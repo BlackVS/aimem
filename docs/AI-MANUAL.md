@@ -25,6 +25,8 @@ system specifics.
    - `forget_memory` — expire a wrong fact (refused if pinned).
    - `search_journal` — FTS over raw journal events (turns, failures,
      compaction markers) when you need what happened, not what is known.
+     Results also include matching **shared documents** (name + snippet;
+     fetch whole with `read_doc`).
    - `review_memories` / `confirm_memory` — the staleness review queue
      and its "still true" verdict (see *Reviewing stale knowledge*
      below).

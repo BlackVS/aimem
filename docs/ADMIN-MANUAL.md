@@ -290,7 +290,7 @@ run at all (never spend unpriced); unpriced recorded runs are charged at
 these prices when counting usage. The openai backend also records
 LiteLLM's `x-litellm-response-cost` header when present. NOTE: budget
 config is machine-local (meta does not sync) — set it on the hub too,
-where the nightly curation actually runs. The TUI AI tab shows global
+where the hourly curation actually runs. The TUI AI tab shows global
 budget windows with a warning at 80%.
 
 ## 4. Embeddings on a workstation (optional)
@@ -310,7 +310,8 @@ config as the systemd units — no manual `export` needed.
 Embeddings are machine-local derived data
 and are not synced — but `aimem sync` runs an embed backfill
 automatically after each successful memory sync (when the env above is
-configured), and the hub does it nightly, so no manual step remains.
+configured), and the hub does it after each hourly curation run, so no
+manual step remains.
 Embed spend is metered into the run history and budget-gated.
 Unset env = BM25-only recall — everything still works.
 

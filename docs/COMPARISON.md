@@ -64,6 +64,12 @@ is a fine choice.
 
 Where the others are stronger than aimem, plainly:
 
+- **Licensing**: most tools in this category are MIT or Apache-2.0;
+  aimem is source-available under PolyForm Noncommercial from v0.2.0
+  (free for noncommercial use, commercial use licensed by the author).
+  If an OSI-approved license is a requirement, the others qualify and
+  aimem does not.
+
 - **claude-mem**: adoption, community, and the polish ~92k stars buy.
 - **Basic Memory**: memories are Markdown you can read and edit in
   Obsidian — nothing in aimem is that directly human-editable.

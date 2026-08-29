@@ -172,7 +172,7 @@ aimem search  -p "$PID" -q "migration failed"  # journal FTS + shared docs
 
 ## Curation (manual runs)
 
-Normally the hub does this nightly. To distill fresh session events into
+Normally the hub does this hourly. To distill fresh session events into
 facts right now (needs LiteLLM key in env, see ADMIN-MANUAL):
 
 ```sh
