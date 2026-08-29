@@ -149,7 +149,7 @@ func (c *Client) submit(p *Payload, toHub bool) (spooled bool, err error) {
 		if serr := c.spool(body); serr != nil {
 			return false, fmt.Errorf("submit failed (%v) and spool failed: %w", err, serr)
 		}
-		fmt.Fprintf(os.Stderr, "aimem: service unreachable, checkpoint spooled (%v)\n", err)
+		c.note("aimem: service unreachable, checkpoint spooled (%v)", err)
 		if toHub {
 			c.pushHub(hubName, body)
 			c.publishDocsQuiet(p)
@@ -262,7 +262,7 @@ func (c *Client) ReplaySpool() (replayed, requeued int, err error) {
 		}
 		if err := c.post(line); err != nil {
 			if _, invalid := err.(*rejectError); invalid {
-				fmt.Fprintf(os.Stderr, "aimem: dropping invalid spooled record: %v\n", err)
+				c.note("aimem: dropping invalid spooled record: %v", err)
 				continue
 			}
 			c.spool(line)
@@ -276,6 +276,6 @@ func (c *Client) ReplaySpool() (replayed, requeued int, err error) {
 
 func (c *Client) replaySpool() {
 	if n, _, err := c.ReplaySpool(); err == nil && n > 0 {
-		fmt.Fprintf(os.Stderr, "aimem: replayed %d spooled checkpoint(s)\n", n)
+		c.note("aimem: replayed %d spooled checkpoint(s)", n)
 	}
 }

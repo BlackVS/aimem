@@ -335,3 +335,26 @@ func TestSubmitSurfacesRejectionWithoutSpooling(t *testing.T) {
 		t.Error("rejected record was spooled anyway")
 	}
 }
+
+func TestNoteWritesAndRotates(t *testing.T) {
+	root := t.TempDir()
+	Note(root, "aimem: first warning (%d)", 1)
+	p := filepath.Join(root, "adapter.log")
+	raw, err := os.ReadFile(p)
+	if err != nil || !strings.Contains(string(raw), "first warning (1)") {
+		t.Fatalf("note not persisted: %q err=%v", raw, err)
+	}
+	if !strings.HasPrefix(string(raw), "20") { // timestamped
+		t.Fatalf("missing timestamp: %q", raw[:20])
+	}
+	// Past the cap, the log rotates once and keeps going.
+	os.WriteFile(p, make([]byte, noteLogMax+1), 0o600)
+	Note(root, "aimem: after rotation")
+	if _, err := os.Stat(p + ".1"); err != nil {
+		t.Fatal("rotation window missing")
+	}
+	raw, _ = os.ReadFile(p)
+	if !strings.Contains(string(raw), "after rotation") || len(raw) > 1024 {
+		t.Fatalf("post-rotation log wrong: %d bytes", len(raw))
+	}
+}

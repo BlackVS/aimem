@@ -334,6 +334,7 @@ request.
 
 | Symptom | Check |
 |---|---|
+| Anything silently wrong on a client | **`aimem logs`** — client-side warnings (spooled checkpoints, projects bound to unconfigured hubs, doc conflicts; persisted in `<state-root>/adapter.log`) plus the service log ring. This is the first command to run: the submit process's stderr is discarded by OpenCode and buried on Windows |
 | No checkpoints appearing | `systemctl --user status aimem`; hooks in `~/.claude/settings.json`; `aimem health` |
 | Hub push failing | token file perms; `curl -H "Authorization: Bearer $T" https://hub.example.com:8440/v1/health`; spool flushes automatically |
 | Duplicate journal events | hooks registered at both user and project level — remove project-level ones |

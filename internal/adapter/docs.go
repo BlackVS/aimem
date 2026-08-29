@@ -131,7 +131,7 @@ func (c *Client) PublishDocs(projectDir, projectID, hubName, by string) []DocPus
 			continue
 		}
 		if len(warn) > 0 {
-			fmt.Fprintf(os.Stderr, "aimem: shared doc %s has secret-shaped content (%s) — it publishes as written to every machine on the project\n",
+			c.note("aimem: shared doc %s has secret-shaped content (%s) — it publishes as written to every machine on the project",
 				docName, strings.Join(warn, ", "))
 		}
 		h := hashBody(body)
@@ -167,7 +167,7 @@ func (c *Client) publishDocsQuiet(p *Payload) {
 	host, _ := os.Hostname()
 	for _, r := range c.PublishDocs(p.ProjectDir, p.ProjectID, hubName, host+"/"+p.Event.Client) {
 		if r.Err != nil {
-			fmt.Fprintf(os.Stderr, "aimem: shared doc %s not published: %v\n", r.Name, r.Err)
+			c.note("aimem: shared doc %s not published: %v", r.Name, r.Err)
 		}
 	}
 }

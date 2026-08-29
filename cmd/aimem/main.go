@@ -120,6 +120,8 @@ func main() {
 		err = tokenCmd(args)
 	case "review":
 		err = reviewCmd(args)
+	case "logs":
+		err = logsCmd(args)
 	case "doc":
 		err = docCmd(args)
 	case "export-group-config":
@@ -229,6 +231,9 @@ func usage() {
   token      add <name> [--role writer|admin] | list | rm <name>
                              named hub tokens (run on the hub host);
                              secret printed once, only hashes stored
+  logs       [-n 40] [-q filter]  local diagnostics: client-side warnings
+                             (spooled checkpoints, orphaned hub bindings,
+                             doc conflicts) + the service log ring
   review     [-p] [--days N] [--max-corroboration N]  stale-fact queue:
                              old, thinly-corroborated, unpinned facts;
                              verdicts = review confirm / supersede / forget

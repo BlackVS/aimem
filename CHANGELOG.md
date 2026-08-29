@@ -15,6 +15,20 @@ currently 8); a binary refuses a database newer than it understands.
 
 Nothing yet.
 
+## [0.2.3] — 2026-08-29
+
+### Added
+
+- **`aimem logs`** — local diagnostics in one command: client-side
+  warnings and the service log ring. Adapter warnings (spooled
+  checkpoints, orphaned hub bindings, shared-doc conflicts, replay
+  drops) are now also persisted to `<state-root>/adapter.log`
+  (timestamped, rotated at 512KB) — previously they lived only on the
+  submit process's stderr, which OpenCode's detached spawn discards
+  and Windows hook plumbing buries; that silence is how the RC binding
+  incident hid for four hours. The orphaned-binding sync warning
+  (0.2.2) persists there too.
+
 ## [0.2.2] — 2026-08-29
 
 ### Fixed

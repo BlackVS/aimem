@@ -198,7 +198,7 @@ func (c *Client) pushHub(hubName string, body []byte) {
 			// data delivers the moment `aimem hub add <name>` runs —
 			// never misrouted, never dropped.
 			if err := c.spoolTo(c.hubSpoolPathFor(name), body); err == nil {
-				fmt.Fprintf(os.Stderr, "aimem: hub %q is not configured on this machine — checkpoint spooled for it (aimem hub add %s <url> <token>)\n", name, name)
+				c.note("aimem: hub %q is not configured on this machine — checkpoint spooled for it (aimem hub add %s <url> <token>)", name, name)
 			}
 		}
 		return
@@ -206,12 +206,12 @@ func (c *Client) pushHub(hubName string, body []byte) {
 	spool := c.hubSpoolPathFor(name)
 	if err := c.hubPost(hub, body); err != nil {
 		if serr := c.spoolTo(spool, body); serr == nil {
-			fmt.Fprintf(os.Stderr, "aimem: hub unreachable, checkpoint queued for hub (%v)\n", err)
+			c.note("aimem: hub unreachable, checkpoint queued for hub (%v)", err)
 			// A spool that keeps growing means the hub has been down — or
 			// the token rejected — for a long time; the per-checkpoint
 			// line above is easy to tune out, a size is not.
 			if fi, e := os.Stat(spool); e == nil && fi.Size() > hubSpoolWarnBytes {
-				fmt.Fprintf(os.Stderr, "aimem: hub spool %s holds %d MB of undelivered checkpoints — check the hub and its token\n",
+				c.note("aimem: hub spool %s holds %d MB of undelivered checkpoints — check the hub and its token",
 					filepath.Base(spool), fi.Size()>>20)
 			}
 		}
@@ -323,10 +323,10 @@ func (c *Client) flushHubSpool(hub *HubConfig, spool string) {
 		n++
 	}
 	if n > 0 {
-		fmt.Fprintf(os.Stderr, "aimem: delivered %d queued checkpoint(s) to hub\n", n)
+		c.note("aimem: delivered %d queued checkpoint(s) to hub", n)
 	}
 	if kept > 0 {
-		fmt.Fprintf(os.Stderr, "aimem: %d more remain spooled (bounded flush); they drain on coming checkpoints\n", kept)
+		c.note("aimem: %d more remain spooled (bounded flush); they drain on coming checkpoints", kept)
 	}
 }
 

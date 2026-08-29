@@ -64,7 +64,7 @@ func warnOrphanBindings(hubs map[string]*adapter.HubConfig) {
 	}
 	defer reg.Close()
 	for _, w := range orphanBindings(reg, hubs) {
-		fmt.Fprintf(os.Stderr, "aimem: WARNING: %s\n", w)
+		adapter.Note(stateRoot(), "aimem: WARNING: %s", w)
 	}
 }
 
