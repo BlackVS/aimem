@@ -1,0 +1,63 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>aimem hub</title>
+<style>
+  /* The public face of a hub. Deliberately says almost nothing: whether
+     the service is up, which build it runs, and how long it has been up.
+     Project names, spend and log lines live behind the token at /admin. */
+  :root{--ink:#0e1210;--panel:#141a15;--edge:#26332a;--bone:#d6ddd2;
+        --dim:#8a9a8d;--moss:#4fb477;--rust:#c96f52;
+        --mono:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--ink);color:var(--bone);
+       font:14px/1.6 var(--mono);display:flex;min-height:100vh;
+       align-items:center;justify-content:center;padding:24px}
+  .card{background:var(--panel);border:1px solid var(--edge);
+        padding:20px 24px;min-width:min(420px,100%)}
+  h1{font:700 13px/1 var(--mono);color:var(--moss);margin:0 0 14px;
+     letter-spacing:.14em;text-transform:uppercase}
+  dl{display:grid;grid-template-columns:auto 1fr;gap:4px 18px;margin:0}
+  dt{color:var(--dim)} dd{margin:0}
+  .up{color:var(--moss)} .down{color:var(--rust)}
+  footer{margin-top:16px;padding-top:12px;border-top:1px solid var(--edge)}
+  a{color:var(--moss)}
+</style>
+</head>
+<body>
+<div class="card">
+  <h1 id="title">aimem hub</h1>
+  <dl id="fields"><dt>status</dt><dd id="st" class="dim">checking…</dd></dl>
+  <footer><a href="/admin">console →</a></footer>
+</div>
+<script>
+function dur(s){
+  s=Math.max(0,Math.floor(s));
+  const d=Math.floor(s/86400),h=Math.floor(s%86400/3600),m=Math.floor(s%3600/60);
+  if(d)return d+"d "+h+"h"; if(h)return h+"h "+m+"m";
+  if(m)return m+"m "+(s%60)+"s"; return s+"s";
+}
+function row(k,v,cls){
+  return "<dt>"+k+"</dt><dd"+(cls?' class="'+cls+'"':"")+">"+
+    String(v).replace(/[<&]/g,c=>c=="<"?"&lt;":"&amp;")+"</dd>";
+}
+(async function(){
+  const f=document.getElementById("fields");
+  try{
+    const r=await fetch("/v1/status",{cache:"no-store"});
+    if(!r.ok)throw new Error("HTTP "+r.status);
+    const j=await r.json();
+    if(j.hub_name){document.title="aimem "+j.hub_name;
+      document.getElementById("title").textContent="aimem "+j.hub_name+" hub";}
+    let h=row("status","up","up");
+    if(j.version)h+=row("build",j.version);
+    if(j.host)h+=row("host",j.host);
+    if(typeof j.uptime_s==="number")h+=row("uptime",dur(j.uptime_s));
+    f.innerHTML=h;
+  }catch(e){ f.innerHTML=row("status","unreachable — "+e.message,"down"); }
+})();
+</script>
+</body>
+</html>

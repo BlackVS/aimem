@@ -1,0 +1,53 @@
+name: Release
+
+# Cut a release by pushing a tag:  git tag v0.2.0 && git push origin v0.2.0
+# The installers (boot.sh / boot.ps1) resolve "latest" and download these
+# assets, so every platform they offer must be built here.
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Tag to build and release (e.g. v0.2.0)'
+        required: true
+
+permissions:
+  contents: write   # create the release and upload its assets
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.inputs.tag || github.ref }}
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.25'
+          cache: true
+
+      - name: Test before publishing
+        run: go test ./...
+
+      - name: Cross-build static binaries
+        env:
+          VER: ${{ github.event.inputs.tag || github.ref_name }}
+        run: |
+          mkdir -p dist
+          build() {
+            GOOS=$1 GOARCH=$2 CGO_ENABLED=0 go build -trimpath \
+              -ldflags "-s -w -X main.version=$VER" -o "dist/$3" ./cmd/aimem
+          }
+          build linux   amd64 aimem-linux-amd64
+          build linux   arm64 aimem-linux-arm64
+          build darwin  amd64 aimem-darwin-amd64
+          build darwin  arm64 aimem-darwin-arm64
+          build windows amd64 aimem-windows-amd64.exe
+          (cd dist && sha256sum * > SHA256SUMS)
+
+      - uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.event.inputs.tag || github.ref_name }}
+          generate_release_notes: true
+          files: dist/*

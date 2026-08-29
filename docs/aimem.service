@@ -1,0 +1,18 @@
+# systemd user unit for aimem. Install:
+#   cp docs/aimem.service ~/.config/systemd/user/
+#   systemctl --user daemon-reload
+#   systemctl --user enable --now aimem
+# The ExecStart path assumes the project-local binary; adjust when the
+# binary moves to ~/.local/bin in a later phase.
+[Unit]
+Description=aimem - local coding-session recovery and memory service
+
+[Service]
+ExecStart=/big/AI/opencode-tuning/aimem serve
+Restart=on-failure
+RestartSec=2
+# Journal content is sensitive; keep the service private.
+UMask=0077
+
+[Install]
+WantedBy=default.target

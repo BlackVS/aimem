@@ -1,0 +1,16 @@
+{
+    "hooks":  {
+                  "SessionStart":  [
+                                       {
+                                           "hooks":  [
+                                                         {
+                                                             "type":  "command",
+                                                             "command":  "aimem session-start",
+                                                             "timeout":  10,
+                                                             "statusMessage":  "Loading session handoff"
+                                                         }
+                                                     ]
+                                       }
+                                   ]
+              }
+}

@@ -1,0 +1,162 @@
+{
+  "openapi": "3.0.3",
+  "info": {
+    "title": "aimem hub API",
+    "version": "v1",
+    "description": "The complete HTTP surface of an aimem hub (and of the local service, which serves the same mux over a unix socket without auth). Every route except the three public pages (/, /v1/status, /admin) requires `Authorization: Bearer <token>`; routes marked x-role admin additionally need an admin token (the env token, or a tokens.json entry with role admin). This spec documents the surface and its auth contract; request/response bodies are intentionally loose (JSON objects) - the store types in internal/store are the authority on field shapes. A parity test (openapi_test.go) fails CI when this file and the real route table disagree."
+  },
+  "servers": [{"url": "https://hub.example.com:8440"}],
+  "components": {
+    "securitySchemes": {
+      "bearer": {"type": "http", "scheme": "bearer"}
+    },
+    "parameters": {
+      "p": {"name": "p", "in": "path", "required": true, "schema": {"type": "string"}, "description": "project id"},
+      "s": {"name": "s", "in": "path", "required": true, "schema": {"type": "string"}, "description": "session id"},
+      "id": {"name": "id", "in": "path", "required": true, "schema": {"type": "string"}, "description": "memory id"},
+      "key": {"name": "key", "in": "path", "required": true, "schema": {"type": "string"}, "description": "meta key (allow-listed)"},
+      "name": {"name": "name", "in": "path", "required": true, "schema": {"type": "string"}, "description": "document or provider name"}
+    }
+  },
+  "security": [{"bearer": []}],
+  "paths": {
+    "/": {
+      "get": {"summary": "Public status page (HTML)", "x-role": "public", "security": [], "responses": {"200": {"description": "liveness, build, hostname, uptime - nothing about what the hub holds"}}}
+    },
+    "/admin": {
+      "get": {"summary": "Admin console shell (HTML, holds no data; asks for the token in the browser)", "x-role": "public", "security": [], "responses": {"200": {"description": "console page"}}}
+    },
+    "/v1/status": {
+      "get": {"summary": "Public status JSON", "x-role": "public", "security": [], "responses": {"200": {"description": "liveness, build, hostname, uptime"}}}
+    },
+    "/v1/openapi.json": {
+      "get": {"summary": "This specification", "x-role": "writer", "responses": {"200": {"description": "OpenAPI 3.0 document"}}}
+    },
+    "/v1/health": {
+      "get": {"summary": "Service health: project count, state root, version, resources", "x-role": "writer", "responses": {"200": {"description": "health object"}}}
+    },
+    "/v1/events": {
+      "post": {"summary": "Append one checkpoint event (idempotent on idempotency_key); groups and hub binding ride along into project meta", "x-role": "writer", "responses": {"200": {"description": "{id, inserted}"}}}
+    },
+    "/v1/projects": {
+      "get": {"summary": "List project ids", "x-role": "writer", "responses": {"200": {"description": "project id list"}}}
+    },
+    "/v1/projects/{p}": {
+      "delete": {"summary": "Drop a project (files deleted; a read never resurrects it)", "x-role": "admin", "parameters": [{"$ref": "#/components/parameters/p"}], "responses": {"200": {"description": "dropped"}}}
+    },
+    "/v1/projects/{p}/rename": {
+      "post": {"summary": "Rename a project: moves journal, facts, embeddings, curate cursor; relabels project:<id> citations in group DBs; refuses reserved ids and existing targets", "x-role": "admin", "parameters": [{"$ref": "#/components/parameters/p"}], "responses": {"200": {"description": "renamed"}}}
+    },
+    "/v1/projects/{p}/sessions": {
+      "get": {"summary": "Sessions seen in a project", "x-role": "writer", "parameters": [{"$ref": "#/components/parameters/p"}], "responses": {"200": {"description": "session list"}}}
+    },
+    "/v1/projects/{p}/sessions/{s}/timeline": {
+      "get": {"summary": "Events of one session, oldest first", "x-role": "writer", "parameters": [{"$ref": "#/components/parameters/p"}, {"$ref": "#/components/parameters/s"}], "responses": {"200": {"description": "event list"}}}
+    },
+    "/v1/projects/{p}/sessions/{s}/latest": {
+      "get": {"summary": "Most recent event of one session", "x-role": "writer", "parameters": [{"$ref": "#/components/parameters/p"}, {"$ref": "#/components/parameters/s"}], "responses": {"200": {"description": "event"}}}
+    },
+    "/v1/projects/{p}/search": {
+      "get": {"summary": "FTS5 search over the journal (?q=)", "x-role": "writer", "parameters": [{"$ref": "#/components/parameters/p"}], "responses": {"200": {"description": "matching events"}}}
+    },
+    "/v1/projects/{p}/retention": {
+      "post": {"summary": "Trim old journal events", "x-role": "admin", "parameters": [{"$ref": "#/components/parameters/p"}], "responses": {"200": {"description": "trim report"}}}
+    },
+    "/v1/projects/{p}/memories": {
+      "get": {"summary": "List memories (?all=1 includes expired)", "x-role": "writer", "parameters": [{"$ref": "#/components/parameters/p"}], "responses": {"200": {"description": "memory list"}}},
+      "post": {"summary": "Remember a fact through the audited write path (reassert folds into an identical active fact)", "x-role": "writer", "parameters": [{"$ref": "#/components/parameters/p"}], "responses": {"200": {"description": "{id, reasserted}"}}}
+    },
+    "/v1/projects/{p}/memories/recall": {
+      "get": {"summary": "Hybrid recall: BM25 + cosine fused by RRF, pinned first, token-budget trimmed; query embedding is server-side and fail-open", "x-role": "writer", "parameters": [{"$ref": "#/components/parameters/p"}], "responses": {"200": {"description": "ranked facts"}}}
+    },
+    "/v1/projects/{p}/memories/review": {
+      "get": {"summary": "Staleness review queue: active unpinned facts whose last assertion/validation predates ?days= with corroboration <= ?max_corroboration= (derived, never stored)", "x-role": "writer", "parameters": [{"$ref": "#/components/parameters/p"}], "responses": {"200": {"description": "{items, cutoff}"}}}
+    },
+    "/v1/projects/{p}/memories/{id}/confirm": {
+      "post": {"summary": "Record a review verdict of still-true: audited touch (drops the fact from the queue) plus a modest confidence reinforcement", "x-role": "writer", "parameters": [{"$ref": "#/components/parameters/p"}, {"$ref": "#/components/parameters/id"}], "responses": {"200": {"description": "confirmed"}}}
+    },
+    "/v1/projects/{p}/memories/import": {
+      "post": {"summary": "Merge one synced memory (union, staleness-wins; idempotent)", "x-role": "writer", "parameters": [{"$ref": "#/components/parameters/p"}], "responses": {"200": {"description": "imported"}}}
+    },
+    "/v1/projects/{p}/curate-runs/import": {
+      "post": {"summary": "Import one curation-run record (id-idempotent)", "x-role": "writer", "parameters": [{"$ref": "#/components/parameters/p"}], "responses": {"200": {"description": "imported"}}}
+    },
+    "/v1/projects/{p}/memories/{id}/forget": {
+      "post": {"summary": "Expire a memory (bi-temporal; refused if pinned)", "x-role": "writer", "parameters": [{"$ref": "#/components/parameters/p"}, {"$ref": "#/components/parameters/id"}], "responses": {"200": {"description": "forgotten"}}}
+    },
+    "/v1/projects/{p}/memories/{id}/supersede": {
+      "post": {"summary": "Replace a fact keeping lineage (old row expires and points at the new)", "x-role": "writer", "parameters": [{"$ref": "#/components/parameters/p"}, {"$ref": "#/components/parameters/id"}], "responses": {"200": {"description": "{id}"}}}
+    },
+    "/v1/projects/{p}/memories/{id}/pin": {
+      "post": {"summary": "Pin or unpin (pinned facts are protected and rank first)", "x-role": "writer", "parameters": [{"$ref": "#/components/parameters/p"}, {"$ref": "#/components/parameters/id"}], "responses": {"200": {"description": "pinned state"}}}
+    },
+    "/v1/projects/{p}/memories/{id}/link": {
+      "post": {"summary": "Relate two memories", "x-role": "writer", "parameters": [{"$ref": "#/components/parameters/p"}, {"$ref": "#/components/parameters/id"}], "responses": {"200": {"description": "linked"}}}
+    },
+    "/v1/projects/{p}/memories/{id}/tag": {
+      "post": {"summary": "Attach a tag (explicit filing path; chapters capped at 3 per fact)", "x-role": "writer", "parameters": [{"$ref": "#/components/parameters/p"}, {"$ref": "#/components/parameters/id"}], "responses": {"200": {"description": "tagged"}}}
+    },
+    "/v1/projects/{p}/memories/{id}/untag": {
+      "post": {"summary": "Detach a tag (the correction path for a mis-filed fact)", "x-role": "writer", "parameters": [{"$ref": "#/components/parameters/p"}, {"$ref": "#/components/parameters/id"}], "responses": {"200": {"description": "untagged"}}}
+    },
+    "/v1/projects/{p}/meta/{key}": {
+      "get": {"summary": "Read one allow-listed project meta key", "x-role": "writer", "parameters": [{"$ref": "#/components/parameters/p"}, {"$ref": "#/components/parameters/key"}], "responses": {"200": {"description": "{value}"}}},
+      "put": {"summary": "Write one allow-listed project meta key", "x-role": "writer", "parameters": [{"$ref": "#/components/parameters/p"}, {"$ref": "#/components/parameters/key"}], "responses": {"200": {"description": "written"}}}
+    },
+    "/v1/projects/{p}/curate-runs": {
+      "get": {"summary": "Curation run history (the token/cost meter)", "x-role": "writer", "parameters": [{"$ref": "#/components/parameters/p"}], "responses": {"200": {"description": "run list"}}}
+    },
+    "/v1/projects/{p}/audit": {
+      "get": {"summary": "Knowledge audit trail, newest first", "x-role": "writer", "parameters": [{"$ref": "#/components/parameters/p"}], "responses": {"200": {"description": "audit entries"}}}
+    },
+    "/v1/overview": {
+      "get": {"summary": "Per-project stats for dashboards", "x-role": "writer", "responses": {"200": {"description": "stats"}}}
+    },
+    "/v1/projects/{p}/docs": {
+      "get": {"summary": "List shared documents (name, rev, writer; tombstones flagged)", "x-role": "writer", "parameters": [{"$ref": "#/components/parameters/p"}], "responses": {"200": {"description": "{docs}"}}}
+    },
+    "/v1/projects/{p}/docs/{name}": {
+      "get": {"summary": "Read a shared document (current, or ?rev= for a retained revision)", "x-role": "writer", "parameters": [{"$ref": "#/components/parameters/p"}, {"$ref": "#/components/parameters/name"}], "responses": {"200": {"description": "document"}}},
+      "put": {"summary": "Compare-and-swap write ({body, base_rev, updated_by}); named tokens prefix updated_by; identical body is a no-op", "x-role": "writer", "parameters": [{"$ref": "#/components/parameters/p"}, {"$ref": "#/components/parameters/name"}], "responses": {"200": {"description": "{rev}"}, "409": {"description": "stale base_rev - carries current rev, writer, and (capped) body to merge from"}}},
+      "delete": {"summary": "Tombstone a document (?base_rev=&by=; CAS like any write)", "x-role": "writer", "parameters": [{"$ref": "#/components/parameters/p"}, {"$ref": "#/components/parameters/name"}], "responses": {"200": {"description": "{rev, deleted}"}, "409": {"description": "stale base_rev"}}}
+    },
+    "/v1/projects/{p}/docs/{name}/log": {
+      "get": {"summary": "Recent revisions of a shared document (bounded history)", "x-role": "writer", "parameters": [{"$ref": "#/components/parameters/p"}, {"$ref": "#/components/parameters/name"}], "responses": {"200": {"description": "{revisions}"}}}
+    },
+    "/v1/sync/events": {
+      "get": {"summary": "Anti-entropy pull: JSONL event stream (?since=<cursor>&projects=a,b); opens existing projects only", "x-role": "writer", "responses": {"200": {"description": "application/x-ndjson"}}},
+      "post": {"summary": "Anti-entropy push: JSONL event stream in (idempotent per line)", "x-role": "writer", "responses": {"200": {"description": "{submitted, failed}"}}}
+    },
+    "/v1/sync/memories": {
+      "get": {"summary": "Anti-entropy pull: JSONL of {project_id, memory|curate_run} (?projects=)", "x-role": "writer", "responses": {"200": {"description": "application/x-ndjson"}}},
+      "post": {"summary": "Anti-entropy push: memories merge union/staleness-wins, runs id-idempotent", "x-role": "writer", "responses": {"200": {"description": "{imported, failed}"}}}
+    },
+    "/v1/sync/group-config": {
+      "get": {"summary": "Anti-entropy pull: hub bindings, group charter keys, design docs (?projects=)", "x-role": "writer", "responses": {"200": {"description": "application/x-ndjson"}}},
+      "post": {"summary": "Anti-entropy push: fill-only config, newest-wins design docs", "x-role": "writer", "responses": {"200": {"description": "{applied}"}}}
+    },
+    "/v1/config/models": {
+      "get": {"summary": "Curate/embed model configuration", "x-role": "admin", "responses": {"200": {"description": "models"}}},
+      "put": {"summary": "Update model configuration (atomic env rewrite)", "x-role": "admin", "responses": {"200": {"description": "written"}}}
+    },
+    "/v1/config/providers": {
+      "get": {"summary": "Provider registry, tokens masked to last 4", "x-role": "admin", "responses": {"200": {"description": "providers"}}},
+      "put": {"summary": "Update providers/bindings (blank token keeps stored)", "x-role": "admin", "responses": {"200": {"description": "written"}}}
+    },
+    "/v1/config/providers/test": {
+      "post": {"summary": "Live probe of one model through its resolved provider (server-side; nothing secret reaches the caller)", "x-role": "admin", "responses": {"200": {"description": "probe result"}}}
+    },
+    "/v1/config/providers/{name}/models": {
+      "get": {"summary": "Proxy the provider's model list (token stays server-side)", "x-role": "admin", "parameters": [{"$ref": "#/components/parameters/name"}], "responses": {"200": {"description": "model ids"}}}
+    },
+    "/v1/logs": {
+      "get": {"summary": "Service log ring buffer", "x-role": "admin", "responses": {"200": {"description": "log lines"}}}
+    },
+    "/v1/projects/{p}/chapter-proposal": {
+      "post": {"summary": "LLM-propose chapter filings for unfiled facts (plan lands in meta for review)", "x-role": "admin", "parameters": [{"$ref": "#/components/parameters/p"}], "responses": {"200": {"description": "proposal"}}}
+    },
+    "/v1/projects/{p}/chapter-proposal/apply": {
+      "post": {"summary": "Apply the human-approved subset of a chapter proposal", "x-role": "admin", "parameters": [{"$ref": "#/components/parameters/p"}], "responses": {"200": {"description": "applied"}}}
+    }
+  }
+}

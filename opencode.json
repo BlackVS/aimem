@@ -1,0 +1,16 @@
+{
+    "$schema":  "https://opencode.ai/config.json",
+    "instructions":  [
+                         "docs/SESSION-STATE.md"
+                     ],
+    "mcp":  {
+                "aimem":  {
+                              "type":  "local",
+                              "command":  [
+                                              "aimem",
+                                              "mcp"
+                                          ],
+                              "enabled":  true
+                          }
+            }
+}

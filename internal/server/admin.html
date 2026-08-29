@@ -1,0 +1,1307 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>aimem hub</title>
+<style>
+  /* aimem hub console. Two voices on purpose: chrome (nav, labels, meta,
+     numbers) speaks terminal monospace like the machinery it controls;
+     knowledge (fact text, charters) speaks a humanist text face, because
+     curated facts are for people. Palette: green-tinted ink and bone,
+     moss for the living system, amber phosphor for numbers, rust for
+     destructive edges. Facts render as catalog cards with a chapter-
+     colored spine — the KB is a card catalog tended by machines. */
+  :root{
+    --ink:#0e1210; --panel:#141a15; --well:#0a0e0b; --edge:#26332a;
+    --bone:#d6ddd2; --dim:#8a9a8d;
+    --moss:#4fb477; --moss-deep:#062012;
+    --amber:#d9a441; --rust:#c96f52; --tide:#5fb3b3; --iris:#9a86c8;
+    --mono:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+    --text:system-ui,-apple-system,"Segoe UI",sans-serif;
+    font-size:15px;
+  }
+  /* Alternate schemes: same variable contract, different ink. --moss stays
+     the accent slot whatever its hue. The pick is a viewer preference
+     stored in this browser (aimem_theme), never hub state. */
+  :root[data-theme="slate"]{
+    --ink:#0d1117; --panel:#161d26; --well:#090c10; --edge:#2b3646;
+    --bone:#dfe7ef; --dim:#93a1b3;
+    --moss:#6cb1f0; --moss-deep:#04101c;
+    --amber:#d9b23f; --rust:#d0705a; --tide:#5fb3b3; --iris:#a08fd0;
+  }
+  :root[data-theme="paper"]{
+    --ink:#f2efe7; --panel:#faf8f2; --well:#e7e2d5; --edge:#c9c2af;
+    --bone:#2e2b24; --dim:#6e6858;
+    --moss:#33704e; --moss-deep:#f5f3ec;
+    --amber:#8a5f14; --rust:#9c4227; --tide:#1f6f6f; --iris:#5c4d96;
+  }
+  :root[data-theme="contrast"]{
+    --ink:#000000; --panel:#0d0d0d; --well:#000000; --edge:#4a4a4a;
+    --bone:#f5f5f5; --dim:#c9c9c9;
+    --moss:#ffd75f; --moss-deep:#000000;
+    --amber:#ffb86b; --rust:#ff8a70; --tide:#7fd8d8; --iris:#c7b3f2;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--ink);color:var(--bone);font:14px/1.5 var(--mono)}
+  ::selection{background:var(--moss);color:var(--moss-deep)}
+  :focus-visible{outline:2px solid var(--moss);outline-offset:1px}
+  /* The header names the hub; it is not a call to action. A full slab of
+     --moss shouted over the content below it, so the accent survives only
+     as the title's ink and a hairline rule, and the bar is one line tall. */
+  header{display:flex;align-items:center;gap:10px;padding:4px 14px;
+         background:var(--panel);color:var(--moss);font-weight:700;
+         font-size:13px;line-height:1.6;border-bottom:1px solid var(--edge)}
+  header .sub{font-weight:400;opacity:.75;color:var(--dim)}
+  header .right{margin-left:auto;font-weight:400;display:flex;gap:8px;align-items:center;white-space:nowrap}
+  header .right select,header .right button{font-size:12px}
+  nav{display:flex;gap:2px;padding:8px 12px;border-bottom:1px solid var(--edge);
+      justify-content:center}
+  nav button{background:none;border:1px solid var(--edge);color:var(--dim);
+             padding:6px 14px;cursor:pointer;font:inherit}
+  nav button.on{color:var(--moss-deep);background:var(--moss);border-color:var(--moss);font-weight:700}
+  main{padding:14px 16px;max-width:1060px;margin:0 auto}
+  h2{font:700 12px/1 var(--mono);color:var(--dim);text-transform:uppercase;
+     letter-spacing:.14em;margin:20px 0 8px}
+  .card{background:var(--panel);border:1px solid var(--edge);padding:10px 12px;margin:8px 0}
+  .chip{display:inline-block;background:var(--well);border:1px solid var(--edge);
+        color:var(--dim);padding:1px 8px;margin:1px 4px 1px 0;font-size:12px;cursor:default}
+  .chip.on{color:var(--moss-deep);background:var(--moss);border-color:var(--moss)}
+  .chip.click{cursor:pointer}
+  .chip.click:hover{border-color:var(--moss);color:var(--bone)}
+  .chip.ch{color:var(--tide)}
+  .chip .x{cursor:pointer;opacity:.55;padding:0 2px}
+  .chip .x:hover{opacity:1;color:var(--rust)}
+  select.addch{font:12px var(--mono);padding:1px 4px;width:auto;margin:1px 4px 1px 0}
+  .dim{color:var(--dim)} .warn{color:var(--amber)} .bad{color:var(--rust)} .ok{color:var(--moss)}
+  input,textarea,select{background:var(--well);border:1px solid var(--edge);color:var(--bone);
+        font:inherit;padding:6px 8px;width:100%}
+  input:focus,textarea:focus,select:focus{border-color:var(--moss);outline:none}
+  input[type=text].inline{width:auto}
+  textarea{resize:vertical;min-height:38px;font:14px/1.5 var(--text)}
+  button.act{background:var(--well);border:1px solid var(--edge);color:var(--bone);
+             padding:5px 12px;cursor:pointer;font:inherit}
+  button.act:hover{border-color:var(--moss)}
+  button.act.danger:hover{border-color:var(--rust);color:var(--rust)}
+  button.act.dirty{border-color:var(--amber);color:var(--amber);font-weight:700}
+  table{border-collapse:collapse;width:100%}
+  th,td{text-align:left;padding:4px 10px 4px 0;border-bottom:1px solid var(--edge)}
+  th{color:var(--moss-deep);background:var(--moss);padding:4px 10px 4px 6px;
+     font-size:12px;letter-spacing:.06em;text-transform:uppercase}
+  td.num,th.num{text-align:right}
+  td.num{color:var(--amber)}
+  .row{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin:6px 0}
+  .grow{flex:1}
+  .bar{height:10px;background:var(--well);border:1px solid var(--edge);position:relative;min-width:120px}
+  .bar i{position:absolute;inset:0;background:var(--moss);width:0;transition:width .4s ease}
+  .bar.warn i{background:var(--amber)} .bar.bad i{background:var(--rust)}
+  #gate{position:fixed;inset:0;background:var(--ink);display:flex;align-items:center;
+        justify-content:center;flex-direction:column;gap:12px;z-index:9}
+  #gate.hide,[hidden]{display:none}
+  #gate .box{width:min(480px,90vw)}
+  /* KB master-detail: the tree is the catalog's drawer front — groups
+     as drawers, chapters as labeled dividers with fact counts. */
+  .kb{display:flex;gap:16px;align-items:flex-start}
+  #kbTree{width:230px;flex-shrink:0;position:sticky;top:12px;
+          border:1px solid var(--edge);background:var(--panel);padding:6px 0;
+          max-height:calc(100vh - 24px);overflow-y:auto}
+  .kbMain{flex:1;min-width:0}
+  .tg{display:flex;justify-content:space-between;align-items:center;gap:8px;
+      padding:6px 10px;cursor:pointer;font-weight:700}
+  .tg:hover{color:var(--moss)}
+  .tg.on{color:var(--moss)}
+  .tg .n{font-weight:400;color:var(--amber);font-size:12px}
+  .tc{display:flex;justify-content:space-between;align-items:center;gap:8px;
+      padding:3px 10px 3px 20px;cursor:pointer;color:var(--dim);font-size:13px;
+      border-left:3px solid transparent}
+  .tc:hover{color:var(--bone)}
+  .tc.on{color:var(--bone);background:var(--well);border-left-color:var(--moss)}
+  .tc .dot{width:8px;height:8px;flex-shrink:0;border-radius:50%;margin-right:6px}
+  .tc .name{flex:1;display:flex;align-items:center;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .tc .n{color:var(--amber);font-size:12px}
+  .tsep{padding:8px 10px 2px;color:var(--dim);font-size:11px;
+        text-transform:uppercase;letter-spacing:.12em}
+  /* The ... actions menu on tree titles: actions live on the thing they
+     act on, not as pseudo-rows mixed into the chapter list. */
+  .kebab{color:var(--dim);padding:0 4px;font-weight:400;border-radius:3px}
+  .kebab:hover{color:var(--bone);background:var(--well)}
+  .kbmenu{margin:0 8px 4px 20px;border:1px solid var(--edge);background:var(--well)}
+  .kbmenu .tc{padding-left:10px;border-left:none}
+  .kbmenu .danger{color:var(--rust,#b5533c)}
+  @media (max-width:820px){
+    .kb{flex-direction:column}
+    #kbTree{position:static;width:100%}
+  }
+  /* Catalog cards: fact text is prose; the spine carries the chapter. */
+  .facts .card{position:relative;border-left:3px solid var(--edge);
+               animation:settle .25s ease both}
+  .facts .card:nth-child(-n+12){animation-delay:calc(var(--i,0)*22ms)}
+  @keyframes settle{from{opacity:0;transform:translateY(4px)}to{opacity:1;transform:none}}
+  .facts .fact{font:15px/1.55 var(--text);padding-right:170px;max-width:72ch}
+  .facts .acts{position:absolute;top:8px;right:10px;display:flex;gap:6px}
+  .facts .acts button{padding:2px 8px;font-size:12px}
+  .about{font:14px/1.5 var(--text);color:var(--bone)}
+  /* The synthesized design document reads as a document, not a console. */
+  .doc{font:15px/1.6 var(--text);max-width:76ch;padding:18px 22px}
+  .doc h1{font:700 22px/1.3 var(--text);margin:0 0 12px}
+  .doc h2{font:700 17px/1.3 var(--text);color:var(--moss);text-transform:none;
+          letter-spacing:0;margin:22px 0 8px}
+  .doc h3{font:700 15px/1.3 var(--text);margin:16px 0 6px}
+  .doc p{margin:0 0 10px}
+  .doc code{font:13px var(--mono);background:var(--well);padding:0 4px}
+  .doc .cite{color:var(--amber);font:12px var(--mono)}
+  .doc .docmeta{color:var(--dim);font:12px var(--mono);border-top:1px solid var(--edge);
+                padding-top:8px;margin-top:14px}
+  .srcs{font-size:12px;color:var(--dim);margin-top:5px}
+  #toast{position:fixed;bottom:14px;right:14px;background:var(--well);
+         border:1px solid var(--moss);padding:8px 14px;opacity:0;transition:opacity .2s}
+  @media (prefers-reduced-motion: reduce){
+    .facts .card{animation:none}
+    .bar i{transition:none}
+  }
+  @media (max-width:700px){
+    .facts .fact{padding-right:0}
+    .facts .acts{position:static;margin-top:6px}
+  }
+</style>
+</head>
+<body>
+<div id="gate">
+  <div class="box card">
+    <div style="font-weight:700;margin-bottom:4px">aimem hub</div>
+    <div class="dim" style="margin-bottom:10px">Paste the hub access token to open the console. It stays in this browser.</div>
+    <div class="row"><input id="tok" type="password" placeholder="hub token" class="grow" aria-label="hub token">
+    <button class="act" onclick="saveTok()">Connect</button></div>
+    <div id="gateErr" class="bad"></div>
+  </div>
+</div>
+<header>aimem <span id="hubName">hub</span> <span class="sub" id="hostinfo"></span>
+  <span class="right"><span id="healthDot" class="dim" title="live hub health, polled from /v1/health">…</span>
+  <select id="themeSel" onchange="setTheme(this.value)" aria-label="color scheme"
+          style="padding:2px 6px">
+    <option value="">moss</option><option value="slate">slate</option>
+    <option value="paper">paper</option><option value="contrast">contrast</option>
+  </select>
+  <button class="act" onclick="logout()" style="padding:2px 10px">logout</button></span>
+</header>
+<nav>
+  <button data-t="kb" class="on" onclick="tab('kb')">Knowledge Base</button>
+  <button data-t="groups" onclick="tab('groups')">Groups</button>
+  <button data-t="setup" onclick="tab('setup')">AI Setup</button>
+  <button data-t="usage" onclick="tab('usage')">Usage</button>
+  <button data-t="health" onclick="tab('health')">Health</button>
+  <button data-t="docs" onclick="tab('docs')">Docs</button>
+  <button data-t="review" onclick="tab('review')">Review</button>
+  <button data-t="log" onclick="tab('log')">Log</button>
+</nav>
+<main>
+  <section id="t-kb">
+    <div class="kb">
+      <aside id="kbTree" aria-label="knowledge base tree"></aside>
+      <div class="kbMain">
+        <div class="row" style="margin-top:0">
+          <input id="kbQ" type="search" class="grow" placeholder="search facts and tags…  (press / to focus)" oninput="kbPage=1;renderFacts()">
+          <button class="act" id="kbDocBtn" hidden onclick="toggleDoc()">design document</button></div>
+        <div id="kbDoc" class="card doc" hidden></div>
+        <div id="kbFacts" class="facts"></div>
+      </div>
+    </div>
+  </section>
+  <section id="t-groups" hidden>
+    <div class="row"><input id="newGroup" type="text" class="inline" placeholder="new-group-name">
+      <button class="act" onclick="createGroup()">create group</button></div>
+    <div id="groupEditors"></div>
+  </section>
+  <section id="t-setup" hidden>
+    <div class="card">
+      <h2 style="margin-top:0">models</h2>
+      <div class="row"><span class="dim" style="width:110px">curate model</span>
+        <select id="mCurate" class="grow"></select></div>
+      <div class="row"><span class="dim" style="width:110px">embed model</span>
+        <select id="mEmbed" class="grow"></select></div>
+      <div class="row"><span style="width:110px"></span>
+        <button class="act" onclick="saveModels()">save models</button>
+        <span id="mNote" class="dim"></span></div>
+    </div>
+    <div class="card">
+      <h2 style="margin-top:0">providers</h2>
+      <div id="provList" class="dim">loading…</div>
+      <div class="row">
+        <input id="pvName" type="text" class="inline" placeholder="name" style="width:110px">
+        <select id="pvKind"><option value="openai">openai</option><option value="claude">claude</option></select>
+        <input id="pvUrl" type="text" class="grow" placeholder="base url (blank = default proxy)">
+        <input id="pvTok" type="password" class="inline" placeholder="token (blank = keep)" style="width:150px">
+        <button class="act" onclick="saveProvider()">save</button></div>
+      <h2>model bindings</h2>
+      <div id="bindList" class="dim"></div>
+      <div class="row">
+        <select id="bProv" style="min-width:120px" onchange="loadProviderModels()"></select>
+        <select id="bUp" class="grow" onchange="bUpChanged()"></select>
+        <input id="bUpCustom" type="text" class="grow" placeholder="custom model name" hidden
+               oninput="$('bModel').placeholder=$('bProv').value+'/'+this.value">
+        <input id="bModel" type="text" class="grow" placeholder="local name (auto: provider/model)">
+        <button class="act" onclick="bindModel()">bind</button></div>
+      <div class="dim" style="font-size:12px;margin-top:6px">Unbound models fall back to the
+        host env (AIMEM_OPENAI_*). Tokens stay on the hub — this page only ever sees a mask.
+        “test” makes one minimal live call and shows the provider's answer. Curation picks
+        changes up on its next run; live recall embedding needs a service restart.</div>
+    </div>
+  </section>
+  <section id="t-usage" hidden>
+    <div id="usageBody" class="dim">loading…</div>
+  </section>
+  <section id="t-health" hidden><div id="healthBody" class="dim">loading…</div></section>
+  <section id="t-docs" hidden>
+    <div class="row" style="margin-top:0">
+      <select id="docProj" style="width:auto" onchange="loadDocs()"></select>
+      <button class="act" onclick="loadDocs()">refresh</button>
+      <span class="dim" id="docHint"></span>
+    </div>
+    <div id="docList"></div>
+    <div id="docView"></div>
+  </section>
+  <section id="t-review" hidden>
+    <div class="row" style="margin-top:0">
+      <select id="revProj" style="width:auto" onchange="loadReview()"></select>
+      <select id="revDays" style="width:auto" onchange="loadReview()">
+        <option value="7">7 days</option>
+        <option value="30" selected>30 days</option>
+        <option value="90">90 days</option>
+      </select>
+      <button class="act" onclick="loadReview()">refresh</button>
+      <span class="dim" id="revHint"></span>
+    </div>
+    <div class="dim" style="font-size:12px;margin:6px 0">Facts that are old, thinly corroborated,
+      and untouched since — knowledge at risk of being quietly wrong. Verify each against
+      reality, then record a verdict; the queue is derived from the audit trail, so reviewing
+      is what empties it.</div>
+    <div id="revList"></div>
+  </section>
+  <section id="t-log" hidden>
+    <div class="row" style="margin-top:0">
+      <select id="logSrc" style="width:auto" onchange="loadLog()">
+        <option value="service">service</option>
+        <option value="knowledge">knowledge (audit)</option>
+      </select>
+      <select id="logLevel" style="width:auto" onchange="renderLog()">
+        <option value="">all levels</option><option>INFO</option>
+        <option>WARN</option><option>ERROR</option>
+      </select>
+      <input id="logQ" type="text" class="grow" placeholder="filter…" oninput="renderLog()">
+      <button class="act" onclick="loadLog()">refresh</button>
+      <span class="dim" id="logNote"></span></div>
+    <div id="logBody" class="dim" style="margin-top:8px">loading…</div>
+  </section>
+</main>
+<div id="toast"></div>
+<script>
+"use strict";
+const THEME = localStorage.getItem("aimem_theme") || "";
+if(THEME){document.documentElement.dataset.theme = THEME;}
+document.getElementById("themeSel").value = THEME;
+function setTheme(t){
+  if(t){document.documentElement.dataset.theme=t;localStorage.setItem("aimem_theme",t);}
+  else{delete document.documentElement.dataset.theme;localStorage.removeItem("aimem_theme");}
+}
+let TOK = localStorage.getItem("aimem_token") || "";
+let OV = [];            // overview rows
+let curGroup = "", curChap = "", curOrigin = "", memCache = {};
+let kbMenu = ""; // open ⋯ menu: "scope:<id>" | "chap:<id>:<name>" | ""
+// 177 facts in one scope is normal, so the list pages: PAGE at a time,
+// extended in place rather than paginated, which keeps browser find
+// (and the search box above) working over everything on screen.
+const PAGE = 50;
+let kbPage = 1;
+
+const $ = id => document.getElementById(id);
+const esc = s => (s??"").replace(/[&<>"]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+function toast(m){const t=$("toast");t.textContent=m;t.style.opacity=1;setTimeout(()=>t.style.opacity=0,2200);}
+function ago(ts){if(!ts)return"-";const s=(Date.now()-Date.parse(ts))/1e3;
+  if(s<90)return Math.round(s)+"s ago";if(s<5400)return Math.round(s/60)+"m ago";
+  if(s<172800)return Math.round(s/3600)+"h ago";return Math.round(s/86400)+"d ago";}
+async function api(path, opt){
+  const r = await fetch(path, Object.assign({headers:{Authorization:"Bearer "+TOK,
+    "Content-Type":"application/json"}}, opt||{}));
+  if(r.status===401) throw {auth:true};
+  if(!r.ok) throw new Error((await r.text())||r.status);
+  return r.json();
+}
+function saveTok(){TOK=$("tok").value.trim();localStorage.setItem("aimem_token",TOK);boot();}
+function logout(){localStorage.removeItem("aimem_token");TOK="";location.reload();}
+function tab(t){document.querySelectorAll("nav button").forEach(b=>b.classList.toggle("on",b.dataset.t===t));
+  for(const s of ["kb","groups","setup","usage","health","log","docs","review"]) $("t-"+s).hidden = s!==t;
+  if(t==="setup") loadSetup(); if(t==="usage") loadUsage(); if(t==="health") loadHealth();
+  if(t==="log") loadLog(); if(t==="docs") initDocs(); if(t==="review") initReview();}
+
+async function boot(){
+  try{
+    const h = await api("/v1/health");
+    $("gate").classList.add("hide");
+    // Unlabelled, a bare dot reads as noise; say what is ok.
+    $("healthDot").textContent = "● hub "+h.status; $("healthDot").className = h.status==="ok"?"ok":"bad";
+    // Two hubs otherwise render identical chrome; name the console
+    // after the hub (friendly name, else its hostname) in the header
+    // AND the tab title, which is what you actually read when
+    // switching windows.
+    const hubName = h.hub_name || h.host || "";
+    if(hubName){
+      $("hubName").textContent = hubName;
+      document.title = hubName + " · aimem";
+    }
+    $("hostinfo").textContent = "· "+(h.projects??"?")+" projects"+(h.version?" · "+h.version:"");
+    const o = await api("/v1/overview"); OV = o.projects||[];
+    renderKB(); renderGroups(); loadHealth();
+  }catch(e){
+    if(e.auth){$("gate").classList.remove("hide");
+      $("gateErr").textContent=TOK?"That token was rejected — copy it again from aimem_hub_token on a connected machine.":"";}
+    else $("gateErr").textContent = String(e);
+  }
+}
+const groups = () => OV.filter(p=>p.id.startsWith("group-"));
+const members = gid => OV.filter(p=>(p.groups||[]).includes(gid)).map(p=>p.id);
+// Ordinary projects hold curated facts too — usually MORE of them than
+// the shared knowledge bases do — but the tree used to list groups
+// only, so most of the knowledge base had no UI at all.
+const hasFacts = p => (p.stats && p.stats.memories) > 0;
+const kbProjects = () => OV.filter(p=>!p.id.startsWith("group-") && p.id!=="user" &&
+  !p.id.startsWith("curator-workdir-") && hasFacts(p));
+const userScope = () => OV.filter(p=>p.id==="user" && hasFacts(p));
+// Project ids carry host + path + hash; show the distinctive tail and
+// keep the full id in the tooltip.
+const kbLabel = id => id.startsWith("group-") ? id.slice(6)
+  : (id.replace(/-[0-9a-f]{12}$/,"").split("-").slice(-2).join("-") || id);
+
+/* ---------- Knowledge Base ---------- */
+// A fact may be filed in several chapters, so these are APPEARANCES:
+// their sum can exceed the group's fact count (shown separately as
+// "all"). Only a fact with no chapter at all counts as unfiled.
+function chapCounts(gid){
+  const by = {unfiled: 0};
+  for(const m of memCache[gid]||[]){
+    const chs=(m.tags||[]).filter(t=>t.startsWith("chapter:"));
+    if(!chs.length){ by.unfiled++; continue; }
+    for(const ch of chs) by[ch.slice(8)] = (by[ch.slice(8)]||0)+1;
+  }
+  return by;
+}
+// The tree scales: only the selected group expands its chapters, and
+// the sidebar scrolls on its own when groups outgrow the viewport.
+function treeEntry(g){
+  const on = g.id===curGroup;
+  // Actions ride a ⋯ menu ON the title (and on chapter rows), not as
+  // pseudo-rows mixed into the chapter list — a "rename…" row between
+  // chapters read as a filter, which was exactly the confusion.
+  const kebab = on && g.id!=="user"
+    ? `<span class="kebab" role="button" tabindex="0" title="actions" `+
+      `onclick="event.stopPropagation();toggleKbMenu('scope:${esc(g.id)}')">&hellip;</span>` : "";
+  // Collapsed entries carry their count; an EXPANDED one does not —
+  // the "all" row directly beneath shows the same number (user
+  // feedback: the duplicate read as two different figures).
+  const count = on ? "" : `<span class="n">${g.stats.memories}</span>`;
+  let rows = `<div class="tg ${on?"on":""}" role="button" tabindex="0" title="${esc(g.id)}" `+
+    `onclick="pickGroup('${g.id}')" onkeydown="if(event.key==='Enter')pickGroup('${g.id}')">`+
+    `<span>${on?"▾":"▸"} ${esc(kbLabel(g.id))}</span>${count}${kebab}</div>`;
+  if(on && kbMenu==="scope:"+g.id){
+    // A derived project id is unreadable by design; the user DB and
+    // group DBs are addressed by convention, so re-keying one orphans
+    // every reference — rename and drop are ordinary-project actions.
+    rows += `<div class="kbmenu">` +
+      (g.id.startsWith("group-")
+        ? `<div class="tc" role="button" tabindex="0" onclick="tab('groups')"><span class="name">chapters &amp; charter (Groups tab)&hellip;</span></div>`
+        : `<div class="tc" role="button" tabindex="0" onclick="renameProject('${esc(g.id)}')"><span class="name">rename project&hellip;</span></div>`+
+          `<div class="tc danger" role="button" tabindex="0" onclick="dropProjectUI('${esc(g.id)}')"><span class="name">drop project&hellip;</span></div>`) +
+      `</div>`;
+  }
+  if(on){
+    const chaps = g.chapters||[], counts = chapCounts(g.id), loaded = g.id in memCache;
+    const n = v => loaded ? (v||0) : "";
+    rows += `<div class="tc ${curChap===""?"on":""}" role="button" tabindex="0" onclick="pickChap('')">`+
+      `<span class="name">all</span><span class="n">${loaded?(memCache[g.id]||[]).length:""}</span></div>`;
+    rows += chaps.map((c,i)=>{
+      const ck = `chap:${g.id}:${c.name}`;
+      const chapKebab = curChap===c.name
+        ? `<span class="kebab" role="button" tabindex="0" title="chapter actions" `+
+          `onclick="event.stopPropagation();toggleKbMenu('${esc(ck)}')">&hellip;</span>` : "";
+      let row = `<div class="tc ${curChap===c.name?"on":""}" role="button" tabindex="0" `+
+        `title="${esc(c.about)}" onclick="pickChap('${esc(c.name)}')">`+
+        `<span class="name"><span class="dot" style="background:${SPINES[i%SPINES.length]}"></span>${esc(c.name)}</span>`+
+        `<span class="n">${n(counts[c.name])}</span>${chapKebab}</div>`;
+      if(kbMenu===ck)
+        row += `<div class="kbmenu"><div class="tc" role="button" tabindex="0" `+
+          `onclick="renameChapter('${esc(g.id)}','${esc(c.name)}')"><span class="name">rename chapter&hellip;</span></div></div>`;
+      return row;
+    }).join("");
+    // With no chapters declared, every fact is unfiled and the row just
+    // repeats "all" — only worth showing once filing is possible.
+    if(chaps.length)
+      rows += `<div class="tc ${curChap==="~"?"on":""}" role="button" tabindex="0" onclick="pickChap('~')">`+
+        `<span class="name"><span class="dot" style="background:var(--edge)"></span>unfiled</span>`+
+        `<span class="n">${n(counts.unfiled)}</span></div>`;
+    // Origin facet: which member repo a fact came from — orthogonal to
+    // chapters (topic), so both filters combine. Group scope only:
+    // project facts cite journal events, not member projects.
+    const org = {};
+    for(const m of memCache[g.id]||[])
+      for(const s of (m.sources||[]).filter(s=>s.startsWith("project:")))
+        org[s.slice(8)] = (org[s.slice(8)]||0)+1;
+    const names = Object.keys(org).sort();
+    if(names.length){
+      rows += `<div class="tsep">from</div>`;
+      rows += names.map(o=>`<div class="tc ${curOrigin===o?"on":""}" role="button" tabindex="0" `+
+        `onclick="pickOrigin('${esc(o)}')"><span class="name">${esc(o)}</span>`+
+        `<span class="n">${org[o]}</span></div>`).join("");
+    }
+  }
+  return rows;
+}
+function toggleKbMenu(key){ kbMenu = kbMenu===key ? "" : key; renderTree(); }
+
+// Drop is the console face of drop-project: files deleted on THIS hub.
+// The machines that feed it are untouched — their next checkpoint
+// re-creates the id — so the honest framing is "remove from this hub".
+async function dropProjectUI(id){
+  kbMenu = "";
+  const st = (OV.find(p=>p.id===id)||{}).stats||{};
+  if(!confirm(`Drop ${id} from this hub?\n\nIts journal (${st.events||0} events) and facts (${st.memories||0}) are deleted HERE. Machines still pushing this id will re-create it on their next checkpoint - drop their local copy or re-pin .aimem.json first if this should stay gone.`)) return;
+  try{
+    await api("/v1/projects/"+encodeURIComponent(id), {method:"DELETE"});
+    toast(id+" dropped from this hub");
+    if(curGroup===id) curGroup = "";
+    delete memCache[id];
+    const o = await api("/v1/overview"); OV=o.projects||[]; renderGroups(); renderKB();
+  }catch(e){ toast("drop failed: "+String(e.message||e)); }
+}
+
+// Chapter rename = the add-then-remove relabeling the taxonomy runbook
+// does by hand: update the chapters meta, then for every fact filed in
+// the old chapter, tag the new name and untag the old — in that order,
+// so no fact is ever chapterless. A fact already at the 3-chapter cap
+// refuses the extra tag; those swap remove-first, and any failure is
+// counted and reported rather than hidden.
+async function renameChapter(gid, oldName){
+  kbMenu = "";
+  const name = prompt(`New name for chapter "${oldName}" in ${kbLabel(gid)}.\n\nEvery fact filed there is relabeled (add-then-remove, so nothing goes unfiled). Peers adopt the new chapter list via config sync; their facts relabel here, on the hub, which is the copy curation reads.`, oldName);
+  if(name===null) return;
+  const nn = name.trim();
+  if(!nn || nn===oldName) return;
+  // "all" and "unfiled" are the tree's built-in rows ("~" the internal
+  // unfiled sentinel): a chapter carrying one of those names would be
+  // indistinguishable from the view it collides with.
+  if(["all","unfiled","~"].includes(nn.toLowerCase())){
+    toast(`"${nn}" is a reserved view name - pick another`); return;
+  }
+  try{
+    const meta = await api(`/v1/projects/${encodeURIComponent(gid)}/meta/chapters`);
+    let chaps = [];
+    try{ chaps = JSON.parse(meta.value||"[]"); }catch(_e){ chaps = []; }
+    if(chaps.some(c=>c.name===nn)){ toast(`chapter "${nn}" already exists`); return; }
+    chaps = chaps.map(c=>c.name===oldName ? Object.assign({}, c, {name:nn}) : c);
+    await api(`/v1/projects/${encodeURIComponent(gid)}/meta/chapters`,
+      {method:"PUT", body:JSON.stringify({value:JSON.stringify(chaps)})});
+    const facts = (memCache[gid]||[]).filter(m=>(m.tags||[]).includes("chapter:"+oldName));
+    let moved = 0, failed = 0;
+    for(const m of facts){
+      const base = `/v1/projects/${encodeURIComponent(gid)}/memories/${encodeURIComponent(m.id)}`;
+      try{
+        try{
+          await api(base+"/tag", {method:"POST", body:JSON.stringify({tag:"chapter:"+nn})});
+          await api(base+"/untag", {method:"POST", body:JSON.stringify({tag:"chapter:"+oldName})});
+        }catch(_e){
+          // At the 3-chapter cap the extra tag refuses: swap remove-first.
+          await api(base+"/untag", {method:"POST", body:JSON.stringify({tag:"chapter:"+oldName})});
+          await api(base+"/tag", {method:"POST", body:JSON.stringify({tag:"chapter:"+nn})});
+        }
+        moved++;
+      }catch(_e){ failed++; }
+    }
+    toast(`chapter renamed: ${moved} fact(s) relabeled`+(failed?`, ${failed} FAILED - check the unfiled view`:""));
+    if(curChap===oldName) curChap = nn;
+    delete memCache[gid];
+    loadFacts();
+  }catch(e){ toast("chapter rename failed: "+String(e.message||e)); }
+}
+
+// Rename re-keys the project on this hub. It does NOT reach the machines
+// that feed it: a client still deriving the old id re-creates it on its
+// next checkpoint, so the durable half of the change is a .aimem.json pin
+// on that machine. Say so before doing it, not after.
+async function renameProject(id){
+  kbMenu = "";
+  // Built as an array joined on a newline rather than one literal with
+  // embedded escapes: a stray raw newline inside a JS string literal is a
+  // syntax error that takes the WHOLE script block with it, and the page
+  // then renders as dead chrome (the token gate stops responding).
+  const msg = [
+    "New id for this project.",
+    "",
+    "Letters, digits, . _ - (max 64). This hub moves the journal, its facts "+
+      "and its curate cursor, and relabels citations in shared knowledge bases.",
+    "",
+    "It cannot reach the machines that push here. Unless you also pin",
+    `  {"project": "<new id>"}`,
+    "in that project's .aimem.json, the next checkpoint from it will "+
+      "re-create the old id alongside this one."
+  ].join("\n");
+  const name = prompt(msg, id);
+  if(name===null) return;              // cancelled
+  if(!name.trim() || name.trim()===id) return;
+  try{
+    await api("/v1/projects/"+encodeURIComponent(id)+"/rename",
+      {method:"POST", body:JSON.stringify({name:name.trim()})});
+  }catch(e){ toast("rename failed: "+String(e.message||e)); return; }
+  if(curGroup===id) curGroup = name.trim();
+  delete memCache[id];
+  toast("renamed to "+name.trim()+" - pin it in .aimem.json to make it stick");
+  const o = await api("/v1/overview"); OV=o.projects||[]; renderGroups(); renderKB();
+}
+// The tree scales: only the selected scope expands, and the sidebar
+// scrolls on its own when the list outgrows the viewport.
+function renderTree(){
+  const section = (label, list) => list.length
+    ? `<div class="tsep">${label}</div>` + list.map(treeEntry).join("") : "";
+  $("kbTree").innerHTML =
+    section("knowledge bases", groups()) +
+    section("projects", kbProjects()) +
+    section("user", userScope())
+    || '<div class="tc dim">No curated facts yet — they arrive from curation runs.</div>';
+}
+function renderKB(){
+  const all = [...groups(), ...kbProjects(), ...userScope()];
+  if(!curGroup && all.length) curGroup = all[0].id;
+  renderTree();
+  updateDocBtn();
+  loadFacts();
+}
+function pickGroup(id){curGroup=id;curChap="";curOrigin="";kbMenu="";kbPage=1;if(docOpen)toggleDoc();renderKB();updateDocBtn();}
+// Filing is deliberate and reversible: a fact may live in up to 3
+// chapters (the store caps it); the FIRST one filed stays primary and
+// is where the design document places it.
+async function fileFact(id, chapter){
+  if(!chapter) return;
+  try{
+    await api(`/v1/projects/${encodeURIComponent(curGroup)}/memories/${encodeURIComponent(id)}/tag`,
+      {method:"POST", body:JSON.stringify({tag:"chapter:"+chapter})});
+    toast("filed in "+chapter); loadFacts();
+  }catch(e){ toast(String(e.message||e)); }
+}
+async function unfileFact(id, chapter){
+  try{
+    await api(`/v1/projects/${encodeURIComponent(curGroup)}/memories/${encodeURIComponent(id)}/untag`,
+      {method:"POST", body:JSON.stringify({tag:"chapter:"+chapter})});
+    toast("removed from "+chapter); loadFacts();
+  }catch(e){ toast(String(e.message||e)); }
+}
+function pickChap(c){curChap=c;kbMenu="";kbPage=1;if(docOpen)toggleDoc();renderTree();renderFacts();}
+function pickOrigin(o){curOrigin = curOrigin===o ? "" : o;kbPage=1;if(docOpen)toggleDoc();renderTree();renderFacts();}
+async function loadFacts(){
+  if(!curGroup){$("kbFacts").innerHTML="";return;}
+  try{
+    const d = await api(`/v1/projects/${encodeURIComponent(curGroup)}/memories`);
+    memCache[curGroup] = d.memories||[]; renderTree(); renderFacts();
+  }catch(e){ $("kbFacts").innerHTML = `<div class="bad">${esc(String(e))}</div>`; }
+}
+// Chapter spines cycle a fixed palette in declaration order, so a
+// chapter keeps its color across visits.
+const SPINES = ["var(--tide)","var(--amber)","var(--iris)","var(--moss)"];
+function chapColor(name){
+  const g = groups().find(x=>x.id===curGroup);
+  const i = (g&&g.chapters?g.chapters:[]).findIndex(c=>c.name===name);
+  return i < 0 ? "var(--edge)" : SPINES[i % SPINES.length];
+}
+function renderFacts(){
+  const q = $("kbQ").value.toLowerCase();
+  const gch = (OV.find(p=>p.id===curGroup)||{}).chapters||[];
+  let ms = (memCache[curGroup]||[]).slice()
+    .sort((a,b)=>(b.created_at||"").localeCompare(a.created_at||""));
+  if(curChap==="~") ms = ms.filter(m=>!(m.tags||[]).some(t=>t.startsWith("chapter:")));
+  else if(curChap) ms = ms.filter(m=>(m.tags||[]).includes("chapter:"+curChap));
+  if(curOrigin) ms = ms.filter(m=>(m.sources||[]).includes("project:"+curOrigin));
+  if(q) ms = ms.filter(m=>(m.text+" "+(m.tags||[]).join(" ")).toLowerCase().includes(q));
+  const total = ms.length;
+  ms = ms.slice(0, kbPage*PAGE);
+  const cards = ms.map((m,i)=>{
+    const chs=(m.tags||[]).filter(t=>t.startsWith("chapter:")).map(t=>t.slice(8));
+    const tags=(m.tags||[]).filter(t=>!t.startsWith("chapter:"));
+    const origin=(m.sources||[]).filter(s=>s.startsWith("project:")).map(s=>s.slice(8));
+    return `<div class="card" style="--i:${i};border-left-color:${chs.length?chapColor(chs[0]):"var(--edge)"}">
+      <div class="acts">
+        <button class="act" onclick="supersede('${m.id}')">supersede</button>
+        <button class="act danger" onclick="forget('${m.id}')">forget</button>
+      </div>
+      <div class="fact">${esc(m.text)}</div>
+      <div class="srcs">
+        <span class="chip">${esc(m.kind||"fact")}</span>
+        ${chs.map((c,ci)=>`<span class="chip ch"${ci?"":' title="primary — the design document files this fact here"'}>${
+          ci?"":"● "}${esc(c)} <a class="x" onclick="unfileFact('${m.id}','${esc(c)}')">×</a></span>`).join("")}
+        ${chs.length<3?`<select class="addch" onchange="fileFact('${m.id}',this.value);this.value=''">
+          <option value="">+ chapter</option>${gch.filter(c=>!chs.includes(c.name))
+            .map(c=>`<option>${esc(c.name)}</option>`).join("")}</select>`:""}
+        ${tags.map(t=>`<span class="chip">${esc(t)}</span>`).join("")}
+        <span class="dim">${ago(m.created_at)} · conf ${(m.confidence??0).toFixed(2)}`+
+        `${m.corroboration?` · ×${m.corroboration}`:""}`+
+        `${origin.length?` · from ${esc(origin.join(", "))}`:""}</span>
+      </div></div>`;
+  }).join("");
+  if(!ms.length){
+    $("kbFacts").innerHTML = `<div class="dim card">${q
+      ? "No facts match this search."
+      : curChap
+      ? "No facts filed in this chapter yet — the curator files new facts here as sessions produce them."
+      : "No facts in this knowledge base yet. Facts arrive from curation runs."}</div>`;
+    return;
+  }
+  const more = total - ms.length;
+  $("kbFacts").innerHTML = cards + `<div class="row" style="margin-top:10px">`+
+    (more>0 ? `<button class="act" onclick="kbPage++;renderFacts()">show ${Math.min(more,PAGE)} more</button>` : "")+
+    `<span class="dim">showing ${ms.length} of ${total}${q?" matching":""} fact${total===1?"":"s"}</span></div>`;
+}
+// Quick search: "/" focuses the box from anywhere on the KB tab, Escape
+// clears it — the shortcut is advertised in the placeholder.
+document.addEventListener("keydown", e=>{
+  const typing = /^(INPUT|TEXTAREA|SELECT)$/.test(document.activeElement.tagName);
+  if(e.key==="/" && !typing && !$("t-kb").hidden){ e.preventDefault(); $("kbQ").focus(); }
+  else if(e.key==="Escape" && document.activeElement===$("kbQ")){
+    $("kbQ").value=""; kbPage=1; renderFacts(); $("kbQ").blur();
+  }
+});
+async function forget(id){
+  if(!confirm("Retire this fact? (bi-temporal: audit preserved)"))return;
+  await api(`/v1/projects/${encodeURIComponent(curGroup)}/memories/${id}/forget`,{method:"POST",body:"{}"});
+  toast("fact retired"); loadFacts();
+}
+async function supersede(id){
+  const m=(memCache[curGroup]||[]).find(x=>x.id===id);
+  const txt=prompt("Replacement text:", m?m.text:"");
+  if(!txt || (m && txt===m.text)) return;  // unchanged text is not a change
+  await api(`/v1/projects/${encodeURIComponent(curGroup)}/memories/${id}/supersede`,
+    {method:"POST",body:JSON.stringify({text:txt})});
+  toast("fact superseded"); loadFacts();
+}
+
+/* ---------- Design document view ---------- */
+let docOpen = false;
+// Minimal Markdown: headings, paragraphs, inline code, [n] citations.
+function md2html(md){
+  return md.split(/\n\n+/).map(block=>{
+    const b = block.trim();
+    if(!b) return "";
+    if(b.startsWith("### ")) return `<h3>${esc(b.slice(4))}</h3>`;
+    if(b.startsWith("## "))  return `<h2>${esc(b.slice(3))}</h2>`;
+    if(b.startsWith("# "))   return `<h1>${esc(b.slice(2))}</h1>`;
+    if(b.startsWith("---"))  return `<div class="docmeta">${esc(b.replace(/^---\s*/,"").replace(/^_|_$/g,""))}</div>`;
+    let h = esc(b).replace(/`([^`]+)`/g,"<code>$1</code>")
+                  .replace(/\[(\d+)\]/g,'<span class="cite">[$1]</span>')
+                  .replace(/_\(([^)]*)\)_/g,'<span class="dim">($1)</span>');
+    return `<p>${h.replace(/\n/g,"<br>")}</p>`;
+  }).join("");
+}
+function updateDocBtn(){
+  const g = groups().find(x=>x.id===curGroup);
+  const btn = $("kbDocBtn");
+  btn.hidden = !(g && g.doc_ts);
+  if(g && g.doc_ts) btn.textContent = `design document · ${ago(g.doc_ts)}`;
+  if(docOpen && (!g || !g.doc_ts)) toggleDoc();
+}
+async function toggleDoc(){
+  docOpen = !docOpen;
+  $("kbDoc").hidden = !docOpen;
+  $("kbFacts").hidden = docOpen;
+  $("kbQ").hidden = docOpen;
+  if(!docOpen) return;
+  $("kbDoc").innerHTML = '<span class="dim">loading…</span>';
+  try{
+    const d = await api(`/v1/projects/${encodeURIComponent(curGroup)}/meta/design_doc`);
+    $("kbDoc").innerHTML = d.value ? md2html(d.value)
+      : '<span class="dim">No document yet — enable the doc feature and the nightly run will write one, or run `aimem doc`.</span>';
+  }catch(e){ $("kbDoc").innerHTML = `<span class="bad">${esc(String(e))}</span>`; }
+}
+
+/* ---------- Groups management ---------- */
+function renderGroups(){
+  $("groupEditors").innerHTML = groups().map(g=>{
+    const ch = g.chapters||[];
+    return `<div class="card" id="ge-${g.id}" oninput="markDirty(event,'${g.id}')" onchange="markDirty(event,'${g.id}')">
+      <div class="row"><b>${esc(g.id.slice(6))}</b>
+        <span class="dim">${g.stats.memories} facts · members: ${esc(members(g.id).join(", ")||"none yet")}</span></div>
+      <div class="row"><span class="dim" style="width:70px">charter</span>
+        <textarea data-k="about" class="grow">${esc(g.about||"")}</textarea></div>
+      <div class="row"><span class="dim" style="width:70px">policy</span>
+        <select data-k="policy" style="width:auto">
+          <option value="domain" ${g.policy!=="all"?"selected":""}>domain — charter-routed promotion</option>
+          <option value="all" ${g.policy==="all"?"selected":""}>all — mirror every member fact</option>
+        </select></div>
+      <div class="row"><span class="dim" style="width:70px">features</span>
+        <label class="dim" style="cursor:pointer">
+          <input type="checkbox" data-f="doc" style="width:auto;vertical-align:middle"
+            ${(g.features||[]).includes("doc")?"checked":""}>
+          design document — synthesized nightly from this KB's facts</label></div>
+      <div class="row"><span class="dim" style="width:70px">chapters</span><div class="grow" data-chapters>
+        ${ch.map(c=>chapRow(c.name,c.about)).join("")}</div></div>
+      <div class="row"><span style="width:70px"></span>
+        <button class="act" onclick="addChap('${g.id}')">+ chapter</button>
+        <button class="act" onclick="proposeChap('${g.id}',this)">propose chapters (AI)</button>
+        <span class="dim" data-propnote></span>
+        <span class="grow"></span>
+        <button class="act" data-save onclick="saveGroup('${g.id}')">save ${esc(g.id.slice(6))}</button></div>
+      <div data-plan></div>
+    </div>`;}).join("") || '<div class="dim card">no groups yet</div>';
+  for(const g of groups()) loadPlan(g.id);
+}
+/* Chapter proposal review (propose → approve/edit → apply; the model
+   never writes — DESIGN-unfiled-remediation Part B). */
+async function factTexts(gid){
+  try{ const r=await api(`/v1/projects/${encodeURIComponent(gid)}/memories`);
+    return Object.fromEntries((r.memories||[]).map(m=>[m.id,m.text])); }catch(e){ return {}; }
+}
+async function proposeChap(gid,btn){
+  const note=$("ge-"+gid).querySelector("[data-propnote]");
+  btn.disabled=true; note.textContent="asking the curate model… (may take ~30s)";
+  try{
+    const plan=await api(`/v1/projects/${encodeURIComponent(gid)}/chapter-proposal`,{method:"POST",body:"{}"});
+    note.textContent=""; await renderPlan(gid,plan);
+  }catch(e){ note.textContent=String(e.message||e); }
+  btn.disabled=false;
+}
+async function loadPlan(gid){
+  try{
+    const r=await api(`/v1/projects/${encodeURIComponent(gid)}/meta/chapter_proposal`);
+    if(r.value) await renderPlan(gid,JSON.parse(r.value));
+  }catch(e){}
+}
+async function renderPlan(gid,plan){
+  const box=$("ge-"+gid).querySelector("[data-plan]");
+  if(!plan || (!(plan.assign||[]).length && !(plan.new_chapters||[]).length)){
+    box.innerHTML = plan ? `<div class="dim" style="margin-top:6px">proposal found nothing to file (${plan.unfiled||0} unfiled)</div>` : "";
+    return;
+  }
+  const texts=await factTexts(gid);
+  const fact=(id)=>`<label class="dim" style="display:block;padding-left:18px;cursor:pointer">
+    <input type="checkbox" checked data-fid="${esc(id)}" style="width:auto;vertical-align:middle">
+    ${esc((texts[id]||id).slice(0,160))}</label>`;
+  box.innerHTML=`<div class="card" style="margin-top:8px">
+    <h2 style="margin-top:0">chapter proposal <span class="dim">· ${esc(plan.model||"?")} · ${esc((plan.ts||"").replace("T"," ").replace("Z",""))}
+      · ${plan.considered||0}/${plan.unfiled||0} unfiled considered</span></h2>
+    ${(plan.new_chapters||[]).map((nc,i)=>`<div data-nc style="margin:6px 0">
+      <div class="row"><input type="checkbox" checked data-ncok style="width:auto">
+        <input type="text" value="${esc(nc.name)}" data-ncname style="width:160px">
+        <input type="text" value="${esc(nc.about)}" data-ncabout class="grow"></div>
+      ${(nc.fact_ids||[]).map(fact).join("")}</div>`).join("")}
+    ${(plan.assign||[]).length?`<h2>into existing chapters</h2>`:""}
+    ${(plan.assign||[]).map(a=>`<div class="row" data-as data-chap="${esc(a.chapter)}">
+      <input type="checkbox" checked data-fid="${esc(a.fact_id)}" style="width:auto">
+      <span class="grow dim">${esc((texts[a.fact_id]||a.fact_id).slice(0,140))}</span>
+      <span class="chip ch">${esc(a.chapter)}</span></div>`).join("")}
+    <div class="row"><button class="act" onclick="applyPlan('${gid}',this)">apply approved</button>
+      <button class="act danger" onclick="discardPlan('${gid}')">discard proposal</button>
+      <span class="dim" data-applynote></span></div>
+  </div>`;
+}
+async function applyPlan(gid,btn){
+  const box=$("ge-"+gid).querySelector("[data-plan]"), note=box.querySelector("[data-applynote]");
+  const new_chapters=[...box.querySelectorAll("[data-nc]")].filter(d=>d.querySelector("[data-ncok]").checked)
+    .map(d=>({name:d.querySelector("[data-ncname]").value.trim(),
+              about:d.querySelector("[data-ncabout]").value.trim(),
+              fact_ids:[...d.querySelectorAll("[data-fid]")].filter(c=>c.checked).map(c=>c.dataset.fid)}))
+    .filter(nc=>nc.name&&nc.fact_ids.length);
+  const assign=[...box.querySelectorAll("[data-as]")].map(d=>({el:d,cb:d.querySelector("[data-fid]")}))
+    .filter(x=>x.cb.checked).map(x=>({fact_id:x.cb.dataset.fid, chapter:x.el.dataset.chap}));
+  btn.disabled=true; note.textContent="applying…";
+  try{
+    const r=await api(`/v1/projects/${encodeURIComponent(gid)}/chapter-proposal/apply`,
+      {method:"POST",body:JSON.stringify({new_chapters,assign})});
+    toast(`${r.new_chapters} chapters, ${r.filed} facts filed — written to the hub, no save needed`);
+    const o=await api("/v1/overview"); OV=o.projects||[]; renderGroups(); renderKB();
+  }catch(e){ note.textContent=String(e.message||e); btn.disabled=false; }
+}
+async function discardPlan(gid){
+  await api(`/v1/projects/${encodeURIComponent(gid)}/chapter-proposal/apply`,
+    {method:"POST",body:'{"new_chapters":[],"assign":[]}'});
+  $("ge-"+gid).querySelector("[data-plan]").innerHTML=""; toast("proposal discarded");
+}
+const chapRow = (n,a) => `<div class="row" data-chap>
+  <input type="text" placeholder="name" value="${esc(n)}" style="width:160px">
+  <input type="text" placeholder="which facts belong here" value="${esc(a)}" class="grow">
+  <button class="act danger" onclick="const c=this.closest('[id^=ge-]');this.parentElement.remove();dirtyGroup(c.id.slice(3))">×</button></div>`;
+function addChap(gid){ $("ge-"+gid).querySelector("[data-chapters]").insertAdjacentHTML("beforeend", chapRow("","")); dirtyGroup(gid); }
+/* Unsaved-edit indicator: the save button goes amber the moment a field
+   in the card changes. Proposal-review interactions are excluded — apply
+   writes server-side by itself and needs no save. */
+function markDirty(ev,gid){ if(ev.target.closest("[data-plan]")) return; dirtyGroup(gid); }
+function dirtyGroup(gid){
+  const b=$("ge-"+gid).querySelector("[data-save]");
+  if(b && !b.classList.contains("dirty")){ b.classList.add("dirty"); b.textContent="save "+gid.slice(6)+" — unsaved"; }
+}
+async function saveGroup(gid){
+  const box = $("ge-"+gid);
+  const chapters = [...box.querySelectorAll("[data-chap]")].map(r=>{
+    const [n,a]=r.querySelectorAll("input");
+    return {name:n.value.trim(), about:a.value.trim()};
+  }).filter(c=>c.name&&c.about);
+  const features = [...box.querySelectorAll("[data-f]")].filter(c=>c.checked).map(c=>c.dataset.f);
+  const puts = {about: box.querySelector('[data-k=about]').value.trim(),
+                policy: box.querySelector('[data-k=policy]').value,
+                chapters: JSON.stringify(chapters),
+                features: JSON.stringify(features)};
+  for(const [k,v] of Object.entries(puts))
+    await api(`/v1/projects/${encodeURIComponent(gid)}/meta/${k}`,{method:"PUT",body:JSON.stringify({value:v})});
+  toast(gid.slice(6)+" saved");
+  const o = await api("/v1/overview"); OV=o.projects||[]; renderGroups(); renderKB();
+}
+async function createGroup(){
+  const name = $("newGroup").value.trim().toLowerCase();
+  if(!/^[a-z0-9][a-z0-9-]{0,40}$/.test(name)){toast("name: lowercase letters, digits, dashes");return;}
+  await api(`/v1/projects/${encodeURIComponent("group-"+name)}/meta/policy`,
+    {method:"PUT",body:JSON.stringify({value:"domain"})});
+  $("newGroup").value="";
+  const o = await api("/v1/overview"); OV=o.projects||[]; renderGroups(); renderKB();
+  toast("group-"+name+" created — declare it in members' .aimem.json");
+}
+
+/* ---------- Models ---------- */
+// The pickers are real dropdowns over the BOUND local model names (plus
+// the currently configured value, which may predate the registry).
+async function loadModels(){
+  let cur="", emb="";
+  try{
+    const m = await api("/v1/config/models");
+    cur = m.curate_model||""; emb = m.embed_model||"";
+  }catch(e){ $("mNote").textContent = String(e); }
+  const bound = Object.keys(PROV.models).sort();
+  // The claude CLI cannot embed: picking such a binding as embed model
+  // would silently degrade recall to BM25-only, so keep it out of that
+  // picker entirely.
+  const embeddable = bound.filter(m=>(PROV.providers[PROV.models[m].provider]||{}).kind!=="claude");
+  for(const [id,val] of [["mCurate",cur],["mEmbed",emb]]){
+    const opts=[...new Set([val,...(id==="mEmbed"?embeddable:bound)])].filter(Boolean);
+    // An unset value gets an explicit placeholder: without it the select
+    // silently DISPLAYS the first bound model while the server value is
+    // still empty, which reads as "already selected".
+    $(id).innerHTML = (val?"":'<option value="" selected>(not set)</option>')+(opts.length
+      ? opts.map(o=>`<option${o===val?" selected":""}>${esc(o)}</option>`).join("")
+      : (val?"":'<option value="" disabled>(bind a model first)</option>'));
+  }
+}
+async function saveModels(){
+  try{
+    const r = await api("/v1/config/models",{method:"PUT",body:JSON.stringify(
+      {curate_model:$("mCurate").value, embed_model:$("mEmbed").value})});
+    $("mNote").textContent = r.note||"saved";
+    toast("models saved");
+  }catch(e){ $("mNote").textContent = String(e); }
+}
+
+/* ---------- Providers ---------- */
+let PROV = {providers:{}, models:{}};
+async function loadProviders(){
+  try{ PROV = await api("/v1/config/providers"); }catch(e){ $("provList").textContent=String(e); return; }
+  const names = Object.keys(PROV.providers).sort();
+  $("provList").className="";
+  $("provList").innerHTML = names.length ? names.map(n=>{
+    const p=PROV.providers[n];
+    return `<div class="row"><span style="width:110px">${esc(n)}</span>`+
+      `<span class="chip">${esc(p.kind)}</span>`+
+      `<span class="grow dim">${esc(p.base_url||"(default proxy)")}</span>`+
+      `<span class="dim">${esc(p.token||"no token")}</span>`+
+      `<button class="act" onclick="editProvider('${esc(n)}')">edit</button>`+
+      `<button class="act danger" onclick="delProvider('${esc(n)}')">delete</button></div>`;
+  }).join("") : '<span class="dim">none yet — models use the host env fallback</span>';
+  const models = Object.keys(PROV.models).sort();
+  $("bindList").className="";
+  $("bindList").innerHTML = models.map(m=>{
+    const b=PROV.models[m], up=b.model&&b.model!==m?` <span class="dim">→ ${esc(b.model)}</span>`:"";
+    return `<div class="row"><span class="grow">${esc(m)}${up}</span>`+
+    `<span class="chip">${esc(b.provider)}</span>`+
+    `<button class="act" onclick="testModel('${esc(m)}','chat',this)">test chat</button>`+
+    `<button class="act" onclick="testModel('${esc(m)}','embed',this)">test embed</button>`+
+    `<span class="dim" data-test="${esc(m)}"></span>`+
+    `<button class="act danger" onclick="unbindModel('${esc(m)}')">unbind</button></div>`;}).join("");
+  const sel=$("bProv").value;
+  $("bProv").innerHTML = names.map(n=>`<option>${esc(n)}</option>`).join("");
+  if(names.includes(sel)) $("bProv").value=sel;
+  loadProviderModels();
+}
+async function loadProviderModels(){
+  const n=$("bProv").value, base='<option value="">(choose model)</option>',
+        custom='<option value="__custom">(custom…)</option>';
+  if(!n){$("bUp").innerHTML=base+custom;return;}
+  try{
+    const r=await api(`/v1/config/providers/${encodeURIComponent(n)}/models`);
+    $("bUp").innerHTML=base+(r.models||[]).map(m=>`<option>${esc(m)}</option>`).join("")+custom;
+  }catch(e){ $("bUp").innerHTML=base+custom; }
+  bUpChanged();
+}
+function bUpChanged(){
+  const custom = $("bUp").value==="__custom";
+  $("bUpCustom").hidden = !custom;
+  const up = custom ? $("bUpCustom").value.trim() : $("bUp").value;
+  $("bModel").placeholder = up ? $("bProv").value+"/"+up : "local name (auto: provider/model)";
+}
+function editProvider(n){const p=PROV.providers[n];$("pvName").value=n;$("pvKind").value=p.kind;
+  $("pvUrl").value=p.base_url||"";$("pvTok").value="";}
+async function putProv(body,msg){
+  try{ await api("/v1/config/providers",{method:"PUT",body:JSON.stringify(body)});
+    toast(msg); await loadProviders(); loadModels(); }catch(e){ toast(String(e)); }
+}
+function saveProvider(){
+  const name=$("pvName").value.trim(); if(!name){toast("provider needs a name");return;}
+  putProv({set_provider:{name, kind:$("pvKind").value, base_url:$("pvUrl").value.trim(),
+    token:$("pvTok").value.trim()}}, "provider saved");
+  $("pvTok").value="";
+}
+function delProvider(n){ if(confirm(`Delete provider ${n} and its bindings?`)) putProv({delete_provider:n},"provider deleted"); }
+function bindModel(){
+  const up = $("bUp").value==="__custom" ? $("bUpCustom").value.trim() : $("bUp").value;
+  // Alias defaults to provider/model — unique across providers by
+  // construction, so the same upstream model can be bound everywhere.
+  const m=$("bModel").value.trim()||(up?$("bProv").value+"/"+up:"");
+  if(!m){toast("bind needs a model name");return;}
+  putProv({bind:{model:m, provider:$("bProv").value, upstream:up}}, "model bound");
+  $("bModel").value=""; $("bUp").value=""; $("bUpCustom").value=""; bUpChanged();
+}
+function unbindModel(m){ putProv({unbind:m},"model unbound"); }
+// op is explicit ("chat"|"embed") — an embed-only model group rejects a
+// chat probe with a confusing transport error, so never guess the kind.
+async function testModel(m,op,btn){
+  const out=document.querySelector(`[data-test="${CSS.escape(m)}"]`);
+  btn.disabled=true; out.textContent="testing "+op+"…"; out.className="dim";
+  try{
+    const r=await api("/v1/config/providers/test",{method:"POST",body:JSON.stringify({model:m,op})});
+    out.textContent=`ok · ${r.latency_ms}ms · ${r.tokens} tok`; out.className="ok";
+  }catch(e){ out.textContent=String(e.message||e); out.className="bad"; }
+  btn.disabled=false;
+}
+
+/* ---------- Log ----------
+   Two sources, because they live in different places: "service" is the
+   serve process's in-memory ring, while curation runs in its OWN
+   process — its supersessions and conflicts reach the GUI only through
+   the append-only audit trail ("knowledge"). */
+let LOG = [], AUDIT = [];
+const shortProj = id => id.startsWith("group-") ? id.slice(6)
+  : (id.length>26 ? id.slice(0,24)+"…" : id);
+async function loadLog(){
+  const knowledge = $("logSrc").value==="knowledge";
+  $("logLevel").hidden = knowledge;
+  $("logNote").textContent = knowledge
+    ? "curator + operator changes to curated facts (append-only)"
+    : "last 500 in-memory records; journalctl holds history";
+  $("logBody").className="dim"; $("logBody").textContent="loading…";
+  if(knowledge){
+    const rows=[];
+    for(const p of OV){
+      if(!(p.stats&&p.stats.memories)) continue;
+      try{
+        const r = await api(`/v1/projects/${encodeURIComponent(p.id)}/audit?limit=100`);
+        for(const e of r.entries||[]) rows.push(Object.assign({project:p.id}, e));
+      }catch(e){}
+    }
+    rows.sort((a,b)=>(b.ts||"").localeCompare(a.ts||""));
+    AUDIT = rows.slice(0,400);
+  } else {
+    try{ LOG = (await api("/v1/logs?limit=500")).entries||[]; }
+    catch(e){ $("logBody").textContent = String(e); return; }
+  }
+  renderLog();
+}
+function renderLog(){
+  const q=$("logQ").value.toLowerCase();
+  const when = ts => esc((ts||"").replace("T"," ").replace("Z","").slice(0,19));
+  $("logBody").className="";
+  if($("logSrc").value==="knowledge"){
+    // A conflict/supersede row carries both texts: what the curator
+    // found and what it wanted to write.
+    const rows = AUDIT.filter(e=>!q||
+      (e.op+" "+e.project+" "+(e.actor||"")+" "+(e.old_text||"")+" "+(e.new_text||"")).toLowerCase().includes(q));
+    $("logBody").innerHTML = rows.length ? rows.map(e=>{
+      const cls = e.op==="forget"?"bad" : (e.op==="supersede"||e.op==="conflict")?"warn" : "dim";
+      const diff = (e.op==="supersede"||e.op==="conflict")
+        ? `<div class="dim" style="padding-left:16px">− ${esc(e.old_text||"")}</div>`+
+          `<div style="padding-left:16px">+ ${esc(e.new_text||"")}</div>`
+        : (e.new_text?`<div class="dim" style="padding-left:16px">${esc(e.new_text)}</div>`:"");
+      return `<div style="font-size:13px;padding:2px 0">`+
+        `<span class="dim">${when(e.ts)}</span> <span class="${cls}">${esc(e.op)}</span> `+
+        `<span class="chip">${esc(shortProj(e.project))}</span>`+
+        `<span class="dim">${esc(e.actor||"")}</span>${diff}</div>`;
+    }).join("") : '<span class="dim">no knowledge changes recorded yet</span>';
+    return;
+  }
+  const lv=$("logLevel").value;
+  const rows = LOG.filter(e=>(!lv||e.level===lv) &&
+    (!q||(e.msg+" "+(e.attrs||"")).toLowerCase().includes(q)));
+  $("logBody").innerHTML = rows.length ? rows.slice().reverse().map(e=>{
+    const cls = e.level==="ERROR"?"bad":(e.level==="WARN"?"warn":"dim");
+    return `<div style="font-size:13px;padding:1px 0"><span class="dim">${when(e.ts)}</span> `+
+      `<span class="${cls}">${esc(e.level)}</span> ${esc(e.msg)}`+
+      (e.attrs?` <span class="dim">${esc(e.attrs)}</span>`:"")+`</div>`;
+  }).join("") : '<span class="dim">no matching records</span>';
+}
+
+/* ---------- Usage ---------- */
+async function loadSetup(){
+  await loadProviders();  // fills PROV; the model pickers list bound names
+  loadModels();
+}
+async function loadUsage(){
+  // Run history travels with a project (a migrated project carries its
+  // cost records), so this view separates the runs THIS host performed
+  // from imported history recorded on other hosts.
+  let HOST=""; try{HOST=(await api("/v1/health")).host||"";}catch(e){}
+  const day = new Date(); day.setUTCHours(0,0,0,0);
+  const week = Date.now()-7*864e5, month = Date.now()-30*864e5;
+  const rows=[], models={}, foreign={};
+  for(const p of OV){
+    let runs=[]; try{runs=(await api(`/v1/projects/${encodeURIComponent(p.id)}/curate-runs`)).runs||[];}catch(e){}
+    if(!runs.length) continue;
+    const agg={t:0,w:0,m:0,last:"",zy:0};
+    for(const r of runs){
+      const ts=Date.parse(r.ts), tok=(r.input_tokens||0)+(r.output_tokens||0);
+      if(HOST && r.host && r.host!==HOST){
+        if(ts>=month){const f=foreign[r.host]=foreign[r.host]||{m:0}; f.m+=tok;}
+        continue;
+      }
+      // Zero-yield: events consumed, nothing landed — possibly a
+      // guardrail's clean []. Derivable from any run row, so this badge
+      // works retroactively over all history.
+      if(ts>=month && (r.events_read||0)>0 && !(r.written||r.reasserted||r.skipped)) agg.zy++;
+      if(ts>=month){agg.m+=tok; const mm=models[r.model||"?"]=models[r.model||"?"]||{t:0,m:0};
+        mm.m+=tok; if(ts>=+day)mm.t+=tok;}
+      if(ts>=week)agg.w+=tok; if(ts>=+day)agg.t+=tok;
+      if(r.ts>agg.last)agg.last=r.ts;
+    }
+    if(agg.m||agg.zy) rows.push({id:p.id,...agg});
+  }
+  const tok=n=>n>=1e6?(n/1e6).toFixed(1)+"M":n>=1e3?(n/1e3).toFixed(1)+"k":String(n);
+  rows.sort((a,b)=>b.m-a.m);
+  const foreignNote = Object.keys(foreign).length
+    ? `<div class=dim style="margin-top:.6em">imported history (not this hub's spend, 30d): ${
+        Object.entries(foreign).map(([h,v])=>`${esc(h)} ${tok(v.m)}`).join(" · ")}</div>` : "";
+  $("usageBody").innerHTML = (`<h2>curation cost on ${esc(HOST||"this hub")} (in+out tokens)</h2>
+    <table><tr><th>project</th><th>last run</th><th class=num>today</th><th class=num>7d</th><th class=num>30d</th><th>anomalies</th></tr>
+    ${rows.map(r=>`<tr><td>${esc(r.id)}</td><td class=dim>${ago(r.last)}</td>
+      <td class=num>${tok(r.t)}</td><td class=num>${tok(r.w)}</td><td class=num>${tok(r.m)}</td>
+      <td>${r.zy?`<span class="warn" title="runs that consumed events but wrote nothing (30d) — possibly a guardrail's empty reply; the run history holds each window">${r.zy} zero-yield</span>`:""}</td></tr>`).join("")}
+    </table>
+    <h2>per model (30d)</h2>
+    <table><tr><th>model</th><th class=num>today</th><th class=num>30d</th></tr>
+    ${Object.entries(models).map(([m,v])=>`<tr><td>${esc(m)}</td>
+      <td class=num>${tok(v.t)}</td><td class=num>${tok(v.m)}</td></tr>`).join("")}</table>`
+    + foreignNote)
+    || '<div class="dim">no curation runs recorded yet</div>';
+}
+
+/* ---------- Health ---------- */
+async function loadHealth(){
+  let h; try{h=await api("/v1/health");}catch(e){$("healthBody").textContent=String(e);return;}
+  const r=h.resources||{};
+  const bar=(label,pct,extra)=>{const cls=pct>=90?"bad":pct>=75?"warn":"";
+    return `<div class="row"><span class="dim" style="width:60px">${label}</span>
+      <div class="bar ${cls} grow"><i style="width:${Math.min(100,pct||0)}%"></i></div>
+      <span style="width:220px">${pct??"?"}% ${extra||""}</span></div>`;};
+  $("healthBody").innerHTML = `
+    <div class="card">
+      <div class="row"><span class="dim">status</span><b class="${h.status==="ok"?"ok":"bad"}">${esc(h.status)}</b>
+        <span class="dim">· ${h.projects} projects · state root ${esc(h.state_root||"")}</span></div>
+      ${bar("cpu", r.cpu_used_pct, `<span class="dim">of ${r.cpus} cpus · load ${esc(r.load_1m||"?")} / ${esc(r.load_5m||"?")} / ${esc(r.load_15m||"?")}</span>`)}
+      ${bar("mem", r.mem_used_pct, `<span class="dim">${r.mem_available_mb}MB free of ${r.mem_total_mb}MB</span>`)}
+      ${bar("disk", r.disk_used_pct, `<span class="dim">${r.disk_free_mb}MB free</span>`)}
+      <div class="row dim">service rss ${r.proc_rss_mb??"?"}MB</div>
+    </div>`;
+}
+
+if(TOK) boot(); else $("gate").classList.remove("hide");
+
+/* ---------- Docs (shared documents) ---------- */
+// Whole authored files versioned on this hub with compare-and-swap
+// (docs/DESIGN-shared-docs.md). Editing here is a normal CAS write and
+// can conflict like any other, so the editor keeps the rev it loaded and
+// hands a conflict back rather than clobbering another machine's work.
+let docCur = null;           // {project, name, rev, body} being viewed
+let docProjInit = false;
+
+function initDocs(){
+  if(!docProjInit){
+    // Any project can hold documents; groups are projects too, and a
+    // group runbook is the case with no bound file anywhere.
+    const ids = OV.map(p=>p.id).sort();
+    $("docProj").innerHTML = ids.map(id=>`<option>${esc(id)}</option>`).join("");
+    docProjInit = true;
+  }
+  loadDocs();
+}
+
+// keepView refreshes only the listing. On a conflict the editor must
+// survive: it holds the user's unsaved text, which the conflict message
+// is telling them to preserve — clearing it would destroy exactly what
+// it asks them to keep.
+async function loadDocs(keepView){
+  const proj = $("docProj").value;
+  if(!keepView){ $("docView").innerHTML = ""; docCur = null; }
+  if(!proj){ $("docList").innerHTML = '<div class="tc dim">no projects</div>'; return; }
+  try{
+    const r = await api(`/v1/projects/${encodeURIComponent(proj)}/docs`);
+    const docs = r.docs||[];
+    $("docHint").textContent = docs.length ? "" : "no shared documents in this project yet";
+    $("docList").innerHTML = docs.length ? docs.map(d=>{
+      const del = d.deleted ? ' <span class="bad">[retired]</span>' : "";
+      return `<div class="card">
+        <div class="acts">
+          <button class="act" onclick="openDoc('${esc(proj)}','${esc(d.name)}')">open</button>
+          ${d.deleted?"":`<button class="act danger" onclick="retireDoc('${esc(proj)}','${esc(d.name)}',${d.rev})">retire</button>`}
+        </div>
+        <div class="fact">${esc(d.name)}${del}</div>
+        <div class="srcs"><span class="chip">rev ${d.rev}</span>
+          <span class="dim">${ago(d.updated_at)} · ${d.size} bytes · by ${esc(d.updated_by||"?")}</span></div>
+      </div>`;
+    }).join("") : "";
+  }catch(e){ $("docList").innerHTML = `<div class="bad">${esc(String(e.message||e))}</div>`; }
+}
+
+async function openDoc(proj, name){
+  try{
+    const d = await api(`/v1/projects/${encodeURIComponent(proj)}/docs/${encodeURIComponent(name)}`);
+    docCur = {project:proj, name, rev:d.rev, body:d.body||""};
+    const isHandoff = name === "SESSION-STATE";
+    $("docView").innerHTML = `<div class="card">
+      <div class="fact">${esc(name)} <span class="dim">rev ${d.rev} · ${esc(d.updated_at)} · by ${esc(d.updated_by||"?")}</span></div>
+      ${isHandoff?'<div class="dim" style="margin:6px 0">This is the session handoff: machines publish it from docs/SESSION-STATE.md on every checkpoint. Editing it here is possible but the next checkpoint from a machine with a different copy will conflict.</div>':""}
+      <textarea id="docBody" style="width:100%;min-height:340px;font:13px/1.5 var(--mono)">${esc(docCur.body)}</textarea>
+      <div class="row">
+        <button class="act" onclick="saveDoc()">save (rev ${d.rev} &rarr; ${d.rev+1})</button>
+        <button class="act" onclick="showDocLog()">history</button>
+        <span class="dim" id="docMsg"></span>
+      </div>
+      <div id="docLog"></div>
+    </div>`;
+  }catch(e){ $("docView").innerHTML = `<div class="bad">${esc(String(e.message||e))}</div>`; }
+}
+
+async function saveDoc(){
+  if(!docCur) return;
+  const body = $("docBody").value;
+  if(body === docCur.body){ $("docMsg").textContent = "no changes"; return; }
+  try{
+    const r = await api(`/v1/projects/${encodeURIComponent(docCur.project)}/docs/${encodeURIComponent(docCur.name)}`,
+      {method:"PUT", body:JSON.stringify({body, base_rev:docCur.rev, updated_by:"console"})});
+    docCur.rev = r.rev; docCur.body = body;
+    toast(`${docCur.name} saved as rev ${r.rev}`);
+    openDoc(docCur.project, docCur.name); loadDocs();
+  }catch(e){
+    // A 409 is not a failure to retry blindly: another machine wrote a
+    // newer revision, and its text has to be reconciled by a person.
+    const m = String(e.message||e);
+    $("docMsg").innerHTML = `<span class="bad">conflict - someone else saved a newer revision. `+
+      `Copy your text somewhere, reopen the document to see theirs, and merge deliberately.</span>`;
+    console.log("doc conflict:", m);
+    // The listing now shows a revision that is no longer current; a stale
+    // "rev 4 by console" next to a conflict about rev 5 is exactly the
+    // confusion this message is trying to clear up. The editor stays.
+    loadDocs(true);
+  }
+}
+
+async function showDocLog(){
+  if(!docCur) return;
+  try{
+    const r = await api(`/v1/projects/${encodeURIComponent(docCur.project)}/docs/${encodeURIComponent(docCur.name)}/log`);
+    $("docLog").innerHTML = `<div class="tsep">history</div>` + (r.revisions||[]).map(v=>
+      `<div class="tc"><span class="name">rev ${v.rev}${v.deleted?" (retired)":""} - ${esc(v.updated_at)} by ${esc(v.updated_by||"?")}</span>`+
+      `<span class="n"><a class="x" onclick="viewRev(${v.rev})">view</a></span></div>`).join("");
+  }catch(e){ $("docLog").innerHTML = `<div class="bad">${esc(String(e.message||e))}</div>`; }
+}
+
+async function viewRev(rev){
+  if(!docCur) return;
+  const d = await api(`/v1/projects/${encodeURIComponent(docCur.project)}/docs/${encodeURIComponent(docCur.name)}?rev=${rev}`);
+  // Load an old body into the editor WITHOUT touching base_rev: saving
+  // then restores it as a new revision on top, never a rewrite of history.
+  $("docBody").value = d.body||"";
+  $("docMsg").textContent = `loaded rev ${rev} - saving will restore it as rev ${docCur.rev+1}`;
+}
+
+async function retireDoc(proj, name, rev){
+  if(!confirm(`Retire ${name}? It is tombstoned for every machine (history is kept, and it can be republished deliberately).`)) return;
+  try{
+    await api(`/v1/projects/${encodeURIComponent(proj)}/docs/${encodeURIComponent(name)}?base_rev=${rev}&by=console`,
+      {method:"DELETE"});
+    toast(`${name} retired`); loadDocs();
+  }catch(e){ toast("retire failed: "+String(e.message||e)); }
+}
+
+/* ---------- Review (stale knowledge) ---------- */
+// FEATURE-PROPOSALS #5's console face. The queue is derived from the
+// audit trail; every verdict below is an ordinary audited write, so
+// acting on a row removes it. Never confirm without checking — a wrong
+// confirmation launders stale knowledge into fresh-looking knowledge.
+let revProjInit = false;
+
+function initReview(){
+  if(!revProjInit){
+    const ids = OV.map(p=>p.id).sort();
+    $("revProj").innerHTML = ids.map(id=>`<option>${esc(id)}</option>`).join("");
+    revProjInit = true;
+  }
+  loadReview();
+}
+
+async function loadReview(){
+  const proj = $("revProj").value;
+  if(!proj){ $("revList").innerHTML = '<div class="tc dim">no projects</div>'; return; }
+  const days = $("revDays").value;
+  try{
+    const r = await api(`/v1/projects/${encodeURIComponent(proj)}/memories/review?days=${days}&limit=100`);
+    const items = r.items||[];
+    $("revHint").textContent = items.length
+      ? `${items.length} fact(s) unreviewed since ${(r.cutoff||"").slice(0,10)}`
+      : "queue is clear";
+    $("revList").innerHTML = items.map(it=>`<div class="card" id="rev-${esc(it.id)}">
+      <div class="acts">
+        <button class="act" onclick="revConfirm('${esc(proj)}','${esc(it.id)}')">still true</button>
+        <button class="act" onclick="revEdit('${esc(it.id)}')">update&hellip;</button>
+        <button class="act danger" onclick="revForget('${esc(proj)}','${esc(it.id)}')">expire</button>
+      </div>
+      <div class="fact">${esc(it.text)}</div>
+      <div class="srcs"><span class="chip">${esc(it.kind)}</span>
+        <span class="dim">conf ${(it.confidence??0).toFixed(2)} · corroboration ${it.corroboration} · last seen ${ago(it.last_seen)}</span></div>
+      <div class="row" id="revEd-${esc(it.id)}" hidden>
+        <input id="revTx-${esc(it.id)}" type="text" class="grow" value="${esc(it.text)}">
+        <button class="act" onclick="revSupersede('${esc(proj)}','${esc(it.id)}')">supersede</button>
+      </div>
+    </div>`).join("");
+  }catch(e){ $("revList").innerHTML = `<div class="bad">${esc(String(e.message||e))}</div>`; }
+}
+
+async function revConfirm(proj, id){
+  try{
+    await api(`/v1/projects/${encodeURIComponent(proj)}/memories/${encodeURIComponent(id)}/confirm`,
+      {method:"POST", body:JSON.stringify({actor:"console"})});
+    toast("confirmed - back in the queue after the age window");
+    $("rev-"+id)?.remove();
+  }catch(e){ toast("confirm failed: "+String(e.message||e)); }
+}
+
+function revEdit(id){ const ed = $("revEd-"+id); ed.hidden = !ed.hidden; }
+
+async function revSupersede(proj, id){
+  const text = $("revTx-"+id).value.trim();
+  if(!text) return;
+  try{
+    await api(`/v1/projects/${encodeURIComponent(proj)}/memories/${encodeURIComponent(id)}/supersede`,
+      {method:"POST", body:JSON.stringify({text, actor:"console"})});
+    toast("superseded (lineage kept)");
+    $("rev-"+id)?.remove();
+  }catch(e){ toast("supersede failed: "+String(e.message||e)); }
+}
+
+async function revForget(proj, id){
+  if(!confirm("Expire this fact? It is retired bi-temporally (history kept), and sync cannot resurrect it.")) return;
+  try{
+    await api(`/v1/projects/${encodeURIComponent(proj)}/memories/${encodeURIComponent(id)}/forget`,
+      {method:"POST", body:JSON.stringify({actor:"console"})});
+    toast("expired");
+    $("rev-"+id)?.remove();
+  }catch(e){ toast("expire failed: "+String(e.message||e)); }
+}
+
+</script>
+</body>
+</html>

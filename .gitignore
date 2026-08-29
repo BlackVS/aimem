@@ -1,0 +1,27 @@
+# Build output
+/aimem
+/aimem.exe
+dist/
+bin/
+
+# Local databases (journals, memories) if a state root lands in the tree
+*.db
+*.db-wal
+*.db-shm
+
+# Local secrets: never commit these
+.creds/
+providers.json
+
+# aimem's OWN handoff. The installer creates docs/SESSION-STATE.md in every
+# project it wires, and in YOUR project you should commit it - that is how
+# the handoff reaches your other machines and your teammates. This repo is
+# public, and its handoff carries hostnames and in-flight operational
+# state, so here it stays local.
+docs/SESSION-STATE.md
+
+# This repo only: .aimem.json carries the operator's own hub binding and
+# group membership, which are meaningless (or half-broken) on anyone
+# else's machine. In YOUR projects, committing .aimem.json is right -
+# a pinned project id shared across machines is the point of the file.
+.aimem.json
