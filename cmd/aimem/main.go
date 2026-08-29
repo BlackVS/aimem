@@ -1254,6 +1254,7 @@ func syncCmd(args []string) error {
 		if hubs == nil {
 			return fmt.Errorf("no hub configured")
 		}
+		warnOrphanBindings(hubs)
 		var errs []string
 		for _, name := range slices.Sorted(maps.Keys(hubs)) {
 			if err := syncHub(name, hubs[name], def, ""); err != nil {
@@ -1274,6 +1275,7 @@ func syncCmd(args []string) error {
 		if !ok {
 			return fmt.Errorf("no hub named %q", *hubName)
 		}
+		warnOrphanBindings(hubs)
 		dest := ""
 		if len(rest) > 0 {
 			dest = rest[0]

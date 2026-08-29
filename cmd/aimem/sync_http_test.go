@@ -130,3 +130,29 @@ func TestSyncHubFallback(t *testing.T) {
 		t.Fatalf("bare hub: %v", err)
 	}
 }
+
+// TestOrphanBindings pins the loud-surface guarantee born from the RC
+// incident: a project bound to an unconfigured hub NAME must be named
+// by sync, because since the no-fallback guard it syncs nowhere.
+func TestOrphanBindings(t *testing.T) {
+	reg, err := store.NewRegistry(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer reg.Close()
+	seed := func(id, hub string) {
+		db, _ := reg.Open(id)
+		if hub != "" {
+			db.SetMeta("hub", hub)
+		}
+	}
+	seed("good", "home")
+	seed("unbound", "")
+	seed("lost", "work") // the RC case: name matches no configured hub
+	reg.Open("group-g")  // groups are exempt
+	hubs := map[string]*adapter.HubConfig{"home": {URL: "x", Token: "t"}}
+	warns := orphanBindings(reg, hubs)
+	if len(warns) != 1 || !strings.Contains(warns[0], `"work"`) || !strings.Contains(warns[0], "lost") {
+		t.Fatalf("orphan detection: %v", warns)
+	}
+}

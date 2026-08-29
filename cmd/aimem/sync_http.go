@@ -28,6 +28,46 @@ import (
 // destination — nothing to sync over.
 var errNoSyncTransport = errors.New("no sync transport")
 
+// orphanBindings finds projects bound to hub NAMES this machine has not
+// configured. Such a project syncs NOWHERE and its checkpoints spool
+// indefinitely — correct since the no-fallback partition guard, but
+// quiet enough to hide a project for four hours (observed live
+// 2026-08-29: a binding said "work" where the hub was named "seclab").
+// Sync is where an operator actually looks, so sync says it.
+func orphanBindings(reg *store.Registry, hubs map[string]*adapter.HubConfig) []string {
+	ids, err := reg.Projects()
+	if err != nil {
+		return nil
+	}
+	var out []string
+	for _, id := range ids {
+		if id == "user" || strings.HasPrefix(id, "group-") {
+			continue
+		}
+		db, err := reg.OpenExisting(id)
+		if err != nil {
+			continue
+		}
+		if h, _ := db.GetMeta("hub"); h != "" && hubs[h] == nil {
+			out = append(out, fmt.Sprintf(
+				"project %s is bound to hub %q, which is NOT configured on this machine — it syncs NOWHERE and its checkpoints spool until `aimem hub add %s <url> <token>` runs (or .aimem.json names an existing hub)",
+				id, h, h))
+		}
+	}
+	return out
+}
+
+func warnOrphanBindings(hubs map[string]*adapter.HubConfig) {
+	reg, err := store.NewRegistry(stateRoot())
+	if err != nil {
+		return
+	}
+	defer reg.Close()
+	for _, w := range orphanBindings(reg, hubs) {
+		fmt.Fprintf(os.Stderr, "aimem: WARNING: %s\n", w)
+	}
+}
+
 // errNoSyncRoutes: the hub answered but predates the /v1/sync routes.
 var errNoSyncRoutes = errors.New("hub has no sync routes (older release)")
 

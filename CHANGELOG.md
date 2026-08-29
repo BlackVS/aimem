@@ -15,6 +15,20 @@ currently 8); a binary refuses a database newer than it understands.
 
 Nothing yet.
 
+## [0.2.2] — 2026-08-29
+
+### Fixed
+
+- **`aimem sync` now warns, loudly and by name, about projects bound
+  to a hub name this machine has not configured.** Since the
+  no-fallback partition guard such a project syncs NOWHERE and its
+  checkpoints spool indefinitely — correct, but quiet enough to hide a
+  project for four hours (found live: a `.aimem.json` said
+  `"hub": "work"` on a machine whose hub is named `seclab`; facts
+  stayed local and curation saw no events until the binding was
+  fixed). Hub names are machine-local — use the same names everywhere,
+  as ADMIN-MANUAL already said.
+
 ## [0.2.1] — 2026-08-29
 
 ### Fixed
