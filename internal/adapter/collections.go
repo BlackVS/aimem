@@ -101,9 +101,15 @@ func (c *Client) GetHubRecord(hub *HubConfig, projectID, collection, id string, 
 // PutHubRecord is the CAS write; a *RecordConflictError carries the
 // hub's current record.
 func (c *Client) PutHubRecord(hub *HubConfig, projectID, collection, id string, body json.RawMessage, by string, baseRev int64) (HubRecord, error) {
-	payload, _ := json.Marshal(map[string]any{"body": body, "base_rev": baseRev, "updated_by": by})
+	// A BOM (PowerShell's `-Encoding utf8` prepends one) makes otherwise
+	// valid JSON invalid; strip it like ident does for .aimem.json.
+	body = bytes.TrimPrefix(bytes.TrimSpace(body), []byte("\xef\xbb\xbf"))
+	payload, err := json.Marshal(map[string]any{"body": body, "base_rev": baseRev, "updated_by": by})
+	if err != nil {
+		return HubRecord{}, fmt.Errorf("record body is not valid JSON: %w", err)
+	}
 	var res HubRecord
-	err := c.hubColDo(hub, "PUT", hubColURL(hub, projectID, collection, id), payload, &res)
+	err = c.hubColDo(hub, "PUT", hubColURL(hub, projectID, collection, id), payload, &res)
 	res.Collection, res.ID = collection, id
 	return res, err
 }

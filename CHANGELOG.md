@@ -15,6 +15,33 @@ currently 9); a binary refuses a database newer than it understands.
 
 Nothing yet.
 
+## [0.3.1] — 2026-08-30
+
+### Fixed
+
+First-live-run fixes for structured collections, found dogfooding the
+aimem API wiki minutes after 0.3.0:
+
+- `aimem col` flags (`--base-rev`, `--scope`, `--out`) now work in the
+  natural trailing position (package flag stops at the first
+  positional; they are scanned manually now, like `docs --force`).
+- `aimem col import` disambiguates listing/item GET collisions: after
+  parameter stripping, `/docs` GET and `/docs/{name}` GET collapsed to
+  one id — the item op now gets `-one` (`projects/docs/get-one`), and
+  only when an actual collision occurs. Import counters made honest:
+  "applied (created or already identical)" vs "diverged and left
+  alone".
+- A UTF-8 BOM on a record body file (PowerShell's `-Encoding utf8`
+  writes one) no longer turns into a confusing "hub: EOF": the client
+  strips it and a marshal failure now reports "record body is not
+  valid JSON".
+
+### Added
+
+- `docs/API.md`: the first release cut of the aimem API wiki —
+  generated from the hub's `api` collection (58 records seeded from
+  openapi.json) by `aimem col render`.
+
 ## [0.3.0] — 2026-08-30
 
 ### Added

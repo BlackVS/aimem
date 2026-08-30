@@ -8,12 +8,12 @@ package main
 
 import (
 	"encoding/json"
-	"flag"
 	"fmt"
 	"io"
 	"os"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 
 	"aimem/internal/adapter"
@@ -21,14 +21,39 @@ import (
 )
 
 func colCmd(args []string) error {
-	fs := flag.NewFlagSet("col", flag.ContinueOnError)
-	scope := fs.String("scope", "", `"group:<name>" to address a shared group collection (default: the .aimem.json binding's scope, else this project)`)
-	baseRev := fs.Int64("base-rev", -1, "expected current revision for put/rm (CAS; read the record first)")
-	out := fs.String("out", "", "render target (.md file = one flattened document, directory = one file per branch); default: the .aimem.json binding's render path")
-	if err := fs.Parse(args); err != nil {
-		return err
+	// Flags are scanned manually (like docsCmd's --force) so they work in
+	// the natural trailing position — package flag stops at the first
+	// positional argument, which here is always the subcommand.
+	scopeF, outF := "", ""
+	baseRevF := int64(-1)
+	var rest []string
+	for i := 0; i < len(args); i++ {
+		a := args[i]
+		val := func(name string) (string, bool) {
+			if v, ok := strings.CutPrefix(a, "--"+name+"="); ok {
+				return v, true
+			}
+			if a == "--"+name && i+1 < len(args) {
+				i++
+				return args[i], true
+			}
+			return "", false
+		}
+		if v, ok := val("scope"); ok {
+			scopeF = v
+		} else if v, ok := val("out"); ok {
+			outF = v
+		} else if v, ok := val("base-rev"); ok {
+			n, err := strconv.ParseInt(v, 10, 64)
+			if err != nil {
+				return fmt.Errorf("--base-rev wants a number, got %q", v)
+			}
+			baseRevF = n
+		} else {
+			rest = append(rest, a)
+		}
 	}
-	rest := fs.Args()
+	scope, out, baseRev := &scopeF, &outF, &baseRevF
 	if len(rest) == 0 {
 		return fmt.Errorf(`usage: aimem col <list|get|put|rm|render|import> ...
 
@@ -299,16 +324,19 @@ conflict. Declare bindings in .aimem.json {"collections":[{"name","scope","rende
 		if err != nil {
 			return err
 		}
-		created, skipped := 0, 0
+		// Writes at base 0 either create, land as idempotent no-ops on an
+		// identical existing record, or conflict on a record a writer has
+		// since changed — which the importer must never overwrite.
+		applied, diverged := 0, 0
 		for _, r := range recs {
 			if _, err := c.PutHubRecord(hub, p, rest[1], r.id, r.body, by, 0); err != nil {
-				skipped++ // an existing record is the writer's, not the importer's
+				diverged++
 				continue
 			}
-			created++
+			applied++
 		}
-		fmt.Printf("%s: %d records created, %d skipped (already exist — the importer never overwrites)\n",
-			rest[1], created, skipped)
+		fmt.Printf("%s: %d records applied (created or already identical), %d diverged and left alone — the importer never overwrites\n",
+			rest[1], applied, diverged)
 		return nil
 	}
 	return fmt.Errorf("unknown subcommand %q (aimem col with no args shows usage)", sub)
@@ -416,8 +444,16 @@ func openapiRecords(raw []byte) ([]importRecord, error) {
 	if len(spec.Paths) == 0 {
 		return nil, fmt.Errorf("spec has no paths")
 	}
-	var out []importRecord
+	type entry struct {
+		importRecord
+		paramFinal bool // the raw path ends in a parameter: an item op
+		method     string
+	}
+	var all []entry
+	counts := map[string]int{}
 	for path, ops := range spec.Paths {
+		segs := strings.Split(strings.Trim(path, "/"), "/")
+		paramFinal := len(segs) > 0 && strings.HasPrefix(segs[len(segs)-1], "{")
 		for method, op := range ops {
 			id := recordIDFromPath(path, method)
 			if id == "" {
@@ -427,8 +463,19 @@ func openapiRecords(raw []byte) ([]importRecord, error) {
 				"method": strings.ToUpper(method), "path": path,
 				"summary": op.Summary, "role": op.XRole,
 			})
-			out = append(out, importRecord{id: id, body: body})
+			all = append(all, entry{importRecord{id: id, body: body}, paramFinal, method})
+			counts[id]++
 		}
+	}
+	// Parameter stripping can collapse a listing and its item op onto one
+	// id ("/docs" GET vs "/docs/{name}" GET). Disambiguate only actual
+	// collisions: the item op (parameter-final path) gets "-one".
+	var out []importRecord
+	for _, e := range all {
+		if counts[e.id] > 1 && e.paramFinal {
+			e.id += "-one"
+		}
+		out = append(out, e.importRecord)
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].id < out[j].id })
 	return out, nil

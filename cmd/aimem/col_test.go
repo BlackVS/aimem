@@ -39,18 +39,28 @@ func TestRenderCollectionDeterministic(t *testing.T) {
 
 func TestOpenapiRecords(t *testing.T) {
 	spec := `{"paths":{
-		"/v1/projects/{p}/docs/{name}": {"put": {"summary": "CAS write", "x-role": "writer"}},
+		"/v1/projects/{p}/docs": {"get": {"summary": "list docs", "x-role": "writer"}},
+		"/v1/projects/{p}/docs/{name}": {"get": {"summary": "read one doc", "x-role": "writer"},
+		                                 "put": {"summary": "CAS write", "x-role": "writer"}},
 		"/v1/health": {"get": {"summary": "liveness", "x-role": "writer"}}
 	}}`
 	recs, err := openapiRecords([]byte(spec))
-	if err != nil || len(recs) != 2 {
+	if err != nil || len(recs) != 4 {
 		t.Fatalf("recs=%v err=%v", recs, err)
 	}
-	// Sorted by id; parameters and version prefix drop out of ids.
-	if recs[0].id != "health/get" || recs[1].id != "projects/docs/put" {
-		t.Fatalf("ids: %q %q", recs[0].id, recs[1].id)
+	// Sorted by id; parameters and version prefix drop out of ids; a
+	// listing/item GET collision disambiguates the ITEM op with -one,
+	// and the uncontested put keeps its plain id.
+	want := []string{"health/get", "projects/docs/get", "projects/docs/get-one", "projects/docs/put"}
+	for i, w := range want {
+		if recs[i].id != w {
+			t.Fatalf("ids: got %q at %d, want %q", recs[i].id, i, w)
+		}
 	}
-	if !strings.Contains(string(recs[1].body), `"PUT"`) || !strings.Contains(string(recs[1].body), "CAS write") {
-		t.Fatalf("body: %s", recs[1].body)
+	if !strings.Contains(string(recs[1].body), "list docs") || !strings.Contains(string(recs[2].body), "read one doc") {
+		t.Fatalf("collision bodies swapped: %s / %s", recs[1].body, recs[2].body)
+	}
+	if !strings.Contains(string(recs[3].body), `"PUT"`) || !strings.Contains(string(recs[3].body), "CAS write") {
+		t.Fatalf("body: %s", recs[3].body)
 	}
 }
