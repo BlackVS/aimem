@@ -26,7 +26,8 @@ system specifics.
    - `search_journal` — FTS over raw journal events (turns, failures,
      compaction markers) when you need what happened, not what is known.
      Results also include matching **shared documents** (name + snippet;
-     fetch whole with `read_doc`).
+     fetch whole with `read_doc`) and **wiki records** (collection/id +
+     snippet; fetch with `get_record`).
    - `review_memories` / `confirm_memory` — the staleness review queue
      and its "still true" verdict (see *Reviewing stale knowledge*
      below).
@@ -45,6 +46,22 @@ system specifics.
      (`scope: "group:<name>"`) are how a runbook shared by a knowledge
      group reaches you — most member checkouts have no bound file, so
      the tools are the only access.
+   - `list_records` / `get_record` / `put_record` — the **wiki**
+     (structured collections): live trees of small JSON records with
+     slash-path ids (`api/messages/create`), for structured reference
+     many writers maintain at once — an API surface, a config matrix, a
+     glossary. Read the ONE record you need (~200 tokens) instead of a
+     whole document; when you change what a record describes, update
+     that record — pass the complete JSON object and the `base_rev` you
+     read (0 creates). The CAS unit is the record: a conflict means
+     someone changed THIS entry — re-read it, re-apply your change to
+     the current version, retry with its rev. Scope resolves from the
+     project's `.aimem.json` `{"collections":[...]}` binding, so you
+     rarely pass one. A rendered markdown file (e.g. `docs/API.md`) is
+     GENERATED from the collection — never edit it; edit the record
+     (the human regenerates with `aimem col render`).
+     **Choosing**: narrative to read whole → shared doc; structured
+     entry to look up → wiki record; something learned → `remember`.
 
 ## When to recall
 

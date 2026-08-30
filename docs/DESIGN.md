@@ -53,7 +53,7 @@ Checkpointing is **mechanical** — no LLM call, ~ms latency, runs on every
 turn. Compaction markers are anchored to the last assistant message uuid so
 re-fired hooks stay idempotent.
 
-### Memories (schema v8)
+### Memories (schema v9)
 
 - Bi-temporal rows: `created/expired` (transaction time) +
   `valid/invalid` (belief time); forget = expiry, never delete.
@@ -248,8 +248,35 @@ merge` (v0.1.84): a dependency-free three-way merge against the
 last-synced revision from the hub's retained history — clean edits
 apply and arm auto-publish, overlaps become conflict markers that can
 never auto-publish on their own. The hub itself never merges; it
-refuses and hands both sides back. Full rationale and corrections:
-`docs/DESIGN-shared-docs.md`.
+refuses and hands both sides back. Since v0.2.5 the periodic sync
+reconciles git-style (`docs/DESIGN-doc-collab.md`): unchanged files
+fast-forward to newer hub revisions, clean merges auto-apply and push
+back, conflicts drop a self-describing `<file>.merge` preview and warn
+loudly — `aimem docs sync` runs the same reconcile on demand. Full
+rationale and corrections: `docs/DESIGN-shared-docs.md`.
+
+## Structured collections (schema v9, v0.3.0)
+
+Live trees of small JSON records (`col_records` + bounded
+`col_revisions`, mirroring the docs pair with a composite
+(collection, id) key) for authored structured state under concurrent
+multi-agent edit — an API surface, a config matrix, a glossary. The
+compare-and-swap unit is the **record**, so writers touching different
+entries never conflict and no merge machinery exists at this layer at
+all; ids are slash paths forming the tree. Group-scoped collections
+live in the knowledge group's database like group docs. Bodies must be
+JSON objects (32KB cap, secret shapes refused). Markdown is strictly a
+GENERATED artifact (`aimem col render`, deterministic, file or
+directory tree); git receives release cuts, never hand edits.
+Surfaces: five hub routes (in OpenAPI + the parity test),
+`aimem col list|get|put|rm|log|render|import`, MCP `list_records` /
+`get_record` / `put_record` (scope resolves from the `.aimem.json`
+`{"collections":[...]}` binding), a console Wiki tab (rendered tree
+first, table mode second), and search hits alongside journal events
+and doc matches. Distinct from the KB by authorship: the curator never
+touches a collection. Full rationale and corrections:
+`docs/DESIGN-structured-docs.md`; the storage-kind map lives in
+`docs/STORAGE-GUIDE.md`.
 
 ## Security / egress
 

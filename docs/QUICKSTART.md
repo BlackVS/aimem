@@ -213,6 +213,8 @@ Then start a fresh session and ask how migrations run.
 
 | You want to | Read |
 |---|---|
+| Know which storage kind fits what (facts vs docs vs wiki), or wire a big project end to end | [STORAGE-GUIDE.md](STORAGE-GUIDE.md) |
+| Keep a living API reference many agents edit at once | structured collections in [USER-MANUAL.md](USER-MANUAL.md) |
 | Share facts between related projects | knowledge groups in [USER-MANUAL.md](USER-MANUAL.md) |
 | Keep work and personal memory on separate servers | multiple hubs in [INSTALL-CLIENT.md](INSTALL-CLIENT.md#several-hubs-on-one-machine) |
 | Organize a growing knowledge base | chapters in [USER-MANUAL.md](USER-MANUAL.md) |

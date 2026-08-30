@@ -72,7 +72,10 @@ Where the others are stronger than aimem, plainly:
 
 - **claude-mem**: adoption, community, and the polish ~92k stars buy.
 - **Basic Memory**: memories are Markdown you can read and edit in
-  Obsidian — nothing in aimem is that directly human-editable.
+  Obsidian — its whole store is a vault. aimem's human-editable surface
+  is narrower by design: shared docs are ordinary files, and wiki
+  collections render to committed markdown, but the knowledge base
+  itself is structured rows, not a folder of notes.
 - **Mem0 plugin**: inherits a mature hosted platform, dashboards, and
   memory shared with non-coding agents.
 - **supermemory** (~2.7k★ plugin): LLM fact extraction with explicit

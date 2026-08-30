@@ -113,10 +113,12 @@ Recovery from a crash never depends on an LLM being available.
 
 - **Web console** on the hub: browse and edit the knowledge base, manage
   chapters, review stale facts, edit shared documents with revision
-  history, configure model providers with live test probes, watch token
-  spend, read logs. Four color schemes.
-- **Terminal dashboard** (`aimem tui`): projects, groups, AI usage, hub
-  health, memory and disk gauges.
+  history, maintain wikis record-by-record (rendered tree view, per-entry
+  history), search the journal, configure model providers with live test
+  probes, watch token spend, read logs. Four color schemes.
+- **Terminal dashboard** (`aimem tui`): projects with their hub bindings,
+  pending merge conflicts, groups, AI usage, per-hub health and spool,
+  memory and disk gauges.
 - **Budgets** (`aimem budget`) cap curation spend per window, enforced
   *before* the call, so a cap cannot be overrun.
 - **Multiprovider**: point curation and embeddings at different endpoints

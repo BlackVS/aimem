@@ -193,11 +193,13 @@ curator; collections are authored by you and your agents.
 ## Dashboard
 
 `aimem tui` opens a live read-only dashboard (refreshes every 2s) with
-four tabs — `1:Projects` (stats table ranked by recent activity, selected
-project detail, live event tail), `2:Groups` (shared scopes, declarers,
+four tabs — `1:Projects` (stats table with each project's hub binding,
+pending doc-merge conflicts flagged at the top, selected project
+detail, live event tail), `2:Groups` (shared scopes, declarers,
 newest facts), `3:AI` (per-project, per-group, and per-model token usage
 for today/7d/30d from the synced run history, plus budget state), and
-`4:Hub` (real CPU gauge, memory/disk gauges, load, spool, timers).
+`4:Hub` (every configured hub's health with CPU/memory/disk gauges and
+load, queued events per spool destination, timers).
 Layout adapts to terminal size (compact mode under 80 columns). Keys:
 `tab`/`1`-`4` switch view, `j`/`k` select project, `r` refresh, `q`
 quit.
