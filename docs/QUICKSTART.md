@@ -81,8 +81,10 @@ Substitute your own hostname. `AIMEM_DOMAIN` generates a self-signed
 certificate and serves TLS immediately; `AIMEM_HUB_NAME` labels the
 console, which matters the moment you run a second hub.
 
-The installer prints a **bearer token** at the end. Keep it — it is the
-only credential clients and the console need.
+The installer prints a **bearer token** at the end (once — re-runs
+never re-show it). Keep it: it is the hub's **admin** credential — the
+one you paste into the console, and the one that can change
+configuration. Workstations get their own tokens in the next step.
 
 ### 2.2 Check it is up
 
@@ -96,18 +98,33 @@ token.
 
 ### 2.3 Point your workstation at it
 
+First mint the workstation its **own token**, on the hub (as the
+service user). A *writer* token covers everything a workstation does —
+events, sync, recall, shared documents — but not hub administration,
+and revoking it later touches only that one machine:
+
+```sh
+aimem token add my-laptop        # prints the secret ONCE — copy it now
+```
+
 Back on your workstation:
 
 ```sh
-aimem hub add home https://hub.example.com:8440 "<token>" --insecure
+aimem hub add home https://hub.example.com:8440 "<writer-token>" --insecure
 ```
 
 Drop `--insecure` once you install a real certificate. Checkpoints now
 push to the hub as they happen; if it is unreachable they spool locally
 and flush on the next contact, so capture never depends on the network.
+Periodic sync — the leg that pulls curated knowledge back down — rides
+the same token (`./install.sh enable-sync` on Linux; Windows gets a
+scheduled task automatically).
 
-Repeat on every machine you code from. That is the whole of "shared
-memory across machines".
+Repeat — one minted token per machine — for every machine you code
+from. That is the whole of "shared memory across machines". (The admin
+token from 2.1 also works everywhere, but then every machine holds the
+key to the hub's configuration, and revoking one machine means
+re-keying all of them.)
 
 ### 2.4 Open the console
 

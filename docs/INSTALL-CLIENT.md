@@ -85,27 +85,41 @@ If nothing appears, see *Troubleshooting* in
 ## 4. Connect to a hub (optional)
 
 A hub merges journals and curated memory across machines. With one
-running (see [INSTALL-HUB.md](INSTALL-HUB.md)):
+running (see [INSTALL-HUB.md](INSTALL-HUB.md)), mint this machine its
+own **writer token** on the hub host — `aimem token add <machine>`
+(secret printed once; covers events, sync, recall, and shared
+documents, but not hub administration, and revokes alone) — then:
 
 ```sh
-aimem hub https://hub.example.com:8440 "<token>"
+aimem hub add home https://hub.example.com:8440 "<writer-token>"
 ```
 
 Every checkpoint now pushes there as well as landing locally. If the hub
 is unreachable the event spools locally and flushes on the next contact —
-capture never depends on the network.
+capture never depends on the network. The hub's admin token (printed
+once at hub install) also works, but keep it for the console and the
+operator: a per-machine token is individually revocable and cannot
+touch hub configuration.
 
 ### Several hubs on one machine
 
 Different projects can live on different hubs, so — for example — work
-and personal projects never share a server:
+and personal projects never share a server. Mint a token per machine on
+**each** hub (they are not interchangeable):
 
 ```sh
-aimem hub add work https://hub.example.com:8440  <token> --sync aimem@hub.example.com --default
-aimem hub add home https://hub2.example.com:8440 <token> --sync aimem@hub2.example.com
+aimem hub add work https://hub.example.com:8440  <work-writer-token> --default
+aimem hub add home https://hub2.example.com:8440 <home-writer-token>
 aimem hub               # list; the default is marked *
 aimem hub default home  # change the default
 ```
+
+(`--sync <ssh-dest>` on `hub add` is only for hubs old enough to lack
+the sync API; current hubs sync over HTTPS with the same token. Hub
+NAMES are machine-local, but use the same names on every machine — a
+project's `.aimem.json` binding travels with the repo, and a name that
+no machine-local hub matches syncs nowhere; `aimem sync` and
+`aimem logs` both warn when that happens.)
 
 Bind a project to one of them in its `.aimem.json`:
 

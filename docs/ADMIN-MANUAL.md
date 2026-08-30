@@ -178,8 +178,11 @@ and shipped in the repo (`internal/server/openapi.json`).
 
 ## 3. Connect a workstation to the hub
 
+Mint the machine a writer token on the hub (`aimem token add
+<machine>` — see "Named tokens" above), then:
+
 ```sh
-aimem hub https://hub.example.com:8440 "$(cat ~/.config/aimem/hub_token)"
+aimem hub add home https://hub.example.com:8440 "$(cat ~/.config/aimem/hub_token)"
 ```
 
 Real-time push is then automatic on every checkpoint (hub outage spools

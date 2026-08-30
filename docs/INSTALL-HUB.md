@@ -147,10 +147,13 @@ tokens and is deliberately host-local: it never syncs between machines.
 
 ## 7. Connect clients
 
-On each workstation (see [INSTALL-CLIENT.md](INSTALL-CLIENT.md)):
+Mint each workstation its own writer token here on the hub, then
+register it there (see [INSTALL-CLIENT.md](INSTALL-CLIENT.md)):
 
 ```sh
-aimem hub https://hub.example.com:8440 "<token>"
+aimem token add <machine>                # on the hub; secret shown once
+# on the workstation:
+aimem hub add <name> https://hub.example.com:8440 "<writer-token>"
 ```
 
 For day-to-day operation — timers, curation tuning, budgets, multi-hub
