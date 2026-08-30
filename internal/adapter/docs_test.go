@@ -274,6 +274,9 @@ func TestReconcileDocs(t *testing.T) {
 		!strings.Contains(string(prev), "C-hub") || !strings.Contains(string(prev), "C-mine") {
 		t.Fatalf("preview missing or wrong: %q err=%v", prev, err)
 	}
+	if !strings.Contains(string(prev), "base rev 4") || !strings.Contains(string(prev), "hub rev 5") {
+		t.Fatalf("preview header must name base and hub revs: %q", prev)
+	}
 	if c.DocSyncRev("projR", "SESSION-STATE") != 4 {
 		t.Fatalf("conflict must not rebase sidecar: %d", c.DocSyncRev("projR", "SESSION-STATE"))
 	}

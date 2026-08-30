@@ -14,6 +14,11 @@ and deliberate simplifications ("we should not overcomplicate" — user):
   reconciles DO drop a `<file>.merge` preview (also the offline
   session-start beacon; a completed `docs merge` removes it); group
   docs stay MCP-surfaced with nothing to reconcile locally.
+- Post-ship additions (same day, user use-case review): the `.merge`
+  preview opens with a self-describing header — base rev, hub rev,
+  writer, conflict count — because the hub may have moved again by the
+  time anyone reads it; and `aimem docs sync` runs the reconcile +
+  publish on demand instead of waiting for the ~10-minute timer.
 
 Companion to DESIGN-shared-docs.md, whose storage contract this
 deliberately does NOT change.

@@ -317,6 +317,13 @@ func (c *Client) ReconcileDocs(hub *HubConfig, projectID string) {
 	if dir == "" {
 		return // no publisher has run here; nothing bound locally
 	}
+	c.ReconcileDocsIn(hub, projectID, dir)
+}
+
+// ReconcileDocsIn is ReconcileDocs against an explicit project dir —
+// the CLI (`aimem docs sync`) is standing in the project and need not
+// wait for a publisher to have recorded it.
+func (c *Client) ReconcileDocsIn(hub *HubConfig, projectID, dir string) {
 	paths := ident.ProjectDocs(dir)
 	if len(paths) == 0 {
 		return
@@ -387,7 +394,12 @@ func (c *Client) ReconcileDocs(hub *HubConfig, projectID string) {
 		}
 		// Conflicted: never touch the bound file unasked. Drop a preview
 		// beside it (also the session-start beacon) and say so loudly.
-		os.WriteFile(abs+".merge", []byte(merged), 0o644)
+		// The header makes the preview self-describing — which base rev
+		// the three-way merge used, against which hub rev — because the
+		// hub may have moved again by the time anyone reads it.
+		header := fmt.Sprintf("aimem merge preview: base rev %d + local %s vs hub rev %d by %s — %d conflict(s); disposable, resolve with `aimem docs merge %s`\n\n",
+			st.Rev, rel, cur.Rev, cur.UpdatedBy, conflicts, name)
+		os.WriteFile(abs+".merge", []byte(header+merged), 0o644)
 		c.note("aimem: shared doc %s CONFLICTS with hub rev %d (%d overlap(s)) — preview in %s.merge; resolve with `aimem docs merge %s`",
 			name, cur.Rev, conflicts, rel, name)
 	}

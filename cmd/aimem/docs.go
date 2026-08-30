@@ -25,12 +25,13 @@ import (
 
 func docsCmd(args []string) error {
 	if len(args) == 0 {
-		return fmt.Errorf(`usage: aimem docs <list|push|pull|diff|merge|log|rm> [name] [--force]
+		return fmt.Errorf(`usage: aimem docs <list|sync|push|pull|diff|merge|log|rm> [name] [--force]
 
 Shared documents: whole files (the handoff, runbooks) versioned on the
 project's hub with compare-and-swap. Bound files (docs/SESSION-STATE.md
 by default, plus .aimem.json "docs" entries) publish automatically on
-every checkpoint; these commands are for deliberate moments.`)
+every checkpoint; these commands are for deliberate moments. "sync"
+runs the periodic reconcile (pull / clean-merge / push) right now.`)
 	}
 	sub, rest := args[0], args[1:]
 	force := false
@@ -73,6 +74,25 @@ every checkpoint; these commands are for deliberate moments.`)
 	}
 
 	switch sub {
+	case "sync":
+		// The doc-collab reconcile (DESIGN-doc-collab), on demand instead
+		// of waiting for the periodic sync: fast-forward pulls, clean
+		// merges, conflict previews — each action prints as it happens —
+		// then publish whatever is locally changed.
+		c.ReconcileDocsIn(hub, projID, dir)
+		res := c.PublishDocs(dir, projID, hubName, by)
+		if len(res) == 0 {
+			fmt.Println("docs in sync (nothing to publish)")
+		}
+		for _, r := range res {
+			if r.Err != nil {
+				fmt.Fprintf(os.Stderr, "aimem: %s: %v\n", r.Name, r.Err)
+			} else {
+				fmt.Printf("%s -> rev %d\n", r.Name, r.Rev)
+			}
+		}
+		return nil
+
 	case "list", "ls":
 		docs, err := c.ListHubDocs(hub, projID)
 		if err != nil {

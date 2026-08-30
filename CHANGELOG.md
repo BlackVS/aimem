@@ -15,6 +15,19 @@ currently 8); a binary refuses a database newer than it understands.
 
 Nothing yet.
 
+## [0.2.6] — 2026-08-30
+
+### Added
+
+- `aimem docs sync` — run the doc-collab reconcile on demand instead of
+  waiting for the ~10-minute periodic sync: fast-forward pulls, clean
+  merges auto-applied and pushed, conflicts previewed, then anything
+  locally changed is published. Each action prints as it happens.
+- The `<file>.merge` conflict preview now opens with a self-describing
+  header: the base revision the three-way merge used, the hub revision
+  and writer it merged against, and the conflict count — so the merge's
+  provenance survives even after the hub moves on to newer revisions.
+
 ## [0.2.5] — 2026-08-30
 
 ### Added

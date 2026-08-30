@@ -122,6 +122,10 @@ other writer, never silently overwritten.
 
 ```sh
 aimem docs list           # names, revisions, writers, local/hub state
+aimem docs sync           # reconcile NOW instead of waiting for the
+                          #   periodic sync: fast-forward newer hub revs,
+                          #   auto-apply clean merges, push local changes;
+                          #   conflicts drop a <file>.merge preview
 aimem docs push [name]    # publish the local file (refuses on conflict)
 aimem docs pull [name]    # fetch the hub copy (refuses to clobber local edits)
 aimem docs diff [name]    # local vs hub
@@ -134,8 +138,10 @@ aimem docs rm   <name>    # retire (tombstone; --force required)
 
 The handoff publishes automatically after any checkpoint that changed
 it, and session start warns when the hub holds a newer revision than
-this machine last saw. The console's Docs tab does the same over the
-web, including revision history and restore.
+this machine last saw. The periodic sync (~10 min) reconciles bound
+files git-style — `aimem docs sync` runs the same reconcile on demand.
+The console's Docs tab does the same over the web, including revision
+history and restore.
 
 ## Compaction
 
