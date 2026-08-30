@@ -15,6 +15,20 @@ currently 9); a binary refuses a database newer than it understands.
 
 Nothing yet.
 
+## [0.3.2] — 2026-08-30
+
+### Changed
+
+- Collections get their own console tab — **Wiki** — instead of a
+  cramped line under the Docs tab (user feedback minutes after first
+  contact). Collections list as cards; opening one shows the
+  **rendered wiki by default** (headings from the id tree,
+  title/description promoted, scalars as a definition list, nested
+  shapes as JSON — mirroring `aimem col render`), with an "edit ·
+  rev N" link on every entry and a table mode for operators. The
+  record editor fetches fresh before editing, so the rev on screen is
+  the base_rev the save asserts.
+
 ## [0.3.1] — 2026-08-30
 
 ### Fixed
