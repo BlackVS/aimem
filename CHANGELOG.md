@@ -15,6 +15,21 @@ currently 9); a binary refuses a database newer than it understands.
 
 Nothing yet.
 
+## [0.3.12] — 2026-08-30
+
+### Fixed
+
+- **Merged/renamed origin labels stay dead** (data integrity). Sync
+  UNIONS source labels across copies, so the merge's local relabel was
+  not durable: a lagging peer (lived: a machine with only ssh down,
+  still syncing every 10 minutes) pushed the old `project:<id>` label
+  right back within minutes. Merges and renames now also record an
+  origin ALIAS ({old: new}, chains re-pointed) in each group DB, and
+  every future source write — sync import or new fact — normalizes
+  through it. Re-run the relabel once after upgrading to clean current
+  rows; the alias then blocks resurrection from any peer, upgraded or
+  not.
+
 ## [0.3.11] — 2026-08-30
 
 ### Changed

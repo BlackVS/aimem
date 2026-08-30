@@ -133,10 +133,33 @@ VALUES(?,?,?,?,?,?)`, id, text, validKind(opts.Kind), nowUTC(), nullable(opts.Va
 	return id, false, nil
 }
 
+// originAliases reads the DB's recorded project-id merges/renames
+// ({old: new}). Source labels are unioned across copies during sync, so
+// deleting an old label locally is not durable — a lagging peer pushes
+// it right back. The alias makes the relabel permanent: every future
+// import normalizes through it.
+func (d *DB) originAliases() map[string]string {
+	raw, _ := d.GetMeta("origin_aliases")
+	if raw == "" {
+		return nil
+	}
+	m := map[string]string{}
+	json.Unmarshal([]byte(raw), &m)
+	return m
+}
+
 func (d *DB) addSources(memoryID string, eventIDs []string) error {
+	aliases := d.originAliases()
 	for _, ev := range eventIDs {
 		if ev == "" {
 			continue
+		}
+		if len(aliases) > 0 {
+			if id, ok := strings.CutPrefix(ev, "project:"); ok {
+				if to, ok := aliases[id]; ok {
+					ev = "project:" + to
+				}
+			}
 		}
 		if _, err := d.sql.Exec(`INSERT INTO memory_sources(memory_id, event_id) VALUES(?,?)
 ON CONFLICT(memory_id, event_id) DO NOTHING`, memoryID, ev); err != nil {

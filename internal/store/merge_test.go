@@ -146,4 +146,37 @@ func TestMergeOrphanedOrigin(t *testing.T) {
 	if cited != "project:rc" {
 		t.Fatalf("citation is %q; want project:rc", cited)
 	}
+
+	// DURABILITY (the resurrection case, lived live): sync UNIONS
+	// sources, so a lagging peer re-pushes the old label. The recorded
+	// alias must normalize it on import instead of resurrecting it.
+	peer := gm[0]
+	peer.Sources = []string{"project:RC-000668815ca9"}
+	if err := grp.ImportMemory(&peer); err != nil {
+		t.Fatal(err)
+	}
+	gm, _ = grp.Memories(false)
+	for _, s := range gm[0].Sources {
+		if strings.Contains(s, "RC-000") {
+			t.Fatalf("old label resurrected through import: %v", gm[0].Sources)
+		}
+	}
+	// And a brand-new fact citing the old id files under the new one.
+	nid, _, err := grp.Remember("late fact from a lagging peer", "curator", RememberOpts{
+		Kind: "fact", Sources: []string{"project:RC-000668815ca9"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	gm, _ = grp.Memories(false)
+	for _, m := range gm {
+		if m.ID != nid {
+			continue
+		}
+		for _, s := range m.Sources {
+			if strings.Contains(s, "RC-000") {
+				t.Fatalf("new fact carries the dead label: %v", m.Sources)
+			}
+		}
+	}
 }

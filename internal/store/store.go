@@ -254,6 +254,24 @@ func (r *Registry) renameSources(oldID, newID string) int {
 				touched += int(n)
 			}
 		}
+		// The local rewrite alone is not durable: sync UNIONS sources, so
+		// a peer copy that still holds the old label pushes it right back
+		// (lived 2026-08-30: a machine with only ssh down kept
+		// resurrecting a merged id every 10 minutes). Record the alias so
+		// addSources normalizes every future import; chains re-point.
+		al := db.originAliases()
+		if al == nil {
+			al = map[string]string{}
+		}
+		al[oldID] = newID
+		for k, v := range al {
+			if v == oldID {
+				al[k] = newID
+			}
+		}
+		if raw, err := json.Marshal(al); err == nil {
+			db.SetMeta("origin_aliases", string(raw))
+		}
 	}
 	return touched
 }
