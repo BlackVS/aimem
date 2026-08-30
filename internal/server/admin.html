@@ -430,10 +430,21 @@ function treeEntry(g){
   const kebab = on && g.id!=="user"
     ? `<span class="kebab" role="button" tabindex="0" title="actions" `+
       `onclick="event.stopPropagation();toggleKbMenu('scope:${esc(g.id)}')">&hellip;</span>` : "";
-  // Collapsed entries carry their count; an EXPANDED one does not —
-  // the "all" row directly beneath shows the same number (user
-  // feedback: the duplicate read as two different figures).
-  const count = on ? "" : `<span class="n">${g.stats.memories}</span>`;
+  // Sub-rows exist only when there is something to FILTER by: chapters
+  // or origins. A scope with neither used to expand into a lone "all"
+  // row (user: "what sense in this?") — now it expands into nothing
+  // and keeps its count on the title.
+  const chaps = g.chapters||[];
+  const org = {};
+  if(on) for(const m of memCache[g.id]||[])
+    for(const s of (m.sources||[]).filter(s=>s.startsWith("project:")))
+      org[s.slice(8)] = (org[s.slice(8)]||0)+1;
+  const orgNames = Object.keys(org).sort();
+  const hasSub = chaps.length>0 || orgNames.length>0;
+  // Collapsed entries carry their count; an EXPANDED one only when no
+  // "all" row follows to show the same number (the duplicate read as
+  // two different figures).
+  const count = (on && hasSub) ? "" : `<span class="n">${g.stats.memories}</span>`;
   let rows = `<div class="tg ${on?"on":""}" role="button" tabindex="0" title="${esc(g.id)}" `+
     `onclick="pickGroup('${g.id}')" onkeydown="if(event.key==='Enter')pickGroup('${g.id}')">`+
     `<span>${on?"▾":"▸"} ${esc(kbLabel(g.id))}</span>${count}${kebab}</div>`;
@@ -449,8 +460,8 @@ function treeEntry(g){
           `<div class="tc danger" role="button" tabindex="0" onclick="dropProjectUI('${esc(g.id)}')"><span class="name">drop project&hellip;</span></div>`) +
       `</div>`;
   }
-  if(on){
-    const chaps = g.chapters||[], counts = chapCounts(g.id), loaded = g.id in memCache;
+  if(on && hasSub){
+    const counts = chapCounts(g.id), loaded = g.id in memCache;
     const n = v => loaded ? (v||0) : "";
     rows += `<div class="tc ${curChap===""?"on":""}" role="button" tabindex="0" onclick="pickChap('')">`+
       `<span class="name">all</span><span class="n">${loaded?(memCache[g.id]||[]).length:""}</span></div>`;
@@ -475,16 +486,11 @@ function treeEntry(g){
         `<span class="name"><span class="dot" style="background:var(--edge)"></span>unfiled</span>`+
         `<span class="n">${n(counts.unfiled)}</span></div>`;
     // Origin facet: which member repo a fact came from — orthogonal to
-    // chapters (topic), so both filters combine. Group scope only:
-    // project facts cite journal events, not member projects.
-    const org = {};
-    for(const m of memCache[g.id]||[])
-      for(const s of (m.sources||[]).filter(s=>s.startsWith("project:")))
-        org[s.slice(8)] = (org[s.slice(8)]||0)+1;
-    const names = Object.keys(org).sort();
-    if(names.length){
+    // chapters (topic), so both filters combine (computed above, where
+    // hasSub needs it).
+    if(orgNames.length){
       rows += `<div class="tsep">from</div>`;
-      rows += names.map(o=>`<div class="tc ${curOrigin===o?"on":""}" role="button" tabindex="0" `+
+      rows += orgNames.map(o=>`<div class="tc ${curOrigin===o?"on":""}" role="button" tabindex="0" `+
         `onclick="pickOrigin('${esc(o)}')"><span class="name">${esc(o)}</span>`+
         `<span class="n">${org[o]}</span></div>`).join("");
     }

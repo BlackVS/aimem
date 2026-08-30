@@ -15,6 +15,15 @@ currently 9); a binary refuses a database newer than it understands.
 
 Nothing yet.
 
+## [0.3.9] — 2026-08-30
+
+### Changed
+
+- KB tree: a scope with nothing to filter by (no chapters, no origins)
+  no longer expands into a lone "all" row — it expands into nothing
+  and keeps its fact count on the title line. The "all"/unfiled/from
+  sub-rows appear only when they distinguish something.
+
 ## [0.3.8] — 2026-08-30
 
 ### Added
