@@ -835,8 +835,8 @@ function renderGroups(){
       <div class="row"><span style="width:70px"></span>
         <button class="act" onclick="addChap('${g.id}')">+ chapter</button>
         <button class="act" onclick="proposeChap('${g.id}',this)">propose chapters (AI)</button>
-        <button class="act" title="the chapter set evolved: propose ADDITIONAL labels for already-filed facts (add-only; nothing moves)"
-          onclick="proposeChap('${g.id}',this,1)">re-label filed facts (AI)</button>
+        <button class="act" title="the chapter set evolved: review ALL filed facts and propose ADDITIONAL labels (add-only; nothing moves; cancel anytime; nothing written until you approve)"
+          onclick="sweepRelabel('${g.id}',this)">re-label filed facts (AI)</button>
         <span class="dim" data-propnote></span>
         <span class="grow"></span>
         <button class="act" data-save onclick="saveGroup('${g.id}')">save ${esc(g.id.slice(6))}</button></div>
@@ -850,14 +850,56 @@ async function factTexts(gid){
   try{ const r=await api(`/v1/projects/${encodeURIComponent(gid)}/memories`);
     return Object.fromEntries((r.memories||[]).map(m=>[m.id,m.text])); }catch(e){ return {}; }
 }
-async function proposeChap(gid,btn,revisit){
+async function proposeChap(gid,btn){
   const note=$("ge-"+gid).querySelector("[data-propnote]");
   btn.disabled=true; note.textContent="asking the curate model… (may take ~30s)";
   try{
-    const plan=await api(`/v1/projects/${encodeURIComponent(gid)}/chapter-proposal${revisit?"?revisit=1":""}`,
+    const plan=await api(`/v1/projects/${encodeURIComponent(gid)}/chapter-proposal`,
       {method:"POST",body:"{}"});
     note.textContent=""; await renderPlan(gid,plan);
   }catch(e){ note.textContent=String(e.message||e); }
+  btn.disabled=false;
+}
+
+// sweepRelabel walks the WHOLE filed-fact pool for a group: the server
+// proposes one bounded slice per call (its rotation cursor continues
+// across calls), the console loops until the pool is covered, merging
+// every suggestion into one combined review. Progress speaks in facts,
+// not implementation batches; cancel stops after the current slice and
+// keeps everything found so far. Nothing is written until "apply".
+let sweepStop = false;
+async function sweepRelabel(gid,btn){
+  const note=$("ge-"+gid).querySelector("[data-propnote]");
+  sweepStop=false; btn.disabled=true;
+  const merged={assign:[],new_chapters:[],revisit:true,considered:0,unfiled:0,model:""};
+  let covered=0, pool=null, calls=0;
+  const found=()=>merged.assign.length+merged.new_chapters.reduce((s,nc)=>s+(nc.fact_ids||[]).length,0);
+  const progress=()=>{note.innerHTML=
+    `re-labeling… ${covered}${pool!==null?"/"+pool:""} facts reviewed · ${found()} suggestion(s) `+
+    `<a class="x" onclick="sweepStop=true;this.textContent='stopping after this step…'">cancel</a>`;};
+  try{
+    while(!sweepStop && (pool===null || covered<pool) && calls<60){
+      progress();
+      const plan=await api(`/v1/projects/${encodeURIComponent(gid)}/chapter-proposal?revisit=1`,
+        {method:"POST",body:"{}"});
+      calls++; pool=plan.unfiled||0; merged.model=plan.model||merged.model;
+      if(!plan.considered) break;
+      covered+=plan.considered;
+      merged.assign.push(...(plan.assign||[]));
+      for(const nc of (plan.new_chapters||[])){
+        const ex=merged.new_chapters.find(x=>x.name===nc.name);
+        if(ex) ex.fact_ids.push(...(nc.fact_ids||[]));
+        else merged.new_chapters.push({name:nc.name,about:nc.about,fact_ids:(nc.fact_ids||[]).slice()});
+      }
+    }
+    merged.considered=Math.min(covered,pool||covered); merged.unfiled=pool||covered;
+    merged.ts=new Date().toISOString().slice(0,19)+"Z";
+    note.textContent = sweepStop ? "cancelled — everything reviewed so far is below" : "";
+    await renderPlan(gid,merged);
+  }catch(e){
+    note.textContent=`${String(e.message||e)} — partial results below (${covered} facts reviewed)`;
+    if(found()) await renderPlan(gid,merged);
+  }
   btn.disabled=false;
 }
 async function loadPlan(gid){

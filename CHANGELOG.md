@@ -15,6 +15,20 @@ currently 9); a binary refuses a database newer than it understands.
 
 Nothing yet.
 
+## [0.3.11] — 2026-08-30
+
+### Changed
+
+- **Re-label sweeps the whole KB in one click**: instead of clicking
+  per slice, the console now loops the bounded proposal calls itself
+  (the server's rotation cursor continues across them), merging every
+  suggestion into ONE combined review. Progress reads in facts —
+  "re-labeling… 160/380 facts reviewed · 12 suggestions" — with a
+  cancel link that stops after the current step and keeps everything
+  found so far; a mid-sweep error likewise surfaces partial results.
+  Implementation batch sizes never appear in the UI. Nothing is
+  written until "apply approved", as before.
+
 ## [0.3.10] — 2026-08-30
 
 ### Fixed
