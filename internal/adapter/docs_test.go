@@ -2,6 +2,7 @@ package adapter
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -178,5 +179,102 @@ func TestPublishDocsRefusesNameCollision(t *testing.T) {
 	}
 	if fake.docs["SESSION-STATE"].Body != "# Handoff v1\n" {
 		t.Fatalf("wrong file won the name: %q", fake.docs["SESSION-STATE"].Body)
+	}
+}
+
+// reconcile fixtures: extend the fake hub with the read surface
+// (list, current, historical revision) that ReconcileDocs uses.
+func (f *fakeDocHub) readHandlers(mux *http.ServeMux, history map[int64]string) {
+	mux.HandleFunc("GET /v1/projects/{p}/docs", func(w http.ResponseWriter, r *http.Request) {
+		var list []store.Doc
+		for _, d := range f.docs {
+			list = append(list, d)
+		}
+		json.NewEncoder(w).Encode(map[string]any{"docs": list})
+	})
+	mux.HandleFunc("GET /v1/projects/{p}/docs/{name}", func(w http.ResponseWriter, r *http.Request) {
+		d := f.docs[r.PathValue("name")]
+		if rev := r.URL.Query().Get("rev"); rev != "" {
+			var n int64
+			fmt.Sscanf(rev, "%d", &n)
+			if body, ok := history[n]; ok {
+				d = store.Doc{Name: d.Name, Body: body, Rev: n, UpdatedBy: d.UpdatedBy}
+			}
+		}
+		json.NewEncoder(w).Encode(d)
+	})
+}
+
+func TestReconcileDocs(t *testing.T) {
+	fake := &fakeDocHub{docs: map[string]store.Doc{}}
+	mux := http.NewServeMux()
+	mux.Handle("/", fake.handler())
+	history := map[int64]string{}
+	fake.readHandlers(mux, history)
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+	root := t.TempDir()
+	if err := SaveHubs(root, map[string]*HubConfig{"home": {URL: srv.URL, Token: "t"}}, "home"); err != nil {
+		t.Fatal(err)
+	}
+	proj := t.TempDir()
+	os.MkdirAll(filepath.Join(proj, "docs"), 0o755)
+	file := filepath.Join(proj, "docs", "SESSION-STATE.md")
+	os.WriteFile(file, []byte("a\nb\nc\n"), 0o644)
+	c := NewClient(root)
+	hub := &HubConfig{URL: srv.URL, Token: "t"}
+
+	// Publish rev 1 (also records the project dir for the timer).
+	if res := c.PublishDocs(proj, "projR", "home", "h/t"); len(res) != 1 || res[0].Err != nil {
+		t.Fatalf("seed publish: %+v", res)
+	}
+	if c.DocDir("projR") == "" {
+		t.Fatal("publisher did not record the project dir")
+	}
+	history[1] = "a\nb\nc\n"
+
+	// FAST-FORWARD: console edits rev 2; local unchanged -> file follows.
+	fake.docs["SESSION-STATE"] = store.Doc{Name: "SESSION-STATE", Body: "a\nB2\nc\n", Rev: 2, UpdatedBy: "console"}
+	c.ReconcileDocs(hub, "projR")
+	if got, _ := os.ReadFile(file); string(got) != "a\nB2\nc\n" {
+		t.Fatalf("fast-forward did not apply: %q", got)
+	}
+	if c.DocSyncRev("projR", "SESSION-STATE") != 2 {
+		t.Fatalf("sidecar not rebased: %d", c.DocSyncRev("projR", "SESSION-STATE"))
+	}
+	history[2] = "a\nB2\nc\n"
+
+	// CLEAN MERGE: hub rev 3 changes the tail, local changes the head.
+	fake.docs["SESSION-STATE"] = store.Doc{Name: "SESSION-STATE", Body: "a\nB2\nC3\n", Rev: 3, UpdatedBy: "console"}
+	os.WriteFile(file, []byte("A-local\nB2\nc\n"), 0o644)
+	c.ReconcileDocs(hub, "projR")
+	if got, _ := os.ReadFile(file); string(got) != "A-local\nB2\nC3\n" {
+		t.Fatalf("clean merge result: %q", got)
+	}
+	// Sidecar rebased onto rev 3 with the HUB body's hash, so PublishDocs
+	// pushes the merged file - the sync loop's next step.
+	if c.DocSyncRev("projR", "SESSION-STATE") != 3 {
+		t.Fatalf("merge did not rebase sidecar: %d", c.DocSyncRev("projR", "SESSION-STATE"))
+	}
+	if res := c.PublishDocs(proj, "projR", "home", "h/t"); len(res) != 1 || res[0].Err != nil || res[0].Rev != 4 {
+		t.Fatalf("merged push: %+v", res)
+	}
+	history[4] = "A-local\nB2\nC3\n"
+
+	// CONFLICT: both sides change the same line -> preview file, bound
+	// file untouched, sidecar untouched.
+	fake.docs["SESSION-STATE"] = store.Doc{Name: "SESSION-STATE", Body: "A-local\nB2\nC-hub\n", Rev: 5, UpdatedBy: "console"}
+	os.WriteFile(file, []byte("A-local\nB2\nC-mine\n"), 0o644)
+	c.ReconcileDocs(hub, "projR")
+	if got, _ := os.ReadFile(file); string(got) != "A-local\nB2\nC-mine\n" {
+		t.Fatalf("conflict must not touch the bound file: %q", got)
+	}
+	prev, err := os.ReadFile(file + ".merge")
+	if err != nil || !strings.Contains(string(prev), "<<<<<<<") ||
+		!strings.Contains(string(prev), "C-hub") || !strings.Contains(string(prev), "C-mine") {
+		t.Fatalf("preview missing or wrong: %q err=%v", prev, err)
+	}
+	if c.DocSyncRev("projR", "SESSION-STATE") != 4 {
+		t.Fatalf("conflict must not rebase sidecar: %d", c.DocSyncRev("projR", "SESSION-STATE"))
 	}
 }

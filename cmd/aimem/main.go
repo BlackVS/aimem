@@ -420,6 +420,7 @@ func sessionStartCmd(args []string) error {
 	// Opt-in recalled knowledge rides along (FEATURE-PROPOSALS #6);
 	// empty unless .aimem.json sets "session_facts".
 	ctx += sessionFactsNotice()
+	ctx += mergePreviewNotice()
 	if ctx == "" {
 		return nil
 	}
@@ -429,6 +430,21 @@ func sessionStartCmd(args []string) error {
 			"additionalContext": ctx,
 		},
 	})
+}
+
+// mergePreviewNotice is the offline conflict beacon (DESIGN-doc-collab):
+// a <file>.merge preview left by sync's reconcile means hub and this
+// machine both changed a bound doc and the overlap needs judgment.
+// Purely local — session start gains no network dependency.
+func mergePreviewNotice() string {
+	var b strings.Builder
+	for _, rel := range ident.ProjectDocs(".") {
+		if _, err := os.Stat(filepath.FromSlash(rel) + ".merge"); err == nil {
+			fmt.Fprintf(&b, "\n\nATTENTION: %s.merge holds an unresolved shared-document merge preview — the hub and this machine both changed %s. Run `aimem docs merge %s`, resolve any <<<<<<< markers in the bound file, and the next checkpoint publishes it (the .merge preview is removed by a completed merge).",
+				rel, rel, ident.DocName(rel))
+		}
+	}
+	return b.String()
 }
 
 // hubHandoffNotice checks — under a hard short timeout, failing open —

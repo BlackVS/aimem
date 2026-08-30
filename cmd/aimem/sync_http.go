@@ -255,6 +255,26 @@ func syncOneHTTP(name string, h *adapter.HubConfig, def string) error {
 	}
 	fmt.Fprintf(os.Stderr, "aimem: merged %d memory record(s) (%d failed)\n", imported, mfailed)
 
+	// Docs reconcile (DESIGN-doc-collab): fast-forward unchanged bound
+	// files, auto-merge clean divergences, then push whatever changed —
+	// best-effort like config, and only for projects a publisher has
+	// run in on this machine.
+	host, _ := os.Hostname()
+	c := adapter.NewClient(stateRoot())
+	for _, id := range ids {
+		if id == "user" || strings.HasPrefix(id, "group-") {
+			continue
+		}
+		c.ReconcileDocs(h, id)
+		if dir := c.DocDir(id); dir != "" {
+			for _, r := range c.PublishDocs(dir, id, name, host+"/sync") {
+				if r.Err != nil {
+					adapter.Note(stateRoot(), "aimem: shared doc %s not published during sync: %v", r.Name, r.Err)
+				}
+			}
+		}
+	}
+
 	// Group config is best-effort in both directions, like the ssh legs:
 	// an older hub or a partial failure must not fail the whole sync.
 	if err := syncPost(h, "/v1/sync/group-config", nil, func(w io.Writer) error {

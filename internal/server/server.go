@@ -111,6 +111,7 @@ func (s *Server) Routes() []Route {
 		{"GET", "/v1/projects/{p}/docs", s.listDocs, false},
 		{"GET", "/v1/projects/{p}/docs/{name}", s.getDoc, false},
 		{"GET", "/v1/projects/{p}/docs/{name}/log", s.docLog, false},
+		{"POST", "/v1/projects/{p}/docs/{name}/merge", s.mergeDoc, false},
 		{"PUT", "/v1/projects/{p}/docs/{name}", s.putDoc, false},
 		{"DELETE", "/v1/projects/{p}/docs/{name}", s.deleteDoc, false},
 		{"GET", "/v1/sync/events", s.syncEventsOut, false},

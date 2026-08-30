@@ -1186,16 +1186,27 @@ async function saveDoc(){
     toast(`${docCur.name} saved as rev ${r.rev}`);
     openDoc(docCur.project, docCur.name); loadDocs();
   }catch(e){
-    // A 409 is not a failure to retry blindly: another machine wrote a
-    // newer revision, and its text has to be reconciled by a person.
-    const m = String(e.message||e);
-    $("docMsg").innerHTML = `<span class="bad">conflict - someone else saved a newer revision. `+
-      `Copy your text somewhere, reopen the document to see theirs, and merge deliberately `+
-      `(on a machine with the bound file, <code>aimem docs merge ${esc(docCur.name)}</code> does the three-way merge).</span>`;
-    console.log("doc conflict:", m);
-    // The listing now shows a revision that is no longer current; a stale
-    // "rev 4 by console" next to a conflict about rev 5 is exactly the
-    // confusion this message is trying to clear up. The editor stays.
+    // A 409 means another writer got there first. Instead of "copy your
+    // text somewhere": ask the hub for a compute-only three-way merge of
+    // this draft against the current revision, load the result into the
+    // editor rebased onto that revision, and let one more save finish it
+    // (DESIGN-doc-collab). Overlaps arrive as <<<<<<< markers to resolve
+    // in place. The hub itself still never merges on write.
+    console.log("doc conflict:", String(e.message||e));
+    try{
+      const m = await api(`/v1/projects/${encodeURIComponent(docCur.project)}/docs/${encodeURIComponent(docCur.name)}/merge`,
+        {method:"POST", body:JSON.stringify({body, base_rev:docCur.rev})});
+      $("docBody").value = m.merged;
+      docCur.rev = m.against_rev; docCur.body = null; // rebased draft, not saved
+      $("docMsg").innerHTML = m.conflicts
+        ? `<span class="bad">merged with rev ${m.against_rev}: ${m.conflicts} overlap(s) marked with &lt;&lt;&lt;&lt;&lt;&lt;&lt; - resolve them, then save.</span>`
+        : `merged cleanly with rev ${m.against_rev} - review and save.`;
+    }catch(e2){
+      $("docMsg").innerHTML = `<span class="bad">conflict, and the merge helper failed (${esc(String(e2.message||e2))}) - `+
+        `copy your text, reopen to see theirs (or run <code>aimem docs merge ${esc(docCur.name)}</code> on a machine with the bound file).</span>`;
+    }
+    // The listing now shows a revision that is no longer current; the
+    // editor stays - it holds the (now rebased) draft.
     loadDocs(true);
   }
 }

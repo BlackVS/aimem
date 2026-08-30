@@ -120,6 +120,9 @@
       "put": {"summary": "Compare-and-swap write ({body, base_rev, updated_by}); named tokens prefix updated_by; identical body is a no-op", "x-role": "writer", "parameters": [{"$ref": "#/components/parameters/p"}, {"$ref": "#/components/parameters/name"}], "responses": {"200": {"description": "{rev}"}, "409": {"description": "stale base_rev - carries current rev, writer, and (capped) body to merge from"}}},
       "delete": {"summary": "Tombstone a document (?base_rev=&by=; CAS like any write)", "x-role": "writer", "parameters": [{"$ref": "#/components/parameters/p"}, {"$ref": "#/components/parameters/name"}], "responses": {"200": {"description": "{rev, deleted}"}, "409": {"description": "stale base_rev"}}}
     },
+    "/v1/projects/{p}/docs/{name}/merge": {
+      "post": {"summary": "Compute-only three-way merge: {body, base_rev} against the current document -> {merged, conflicts, against_rev, base_found}. The hub never merges on write; saving the result is an ordinary CAS PUT", "x-role": "writer", "parameters": [{"$ref": "#/components/parameters/p"}, {"$ref": "#/components/parameters/name"}], "responses": {"200": {"description": "merge result"}}}
+    },
     "/v1/projects/{p}/docs/{name}/log": {
       "get": {"summary": "Recent revisions of a shared document (bounded history)", "x-role": "writer", "parameters": [{"$ref": "#/components/parameters/p"}, {"$ref": "#/components/parameters/name"}], "responses": {"200": {"description": "{revisions}"}}}
     },

@@ -8,9 +8,11 @@ package server
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"strconv"
 
+	"aimem/internal/diff3"
 	"aimem/internal/store"
 )
 
@@ -114,6 +116,48 @@ func (s *Server) deleteDoc(w http.ResponseWriter, r *http.Request) {
 	}
 	s.log.Warn("doc retired", "project", r.PathValue("p"), "doc", doc.Name, "rev", doc.Rev, "by", by)
 	s.ok(w, map[string]any{"rev": doc.Rev, "deleted": true})
+}
+
+// mergeDoc is a CALCULATOR, not a writer (DESIGN-doc-collab): given a
+// draft and the revision it was based on, return the three-way merge
+// against the current document — so a console 409 becomes one click
+// instead of "copy your text somewhere". The hub still never merges on
+// write; saving the result is a separate, ordinary CAS PUT.
+func (s *Server) mergeDoc(w http.ResponseWriter, r *http.Request) {
+	db := s.withDB(w, r)
+	if db == nil {
+		return
+	}
+	var req struct {
+		Body    string `json:"body"`
+		BaseRev int64  `json:"base_rev"`
+	}
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, store.MaxDocBytes*2)).Decode(&req); err != nil {
+		s.fail(w, http.StatusBadRequest, err)
+		return
+	}
+	name := r.PathValue("name")
+	cur, err := db.GetDoc(name, 0)
+	if err != nil {
+		s.fail(w, http.StatusNotFound, err)
+		return
+	}
+	base, baseFound := "", false
+	if req.BaseRev > 0 && req.BaseRev != cur.Rev {
+		if bd, err := db.GetDoc(name, req.BaseRev); err == nil && !bd.Deleted {
+			base, baseFound = bd.Body, true
+		}
+	}
+	merged, conflicts, err := diff3.MergeText(base, req.Body, cur.Body,
+		"mine", fmt.Sprintf("hub rev %d by %s", cur.Rev, cur.UpdatedBy))
+	if err != nil {
+		s.fail(w, http.StatusBadRequest, err)
+		return
+	}
+	s.ok(w, map[string]any{
+		"merged": merged, "conflicts": conflicts,
+		"against_rev": cur.Rev, "base_found": baseFound,
+	})
 }
 
 // docWriteError maps a CAS refusal to 409 carrying the current document

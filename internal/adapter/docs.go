@@ -21,6 +21,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"aimem/internal/diff3"
 	"aimem/internal/ident"
 	"aimem/internal/redact"
 	"aimem/internal/store"
@@ -39,6 +40,31 @@ type docState struct {
 
 func docSyncPath(root, projectID string) string {
 	return filepath.Join(root, "docsync", projectID+".json")
+}
+
+// The sync timer has no working directory, but reconciliation needs to
+// find the bound FILES — so the publisher records the project dir it
+// last ran from in a one-line sidecar next to the state file. Multiple
+// checkouts of one project on a machine: last writer wins, which
+// matches whichever checkout is actually being worked in.
+func docDirPath(root, projectID string) string {
+	return filepath.Join(root, "docsync", projectID+".dir")
+}
+
+func rememberDocDir(root, projectID, dir string) {
+	if abs, err := filepath.Abs(dir); err == nil {
+		dir = abs
+	}
+	os.MkdirAll(filepath.Join(root, "docsync"), 0o700)
+	os.WriteFile(docDirPath(root, projectID), []byte(dir+"\n"), 0o600)
+}
+
+func recallDocDir(root, projectID string) string {
+	raw, err := os.ReadFile(docDirPath(root, projectID))
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(string(raw))
 }
 
 func loadDocSync(root, projectID string) map[string]docState {
@@ -94,6 +120,7 @@ func (c *Client) PublishDocs(projectDir, projectID, hubName, by string) []DocPus
 	if len(paths) == 0 {
 		return nil
 	}
+	rememberDocDir(c.root, projectID, projectDir)
 	state := loadDocSync(c.root, projectID)
 	var out []DocPushResult
 	changed := false
@@ -276,6 +303,102 @@ func (c *Client) hubDocDo(hub *HubConfig, method, u string, body []byte, into an
 	}
 	return json.Unmarshal(raw, into)
 }
+
+// ReconcileDocs is the git-like pull half of DESIGN-doc-collab, run
+// from the periodic sync: an unchanged local file fast-forwards to a
+// newer hub revision; a diverged one gets a three-way merge — written
+// and left for PublishDocs to push when clean, or dropped as a
+// <file>.merge preview (original untouched) when conflicted. Every
+// action notes to adapter.log. Loss-free by construction: only
+// unchanged files are overwritten, and conflicts never modify the
+// bound file.
+func (c *Client) ReconcileDocs(hub *HubConfig, projectID string) {
+	dir := recallDocDir(c.root, projectID)
+	if dir == "" {
+		return // no publisher has run here; nothing bound locally
+	}
+	paths := ident.ProjectDocs(dir)
+	if len(paths) == 0 {
+		return
+	}
+	hubDocs, err := c.ListHubDocs(hub, projectID)
+	if err != nil {
+		return // sync already reports transport trouble
+	}
+	byName := map[string]HubDoc{}
+	for _, d := range hubDocs {
+		byName[d.Name] = d
+	}
+	state := loadDocSync(c.root, projectID)
+	changed := false
+	for _, rel := range paths {
+		name := ident.DocName(rel)
+		hd, ok := byName[name]
+		if !ok || hd.Deleted {
+			continue // nothing hub-side to reconcile with (tombstones stay manual)
+		}
+		st := state[name]
+		if hd.Rev <= st.Rev {
+			continue // hub has nothing newer
+		}
+		abs := filepath.Join(dir, filepath.FromSlash(rel))
+		local, err := os.ReadFile(abs)
+		if err != nil {
+			continue // no local file: pull is a deliberate act (`docs pull`)
+		}
+		cur, err := c.GetHubDoc(hub, projectID, name, 0)
+		if err != nil || cur.Deleted {
+			continue
+		}
+		if hashBody(local) == st.Hash {
+			// Fast-forward: nothing local to lose.
+			if err := os.WriteFile(abs, []byte(cur.Body), 0o644); err != nil {
+				continue
+			}
+			state[name] = docState{Rev: cur.Rev, Hash: hashBody([]byte(cur.Body))}
+			changed = true
+			c.note("aimem: shared doc %s fast-forwarded to rev %d (by %s)", name, cur.Rev, cur.UpdatedBy)
+			continue
+		}
+		// Diverged: three-way merge against the last-synced revision.
+		base := ""
+		if st.Rev > 0 {
+			if bd, err := c.GetHubDoc(hub, projectID, name, st.Rev); err == nil && !bd.Deleted {
+				base = bd.Body
+			}
+		}
+		merged, conflicts, err := diff3.MergeText(base, string(local), cur.Body,
+			"local ("+rel+")", fmt.Sprintf("hub rev %d by %s", cur.Rev, cur.UpdatedBy))
+		if err != nil {
+			c.note("aimem: shared doc %s diverged and cannot auto-merge (%v) — run `aimem docs merge %s`", name, err, name)
+			continue
+		}
+		if conflicts == 0 {
+			// Same sidecar semantics as `docs merge`: rebase onto the hub
+			// rev with the HUB body's hash, so PublishDocs pushes the
+			// merged file with a valid CAS base on this very sync.
+			if err := os.WriteFile(abs, []byte(merged), 0o644); err != nil {
+				continue
+			}
+			state[name] = docState{Rev: cur.Rev, Hash: hashBody([]byte(cur.Body))}
+			changed = true
+			c.note("aimem: shared doc %s auto-merged with hub rev %d — pushing the result", name, cur.Rev)
+			continue
+		}
+		// Conflicted: never touch the bound file unasked. Drop a preview
+		// beside it (also the session-start beacon) and say so loudly.
+		os.WriteFile(abs+".merge", []byte(merged), 0o644)
+		c.note("aimem: shared doc %s CONFLICTS with hub rev %d (%d overlap(s)) — preview in %s.merge; resolve with `aimem docs merge %s`",
+			name, cur.Rev, conflicts, rel, name)
+	}
+	if changed {
+		saveDocSync(c.root, projectID, state)
+	}
+}
+
+// DocDir reports where this project's bound files live, as last seen
+// by the publisher ("" until a checkpoint has run from the project).
+func (c *Client) DocDir(projectID string) string { return recallDocDir(c.root, projectID) }
 
 // DocSyncRev returns the last revision this machine recorded for a doc.
 func (c *Client) DocSyncRev(projectID, name string) int64 {

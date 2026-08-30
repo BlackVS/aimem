@@ -15,6 +15,23 @@ currently 8); a binary refuses a database newer than it understands.
 
 Nothing yet.
 
+## [0.2.5] — 2026-08-30
+
+### Added
+
+- **Git-like reconciliation for shared documents**
+  (`docs/DESIGN-doc-collab.md`): the periodic sync now fast-forwards a
+  bound file the machine hasn't changed to the hub's newer revision,
+  auto-applies and pushes back CLEAN three-way merges when both sides
+  changed disjoint parts, and on real overlaps leaves the bound file
+  untouched — dropping a `<file>.merge` preview beside it, warning in
+  `aimem logs`, and flagging it at session start until
+  `aimem docs merge` resolves it. Console saves that hit a 409 now
+  auto-merge the draft in the editor via a new compute-only
+  `POST .../docs/{name}/merge` endpoint (clean → save again;
+  overlaps → markers to resolve in place). The hub still never merges
+  on write; only unchanged files are ever overwritten.
+
 ## [0.2.4] — 2026-08-30
 
 ### Fixed

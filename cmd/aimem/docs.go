@@ -236,6 +236,8 @@ every checkpoint; these commands are for deliberate moments.`)
 		if err := os.WriteFile(abs, []byte(merged), 0o644); err != nil {
 			return err
 		}
+		// A completed merge consumes any reconcile preview beacon.
+		os.Remove(abs + ".merge")
 		if conflicts == 0 {
 			// Rebase the sidecar onto the hub's current rev, with the HUB
 			// body's hash: the merged file then reads as a pending local

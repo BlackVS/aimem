@@ -1,6 +1,20 @@
-# Multi-writer document collaboration — proposal
+# Multi-writer document collaboration
 
-Status: **proposal**, drafted 2026-08-30 (user request: "design first").
+Status: **implemented** 2026-08-30, same day as drafted. Corrections
+and deliberate simplifications ("we should not overcomplicate" — user):
+
+- The sync timer has no working directory, so the publisher records
+  the project dir in a one-line sidecar (`docsync/<project>.dir`) —
+  no sidecar schema change, no migration. A project never published
+  from a machine is simply not reconciled there.
+- The console's 15-second staleness banner was CUT: the 409-triggered
+  auto-merge covers the same case at the moment it matters, with one
+  click. Revisit only if mid-edit surprise proves painful in practice.
+- Open questions resolved as proposed: no opt-out knob; conflicted
+  reconciles DO drop a `<file>.merge` preview (also the offline
+  session-start beacon; a completed `docs merge` removes it); group
+  docs stay MCP-surfaced with nothing to reconcile locally.
+
 Companion to DESIGN-shared-docs.md, whose storage contract this
 deliberately does NOT change.
 
