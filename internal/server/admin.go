@@ -299,7 +299,7 @@ func (s *Server) mergeProject(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	into := strings.TrimSpace(body.Into)
-	events, mems, runs, err := s.reg.MergeProject(id, into)
+	events, mems, runs, cites, err := s.reg.MergeProject(id, into)
 	if err != nil {
 		s.fail(w, http.StatusBadRequest, err)
 		return
@@ -309,9 +309,9 @@ func (s *Server) mergeProject(w http.ResponseWriter, r *http.Request) {
 		s.log.Warn("stale curate cursor not removed after merge", "project", id, "err", err)
 	}
 	s.log.Warn("project merged", "from", id, "into", into,
-		"events", events, "memories", mems, "runs", runs)
+		"events", events, "memories", mems, "runs", runs, "citations", cites)
 	s.ok(w, map[string]any{"merged": id, "into": into,
-		"events": events, "memories": mems, "curate_runs": runs})
+		"events": events, "memories": mems, "curate_runs": runs, "citations": cites})
 }
 
 func (s *Server) curateRuns(w http.ResponseWriter, r *http.Request) {

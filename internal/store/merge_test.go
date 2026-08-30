@@ -41,13 +41,13 @@ func TestMergeProject(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	events, mems, runs, err := r.MergeProject("rc-0f05aa6db5cf", "rc")
+	events, mems, runs, cites, err := r.MergeProject("rc-0f05aa6db5cf", "rc")
 	if err != nil {
 		t.Fatalf("merge: %v", err)
 	}
 	// The shared idempotency key dedups: only the genuinely-old event lands.
-	if events != 1 || mems != 1 || runs != 1 {
-		t.Fatalf("merged events=%d mems=%d runs=%d; want 1/1/1", events, mems, runs)
+	if events != 1 || mems != 1 || runs != 1 || cites != 1 {
+		t.Fatalf("merged events=%d mems=%d runs=%d cites=%d; want 1/1/1/1", events, mems, runs, cites)
 	}
 	if _, err := r.OpenExisting("rc-0f05aa6db5cf"); err == nil {
 		t.Fatal("source still resolves after merge")
@@ -89,10 +89,10 @@ func TestMergeProjectRefusals(t *testing.T) {
 		{"alpha", "alpha", "self-merge"},
 		{UserScopeProject, "alpha", "user DB reserved"},
 		{"alpha", "group-x", "group DB reserved"},
-		{"missing", "alpha", "no such source"},
+		{"missing", "alpha", "no such source and nothing cites it"},
 	}
 	for _, c := range cases {
-		if _, _, _, err := r.MergeProject(c.old, c.new); err == nil {
+		if _, _, _, _, err := r.MergeProject(c.old, c.new); err == nil {
 			t.Errorf("MergeProject(%q, %q) succeeded; want refusal (%s)", c.old, c.new, c.why)
 		}
 	}
@@ -100,12 +100,50 @@ func TestMergeProjectRefusals(t *testing.T) {
 	if _, err := a.PutDoc("RUNBOOK", "content\n", "x", 0, false); err != nil {
 		t.Fatal(err)
 	}
-	if _, _, _, err := r.MergeProject("alpha", "beta"); err == nil || !strings.Contains(err.Error(), "document") {
+	if _, _, _, _, err := r.MergeProject("alpha", "beta"); err == nil || !strings.Contains(err.Error(), "document") {
 		t.Errorf("merge with docs should refuse, got %v", err)
 	}
 	for _, id := range []string{"alpha", "beta"} {
 		if _, err := r.OpenExisting(id); err != nil {
 			t.Errorf("project %q disappeared after refused merge: %v", id, err)
 		}
+	}
+}
+
+// TestMergeOrphanedOrigin: the source project is already GONE but group
+// facts still cite it (dropped before merge existed) — the merge
+// degrades to a pure citation relabel.
+func TestMergeOrphanedOrigin(t *testing.T) {
+	r, err := NewRegistry(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer r.Close()
+	if _, err := r.Open("rc"); err != nil {
+		t.Fatal(err)
+	}
+	grp, err := r.Open("group-oboro")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := grp.Remember("orphan-cited fact", "curator", RememberOpts{
+		Kind: "fact", Sources: []string{"project:RC-000668815ca9"},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	events, mems, runs, cites, err := r.MergeProject("RC-000668815ca9", "rc")
+	if err != nil || events != 0 || mems != 0 || runs != 0 || cites != 1 {
+		t.Fatalf("orphan relabel: ev=%d mems=%d runs=%d cites=%d err=%v; want 0/0/0/1 nil",
+			events, mems, runs, cites, err)
+	}
+	gm, _ := grp.Memories(false)
+	var cited string
+	for _, s := range gm[0].Sources {
+		if strings.HasPrefix(s, "project:") {
+			cited = s
+		}
+	}
+	if cited != "project:rc" {
+		t.Fatalf("citation is %q; want project:rc", cited)
 	}
 }

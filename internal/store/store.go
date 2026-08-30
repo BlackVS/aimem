@@ -225,15 +225,17 @@ func (r *Registry) moveProject(oldID, newID string) error {
 	return os.Rename(dir, dst)
 }
 
-// renameSources rewrites "project:<old>" citations in every group DB.
-// OR IGNORE covers the case where a fact already cites the new id (a
-// re-rename); the leftover old rows are then deleted outright.
-func (r *Registry) renameSources(oldID, newID string) {
+// renameSources rewrites "project:<old>" citations in every group DB,
+// returning how many rows it touched. OR IGNORE covers the case where a
+// fact already cites the new id (a re-rename); the leftover old rows
+// are then deleted outright.
+func (r *Registry) renameSources(oldID, newID string) int {
 	entries, err := os.ReadDir(filepath.Join(r.root, "projects"))
 	if err != nil {
-		return
+		return 0
 	}
 	oldSrc, newSrc := "project:"+oldID, "project:"+newID
+	touched := 0
 	for _, e := range entries {
 		if !e.IsDir() || !strings.HasPrefix(e.Name(), "group-") {
 			continue
@@ -242,9 +244,18 @@ func (r *Registry) renameSources(oldID, newID string) {
 		if err != nil {
 			continue
 		}
-		db.sql.Exec(`UPDATE OR IGNORE memory_sources SET event_id = ? WHERE event_id = ?`, newSrc, oldSrc)
-		db.sql.Exec(`DELETE FROM memory_sources WHERE event_id = ?`, oldSrc)
+		if res, err := db.sql.Exec(`UPDATE OR IGNORE memory_sources SET event_id = ? WHERE event_id = ?`, newSrc, oldSrc); err == nil {
+			if n, _ := res.RowsAffected(); n > 0 {
+				touched += int(n)
+			}
+		}
+		if res, err := db.sql.Exec(`DELETE FROM memory_sources WHERE event_id = ?`, oldSrc); err == nil {
+			if n, _ := res.RowsAffected(); n > 0 {
+				touched += int(n)
+			}
+		}
 	}
+	return touched
 }
 
 // MergeProject folds one project's history into another and removes the
@@ -261,37 +272,45 @@ func (r *Registry) renameSources(oldID, newID string) {
 // target's next curation pass re-reads the merged events (they carry
 // fresh ids past its cursor) — the source's distilled facts are already
 // imported, so that pass mostly corroborates.
-func (r *Registry) MergeProject(oldID, newID string) (events, mems, runs int, err error) {
+//
+// A source that no longer exists as a project but is still CITED by
+// group facts (dropped before this operation existed) degrades to a
+// pure citation relabel; zero citations then means a typo and refuses.
+func (r *Registry) MergeProject(oldID, newID string) (events, mems, runs, cites int, err error) {
 	for _, id := range []string{oldID, newID} {
 		if !schema.ValidProjectID(id) {
-			return 0, 0, 0, fmt.Errorf("invalid project id %q", id)
+			return 0, 0, 0, 0, fmt.Errorf("invalid project id %q", id)
 		}
 		if id == UserScopeProject || strings.HasPrefix(id, "group-") {
-			return 0, 0, 0, fmt.Errorf("refusing to merge reserved project %q", id)
+			return 0, 0, 0, 0, fmt.Errorf("refusing to merge reserved project %q", id)
 		}
 	}
 	if oldID == newID {
-		return 0, 0, 0, fmt.Errorf("source and target are the same project")
-	}
-	src, err := r.OpenExisting(oldID)
-	if err != nil {
-		return 0, 0, 0, err
+		return 0, 0, 0, 0, fmt.Errorf("source and target are the same project")
 	}
 	dst, err := r.OpenExisting(newID)
 	if err != nil {
-		return 0, 0, 0, fmt.Errorf("no such target project %q — a missing target makes this a rename, not a merge", newID)
+		return 0, 0, 0, 0, fmt.Errorf("no such target project %q — a missing target makes this a rename, not a merge", newID)
+	}
+	src, err := r.OpenExisting(oldID)
+	if err != nil {
+		// Orphaned-origin case: nothing to copy, only labels to fix.
+		if cites = r.renameSources(oldID, newID); cites == 0 {
+			return 0, 0, 0, 0, fmt.Errorf("no such project %q and no group facts cite it — nothing to merge", oldID)
+		}
+		return 0, 0, 0, cites, nil
 	}
 	if docs, _ := src.ListDocs(); len(docs) > 0 {
-		return 0, 0, 0, fmt.Errorf("source %q holds %d shared document(s); migrate or retire them first — doc names could collide silently", oldID, len(docs))
+		return 0, 0, 0, 0, fmt.Errorf("source %q holds %d shared document(s); migrate or retire them first — doc names could collide silently", oldID, len(docs))
 	}
 	if cols, _ := src.ListCollections(); len(cols) > 0 {
-		return 0, 0, 0, fmt.Errorf("source %q holds %d collection(s); migrate them first — record ids could collide silently", oldID, len(cols))
+		return 0, 0, 0, 0, fmt.Errorf("source %q holds %d collection(s); migrate them first — record ids could collide silently", oldID, len(cols))
 	}
 	since := ""
 	for {
 		evs, err := src.EventsSince(since, 500)
 		if err != nil {
-			return events, mems, runs, err
+			return events, mems, runs, 0, err
 		}
 		if len(evs) == 0 {
 			break
@@ -305,7 +324,7 @@ func (r *Registry) MergeProject(oldID, newID string) (events, mems, runs int, er
 	}
 	msrc, err := src.Memories(true)
 	if err != nil {
-		return events, mems, runs, err
+		return events, mems, runs, 0, err
 	}
 	for i := range msrc {
 		if err := dst.ImportMemory(&msrc[i]); err == nil {
@@ -320,7 +339,7 @@ func (r *Registry) MergeProject(oldID, newID string) (events, mems, runs int, er
 			}
 		}
 	}
-	r.renameSources(oldID, newID)
+	cites = r.renameSources(oldID, newID)
 	// Everything copied; retire the source (evict the handle first, as
 	// moveProject does — an open SQLite file must not be deleted under
 	// its connection).
@@ -331,9 +350,9 @@ func (r *Registry) MergeProject(oldID, newID string) (events, mems, runs int, er
 	}
 	r.mu.Unlock()
 	if err := os.RemoveAll(filepath.Join(r.root, "projects", oldID)); err != nil {
-		return events, mems, runs, fmt.Errorf("history merged, but the source was not removed: %w (safe to re-run)", err)
+		return events, mems, runs, cites, fmt.Errorf("history merged, but the source was not removed: %w (safe to re-run)", err)
 	}
-	return events, mems, runs, nil
+	return events, mems, runs, cites, nil
 }
 
 // Close closes all open project databases.

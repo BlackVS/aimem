@@ -15,6 +15,20 @@ currently 9); a binary refuses a database newer than it understands.
 
 Nothing yet.
 
+## [0.3.7] — 2026-08-30
+
+### Added
+
+- Merge-into handles the **orphaned-origin** case found live minutes
+  after 0.3.6: a project dropped before merge existed leaves group
+  facts citing a ghost id ("from RC-000668815ca9" with no such
+  project). When the merge source no longer exists but group facts
+  still cite it, the operation degrades to a pure citation relabel
+  (zero citations = typo, refused); responses now count relabeled
+  citations. NOTE: sources union across copies during sync — relabel
+  every copy of a group DB (each hub and machine holding it), or the
+  next sync re-unions the old label from an untouched peer.
+
 ## [0.3.6] — 2026-08-30
 
 ### Added
