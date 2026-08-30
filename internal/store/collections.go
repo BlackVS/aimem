@@ -237,6 +237,92 @@ func (d *DB) ListCollections() ([]ColSummary, error) {
 	return out, rows.Err()
 }
 
+// RecordLog returns the retained revisions of one record, newest first,
+// without bodies (GetRecord with a rev fetches one) — the same shape
+// DocLog gives documents, because history you retain but cannot
+// enumerate is history you do not have.
+func (d *DB) RecordLog(collection, id string) ([]Record, error) {
+	rows, err := d.sql.Query(`SELECT collection, id, '{}', rev, updated_at, updated_by, deleted, LENGTH(body)
+		FROM col_revisions WHERE collection=? AND id=? ORDER BY rev DESC`, collection, id)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []Record
+	for rows.Next() {
+		var rec Record
+		var body string
+		var del int
+		if err := rows.Scan(&rec.Collection, &rec.ID, &body, &rec.Rev, &rec.UpdatedAt, &rec.UpdatedBy, &del, &rec.Size); err != nil {
+			return nil, err
+		}
+		rec.Deleted = del != 0
+		out = append(out, rec)
+	}
+	return out, rows.Err()
+}
+
+// ColMatch is one search hit inside a collection record: enough to know
+// WHICH record to fetch — like DocMatch, retrieval stays fetch-by-id.
+type ColMatch struct {
+	Collection string `json:"collection"`
+	ID         string `json:"id"`
+	Rev        int64  `json:"rev"`
+	UpdatedAt  string `json:"updated_at"`
+	Snippet    string `json:"snippet"`
+}
+
+// SearchRecords finds live records whose id or body contains EVERY term,
+// case-insensitively. The same deliberate exact scan as SearchDocs and
+// for the same reason: records are 32KB-capped entries at a scale where
+// scanning beats an FTS table over an upsert-and-tombstone base; the
+// recorded upgrade path is shared with docs.
+func (d *DB) SearchRecords(q string, limit int) ([]ColMatch, error) {
+	terms := strings.Fields(strings.ToLower(q))
+	if len(terms) == 0 {
+		return nil, nil
+	}
+	if limit <= 0 || limit > 50 {
+		limit = 10
+	}
+	rows, err := d.sql.Query(`SELECT collection, id, body, rev, updated_at FROM col_records
+		WHERE deleted = 0 ORDER BY collection, id`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []ColMatch
+	for rows.Next() {
+		var col, id, body, updatedAt string
+		var rev int64
+		if err := rows.Scan(&col, &id, &body, &rev, &updatedAt); err != nil {
+			return nil, err
+		}
+		lowBody, lowID := strings.ToLower(body), strings.ToLower(col+"/"+id)
+		all := true
+		first := -1
+		for _, t := range terms {
+			i := strings.Index(lowBody, t)
+			if i < 0 && !strings.Contains(lowID, t) {
+				all = false
+				break
+			}
+			if i >= 0 && (first < 0 || i < first) {
+				first = i
+			}
+		}
+		if !all {
+			continue
+		}
+		out = append(out, ColMatch{Collection: col, ID: id, Rev: rev, UpdatedAt: updatedAt,
+			Snippet: docSnippet(body, first)})
+		if len(out) >= limit {
+			break
+		}
+	}
+	return out, rows.Err()
+}
+
 func scanRecord(row *sql.Row) (Record, error) {
 	var rec Record
 	var body string

@@ -116,6 +116,7 @@ func (s *Server) Routes() []Route {
 		{"DELETE", "/v1/projects/{p}/docs/{name}", s.deleteDoc, false},
 		{"GET", "/v1/projects/{p}/collections", s.listCollections, false},
 		{"GET", "/v1/projects/{p}/collections/{c}/records", s.listRecords, false},
+		{"GET", "/v1/projects/{p}/collections/{c}/log/{id...}", s.recordLog, false},
 		{"GET", "/v1/projects/{p}/collections/{c}/records/{id...}", s.getRecord, false},
 		{"PUT", "/v1/projects/{p}/collections/{c}/records/{id...}", s.putRecord, false},
 		{"DELETE", "/v1/projects/{p}/collections/{c}/records/{id...}", s.deleteRecord, false},
@@ -636,7 +637,17 @@ func (s *Server) search(w http.ResponseWriter, r *http.Request) {
 		if docs == nil {
 			docs = []store.DocMatch{}
 		}
-		s.ok(w, map[string]any{"events": evs, "docs": docs})
+		// Wiki records too (arch review A1): search FINDS a record,
+		// retrieval stays fetch-by-id.
+		recs, err := db.SearchRecords(q, 5)
+		if err != nil {
+			s.fail(w, http.StatusInternalServerError, err)
+			return
+		}
+		if recs == nil {
+			recs = []store.ColMatch{}
+		}
+		s.ok(w, map[string]any{"events": evs, "docs": docs, "records": recs})
 	}
 }
 

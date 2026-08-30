@@ -62,6 +62,25 @@ func (s *Server) getRecord(w http.ResponseWriter, r *http.Request) {
 	s.ok(w, rec)
 }
 
+// recordLog lives at .../collections/{c}/log/{id...} rather than a
+// /log suffix on the record path: the record id is a slash path and the
+// {id...} wildcard must end the pattern.
+func (s *Server) recordLog(w http.ResponseWriter, r *http.Request) {
+	db := s.withDB(w, r)
+	if db == nil {
+		return
+	}
+	log, err := db.RecordLog(r.PathValue("c"), r.PathValue("id"))
+	if err != nil {
+		s.fail(w, http.StatusInternalServerError, err)
+		return
+	}
+	if log == nil {
+		log = []store.Record{}
+	}
+	s.ok(w, map[string]any{"revisions": log})
+}
+
 func (s *Server) putRecord(w http.ResponseWriter, r *http.Request) {
 	db := s.withDB(w, r)
 	if db == nil {

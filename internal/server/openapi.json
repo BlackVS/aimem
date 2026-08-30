@@ -133,6 +133,9 @@
     "/v1/projects/{p}/collections/{c}/records": {
       "get": {"summary": "List a collection's records in id (= tree) order; ?bodies=1 includes bodies (the render fetch)", "x-role": "writer", "parameters": [{"$ref": "#/components/parameters/p"}, {"$ref": "#/components/parameters/c"}], "responses": {"200": {"description": "{records}"}}}
     },
+    "/v1/projects/{p}/collections/{c}/log/{id...}": {
+      "get": {"summary": "Recent revisions of one record (bounded history; not a /log suffix because the slash-path id wildcard must end the pattern)", "x-role": "writer", "parameters": [{"$ref": "#/components/parameters/p"}, {"$ref": "#/components/parameters/c"}], "responses": {"200": {"description": "{revisions}"}}}
+    },
     "/v1/projects/{p}/collections/{c}/records/{id...}": {
       "get": {"summary": "Read one record (current, or ?rev= for a retained revision); id is a slash path like api/messages/create", "x-role": "writer", "parameters": [{"$ref": "#/components/parameters/p"}, {"$ref": "#/components/parameters/c"}], "responses": {"200": {"description": "record"}}},
       "put": {"summary": "Compare-and-swap write of one record ({body: <JSON object>, base_rev, updated_by}); the CAS unit is the record, so disjoint edits never conflict", "x-role": "writer", "parameters": [{"$ref": "#/components/parameters/p"}, {"$ref": "#/components/parameters/c"}], "responses": {"200": {"description": "{rev}"}, "409": {"description": "stale base_rev - carries the current record whole to re-apply intent onto"}}},

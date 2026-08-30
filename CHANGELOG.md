@@ -15,6 +15,36 @@ currently 9); a binary refuses a database newer than it understands.
 
 Nothing yet.
 
+## [0.3.4] — 2026-08-30
+
+The storage-architecture review's parity slice (PROJECT-REVIEW §6):
+the wiki now has every affordance documents already had, and the
+console's structure mirrors the architecture instead of its own
+accretion history.
+
+### Added
+
+- **Search sees the wiki**: `aimem search`, MCP `search_journal`, and
+  the hub search route now return record hits (collection/id, rev,
+  snippet) alongside journal events and doc hits — same exact-scan
+  design, retrieval stays fetch-by-id.
+- **Record history is enumerable**: `GET .../collections/{c}/log/{id}`
+  (wildcard ids end the pattern, hence not a `/log` suffix),
+  `aimem col log`, and a history button in the console's record
+  editor — the parity trio documents already had.
+- **Console Search tab**: full-text over the journal (its first
+  console surface), doc hits, and wiki-record hits in one place.
+- Records get the softer-tier secret warning documents had (CLI put
+  and MCP put_record; hard shapes were always refused).
+
+### Changed
+
+- Console tabs are grouped into two clusters mirroring
+  docs/STORAGE-GUIDE.md — Knowledge Base · Review · Groups · Docs ·
+  Wiki, a separator, then Search · AI Setup · Usage · Health · Log —
+  instead of accretion order (Review sat orphaned at the far end,
+  storage tabs after Health).
+
 ## [0.3.3] — 2026-08-30
 
 ### Changed

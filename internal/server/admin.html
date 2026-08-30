@@ -186,14 +186,20 @@
   <button class="act" onclick="logout()" style="padding:2px 10px">logout</button></span>
 </header>
 <nav>
+  <!-- Two clusters mirroring docs/STORAGE-GUIDE.md: what the hub
+       REMEMBERS (KB + its review loop, groups, docs, wiki), then how
+       it is OPERATED (search over the journal, providers, usage,
+       health, logs). The order used to be accretion order. -->
   <button data-t="kb" class="on" onclick="tab('kb')">Knowledge Base</button>
+  <button data-t="review" onclick="tab('review')">Review</button>
   <button data-t="groups" onclick="tab('groups')">Groups</button>
+  <button data-t="docs" onclick="tab('docs')">Docs</button>
+  <button data-t="wiki" onclick="tab('wiki')">Wiki</button>
+  <span style="display:inline-block;width:1px;align-self:stretch;background:var(--edge);margin:0 8px"></span>
+  <button data-t="search" onclick="tab('search')">Search</button>
   <button data-t="setup" onclick="tab('setup')">AI Setup</button>
   <button data-t="usage" onclick="tab('usage')">Usage</button>
   <button data-t="health" onclick="tab('health')">Health</button>
-  <button data-t="docs" onclick="tab('docs')">Docs</button>
-  <button data-t="wiki" onclick="tab('wiki')">Wiki</button>
-  <button data-t="review" onclick="tab('review')">Review</button>
   <button data-t="log" onclick="tab('log')">Log</button>
 </nav>
 <main>
@@ -275,6 +281,20 @@
     <div id="colList"></div>
     <div id="colView"></div>
   </section>
+  <section id="t-search" hidden>
+    <div class="row" style="margin-top:0">
+      <select id="srchProj" style="width:auto"></select>
+      <input id="srchQ" type="text" class="grow" placeholder="search the journal, shared docs, and wiki records"
+             onkeydown="if(event.key==='Enter')runSearch()">
+      <button class="act" onclick="runSearch()">search</button>
+      <span class="dim" id="srchHint"></span>
+    </div>
+    <div class="dim" style="font-size:12px;margin:6px 0">Full-text over the project's journal
+      (every completed turn, captured mechanically), plus name/body matches in shared documents
+      and wiki records. This is "what happened / where is it written" — for curated knowledge,
+      use the Knowledge Base tab's recall.</div>
+    <div id="srchOut"></div>
+  </section>
   <section id="t-review" hidden>
     <div class="row" style="margin-top:0">
       <select id="revProj" style="width:auto" onchange="loadReview()"></select>
@@ -344,9 +364,10 @@ async function api(path, opt){
 function saveTok(){TOK=$("tok").value.trim();localStorage.setItem("aimem_token",TOK);boot();}
 function logout(){localStorage.removeItem("aimem_token");TOK="";location.reload();}
 function tab(t){document.querySelectorAll("nav button").forEach(b=>b.classList.toggle("on",b.dataset.t===t));
-  for(const s of ["kb","groups","setup","usage","health","log","docs","wiki","review"]) $("t-"+s).hidden = s!==t;
+  for(const s of ["kb","groups","setup","usage","health","log","docs","wiki","review","search"]) $("t-"+s).hidden = s!==t;
   if(t==="setup") loadSetup(); if(t==="usage") loadUsage(); if(t==="health") loadHealth();
-  if(t==="log") loadLog(); if(t==="docs") initDocs(); if(t==="wiki") initWiki(); if(t==="review") initReview();}
+  if(t==="log") loadLog(); if(t==="docs") initDocs(); if(t==="wiki") initWiki(); if(t==="review") initReview();
+  if(t==="search") initSearch();}
 
 async function boot(){
   try{
@@ -1303,10 +1324,31 @@ function recEditor(id, rev, bodyText, note){
     <textarea id="recBody" style="width:100%;min-height:180px;font:13px/1.5 var(--mono)">${esc(bodyText)}</textarea>
     <div class="row">
       <button class="act" onclick="saveRec()">save ${rev?`(rev ${rev} &rarr; ${rev+1})`:"(create)"}</button>
-      ${rev?`<button class="act danger" onclick="retireRec()">retire</button>`:""}
+      ${rev?`<button class="act" onclick="showRecLog()">history</button>
+      <button class="act danger" onclick="retireRec()">retire</button>`:""}
       <span class="dim" id="recMsg"></span>
-    </div>`;
+    </div>
+    <div id="recLog"></div>`;
   $("recView").scrollIntoView({block:"nearest"});
+}
+
+async function showRecLog(){
+  if(!colCur) return;
+  try{
+    const r = await api(`/v1/projects/${encodeURIComponent(colCur.project)}/collections/${encodeURIComponent(colCur.col)}/log/${colCur.id.split("/").map(encodeURIComponent).join("/")}`);
+    $("recLog").innerHTML = `<div class="tsep">history</div>` + (r.revisions||[]).map(v=>
+      `<div class="tc"><span class="name">rev ${v.rev}${v.deleted?" (retired)":""} - ${esc(v.updated_at)} by ${esc(v.updated_by||"?")}</span>`+
+      `<span class="n"><a class="x" onclick="viewRecRev(${v.rev})">view</a></span></div>`).join("");
+  }catch(e){ $("recLog").innerHTML = `<div class="bad">${esc(String(e.message||e))}</div>`; }
+}
+
+async function viewRecRev(rev){
+  if(!colCur) return;
+  const d = await api(`/v1/projects/${encodeURIComponent(colCur.project)}/collections/${encodeURIComponent(colCur.col)}/records/${colCur.id.split("/").map(encodeURIComponent).join("/")}?rev=${rev}`);
+  // Old body into the editor WITHOUT touching base_rev: saving restores
+  // it as a new revision on top, never a rewrite of history.
+  $("recBody").value = JSON.stringify(d.body, null, 2);
+  $("recMsg").textContent = `loaded rev ${rev} - saving will restore it as rev ${colCur.rev+1}`;
 }
 
 async function openRec(id){
@@ -1436,6 +1478,46 @@ async function retireDoc(proj, name, rev){
       {method:"DELETE"});
     toast(`${name} retired`); loadDocs();
   }catch(e){ toast("retire failed: "+String(e.message||e)); }
+}
+
+/* ---------- Search (journal + docs + wiki) ---------- */
+// The console face of GET /v1/projects/{p}/search: the journal is the
+// architecture's first storage kind, and until this tab it had no
+// console surface at all. Search FINDS things; retrieval stays where
+// it lives (Docs tab, Wiki tab, timeline).
+let srchProjInit = false;
+function initSearch(){
+  if(!srchProjInit){
+    const ids = OV.map(p=>p.id).sort();
+    $("srchProj").innerHTML = ids.map(id=>`<option>${esc(id)}</option>`).join("");
+    srchProjInit = true;
+  }
+  $("srchQ").focus();
+}
+
+async function runSearch(){
+  const proj = $("srchProj").value, q = $("srchQ").value.trim();
+  if(!proj || !q){ $("srchHint").textContent = "pick a project and type a query"; return; }
+  $("srchHint").textContent = "…";
+  try{
+    const r = await api(`/v1/projects/${encodeURIComponent(proj)}/search?q=${encodeURIComponent(q)}&limit=10`);
+    const evs = r.events||[], docs = r.docs||[], recs = r.records||[];
+    $("srchHint").textContent = (evs.length+docs.length+recs.length) ? "" : "no matches";
+    let h = "";
+    if(docs.length) h += `<div class="tsep">shared documents (open in the Docs tab)</div>` + docs.map(d=>
+      `<div class="tc"><span class="name">${esc(d.name)} <span class="dim">rev ${d.rev}</span></span>`+
+      `<span class="n dim">${esc(d.snippet)}</span></div>`).join("");
+    if(recs.length) h += `<div class="tsep">wiki records (open in the Wiki tab)</div>` + recs.map(x=>
+      `<div class="tc"><span class="name">${esc(x.collection)}/${esc(x.id)} <span class="dim">rev ${x.rev}</span></span>`+
+      `<span class="n dim">${esc(x.snippet)}</span></div>`).join("");
+    if(evs.length) h += `<div class="tsep">journal turns</div>` + evs.map(e=>`<div class="card">
+      <div class="srcs"><span class="chip">${esc(e.ts||"")}</span>
+        <span class="dim">${esc(e.client||"")} · session ${esc((e.session_id||"").slice(0,8))} · ${esc(e.outcome||"")}</span></div>
+      <div class="fact" style="font-weight:normal">${esc((e.user_request||"").slice(0,300))}</div>
+      <div class="dim" style="font-size:13px">${esc((e.assistant_response||"").slice(0,500))}</div>
+    </div>`).join("");
+    $("srchOut").innerHTML = h;
+  }catch(e){ $("srchOut").innerHTML = `<div class="bad">${esc(String(e.message||e))}</div>`; }
 }
 
 /* ---------- Review (stale knowledge) ---------- */

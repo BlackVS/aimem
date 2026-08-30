@@ -75,4 +75,27 @@ func TestRecordEndpoints(t *testing.T) {
 	if w.Code != 400 {
 		t.Fatalf("non-object body: %d %s", w.Code, w.Body)
 	}
+
+	// History is enumerable (arch review A2): the tombstoned record
+	// shows both revisions, newest first.
+	w = req(t, h, "GET", "/v1/projects/proj-col/collections/api/log/models/get", "")
+	var log struct {
+		Revisions []struct {
+			Rev     int64 `json:"rev"`
+			Deleted bool  `json:"deleted"`
+		} `json:"revisions"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &log); err != nil || len(log.Revisions) != 2 {
+		t.Fatalf("record log: %d %s err=%v", w.Code, w.Body, err)
+	}
+	if log.Revisions[0].Rev != 2 || !log.Revisions[0].Deleted || log.Revisions[1].Rev != 1 {
+		t.Fatalf("record log order/content: %+v", log.Revisions)
+	}
+
+	// Search finds wiki records (arch review A1) alongside events/docs.
+	w = req(t, h, "GET", "/v1/projects/proj-col/search?q=messages", "")
+	if w.Code != 200 || !strings.Contains(w.Body.String(), `"records"`) ||
+		!strings.Contains(w.Body.String(), "messages/create") {
+		t.Fatalf("search records: %d %s", w.Code, w.Body)
+	}
 }

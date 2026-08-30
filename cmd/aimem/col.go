@@ -18,6 +18,7 @@ import (
 
 	"aimem/internal/adapter"
 	"aimem/internal/ident"
+	"aimem/internal/redact"
 )
 
 func colCmd(args []string) error {
@@ -63,6 +64,7 @@ func colCmd(args []string) error {
   aimem col put <collection> <id> [file.json]   CAS write (stdin without file;
                                      --base-rev required to update, 0/absent creates)
   aimem col rm  <collection> <id>    tombstone (--base-rev required)
+  aimem col log <collection> <id>    recent revisions of one record
   aimem col render <collection>      generate markdown (--out or the binding's render path)
   aimem col import <collection> <openapi.json>  seed records from an OpenAPI spec
 
@@ -209,6 +211,13 @@ conflict. Declare bindings in .aimem.json {"collections":[{"name","scope","rende
 		if err != nil {
 			return err
 		}
+		// Same softer-tier warning documents get: the hub refuses the
+		// unambiguous secret shapes itself, but a softer match publishes
+		// as written to everyone on the project — say so (arch review A3).
+		if warn, _ := redact.ScanAuthored(string(body)); len(warn) > 0 {
+			fmt.Fprintf(os.Stderr, "aimem: record has secret-shaped content (%s) — it is stored as written on the hub\n",
+				strings.Join(warn, ", "))
+		}
 		base := *baseRev
 		if base < 0 {
 			// CAS discipline for humans: creating is free, updating
@@ -224,6 +233,31 @@ conflict. Declare bindings in .aimem.json {"collections":[{"name","scope","rende
 			return err
 		}
 		fmt.Printf("%s/%s -> rev %d\n", rest[1], rec.ID, rec.Rev)
+		return nil
+
+	case "log":
+		if len(rest) != 3 {
+			return fmt.Errorf("usage: aimem col log <collection> <id>")
+		}
+		p, err := scopeProject(rest[1])
+		if err != nil {
+			return err
+		}
+		revs, err := c.RecordHubLog(hub, p, rest[1], rest[2])
+		if err != nil {
+			return err
+		}
+		if len(revs) == 0 {
+			fmt.Println("no retained revisions")
+			return nil
+		}
+		for _, r := range revs {
+			mark := ""
+			if r.Deleted {
+				mark = " [deleted]"
+			}
+			fmt.Printf("rev %-4d %s  by %-24s %4dB%s\n", r.Rev, r.UpdatedAt, r.UpdatedBy, r.Size, mark)
+		}
 		return nil
 
 	case "rm":

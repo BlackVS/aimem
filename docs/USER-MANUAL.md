@@ -161,6 +161,7 @@ aimem col list                    # collections (project + bound groups)
 aimem col list api                # records of one collection, tree order
 aimem col get api messages/create # one record's JSON (note the rev)
 aimem col put api messages/create body.json --base-rev 3   # CAS write
+aimem col log api messages/create # recent revisions of one record
 aimem col render api              # GENERATED markdown (--out file.md or dir/)
 aimem col import api openapi.json # seed from an OpenAPI spec
 ```
@@ -208,8 +209,9 @@ aimem sessions -p "$PID"                       # sessions seen
 aimem timeline -p "$PID" -s <session> -n 10    # events of one session
 aimem latest  -p "$PID" -s <session>           # most recent event
 aimem search  -p "$PID" -q "migration failed"  # journal FTS + shared docs
-                                               # (doc hits show name+snippet;
-                                               #  fetch with aimem docs pull)
+                                               # + wiki records (hits show
+                                               #  name+snippet; fetch with
+                                               #  docs pull / col get)
 ```
 
 ## Curation (manual runs)

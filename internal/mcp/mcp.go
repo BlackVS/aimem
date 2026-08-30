@@ -20,6 +20,7 @@ import (
 
 	"aimem/internal/adapter"
 	"aimem/internal/ident"
+	"aimem/internal/redact"
 	"aimem/internal/store"
 )
 
@@ -496,21 +497,29 @@ func (s *srv) run(p *toolParams) (string, error) {
 			limit = 5
 		}
 		var res struct {
-			Events []store.StoredEvent `json:"events"`
-			Docs   []store.DocMatch    `json:"docs"`
+			Events  []store.StoredEvent `json:"events"`
+			Docs    []store.DocMatch    `json:"docs"`
+			Records []store.ColMatch    `json:"records"`
 		}
 		if err := s.get(fmt.Sprintf("/v1/projects/%s/search?q=%s&limit=%d",
 			url.PathEscape(project), url.QueryEscape(a.Query), limit), &res); err != nil {
 			return "", err
 		}
-		if len(res.Events) == 0 && len(res.Docs) == 0 {
-			return "no journal events or shared documents match", nil
+		if len(res.Events) == 0 && len(res.Docs) == 0 && len(res.Records) == 0 {
+			return "no journal events, shared documents, or wiki records match", nil
 		}
 		var b strings.Builder
 		if len(res.Docs) > 0 {
 			b.WriteString("Shared documents matching (fetch whole with read_doc):\n")
 			for _, d := range res.Docs {
 				fmt.Fprintf(&b, "- %s (rev %d, %s): %s\n", d.Name, d.Rev, d.UpdatedAt, d.Snippet)
+			}
+			b.WriteString("\n")
+		}
+		if len(res.Records) > 0 {
+			b.WriteString("Wiki records matching (fetch with get_record):\n")
+			for _, r := range res.Records {
+				fmt.Fprintf(&b, "- %s/%s (rev %d, %s): %s\n", r.Collection, r.ID, r.Rev, r.UpdatedAt, r.Snippet)
 			}
 			b.WriteString("\n")
 		}
@@ -836,8 +845,14 @@ func (s *srv) colTool(p *toolParams) (string, error) {
 		if err != nil {
 			return "", err
 		}
-		return fmt.Sprintf("%s/%s written at rev %d (a rendered markdown file, if any, is regenerated with `aimem col render %s`)",
-			a.Collection, rec.ID, rec.Rev, a.Collection), nil
+		msg := fmt.Sprintf("%s/%s written at rev %d (a rendered markdown file, if any, is regenerated with `aimem col render %s`)",
+			a.Collection, rec.ID, rec.Rev, a.Collection)
+		// Softer-tier secret warning, same as documents get: the hub
+		// refuses the unambiguous shapes; a softer match stores as written.
+		if warn, _ := redact.ScanAuthored(a.Body); len(warn) > 0 {
+			msg += fmt.Sprintf(" — WARNING: secret-shaped content (%s) stored as written", strings.Join(warn, ", "))
+		}
+		return msg, nil
 	}
 	return "", fmt.Errorf("unknown collection tool %q", p.Name)
 }

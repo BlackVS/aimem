@@ -88,6 +88,20 @@ func (c *Client) ListHubRecords(hub *HubConfig, projectID, collection string, wi
 	return res.Records, c.hubColDo(hub, "GET", u, nil, &res)
 }
 
+// RecordHubLog lists the retained revisions of one record, newest first.
+func (c *Client) RecordHubLog(hub *HubConfig, projectID, collection, id string) ([]HubRecord, error) {
+	segs := strings.Split(id, "/")
+	for i, s := range segs {
+		segs[i] = url.PathEscape(s)
+	}
+	u := strings.TrimRight(hub.URL, "/") + "/v1/projects/" + url.PathEscape(projectID) +
+		"/collections/" + url.PathEscape(collection) + "/log/" + strings.Join(segs, "/")
+	var res struct {
+		Revisions []HubRecord `json:"revisions"`
+	}
+	return res.Revisions, c.hubColDo(hub, "GET", u, nil, &res)
+}
+
 // GetHubRecord fetches one record (rev > 0 for a retained revision).
 func (c *Client) GetHubRecord(hub *HubConfig, projectID, collection, id string, rev int64) (HubRecord, error) {
 	u := hubColURL(hub, projectID, collection, id)
