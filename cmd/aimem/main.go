@@ -116,6 +116,8 @@ func main() {
 		err = dedupCmd(args)
 	case "docs":
 		err = docsCmd(args)
+	case "col":
+		err = colCmd(args)
 	case "token":
 		err = tokenCmd(args)
 	case "review":

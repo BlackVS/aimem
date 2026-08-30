@@ -218,6 +218,38 @@ var toolDefs = []map[string]any{
 			"scope":    prop("string", "'project' (default) or 'group:<name>'"),
 		}, "name", "body", "base_rev"),
 	},
+	{
+		"name": "list_records",
+		"description": "List a structured collection's records (small JSON entries with slash-path ids forming a tree, " +
+			"e.g. an API surface: api/messages/create). Shows id, revision, writer. Read one with get_record; " +
+			"the local markdown rendered from a collection is GENERATED - edit the record, never the file.",
+		"inputSchema": objSchema(map[string]any{
+			"collection": prop("string", "collection name (this project's .aimem.json \"collections\" names the bound ones)"),
+			"scope":      prop("string", "'group:<name>' for a shared group collection (default: the binding's scope, else this project)"),
+		}, "collection"),
+	},
+	{
+		"name":        "get_record",
+		"description": "Read one record of a structured collection: its JSON body and revision. Note the revision: put_record needs it as base_rev.",
+		"inputSchema": objSchema(map[string]any{
+			"collection": prop("string", "collection name"),
+			"id":         prop("string", "record id (slash path, e.g. api/messages/create)"),
+			"scope":      prop("string", "'group:<name>' for a shared group collection"),
+		}, "collection", "id"),
+	},
+	{
+		"name": "put_record",
+		"description": "Write ONE record of a structured collection with compare-and-swap: pass the complete JSON object body " +
+			"and the base_rev you read (0 creates). The CAS unit is the record - writers on different records never conflict. " +
+			"ON CONFLICT the current record comes back: re-read it, re-apply your change to it, retry with its rev.",
+		"inputSchema": objSchema(map[string]any{
+			"collection": prop("string", "collection name"),
+			"id":         prop("string", "record id (slash path; creates the tree position it names)"),
+			"body":       prop("string", "the COMPLETE record as one JSON object, e.g. {\"method\":\"POST\",\"summary\":\"...\"}"),
+			"base_rev":   prop("number", "the revision this edit is based on (0 to create)"),
+			"scope":      prop("string", "'group:<name>' for a shared group collection"),
+		}, "collection", "id", "body", "base_rev"),
+	},
 }
 
 func prop(t, desc string) map[string]any {
@@ -258,6 +290,7 @@ type toolParams struct {
 		Body        string   `json:"body"`
 		BaseRev     int64    `json:"base_rev"`
 		Days        int      `json:"days"`
+		Collection  string   `json:"collection"`
 	} `json:"arguments"`
 }
 
@@ -517,6 +550,8 @@ func (s *srv) run(p *toolParams) (string, error) {
 		return res.Value, nil
 	case "list_docs", "read_doc", "update_doc":
 		return s.docTool(p)
+	case "list_records", "get_record", "put_record":
+		return s.colTool(p)
 	}
 	return "", fmt.Errorf("unknown tool %q", p.Name)
 }
@@ -740,6 +775,71 @@ func (s *srv) docTool(p *toolParams) (string, error) {
 		return msg, nil
 	}
 	return "", fmt.Errorf("unknown doc tool %q", p.Name)
+}
+
+// colTool handles the structured-collection tools (DESIGN-structured-docs).
+// Collections are hub-authoritative like documents; the scope defaults to
+// the .aimem.json binding for the named collection, so an agent in a
+// project that declared {"collections":[{"name":"api","scope":"group:fw"}]}
+// addresses the shared group collection without saying so.
+func (s *srv) colTool(p *toolParams) (string, error) {
+	a := p.Arguments
+	scope := a.Scope
+	if scope == "" {
+		for _, b := range ident.ProjectCollections(".") {
+			if b.Name == a.Collection {
+				scope = b.Scope
+				break
+			}
+		}
+	}
+	project, hub, err := s.docProject(scope)
+	if err != nil {
+		return "", err
+	}
+	c := adapter.NewClient(mcpStateRoot())
+	switch p.Name {
+	case "list_records":
+		recs, err := c.ListHubRecords(hub, project, a.Collection, false)
+		if err != nil {
+			return "", err
+		}
+		if len(recs) == 0 {
+			return fmt.Sprintf("collection %q has no records yet (put_record with base_rev 0 creates one)", a.Collection), nil
+		}
+		var b strings.Builder
+		for _, r := range recs {
+			if r.Deleted {
+				continue
+			}
+			fmt.Fprintf(&b, "%s  rev %d  %dB  %s by %s\n", r.ID, r.Rev, r.Size, r.UpdatedAt, r.UpdatedBy)
+		}
+		return b.String(), nil
+	case "get_record":
+		rec, err := c.GetHubRecord(hub, project, a.Collection, a.ID, 0)
+		if err != nil {
+			return "", err
+		}
+		if rec.Deleted {
+			return fmt.Sprintf("%s/%s was deleted at rev %d by %s", a.Collection, rec.ID, rec.Rev, rec.UpdatedBy), nil
+		}
+		return fmt.Sprintf("%s/%s (rev %d, %s by %s):\n%s",
+			a.Collection, rec.ID, rec.Rev, rec.UpdatedAt, rec.UpdatedBy, string(rec.Body)), nil
+	case "put_record":
+		host, _ := os.Hostname()
+		rec, err := c.PutHubRecord(hub, project, a.Collection, a.ID, []byte(a.Body), host+"/mcp", a.BaseRev)
+		var conflict *adapter.RecordConflictError
+		if errors.As(err, &conflict) {
+			return "", fmt.Errorf("CONFLICT: %s/%s is now rev %d (by %s). Re-apply your change onto the current record and retry with base_rev %d. Current body:\n%s",
+				a.Collection, a.ID, conflict.Record.Rev, conflict.Record.UpdatedBy, conflict.Record.Rev, string(conflict.Record.Body))
+		}
+		if err != nil {
+			return "", err
+		}
+		return fmt.Sprintf("%s/%s written at rev %d (a rendered markdown file, if any, is regenerated with `aimem col render %s`)",
+			a.Collection, rec.ID, rec.Rev, a.Collection), nil
+	}
+	return "", fmt.Errorf("unknown collection tool %q", p.Name)
 }
 
 // boundDocPath returns the project-relative path bound to a doc name in

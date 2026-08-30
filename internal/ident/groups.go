@@ -38,7 +38,19 @@ type projectConfig struct {
 	Docs    []string `json:"docs"` // extra shared-document files (docs/SESSION-STATE.md is bound by default)
 	// SessionFacts opts into session-start knowledge injection: a token
 	// budget of recalled facts appended to the handoff (0/absent = off).
-	SessionFacts int `json:"session_facts"`
+	SessionFacts int          `json:"session_facts"`
+	Collections  []ColBinding `json:"collections"` // structured collections this project uses
+}
+
+// ColBinding declares one structured collection a project uses
+// (DESIGN-structured-docs): Scope "" = this project's partition,
+// "group:<name>" = a shared knowledge-group collection; Render is the
+// optional project-relative target `aimem col render` writes to (a .md
+// file for one flattened document, a directory for a tree).
+type ColBinding struct {
+	Name   string `json:"name"`
+	Scope  string `json:"scope"`
+	Render string `json:"render"`
 }
 
 // SessionFactsBudget reads the opt-in session-start recall budget;
@@ -174,6 +186,33 @@ func ProjectDocs(dir string) []string {
 			continue
 		}
 		out = append(out, p)
+	}
+	return out
+}
+
+// ProjectCollections returns the structured-collection bindings declared
+// in .aimem.json, with unsafe render paths dropped (same containment rule
+// as ProjectDocs) and malformed config yielding none (fail-open).
+func ProjectCollections(dir string) []ColBinding {
+	cfg, err := readConfig(dir)
+	if err != nil {
+		return nil
+	}
+	var out []ColBinding
+	for _, b := range cfg.Collections {
+		if b.Name == "" {
+			continue
+		}
+		if b.Render != "" {
+			p := filepath.ToSlash(filepath.Clean(b.Render))
+			if p == "" || p == "." || strings.HasPrefix(p, "../") || strings.HasPrefix(p, "/") ||
+				filepath.IsAbs(p) || filepath.VolumeName(p) != "" {
+				b.Render = ""
+			} else {
+				b.Render = p
+			}
+		}
+		out = append(out, b)
 	}
 	return out
 }

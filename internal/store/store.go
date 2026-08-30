@@ -257,7 +257,7 @@ func (r *Registry) Close() {
 	r.dbs = map[string]*DB{}
 }
 
-const currentSchema = 8
+const currentSchema = 9
 
 // SetMeta / GetMeta store small key-value project metadata (e.g. the
 // project's declared knowledge groups, stamped from event pushes so the
@@ -528,6 +528,35 @@ CREATE TABLE doc_revisions(
   PRIMARY KEY(name, rev)
 );
 UPDATE meta SET value='8' WHERE key='schema_version';`); err != nil {
+			return err
+		}
+	}
+	// v9: structured collections (docs/DESIGN-structured-docs.md) —
+	// record-granular CAS for authored structured state; the record pair
+	// mirrors the docs pair with a composite (collection, id) key.
+	if v < 9 {
+		if err := d.step(`
+CREATE TABLE col_records(
+  collection TEXT NOT NULL,
+  id TEXT NOT NULL,
+  body TEXT NOT NULL,
+  rev INTEGER NOT NULL,
+  updated_at TEXT NOT NULL,
+  updated_by TEXT NOT NULL DEFAULT '',
+  deleted INTEGER NOT NULL DEFAULT 0,
+  PRIMARY KEY(collection, id)
+);
+CREATE TABLE col_revisions(
+  collection TEXT NOT NULL,
+  id TEXT NOT NULL,
+  rev INTEGER NOT NULL,
+  body TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  updated_by TEXT NOT NULL DEFAULT '',
+  deleted INTEGER NOT NULL DEFAULT 0,
+  PRIMARY KEY(collection, id, rev)
+);
+UPDATE meta SET value='9' WHERE key='schema_version';`); err != nil {
 			return err
 		}
 	}

@@ -1,8 +1,25 @@
 # Structured collections: live hub data, generated markdown
 
-Status: **PROPOSED** 2026-08-30, awaiting verdict. Companion to
-DESIGN-shared-docs.md and DESIGN-doc-collab.md, which it deliberately
-does not change.
+Status: **implemented** 2026-08-30 (v0.3.0), same day as proposed.
+Corrections against the proposal, all in the simplifying direction:
+
+- No `collections` registry table: a collection exists iff it has
+  records (`ListCollections` derives the listing), so nothing can fall
+  out of sync with reality. Two tables total (`col_records`,
+  `col_revisions`, schema v9), mirroring the docs pair with a
+  composite (collection, id) key.
+- Record bodies must be JSON *objects* (not arrays/scalars); the
+  secret-shape refusal guards records exactly as it guards documents.
+- `aimem col put` enforces read-before-write for humans: updating an
+  existing record requires `--base-rev` (creation is free) — the CLI
+  never silently fetches a base it didn't read.
+- The console conflict flow shows the CURRENT record to re-apply onto
+  — no merge machinery at record granularity, per the design's point.
+- The importer never overwrites: an existing record belongs to its
+  writers, so `aimem col import` counts it as skipped.
+
+Companion to DESIGN-shared-docs.md and DESIGN-doc-collab.md, which it
+deliberately does not change.
 
 ## The problem
 

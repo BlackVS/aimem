@@ -259,6 +259,8 @@
     </div>
     <div id="docList"></div>
     <div id="docView"></div>
+    <div id="colList"></div>
+    <div id="colView"></div>
   </section>
   <section id="t-review" hidden>
     <div class="row" style="margin-top:0">
@@ -1116,6 +1118,7 @@ if(TOK) boot(); else $("gate").classList.remove("hide");
 // can conflict like any other, so the editor keeps the rev it loaded and
 // hands a conflict back rather than clobbering another machine's work.
 let docCur = null;           // {project, name, rev, body} being viewed
+let colCur = null;           // {project, col, id, rev} record being edited
 let docProjInit = false;
 
 function initDocs(){
@@ -1154,6 +1157,97 @@ async function loadDocs(keepView){
       </div>`;
     }).join("") : "";
   }catch(e){ $("docList").innerHTML = `<div class="bad">${esc(String(e.message||e))}</div>`; }
+  if(!keepView) loadCols();
+}
+
+/* Structured collections (DESIGN-structured-docs): live trees of small
+   JSON records, CAS per record. This view is a table editor; markdown is
+   generated client-side by `aimem col render`, never stored here. */
+async function loadCols(){
+  const proj = $("docProj").value;
+  $("colView").innerHTML = ""; colCur = null;
+  if(!proj){ $("colList").innerHTML = ""; return; }
+  try{
+    const r = await api(`/v1/projects/${encodeURIComponent(proj)}/collections`);
+    const cols = r.collections||[];
+    $("colList").innerHTML = cols.length ? `<div class="tsep">structured collections</div>` + cols.map(c=>
+      `<div class="tc"><span class="name"><a class="x" onclick="openCol('${esc(proj)}','${esc(c.name)}')">${esc(c.name)}</a></span>`+
+      `<span class="n dim">${c.records} records · updated ${ago(c.updated_at)}</span></div>`).join("") : "";
+  }catch(e){ $("colList").innerHTML = ""; } // pre-0.3.0 hub: route absent
+}
+
+async function openCol(proj, col){
+  colCur = null;
+  try{
+    const r = await api(`/v1/projects/${encodeURIComponent(proj)}/collections/${encodeURIComponent(col)}/records`);
+    const recs = (r.records||[]).filter(x=>!x.deleted);
+    $("colView").innerHTML = `<div class="card">
+      <div class="fact">${esc(col)} <span class="dim">${recs.length} records — the CAS unit is the record: edits to different records never conflict</span></div>
+      ${recs.map(x=>`<div class="tc"><span class="name"><a class="x" onclick="openRec('${esc(proj)}','${esc(col)}','${esc(x.id)}')">${esc(x.id)}</a></span>`+
+        `<span class="n dim">rev ${x.rev} · ${x.size}B · ${ago(x.updated_at)} by ${esc(x.updated_by||"?")}</span></div>`).join("")}
+      <div class="row"><input id="newRecId" type="text" class="grow" placeholder="new record id (slash path, e.g. api/messages/create)">
+        <button class="act" onclick="newRec('${esc(proj)}','${esc(col)}')">add record</button>
+        <span class="dim" id="colMsg"></span></div>
+      <div id="recView"></div>
+    </div>`;
+  }catch(e){ $("colView").innerHTML = `<div class="bad">${esc(String(e.message||e))}</div>`; }
+}
+
+function recEditor(proj, col, id, rev, bodyText, note){
+  colCur = {project:proj, col, id, rev};
+  $("recView").innerHTML = `
+    <div class="fact" style="margin-top:10px">${esc(id)} <span class="dim">${rev?`rev ${rev}`:"new"}</span></div>
+    ${note?`<div class="dim" style="margin:4px 0">${note}</div>`:""}
+    <textarea id="recBody" style="width:100%;min-height:180px;font:13px/1.5 var(--mono)">${esc(bodyText)}</textarea>
+    <div class="row">
+      <button class="act" onclick="saveRec()">save ${rev?`(rev ${rev} &rarr; ${rev+1})`:"(create)"}</button>
+      ${rev?`<button class="act danger" onclick="retireRec()">retire</button>`:""}
+      <span class="dim" id="recMsg"></span>
+    </div>`;
+}
+
+async function openRec(proj, col, id){
+  try{
+    const d = await api(`/v1/projects/${encodeURIComponent(proj)}/collections/${encodeURIComponent(col)}/records/${id.split("/").map(encodeURIComponent).join("/")}`);
+    recEditor(proj, col, id, d.rev, JSON.stringify(d.body, null, 2), "");
+  }catch(e){ $("recView").innerHTML = `<div class="bad">${esc(String(e.message||e))}</div>`; }
+}
+
+function newRec(proj, col){
+  const id = $("newRecId").value.trim();
+  if(!id){ $("colMsg").textContent = "give the record an id first"; return; }
+  recEditor(proj, col, id, 0, "{\n  \n}", "");
+}
+
+async function saveRec(){
+  if(!colCur) return;
+  let body;
+  try{ body = JSON.parse($("recBody").value); }
+  catch(e){ $("recMsg").innerHTML = `<span class="bad">not valid JSON: ${esc(String(e.message||e))}</span>`; return; }
+  const url = `/v1/projects/${encodeURIComponent(colCur.project)}/collections/${encodeURIComponent(colCur.col)}/records/${colCur.id.split("/").map(encodeURIComponent).join("/")}`;
+  try{
+    const r = await api(url, {method:"PUT", body:JSON.stringify({body, base_rev:colCur.rev, updated_by:"console"})});
+    toast(`${colCur.id} saved as rev ${r.rev}`);
+    openCol(colCur.project, colCur.col);
+  }catch(e){
+    // A record is small: on conflict, show the current version beside the
+    // message and let the user re-apply their intent onto it — no merge
+    // machinery at record granularity, by design.
+    try{
+      const cur = await api(url);
+      recEditor(colCur.project, colCur.col, colCur.id, cur.rev, JSON.stringify(cur.body, null, 2),
+        `<span class="bad">conflict: rev ${cur.rev} by ${esc(cur.updated_by||"?")} arrived first — this is the CURRENT record; re-apply your change to it and save.</span>`);
+    }catch(e2){ $("recMsg").innerHTML = `<span class="bad">${esc(String(e.message||e))}</span>`; }
+  }
+}
+
+async function retireRec(){
+  if(!colCur || !confirm(`Retire ${colCur.id}? The tombstone keeps history and blocks silent resurrection.`)) return;
+  try{
+    await api(`/v1/projects/${encodeURIComponent(colCur.project)}/collections/${encodeURIComponent(colCur.col)}/records/${colCur.id.split("/").map(encodeURIComponent).join("/")}?base_rev=${colCur.rev}&by=console`,
+      {method:"DELETE"});
+    toast(`${colCur.id} retired`); openCol(colCur.project, colCur.col);
+  }catch(e){ toast("retire failed: "+String(e.message||e)); }
 }
 
 async function openDoc(proj, name){

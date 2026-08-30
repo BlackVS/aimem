@@ -143,6 +143,39 @@ files git-style — `aimem docs sync` runs the same reconcile on demand.
 The console's Docs tab does the same over the web, including revision
 history and restore.
 
+## Structured collections
+
+For big structured artifacts many writers edit at once — an API
+surface, a config matrix — whole files are the wrong granularity:
+every pair of simultaneous edits collides even when they touch
+different entries. A **collection** is a live tree of small JSON
+records on the hub; the compare-and-swap unit is the record, so
+concurrent writers conflict only on the same entry. Record ids are
+slash paths (`api/messages/create`), which IS the tree.
+
+```sh
+aimem col list                    # collections (project + bound groups)
+aimem col list api                # records of one collection, tree order
+aimem col get api messages/create # one record's JSON (note the rev)
+aimem col put api messages/create body.json --base-rev 3   # CAS write
+aimem col render api              # GENERATED markdown (--out file.md or dir/)
+aimem col import api openapi.json # seed from an OpenAPI spec
+```
+
+Declare bindings in `.aimem.json` — scope `group:<name>` shares a
+collection across every project that declared the group:
+
+```json
+{"collections": [{"name": "api", "scope": "group:framework", "render": "docs/api/"}]}
+```
+
+Agents use the MCP tools (`list_records`, `get_record`, `put_record`);
+the console's Docs tab has a table editor. The rendered markdown is a
+build artifact ("GENERATED — do not edit"): commit it to git when a
+release snapshot matters, regenerate it otherwise, never hand-edit or
+merge it. Distinct from the knowledge base: the KB is distilled by the
+curator; collections are authored by you and your agents.
+
 ## Compaction
 
 - `/compact` (Claude Code) and OpenCode's summarize both leave a journal

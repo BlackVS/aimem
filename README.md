@@ -52,6 +52,11 @@ Recovery from a crash never depends on an LLM being available.
   compare-and-swap versioning, so every machine reads the same current
   handoff without a git push; diverged copies get a real three-way
   merge (`aimem docs merge`).
+- **Structured collections** for the artifacts many agents edit at
+  once (an API surface, a config matrix): live trees of small JSON
+  records on the hub, compare-and-swap **per record** so disjoint
+  edits never conflict, markdown strictly generated
+  (`aimem col render`) — git gets release cuts, not merge pain.
 
 ### Knowledge base — the curated layer
 
@@ -194,7 +199,7 @@ aimem tui             # operator dashboard
 | [DESIGN-shared-docs.md](docs/DESIGN-shared-docs.md) | sharing the handoff and other documents over the hub |
 | [DESIGN-hub-sync.md](docs/DESIGN-hub-sync.md) | anti-entropy sync over the hub API, named tokens, OpenAPI |
 | [DESIGN-doc-collab.md](docs/DESIGN-doc-collab.md) | git-like reconciliation for shared documents |
-| [DESIGN-structured-docs.md](docs/DESIGN-structured-docs.md) | proposal: record-granular collections, generated markdown |
+| [DESIGN-structured-docs.md](docs/DESIGN-structured-docs.md) | structured collections: record-granular CAS, generated markdown |
 | [COMPARISON.md](docs/COMPARISON.md) | how aimem relates to mem0, Zep, Letta, claude-mem and friends |
 | [CHANGELOG.md](CHANGELOG.md) | what changed, with data-integrity fixes called out |
 

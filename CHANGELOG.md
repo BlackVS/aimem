@@ -9,11 +9,34 @@ upgrading a fleet.
 The format follows [Keep a Changelog](https://keepachangelog.com/1.1.0/);
 this project does not yet promise semantic versioning. The on-disk schema
 version is tracked separately (`currentSchema` in `internal/store/store.go`,
-currently 8); a binary refuses a database newer than it understands.
+currently 9); a binary refuses a database newer than it understands.
 
 ## [Unreleased]
 
 Nothing yet.
+
+## [0.3.0] — 2026-08-30
+
+### Added
+
+- **Structured collections** (`docs/DESIGN-structured-docs.md`): live
+  trees of small JSON records on the hub for authored structured state
+  under concurrent multi-agent edit — the motivating case is a
+  framework's API wiki. The compare-and-swap unit is the RECORD, so
+  writers touching different records never conflict; ids are slash
+  paths forming the tree (`api/messages/create`); group-scoped
+  collections ride the existing knowledge-group machinery. Surfaces:
+  hub API (`/v1/projects/{p}/collections/...`, in OpenAPI + parity),
+  CLI (`aimem col list|get|put|rm|render|import`), MCP tools
+  (`list_records`/`get_record`/`put_record` — scope resolves from the
+  `.aimem.json` `{"collections":[...]}` binding), and a console table
+  editor in the Docs tab (conflict shows the current record to re-apply
+  onto). Markdown is strictly GENERATED (`aimem col render`, one file
+  or a directory tree, deterministic, marked "do not edit") — git
+  receives release cuts, never the living copy. `aimem col import`
+  seeds a collection from an OpenAPI spec; the first live collection is
+  aimem's own API wiki. Schema v9 (two new tables; existing data
+  untouched).
 
 ## [0.2.6] — 2026-08-30
 
