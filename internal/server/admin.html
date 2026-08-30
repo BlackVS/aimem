@@ -1163,7 +1163,7 @@ async function openDoc(proj, name){
     const isHandoff = name === "SESSION-STATE";
     $("docView").innerHTML = `<div class="card">
       <div class="fact">${esc(name)} <span class="dim">rev ${d.rev} · ${esc(d.updated_at)} · by ${esc(d.updated_by||"?")}</span></div>
-      ${isHandoff?'<div class="dim" style="margin:6px 0">This is the session handoff: machines publish it from docs/SESSION-STATE.md on every checkpoint. Editing it here is possible but the next checkpoint from a machine with a different copy will conflict.</div>':""}
+      ${isHandoff?'<div class="dim" style="margin:6px 0">This is the session handoff: machines publish it from docs/SESSION-STATE.md on every checkpoint. Editing it here is possible, but the next checkpoint from a machine whose copy ALSO changed will get a conflict — refused, never overwritten. That machine then resolves it with <code>aimem docs merge SESSION-STATE</code> (three-way merge; overlaps become markers to hand-resolve) and its next checkpoint republishes.</div>':""}
       <textarea id="docBody" style="width:100%;min-height:340px;font:13px/1.5 var(--mono)">${esc(docCur.body)}</textarea>
       <div class="row">
         <button class="act" onclick="saveDoc()">save (rev ${d.rev} &rarr; ${d.rev+1})</button>
@@ -1190,7 +1190,8 @@ async function saveDoc(){
     // newer revision, and its text has to be reconciled by a person.
     const m = String(e.message||e);
     $("docMsg").innerHTML = `<span class="bad">conflict - someone else saved a newer revision. `+
-      `Copy your text somewhere, reopen the document to see theirs, and merge deliberately.</span>`;
+      `Copy your text somewhere, reopen the document to see theirs, and merge deliberately `+
+      `(on a machine with the bound file, <code>aimem docs merge ${esc(docCur.name)}</code> does the three-way merge).</span>`;
     console.log("doc conflict:", m);
     // The listing now shows a revision that is no longer current; a stale
     // "rev 4 by console" next to a conflict about rev 5 is exactly the
