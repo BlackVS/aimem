@@ -29,10 +29,17 @@ authored dataset).
 
 ## The model
 
-A **collection** is a named, per-project set of **records** on the hub.
-A record is a small JSON object with a caller-chosen id (e.g.
-`GET /v1/users`). The hub is the single source of truth; markdown is a
-build artifact.
+A **collection** is a named set of **records** on the hub — owned by a
+project, or (the primary case, per user 2026-08-30) shared by a
+**knowledge group**, because the artifact that motivates this is a
+framework's live wiki that many projects and parallel sessions each
+update in their own part. A record is a small JSON object with a
+caller-chosen id. Ids are slash-separated paths, so a collection is a
+**tree**: `api/messages/create`, `api/messages/list`,
+`api/models/get` — the shape of a real reference wiki (think
+platform.claude.com/docs/en/api: sections → pages → entries), not a
+flat list. The hub is the single source of truth; markdown is a build
+artifact.
 
 - **CAS moves from the file to the record.** Each record carries its
   own rev; writes are compare-and-swap exactly like docs. Two agents
@@ -43,11 +50,18 @@ build artifact.
   Record granularity makes merging unnecessary — that is the entire
   point of the design.
 - **Markdown is generated, one way.** `aimem col render <name>`
-  produces a deterministic file (stable record ordering by group key +
-  id) with a header: `GENERATED from hub collection <name> — do not
-  edit; regenerate with aimem col render`. Commit it to git when a
-  snapshot matters (a release); otherwise regenerate on demand. A
-  generated file is never pulled, pushed, or merged.
+  produces deterministic output (stable ordering: optional per-record
+  `order` field, then id) with a header: `GENERATED from hub
+  collection <name> — do not edit; regenerate with aimem col render`.
+  Rendering to a file flattens the tree into one document; rendering
+  to a directory (`--out docs/api/`) emits one file per branch,
+  mirroring the id paths. A generated file is never pulled, pushed,
+  or merged.
+- **Releases are cuts.** "When needed we just cut them as release to
+  git": render into the consuming repo, commit, tag — that commit IS
+  the frozen snapshot of the wiki at release time, reviewable in the
+  PR like any artifact. Between cuts, git holds the last cut and the
+  hub holds the truth; nobody maintains both by hand.
 
 ## Mechanics
 
@@ -55,6 +69,30 @@ Storage (hub DB, mirroring the docs tables): `collections(project,
 name, created_by)` and `col_records(project, collection, id, body
 JSON, rev, updated_by, updated_at, deleted)` with per-record audited
 history (retain last N revs, like doc_revisions).
+
+Binding (user request, 2026-08-30): a project declares the collections
+it uses in `.aimem.json`, mirroring the existing `"docs"` list —
+
+```json
+{"collections": [
+  {"name": "api-surface", "scope": "group:framework", "render": "docs/api/"},
+  {"name": "glossary"}
+]}
+```
+
+The binding scopes the MCP tools to the declared collections (an agent
+in the project sees exactly its collections, nothing else), and
+`render` names where `aimem col render` writes the generated output
+(file or directory) — optional, because a collection is useful with no
+markdown at all. Scope rides the machinery that already exists: a
+project-scoped collection lives in the project partition like its
+docs; a `group:` collection lives in the knowledge group's database,
+shared by exactly the projects that declared the group — same consent
+model, same physical isolation. Concurrency across sessions needs
+nothing new either: two sessions on different parts of the framework
+touch different records; two sessions on the SAME part collide only on
+the specific record both edited, and the loser re-reads one record and
+re-applies.
 
 API (writer role, OpenAPI + parity test as usual):
 
@@ -92,8 +130,12 @@ per-record markdown bodies in v1 (a record MAY have a `notes` string).
 
 - Not a replacement for shared docs: prose with narrative order (the
   handoff, runbooks) stays whole-file + doc-collab.
-- Not the KB: records are *authored* data with ids and schema-shaped
-  bodies; facts are *distilled* knowledge. No curator involvement.
+- Not the KB, though it rhymes with it (the user's own observation):
+  the KB is *created by the hub's curator* — distilled, confidence-
+  scored, retrieval-ranked, with its own lifecycle (staleness review,
+  supersession). Collections are *authored by the writers themselves*
+  — deliberate reference material with stable ids and a deliberate
+  tree shape. No curator ever touches a collection.
 - Not a general database: no queries beyond get/list in v1, no
   cross-collection joins, no schema enforcement in v1 (a JSON Schema
   per collection is the natural v2 if garbage records become a
@@ -111,8 +153,10 @@ per-record markdown bodies in v1 (a record MAY have a `notes` string).
    with doc-collab's reconcile.
 3. Import bootstrap: `aimem col import <file.json|.md>` to seed a
    collection from an existing document? Useful, but v2.
-4. Group docs equivalent (shared collections across projects)? Defer
-   until a real cross-project dataset appears.
+4. ~~Group docs equivalent?~~ RESOLVED by the user (2026-08-30): group
+   scope is the primary use case (a framework's wiki shared by many
+   projects), in scope for v1 via the existing knowledge-group
+   machinery.
 
 ## Prior art (what the world does today, 2026)
 
