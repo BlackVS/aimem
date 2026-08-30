@@ -15,6 +15,17 @@ currently 9); a binary refuses a database newer than it understands.
 
 Nothing yet.
 
+## [0.3.3] — 2026-08-30
+
+### Changed
+
+- The console wiki view is now a collapsible **tree** instead of a flat
+  heading-per-segment page (which split `admin/get` into two heading
+  rows): branches fold, entries fold too but start open so content
+  stays previewable, and the edit link no longer toggles the fold it
+  sits in. Release bodies now carry the tag's CHANGELOG section
+  (workflow change; v0.2.1–v0.3.2 backfilled).
+
 ## [0.3.2] — 2026-08-30
 
 ### Changed

@@ -1237,40 +1237,62 @@ function colTableHTML(d){
     `<span class="n dim">rev ${x.rev} · ${x.size}B · ${ago(x.updated_at)} by ${esc(x.updated_by||"?")}</span></div>`).join("");
 }
 
-// colWikiHTML mirrors `aimem col render`: headings from path segments,
-// title/description fields promoted, scalars as a definition list,
-// nested shapes as JSON — readable first, with a per-entry edit link.
+// colWikiHTML renders the collection as a collapsible TREE (user
+// feedback: heading-per-segment split "admin/get" into two rows).
+// Branches are <details> nodes, entries fold too but start open so the
+// content stays previewable; title/description are promoted, scalars
+// list inline, nested shapes show as JSON.
 function colWikiHTML(d){
-  let h = "";
-  const emitted = {};
+  const root = {kids:{}, rec:null};
   for(const r of d.recs){
-    const segs = r.id.split("/");
-    for(let i=1;i<segs.length;i++){
-      const pre = segs.slice(0,i).join("/");
-      if(!emitted[pre]){ emitted[pre]=1;
-        h += `<h${Math.min(i+1,6)} style="margin:14px 0 2px">${esc(segs[i-1])}</h${Math.min(i+1,6)}>`; }
+    let n = root;
+    for(const s of r.id.split("/")){
+      n.kids[s] = n.kids[s] || {kids:{}, rec:null};
+      n = n.kids[s];
     }
+    n.rec = r;
+  }
+  const indent = `style="margin-left:14px;border-left:1px solid var(--edge);padding-left:10px"`;
+  const entry = r => {
     let b = {};
     try{ b = (typeof r.body==="object" && r.body) ? r.body : JSON.parse(r.body||"{}"); }catch(e){}
-    const depth = Math.min(segs.length+1,6);
-    const title = (typeof b.title==="string" && b.title) ? b.title : segs[segs.length-1];
-    h += `<h${depth} style="margin:12px 0 2px">${esc(title)} `+
-      `<a class="x dim" style="font-size:11px;font-weight:normal" onclick="openRec('${esc(r.id)}')">edit · rev ${r.rev}</a></h${depth}>`;
-    if(typeof b.description==="string" && b.description) h += `<div style="margin:2px 0 6px">${esc(b.description)}</div>`;
+    let h = "";
+    if(typeof b.description==="string" && b.description) h += `<div style="margin:2px 0 4px">${esc(b.description)}</div>`;
     const keys = Object.keys(b).filter(k=>k!=="title"&&k!=="description").sort();
     const nested = [];
-    let dl = "";
     for(const k of keys){
       const v = b[k];
-      if(v===null || ["string","number","boolean"].includes(typeof v)) dl += `<div class="dim" style="font-size:13px">• <b>${esc(k)}</b>: ${esc(String(v))}</div>`;
+      if(v===null || ["string","number","boolean"].includes(typeof v)) h += `<div class="dim" style="font-size:13px">• <b>${esc(k)}</b>: ${esc(String(v))}</div>`;
       else nested.push(k);
     }
-    h += dl;
     for(const k of nested)
       h += `<div class="dim" style="font-size:12px;margin-top:4px"><b>${esc(k)}</b>:</div>`+
            `<pre style="margin:2px 0;font-size:12px;overflow-x:auto">${esc(JSON.stringify(b[k],null,2))}</pre>`;
-  }
-  return h || '<div class="dim">no entries yet</div>';
+    return h;
+  };
+  // The edit link lives inside a <summary>: stop the click from also
+  // toggling the fold.
+  const editLink = r => `<a class="x dim" style="font-size:11px;font-weight:normal"
+    onclick="event.stopPropagation();event.preventDefault();openRec('${esc(r.id)}')">edit · rev ${r.rev}</a>`;
+  const render = (n, name) => {
+    const kidNames = Object.keys(n.kids).sort();
+    if(!name){ // root: just the children
+      return kidNames.map(k=>render(n.kids[k], k)).join("");
+    }
+    if(!kidNames.length && n.rec){ // pure leaf: one foldable entry row
+      let b = {};
+      try{ b = (typeof n.rec.body==="object" && n.rec.body) ? n.rec.body : JSON.parse(n.rec.body||"{}"); }catch(e){}
+      const title = (typeof b.title==="string" && b.title) ? b.title : name;
+      return `<details open style="margin:3px 0"><summary style="cursor:pointer"><b>${esc(title)}</b> ${editLink(n.rec)}</summary>`+
+        `<div ${indent}>${entry(n.rec)}</div></details>`;
+    }
+    // Branch (possibly with its own record, when both "a" and "a/b" exist).
+    let inner = n.rec ? `<div style="margin:2px 0">${editLink(n.rec)}${entry(n.rec)}</div>` : "";
+    inner += kidNames.map(k=>render(n.kids[k], k)).join("");
+    return `<details open style="margin:3px 0"><summary style="cursor:pointer;font-weight:700">${esc(name)}</summary>`+
+      `<div ${indent}>${inner}</div></details>`;
+  };
+  return render(root, "") || '<div class="dim">no entries yet</div>';
 }
 
 function recEditor(id, rev, bodyText, note){
