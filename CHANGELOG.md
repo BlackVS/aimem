@@ -15,6 +15,16 @@ currently 8); a binary refuses a database newer than it understands.
 
 Nothing yet.
 
+## [0.2.4] — 2026-08-30
+
+### Fixed
+
+- Console doc-conflict hints now say how a conflict is *resolved*, not
+  just that one will happen: the handoff editor's note explains the
+  refuse-never-overwrite contract and points the divergent machine at
+  `aimem docs merge`, and the save-conflict message names the same
+  command for any bound doc.
+
 ## [0.2.3] — 2026-08-29
 
 ### Added
