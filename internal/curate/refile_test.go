@@ -8,9 +8,12 @@ import (
 	"aimem/internal/store"
 )
 
-type fakeRefileSynth struct{ reply string }
+type fakeRefileSynth struct{ reply, prompt string }
 
-func (f *fakeRefileSynth) Complete(string) (string, Usage, error) { return f.reply, Usage{}, nil }
+func (f *fakeRefileSynth) Complete(p string) (string, Usage, error) {
+	f.prompt = p
+	return f.reply, Usage{}, nil
+}
 
 func TestProposeChapters(t *testing.T) {
 	reg, err := store.NewRegistry(t.TempDir())
@@ -45,7 +48,7 @@ func TestProposeChapters(t *testing.T) {
 		`{"assign":[{"fact_id":%q,"chapter":"ops"}],
 		  "new_chapters":[{"name":"testing","about":"test facts","fact_ids":[%q,"01a0-hallucinated"]}]}`,
 		ids[0], ids[1]) + "\n```"}
-	plan, err := ProposeChapters(db, "x", "charter", []Chapter{{Name: "ops", About: "o"}}, syn, 0)
+	plan, err := ProposeChapters(db, "x", "charter", []Chapter{{Name: "ops", About: "o"}}, syn, 0, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -73,8 +76,49 @@ func TestProposeChaptersRefusal(t *testing.T) {
 	db, _ := reg.Open("group-y")
 	db.Remember("a fact", "test", store.RememberOpts{})
 	syn := &fakeRefileSynth{reply: "I cannot help with that."}
-	if _, err := ProposeChapters(db, "y", "", nil, syn, 0); err == nil ||
+	if _, err := ProposeChapters(db, "y", "", nil, syn, 0, false); err == nil ||
 		!strings.Contains(err.Error(), "no JSON object") {
 		t.Fatalf("refusal should error without writing, got %v", err)
+	}
+}
+
+// TestProposeChaptersRevisit: the re-label pass pools FILED facts with
+// room under the cap, shows their current filings, and add-only assigns
+// from the current chapter set.
+func TestProposeChaptersRevisit(t *testing.T) {
+	reg, _ := store.NewRegistry(t.TempDir())
+	defer reg.Close()
+	db, _ := reg.Open("group-z")
+	idA, _, err := db.Remember("deploy is via installers", "test", store.RememberOpts{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	idB, _, err := db.Remember("unfiled newcomer", "test", store.RememberOpts{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Tag(idA, "chapter:ops", "test"); err != nil {
+		t.Fatal(err)
+	}
+	cands, err := RefileCandidates(db)
+	if err != nil || len(cands) != 1 || cands[0].ID != idA {
+		t.Fatalf("candidates = %+v (%v), want just the filed fact", cands, err)
+	}
+	syn := &fakeRefileSynth{reply: fmt.Sprintf(
+		`{"assign":[{"fact_id":%q,"chapter":"deploy"}],"new_chapters":[]}`, idA)}
+	plan, err := ProposeChapters(db, "z", "charter",
+		[]Chapter{{Name: "ops", About: "o"}, {Name: "deploy", About: "d"}}, syn, 0, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !plan.Revisit || plan.Unfiled != 1 || plan.Considered != 1 {
+		t.Fatalf("plan counts: %+v", plan)
+	}
+	if len(plan.Assign) != 1 || plan.Assign[0].Chapter != "deploy" {
+		t.Fatalf("assign: %+v", plan.Assign)
+	}
+	// The prompt carried the existing filing so the model could judge.
+	if !strings.Contains(syn.prompt, "[ops]") || strings.Contains(syn.prompt, idB) {
+		t.Fatalf("prompt should show current filings and exclude unfiled facts:\n%s", syn.prompt)
 	}
 }

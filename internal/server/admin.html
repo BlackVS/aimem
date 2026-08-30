@@ -657,7 +657,9 @@ async function unfileFact(id, chapter){
     toast("removed from "+chapter); loadFacts();
   }catch(e){ toast(String(e.message||e)); }
 }
-function pickChap(c){curChap=c;kbMenu="";kbPage=1;if(docOpen)toggleDoc();renderTree();renderFacts();}
+// Clicking the selected chapter again deselects it (back to "all"),
+// like origins already did — saves the trip to the "all" row.
+function pickChap(c){curChap = (c && curChap===c) ? "" : c;kbMenu="";kbPage=1;if(docOpen)toggleDoc();renderTree();renderFacts();}
 function pickOrigin(o){curOrigin = curOrigin===o ? "" : o;kbPage=1;if(docOpen)toggleDoc();renderTree();renderFacts();}
 async function loadFacts(){
   if(!curGroup){$("kbFacts").innerHTML="";return;}
@@ -827,6 +829,8 @@ function renderGroups(){
       <div class="row"><span style="width:70px"></span>
         <button class="act" onclick="addChap('${g.id}')">+ chapter</button>
         <button class="act" onclick="proposeChap('${g.id}',this)">propose chapters (AI)</button>
+        <button class="act" title="the chapter set evolved: propose ADDITIONAL labels for already-filed facts (add-only; nothing moves)"
+          onclick="proposeChap('${g.id}',this,1)">re-label filed facts (AI)</button>
         <span class="dim" data-propnote></span>
         <span class="grow"></span>
         <button class="act" data-save onclick="saveGroup('${g.id}')">save ${esc(g.id.slice(6))}</button></div>
@@ -840,11 +844,12 @@ async function factTexts(gid){
   try{ const r=await api(`/v1/projects/${encodeURIComponent(gid)}/memories`);
     return Object.fromEntries((r.memories||[]).map(m=>[m.id,m.text])); }catch(e){ return {}; }
 }
-async function proposeChap(gid,btn){
+async function proposeChap(gid,btn,revisit){
   const note=$("ge-"+gid).querySelector("[data-propnote]");
   btn.disabled=true; note.textContent="asking the curate model… (may take ~30s)";
   try{
-    const plan=await api(`/v1/projects/${encodeURIComponent(gid)}/chapter-proposal`,{method:"POST",body:"{}"});
+    const plan=await api(`/v1/projects/${encodeURIComponent(gid)}/chapter-proposal${revisit?"?revisit=1":""}`,
+      {method:"POST",body:"{}"});
     note.textContent=""; await renderPlan(gid,plan);
   }catch(e){ note.textContent=String(e.message||e); }
   btn.disabled=false;
@@ -858,7 +863,7 @@ async function loadPlan(gid){
 async function renderPlan(gid,plan){
   const box=$("ge-"+gid).querySelector("[data-plan]");
   if(!plan || (!(plan.assign||[]).length && !(plan.new_chapters||[]).length)){
-    box.innerHTML = plan ? `<div class="dim" style="margin-top:6px">proposal found nothing to file (${plan.unfiled||0} unfiled)</div>` : "";
+    box.innerHTML = plan ? `<div class="dim" style="margin-top:6px">proposal found nothing to ${plan.revisit?"re-label":"file"} (${plan.unfiled||0} ${plan.revisit?"filed candidates":"unfiled"})</div>` : "";
     return;
   }
   const texts=await factTexts(gid);
@@ -866,8 +871,8 @@ async function renderPlan(gid,plan){
     <input type="checkbox" checked data-fid="${esc(id)}" style="width:auto;vertical-align:middle">
     ${esc((texts[id]||id).slice(0,160))}</label>`;
   box.innerHTML=`<div class="card" style="margin-top:8px">
-    <h2 style="margin-top:0">chapter proposal <span class="dim">· ${esc(plan.model||"?")} · ${esc((plan.ts||"").replace("T"," ").replace("Z",""))}
-      · ${plan.considered||0}/${plan.unfiled||0} unfiled considered</span></h2>
+    <h2 style="margin-top:0">${plan.revisit?"re-label proposal (add-only)":"chapter proposal"} <span class="dim">· ${esc(plan.model||"?")} · ${esc((plan.ts||"").replace("T"," ").replace("Z",""))}
+      · ${plan.considered||0}/${plan.unfiled||0} ${plan.revisit?"filed candidates":"unfiled"} considered</span></h2>
     ${(plan.new_chapters||[]).map((nc,i)=>`<div data-nc style="margin:6px 0">
       <div class="row"><input type="checkbox" checked data-ncok style="width:auto">
         <input type="text" value="${esc(nc.name)}" data-ncname style="width:160px">

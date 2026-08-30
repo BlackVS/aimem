@@ -15,6 +15,26 @@ currently 9); a binary refuses a database newer than it understands.
 
 Nothing yet.
 
+## [0.3.8] — 2026-08-30
+
+### Added
+
+- **Re-label pass for filed facts**: the chapter set evolves as a KB
+  grows, and facts filed under the early chapters may belong in the
+  newer ones too. `POST .../chapter-proposal?revisit=1` (console:
+  "re-label filed facts (AI)" next to the propose button) pools
+  already-filed facts with room under the 3-chapter cap, shows the
+  model their current filings, and proposes ADDITIONAL labels only —
+  the model can never move or unfile; the same human review/apply flow
+  gates every write. Automatic re-labeling (curation-driven, opt-in
+  per group) is the recorded follow-up once the manual pass proves its
+  judgment.
+
+### Changed
+
+- KB tree: clicking the selected chapter again deselects it (back to
+  "all"), matching how origin filters already behaved.
+
 ## [0.3.7] — 2026-08-30
 
 ### Added

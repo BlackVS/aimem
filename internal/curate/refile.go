@@ -31,8 +31,9 @@ type NewChapter struct {
 type ChapterPlan struct {
 	Assign      []ChapterAssign `json:"assign"`
 	NewChapters []NewChapter    `json:"new_chapters"`
-	Unfiled     int             `json:"unfiled"`         // bucket size at proposal time
+	Unfiled     int             `json:"unfiled"`         // candidate-pool size at proposal time
 	Considered  int             `json:"considered"`      // facts actually shown to the model
+	Revisit     bool            `json:"revisit"`         // pass ran over FILED facts, add-only
 	TS          string          `json:"ts,omitempty"`    // proposal generation time
 	Model       string          `json:"model,omitempty"` // attribution
 	Usage       Usage           `json:"usage"`
@@ -59,6 +60,54 @@ Reply with ONLY a JSON object (no prose, no markdown fences):
 Facts:
 %s`
 
+// revisitPrompt is the RE-LABEL variant (user request, 2026-08-30): a
+// chapter set evolves as the KB grows, and facts filed under the early
+// chapters may belong in the newer ones too. Deliberately ADD-only —
+// moving or unfiling a fact stays a human act in the console, so an
+// over-eager model can only ever add a reversible extra label.
+const revisitPrompt = `You are the knowledge librarian for the shared knowledge base %q.
+Its charter: %s
+
+Current chapters:
+%s
+Below are ALREADY-FILED facts, one per line as "<id>\t[current chapters]\t<text>".
+The chapter set has evolved since these were filed. Propose ADDITIONAL
+chapters from the current list for facts that clearly also belong there
+(at most 3 chapters per fact including its current ones). Do NOT
+propose removing or changing existing filings. Only add where the fit
+is clear — most facts should get nothing. If a distinct cluster has no
+fitting chapter, you may propose a new chapter for it (short
+lowercase-slug name, one-sentence "about"), but prefer the existing set.
+
+Reply with ONLY a JSON object (no prose, no markdown fences):
+{"assign":[{"fact_id":"...","chapter":"<existing name>"}],
+ "new_chapters":[{"name":"...","about":"...","fact_ids":["..."]}]}
+
+Facts:
+%s`
+
+// RefileCandidates lists live facts that ARE filed but still have room
+// under the cap — the revisit pool.
+func RefileCandidates(db *store.DB) ([]store.Memory, error) {
+	mems, err := db.Memories(false)
+	if err != nil {
+		return nil, err
+	}
+	var out []store.Memory
+	for _, m := range mems {
+		n := 0
+		for _, t := range m.Tags {
+			if strings.HasPrefix(t, "chapter:") {
+				n++
+			}
+		}
+		if n > 0 && n < store.MaxChaptersPerFact {
+			out = append(out, m)
+		}
+	}
+	return out, nil
+}
+
 // UnfiledFacts lists a group's live facts carrying no chapter tag.
 func UnfiledFacts(db *store.DB) ([]store.Memory, error) {
 	mems, err := db.Memories(false)
@@ -81,22 +130,27 @@ func UnfiledFacts(db *store.DB) ([]store.Memory, error) {
 	return out, nil
 }
 
-// ProposeChapters runs the proposal pass over a group's unfiled bucket.
-// maxFacts caps how many facts one call considers (token bound); 0 means
-// the default of 80.
-func ProposeChapters(db *store.DB, group, about string, chapters []Chapter, syn Synthesizer, maxFacts int) (*ChapterPlan, error) {
+// ProposeChapters runs the proposal pass: over the group's unfiled
+// bucket by default, or (revisit) over already-filed facts with room
+// under the cap, proposing additional labels from the evolved chapter
+// set. maxFacts caps how many facts one call considers (token bound);
+// 0 means the default of 80.
+func ProposeChapters(db *store.DB, group, about string, chapters []Chapter, syn Synthesizer, maxFacts int, revisit bool) (*ChapterPlan, error) {
 	if maxFacts <= 0 {
 		maxFacts = 80
 	}
-	unfiled, err := UnfiledFacts(db)
+	pool, err := UnfiledFacts(db)
+	if revisit {
+		pool, err = RefileCandidates(db)
+	}
 	if err != nil {
 		return nil, err
 	}
-	plan := &ChapterPlan{Unfiled: len(unfiled), TS: time.Now().UTC().Format(time.RFC3339)}
-	if len(unfiled) == 0 {
+	plan := &ChapterPlan{Unfiled: len(pool), Revisit: revisit, TS: time.Now().UTC().Format(time.RFC3339)}
+	if len(pool) == 0 {
 		return plan, nil
 	}
-	batch := unfiled
+	batch := pool
 	if len(batch) > maxFacts {
 		batch = batch[:maxFacts]
 	}
@@ -115,12 +169,26 @@ func ProposeChapters(db *store.DB, group, about string, chapters []Chapter, syn 
 		if len(text) > 400 {
 			text = text[:400]
 		}
-		fmt.Fprintf(&facts, "%s\t%s\n", m.ID, text)
+		if revisit {
+			var cur []string
+			for _, t := range m.Tags {
+				if c, ok := strings.CutPrefix(t, "chapter:"); ok {
+					cur = append(cur, c)
+				}
+			}
+			fmt.Fprintf(&facts, "%s\t[%s]\t%s\n", m.ID, strings.Join(cur, ","), text)
+		} else {
+			fmt.Fprintf(&facts, "%s\t%s\n", m.ID, text)
+		}
 	}
 	if about == "" {
 		about = "(no charter recorded)"
 	}
-	reply, usage, err := syn.Complete(fmt.Sprintf(refilePrompt, group, about, chapterList, facts.String()))
+	prompt := refilePrompt
+	if revisit {
+		prompt = revisitPrompt
+	}
+	reply, usage, err := syn.Complete(fmt.Sprintf(prompt, group, about, chapterList, facts.String()))
 	plan.Usage = usage
 	if err != nil {
 		return nil, err

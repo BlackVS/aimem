@@ -79,7 +79,11 @@ func (s *Server) proposeChapters(w http.ResponseWriter, r *http.Request) {
 	if raw, _ := db.GetMeta("chapters"); raw != "" {
 		_ = json.Unmarshal([]byte(raw), &chapters)
 	}
-	plan, err := curate.ProposeChapters(db, strings.TrimPrefix(p, "group-"), about, chapters, syn, 0)
+	// ?revisit=1 runs the RE-LABEL variant: already-filed facts get
+	// additional chapters from the evolved set (add-only; the model can
+	// never move or unfile). Same review/apply flow either way.
+	revisit := r.URL.Query().Get("revisit") == "1"
+	plan, err := curate.ProposeChapters(db, strings.TrimPrefix(p, "group-"), about, chapters, syn, 0, revisit)
 	if err != nil {
 		s.fail(w, http.StatusBadGateway, err)
 		return
@@ -90,8 +94,8 @@ func (s *Server) proposeChapters(w http.ResponseWriter, r *http.Request) {
 		s.fail(w, http.StatusInternalServerError, err)
 		return
 	}
-	s.log.Warn("chapter proposal generated", "project", p, "model", model,
-		"unfiled", plan.Unfiled, "assign", len(plan.Assign), "new_chapters", len(plan.NewChapters))
+	s.log.Warn("chapter proposal generated", "project", p, "model", model, "revisit", revisit,
+		"pool", plan.Unfiled, "assign", len(plan.Assign), "new_chapters", len(plan.NewChapters))
 	s.ok(w, plan)
 }
 
