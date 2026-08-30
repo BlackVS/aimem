@@ -189,6 +189,7 @@ aimem tui             # operator dashboard
 | [QUICKSTART.md](docs/QUICKSTART.md) | **start here** - workstation, then hub, then curation |
 | [INSTALL-CLIENT.md](docs/INSTALL-CLIENT.md) | putting aimem on a workstation |
 | [INSTALL-HUB.md](docs/INSTALL-HUB.md) | standing up a hub |
+| [STORAGE-GUIDE.md](docs/STORAGE-GUIDE.md) | what goes where: journal vs KB vs groups vs docs vs wiki, and full-featured project setup |
 | [USER-MANUAL.md](docs/USER-MANUAL.md) | day-to-day use: handoffs, recall, curation |
 | [ADMIN-MANUAL.md](docs/ADMIN-MANUAL.md) | operating a deployment: timers, budgets, multi-hub, troubleshooting |
 | [AI-MANUAL.md](docs/AI-MANUAL.md) | for the agent: how to read and write memory well |

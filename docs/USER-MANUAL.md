@@ -1,6 +1,9 @@
 # aimem — User Manual
 
 Daily use of aimem in a project. Setup lives in `ADMIN-MANUAL.md`.
+Unsure whether something belongs in the knowledge base, a group, a
+shared doc, or the wiki — or starting a big project that uses all of
+them? Read `STORAGE-GUIDE.md` first.
 
 ## What happens automatically
 
