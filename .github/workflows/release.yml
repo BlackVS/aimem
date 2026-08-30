@@ -46,8 +46,25 @@ jobs:
           build windows amd64 aimem-windows-amd64.exe
           (cd dist && sha256sum * > SHA256SUMS)
 
+      # The release body is the tag's CHANGELOG section — written by a
+      # human (or an agent) about what changed, not an auto-generated
+      # commit list. Roll the Unreleased section into the version BEFORE
+      # tagging, or the fallback line ships instead.
+      - name: Extract changelog section
+        env:
+          VER: ${{ github.event.inputs.tag || github.ref_name }}
+        run: |
+          awk -v ver="${VER#v}" '
+            $0 ~ "^## \\[" ver "\\]" {on=1; next}
+            on && /^## \[/ {exit}
+            on {print}
+          ' CHANGELOG.md > release_notes.md
+          if ! grep -q '[^[:space:]]' release_notes.md; then
+            echo "See [CHANGELOG.md](https://github.com/${{ github.repository }}/blob/master/CHANGELOG.md) for details." > release_notes.md
+          fi
+
       - uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ github.event.inputs.tag || github.ref_name }}
-          generate_release_notes: true
+          body_path: release_notes.md
           files: dist/*
