@@ -445,6 +445,7 @@ function treeEntry(g){
       (g.id.startsWith("group-")
         ? `<div class="tc" role="button" tabindex="0" onclick="tab('groups')"><span class="name">chapters &amp; charter (Groups tab)&hellip;</span></div>`
         : `<div class="tc" role="button" tabindex="0" onclick="renameProject('${esc(g.id)}')"><span class="name">rename project&hellip;</span></div>`+
+          `<div class="tc" role="button" tabindex="0" onclick="mergeProjectUI('${esc(g.id)}')"><span class="name">merge into another project&hellip;</span></div>`+
           `<div class="tc danger" role="button" tabindex="0" onclick="dropProjectUI('${esc(g.id)}')"><span class="name">drop project&hellip;</span></div>`) +
       `</div>`;
   }
@@ -590,6 +591,35 @@ async function renameProject(id){
   toast("renamed to "+name.trim()+" - pin it in .aimem.json to make it stick");
   const o = await api("/v1/overview"); OV=o.projects||[]; renderGroups(); renderKB();
 }
+// mergeProjectUI folds one project into another — the fix for one real
+// project living under two ids (a derived id from before its
+// .aimem.json {"project"} pin, plus the pinned name), which splits the
+// origin facet ("from RC" vs "from RC-000...").
+async function mergeProjectUI(id){
+  const others = OV.map(p=>p.id)
+    .filter(x=>x!==id && x!=="user" && !x.startsWith("group-")).sort();
+  const msg = [
+    `Merge "${id}" INTO which project? It is then removed.`,
+    "",
+    "Its journal, facts and curation history fold into the target "+
+      "(idempotent - a re-run completes, never duplicates), and shared "+
+      "knowledge bases relabel their citations. Use this when one real "+
+      "project exists under two ids. Refused if the source holds shared "+
+      "docs or collections (migrate those first).",
+    "",
+    "Existing projects: "+others.join(", ")
+  ].join("\n");
+  const into = prompt(msg, "");
+  if(into===null || !into.trim() || into.trim()===id) return;
+  try{
+    const r = await api("/v1/projects/"+encodeURIComponent(id)+"/merge-into",
+      {method:"POST", body:JSON.stringify({into:into.trim()})});
+    if(curGroup===id) curGroup = into.trim();
+    delete memCache[id]; delete memCache[into.trim()];
+    toast(`merged: +${r.events} events, +${r.memories} facts into ${r.into}`);
+    const o = await api("/v1/overview"); OV=o.projects||[]; renderGroups(); renderKB();
+  }catch(e){ toast("merge failed: "+String(e.message||e)); }
+}
 // The tree scales: only the selected scope expands, and the sidebar
 // scrolls on its own when the list outgrows the viewport.
 function renderTree(){
@@ -661,10 +691,10 @@ function renderFacts(){
     const origin=(m.sources||[]).filter(s=>s.startsWith("project:")).map(s=>s.slice(8));
     return `<div class="card" style="--i:${i};border-left-color:${chs.length?chapColor(chs[0]):"var(--edge)"}">
       <div class="acts">
-        <button class="act" onclick="supersede('${m.id}')">supersede</button>
+        <button class="act" onclick="editFact('${m.id}')">edit</button>
         <button class="act danger" onclick="forget('${m.id}')">forget</button>
       </div>
-      <div class="fact">${esc(m.text)}</div>
+      <div class="fact" id="ftx-${m.id}">${esc(m.text)}</div>
       <div class="srcs">
         <span class="chip">${esc(m.kind||"fact")}</span>
         ${chs.map((c,ci)=>`<span class="chip ch"${ci?"":' title="primary — the design document files this fact here"'}>${
@@ -705,13 +735,34 @@ async function forget(id){
   await api(`/v1/projects/${encodeURIComponent(curGroup)}/memories/${id}/forget`,{method:"POST",body:"{}"});
   toast("fact retired"); loadFacts();
 }
-async function supersede(id){
+// "Edit" is the user's intent; SUPERSESSION is how the store implements
+// it — the old text stays in the fact's lineage, never overwritten.
+// The editor is in-card and multiline (a prompt() box made long facts
+// unreadable and uneditable).
+function autoGrow(ta){ ta.style.height="auto"; ta.style.height=(ta.scrollHeight+2)+"px"; }
+function editFact(id){
   const m=(memCache[curGroup]||[]).find(x=>x.id===id);
-  const txt=prompt("Replacement text:", m?m.text:"");
-  if(!txt || (m && txt===m.text)) return;  // unchanged text is not a change
+  const el=$("ftx-"+id);
+  if(!m || !el || el.dataset.editing) return;
+  el.dataset.editing="1";
+  el.innerHTML = `<textarea id="fed-${id}" oninput="autoGrow(this)"
+      style="width:100%;font:inherit;line-height:inherit;resize:vertical"></textarea>
+    <div class="row" style="margin-top:4px">
+      <button class="act" onclick="saveFact('${id}')">save</button>
+      <button class="act" onclick="renderFacts()">cancel</button>
+      <span class="dim" style="font-size:12px">saving keeps the previous text in this fact's lineage</span>
+    </div>`;
+  const ta=$("fed-"+id);
+  ta.value=m.text;  // set as value, not innerHTML: the text is data
+  autoGrow(ta); ta.focus();
+}
+async function saveFact(id){
+  const m=(memCache[curGroup]||[]).find(x=>x.id===id);
+  const txt=$("fed-"+id).value.trim();
+  if(!txt || (m && txt===m.text)){ renderFacts(); return; } // unchanged is not a change
   await api(`/v1/projects/${encodeURIComponent(curGroup)}/memories/${id}/supersede`,
-    {method:"POST",body:JSON.stringify({text:txt})});
-  toast("fact superseded"); loadFacts();
+    {method:"POST",body:JSON.stringify({text:txt, actor:"console"})});
+  toast("saved — previous version kept in lineage"); loadFacts();
 }
 
 /* ---------- Design document view ---------- */
@@ -1549,15 +1600,19 @@ async function loadReview(){
     $("revList").innerHTML = items.map(it=>`<div class="card" id="rev-${esc(it.id)}">
       <div class="acts">
         <button class="act" onclick="revConfirm('${esc(proj)}','${esc(it.id)}')">still true</button>
-        <button class="act" onclick="revEdit('${esc(it.id)}')">update&hellip;</button>
+        <button class="act" onclick="revEdit('${esc(it.id)}')">edit&hellip;</button>
         <button class="act danger" onclick="revForget('${esc(proj)}','${esc(it.id)}')">expire</button>
       </div>
       <div class="fact">${esc(it.text)}</div>
       <div class="srcs"><span class="chip">${esc(it.kind)}</span>
         <span class="dim">conf ${(it.confidence??0).toFixed(2)} · corroboration ${it.corroboration} · last seen ${ago(it.last_seen)}</span></div>
-      <div class="row" id="revEd-${esc(it.id)}" hidden>
-        <input id="revTx-${esc(it.id)}" type="text" class="grow" value="${esc(it.text)}">
-        <button class="act" onclick="revSupersede('${esc(proj)}','${esc(it.id)}')">supersede</button>
+      <div id="revEd-${esc(it.id)}" hidden>
+        <textarea id="revTx-${esc(it.id)}" oninput="autoGrow(this)"
+          style="width:100%;font:inherit;line-height:inherit;resize:vertical">${esc(it.text)}</textarea>
+        <div class="row" style="margin-top:4px">
+          <button class="act" onclick="revSupersede('${esc(proj)}','${esc(it.id)}')">save</button>
+          <span class="dim" style="font-size:12px">saving keeps the previous text in this fact's lineage</span>
+        </div>
       </div>
     </div>`).join("");
   }catch(e){ $("revList").innerHTML = `<div class="bad">${esc(String(e.message||e))}</div>`; }
@@ -1572,7 +1627,11 @@ async function revConfirm(proj, id){
   }catch(e){ toast("confirm failed: "+String(e.message||e)); }
 }
 
-function revEdit(id){ const ed = $("revEd-"+id); ed.hidden = !ed.hidden; }
+function revEdit(id){
+  const ed = $("revEd-"+id);
+  ed.hidden = !ed.hidden;
+  if(!ed.hidden){ const ta=$("revTx-"+id); autoGrow(ta); ta.focus(); }
+}
 
 async function revSupersede(proj, id){
   const text = $("revTx-"+id).value.trim();
@@ -1580,9 +1639,9 @@ async function revSupersede(proj, id){
   try{
     await api(`/v1/projects/${encodeURIComponent(proj)}/memories/${encodeURIComponent(id)}/supersede`,
       {method:"POST", body:JSON.stringify({text, actor:"console"})});
-    toast("superseded (lineage kept)");
+    toast("saved — previous version kept in lineage");
     $("rev-"+id)?.remove();
-  }catch(e){ toast("supersede failed: "+String(e.message||e)); }
+  }catch(e){ toast("edit failed: "+String(e.message||e)); }
 }
 
 async function revForget(proj, id){

@@ -48,6 +48,9 @@
     "/v1/projects/{p}/rename": {
       "post": {"summary": "Rename a project: moves journal, facts, embeddings, curate cursor; relabels project:<id> citations in group DBs; refuses reserved ids and existing targets", "x-role": "admin", "parameters": [{"$ref": "#/components/parameters/p"}], "responses": {"200": {"description": "renamed"}}}
     },
+    "/v1/projects/{p}/merge-into": {
+      "post": {"summary": "Fold this project into an existing one ({into}) and remove it: events dedup on idempotency key, memories merge staleness-wins, runs id-idempotent, group citations relabel; refuses if the source holds docs/collections. For one project split across two ids", "x-role": "admin", "parameters": [{"$ref": "#/components/parameters/p"}], "responses": {"200": {"description": "{merged, into, events, memories, curate_runs}"}}}
+    },
     "/v1/projects/{p}/sessions": {
       "get": {"summary": "Sessions seen in a project", "x-role": "writer", "parameters": [{"$ref": "#/components/parameters/p"}], "responses": {"200": {"description": "session list"}}}
     },

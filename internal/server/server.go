@@ -108,6 +108,7 @@ func (s *Server) Routes() []Route {
 		{"GET", "/v1/overview", s.overview, false},
 		{"DELETE", "/v1/projects/{p}", s.dropProject, true},
 		{"POST", "/v1/projects/{p}/rename", s.renameProject, true},
+		{"POST", "/v1/projects/{p}/merge-into", s.mergeProject, true},
 		{"GET", "/v1/projects/{p}/docs", s.listDocs, false},
 		{"GET", "/v1/projects/{p}/docs/{name}", s.getDoc, false},
 		{"GET", "/v1/projects/{p}/docs/{name}/log", s.docLog, false},

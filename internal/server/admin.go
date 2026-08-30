@@ -285,6 +285,35 @@ func (s *Server) renameProject(w http.ResponseWriter, r *http.Request) {
 	s.ok(w, map[string]string{"renamed": id, "to": name})
 }
 
+// mergeProject folds one project into another (store.MergeProject):
+// the fix for one real project split across two ids — a derived id from
+// before its .aimem.json pin plus the pinned name — which doubles the
+// KB origin facet and the catalog.
+func (s *Server) mergeProject(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("p")
+	var body struct {
+		Into string `json:"into"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		s.fail(w, http.StatusBadRequest, err)
+		return
+	}
+	into := strings.TrimSpace(body.Into)
+	events, mems, runs, err := s.reg.MergeProject(id, into)
+	if err != nil {
+		s.fail(w, http.StatusBadRequest, err)
+		return
+	}
+	// The source's curate cursor is meaningless once the source is gone.
+	if err := os.Remove(filepath.Join(s.reg.Root(), "curate", id+".cursor")); err != nil && !os.IsNotExist(err) {
+		s.log.Warn("stale curate cursor not removed after merge", "project", id, "err", err)
+	}
+	s.log.Warn("project merged", "from", id, "into", into,
+		"events", events, "memories", mems, "runs", runs)
+	s.ok(w, map[string]any{"merged": id, "into": into,
+		"events": events, "memories": mems, "curate_runs": runs})
+}
+
 func (s *Server) curateRuns(w http.ResponseWriter, r *http.Request) {
 	if db := s.withDB(w, r); db != nil {
 		runs, err := db.CurateRuns()

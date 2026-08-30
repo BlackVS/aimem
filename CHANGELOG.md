@@ -15,6 +15,31 @@ currently 9); a binary refuses a database newer than it understands.
 
 Nothing yet.
 
+## [0.3.6] — 2026-08-30
+
+### Added
+
+- **Merge two ids of the same project**: `POST
+  /v1/projects/{p}/merge-into {into}` (admin) folds one project's
+  journal, facts, and curation history into another and removes the
+  source — the fix for one real project living under two ids (a
+  derived id from before its `.aimem.json` `{"project"}` pin plus the
+  pinned name), which splits the KB's origin facet. Every copy path is
+  the idempotent machinery sync already trusts, so a re-run after a
+  partial failure completes rather than duplicates; group citations
+  relabel like rename; refused while the source holds shared docs or
+  collections (names could collide silently). Console: "merge into
+  another project…" in the KB tree's ⋯ menu.
+
+### Changed
+
+- The console verb for changing a fact's text is now **edit** (was
+  "supersede" — the mechanism's name, not the user's intent;
+  supersession with full lineage is still exactly what happens, and
+  the toast says so). The KB tab's editor is now in-card and multiline
+  (a one-line `prompt()` made long facts unreadable), and the Review
+  tab's update flow uses the same auto-growing textarea.
+
 ## [0.3.5] — 2026-08-30
 
 ### Changed
