@@ -454,7 +454,7 @@ function treeEntry(g){
     // every reference — rename and drop are ordinary-project actions.
     rows += `<div class="kbmenu">` +
       (g.id.startsWith("group-")
-        ? `<div class="tc" role="button" tabindex="0" onclick="tab('groups')"><span class="name">chapters &amp; charter (Groups tab)&hellip;</span></div>`
+        ? `<div class="tc" role="button" tabindex="0" onclick="tab('groups')"><span class="name">chapters, charter, AI propose / re-label (Groups tab)&hellip;</span></div>`
         : `<div class="tc" role="button" tabindex="0" onclick="renameProject('${esc(g.id)}')"><span class="name">rename project&hellip;</span></div>`+
           `<div class="tc" role="button" tabindex="0" onclick="mergeProjectUI('${esc(g.id)}')"><span class="name">merge into another project&hellip;</span></div>`+
           `<div class="tc danger" role="button" tabindex="0" onclick="dropProjectUI('${esc(g.id)}')"><span class="name">drop project&hellip;</span></div>`) +
