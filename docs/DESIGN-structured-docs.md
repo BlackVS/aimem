@@ -38,8 +38,12 @@ caller-chosen id. Ids are slash-separated paths, so a collection is a
 **tree**: `api/messages/create`, `api/messages/list`,
 `api/models/get` — the shape of a real reference wiki (think
 platform.claude.com/docs/en/api: sections → pages → entries), not a
-flat list. The hub is the single source of truth; markdown is a build
-artifact.
+flat list. One hub hosts **any number of such wikis** for different
+projects and groups side by side — collections partition exactly like
+docs and KBs do, so a work hub can carry one framework's API wiki, an
+unrelated product's config matrix, and a group glossary without any of
+them seeing the others. The hub is the single source of truth;
+markdown is a build artifact.
 
 - **CAS moves from the file to the record.** Each record carries its
   own rev; writes are compare-and-swap exactly like docs. Two agents
@@ -157,6 +161,20 @@ per-record markdown bodies in v1 (a record MAY have a `notes` string).
    scope is the primary use case (a framework's wiki shared by many
    projects), in scope for v1 via the existing knowledge-group
    machinery.
+
+## Dogfood first: the aimem wiki
+
+The first live collection is aimem's own (user, 2026-08-30). Natural
+seed: the hub API reference — `openapi.json` already holds every
+route, method, role, and description, so a small importer turns each
+route into a record (`api/projects/docs/put`, ...), giving the import
+bootstrap (open question 3) a concrete v1 shape instead of a deferred
+one. Render lands in `docs/API.md` (or `docs/api/` as a tree) with the
+GENERATED header; the parity test keeps openapi.json honest against
+the router, and the collection stays honest against openapi.json by
+being re-importable. From then on aimem's own sessions maintain their
+reference the way the design intends every framework to: edit the
+record, regenerate, cut to git at release.
 
 ## Prior art (what the world does today, 2026)
 
