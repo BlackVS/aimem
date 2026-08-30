@@ -15,6 +15,25 @@ currently 9); a binary refuses a database newer than it understands.
 
 Nothing yet.
 
+## [0.3.5] — 2026-08-30
+
+### Changed
+
+The TUI's parity pass from the architecture review — the console/TUI
+split itself was judged correct (console operates the memory content
+on the hub; the TUI answers "is this machine healthy and flowing"),
+so these are the three local-only gaps, each costing zero network:
+
+- **Pending merge conflicts surface on the Projects tab**: a bound
+  file with a `<file>.merge` preview waiting for `aimem docs merge`
+  now shows as a warning line at the top — the one state on a machine
+  that waits for a human, previously visible only in `aimem logs`.
+- **Spool is broken down per destination**: the Hub tab counts queued
+  EVENTS per spool file ("local service: N, hub work: M") instead of
+  counting files — a 500-line hub spool used to read as "1".
+- **Projects show their hub binding** in a new column, making the
+  multi-hub partition visible at a glance.
+
 ## [0.3.4] — 2026-08-30
 
 The storage-architecture review's parity slice (PROJECT-REVIEW §6):

@@ -5,6 +5,8 @@
 package tui
 
 import (
+	"bytes"
+	"cmp"
 	"crypto/tls"
 	"encoding/json"
 	"fmt"
@@ -25,6 +27,7 @@ import (
 
 	"aimem/internal/adapter"
 	"aimem/internal/curate"
+	"aimem/internal/ident"
 	"aimem/internal/store"
 )
 
@@ -37,6 +40,7 @@ type projectRow struct {
 	ID     string
 	Stats  store.ProjectStats
 	Groups []string
+	Hub    string           // declared hub binding ("" = machine default)
 	Curate *store.CurateRun // newest run, nil if never
 	Today  usage            // since UTC midnight
 	Week   usage            // last 7 days
@@ -87,7 +91,9 @@ type snapshot struct {
 	HubProjects int                 // project count reported by default hub health
 	HubOK       bool                // default hub reachable this refresh
 	Hubs        []hubLine           // every configured hub, for the Hub tab
-	Spool       int                 // queued hub payloads
+	Spool       int                 // queued events, all spools summed
+	SpoolBy     map[string]int      // spool label ("local service", "hub <name>") -> queued events
+	Conflicts   []string            // bound files with a pending .merge preview on THIS machine
 	Timers      []string            // systemd timer lines (best-effort)
 	Tail        []store.StoredEvent // latest events of selected project
 	Err         error
@@ -294,13 +300,18 @@ func (m model) tabBar() string {
 
 func (m model) renderProjects(b *strings.Builder, w, nameW, reqW, maxRows int, compact bool) {
 	s := m.snap
+	// Pending doc-merge conflicts outrank everything: they are the one
+	// state on this machine that waits for a human.
+	for _, c := range s.Conflicts {
+		fmt.Fprintf(b, "  %s\n", warnSt.Render(clip("merge pending — "+c, max(30, w-4))))
+	}
 	// Projects table.
 	if compact {
 		fmt.Fprintf(b, "\n%s\n", bar(w, fmt.Sprintf("  %-*s %5s %-9s",
 			nameW, "project", "mems", "last")))
 	} else {
-		fmt.Fprintf(b, "\n%s\n", bar(w, fmt.Sprintf("  %-*s %6s %5s %5s %6s %-11s %-13s",
-			nameW, "project", "events", "sess", "mems", "embed", "client", "last activity")))
+		fmt.Fprintf(b, "\n%s\n", bar(w, fmt.Sprintf("  %-*s %6s %5s %5s %6s %-8s %-11s %-13s",
+			nameW, "project", "events", "sess", "mems", "embed", "hub", "client", "last activity")))
 	}
 	start := 0
 	if m.selected >= maxRows {
@@ -316,10 +327,10 @@ func (m model) renderProjects(b *strings.Builder, w, nameW, reqW, maxRows int, c
 			line = fmt.Sprintf("%-*s %5d %-9s",
 				nameW, clip(p.ID, nameW), p.Stats.Memories, ago(p.Stats.LastEventTS))
 		} else {
-			line = fmt.Sprintf("%-*s %6d %5d %5d %5d%% %-11s %-13s",
+			line = fmt.Sprintf("%-*s %6d %5d %5d %5d%% %-8s %-11s %-13s",
 				nameW, clip(p.ID, nameW), p.Stats.Events, p.Stats.Sessions, p.Stats.Memories,
-				pct(p.Stats.Embedded, p.Stats.Memories), clip(p.Stats.LastClient, 11),
-				ago(p.Stats.LastEventTS))
+				pct(p.Stats.Embedded, p.Stats.Memories), clip(cmp.Or(p.Hub, "-"), 8),
+				clip(p.Stats.LastClient, 11), ago(p.Stats.LastEventTS))
 		}
 		if i == m.selected {
 			line = selSt.Render("> " + line)
@@ -693,6 +704,7 @@ func collect(root string, selected int) snapshot {
 		return s
 	}
 	sort.Strings(ids)
+	ac := adapter.NewClient(root)
 	for _, id := range ids {
 		db, err := reg.Open(id)
 		if err != nil {
@@ -700,6 +712,18 @@ func collect(root string, selected int) snapshot {
 		}
 		row := projectRow{ID: id}
 		row.Stats, _ = db.Stats()
+		row.Hub, _ = db.GetMeta("hub")
+		// Pending doc-merge previews (DESIGN-doc-collab): local files, so
+		// this costs no network — exactly the "this machine needs a human"
+		// state an always-on dashboard exists to show.
+		if dir := ac.DocDir(id); dir != "" {
+			for _, rel := range ident.ProjectDocs(dir) {
+				if _, err := os.Stat(filepath.Join(dir, filepath.FromSlash(rel)) + ".merge"); err == nil {
+					s.Conflicts = append(s.Conflicts,
+						fmt.Sprintf("%s: %s.merge — resolve with `aimem docs merge %s`", id, rel, ident.DocName(rel)))
+				}
+			}
+		}
 		if raw, _ := db.GetMeta("groups"); raw != "" {
 			json.Unmarshal([]byte(raw), &row.Groups)
 			for _, g := range row.Groups {
@@ -843,8 +867,32 @@ func collect(root string, selected int) snapshot {
 			}
 		}
 	}
+	// Spools are per destination (spool/pending.jsonl for the local
+	// service, spool/hub-<name>.jsonl per hub) — count EVENTS per file,
+	// not files, so "which hub is behind, and by how much" is answerable.
+	// In-flight .replay-* claims are deliberately excluded.
 	if entries, err := os.ReadDir(filepath.Join(root, "spool")); err == nil {
-		s.Spool = len(entries)
+		s.SpoolBy = map[string]int{}
+		for _, e := range entries {
+			name := e.Name()
+			if e.IsDir() || !strings.HasSuffix(name, ".jsonl") {
+				continue
+			}
+			raw, err := os.ReadFile(filepath.Join(root, "spool", name))
+			if err != nil || len(raw) == 0 {
+				continue
+			}
+			n := bytes.Count(raw, []byte{'\n'})
+			if n == 0 {
+				n = 1 // a partial final line is still one queued event
+			}
+			label := "local service"
+			if h, ok := strings.CutPrefix(strings.TrimSuffix(name, ".jsonl"), "hub-"); ok {
+				label = "hub " + h
+			}
+			s.SpoolBy[label] += n
+			s.Spool += n
+		}
 	}
 	// systemd user timers (Linux best-effort; silently absent elsewhere).
 	if out, err := exec.Command("systemctl", "--user", "list-timers",
@@ -1002,7 +1050,14 @@ func (m model) renderHub(b *strings.Builder, w int) {
 		m.renderHubOne(b, h)
 	}
 	if s.Spool > 0 {
-		fmt.Fprintf(b, "  %s\n", warnSt.Render(fmt.Sprintf("spool:      %d checkpoints queued locally for the hub", s.Spool)))
+		// Per-destination breakdown: one aggregate number cannot say
+		// WHICH hub is behind on a multi-hub machine.
+		var parts []string
+		for _, label := range slices.Sorted(maps.Keys(s.SpoolBy)) {
+			parts = append(parts, fmt.Sprintf("%s: %d", label, s.SpoolBy[label]))
+		}
+		fmt.Fprintf(b, "  %s\n", warnSt.Render(fmt.Sprintf("spool:      %d event(s) queued (%s)",
+			s.Spool, strings.Join(parts, ", "))))
 	} else {
 		fmt.Fprintf(b, "  spool:      %s\n", dimSt.Render("empty (real-time push healthy)"))
 	}
