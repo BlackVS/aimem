@@ -193,6 +193,7 @@ aimem tui             # operator dashboard
 | [DESIGN-multiprovider.md](docs/DESIGN-multiprovider.md) | the provider registry |
 | [DESIGN-shared-docs.md](docs/DESIGN-shared-docs.md) | sharing the handoff and other documents over the hub |
 | [DESIGN-hub-sync.md](docs/DESIGN-hub-sync.md) | anti-entropy sync over the hub API, named tokens, OpenAPI |
+| [DESIGN-doc-collab.md](docs/DESIGN-doc-collab.md) | proposed: git-like reconciliation for shared documents |
 | [COMPARISON.md](docs/COMPARISON.md) | how aimem relates to mem0, Zep, Letta, claude-mem and friends |
 | [CHANGELOG.md](CHANGELOG.md) | what changed, with data-integrity fixes called out |
 
