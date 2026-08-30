@@ -15,6 +15,22 @@ currently 9); a binary refuses a database newer than it understands.
 
 Nothing yet.
 
+## [0.3.10] — 2026-08-30
+
+### Fixed
+
+- **Re-label runs now rotate through the candidate pool** (user asked
+  "what happens when facts don't fit in context" — the answer exposed
+  a starvation bug). Proposals batch at 80 facts per call; the unfiled
+  pool drains as facts get filed, but the revisit pool does not, so
+  with stable ordering the same first 80 would be reconsidered forever
+  on a big KB. A persisted cursor now walks the pool across runs,
+  wrapping at the end, advancing only on a successful proposal (a
+  failed model call retries the same slice).
+- KB tree ⋯ menu names what actually lives on the Groups tab
+  ("chapters, charter, AI propose / re-label") — the re-label button
+  was hard to find from the KB tab.
+
 ## [0.3.9] — 2026-08-30
 
 ### Changed

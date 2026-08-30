@@ -7,6 +7,7 @@ package curate
 import (
 	"encoding/json"
 	"fmt"
+	"sort"
 	"strings"
 	"time"
 
@@ -150,6 +151,24 @@ func ProposeChapters(db *store.DB, group, about string, chapters []Chapter, syn 
 	if len(pool) == 0 {
 		return plan, nil
 	}
+	// The unfiled pool DRAINS as facts get filed, so first-N batching
+	// covers it across runs. The revisit pool does not (a fact stays a
+	// candidate until it hits the chapter cap), so with a stable order
+	// the same first N would be reconsidered forever and the rest
+	// starved — rotate through the pool with a persisted cursor instead:
+	// each run picks up where the previous one left off, wrapping.
+	if revisit {
+		sort.Slice(pool, func(i, j int) bool { return pool[i].ID < pool[j].ID })
+		cursor, _ := db.GetMeta("refile_cursor")
+		start := 0
+		for i := range pool {
+			if pool[i].ID > cursor {
+				start = i
+				break
+			}
+		}
+		pool = append(append([]store.Memory{}, pool[start:]...), pool[:start]...)
+	}
 	batch := pool
 	if len(batch) > maxFacts {
 		batch = batch[:maxFacts]
@@ -223,6 +242,13 @@ func ProposeChapters(db *store.DB, group, about string, chapters []Chapter, syn 
 			}
 		}
 		plan.NewChapters[i].FactIDs = ids
+	}
+	// Advance the rotation cursor only on a successful proposal — a
+	// failed synth call must retry the same slice, not skip it. The last
+	// batch entry is the walk's frontier: past the wrap point it is a
+	// low id, which correctly makes the next run continue from there.
+	if revisit {
+		_ = db.SetMeta("refile_cursor", batch[len(batch)-1].ID)
 	}
 	return plan, nil
 }

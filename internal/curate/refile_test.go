@@ -2,6 +2,7 @@ package curate
 
 import (
 	"fmt"
+	"sort"
 	"strings"
 	"testing"
 
@@ -120,5 +121,54 @@ func TestProposeChaptersRevisit(t *testing.T) {
 	// The prompt carried the existing filing so the model could judge.
 	if !strings.Contains(syn.prompt, "[ops]") || strings.Contains(syn.prompt, idB) {
 		t.Fatalf("prompt should show current filings and exclude unfiled facts:\n%s", syn.prompt)
+	}
+}
+
+// TestRevisitRotation: the revisit pool does not drain, so successive
+// runs must walk it with the persisted cursor instead of reconsidering
+// the same first batch forever.
+func TestRevisitRotation(t *testing.T) {
+	reg, _ := store.NewRegistry(t.TempDir())
+	defer reg.Close()
+	db, _ := reg.Open("group-r")
+	var ids []string
+	for i := range 3 {
+		id, _, err := db.Remember(fmt.Sprintf("rotating fact %d", i), "test", store.RememberOpts{})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := db.Tag(id, "chapter:ops", "test"); err != nil {
+			t.Fatal(err)
+		}
+		ids = append(ids, id)
+	}
+	sortedIDs := append([]string{}, ids...)
+	sort.Strings(sortedIDs)
+	syn := &fakeRefileSynth{reply: `{"assign":[],"new_chapters":[]}`}
+	chapters := []Chapter{{Name: "ops", About: "o"}}
+
+	seen := func() []string {
+		var got []string
+		for _, id := range sortedIDs {
+			if strings.Contains(syn.prompt, id) {
+				got = append(got, id)
+			}
+		}
+		return got
+	}
+	if _, err := ProposeChapters(db, "r", "", chapters, syn, 2, true); err != nil {
+		t.Fatal(err)
+	}
+	first := seen()
+	if len(first) != 2 || first[0] != sortedIDs[0] || first[1] != sortedIDs[1] {
+		t.Fatalf("first batch = %v, want first two of %v", first, sortedIDs)
+	}
+	if _, err := ProposeChapters(db, "r", "", chapters, syn, 2, true); err != nil {
+		t.Fatal(err)
+	}
+	second := seen()
+	// Second run continues at the third fact and wraps to the first.
+	if len(second) != 2 || second[0] != sortedIDs[0] || second[1] != sortedIDs[2] {
+		t.Fatalf("second batch = %v, want %v and %v (continue + wrap)", second, sortedIDs[2], sortedIDs[0])
 	}
 }
