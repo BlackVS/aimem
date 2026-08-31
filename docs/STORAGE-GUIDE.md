@@ -32,6 +32,12 @@ Rules of thumb:
   `remember` (MCP) or `aimem remember` for the explicit cases.
 - **Learned, and other projects need it too** → a knowledge group.
   Same lifecycle as the KB, physically separate database, opt-in.
+  The NAME is the group's identity across every hub: members spanning
+  hubs make one logical KB with per-hub replicas (bridged by machines
+  that sync both), and two unrelated groups sharing a name will be
+  silently merged the first time a machine bridges them — treat group
+  names as globally unique, and keep a group's members on one hub if
+  it must never leave that hub.
 - **It reads as a narrative, whole** → shared doc. The handoff is one;
   runbooks are the other common case. One writer at a time per file
   is the natural cadence; diverged copies merge like git.

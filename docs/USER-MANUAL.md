@@ -93,6 +93,14 @@ into memories.
   `{"groups":["ai-infra"]}`. Recall with scope=both surfaces group facts.
   The installer creates `.aimem.json` with empty groups (isolated) unless
   `AIMEM_GROUPS` was set; edit and commit it to join groups later.
+  **The name IS the group's identity** — there is no hub-scoped
+  namespace behind it. A group whose members span hubs is ONE logical
+  KB with a replica per hub, converged (facts and charter alike) by
+  machines that sync both. The flip side: two *unrelated* groups that
+  happen to share a name on different hubs will be silently MERGED the
+  first time any machine declares member projects on both — so treat
+  group names as globally unique across every hub your machines touch,
+  and pick distinctive names for scopes that must never join.
 - **session facts** — opt-in: `.aimem.json` `{"session_facts": 600}`
   injects up to that many tokens of recalled knowledge at session
   start, matched against the previous session's requests (mechanical,

@@ -88,7 +88,13 @@ re-fired hooks stay idempotent.
   storage); `pin` protects from forgetting and ranks first in recall.
 - **Scopes**: project | user (reserved `user` DB) | knowledge groups
   (shared DBs `group-<name>`, projects opt in via `.aimem.json`
-  `{"groups":[...]}`).
+  `{"groups":[...]}`). The group NAME is its whole identity — no
+  hub-scoped namespace, no hidden id. Members spanning hubs make one
+  logical KB with per-hub replicas (machines syncing both hubs carry
+  facts and config between them); two unrelated groups sharing a name
+  on different hubs merge silently the first time a machine bridges
+  them. Group names must be treated as globally unique across every
+  hub a fleet's machines touch.
 - `memory_embeddings(memory_id, model, dim, vec BLOB)` — float32
   little-endian vectors, **in the same SQLite file**. No external vector
   DB: at 10²–10³ facts per project, exact brute-force cosine beats any
