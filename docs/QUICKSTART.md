@@ -23,7 +23,7 @@ curl -fsSL https://raw.githubusercontent.com/BlackVS/aimem/master/boot.sh | bash
 
 ```powershell
 # Windows
-irm https://raw.githubusercontent.com/BlackVS/aimem/master/boot.ps1 | iex
+powershell -NoProfile -ExecutionPolicy Bypass -Command "irm https://raw.githubusercontent.com/BlackVS/aimem/master/boot.ps1 | iex"
 ```
 
 **Restart your Claude Code or OpenCode session** — hooks and plugins load

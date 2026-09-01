@@ -18,8 +18,15 @@ curl -fsSL https://raw.githubusercontent.com/BlackVS/aimem/master/boot.sh | bash
 **Windows (PowerShell)**
 
 ```powershell
-irm https://raw.githubusercontent.com/BlackVS/aimem/master/boot.ps1 | iex
+powershell -NoProfile -ExecutionPolicy Bypass -Command "irm https://raw.githubusercontent.com/BlackVS/aimem/master/boot.ps1 | iex"
 ```
+
+The wrapper matters on a fresh machine: Windows clients default to the
+`Restricted` execution policy, and while `irm | iex` itself is exempt,
+script files are not. The bypass is process-scoped — it changes no
+machine state — and is overridden only by a Group Policy-enforced
+policy (`Get-ExecutionPolicy -List` showing MachinePolicy/UserPolicy),
+which no installer can and should not work around.
 
 Then **restart any running Claude Code or OpenCode session** — hooks and
 plugins are read at startup.

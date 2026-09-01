@@ -1,6 +1,10 @@
 # aimem bootstrap for Windows. Run it INSIDE a project directory.
 #
-#   irm https://raw.githubusercontent.com/BlackVS/aimem/master/boot.ps1 | iex
+#   powershell -NoProfile -ExecutionPolicy Bypass -Command "irm https://raw.githubusercontent.com/BlackVS/aimem/master/boot.ps1 | iex"
+#
+# (The wrapper survives the default Restricted execution policy on a
+# fresh Windows machine; bare `irm ... | iex` works too once fetched,
+# since this script bypasses the policy for the installer it runs.)
 #
 # It downloads the latest release (a prebuilt aimem.exe - no Go needed),
 # unpacks the repository archive for the installer and the OpenCode plugin,

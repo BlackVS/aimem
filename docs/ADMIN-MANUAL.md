@@ -16,7 +16,7 @@ curl -fsSL https://raw.githubusercontent.com/BlackVS/aimem/master/boot.sh | bash
 Windows (PowerShell; supported, tested less than Linux):
 
 ```powershell
-irm https://raw.githubusercontent.com/BlackVS/aimem/master/boot.ps1 | iex
+powershell -NoProfile -ExecutionPolicy Bypass -Command "irm https://raw.githubusercontent.com/BlackVS/aimem/master/boot.ps1 | iex"
 ```
 
 Environment knobs for the boot script:
