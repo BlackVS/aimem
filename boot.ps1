@@ -54,7 +54,13 @@ try {
     }
   }
 
-  & (Join-Path $dest 'install.ps1') -Target $PWD.Path
+  # Run the installer in a child shell with an explicit policy bypass:
+  # `irm | iex` itself is exempt from ExecutionPolicy, but invoking the
+  # downloaded install.ps1 as a FILE is not — on the default Restricted
+  # policy the install died right here (lived 2026-08-31). The bypass is
+  # process-scoped and changes no machine state.
+  & powershell -NoProfile -ExecutionPolicy Bypass -File (Join-Path $dest 'install.ps1') -Target $PWD.Path
+  if ($LASTEXITCODE -ne 0) { throw "install.ps1 failed with exit code $LASTEXITCODE" }
 } finally {
   Remove-Item -Recurse -Force $dest -ErrorAction SilentlyContinue
 }

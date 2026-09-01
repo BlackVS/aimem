@@ -13,7 +13,14 @@ currently 9); a binary refuses a database newer than it understands.
 
 ## [Unreleased]
 
-Nothing yet.
+- boot.ps1 works under the default Restricted execution policy: the
+  downloaded install.ps1 now runs in a child shell with a
+  process-scoped `-ExecutionPolicy Bypass` (`irm | iex` is exempt from
+  the policy, but invoking a downloaded .ps1 as a FILE is not — a
+  fresh machine died right there). No machine state is changed; the
+  scheduled tasks were already policy-safe (they execute aimem.exe
+  directly). boot.ps1 is served from master, so this fix is live
+  without a release.
 
 ## [0.3.12] — 2026-08-30
 
