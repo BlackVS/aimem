@@ -15,6 +15,18 @@ currently 9); a binary refuses a database newer than it understands.
 
 Nothing yet.
 
+## [0.3.16] — 2026-08-31
+
+### Changed
+
+- **Label filters moved beside the search bar, and several combine**
+  (user proposal): a "＋ label filter" picker next to the search box
+  adds labels one at a time; active ones show as removable chips
+  ("facts carrying all N labels" — each added label narrows), and the
+  label chips on fact cards toggle the same set, highlighting when
+  active. The left tree lists only chapters and origins again — its
+  height no longer depends on a scope's label vocabulary at all.
+
 ## [0.3.15] — 2026-08-31
 
 ### Changed

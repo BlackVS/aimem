@@ -209,7 +209,9 @@
       <div class="kbMain">
         <div class="row" style="margin-top:0">
           <input id="kbQ" type="search" class="grow" placeholder="search facts and tags…  (press / to focus)" oninput="kbPage=1;renderFacts()">
+          <select id="kbTagSel" style="width:auto;max-width:200px" onchange="if(this.value)pickTag(this.value);this.value=''"></select>
           <button class="act" id="kbDocBtn" hidden onclick="toggleDoc()">design document</button></div>
+        <div class="row" id="kbTagChips" style="margin-top:4px" hidden></div>
         <div id="kbDoc" class="card doc" hidden></div>
         <div id="kbFacts" class="facts"></div>
       </div>
@@ -340,7 +342,7 @@ function setTheme(t){
 }
 let TOK = localStorage.getItem("aimem_token") || "";
 let OV = [];            // overview rows
-let curGroup = "", curChap = "", curOrigin = "", curTag = "", memCache = {};
+let curGroup = "", curChap = "", curOrigin = "", curTags = [], memCache = {};
 let kbMenu = ""; // open ⋯ menu: "scope:<id>" | "chap:<id>:<name>" | ""
 // 177 facts in one scope is normal, so the list pages: PAGE at a time,
 // extended in place rather than paginated, which keeps browser find
@@ -441,20 +443,16 @@ function treeEntry(g){
   // labels (explicit filing, charter-routed copies), and a label you
   // can see on a card but not filter by read as a bug (user report).
   // Same derivation the origin facet always used.
+  // (Ordinary labels are NOT a tree facet: they filter from the picker
+  // beside the search bar, where several can combine — the tree lists
+  // only chapters and origins.)
   const chaps = (g.chapters||[]).slice();
-  const org = {}, tagCount = {};
+  const org = {};
   if(on){
     const declared = new Set(chaps.map(c=>c.name));
     const derived = new Set();
     for(const m of memCache[g.id]||[]){
-      // Chapters are the chapter:-prefixed tags; everything else is an
-      // ordinary entity label — projects have ONLY those (chapters are
-      // a group concept), so the label facet below is what makes a
-      // project's left bar useful at all (user report: "I see labels,
-      // but in left bar no chapters").
-      for(const t of (m.tags||[]))
-        if(t.startsWith("chapter:")) derived.add(t.slice(8));
-        else tagCount[t] = (tagCount[t]||0)+1;
+      for(const t of (m.tags||[])) if(t.startsWith("chapter:")) derived.add(t.slice(8));
       for(const s of (m.sources||[]).filter(s=>s.startsWith("project:")))
         org[s.slice(8)] = (org[s.slice(8)]||0)+1;
     }
@@ -462,8 +460,7 @@ function treeEntry(g){
       if(!declared.has(n)) chaps.push({name:n, about:"from fact labels (not a declared chapter of this scope)"});
   }
   const orgNames = Object.keys(org).sort();
-  const tagNames = Object.keys(tagCount).sort((a,b)=>tagCount[b]-tagCount[a] || a.localeCompare(b));
-  const hasSub = chaps.length>0 || orgNames.length>0 || tagNames.length>0;
+  const hasSub = chaps.length>0 || orgNames.length>0;
   // Collapsed entries carry their count; an EXPANDED one only when no
   // "all" row follows to show the same number (the duplicate read as
   // two different figures).
@@ -508,20 +505,6 @@ function treeEntry(g){
       rows += `<div class="tc ${curChap==="~"?"on":""}" role="button" tabindex="0" onclick="pickChap('~')">`+
         `<span class="name"><span class="dot" style="background:var(--edge)"></span>unfiled</span>`+
         `<span class="n">${n(counts.unfiled)}</span></div>`;
-    // Label facet: the facts' ordinary tags as a filter — the whole
-    // left bar for project scopes, a refinement for groups. A DROPDOWN
-    // rather than rows (user: a scope can carry dozens of labels and
-    // an expanded list made the bar too long); one row regardless of
-    // count, and it holds every label, most common first. Combines
-    // with the chapter and origin filters; chips on cards toggle the
-    // same filter.
-    if(tagNames.length){
-      rows += `<div class="tsep">labels</div>`+
-        `<div class="tc"><select style="width:100%" onchange="setTag(this.value)">`+
-        `<option value="">all labels (${tagNames.length})</option>`+
-        tagNames.map(t=>`<option value="${esc(t)}" ${curTag===t?"selected":""}>${esc(t)} (${tagCount[t]})</option>`).join("")+
-        `</select></div>`;
-    }
     // Origin facet: which member repo a fact came from — orthogonal to
     // chapters (topic), so both filters combine (computed above, where
     // hasSub needs it).
@@ -681,7 +664,7 @@ function renderKB(){
   updateDocBtn();
   loadFacts();
 }
-function pickGroup(id){curGroup=id;curChap="";curOrigin="";curTag="";kbMenu="";kbPage=1;if(docOpen)toggleDoc();renderKB();updateDocBtn();}
+function pickGroup(id){curGroup=id;curChap="";curOrigin="";curTags=[];kbMenu="";kbPage=1;if(docOpen)toggleDoc();renderKB();updateDocBtn();}
 // Filing is deliberate and reversible: a fact may live in up to 3
 // chapters (the store caps it); the FIRST one filed stays primary and
 // is where the design document places it.
@@ -704,8 +687,31 @@ async function unfileFact(id, chapter){
 // like origins already did — saves the trip to the "all" row.
 function pickChap(c){curChap = (c && curChap===c) ? "" : c;kbMenu="";kbPage=1;if(docOpen)toggleDoc();renderTree();renderFacts();}
 function pickOrigin(o){curOrigin = curOrigin===o ? "" : o;kbPage=1;if(docOpen)toggleDoc();renderTree();renderFacts();}
-function setTag(t){curTag=t;kbPage=1;if(docOpen)toggleDoc();renderTree();renderFacts();}
-function pickTag(t){setTag(curTag===t ? "" : t);}
+// Label filters live NEXT TO THE SEARCH BAR (user request — the tree
+// grew too long), and several can be active at once: each added label
+// NARROWS the list (a fact must carry all of them). pickTag toggles
+// membership — the "+ label" picker and the chips on fact cards are
+// two doors to the same set.
+function pickTag(t){
+  const i = curTags.indexOf(t);
+  if(i >= 0) curTags.splice(i,1); else curTags.push(t);
+  kbPage=1; if(docOpen)toggleDoc(); renderFacts();
+}
+function renderTagBar(){
+  const sel=$("kbTagSel"), chips=$("kbTagChips");
+  const count={};
+  for(const m of memCache[curGroup]||[])
+    for(const t of (m.tags||[])) if(!t.startsWith("chapter:")) count[t]=(count[t]||0)+1;
+  const names=Object.keys(count).filter(t=>!curTags.includes(t))
+    .sort((a,b)=>count[b]-count[a] || a.localeCompare(b));
+  sel.hidden = !names.length && !curTags.length;
+  sel.innerHTML = `<option value="">＋ label filter</option>`+
+    names.map(t=>`<option value="${esc(t)}">${esc(t)} (${count[t]})</option>`).join("");
+  chips.hidden = !curTags.length;
+  chips.innerHTML = curTags.map(t=>`<span class="chip on" style="cursor:pointer" `+
+    `title="remove this label filter" onclick="pickTag('${esc(t)}')">${esc(t)} ×</span>`).join("")+
+    (curTags.length>1?`<span class="dim" style="font-size:12px">facts carrying all ${curTags.length} labels</span>`:"");
+}
 async function loadFacts(){
   if(!curGroup){$("kbFacts").innerHTML="";return;}
   try{
@@ -722,6 +728,7 @@ function chapColor(name){
   return i < 0 ? "var(--edge)" : SPINES[i % SPINES.length];
 }
 function renderFacts(){
+  renderTagBar();
   const q = $("kbQ").value.toLowerCase();
   const gch = (OV.find(p=>p.id===curGroup)||{}).chapters||[];
   let ms = (memCache[curGroup]||[]).slice()
@@ -729,7 +736,7 @@ function renderFacts(){
   if(curChap==="~") ms = ms.filter(m=>!(m.tags||[]).some(t=>t.startsWith("chapter:")));
   else if(curChap) ms = ms.filter(m=>(m.tags||[]).includes("chapter:"+curChap));
   if(curOrigin) ms = ms.filter(m=>(m.sources||[]).includes("project:"+curOrigin));
-  if(curTag) ms = ms.filter(m=>(m.tags||[]).includes(curTag));
+  for(const t of curTags) ms = ms.filter(m=>(m.tags||[]).includes(t));
   if(q) ms = ms.filter(m=>(m.text+" "+(m.tags||[]).join(" ")).toLowerCase().includes(q));
   const total = ms.length;
   ms = ms.slice(0, kbPage*PAGE);
@@ -750,7 +757,7 @@ function renderFacts(){
         ${chs.length<3?`<select class="addch" onchange="fileFact('${m.id}',this.value);this.value=''">
           <option value="">+ chapter</option>${gch.filter(c=>!chs.includes(c.name))
             .map(c=>`<option>${esc(c.name)}</option>`).join("")}</select>`:""}
-        ${tags.map(t=>`<span class="chip" style="cursor:pointer" title="filter by this label" onclick="pickTag('${esc(t)}')">${esc(t)}</span>`).join("")}
+        ${tags.map(t=>`<span class="chip${curTags.includes(t)?" on":""}" style="cursor:pointer" title="toggle this label filter" onclick="pickTag('${esc(t)}')">${esc(t)}</span>`).join("")}
         <span class="dim">${ago(m.created_at)} · conf ${(m.confidence??0).toFixed(2)}`+
         `${m.corroboration?` · ×${m.corroboration}`:""}`+
         `${origin.length?` · from ${esc(origin.join(", "))}`:""}</span>
@@ -842,6 +849,8 @@ async function toggleDoc(){
   $("kbDoc").hidden = !docOpen;
   $("kbFacts").hidden = docOpen;
   $("kbQ").hidden = docOpen;
+  $("kbTagSel").hidden = docOpen;
+  $("kbTagChips").hidden = docOpen || !curTags.length;
   if(!docOpen) return;
   $("kbDoc").innerHTML = '<span class="dim">loading…</span>';
   try{
