@@ -15,6 +15,20 @@ currently 9); a binary refuses a database newer than it understands.
 
 Nothing yet.
 
+## [0.3.21] — 2026-09-04
+
+### Changed
+
+- **Manual fact organization goes through labels, not chapters** (user
+  verdict on 0.3.20's "new chapter…": project chapters that nothing
+  consumes are labels with ceremony). "new chapter…" is gone —
+  chapters are never invented from a fact card; "+ chapter" still
+  offers declared + derived ones where they exist. Instead every fact
+  card gains **"+ label"** (inline input with type-ahead over the
+  scope's vocabulary; free text extends it) and label chips get an ×
+  to untag — add/remove symmetric with chapters, landing in the
+  vocabulary the facet, search, and recall already run on.
+
 ## [0.3.20] — 2026-09-04
 
 ### Fixed

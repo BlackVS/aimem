@@ -213,6 +213,7 @@
             style="width:auto;max-width:200px" autocomplete="off"
             onchange="tagSelPick(this)" onkeydown="if(event.key==='Enter')tagSelPick(this)">
           <datalist id="kbTagList"></datalist>
+          <datalist id="kbAllTags"></datalist>
           <button class="act" id="kbDocBtn" hidden onclick="toggleDoc()">design document</button></div>
         <div class="row" id="kbTagChips" style="margin-top:4px" hidden></div>
         <div id="kbDoc" class="card doc" hidden></div>
@@ -673,17 +674,40 @@ function pickGroup(id){curGroup=id;curChap="";curOrigin="";curTags=[];kbMenu="";
 // is where the design document places it.
 async function fileFact(id, chapter){
   if(!chapter) return;
-  if(chapter==="~new~"){
-    const name = prompt("Name for the new chapter (lowercase letters, digits, dashes — max 56):");
-    if(name===null) return;
-    chapter = name.trim().toLowerCase();
-    if(!/^[a-z0-9][a-z0-9-]{0,55}$/.test(chapter)){ toast("chapter names want lowercase letters/digits/dashes, max 56 chars"); return; }
-    if(["all","unfiled","~"].includes(chapter)){ toast(`"${chapter}" is a reserved view name — pick another`); return; }
-  }
   try{
     await api(`/v1/projects/${encodeURIComponent(curGroup)}/memories/${encodeURIComponent(id)}/tag`,
       {method:"POST", body:JSON.stringify({tag:"chapter:"+chapter})});
     toast("filed in "+chapter); loadFacts();
+  }catch(e){ toast(String(e.message||e)); }
+}
+// Manual organization on any scope goes through LABELS — the
+// vocabulary the facet, search and recall already run on. "+ label"
+// swaps into an inline input with type-ahead over the scope's existing
+// labels (free text allowed: a new label extends the vocabulary).
+function addLabelUI(id){
+  const span=$("addlbl-"+id);
+  span.innerHTML = `<input list="kbAllTags" placeholder="label…" autocomplete="off"
+    style="width:130px;font:12px var(--mono);padding:1px 4px"
+    onkeydown="if(event.key==='Enter')addLabel('${id}',this);else if(event.key==='Escape')renderFacts()"
+    onblur="setTimeout(renderFacts,150)">`;
+  span.querySelector("input").focus();
+}
+async function addLabel(id, inp){
+  const t = inp.value.trim().toLowerCase();
+  if(!t){ renderFacts(); return; }
+  if(t.startsWith("chapter:")){ toast("chapters file via + chapter, not as labels"); return; }
+  if(t.length > 64){ toast("labels cap at 64 characters"); return; }
+  try{
+    await api(`/v1/projects/${encodeURIComponent(curGroup)}/memories/${encodeURIComponent(id)}/tag`,
+      {method:"POST", body:JSON.stringify({tag:t})});
+    toast("labeled "+t); loadFacts();
+  }catch(e){ toast(String(e.message||e)); }
+}
+async function unlabelFact(id, t){
+  try{
+    await api(`/v1/projects/${encodeURIComponent(curGroup)}/memories/${encodeURIComponent(id)}/untag`,
+      {method:"POST", body:JSON.stringify({tag:t})});
+    toast("removed label "+t); loadFacts();
   }catch(e){ toast(String(e.message||e)); }
 }
 async function unfileFact(id, chapter){
@@ -734,6 +758,13 @@ function renderTagBar(facts){
   kbTagSet = new Set(names);
   inp.hidden = !names.length && !curTags.length;
   dl.innerHTML = names.map(t=>`<option value="${esc(t)} (${count[t]})">`).join("");
+  // Raw label names of the WHOLE scope (unfiltered) for the "+ label"
+  // type-ahead on fact cards — adding a label is not limited to ones
+  // co-occurring in the current result set.
+  const all = new Set();
+  for(const m of memCache[curGroup]||[])
+    for(const t of (m.tags||[])) if(!t.startsWith("chapter:")) all.add(t);
+  $("kbAllTags").innerHTML = [...all].sort().map(t=>`<option value="${esc(t)}">`).join("");
   chips.hidden = !curTags.length;
   chips.innerHTML = curTags.map(t=>`<span class="chip on" style="cursor:pointer" `+
     `title="remove this label filter" onclick="pickTag('${esc(t)}')">${esc(t)} ×</span>`).join("")+
@@ -757,18 +788,18 @@ function chapColor(name){
 function renderFacts(){
   const q = $("kbQ").value.toLowerCase();
   // "+ chapter" offers the DECLARED chapters (groups manage a list)
-  // UNIONED with chapters derived from this scope's fact tags — the
-  // declared-only list left the select empty on projects/user, where
-  // the button visibly did nothing (user report). Non-group scopes,
-  // which have no declaration flow, also get "new chapter…" so the
-  // first chapter can be started right here; group chapters stay
-  // managed in the Groups tab.
+  // UNIONED with chapters derived from this scope's fact tags, and
+  // shows only when there is something to offer. Chapters are never
+  // invented from here: group chapters have a management flow (Groups
+  // tab, charter, AI filing, design doc), and project "chapters"
+  // nothing consumes are just labels with ceremony — manual
+  // organization on projects goes through "+ label" instead (user
+  // verdict, 2026-09-04).
   const declared = ((OV.find(p=>p.id===curGroup)||{}).chapters||[]).map(c=>c.name);
   const chapSet = new Set(declared);
   for(const m of memCache[curGroup]||[])
     for(const t of (m.tags||[])) if(t.startsWith("chapter:")) chapSet.add(t.slice(8));
   const chapNames = [...chapSet].sort();
-  const canNew = !curGroup.startsWith("group-") && curGroup!=="";
   let ms = (memCache[curGroup]||[]).slice()
     .sort((a,b)=>(b.created_at||"").localeCompare(a.created_at||""));
   if(curChap==="~") ms = ms.filter(m=>!(m.tags||[]).some(t=>t.startsWith("chapter:")));
@@ -793,11 +824,12 @@ function renderFacts(){
         <span class="chip">${esc(m.kind||"fact")}</span>
         ${chs.map((c,ci)=>`<span class="chip ch"${ci?"":' title="primary — the design document files this fact here"'}>${
           ci?"":"● "}${esc(c)} <a class="x" onclick="unfileFact('${m.id}','${esc(c)}')">×</a></span>`).join("")}
-        ${chs.length<3 && (chapNames.some(c=>!chs.includes(c)) || canNew)
+        ${chs.length<3 && chapNames.some(c=>!chs.includes(c))
           ?`<select class="addch" onchange="fileFact('${m.id}',this.value);this.value=''">
           <option value="">+ chapter</option>${chapNames.filter(c=>!chs.includes(c))
-            .map(c=>`<option>${esc(c)}</option>`).join("")}${canNew?`<option value="~new~">new chapter…</option>`:""}</select>`:""}
-        ${tags.map(t=>`<span class="chip${curTags.includes(t)?" on":""}" style="cursor:pointer" title="toggle this label filter" onclick="pickTag('${esc(t)}')">${esc(t)}</span>`).join("")}
+            .map(c=>`<option>${esc(c)}</option>`).join("")}</select>`:""}
+        ${tags.map(t=>`<span class="chip${curTags.includes(t)?" on":""}" style="cursor:pointer" title="toggle this label filter" onclick="pickTag('${esc(t)}')">${esc(t)} <a class="x" title="remove this label from the fact" onclick="event.stopPropagation();unlabelFact('${m.id}','${esc(t)}')">×</a></span>`).join("")}
+        <span id="addlbl-${m.id}"><span class="chip click dim" title="add a label to this fact" onclick="addLabelUI('${m.id}')">+ label</span></span>
         <span class="dim">${ago(m.created_at)} · conf ${(m.confidence??0).toFixed(2)}`+
         `${m.corroboration?` · ×${m.corroboration}`:""}`+
         `${origin.length?` · from ${esc(origin.join(", "))}`:""}</span>
