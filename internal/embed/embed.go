@@ -11,6 +11,7 @@ import (
 	"encoding/binary"
 	"encoding/json"
 	"fmt"
+	"io"
 	"math"
 	"net/http"
 	"os"
@@ -18,6 +19,7 @@ import (
 	"strings"
 	"time"
 
+	"aimem/internal/llmrate"
 	"aimem/internal/provider"
 )
 
@@ -74,26 +76,17 @@ func ForModel(root, model string) *Client {
 	return &Client{BaseURL: ep.BaseURL, APIKey: ep.Token, Model: ep.Model, Dim: dim}
 }
 
-// Embed returns one vector per input text, in order.
-// Embed returns one vector per input plus the request's token usage (for
-// spend metering).
+// Embed returns one vector per input text, in order, plus the request's
+// token usage (for spend metering). Calls are PACED process-wide and
+// transient upstream blocks retry with backoff (llmrate) — a curation
+// sweep must trickle, not burst, or Cloudflare-fronted provider chains
+// block the whole batch (2026-09-04 incident).
 func (c *Client) Embed(texts []string) ([][]float32, int64, error) {
 	payload := map[string]any{"model": c.Model, "input": texts}
 	if c.Dim > 0 {
 		payload["dimensions"] = c.Dim
 	}
 	body, _ := json.Marshal(payload)
-	req, err := http.NewRequest("POST", strings.TrimRight(c.BaseURL, "/")+"/embeddings", bytes.NewReader(body))
-	if err != nil {
-		return nil, 0, err
-	}
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Authorization", "Bearer "+c.APIKey)
-	resp, err := (&http.Client{Timeout: 60 * time.Second}).Do(req)
-	if err != nil {
-		return nil, 0, err
-	}
-	defer resp.Body.Close()
 	var out struct {
 		Data []struct {
 			Index     int       `json:"index"`
@@ -107,15 +100,54 @@ func (c *Client) Embed(texts []string) ([][]float32, int64, error) {
 			TotalTokens  int64 `json:"total_tokens"`
 		} `json:"usage"`
 	}
-	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
-		return nil, 0, fmt.Errorf("bad embeddings response (HTTP %d): %w", resp.StatusCode, err)
+	var status int
+	for attempt := 0; ; attempt++ {
+		llmrate.Wait()
+		req, err := http.NewRequest("POST", strings.TrimRight(c.BaseURL, "/")+"/embeddings", bytes.NewReader(body))
+		if err != nil {
+			return nil, 0, err
+		}
+		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("Authorization", "Bearer "+c.APIKey)
+		resp, err := (&http.Client{Timeout: 60 * time.Second}).Do(req)
+		if err != nil {
+			return nil, 0, err
+		}
+		raw, _ := io.ReadAll(io.LimitReader(resp.Body, 8<<20))
+		resp.Body.Close()
+		status = resp.StatusCode
+		out.Data, out.Error = nil, nil
+		jsonErr := json.Unmarshal(raw, &out)
+		reason := ""
+		if llmrate.Blocked(status, string(raw)) {
+			reason = fmt.Sprintf("embeddings HTTP %d", status)
+		} else if out.Error != nil && llmrate.BlockedMessage(out.Error.Message) {
+			reason = "embeddings proxy error: " + llmrate.Clip(out.Error.Message, 120)
+		}
+		if reason != "" {
+			llmrate.Penalize(reason)
+			if attempt < llmrate.Retries() {
+				d := llmrate.RetryDelay(attempt)
+				fmt.Fprintf(os.Stderr, "aimem llmrate: retrying embeddings in %s (attempt %d/%d)\n",
+					d.Round(time.Second), attempt+1, llmrate.Retries())
+				time.Sleep(d)
+				continue
+			}
+			return nil, 0, fmt.Errorf("embeddings blocked upstream after %d attempts (HTTP %d): %s",
+				attempt+1, status, llmrate.Clip(string(raw), 200))
+		}
+		if jsonErr != nil {
+			return nil, 0, fmt.Errorf("bad embeddings response (HTTP %d): %s", status, llmrate.Clip(string(raw), 200))
+		}
+		llmrate.Recover()
+		break
 	}
 	tokens := out.Usage.TotalTokens
 	if tokens == 0 {
 		tokens = out.Usage.PromptTokens
 	}
 	if out.Error != nil {
-		return nil, tokens, fmt.Errorf("embeddings error (HTTP %d): %s", resp.StatusCode, out.Error.Message)
+		return nil, tokens, fmt.Errorf("embeddings error (HTTP %d): %s", status, llmrate.Clip(out.Error.Message, 200))
 	}
 	if len(out.Data) != len(texts) {
 		return nil, tokens, fmt.Errorf("embeddings returned %d vectors for %d inputs", len(out.Data), len(texts))

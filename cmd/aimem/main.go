@@ -32,6 +32,7 @@ import (
 	"aimem/internal/curate"
 	"aimem/internal/embed"
 	"aimem/internal/ident"
+	"aimem/internal/llmrate"
 	"aimem/internal/mcp"
 	"aimem/internal/provider"
 	"aimem/internal/server"
@@ -63,6 +64,9 @@ func main() {
 	}
 	server.Version = version
 	loadEnvFile()
+	// LLM call pacing persists across processes (a curate run inherits
+	// the spacing the previous run earned; health/TUI display it).
+	llmrate.SetStateDir(stateRoot())
 	cmd, args := os.Args[1], os.Args[2:]
 	var err error
 	switch cmd {

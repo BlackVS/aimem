@@ -107,6 +107,16 @@ Manual equivalent (what the script sets up):
    # curation + embeddings (optional, enables LLM egress):
    AIMEM_OPENAI_API_KEY=<api key>
    AIMEM_OPENAI_BASE_URL=https://llm.example.com/v1   # omit for api.openai.com
+   # LLM call pacing (optional): outbound curate/embed calls are spaced
+   # AIMEM_LLM_INTERVAL seconds apart (default 2; 0 disables) and retry
+   # transient upstream blocks AIMEM_LLM_RETRIES times (default 3) with
+   # backoff. On a detected rate-block the spacing widens adaptively
+   # (doubling, capped, decaying on success) — Cloudflare-fronted
+   # provider chains block bursts, not clients. Current pacing shows in
+   # `aimem health` (llm_pace) and the TUI's Hub tab; block/retry events
+   # log to stderr with an "aimem llmrate:" prefix.
+   #AIMEM_LLM_INTERVAL=2
+   #AIMEM_LLM_RETRIES=3
    AIMEM_CURATE_MODEL=gpt-4o-mini
    AIMEM_EMBED_MODEL="text-embedding-3-large"
    ```

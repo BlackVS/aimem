@@ -15,6 +15,30 @@ currently 9); a binary refuses a database newer than it understands.
 
 Nothing yet.
 
+## [0.3.23] — 2026-09-04
+
+### Added
+
+- **LLM call pacing with adaptive rate and retry** (incident-driven: a
+  hub's hourly curation sweep burst dozens of requests through a
+  provider chain whose far end sits behind Cloudflare; the bot/rate
+  rules blocked every batch for the hour, while interactive agents on
+  the same chain — one polite request at a time — never saw an error).
+  Outbound curate/embed calls are now spaced process-wide
+  (`AIMEM_LLM_INTERVAL`, default 2s), transient blocks (429/5xx, or an
+  HTML block page where JSON belongs — including one smuggled inside a
+  proxy's error message) retry with backoff (`AIMEM_LLM_RETRIES`,
+  default 3) instead of abandoning the batch, and each detected block
+  **widens the spacing adaptively** (doubling, capped at 2 min,
+  decaying again on success). The penalty persists in the state root,
+  so a curate run inherits the spacing the previous run earned.
+  Visibility: `aimem health` gains `llm_pace` (interval, penalty,
+  spacing, block count, last block), the TUI's Hub tab shows it per
+  hub (amber while penalized), and block/retry/recovery events log
+  with an `aimem llmrate:` prefix. Provider error bodies are truncated
+  in errors and logs — a Cloudflare page is ~8KB of HTML that used to
+  flood the journal.
+
 ## [0.3.22] — 2026-09-04
 
 ### Fixed

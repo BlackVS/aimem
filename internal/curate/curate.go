@@ -12,6 +12,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"os"
 	"os/exec"
@@ -24,6 +25,7 @@ import (
 
 	"aimem/internal/embed"
 	"aimem/internal/ident"
+	"aimem/internal/llmrate"
 	"aimem/internal/store"
 )
 
@@ -643,7 +645,9 @@ func (o *OpenAIExtractor) Extract(events []store.StoredEvent, maxFacts int, grou
 }
 
 // Complete runs one plain text completion — shared by extraction and by
-// design-doc synthesis.
+// design-doc synthesis. Calls are paced process-wide and transient
+// upstream blocks retry with backoff (llmrate; 2026-09-04 incident:
+// Cloudflare-fronted provider chains block bursts, not clients).
 func (o *OpenAIExtractor) Complete(prompt string) (string, Usage, error) {
 	var u Usage
 	// No temperature field: GPT-5-family models reject anything but the
@@ -652,17 +656,6 @@ func (o *OpenAIExtractor) Complete(prompt string) (string, Usage, error) {
 		"model":    o.Model,
 		"messages": []map[string]string{{"role": "user", "content": prompt}},
 	})
-	req, err := http.NewRequest("POST", strings.TrimRight(o.BaseURL, "/")+"/chat/completions", bytes.NewReader(body))
-	if err != nil {
-		return "", u, err
-	}
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Authorization", "Bearer "+o.APIKey)
-	resp, err := (&http.Client{Timeout: 300 * time.Second}).Do(req)
-	if err != nil {
-		return "", u, err
-	}
-	defer resp.Body.Close()
 	var out struct {
 		Choices []struct {
 			Message struct {
@@ -677,20 +670,59 @@ func (o *OpenAIExtractor) Complete(prompt string) (string, Usage, error) {
 			Message string `json:"message"`
 		} `json:"error"`
 	}
-	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
-		return "", u, fmt.Errorf("bad completions response (HTTP %d): %w", resp.StatusCode, err)
-	}
-	u = Usage{InputTokens: out.Usage.PromptTokens, OutputTokens: out.Usage.CompletionTokens}
-	// LiteLLM reports the computed request cost in a response header;
-	// capture it so USD budgets meter real spend where available.
-	if c, err := strconv.ParseFloat(resp.Header.Get("x-litellm-response-cost"), 64); err == nil && c > 0 {
-		u.CostUSD = c
+	var status int
+	for attempt := 0; ; attempt++ {
+		llmrate.Wait()
+		req, err := http.NewRequest("POST", strings.TrimRight(o.BaseURL, "/")+"/chat/completions", bytes.NewReader(body))
+		if err != nil {
+			return "", u, err
+		}
+		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("Authorization", "Bearer "+o.APIKey)
+		resp, err := (&http.Client{Timeout: 300 * time.Second}).Do(req)
+		if err != nil {
+			return "", u, err
+		}
+		raw, _ := io.ReadAll(io.LimitReader(resp.Body, 8<<20))
+		status = resp.StatusCode
+		out.Choices, out.Error = nil, nil
+		jsonErr := json.Unmarshal(raw, &out)
+		u = Usage{InputTokens: out.Usage.PromptTokens, OutputTokens: out.Usage.CompletionTokens}
+		// LiteLLM reports the computed request cost in a response header;
+		// capture it so USD budgets meter real spend where available.
+		if c, err := strconv.ParseFloat(resp.Header.Get("x-litellm-response-cost"), 64); err == nil && c > 0 {
+			u.CostUSD = c
+		}
+		resp.Body.Close()
+		reason := ""
+		if llmrate.Blocked(status, string(raw)) {
+			reason = fmt.Sprintf("completions HTTP %d", status)
+		} else if out.Error != nil && llmrate.BlockedMessage(out.Error.Message) {
+			reason = "completions proxy error: " + llmrate.Clip(out.Error.Message, 120)
+		}
+		if reason != "" {
+			llmrate.Penalize(reason)
+			if attempt < llmrate.Retries() {
+				d := llmrate.RetryDelay(attempt)
+				fmt.Fprintf(os.Stderr, "aimem llmrate: retrying completion in %s (attempt %d/%d)\n",
+					d.Round(time.Second), attempt+1, llmrate.Retries())
+				time.Sleep(d)
+				continue
+			}
+			return "", u, fmt.Errorf("completions blocked upstream after %d attempts (HTTP %d): %s",
+				attempt+1, status, llmrate.Clip(string(raw), 200))
+		}
+		if jsonErr != nil {
+			return "", u, fmt.Errorf("bad completions response (HTTP %d): %s", status, llmrate.Clip(string(raw), 200))
+		}
+		llmrate.Recover()
+		break
 	}
 	if out.Error != nil {
-		return "", u, fmt.Errorf("completions error (HTTP %d): %s", resp.StatusCode, clip(out.Error.Message, 200))
+		return "", u, fmt.Errorf("completions error (HTTP %d): %s", status, clip(out.Error.Message, 200))
 	}
 	if len(out.Choices) == 0 {
-		return "", u, fmt.Errorf("completions returned no choices (HTTP %d)", resp.StatusCode)
+		return "", u, fmt.Errorf("completions returned no choices (HTTP %d)", status)
 	}
 	return out.Choices[0].Message.Content, u, nil
 }

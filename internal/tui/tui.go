@@ -858,10 +858,10 @@ func collect(root string, selected int) snapshot {
 	if hubs, def := adapter.LoadHubs(root); hubs != nil {
 		for _, name := range slices.Sorted(maps.Keys(hubs)) {
 			h := hubs[name]
-			res, projs, ok := cachedHubHealth(h.URL+"/v1/health", h.Token, h.Insecure)
+			res, projs, pace, ok := cachedHubHealth(h.URL+"/v1/health", h.Token, h.Insecure)
 			s.Hubs = append(s.Hubs, hubLine{
 				Name: name, URL: h.URL, Sync: h.Sync, Default: name == def,
-				Res: res, Projects: projs, OK: ok})
+				Res: res, Projects: projs, Pace: pace, OK: ok})
 			if name == def {
 				s.Hub, s.HubRes, s.HubProjects, s.HubOK = h.URL, res, projs, ok
 			}
@@ -996,10 +996,10 @@ var tuiHubHTTPInsecure = &http.Client{
 	Transport: &http.Transport{TLSClientConfig: &tls.Config{InsecureSkipVerify: true}},
 }
 
-func fetchHubHealth(url, token string, insecure bool) (map[string]any, int, bool) {
+func fetchHubHealth(url, token string, insecure bool) (map[string]any, int, map[string]any, bool) {
 	req, err := http.NewRequest("GET", url, nil)
 	if err != nil {
-		return nil, 0, false
+		return nil, 0, nil, false
 	}
 	req.Header.Set("Authorization", "Bearer "+token)
 	cl := tuiHubHTTP
@@ -1008,17 +1008,18 @@ func fetchHubHealth(url, token string, insecure bool) (map[string]any, int, bool
 	}
 	resp, err := cl.Do(req)
 	if err != nil {
-		return nil, 0, false
+		return nil, 0, nil, false
 	}
 	defer resp.Body.Close()
 	var body struct {
 		Projects  int            `json:"projects"`
 		Resources map[string]any `json:"resources"`
+		LLMPace   map[string]any `json:"llm_pace"`
 	}
 	if json.NewDecoder(resp.Body).Decode(&body) != nil {
-		return nil, 0, false
+		return nil, 0, nil, false
 	}
-	return body.Resources, body.Projects, true
+	return body.Resources, body.Projects, body.LLMPace, true
 }
 
 // hubLine is one configured hub's health snapshot for the Hub tab.
@@ -1029,6 +1030,7 @@ type hubLine struct {
 	Default  bool
 	Res      map[string]any
 	Projects int
+	Pace     map[string]any // llm_pace from health: interval/penalty/blocks
 	OK       bool
 }
 
@@ -1079,6 +1081,27 @@ func (m model) renderHubOne(b *strings.Builder, h hubLine) {
 	} else {
 		fmt.Fprintf(b, "  status:     ok (%d projects)\n", h.Projects)
 	}
+	// LLM pacing: how gently this hub is treating its provider chain.
+	// A penalty above zero means upstream rate-blocks were detected and
+	// the spacing widened adaptively (2026-09-04 incident).
+	if p := h.Pace; p != nil {
+		line := fmt.Sprintf("  llm pace:   %.0fs between calls", asFloat(p["spacing_s"]))
+		if pen := asFloat(p["penalty_s"]); pen > 0 {
+			line += fmt.Sprintf("  (base %.0fs + penalty %.0fs)", asFloat(p["interval_s"]), pen)
+		}
+		if n := asInt(p["blocks"]); n > 0 {
+			line += fmt.Sprintf("  · %d block(s)", n)
+			if lb, ok := p["last_block"].(string); ok {
+				line += ", last " + ago(lb)
+			}
+		}
+		if asFloat(p["penalty_s"]) > 0 {
+			line = warnSt.Render(line)
+		} else {
+			line = dimSt.Render(line)
+		}
+		fmt.Fprintln(b, line)
+	}
 	if r := h.Res; r != nil {
 		memPct, diskPct := asInt(r["mem_used_pct"]), asInt(r["disk_used_pct"])
 		mem := fmt.Sprintf("  memory:     %s  (%vMB free of %vMB, aimem rss %vMB)",
@@ -1128,6 +1151,16 @@ func gauge(pct, width int) string {
 		strings.Repeat("-", width-fill), pct)
 }
 
+func asFloat(v any) float64 {
+	switch n := v.(type) {
+	case float64:
+		return n
+	case int:
+		return float64(n)
+	}
+	return 0
+}
+
 func asInt(v any) int {
 	if f, ok := v.(float64); ok {
 		return int(f)
@@ -1142,6 +1175,7 @@ type hubHealthEntry struct {
 	at    time.Time
 	res   map[string]any
 	projs int
+	pace  map[string]any
 	ok    bool
 }
 
@@ -1150,7 +1184,7 @@ var hubHealthCache struct {
 	by map[string]*hubHealthEntry // keyed by health URL
 }
 
-func cachedHubHealth(url, token string, insecure bool) (map[string]any, int, bool) {
+func cachedHubHealth(url, token string, insecure bool) (map[string]any, int, map[string]any, bool) {
 	hubHealthCache.mu.Lock()
 	defer hubHealthCache.mu.Unlock()
 	if hubHealthCache.by == nil {
@@ -1158,10 +1192,10 @@ func cachedHubHealth(url, token string, insecure bool) (map[string]any, int, boo
 	}
 	e := hubHealthCache.by[url]
 	if e != nil && time.Since(e.at) < 10*time.Second {
-		return e.res, e.projs, e.ok
+		return e.res, e.projs, e.pace, e.ok
 	}
 	e = &hubHealthEntry{at: time.Now()}
-	e.res, e.projs, e.ok = fetchHubHealth(url, token, insecure)
+	e.res, e.projs, e.pace, e.ok = fetchHubHealth(url, token, insecure)
 	hubHealthCache.by[url] = e
-	return e.res, e.projs, e.ok
+	return e.res, e.projs, e.pace, e.ok
 }

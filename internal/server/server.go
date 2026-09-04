@@ -19,6 +19,7 @@ import (
 	"time"
 
 	"aimem/internal/embed"
+	"aimem/internal/llmrate"
 	"aimem/internal/schema"
 	"aimem/internal/store"
 )
@@ -552,6 +553,10 @@ func (s *Server) health(w http.ResponseWriter, _ *http.Request) {
 	if res := resources(s.reg.Root()); len(res) > 0 {
 		body["resources"] = res
 	}
+	// LLM call pacing: base interval, adaptive penalty, block count —
+	// the first thing to look at when curation output goes quiet
+	// (2026-09-04: upstream Cloudflare blocked curation bursts).
+	body["llm_pace"] = llmrate.Status()
 	s.ok(w, body)
 }
 
