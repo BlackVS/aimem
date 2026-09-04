@@ -15,6 +15,14 @@ currently 9); a binary refuses a database newer than it understands.
 
 Nothing yet.
 
+## [0.3.18] — 2026-08-31
+
+### Changed
+
+- Label-picker suggestions are one line each — "label (N)" — instead
+  of the two-line value + annotation rendering; the count strips back
+  off when a suggestion is picked.
+
 ## [0.3.17] — 2026-08-31
 
 ### Changed

@@ -706,9 +706,12 @@ function pickTag(t){
 // read as "unsorted"; counts stay visible as option annotations).
 let kbTagSet = new Set();
 function tagSelPick(inp){
-  const v = inp.value.trim();
-  // Accept only a real label of this scope: a datalist allows free
-  // text, and half-typed input must not become a dead filter.
+  let v = inp.value.trim();
+  // Options carry their count inline ("sync (25)") so the list stays
+  // one line per label — strip it back off when picked. Accept only a
+  // real label of this scope: a datalist allows free text, and
+  // half-typed input must not become a dead filter.
+  if(v && !kbTagSet.has(v)) v = v.replace(/ \(\d+\)$/,"");
   if(v && kbTagSet.has(v)){ inp.value=""; pickTag(v); }
 }
 function renderTagBar(){
@@ -719,7 +722,7 @@ function renderTagBar(){
   const names=Object.keys(count).filter(t=>!curTags.includes(t)).sort();
   kbTagSet = new Set(names);
   inp.hidden = !names.length && !curTags.length;
-  dl.innerHTML = names.map(t=>`<option value="${esc(t)}" label="${count[t]} fact${count[t]===1?"":"s"}">`).join("");
+  dl.innerHTML = names.map(t=>`<option value="${esc(t)} (${count[t]})">`).join("");
   chips.hidden = !curTags.length;
   chips.innerHTML = curTags.map(t=>`<span class="chip on" style="cursor:pointer" `+
     `title="remove this label filter" onclick="pickTag('${esc(t)}')">${esc(t)} ×</span>`).join("")+
