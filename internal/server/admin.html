@@ -434,11 +434,26 @@ function treeEntry(g){
   // or origins. A scope with neither used to expand into a lone "all"
   // row (user: "what sense in this?") — now it expands into nothing
   // and keeps its count on the title.
-  const chaps = g.chapters||[];
+  //
+  // Chapters come from the DECLARED list (groups manage one in the
+  // Groups tab) UNIONED with names derived from the facts' own
+  // chapter: tags — projects declare no chapters yet their facts carry
+  // labels (explicit filing, charter-routed copies), and a label you
+  // can see on a card but not filter by read as a bug (user report).
+  // Same derivation the origin facet always used.
+  const chaps = (g.chapters||[]).slice();
   const org = {};
-  if(on) for(const m of memCache[g.id]||[])
-    for(const s of (m.sources||[]).filter(s=>s.startsWith("project:")))
-      org[s.slice(8)] = (org[s.slice(8)]||0)+1;
+  if(on){
+    const declared = new Set(chaps.map(c=>c.name));
+    const derived = new Set();
+    for(const m of memCache[g.id]||[]){
+      for(const t of (m.tags||[])) if(t.startsWith("chapter:")) derived.add(t.slice(8));
+      for(const s of (m.sources||[]).filter(s=>s.startsWith("project:")))
+        org[s.slice(8)] = (org[s.slice(8)]||0)+1;
+    }
+    for(const n of [...derived].sort())
+      if(!declared.has(n)) chaps.push({name:n, about:"from fact labels (not a declared chapter of this scope)"});
+  }
   const orgNames = Object.keys(org).sort();
   const hasSub = chaps.length>0 || orgNames.length>0;
   // Collapsed entries carry their count; an EXPANDED one only when no

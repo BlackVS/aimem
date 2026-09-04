@@ -13,14 +13,30 @@ currently 9); a binary refuses a database newer than it understands.
 
 ## [Unreleased]
 
+Nothing yet.
+
+## [0.3.13] — 2026-08-31
+
+### Fixed
+
+- **Project scopes now show chapter filters in the KB tree.** The tree
+  listed only a scope's DECLARED chapters (a group concept, managed in
+  the Groups tab), while project facts carry `chapter:` labels too
+  (explicit filing, charter-routed copies) — so a label was visible on
+  the fact card but impossible to filter by (user report). Chapter
+  rows now derive from the facts' own tags, unioned with the declared
+  list, exactly the way the origin facet always derived from sources;
+  a derived row's tooltip says it is not a declared chapter of the
+  scope.
 - boot.ps1 works under the default Restricted execution policy: the
   downloaded install.ps1 now runs in a child shell with a
   process-scoped `-ExecutionPolicy Bypass` (`irm | iex` is exempt from
   the policy, but invoking a downloaded .ps1 as a FILE is not — a
   fresh machine died right there). No machine state is changed; the
   scheduled tasks were already policy-safe (they execute aimem.exe
-  directly). boot.ps1 is served from master, so this fix is live
-  without a release.
+  directly). The Windows one-liner is now documented policy-wrapped
+  everywhere. (boot.ps1 is served from master, so this half was live
+  before the release.)
 
 ## [0.3.12] — 2026-08-30
 
