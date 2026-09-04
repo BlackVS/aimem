@@ -673,6 +673,13 @@ function pickGroup(id){curGroup=id;curChap="";curOrigin="";curTags=[];kbMenu="";
 // is where the design document places it.
 async function fileFact(id, chapter){
   if(!chapter) return;
+  if(chapter==="~new~"){
+    const name = prompt("Name for the new chapter (lowercase letters, digits, dashes — max 56):");
+    if(name===null) return;
+    chapter = name.trim().toLowerCase();
+    if(!/^[a-z0-9][a-z0-9-]{0,55}$/.test(chapter)){ toast("chapter names want lowercase letters/digits/dashes, max 56 chars"); return; }
+    if(["all","unfiled","~"].includes(chapter)){ toast(`"${chapter}" is a reserved view name — pick another`); return; }
+  }
   try{
     await api(`/v1/projects/${encodeURIComponent(curGroup)}/memories/${encodeURIComponent(id)}/tag`,
       {method:"POST", body:JSON.stringify({tag:"chapter:"+chapter})});
@@ -749,7 +756,19 @@ function chapColor(name){
 }
 function renderFacts(){
   const q = $("kbQ").value.toLowerCase();
-  const gch = (OV.find(p=>p.id===curGroup)||{}).chapters||[];
+  // "+ chapter" offers the DECLARED chapters (groups manage a list)
+  // UNIONED with chapters derived from this scope's fact tags — the
+  // declared-only list left the select empty on projects/user, where
+  // the button visibly did nothing (user report). Non-group scopes,
+  // which have no declaration flow, also get "new chapter…" so the
+  // first chapter can be started right here; group chapters stay
+  // managed in the Groups tab.
+  const declared = ((OV.find(p=>p.id===curGroup)||{}).chapters||[]).map(c=>c.name);
+  const chapSet = new Set(declared);
+  for(const m of memCache[curGroup]||[])
+    for(const t of (m.tags||[])) if(t.startsWith("chapter:")) chapSet.add(t.slice(8));
+  const chapNames = [...chapSet].sort();
+  const canNew = !curGroup.startsWith("group-") && curGroup!=="";
   let ms = (memCache[curGroup]||[]).slice()
     .sort((a,b)=>(b.created_at||"").localeCompare(a.created_at||""));
   if(curChap==="~") ms = ms.filter(m=>!(m.tags||[]).some(t=>t.startsWith("chapter:")));
@@ -774,9 +793,10 @@ function renderFacts(){
         <span class="chip">${esc(m.kind||"fact")}</span>
         ${chs.map((c,ci)=>`<span class="chip ch"${ci?"":' title="primary — the design document files this fact here"'}>${
           ci?"":"● "}${esc(c)} <a class="x" onclick="unfileFact('${m.id}','${esc(c)}')">×</a></span>`).join("")}
-        ${chs.length<3?`<select class="addch" onchange="fileFact('${m.id}',this.value);this.value=''">
-          <option value="">+ chapter</option>${gch.filter(c=>!chs.includes(c.name))
-            .map(c=>`<option>${esc(c.name)}</option>`).join("")}</select>`:""}
+        ${chs.length<3 && (chapNames.some(c=>!chs.includes(c)) || canNew)
+          ?`<select class="addch" onchange="fileFact('${m.id}',this.value);this.value=''">
+          <option value="">+ chapter</option>${chapNames.filter(c=>!chs.includes(c))
+            .map(c=>`<option>${esc(c)}</option>`).join("")}${canNew?`<option value="~new~">new chapter…</option>`:""}</select>`:""}
         ${tags.map(t=>`<span class="chip${curTags.includes(t)?" on":""}" style="cursor:pointer" title="toggle this label filter" onclick="pickTag('${esc(t)}')">${esc(t)}</span>`).join("")}
         <span class="dim">${ago(m.created_at)} · conf ${(m.confidence??0).toFixed(2)}`+
         `${m.corroboration?` · ×${m.corroboration}`:""}`+

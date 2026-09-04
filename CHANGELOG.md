@@ -15,6 +15,20 @@ currently 9); a binary refuses a database newer than it understands.
 
 Nothing yet.
 
+## [0.3.20] — 2026-09-04
+
+### Fixed
+
+- **"+ chapter" on fact cards works in project and user scopes** (it
+  visibly did nothing — the select filled only from the DECLARED
+  chapter list, a group concept, so it rendered empty everywhere
+  else). It now unions declared chapters with ones derived from the
+  scope's fact tags, and non-group scopes gain a "new chapter…" entry
+  (validated name, reserved views refused) so the first chapter can be
+  started right from a fact; the tree's derived chapter rows
+  (v0.3.13) pick it up immediately. Group chapters stay managed in
+  the Groups tab.
+
 ## [0.3.19] — 2026-08-31
 
 ### Changed
