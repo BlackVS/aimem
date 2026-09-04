@@ -1,8 +1,8 @@
 # How aimem compares
 
 Facts below were checked against each project's repository, license
-file, and documentation on 2026-08-29; star counts are approximate as
-of that date. Corrections welcome — a comparison that misstates another
+file, and documentation on 2026-08-29 (lemmalog added 2026-09-04);
+star counts are approximate as of those dates. Corrections welcome — a comparison that misstates another
 project is worse than none, and each of these tools is genuinely good
 at what it optimizes for. Claims we could not verify are marked
 *unverified* rather than guessed.
@@ -22,7 +22,7 @@ were one:
 3. **Deployed memory for a coding agent you already use** — tools that
    attach to Claude Code, OpenCode, or similar via hooks, plugins, or
    MCP: claude-mem, Engram, Basic Memory, Mem0's Claude Code plugin,
-   Cognee's plugin, mcp-memory-service, and aimem.
+   Cognee's plugin, mcp-memory-service, lemmalog, and aimem.
 
 aimem is in the third category. Within it, the split that predicts
 behavior is **hook-based** (capture is mechanical, fires every turn
