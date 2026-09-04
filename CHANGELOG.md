@@ -15,6 +15,16 @@ currently 9); a binary refuses a database newer than it understands.
 
 Nothing yet.
 
+## [0.3.17] — 2026-08-31
+
+### Changed
+
+- The label picker is a **type-to-search combobox** (user: many labels
+  were hard to select and read as unsorted): typing filters the list
+  natively, options sort alphabetically for scanning, per-label fact
+  counts remain as annotations, and only a real label of the scope is
+  accepted (half-typed text never becomes a dead filter).
+
 ## [0.3.16] — 2026-08-31
 
 ### Changed

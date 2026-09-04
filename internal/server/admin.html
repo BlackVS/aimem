@@ -209,7 +209,10 @@
       <div class="kbMain">
         <div class="row" style="margin-top:0">
           <input id="kbQ" type="search" class="grow" placeholder="search facts and tags…  (press / to focus)" oninput="kbPage=1;renderFacts()">
-          <select id="kbTagSel" style="width:auto;max-width:200px" onchange="if(this.value)pickTag(this.value);this.value=''"></select>
+          <input id="kbTagSel" list="kbTagList" placeholder="＋ label filter (type to search)"
+            style="width:auto;max-width:200px" autocomplete="off"
+            onchange="tagSelPick(this)" onkeydown="if(event.key==='Enter')tagSelPick(this)">
+          <datalist id="kbTagList"></datalist>
           <button class="act" id="kbDocBtn" hidden onclick="toggleDoc()">design document</button></div>
         <div class="row" id="kbTagChips" style="margin-top:4px" hidden></div>
         <div id="kbDoc" class="card doc" hidden></div>
@@ -697,16 +700,26 @@ function pickTag(t){
   if(i >= 0) curTags.splice(i,1); else curTags.push(t);
   kbPage=1; if(docOpen)toggleDoc(); renderFacts();
 }
+// The picker is a COMBOBOX (input + datalist): the browser filters the
+// list as you type — the quick filter a plain <select> cannot give —
+// and the options sort alphabetically for scanning (count-ordering
+// read as "unsorted"; counts stay visible as option annotations).
+let kbTagSet = new Set();
+function tagSelPick(inp){
+  const v = inp.value.trim();
+  // Accept only a real label of this scope: a datalist allows free
+  // text, and half-typed input must not become a dead filter.
+  if(v && kbTagSet.has(v)){ inp.value=""; pickTag(v); }
+}
 function renderTagBar(){
-  const sel=$("kbTagSel"), chips=$("kbTagChips");
+  const inp=$("kbTagSel"), dl=$("kbTagList"), chips=$("kbTagChips");
   const count={};
   for(const m of memCache[curGroup]||[])
     for(const t of (m.tags||[])) if(!t.startsWith("chapter:")) count[t]=(count[t]||0)+1;
-  const names=Object.keys(count).filter(t=>!curTags.includes(t))
-    .sort((a,b)=>count[b]-count[a] || a.localeCompare(b));
-  sel.hidden = !names.length && !curTags.length;
-  sel.innerHTML = `<option value="">＋ label filter</option>`+
-    names.map(t=>`<option value="${esc(t)}">${esc(t)} (${count[t]})</option>`).join("");
+  const names=Object.keys(count).filter(t=>!curTags.includes(t)).sort();
+  kbTagSet = new Set(names);
+  inp.hidden = !names.length && !curTags.length;
+  dl.innerHTML = names.map(t=>`<option value="${esc(t)}" label="${count[t]} fact${count[t]===1?"":"s"}">`).join("");
   chips.hidden = !curTags.length;
   chips.innerHTML = curTags.map(t=>`<span class="chip on" style="cursor:pointer" `+
     `title="remove this label filter" onclick="pickTag('${esc(t)}')">${esc(t)} ×</span>`).join("")+
