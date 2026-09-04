@@ -15,6 +15,15 @@ currently 9); a binary refuses a database newer than it understands.
 
 Nothing yet.
 
+## [0.3.22] — 2026-09-04
+
+### Fixed
+
+- Groups tab: proposal/sweep status messages ("asking the curate
+  model…", re-label progress) render on their own line below the
+  chapter buttons instead of inline, where they shoved the save button
+  onto a wrap (user notice).
+
 ## [0.3.21] — 2026-09-04
 
 ### Changed

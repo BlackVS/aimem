@@ -958,9 +958,12 @@ function renderGroups(){
         <button class="act" onclick="proposeChap('${g.id}',this)">propose chapters (AI)</button>
         <button class="act" title="the chapter set evolved: review ALL filed facts and propose ADDITIONAL labels (add-only; nothing moves; cancel anytime; nothing written until you approve)"
           onclick="sweepRelabel('${g.id}',this)">re-label filed facts (AI)</button>
-        <span class="dim" data-propnote></span>
         <span class="grow"></span>
         <button class="act" data-save onclick="saveGroup('${g.id}')">save ${esc(g.id.slice(6))}</button></div>
+      <!-- Status ("asking the curate model…", sweep progress) gets its
+           OWN line: inline, it shoved the save button onto a wrap
+           (user notice). An empty div costs no height. -->
+      <div class="dim" data-propnote style="margin:2px 0 0 78px;font-size:12px"></div>
       <div data-plan></div>
     </div>`;}).join("") || '<div class="dim card">no groups yet</div>';
   for(const g of groups()) loadPlan(g.id);
