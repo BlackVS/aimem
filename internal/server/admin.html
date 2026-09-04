@@ -462,9 +462,6 @@ function treeEntry(g){
       if(!declared.has(n)) chaps.push({name:n, about:"from fact labels (not a declared chapter of this scope)"});
   }
   const orgNames = Object.keys(org).sort();
-  // The label facet lists the most common tags; a long tail stays
-  // reachable through the search box, which matches tags too.
-  const TAGCAP = 15;
   const tagNames = Object.keys(tagCount).sort((a,b)=>tagCount[b]-tagCount[a] || a.localeCompare(b));
   const hasSub = chaps.length>0 || orgNames.length>0 || tagNames.length>0;
   // Collapsed entries carry their count; an EXPANDED one only when no
@@ -511,16 +508,19 @@ function treeEntry(g){
       rows += `<div class="tc ${curChap==="~"?"on":""}" role="button" tabindex="0" onclick="pickChap('~')">`+
         `<span class="name"><span class="dot" style="background:var(--edge)"></span>unfiled</span>`+
         `<span class="n">${n(counts.unfiled)}</span></div>`;
-    // Label facet: the facts' ordinary tags as filters — the whole
-    // left bar for project scopes, a refinement for groups. Combines
-    // with the chapter and origin filters.
+    // Label facet: the facts' ordinary tags as a filter — the whole
+    // left bar for project scopes, a refinement for groups. A DROPDOWN
+    // rather than rows (user: a scope can carry dozens of labels and
+    // an expanded list made the bar too long); one row regardless of
+    // count, and it holds every label, most common first. Combines
+    // with the chapter and origin filters; chips on cards toggle the
+    // same filter.
     if(tagNames.length){
-      rows += `<div class="tsep">labels</div>`;
-      rows += tagNames.slice(0,TAGCAP).map(t=>`<div class="tc ${curTag===t?"on":""}" role="button" tabindex="0" `+
-        `onclick="pickTag('${esc(t)}')"><span class="name">${esc(t)}</span>`+
-        `<span class="n">${tagCount[t]}</span></div>`).join("");
-      if(tagNames.length>TAGCAP)
-        rows += `<div class="tc dim"><span class="name">…${tagNames.length-TAGCAP} more — the search box matches labels too</span></div>`;
+      rows += `<div class="tsep">labels</div>`+
+        `<div class="tc"><select style="width:100%" onchange="setTag(this.value)">`+
+        `<option value="">all labels (${tagNames.length})</option>`+
+        tagNames.map(t=>`<option value="${esc(t)}" ${curTag===t?"selected":""}>${esc(t)} (${tagCount[t]})</option>`).join("")+
+        `</select></div>`;
     }
     // Origin facet: which member repo a fact came from — orthogonal to
     // chapters (topic), so both filters combine (computed above, where
@@ -704,7 +704,8 @@ async function unfileFact(id, chapter){
 // like origins already did — saves the trip to the "all" row.
 function pickChap(c){curChap = (c && curChap===c) ? "" : c;kbMenu="";kbPage=1;if(docOpen)toggleDoc();renderTree();renderFacts();}
 function pickOrigin(o){curOrigin = curOrigin===o ? "" : o;kbPage=1;if(docOpen)toggleDoc();renderTree();renderFacts();}
-function pickTag(t){curTag = curTag===t ? "" : t;kbPage=1;if(docOpen)toggleDoc();renderTree();renderFacts();}
+function setTag(t){curTag=t;kbPage=1;if(docOpen)toggleDoc();renderTree();renderFacts();}
+function pickTag(t){setTag(curTag===t ? "" : t);}
 async function loadFacts(){
   if(!curGroup){$("kbFacts").innerHTML="";return;}
   try{

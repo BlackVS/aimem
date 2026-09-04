@@ -15,6 +15,16 @@ currently 9); a binary refuses a database newer than it understands.
 
 Nothing yet.
 
+## [0.3.15] — 2026-08-31
+
+### Changed
+
+- The label facet is a **dropdown** instead of an expanded row list
+  (user: a scope can carry dozens of labels and the left bar grew too
+  long) — one row regardless of count, holding every label most
+  common first with its fact count; "all labels (N)" clears. Card
+  chips still toggle the same filter.
+
 ## [0.3.14] — 2026-08-31
 
 ### Added
