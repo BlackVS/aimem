@@ -15,6 +15,19 @@ currently 9); a binary refuses a database newer than it understands.
 
 Nothing yet.
 
+## [0.3.14] — 2026-08-31
+
+### Added
+
+- **Label facet in the KB tree** — the real fix behind "no chapters
+  for projects": project facts carry no `chapter:` tags at all; the
+  labels visible on their cards are ordinary entity tags. The left bar
+  now lists the scope's most common labels (count-ordered, capped,
+  long tail via the search box which matches labels too) as toggling
+  filters, combinable with the chapter and origin facets; the label
+  chips on fact cards are clickable shortcuts to the same filter.
+  Groups get the facet too, as a refinement under their chapters.
+
 ## [0.3.13] — 2026-08-31
 
 ### Fixed
