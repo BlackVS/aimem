@@ -54,6 +54,7 @@ the tools genuinely differ:
 | **Engram** (~6.2k★) | yes — `UserPromptSubmit` + `Stop`, no LLM | yes — dedicated post-compaction hook | yes | local-first; optional cloud replication | Go + SQLite |
 | **Basic Memory** (~3.8k★, AGPL-3.0) | no — transcript read once, at `PreCompact` | yes — its headline feature (extractive, no LLM) | yes | via its cloud ($15/mo) | plain Markdown files |
 | **mcp-memory-service** (~1.9k★) | partial — stores only ≥300-char decision/error/learning matches | no — compaction re-injection is off by default | degraded without extras (hash pseudo-vectors) | partial | SQLite |
+| **lemmalog** (~270★, MIT) | no — facts enter through an extraction boundary (LLM extractor, or the agent asserting via MCP); source episodes kept as provenance, not a turn journal | no — persistent memory, but no compaction hook or handoff re-injection | engine, Datalog queries and context assembly are LLM-free; extraction is not | no — snapshot files shareable by path, no sync | Rust crate, TSV snapshots, event-sourced (derived facts rebuilt on load) |
 
 What is genuinely rare is the combination aimem was built around:
 **mechanical verbatim capture on every turn + zero LLM dependency for
@@ -85,6 +86,21 @@ Where the others are stronger than aimem, plainly:
   self-hosted server is "supermemory lite," capped at 10,000 documents
   enforced at the API (the repo license is MIT; the cap is stated in
   the server release notes).
+- **lemmalog** (~270★, Rust, MIT): the deepest *reasoning* story of
+  any tool on this page — memory as a **deductive database**. Datalog
+  rules derive consequences from asserted facts incrementally, `why()`
+  returns proof trees back to source episodes, facts are bi-temporal
+  with point-in-time queries, `what_if` runs hypotheticals with exact
+  store restoration, entities canonicalize through aliasing, and it
+  publishes real LongMemEval/LoCoMo numbers (self-reported but
+  methodologically explicit). aimem's KB stores, ranks, corroborates
+  and supersedes knowledge, but it cannot *infer* from it — lemmalog
+  can, mechanically and explainably. The shapes are complementary
+  rather than competing: lemmalog answers "what follows from what we
+  know, and prove it"; aimem answers "what happened, survive the
+  compaction, and share it across machines" — and does its capture
+  with no LLM in the path, which lemmalog's extraction boundary needs
+  (an LLM extractor, or a disciplined agent asserting by hand).
 
 ## Categories 1–2: SDKs, platforms, and runtimes
 
