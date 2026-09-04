@@ -15,6 +15,16 @@ currently 9); a binary refuses a database newer than it understands.
 
 Nothing yet.
 
+## [0.3.19] — 2026-08-31
+
+### Changed
+
+- The label picker is properly **faceted** (user proposal): with
+  filters active it offers only labels that co-occur in the current
+  result set — chapter, origin, selected labels, and the search text
+  all narrow the suggestions, so a pick can never land on zero facts,
+  and each count is the exact result size of adding that label.
+
 ## [0.3.18] — 2026-08-31
 
 ### Changed

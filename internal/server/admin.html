@@ -714,10 +714,14 @@ function tagSelPick(inp){
   if(v && !kbTagSet.has(v)) v = v.replace(/ \(\d+\)$/,"");
   if(v && kbTagSet.has(v)){ inp.value=""; pickTag(v); }
 }
-function renderTagBar(){
+// renderTagBar receives the ALREADY-FILTERED fact list (user proposal:
+// with filters active, offer only labels that co-occur in the current
+// result set — a suggestion that would land on zero facts is noise).
+// Counts are therefore exact result sizes for adding that label.
+function renderTagBar(facts){
   const inp=$("kbTagSel"), dl=$("kbTagList"), chips=$("kbTagChips");
   const count={};
-  for(const m of memCache[curGroup]||[])
+  for(const m of facts)
     for(const t of (m.tags||[])) if(!t.startsWith("chapter:")) count[t]=(count[t]||0)+1;
   const names=Object.keys(count).filter(t=>!curTags.includes(t)).sort();
   kbTagSet = new Set(names);
@@ -744,7 +748,6 @@ function chapColor(name){
   return i < 0 ? "var(--edge)" : SPINES[i % SPINES.length];
 }
 function renderFacts(){
-  renderTagBar();
   const q = $("kbQ").value.toLowerCase();
   const gch = (OV.find(p=>p.id===curGroup)||{}).chapters||[];
   let ms = (memCache[curGroup]||[]).slice()
@@ -754,6 +757,7 @@ function renderFacts(){
   if(curOrigin) ms = ms.filter(m=>(m.sources||[]).includes("project:"+curOrigin));
   for(const t of curTags) ms = ms.filter(m=>(m.tags||[]).includes(t));
   if(q) ms = ms.filter(m=>(m.text+" "+(m.tags||[]).join(" ")).toLowerCase().includes(q));
+  renderTagBar(ms); // picker offers only labels of the CURRENT result set
   const total = ms.length;
   ms = ms.slice(0, kbPage*PAGE);
   const cards = ms.map((m,i)=>{
