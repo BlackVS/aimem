@@ -78,7 +78,10 @@ conflict. Declare bindings in .aimem.json {"collections":[{"name","scope","rende
 	if err != nil {
 		return err
 	}
-	hubName, _ := ident.ProjectHubName(dir)
+	hubName, err := ident.ProjectHubName(dir)
+	if err != nil {
+		return err // invalid binding must fail loudly, never route to the default hub
+	}
 	_, hub := adapter.ResolveHub(stateRoot(), hubName)
 	if hub == nil {
 		return fmt.Errorf("no hub configured (aimem hub add ...) — collections live on the hub")

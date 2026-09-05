@@ -685,7 +685,10 @@ func (s *srv) docProject(scope string) (string, *adapter.HubConfig, error) {
 	if project == "" {
 		return "", nil, fmt.Errorf("a project or group scope is required on this server")
 	}
-	hubName, _ := ident.ProjectHubName(".")
+	hubName, err := ident.ProjectHubName(".")
+	if err != nil {
+		return "", nil, err // invalid binding must fail loudly, never route to the default hub
+	}
 	_, hub := adapter.ResolveHub(mcpStateRoot(), hubName)
 	if hub == nil {
 		return "", nil, fmt.Errorf("no hub configured - shared documents live on the project's hub; for a bound file, edit it directly and the checkpoint publisher delivers it when a hub is reachable")

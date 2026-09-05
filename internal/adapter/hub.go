@@ -142,6 +142,14 @@ func SaveHub(root string, c *HubConfig) error {
 }
 
 // ResolveHub maps a project's hub binding to a configured hub: the named
+// QuarantineHubName is the reserved routing target for a project whose
+// .aimem.json carries a hub name that fails validation. It is never a
+// configured hub, so pushes spool under it (visible in `aimem logs`)
+// instead of riding to the DEFAULT hub — the leak ProjectHubName's
+// contract forbids. Once the config is fixed, sync delivers from the
+// journal; the quarantine spool is a redundant, idempotent copy.
+const QuarantineHubName = "invalid-hub-binding"
+
 // entry when it exists, else the default. Returns the resolved name so
 // spooling stays per-hub.
 func ResolveHub(root, name string) (string, *HubConfig) {
@@ -193,6 +201,14 @@ var hubHTTPInsecure = &http.Client{
 func (c *Client) pushHub(hubName string, body []byte) {
 	name, hub := ResolveHub(c.root, hubName)
 	if hub == nil {
+		if name == QuarantineHubName {
+			// Invalid hub name in .aimem.json (see spool.go): quarantine
+			// with a message that names the actual fix.
+			if err := c.spoolTo(c.hubSpoolPathFor(name), body); err == nil {
+				c.note("aimem: this project's .aimem.json hub name is INVALID — checkpoint quarantined, not sent to the default hub; fix the \"hub\" value (lowercase letters, digits, dashes)")
+			}
+			return
+		}
 		if name != "" {
 			// Bound to an unconfigured hub: spool under its name so the
 			// data delivers the moment `aimem hub add <name>` runs —

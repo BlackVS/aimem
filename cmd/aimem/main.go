@@ -464,7 +464,10 @@ func hubHandoffNotice(localBody string) string {
 	if err != nil {
 		return ""
 	}
-	hubName, _ := ident.ProjectHubName(".")
+	hubName, err := ident.ProjectHubName(".")
+	if err != nil {
+		return "" // invalid binding: skip hub contact (session start never blocks, and never touches the default hub)
+	}
 	_, hub := adapter.ResolveHub(stateRoot(), hubName)
 	if hub == nil {
 		return ""
