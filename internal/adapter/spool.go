@@ -56,6 +56,16 @@ func (p *Payload) ResolveProjectID() error {
 	if p.ProjectDir != "" && p.Hub == nil {
 		if h, err := ident.ProjectHubName(p.ProjectDir); err == nil {
 			p.Hub = &h
+		} else {
+			// A malformed hub name in a parseable .aimem.json must NOT
+			// fall back to the default hub — that silently moves data
+			// across the hub partition (ProjectHubName's own contract).
+			// Route to a reserved unconfigured name instead: pushHub
+			// spools under it and warns, local capture is untouched, and
+			// once the config is fixed the periodic sync delivers from
+			// the journal — nothing lost, nothing leaked.
+			q := QuarantineHubName
+			p.Hub = &q
 		}
 	}
 	if p.ProjectID != "" || p.ProjectDir == "" {

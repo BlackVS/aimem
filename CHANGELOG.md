@@ -24,6 +24,18 @@ currently 9); a binary refuses a database newer than it understands.
 
 ### Fixed
 
+- **An invalid hub name in `.aimem.json` no longer routes data to the
+  default hub** (data integrity; architecture review C4).
+  `ProjectHubName` returned an error precisely so this could not
+  happen — and every caller discarded it, silently falling back to the
+  default hub and crossing the partition multi-hub exists to defend.
+  Now: checkpoints stay fail-open locally but their hub push is
+  QUARANTINED under a reserved unconfigured name (spooled, with a loud
+  `aimem logs` warning naming the fix; once the config is repaired the
+  periodic sync delivers from the journal — nothing lost, nothing
+  leaked). `aimem docs`, `aimem col`, and the MCP doc tools fail
+  loudly; the session-start handoff notice skips hub contact (session
+  start never blocks).
 - install-hub.sh detects arm64 and installs `aimem-linux-arm64` (it
   hardcoded amd64, so an arm64 hub got an `exec format error` binary).
 

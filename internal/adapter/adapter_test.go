@@ -358,3 +358,27 @@ func TestNoteWritesAndRotates(t *testing.T) {
 		t.Fatalf("post-rotation log wrong: %d bytes", len(raw))
 	}
 }
+
+func TestResolveProjectIDQuarantinesInvalidHubBinding(t *testing.T) {
+	dir := t.TempDir()
+	os.WriteFile(filepath.Join(dir, ".aimem.json"),
+		[]byte(`{"project":"quarantine-test","hub":"BAD NAME!"}`), 0o600)
+	p := &Payload{ProjectDir: dir}
+	if err := p.ResolveProjectID(); err != nil {
+		t.Fatalf("capture must stay fail-open on a bad hub binding: %v", err)
+	}
+	if p.Hub == nil || *p.Hub != QuarantineHubName {
+		t.Fatalf("invalid hub binding must quarantine, not default-route: hub=%v", p.Hub)
+	}
+
+	// A valid binding still resolves normally.
+	os.WriteFile(filepath.Join(dir, ".aimem.json"),
+		[]byte(`{"project":"quarantine-test","hub":"home"}`), 0o600)
+	p2 := &Payload{ProjectDir: dir}
+	if err := p2.ResolveProjectID(); err != nil {
+		t.Fatal(err)
+	}
+	if p2.Hub == nil || *p2.Hub != "home" {
+		t.Fatalf("valid hub binding mangled: %v", p2.Hub)
+	}
+}
