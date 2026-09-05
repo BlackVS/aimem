@@ -462,6 +462,14 @@ func (d *DB) migrate() error {
 	if v > currentSchema {
 		return fmt.Errorf("database schema v%d is newer than this binary (v%d)", v, currentSchema)
 	}
+	// INVARIANT for both FTS pairs below (events_fts here, memories_fts in
+	// v2): external-content FTS5 synced by INSERT/DELETE triggers only.
+	// Nothing may UPDATE an indexed column (events.user_request/
+	// assistant_response, memories.text) — there is no UPDATE trigger, so
+	// such a write would silently desynchronize search. Supersede inserts
+	// a new row and ImportMemory deliberately never touches text for
+	// exactly this reason; a future column update needs an AFTER UPDATE
+	// trigger pair or a RebuildFTS call.
 	if v < 1 {
 		if err := d.step(`
 CREATE TABLE events(
@@ -924,27 +932,57 @@ func (d *DB) Retention(maxAge time.Duration, maxBytes int64) (deleted int64, err
 		deleted += n
 	}
 	if maxBytes > 0 {
-		for {
-			size, err := d.dbSize()
-			if err != nil || size <= maxBytes {
-				return deleted, err
+		// events/memories carry TEXT primary keys, so their implicit
+		// rowids are renumberable by VACUUM — and both FTS indexes are
+		// external-content tables keyed on exactly those rowids. Every
+		// exit from this loop after a VACUUM therefore rebuilds the FTS
+		// indexes, or search could silently return wrong rows forever
+		// (architecture review C5).
+		vacuumed := false
+		defer func() {
+			if !vacuumed {
+				return
 			}
-			res, err := d.sql.Exec(`DELETE FROM events WHERE id IN
+			if rerr := d.RebuildFTS(); rerr != nil && err == nil {
+				err = rerr
+			}
+		}()
+		for {
+			size, serr := d.dbSize()
+			if serr != nil || size <= maxBytes {
+				return deleted, serr
+			}
+			res, derr := d.sql.Exec(`DELETE FROM events WHERE id IN
 (SELECT id FROM events ORDER BY id ASC LIMIT 100)`)
-			if err != nil {
-				return deleted, err
+			if derr != nil {
+				return deleted, derr
 			}
 			n, _ := res.RowsAffected()
 			deleted += n
 			if n == 0 {
 				return deleted, nil
 			}
-			if _, err := d.sql.Exec(`VACUUM`); err != nil {
-				return deleted, err
+			if _, verr := d.sql.Exec(`VACUUM`); verr != nil {
+				return deleted, verr
 			}
+			vacuumed = true
 		}
 	}
 	return deleted, nil
+}
+
+// RebuildFTS rebuilds both external-content FTS indexes from their base
+// tables — the recovery path for any rowid/index desynchronization
+// (VACUUM on the implicit-rowid base tables is the known cause). Safe to
+// run any time; cost is proportional to the journal and KB size.
+func (d *DB) RebuildFTS() error {
+	if _, err := d.sql.Exec(`INSERT INTO events_fts(events_fts) VALUES('rebuild')`); err != nil {
+		return fmt.Errorf("rebuild events_fts: %w", err)
+	}
+	if _, err := d.sql.Exec(`INSERT INTO memories_fts(memories_fts) VALUES('rebuild')`); err != nil {
+		return fmt.Errorf("rebuild memories_fts: %w", err)
+	}
+	return nil
 }
 
 // MaxEventID returns the lexicographically largest event id (UUIDv7 order

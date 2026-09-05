@@ -116,6 +116,8 @@ func main() {
 		err = groupCmd(args)
 	case "drop-project":
 		err = dropProjectCmd(args)
+	case "fts-rebuild":
+		err = ftsRebuildCmd(args)
 	case "dedup":
 		err = dedupCmd(args)
 	case "docs":
@@ -175,6 +177,7 @@ func usage() {
   latest     -p -s           latest session checkpoint
   search     -p -q [-n]      FTS search within a project
   retention  -p [--max-age-days N] [--max-bytes N]
+  fts-rebuild -p <project>|--all   rebuild search indexes from the base tables
   remember   -p|-u <text>    store a curated memory (project or user scope)
   recall     -p|-u -q [-n]   search curated memories (token budget -n)
   memories   -p|-u [-a]      list curated memories (-a includes stale)
@@ -726,6 +729,41 @@ type multiFlag []string
 
 func (m *multiFlag) String() string     { return strings.Join(*m, ", ") }
 func (m *multiFlag) Set(v string) error { *m = append(*m, v); return nil }
+
+// ftsRebuildCmd rebuilds the external-content FTS indexes from their
+// base tables — the manual recovery for a desynchronized search index
+// (retention runs this itself after VACUUM; see store.RebuildFTS).
+func ftsRebuildCmd(args []string) error {
+	fs := flag.NewFlagSet("fts-rebuild", flag.ExitOnError)
+	p := fs.String("p", "", "project id")
+	all := fs.Bool("all", false, "rebuild every database in the registry (projects, user, groups)")
+	fs.Parse(args)
+	if (*p == "") == !*all {
+		return fmt.Errorf("usage: aimem fts-rebuild -p <project> | --all")
+	}
+	reg, err := store.NewRegistry(stateRoot())
+	if err != nil {
+		return err
+	}
+	defer reg.Close()
+	ids := []string{*p}
+	if *all {
+		if ids, err = reg.Projects(); err != nil {
+			return err
+		}
+	}
+	for _, id := range ids {
+		db, err := reg.OpenExisting(id)
+		if err != nil {
+			return fmt.Errorf("%s: %w", id, err)
+		}
+		if err := db.RebuildFTS(); err != nil {
+			return fmt.Errorf("%s: %w", id, err)
+		}
+		fmt.Fprintf(os.Stderr, "aimem: rebuilt search indexes for %s\n", id)
+	}
+	return nil
+}
 
 // dropProjectCmd deletes a whole project DB — via the running service so
 // its open handle is released first; direct registry removal only when no
@@ -1738,11 +1776,39 @@ func curateCmd(args []string) error {
 		"extraction backend: claude (headless subscription CLI) or openai (LiteLLM/OpenAI-compatible API)")
 	model := fs.String("model", "", "extraction model (default: haiku for claude backend, AIMEM_CURATE_MODEL for openai)")
 	all := fs.Bool("all", false, "curate every project journal in the registry (skips user/group memory DBs)")
+	rewind := fs.String("rewind", "", "set the curation cursor and exit (no LLM call): an event id to replay FROM (inclusive), or 'start' for the whole journal")
 	fs.Parse(args)
 	root := stateRoot()
 	reg, err := store.NewRegistry(root)
 	if err != nil {
 		return err
+	}
+	if *rewind != "" {
+		defer reg.Close()
+		if *all || *p == "" {
+			return fmt.Errorf("--rewind needs an explicit -p <project> (never --all)")
+		}
+		if _, err := reg.OpenExisting(*p); err != nil {
+			return fmt.Errorf("no such project %q: %w", *p, err)
+		}
+		cur := ""
+		if *rewind != "start" {
+			// The cursor is exclusive (next run reads id > cursor), so to
+			// replay FROM the named event inclusively, step just behind it.
+			cur = uuidv7.ShiftBack(*rewind, time.Millisecond)
+			if cur == "" {
+				return fmt.Errorf("--rewind wants an event id (UUIDv7) or 'start', got %q", *rewind)
+			}
+		}
+		if err := curate.SetCursor(root, *p, cur); err != nil {
+			return err
+		}
+		if cur == "" {
+			fmt.Fprintf(os.Stderr, "aimem: curation cursor for %s reset to the start of the journal\n", *p)
+		} else {
+			fmt.Fprintf(os.Stderr, "aimem: curation cursor for %s rewound to replay from %s\n", *p, *rewind)
+		}
+		return nil
 	}
 	defer reg.Close()
 	var projects []string
@@ -1873,8 +1939,8 @@ func curateCmd(args []string) error {
 					proj, c.Action, c.OldID, c.Sim, clipLine(c.OldText), clipLine(c.NewText))
 			}
 			if !*dry && rep.ZeroYield() {
-				fmt.Fprintf(os.Stderr, "aimem: curate %s: ZERO-YIELD run — consumed %d events (%s..%s), wrote nothing; if suspicious, re-curate that window\n",
-					proj, rep.EventsRead, rep.FirstEvent, rep.LastEvent)
+				fmt.Fprintf(os.Stderr, "aimem: curate %s: ZERO-YIELD run — consumed %d events (%s..%s), wrote nothing; if suspicious, replay it: aimem curate -p %s --rewind %s\n",
+					proj, rep.EventsRead, rep.FirstEvent, rep.LastEvent, proj, rep.FirstEvent)
 			}
 			// A short batch means the cursor caught up with the journal;
 			// dry runs never advance the cursor, so they get one round.

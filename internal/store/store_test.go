@@ -1,6 +1,7 @@
 package store
 
 import (
+	"fmt"
 	"os"
 	"runtime"
 	"strings"
@@ -284,5 +285,45 @@ func TestRenameProjectRefusals(t *testing.T) {
 		if _, err := r.OpenExisting(id); err != nil {
 			t.Errorf("project %q disappeared after a refused rename: %v", id, err)
 		}
+	}
+}
+
+func TestRebuildFTSRepairsDesync(t *testing.T) {
+	r := newTestRegistry(t)
+	db, _ := r.Open("proj-a")
+	db.Append(testEvent("k1", "t1"))
+	// Violate the no-UPDATE invariant deliberately: there is no UPDATE
+	// trigger, so this desynchronizes events_fts from its base table -
+	// the same class of desync a rowid renumber would cause.
+	if _, err := db.sql.Exec(`UPDATE events SET user_request='quokka sighting report'`); err != nil {
+		t.Fatal(err)
+	}
+	if hits, _ := db.Search("quokka", 0); len(hits) != 0 {
+		t.Fatal("expected desynced index to miss the updated text")
+	}
+	if err := db.RebuildFTS(); err != nil {
+		t.Fatal(err)
+	}
+	if hits, _ := db.Search("quokka", 0); len(hits) != 1 {
+		t.Fatalf("rebuild did not repair the index: %d hits", len(hits))
+	}
+}
+
+func TestRetentionByBytesKeepsSearchConsistent(t *testing.T) {
+	r := newTestRegistry(t)
+	db, _ := r.Open("proj-a")
+	for i := 0; i < 250; i++ {
+		e := testEvent(fmt.Sprintf("k%d", i), fmt.Sprintf("t%d", i))
+		db.Append(e)
+	}
+	// Impossible budget: deletes everything in 100-row batches with a
+	// VACUUM after each - the exact sequence that could renumber rowids
+	// under the external-content FTS index. Must exit clean (rebuild
+	// runs on the way out) and search must agree with the base table.
+	if _, err := db.Retention(0, 1); err != nil {
+		t.Fatalf("retention: %v", err)
+	}
+	if hits, _ := db.Search("login", 0); len(hits) != 0 {
+		t.Fatalf("search returned %d hits from an emptied journal", len(hits))
 	}
 }
