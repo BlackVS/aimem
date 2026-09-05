@@ -13,7 +13,12 @@ currently 9); a binary refuses a database newer than it understands.
 
 ## [Unreleased]
 
-Nothing yet.
+### Changed
+
+- **Releases build only from master.** The release workflow now refuses
+  to build a tag whose commit is not reachable from `master`, so a
+  commit that bypassed the PR gate cannot ship as a release just by
+  being tagged. Part of the move to branch-protected, PR-only master.
 
 ## [0.3.23] — 2026-09-04
 
