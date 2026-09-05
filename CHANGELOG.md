@@ -13,6 +13,20 @@ currently 9); a binary refuses a database newer than it understands.
 
 ## [Unreleased]
 
+### Security
+
+- **Installers verify release binaries against SHA256SUMS** (architecture
+  review C3: the checksum file was generated on every release and never
+  consumed). boot.sh, boot.ps1, and install-hub.sh now abort loudly on a
+  missing sums file or a mismatch — verification failure never degrades
+  into the source-build fallback, which remains reserved for a release
+  with no binary asset at all. macOS uses `shasum -a 256`.
+
+### Fixed
+
+- install-hub.sh detects arm64 and installs `aimem-linux-arm64` (it
+  hardcoded amd64, so an arm64 hub got an `exec format error` binary).
+
 ### Changed
 
 - **Releases build only from master.** The release workflow now refuses

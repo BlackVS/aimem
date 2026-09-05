@@ -68,8 +68,24 @@ else
     case "$URL" in */releases/tag/*) TAG=${URL##*/releases/tag/} ;; esac
   fi
   [ -n "$TAG" ] || { echo "ERROR: cannot resolve latest release of $REPO." >&2; exit 1; }
-  echo "installing aimem $TAG"
-  fetch "$BASE/releases/download/$TAG/aimem-linux-amd64" -o "$HOME_DIR/.local/bin/aimem.new"
+  ASSET=aimem-linux-amd64
+  case "$(uname -m)" in aarch64|arm64) ASSET=aimem-linux-arm64 ;; esac
+  echo "installing aimem $TAG ($ASSET)"
+  fetch "$BASE/releases/download/$TAG/$ASSET" -o "$HOME_DIR/.local/bin/aimem.new"
+  # Verify against the release's SHA256SUMS — this script runs as root, so
+  # an unverified binary is the worst place to skip it. Any failure aborts.
+  fetch "$BASE/releases/download/$TAG/SHA256SUMS" -o "$HOME_DIR/.local/bin/aimem.sums" || {
+    echo "ERROR: release $TAG has no SHA256SUMS; refusing unverified binary." >&2
+    rm -f "$HOME_DIR/.local/bin/aimem.new"; exit 1
+  }
+  WANT=$(awk -v a="$ASSET" '$2==a{print $1}' "$HOME_DIR/.local/bin/aimem.sums")
+  GOT=$(sha256sum "$HOME_DIR/.local/bin/aimem.new" | awk '{print $1}')
+  rm -f "$HOME_DIR/.local/bin/aimem.sums"
+  if [ -z "$WANT" ] || [ "$WANT" != "$GOT" ]; then
+    echo "ERROR: checksum mismatch for $ASSET (want ${WANT:-absent}, got $GOT)." >&2
+    rm -f "$HOME_DIR/.local/bin/aimem.new"; exit 1
+  fi
+  echo "checksum OK: $ASSET"
   chmod 755 "$HOME_DIR/.local/bin/aimem.new"
 fi
 mv "$HOME_DIR/.local/bin/aimem.new" "$HOME_DIR/.local/bin/aimem"   # text-busy-safe swap
