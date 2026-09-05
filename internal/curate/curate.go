@@ -150,6 +150,30 @@ func cursorPath(root, projectID string) string {
 	return filepath.Join(root, "curate", projectID+".cursor")
 }
 
+// writeCursorFile writes the cursor atomically (temp+rename). A plain
+// truncate-and-write could be interrupted into an EMPTY cursor, and an
+// empty cursor means "re-curate the entire journal from the beginning" —
+// the one file here where a torn write is expensive (arch review O2).
+func writeCursorFile(path, val string) error {
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		return err
+	}
+	tmp := path + ".tmp"
+	if err := os.WriteFile(tmp, []byte(val+"\n"), 0o600); err != nil {
+		return err
+	}
+	return os.Rename(tmp, path)
+}
+
+// SetCursor rewinds (or advances) a project's curation cursor: "" replays
+// the whole journal; an event id resumes strictly AFTER that id on the
+// next run. The recovery tool for a consumed-but-wrong window — a
+// zero-yield batch, a bad model day — which previously meant a human
+// hand-editing the cursor file.
+func SetCursor(root, projectID, id string) error {
+	return writeCursorFile(cursorPath(root, projectID), id)
+}
+
 // Run performs one curation pass over a project's journal. The cursor only
 // advances on a non-dry run, so dry runs are repeatable previews.
 func Run(reg *store.Registry, root, projectID string, ex Extractor, opts RunOpts) (*Report, error) {
@@ -363,10 +387,7 @@ func Run(reg *store.Registry, root, projectID string, ex Extractor, opts RunOpts
 			}
 		}
 	}
-	if err := os.MkdirAll(filepath.Dir(cursorPath(root, projectID)), 0o700); err != nil {
-		return rep, err
-	}
-	if err := os.WriteFile(cursorPath(root, projectID), []byte(newCursor+"\n"), 0o600); err != nil {
+	if err := writeCursorFile(cursorPath(root, projectID), newCursor); err != nil {
 		return rep, err
 	}
 	rep.NewCursor = newCursor
