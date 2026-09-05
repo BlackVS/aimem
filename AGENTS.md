@@ -37,6 +37,17 @@ Fixed section order, hard cap ~50 lines, empty sections omitted, ends with
 a one-line "Pick up here". Reference code by path and commit — never paste
 it. Durable policy lives here, not in the handoff.
 
+## Pre-push review gate
+
+STRICT: before pushing to the remote, the pending changes MUST be
+reviewed with the `oh-code-review` skill and the review must come back
+clean — every finding either fixed or explicitly waived by the user.
+Run the review on the final state of the changes (after the last
+edit), fix, re-verify tests, then push. No exceptions for "small"
+changes; a docs-only edit still gets the review (it is cheap). If the
+skill is unavailable in the running environment, say so and get the
+user's explicit go-ahead before pushing.
+
 ## Project context
 
 <!-- Replace everything below with what an agent needs to know about THIS
