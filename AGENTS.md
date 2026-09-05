@@ -48,6 +48,19 @@ changes; a docs-only edit still gets the review (it is cheap). If the
 skill is unavailable in the running environment, say so and get the
 user's explicit go-ahead before pushing.
 
+## Full PR review before merge
+
+STRICT: when a PR is ready for review-merge, perform a FULL fresh-eyes
+review of it — the complete `oh-code-review` format (taste rating,
+findings, risk assessment, verdict), run against the PR's final diff
+and its actual CI results, not a restatement of the pre-push gate's
+compressed review. The two gates are different instruments: the
+compressed pre-push pass has already approved a real bug that the full
+fresh-eyes pass then caught (PR #9, the boot.ps1 verify-guard). POST
+the review as a comment on the PR, so the record lives with the code
+and survives the session. Findings are fixed (or explicitly waived by
+the user) before merge; the merge click stays the user's.
+
 ## Working in this repo
 
 Build and test exactly as CI does:
