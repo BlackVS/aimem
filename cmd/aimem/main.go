@@ -1220,7 +1220,7 @@ func exportEventsCmd(args []string) error {
 // importEventsCmd submits JSONL payloads from stdin through the spool-backed
 // adapter path. Idempotency keys make re-imports and overlapping dumps safe.
 func importEventsCmd() error {
-	submitted, spooled, failed, err := importEventsFrom(os.Stdin)
+	submitted, spooled, failed, _, err := importEventsFrom(os.Stdin)
 	if err != nil {
 		return err
 	}
@@ -1233,7 +1233,7 @@ func importEventsCmd() error {
 
 // importEventsFrom lands a JSONL event stream locally — the shared core
 // of `import-events` (ssh legs) and the HTTP sync pull.
-func importEventsFrom(r io.Reader) (submitted, spooled, failed int, err error) {
+func importEventsFrom(r io.Reader) (submitted, spooled, failed int, end *int, err error) {
 	c := adapter.NewClient(stateRoot())
 	sc := bufio.NewScanner(r)
 	sc.Buffer(make([]byte, 1024*1024), 16*1024*1024)
@@ -1241,6 +1241,20 @@ func importEventsFrom(r io.Reader) (submitted, spooled, failed int, err error) {
 		line := strings.TrimSpace(sc.Text())
 		if line == "" {
 			continue
+		}
+		// Stream terminator (hub v0.3.24+, requested with ?end=1): carries
+		// the count of records the hub actually sent, so the sync path can
+		// tell a complete stream from a truncated one. Not an event — never
+		// imported. Absent in plain files, harmlessly recognized if present.
+		if strings.Contains(line, `"sync_end"`) {
+			var t struct {
+				SyncEnd bool `json:"sync_end"`
+				Events  int  `json:"events"`
+			}
+			if json.Unmarshal([]byte(line), &t) == nil && t.SyncEnd {
+				end = &t.Events
+				continue
+			}
 		}
 		var p adapter.Payload
 		if err := json.Unmarshal([]byte(line), &p); err != nil {
@@ -1262,7 +1276,7 @@ func importEventsFrom(r io.Reader) (submitted, spooled, failed int, err error) {
 			submitted++
 		}
 	}
-	return submitted, spooled, failed, sc.Err()
+	return submitted, spooled, failed, end, sc.Err()
 }
 
 // syncCmd merges journals with a remote machine over ssh, both directions.

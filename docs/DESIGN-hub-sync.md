@@ -198,3 +198,37 @@ whole credential class and its incident surface, replaces six quoted
 shell pipelines with four routes over primitives that already exist —
 and named tokens make every write on that channel attributable and
 individually revocable.
+
+## Correction: verifiable event streams (2026-09-05, v0.3.24)
+
+The architecture review found the pull leg's load-bearing trust
+unverifiable (findings C1/C2): a hub bailing MID-STREAM terminates
+chunked encoding cleanly, so a truncated pull was indistinguishable
+from a complete one — and the client advanced its cursor over the gap,
+losing anything older than the 1h overlap. Separately, the push legs'
+`{accepted, failed}` counts were printed and discarded, so a
+version/schema break failed every line under a 200 OK this client
+reported as success.
+
+What changed, backward-compatibly in both directions:
+
+- `GET /v1/sync/events` gains `?end=1`: the server terminates a
+  COMPLETE stream with `{"sync_end":true,"events":N}` (a mid-stream
+  error still just breaks the stream — the terminator's absence is the
+  signal). Old clients don't send the param and see the old stream.
+- The client always sends `end=1` and verifies: a present terminator
+  must match its received line count exactly; an absent one is fatal
+  only when the hub's `/v1/status` version says it should have sent
+  one (verify-if-present, require-if-advertised — old hubs stay
+  syncable on the legacy trust model). The pull cursor advances ONLY
+  over a verified (or legacy-trusted) stream.
+- Non-zero `failed` counts now warn via `adapter.Note`; 100% failure
+  on any leg is a hard error (exit ≠ 0, cursor held).
+- Sync preflights `/v1/status` and warns loudly when the hub's
+  self-declared `hub_name` differs from this machine's name for it —
+  the mismatch class that silently disabled hub-side curation on
+  2026-09-04.
+
+Memories need no terminator: the memory legs are full dumps each sync
+and self-heal; the journal pull was the only cursor whose advance
+could permanently skip data.

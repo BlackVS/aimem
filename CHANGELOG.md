@@ -13,6 +13,24 @@ currently 9); a binary refuses a database newer than it understands.
 
 ## [Unreleased]
 
+### Added
+
+- **Sync is self-verifying** (data integrity; architecture review
+  C1/C2). The event pull stream ends with a counted terminator
+  (`?end=1`, hub v0.3.24+) and the client refuses to advance its pull
+  cursor over a stream that is truncated or miscounted — previously a
+  hub failing mid-stream terminated chunked encoding cleanly, the pull
+  looked complete, and events in the gap were silently never fetched
+  again. Per-line `failed` counts from the hub now warn loudly
+  (`aimem logs`), and 100% failure on any leg — the signature of
+  client/hub version or schema skew, previously reported as success
+  with exit 0 — is a hard error. Sync also preflights `/v1/status`
+  and warns when the hub's self-declared name differs from this
+  machine's name for it (the mismatch that silently disabled hub-side
+  curation on 2026-09-04). Old hubs and old clients interoperate
+  unchanged: the terminator is requested by parameter and required
+  only from hubs whose version advertises it.
+
 ### Security
 
 - **Installers verify release binaries against SHA256SUMS** (architecture

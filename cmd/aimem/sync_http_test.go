@@ -156,3 +156,41 @@ func TestOrphanBindings(t *testing.T) {
 		t.Fatalf("orphan detection: %v", warns)
 	}
 }
+
+func TestVersionAtLeast(t *testing.T) {
+	cases := []struct {
+		v    string
+		want bool
+	}{
+		{"v0.3.24", true}, {"0.3.24", true}, {"v0.3.25", true}, {"v0.4.0", true},
+		{"v1.0.0", true}, {"v0.3.24-3-gabc123", true}, {"v0.3.23", false},
+		{"v0.3.23-9-gdef456", false}, {"v0.2.99", false}, {"dev", false},
+		{"", false}, {"garbage", false},
+	}
+	for _, c := range cases {
+		if got := versionAtLeast(c.v, 0, 3, 24); got != c.want {
+			t.Errorf("versionAtLeast(%q) = %v, want %v", c.v, got, c.want)
+		}
+	}
+}
+
+func TestVerifyEventStream(t *testing.T) {
+	n := func(i int) *int { return &i }
+	// Terminator present: count must match exactly, whatever the hub version.
+	if err := verifyEventStream(n(3), 3, ""); err != nil {
+		t.Errorf("matching terminator must verify: %v", err)
+	}
+	if err := verifyEventStream(n(5), 3, ""); err == nil {
+		t.Error("count mismatch must refuse the stream")
+	}
+	// Terminator absent: fatal only when the hub is known to send one.
+	if err := verifyEventStream(nil, 3, "v0.3.24"); err == nil {
+		t.Error("missing terminator from a terminator-capable hub must refuse")
+	}
+	if err := verifyEventStream(nil, 3, "v0.3.23"); err != nil {
+		t.Errorf("legacy hub without terminator must pass: %v", err)
+	}
+	if err := verifyEventStream(nil, 3, "dev"); err != nil {
+		t.Errorf("undatable hub version must not require the terminator: %v", err)
+	}
+}
