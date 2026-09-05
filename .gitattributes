@@ -1,0 +1,23 @@
+# Normalize line endings at the git boundary. This fleet mixes Windows and
+# Linux machines and has hit BOM/CRLF corruption four documented times —
+# enforce it here instead of defending in every writer.
+* text=auto
+
+# LF always: anything executed or parsed on Linux hosts (hubs), and Go
+# source (gofmt emits LF).
+*.go   text eol=lf
+*.sh   text eol=lf
+*.yml  text eol=lf
+*.yaml text eol=lf
+*.json text eol=lf
+*.md   text eol=lf
+*.ts   text eol=lf
+go.mod text eol=lf
+go.sum text eol=lf
+
+# CRLF: PowerShell scripts are edited and run on Windows.
+*.ps1  text eol=crlf
+
+# Never rewrite binaries.
+*.db  binary
+*.png binary

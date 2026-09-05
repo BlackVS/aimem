@@ -1,0 +1,12 @@
+# Weekly dependency PRs. Each lands through the normal PR gate (CI must
+# pass), so a bad upgrade cannot reach master unreviewed.
+version: 2
+updates:
+  - package-ecosystem: gomod
+    directory: /
+    schedule:
+      interval: weekly
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly

@@ -66,8 +66,8 @@ func TestInsertionsBothSides(t *testing.T) {
 
 func TestDeletionVsEdit(t *testing.T) {
 	base := "a\nb\nc\n"
-	local := "a\nc\n"       // deleted b
-	hub := "a\nB-hub\nc\n"  // edited b
+	local := "a\nc\n"      // deleted b
+	hub := "a\nB-hub\nc\n" // edited b
 	out, n := mergeT(t, base, local, hub)
 	if n != 1 {
 		t.Fatalf("delete-vs-edit must conflict, got %d\n%s", n, out)

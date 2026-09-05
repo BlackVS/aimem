@@ -71,12 +71,12 @@ func TestRecordValidation(t *testing.T) {
 	cases := []struct {
 		col, id, body string
 	}{
-		{"api", "a//b", `{}`},              // empty segment
-		{"api", "../etc", `{}`},            // traversal shape
+		{"api", "a//b", `{}`},                        // empty segment
+		{"api", "../etc", `{}`},                      // traversal shape
 		{"api", strings.Repeat("a/", 9) + "x", `{}`}, // too deep
-		{"api", "ok", `[1,2]`},             // not an object
-		{"api", "ok", `not json`},          // not JSON
-		{"bad name!", "ok", `{}`},          // collection name
+		{"api", "ok", `[1,2]`},                       // not an object
+		{"api", "ok", `not json`},                    // not JSON
+		{"bad name!", "ok", `{}`},                    // collection name
 	}
 	for _, c := range cases {
 		if _, err := db.PutRecord(c.col, c.id, []byte(c.body), "x", 0, false); err == nil {

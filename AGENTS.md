@@ -48,6 +48,33 @@ changes; a docs-only edit still gets the review (it is cheap). If the
 skill is unavailable in the running environment, say so and get the
 user's explicit go-ahead before pushing.
 
+## Working in this repo
+
+Build and test exactly as CI does:
+
+    CGO_ENABLED=0 go build -o aimem ./cmd/aimem
+    go test ./...            # full output, check the pass/fail summary
+    gofmt -l .               # must print nothing
+    go run honnef.co/go/tools/cmd/staticcheck@latest ./...
+
+Package map: `cmd/aimem` CLI + subcommand wiring; `internal/store`
+SQLite layer (journal, memories, docs, collections, migrations);
+`internal/curate` LLM distiller + dedup; `internal/server` hub HTTP
+API + admin console (`admin.html`); `internal/adapter` hook-side
+capture, spool, hub push, doc sync; `internal/mcp` MCP facade;
+`internal/embed`/`llmrate`/`provider` embeddings, call pacing,
+model bindings; `internal/ident` project identity and groups;
+`internal/tui` dashboard; `internal/schema`/`redact`/`diff3`/`uuidv7`
+event schema, secret scrubbing, three-way merge, time-ordered ids.
+
+Conventions that bite: master is PR-only (ruleset — direct pushes are
+rejected); releases build only from tags reachable from master; write
+commit messages to a file and use `git commit -F` (PowerShell mangles
+UTF-8 on the command line); never introduce a BOM; roll the CHANGELOG
+`[Unreleased]` section into a version BEFORE tagging (the release body
+is extracted from it); OpenAPI (`internal/server/openapi.json`) is
+pinned to real routes by a parity test — update both together.
+
 ## Project context
 
 <!-- Replace everything below with what an agent needs to know about THIS
