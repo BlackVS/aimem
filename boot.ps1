@@ -56,6 +56,24 @@ try {
       Write-Warning "No prebuilt aimem.exe in release $tag; building from source (needs Go)."
       Remove-Item -Force $prebuilt -ErrorAction SilentlyContinue
     }
+    # Verify against the release's SHA256SUMS. Deliberately OUTSIDE the
+    # try/catch above: a missing sums file or a mismatch must abort the
+    # install, never degrade into the source-build fallback (that path is
+    # reserved for a release with no binary at all). Guard on the file we
+    # actually downloaded — NOT $env:AIMEM_PREBUILT, which is also a
+    # user-supplied knob that survives a failed download and would send
+    # Get-FileHash at a path that does not exist.
+    if (Test-Path $prebuilt) {
+      $sums = Join-Path $dest 'SHA256SUMS'
+      Invoke-WebRequest "$base/releases/download/$tag/SHA256SUMS" -OutFile $sums -UseBasicParsing
+      $want = (Select-String -Path $sums -Pattern 'aimem-windows-amd64\.exe$' |
+               ForEach-Object { ($_.Line -split '\s+')[0] } | Select-Object -First 1)
+      $got = (Get-FileHash $prebuilt -Algorithm SHA256).Hash.ToLower()
+      if (-not $want -or $want.ToLower() -ne $got) {
+        throw "checksum mismatch for aimem-windows-amd64.exe (want $want, got $got)"
+      }
+      Write-Host "checksum OK: aimem-windows-amd64.exe"
+    }
   }
 
   # Run the installer in a child shell with an explicit policy bypass:

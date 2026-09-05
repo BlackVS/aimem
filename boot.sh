@@ -54,6 +54,20 @@ if [ "$TAG" != master ]; then
   case "$(uname -s)" in Darwin) ASSET=aimem-darwin-amd64 ;; esac
   case "$(uname -m)" in aarch64|arm64) ASSET=$(echo "$ASSET" | sed 's/amd64/arm64/') ;; esac
   if curl -fsSL "$BASE/releases/download/$TAG/$ASSET" -o "$DEST/aimem-prebuilt"; then
+    # Verify against the release's SHA256SUMS. A missing sums file or a
+    # mismatch ABORTS — it must never degrade into the source-build
+    # fallback, which is reserved for a release that has no binary at all.
+    curl -fsSL "$BASE/releases/download/$TAG/SHA256SUMS" -o "$DEST/SHA256SUMS" || {
+      echo "ERROR: release $TAG has no SHA256SUMS; refusing unverified binary." >&2
+      exit 1
+    }
+    WANT=$(awk -v a="$ASSET" '$2==a{print $1}' "$DEST/SHA256SUMS")
+    GOT=$( (sha256sum "$DEST/aimem-prebuilt" 2>/dev/null || shasum -a 256 "$DEST/aimem-prebuilt") | awk '{print $1}')
+    if [ -z "$WANT" ] || [ "$WANT" != "$GOT" ]; then
+      echo "ERROR: checksum mismatch for $ASSET (want ${WANT:-absent}, got $GOT)." >&2
+      exit 1
+    fi
+    echo "checksum OK: $ASSET"
     chmod 755 "$DEST/aimem-prebuilt"
     AIMEM_PREBUILT="$DEST/aimem-prebuilt"; export AIMEM_PREBUILT
   else
