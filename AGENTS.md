@@ -61,6 +61,30 @@ the review as a comment on the PR, so the record lives with the code
 and survives the session. Findings are fixed (or explicitly waived by
 the user) before merge; the merge click stays the user's.
 
+A review binds to the head it reviewed: a rebase, an "Update branch",
+or any new commit AFTER the posted review makes it stale — re-review
+before merge (a delta review of what changed since the reviewed head
+is enough when the base moved but the diff did not) and post the
+verdict again, naming the new head.
+
+## One PR at a time
+
+Work PRs SERIALLY: the next PR is opened ONLY after the previous one
+is MERGED (or explicitly closed) — never merely "ready". Drive each
+one all the way (review, fixes, green checks, merge), then branch the
+next from fresh master. A PR the user has explicitly POSTPONED (a
+deliberate hold — e.g. the 7-day supply-chain wait) steps out of the
+line: it does not block new PRs, and when it resumes it rejoins as an
+ordinary next-in-line (rebase first, stale review rules apply).
+Parallel PRs in this repo almost always collide (CHANGELOG's
+Unreleased section alone guarantees it): on 2026-09-05, three
+parallel fix PRs cost two conflict-rebase rounds that a serial flow
+would have avoided entirely. Two exceptions: PRs from external
+automation (dependabot) arrive in parallel by nature — merge those
+one at a time, `@dependabot rebase` before each; and a genuinely
+independent pair (disjoint files, no shared CHANGELOG entry) may
+overlap when the user says so.
+
 ## Working in this repo
 
 Build and test exactly as CI does:
