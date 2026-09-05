@@ -11,7 +11,10 @@ package server
 
 import (
 	"bufio"
+	"bytes"
 	"encoding/json"
+	"fmt"
+	"io"
 	"net/http"
 	"strings"
 
@@ -43,6 +46,18 @@ func (s *Server) syncProjects(r *http.Request) ([]string, error) {
 	return out, nil
 }
 
+// lineCountWriter counts emitted JSONL records (newlines) so the stream
+// can be terminated with a verifiable count.
+type lineCountWriter struct {
+	w     io.Writer
+	lines int
+}
+
+func (c *lineCountWriter) Write(p []byte) (int, error) {
+	c.lines += bytes.Count(p, []byte{'\n'})
+	return c.w.Write(p)
+}
+
 func (s *Server) syncEventsOut(w http.ResponseWriter, r *http.Request) {
 	ids, err := s.syncProjects(r)
 	if err != nil {
@@ -51,15 +66,26 @@ func (s *Server) syncEventsOut(w http.ResponseWriter, r *http.Request) {
 	}
 	since := r.URL.Query().Get("since")
 	w.Header().Set("Content-Type", "application/x-ndjson")
+	// ?end=1 (v0.3.24+ clients): terminate a COMPLETE stream with a
+	// counted sentinel line. A mid-stream break used to be
+	// indistinguishable from a clean EOF under chunked encoding, so a
+	// truncated pull silently advanced the client's cursor and events in
+	// the gap were never fetched again (architecture review C1). Old
+	// clients don't send the param and see the exact old stream.
+	withEnd := r.URL.Query().Get("end") == "1"
+	cw := &lineCountWriter{w: w}
 	for _, id := range ids {
 		db, err := s.reg.OpenExisting(id)
 		if err != nil {
 			continue
 		}
-		if err := db.DumpSince(w, since); err != nil {
+		if err := db.DumpSince(cw, since); err != nil {
 			s.log.Warn("sync events out", "project", id, "err", err)
-			return // mid-stream: the client's scanner stops at the break
+			return // mid-stream: NO terminator — a verifying client refuses the stream
 		}
+	}
+	if withEnd {
+		fmt.Fprintf(w, "{\"sync_end\":true,\"events\":%d}\n", cw.lines)
 	}
 }
 

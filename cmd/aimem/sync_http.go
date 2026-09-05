@@ -132,7 +132,10 @@ func syncDo(h *adapter.HubConfig, method, path string, q url.Values, body io.Rea
 	return resp, nil
 }
 
-// syncPost streams a locally-produced JSONL dump to a sync route.
+// syncPost streams a locally-produced JSONL dump to a sync route and
+// ACTS on the hub's {accepted, failed} counts instead of just printing
+// them (architecture review C2: a schema break used to fail every line
+// under a 200 OK that this client reported as success, exit 0).
 func syncPost(h *adapter.HubConfig, path string, q url.Values, produce func(w io.Writer) error) error {
 	pr, pw := io.Pipe()
 	go func() { pw.CloseWithError(produce(pw)) }()
@@ -146,8 +149,83 @@ func syncPost(h *adapter.HubConfig, path string, q url.Values, produce func(w io
 	if json.NewDecoder(resp.Body).Decode(&counts) == nil && len(counts) > 0 {
 		b, _ := json.Marshal(counts)
 		fmt.Fprintf(os.Stderr, "aimem: hub accepted %s\n", b)
+		return checkSyncCounts(path, counts)
 	}
 	return nil
+}
+
+// checkSyncCounts turns a hub's per-line failure counts into a warning,
+// and total failure into an error: records failing while others land is
+// worth a loud line; EVERY record failing means the hub rejects what
+// this client sends (version/schema skew) and must not read as success.
+func checkSyncCounts(path string, counts map[string]any) error {
+	num := func(k string) float64 { v, _ := counts[k].(float64); return v }
+	failed := num("failed")
+	if failed == 0 {
+		return nil
+	}
+	accepted := num("submitted") + num("imported") + num("applied")
+	if accepted == 0 {
+		return fmt.Errorf("hub rejected ALL %d record(s) on %s — client/hub version or schema skew? (aimem version, hub /v1/status)", int(failed), path)
+	}
+	adapter.Note(stateRoot(), "aimem: WARNING: hub rejected %d record(s) on %s (accepted %d) — check hub logs", int(failed), path, int(accepted))
+	return nil
+}
+
+// hubStatus preflights /v1/status (unauthenticated liveness doc) for the
+// hub's version and self-declared name. Best-effort: an unreachable or
+// pre-status hub returns zero values and sync proceeds as before.
+func hubStatus(h *adapter.HubConfig) (version, hubName string) {
+	resp, err := syncDo(h, "GET", "/v1/status", nil, nil)
+	if err != nil {
+		return "", ""
+	}
+	defer resp.Body.Close()
+	var st struct {
+		Version string `json:"version"`
+		HubName string `json:"hub_name"`
+	}
+	json.NewDecoder(resp.Body).Decode(&st)
+	return st.Version, st.HubName
+}
+
+// versionAtLeast parses release-shaped versions ("v0.3.24", plus git
+// describe suffixes) and reports v >= major.minor.patch. Unparseable
+// versions ("dev", "") report false: requiring a capability of a build
+// we cannot date would break sync against older source installs.
+func versionAtLeast(v string, major, minor, patch int) bool {
+	v = strings.TrimPrefix(strings.TrimSpace(v), "v")
+	if i := strings.IndexAny(v, "-+"); i >= 0 {
+		v = v[:i]
+	}
+	var a, b, c int
+	if n, err := fmt.Sscanf(v, "%d.%d.%d", &a, &b, &c); err != nil || n != 3 {
+		return false
+	}
+	if a != major {
+		return a > major
+	}
+	if b != minor {
+		return b > minor
+	}
+	return c >= patch
+}
+
+// verifyEventStream decides whether a pull may advance the cursor.
+// A present terminator must match the received line count exactly; an
+// absent one is fatal only when the hub is known to send terminators
+// (verify-if-present, require-if-advertised — old hubs stay syncable).
+func verifyEventStream(end *int, received int, hubVersion string) error {
+	if end != nil {
+		if *end != received {
+			return fmt.Errorf("event stream truncated: hub sent %d record(s), received %d — cursor not advanced", *end, received)
+		}
+		return nil
+	}
+	if versionAtLeast(hubVersion, 0, 3, 24) {
+		return fmt.Errorf("event stream ended without its terminator (hub %s should send one) — truncated mid-stream? cursor not advanced", hubVersion)
+	}
+	return nil // legacy hub: the pre-verification trust model, unchanged
 }
 
 // syncOneHTTP merges journals, memories, and group config with one hub
@@ -166,6 +244,16 @@ func syncOneHTTP(name string, h *adapter.HubConfig, def string) error {
 		return err
 	}
 	projects := url.Values{"projects": {strings.Join(ids, ",")}}
+
+	// Preflight: the hub's version gates stream verification below, and a
+	// self-declared hub_name that differs from what this machine calls the
+	// hub is exactly the mismatch that silently disabled hub-side curation
+	// for a day (2026-09-04, "work" vs "seclab") — say it where the
+	// operator looks.
+	hubVersion, hubSelfName := hubStatus(h)
+	if hubSelfName != "" && hubSelfName != name {
+		adapter.Note(stateRoot(), "aimem: WARNING: hub %q declares itself %q (AIMEM_HUB_NAME) — if projects bind to %q, HUB-SIDE CURATION SKIPS THEM; align the names", name, hubSelfName, name)
+	}
 
 	// Cursors are keyed per hub (hashed, like ssh destinations). The 1h
 	// overlap window and idempotent import make clock skew free, exactly
@@ -198,19 +286,34 @@ func syncOneHTTP(name string, h *adapter.HubConfig, def string) error {
 	}
 
 	fmt.Fprintf(os.Stderr, "aimem: pulling events from hub %q\n", name)
-	q := url.Values{"projects": projects["projects"], "since": {uuidv7.ShiftBack(pullCur, overlap)}}
+	q := url.Values{"projects": projects["projects"], "since": {uuidv7.ShiftBack(pullCur, overlap)}, "end": {"1"}}
 	resp, err := syncDo(h, "GET", "/v1/sync/events", q, nil)
 	if err != nil {
 		reg.Close()
 		return fmt.Errorf("pull failed: %w", err)
 	}
-	submitted, spooled, failed, err := importEventsFrom(resp.Body)
+	submitted, spooled, failed, end, err := importEventsFrom(resp.Body)
 	resp.Body.Close()
 	if err != nil {
 		reg.Close()
 		return fmt.Errorf("pull failed: %w", err)
 	}
 	fmt.Fprintf(os.Stderr, "aimem: pulled %d event(s) (%d spooled, %d failed)\n", submitted, spooled, failed)
+	// The cursor advances only over a stream proven complete: a truncated
+	// pull used to look exactly like a clean EOF, and events in the gap
+	// were never fetched again (arch review C1). Failed imports also hold
+	// the cursor when nothing landed at all (C2).
+	if verr := verifyEventStream(end, submitted+spooled+failed, hubVersion); verr != nil {
+		reg.Close()
+		return fmt.Errorf("pull failed: %w", verr)
+	}
+	if failed > 0 && submitted == 0 && spooled == 0 {
+		reg.Close()
+		return fmt.Errorf("pull failed: all %d pulled event(s) failed to import — version/schema skew? cursor not advanced", failed)
+	}
+	if failed > 0 {
+		adapter.Note(stateRoot(), "aimem: WARNING: %d of %d pulled event(s) failed to import from hub %q", failed, submitted+spooled+failed, name)
+	}
 	if m, err := localMaxEventID(); err == nil && m != "" {
 		writeCursor(cursorKey, "pull", m)
 	}
@@ -254,6 +357,13 @@ func syncOneHTTP(name string, h *adapter.HubConfig, def string) error {
 		return fmt.Errorf("memory pull failed: %w", err)
 	}
 	fmt.Fprintf(os.Stderr, "aimem: merged %d memory record(s) (%d failed)\n", imported, mfailed)
+	if mfailed > 0 && imported == 0 {
+		reg.Close()
+		return fmt.Errorf("memory pull failed: all %d record(s) failed to import — version/schema skew?", mfailed)
+	}
+	if mfailed > 0 {
+		adapter.Note(stateRoot(), "aimem: WARNING: %d of %d memory record(s) failed to import from hub %q", mfailed, imported+mfailed, name)
+	}
 
 	// Docs reconcile (DESIGN-doc-collab): fast-forward unchanged bound
 	// files, auto-merge clean divergences, then push whatever changed —
