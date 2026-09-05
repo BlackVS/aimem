@@ -13,6 +13,10 @@ currently 9); a binary refuses a database newer than it understands.
 
 ## [Unreleased]
 
+Nothing yet.
+
+## [0.3.24] — 2026-09-05
+
 ### Added
 
 - **`aimem curate --rewind <event-id>|start -p <project>`** — replay a
