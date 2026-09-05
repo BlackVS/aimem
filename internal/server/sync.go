@@ -133,8 +133,8 @@ func (s *Server) syncMemoriesIn(w http.ResponseWriter, r *http.Request) {
 			continue
 		}
 		var rec struct {
-			ProjectID string          `json:"project_id"`
-			Memory    *store.Memory   `json:"memory"`
+			ProjectID string           `json:"project_id"`
+			Memory    *store.Memory    `json:"memory"`
 			CurateRun *store.CurateRun `json:"curate_run"`
 		}
 		if err := json.Unmarshal([]byte(line), &rec); err != nil || rec.ProjectID == "" {
