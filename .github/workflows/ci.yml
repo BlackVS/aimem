@@ -18,6 +18,11 @@ concurrency:
 jobs:
   lint:
     runs-on: ubuntu-latest
+    env:
+      # staticcheck/govulncheck run @latest and may declare a newer Go than
+      # our pinned 1.25; let `go run` fetch the toolchain they require.
+      # setup-go v7 defaults GOTOOLCHAIN=local, which broke exactly this.
+      GOTOOLCHAIN: auto
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v7
