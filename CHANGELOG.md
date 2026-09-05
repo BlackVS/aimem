@@ -15,6 +15,10 @@ currently 9); a binary refuses a database newer than it understands.
 
 ### Added
 
+- **`aimem curate --rewind <event-id>|start -p <project>`** — replay a
+  consumed curation window (a zero-yield batch, a bad model day)
+  without hand-editing the cursor file; the zero-yield warning now
+  prints the exact command for its own window.
 - **Sync is self-verifying** (data integrity; architecture review
   C1/C2). The event pull stream ends with a counted terminator
   (`?end=1`, hub v0.3.24+) and the client refuses to advance its pull
@@ -42,6 +46,18 @@ currently 9); a binary refuses a database newer than it understands.
 
 ### Fixed
 
+- **Byte-budget retention can no longer silently corrupt search**
+  (data integrity; architecture review C5). `events`/`memories` use
+  TEXT primary keys, so their implicit rowids are renumberable by the
+  VACUUM retention runs between delete batches — and both FTS indexes
+  are external-content tables keyed on exactly those rowids. Retention
+  now rebuilds the FTS indexes after any VACUUM, and a new
+  `aimem fts-rebuild -p <project>|--all` command exposes the same
+  repair for manual recovery. The no-UPDATE invariant the indexes
+  depend on is now documented at the schema definition.
+- The curation cursor is written atomically (temp+rename) — a torn
+  write left an empty cursor, which means "re-curate the entire
+  journal from the beginning".
 - **An invalid hub name in `.aimem.json` no longer routes data to the
   default hub** (data integrity; architecture review C4).
   `ProjectHubName` returned an error precisely so this could not

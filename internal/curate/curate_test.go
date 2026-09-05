@@ -548,3 +548,21 @@ func TestParseClaudeResultCountsCachedTokens(t *testing.T) {
 		t.Fatalf("errored turn: err=%v usage=%+v", err, u)
 	}
 }
+
+func TestSetCursor(t *testing.T) {
+	root := t.TempDir()
+	if err := SetCursor(root, "proj-x", "0199-abc"); err != nil {
+		t.Fatal(err)
+	}
+	b, err := os.ReadFile(cursorPath(root, "proj-x"))
+	if err != nil || strings.TrimSpace(string(b)) != "0199-abc" {
+		t.Fatalf("cursor content %q err=%v", b, err)
+	}
+	if err := SetCursor(root, "proj-x", ""); err != nil {
+		t.Fatal(err)
+	}
+	b, _ = os.ReadFile(cursorPath(root, "proj-x"))
+	if strings.TrimSpace(string(b)) != "" {
+		t.Fatalf("reset cursor not empty: %q", b)
+	}
+}
