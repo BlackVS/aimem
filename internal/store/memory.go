@@ -151,10 +151,10 @@ func (d *DB) originAliases() map[string]string {
 
 // MergeOriginAliases unions a peer's alias map into the local one with
 // LOCAL precedence on conflicting keys (a→b here vs a→c there keeps
-// a→b — divergence is reported by the caller, never silently rewritten)
-// and re-points chains to their terminal target (bounded walk, so an
-// accidental cycle cannot loop). Pure function, shared by rename/merge
-// and the sync import so the two can never disagree.
+// a→b — a local repair is never rewritten by a peer's) and re-points
+// chains to their terminal target (bounded walk, so an accidental
+// cycle cannot loop). Pure function, shared by rename/merge and the
+// sync import so the two can never disagree.
 func MergeOriginAliases(local, peer map[string]string) map[string]string {
 	out := map[string]string{}
 	maps.Copy(out, peer)
