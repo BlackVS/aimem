@@ -1,6 +1,10 @@
 package curate
 
 import (
+	"context"
+	"encoding/json"
+	"errors"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -577,6 +581,7 @@ func TestClaudeExtractorTimeout(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	t.Setenv("AIMEM_LLM_INTERVAL", "0") // keep llmrate.Wait out of the measured window
 	t.Setenv("GO_AIMEM_HELPER", "sleep")
 	c := &ClaudeExtractor{WorkDir: t.TempDir(), Bin: exe, Timeout: 300 * time.Millisecond}
 	start := time.Now()
@@ -584,8 +589,36 @@ func TestClaudeExtractorTimeout(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "timed out") {
 		t.Fatalf("want timeout error, got %v", err)
 	}
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("timeout must wrap context.DeadlineExceeded for callers: %v", err)
+	}
 	if e := time.Since(start); e > 5*time.Second {
 		t.Fatalf("kill took %s — process not bounded", e)
+	}
+}
+
+// TestClaudeExtractorStdinRoundTrip: the prompt must reach the CLI over
+// stdin (never argv — Windows 32K limit, cmd.exe unquoting), and a
+// clean completion must parse and report success. The helper echoes its
+// stdin back inside the CLI's JSON wrapper.
+func TestClaudeExtractorStdinRoundTrip(t *testing.T) {
+	exe, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("AIMEM_LLM_INTERVAL", "0")
+	t.Setenv("GO_AIMEM_HELPER", "echo")
+	c := &ClaudeExtractor{WorkDir: t.TempDir(), Bin: exe}
+	prompt := "line one\nline two with \"quotes\" and %PATH%"
+	res, u, err := c.Complete(prompt)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res != prompt {
+		t.Fatalf("stdin round trip mangled: %q", res)
+	}
+	if u.OutputTokens != 7 {
+		t.Fatalf("usage not parsed: %+v", u)
 	}
 }
 
@@ -600,6 +633,7 @@ func TestClaudeExtractorTimeoutWithGrandchild(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	t.Setenv("AIMEM_LLM_INTERVAL", "0")
 	t.Setenv("GO_AIMEM_HELPER", "spawn")
 	old := claudeWaitDelay
 	claudeWaitDelay = 1 * time.Second
@@ -612,36 +646,56 @@ func TestClaudeExtractorTimeoutWithGrandchild(t *testing.T) {
 	if err == nil {
 		t.Fatal("want an error from the killed CLI")
 	}
-	// The grandchild holds the pipe for ~6s; only WaitDelay's forced
-	// pipe close lets Complete return before that.
-	if elapsed > 5*time.Second {
+	// The LOWER bound is the anti-vacuous check: without a live
+	// grandchild holding the pipe, Output returns right at the 300ms
+	// kill — an elapsed under ~1.1s means the spawn silently failed and
+	// this test proved nothing about WaitDelay. The upper bound is the
+	// point of the test: the grandchild holds the pipe ~4s, and only
+	// WaitDelay's forced close lets Complete return before that.
+	if elapsed < 1100*time.Millisecond {
+		t.Fatalf("returned in %s — grandchild never held the pipe (spawn failed?)", elapsed)
+	}
+	if elapsed > 3500*time.Millisecond {
 		t.Fatalf("Complete blocked %s — grandchild held the pipe past WaitDelay", elapsed)
 	}
-	// Let the grandchild die before test cleanup: on Windows a live
-	// process wedges TempDir removal and the test binary's deletion.
-	time.Sleep(7*time.Second - elapsed)
+	// Outlive the grandchild (born ~start+0.3s, sleeps 4s) before test
+	// cleanup: on Windows a live process wedges TempDir removal and the
+	// test binary's deletion.
+	if wait := 5*time.Second - elapsed; wait > 0 {
+		time.Sleep(wait)
+	}
 }
 
 // TestMain doubles as the helper process: re-invoked with -p by the
 // tests above it plays a claude CLI that hangs ("sleep": 30s, killed
-// by the ctx) or hangs after spawning a stdout-inheriting grandchild
-// ("spawn"; the grandchild sleeps ~6s in the system temp dir) — it
-// gates every test run in this package, so keep the guard exact.
+// by the ctx), hangs after spawning a stdout-inheriting grandchild
+// ("spawn"; the grandchild sleeps 4s in the system temp dir), or
+// echoes stdin back inside the CLI's JSON wrapper ("echo") — it gates
+// every test run in this package, so keep the guard exact.
 func TestMain(m *testing.M) {
 	if mode := os.Getenv("GO_AIMEM_HELPER"); mode != "" && len(os.Args) > 1 && os.Args[1] == "-p" {
-		sleep := 30 * time.Second
-		if mode == "spawn" {
+		switch mode {
+		case "echo":
+			in, _ := io.ReadAll(os.Stdin)
+			json.NewEncoder(os.Stdout).Encode(map[string]any{
+				"result": string(in), "is_error": false,
+				"usage": map[string]any{"input_tokens": 3, "output_tokens": 7},
+			})
+		case "spawn":
 			exe, _ := os.Executable()
 			child := exec.Command(exe, "-p")
-			child.Env = append(os.Environ(), "GO_AIMEM_HELPER=sleep6")
+			child.Env = append(os.Environ(), "GO_AIMEM_HELPER=sleep4")
 			child.Dir = os.TempDir() // never hold the test's TempDir
 			child.Stdout = os.Stdout // inherit the pipe: the orphan that used to wedge Output()
-			child.Start()
+			if err := child.Start(); err != nil {
+				os.Exit(3) // loud, immediate: the test's lower bound catches the fast return
+			}
+			time.Sleep(30 * time.Second)
+		case "sleep4":
+			time.Sleep(4 * time.Second)
+		default: // "sleep"
+			time.Sleep(30 * time.Second)
 		}
-		if mode == "sleep6" {
-			sleep = 6 * time.Second
-		}
-		time.Sleep(sleep)
 		os.Exit(0)
 	}
 	os.Exit(m.Run())

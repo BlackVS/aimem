@@ -27,7 +27,8 @@ import (
 
 var (
 	mu      sync.Mutex
-	last    time.Time
+	last    time.Time     // newest RESERVED slot (monotonic; may be in the future)
+	penGen  int           // bumped by Penalize; sleeping waiters re-queue on change
 	penalty time.Duration // adaptive add-on to the base interval
 	blocks  int           // rate-blocks seen (persisted, for stats)
 	lastHit string        // RFC3339 of the newest block
@@ -129,28 +130,44 @@ func Retries() int { _, r := conf(); return r }
 // Wait blocks until this process's next call slot: calls are spaced by
 // the base interval plus the current adaptive penalty. Serialized under
 // the mutex, so concurrent callers queue rather than stampede.
+// Wait blocks until this caller's turn under the current spacing.
+// Contract: each caller RESERVES the next slot (last + gap) under the
+// mutex, then sleeps UNLOCKED until its slot — so a sleeping waiter
+// never blocks other llmrate users (Status, Penalize, a query
+// embedding). The reserved gap is a snapshot: if Penalize widens the
+// spacing while a waiter sleeps, the waiter detects the generation
+// change on wake and re-queues at the new gap, so an in-flight burst
+// cannot keep hammering a blocked upstream at the old cadence. A
+// Recover while sleeping leaves the old (wider) slot in place —
+// over-spacing is always safe.
 func Wait() {
 	iv, _ := conf()
-	mu.Lock()
-	gap := iv + penalty
-	if gap <= 0 {
-		last = time.Now()
+	for {
+		mu.Lock()
+		gap := iv + penalty
+		if gap <= 0 {
+			if now := time.Now(); last.Before(now) {
+				last = now // advance only: never rewind past a live reservation
+			}
+			mu.Unlock()
+			return
+		}
+		gen := penGen
+		slot := last.Add(gap)
+		if now := time.Now(); slot.Before(now) {
+			slot = now
+		}
+		last = slot
 		mu.Unlock()
-		return
-	}
-	// Reserve the next slot UNDER the lock, sleep OUTSIDE it: sleeping
-	// while holding the mutex made every other llmrate caller — health's
-	// Status(), a recall's query embedding — block for up to the full
-	// penalty behind one paced call (arch review, PR #17). Concurrent
-	// waiters each reserve a later slot, preserving the spacing.
-	slot := last.Add(gap)
-	if now := time.Now(); slot.Before(now) {
-		slot = now
-	}
-	last = slot
-	mu.Unlock()
-	if d := time.Until(slot); d > 0 {
-		time.Sleep(d)
+		if d := time.Until(slot); d > 0 {
+			time.Sleep(d)
+		}
+		mu.Lock()
+		requeue := penGen != gen
+		mu.Unlock()
+		if !requeue {
+			return
+		}
 	}
 }
 
@@ -170,6 +187,7 @@ func Penalize(reason string) {
 		penalty = maxPenalty
 	}
 	blocks++
+	penGen++ // wake-and-requeue signal for waiters sleeping on old slots
 	lastHit = time.Now().UTC().Format(time.RFC3339)
 	saveLocked()
 	fmt.Fprintf(os.Stderr, "aimem llmrate: upstream rate-block detected (%s) — call spacing widened to %s (block #%d)\n",

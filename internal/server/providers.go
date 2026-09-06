@@ -156,7 +156,11 @@ func (s *Server) testProvider(w http.ResponseWriter, r *http.Request) {
 	if ep.Kind == "claude" {
 		workDir := filepath.Join(s.reg.Root(), "curator-workdir")
 		os.MkdirAll(workDir, 0o700)
-		ex := &curate.ClaudeExtractor{Model: ep.Model, WorkDir: workDir}
+		// A human-triggered one-word probe: short bound, and NoPace so a
+		// diagnostic doesn't queue up to the full penalty behind the
+		// batch pacer during the very outage it is diagnosing.
+		ex := &curate.ClaudeExtractor{Model: ep.Model, WorkDir: workDir,
+			Timeout: 30 * time.Second, NoPace: true}
 		var u curate.Usage
 		_, u, err = ex.Complete("Reply with the single word: ok")
 		tokens = u.InputTokens + u.OutputTokens

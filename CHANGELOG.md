@@ -21,15 +21,22 @@ currently 9); a binary refuses a database newer than it understands.
   hub's entire hourly sweep forever. Calls now go through llmrate
   pacing, are killed at the shared 5-minute completion bound
   (`cmd.WaitDelay` force-closes pipes so an orphaned CLI grandchild
-  cannot wedge the kill — proven by a grandchild test), report clean
-  completions to llmrate (a persisted penalty now decays on
-  claude-backend hubs) and rate-limit-shaped CLI failures widen it.
-  The prompt travels over stdin, never argv — as argv, Windows'
-  command-line limit and Go's CVE-2024-24576 newline mitigation made
-  every chatty batch fail permanently on npm-shim installs. Doc
-  synthesis gets its own 10-minute bound (whole-chapter prompts).
-  `llmrate.Wait` now sleeps outside the pacer mutex, so a paced call
-  no longer blocks health checks and query embeddings behind it.
+  cannot wedge the kill — proven by a grandchild test; a SUCCESSFUL
+  run whose straggler held the pipe is salvaged, not re-billed),
+  report clean completions to llmrate (a persisted penalty now decays
+  on claude-backend hubs), and claude-shaped rate blocks ("usage
+  limit reached", 429/529/overloaded — on stderr or inside the stdout
+  JSON) widen it. The prompt travels over stdin, never argv — as
+  argv, Windows' 32K command-line limit bites and cmd.exe's unquoting
+  (npm .cmd shim) is an injection surface the caller owns. Doc
+  synthesis gets a shared 10-minute bound on BOTH backends
+  (whole-chapter prompts); the admin provider test gets 30s and skips
+  the batch pacer (a diagnostic probe must not queue behind the very
+  outage it is diagnosing). `llmrate.Wait` reserves slots and sleeps
+  outside the pacer mutex — a paced call no longer blocks health
+  checks or query embeddings — and a `Penalize` while callers are
+  queued re-spaces them at the widened gap instead of letting the
+  in-flight burst keep the old cadence.
   Deliberately no retry loop, per the recorded curation-failure
   design: the cursor stays unadvanced and the next tick retries.
 - **MCP `recall_memory` honors its token budget across scopes**
