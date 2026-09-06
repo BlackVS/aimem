@@ -13,6 +13,10 @@ currently 9); a binary refuses a database newer than it understands.
 
 ## [Unreleased]
 
+Nothing yet.
+
+## [0.3.25] — 2026-09-06
+
 ### Fixed
 
 - **The claude curation backend is paced, time-bounded, and a full
