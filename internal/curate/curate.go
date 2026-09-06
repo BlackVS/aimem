@@ -10,6 +10,7 @@ package curate
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -586,19 +587,40 @@ func (c *ClaudeExtractor) Extract(events []store.StoredEvent, maxFacts int, grou
 
 // Complete runs one headless claude turn — shared by extraction and by
 // design-doc synthesis.
+// claudeBin and claudeTimeout are variables for the tests' benefit; in
+// production they are the CLI on PATH and a bound generous enough for
+// any real extraction (typical runs finish in well under a minute).
+var (
+	claudeBin     = "claude"
+	claudeTimeout = 5 * time.Minute
+)
+
+// Complete runs one headless extraction call. Paced through llmrate
+// like the OpenAI backend (a sweep is a burst of calls, whatever the
+// backend), and bounded by a hard timeout: a hung CLI used to block
+// the hub's hourly sweep FOREVER — the oneshot curate unit has no
+// timeout of its own (architecture review S4). Deliberately NO retry
+// loop: a failed extraction leaves the cursor unadvanced and the next
+// timer tick retries naturally (the recorded curation-failure design).
 func (c *ClaudeExtractor) Complete(prompt string) (string, Usage, error) {
 	var u Usage
 	model := c.Model
 	if model == "" {
 		model = "haiku"
 	}
-	cmd := exec.Command("claude", "-p", prompt,
+	llmrate.Wait()
+	ctx, cancel := context.WithTimeout(context.Background(), claudeTimeout)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, claudeBin, "-p", prompt,
 		"--model", model, "--output-format", "json")
 	if c.WorkDir != "" {
 		cmd.Dir = c.WorkDir
 	}
 	out, err := cmd.Output()
 	if err != nil {
+		if ctx.Err() != nil {
+			return "", u, fmt.Errorf("claude -p killed after %s timeout — cursor not advanced, next run retries", claudeTimeout)
+		}
 		return "", u, fmt.Errorf("claude -p failed: %w", err)
 	}
 	return parseClaudeResult(out)

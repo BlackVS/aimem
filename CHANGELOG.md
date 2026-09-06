@@ -15,6 +15,14 @@ currently 9); a binary refuses a database newer than it understands.
 
 ### Fixed
 
+- **The claude curation backend is paced and time-bounded**
+  (architecture review S4). `claude -p` ran with no timeout: a hung
+  CLI blocked the hub's entire hourly sweep forever (the oneshot
+  curate unit has no timeout of its own). Extraction calls now go
+  through the same llmrate pacing as the OpenAI backend and are
+  killed at a 5-minute bound — the cursor stays unadvanced and the
+  next timer tick retries naturally. Deliberately no retry loop, per
+  the recorded curation-failure design.
 - **MCP `recall_memory` honors its token budget across scopes**
   (architecture review S7). The budget was applied per resolved scope,
   so `scope: "both"` with two declared groups returned up to 4× the

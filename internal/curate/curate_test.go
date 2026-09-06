@@ -566,3 +566,38 @@ func TestSetCursor(t *testing.T) {
 		t.Fatalf("reset cursor not empty: %q", b)
 	}
 }
+
+// TestClaudeExtractorTimeout: a hung CLI must be killed at the bound
+// instead of blocking the hourly sweep forever (arch review S4). Uses
+// the helper-process pattern: the test binary re-runs itself as a
+// "claude" that sleeps past the (shrunk) timeout.
+func TestClaudeExtractorTimeout(t *testing.T) {
+	exe, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	oldBin, oldTO := claudeBin, claudeTimeout
+	claudeBin, claudeTimeout = exe, 300*time.Millisecond
+	t.Setenv("GO_AIMEM_HELPER_SLEEP", "1")
+	defer func() { claudeBin, claudeTimeout = oldBin, oldTO }()
+
+	c := &ClaudeExtractor{WorkDir: t.TempDir()}
+	start := time.Now()
+	_, _, err = c.Complete("prompt")
+	if err == nil || !strings.Contains(err.Error(), "timeout") {
+		t.Fatalf("want timeout error, got %v", err)
+	}
+	if e := time.Since(start); e > 5*time.Second {
+		t.Fatalf("kill took %s — process not bounded", e)
+	}
+}
+
+// TestHelperProcess is not a real test: when re-invoked by
+// TestClaudeExtractorTimeout it plays a hung claude CLI.
+func TestMain(m *testing.M) {
+	if os.Getenv("GO_AIMEM_HELPER_SLEEP") != "" && len(os.Args) > 1 && os.Args[1] == "-p" {
+		time.Sleep(30 * time.Second)
+		os.Exit(0)
+	}
+	os.Exit(m.Run())
+}
