@@ -40,26 +40,38 @@ it. Durable policy lives here, not in the handoff.
 ## Pre-push review gate
 
 STRICT: before pushing to the remote, the pending changes MUST be
-reviewed with the `oh-code-review` skill and the review must come back
-clean — every finding either fixed or explicitly waived by the user.
-Run the review on the final state of the changes (after the last
-edit), fix, re-verify tests, then push. No exceptions for "small"
-changes; a docs-only edit still gets the review (it is cheap). If the
-skill is unavailable in the running environment, say so and get the
-user's explicit go-ahead before pushing.
+reviewed with the `oh-code-review` skill at level **medium** (the
+standard single pass — speed matters here; depth belongs to the
+pre-merge review) and the review must come back clean — every finding
+either fixed or explicitly waived by the user. Run the review on the
+final state of the changes (after the last edit), fix, re-verify
+tests, then push. No exceptions for "small" changes; a docs-only edit
+still gets the review (it is cheap). If the skill is unavailable in
+the running environment, say so and get the user's explicit go-ahead
+before pushing.
 
 ## Full PR review before merge
 
 STRICT: when a PR is ready for review-merge, perform a FULL fresh-eyes
-review of it — the complete `oh-code-review` format (taste rating,
+review of it with `oh-code-review` — complete format (taste rating,
 findings, risk assessment, verdict), run against the PR's final diff
 and its actual CI results, not a restatement of the pre-push gate's
-compressed review. The two gates are different instruments: the
-compressed pre-push pass has already approved a real bug that the full
-fresh-eyes pass then caught (PR #9, the boot.ps1 verify-guard). POST
-the review as a comment on the PR, so the record lives with the code
-and survives the session. Findings are fixed (or explicitly waived by
-the user) before merge; the merge click stays the user's.
+compressed review. Levels by diff:
+
+- **max** (per-file sub-agent fan-out + cross-file pass +
+  verification) is the STANDARD for code PRs. Single-reader passes
+  have twice approved real bugs that fan-out+verification then caught
+  (PR #9 boot.ps1 verify-guard; PR #17 unset cmd.WaitDelay).
+- **ultra** (max + whole-diff security, test-adequacy, and data-flow
+  specialist passes) when the diff touches the sync protocol, the
+  security surface (auth/tokens/redaction), the storage schema, or
+  the root-run installers.
+- **high** (single pass + verification, no fan-out) suffices for
+  docs-only PRs.
+
+POST the review as a comment on the PR, so the record lives with the
+code and survives the session. Findings are fixed (or explicitly
+waived by the user) before merge; the merge click stays the user's.
 
 A review binds to the head it reviewed: a rebase, an "Update branch",
 or any new commit AFTER the posted review makes it stale — re-review
