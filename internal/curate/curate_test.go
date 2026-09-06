@@ -2,6 +2,7 @@ package curate
 
 import (
 	"os"
+	"os/exec"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -576,15 +577,11 @@ func TestClaudeExtractorTimeout(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	oldBin, oldTO := claudeBin, claudeTimeout
-	claudeBin, claudeTimeout = exe, 300*time.Millisecond
-	t.Setenv("GO_AIMEM_HELPER_SLEEP", "1")
-	defer func() { claudeBin, claudeTimeout = oldBin, oldTO }()
-
-	c := &ClaudeExtractor{WorkDir: t.TempDir()}
+	t.Setenv("GO_AIMEM_HELPER", "sleep")
+	c := &ClaudeExtractor{WorkDir: t.TempDir(), Bin: exe, Timeout: 300 * time.Millisecond}
 	start := time.Now()
 	_, _, err = c.Complete("prompt")
-	if err == nil || !strings.Contains(err.Error(), "timeout") {
+	if err == nil || !strings.Contains(err.Error(), "timed out") {
 		t.Fatalf("want timeout error, got %v", err)
 	}
 	if e := time.Since(start); e > 5*time.Second {
@@ -592,11 +589,59 @@ func TestClaudeExtractorTimeout(t *testing.T) {
 	}
 }
 
-// TestHelperProcess is not a real test: when re-invoked by
-// TestClaudeExtractorTimeout it plays a hung claude CLI.
+// TestClaudeExtractorTimeoutWithGrandchild: the case the plain kill
+// does NOT cover (max-review finding on PR #17): ctx expiry kills only
+// the direct child, and a spawned grandchild inheriting stdout keeps
+// cmd.Output() blocked past the kill — only cmd.WaitDelay force-closes
+// the pipes and bounds Complete. The helper spawns a sleeping child
+// wired to its own stdout, then sleeps.
+func TestClaudeExtractorTimeoutWithGrandchild(t *testing.T) {
+	exe, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("GO_AIMEM_HELPER", "spawn")
+	old := claudeWaitDelay
+	claudeWaitDelay = 1 * time.Second
+	defer func() { claudeWaitDelay = old }()
+
+	c := &ClaudeExtractor{WorkDir: t.TempDir(), Bin: exe, Timeout: 300 * time.Millisecond}
+	start := time.Now()
+	_, _, err = c.Complete("prompt")
+	elapsed := time.Since(start)
+	if err == nil {
+		t.Fatal("want an error from the killed CLI")
+	}
+	// The grandchild holds the pipe for ~6s; only WaitDelay's forced
+	// pipe close lets Complete return before that.
+	if elapsed > 5*time.Second {
+		t.Fatalf("Complete blocked %s — grandchild held the pipe past WaitDelay", elapsed)
+	}
+	// Let the grandchild die before test cleanup: on Windows a live
+	// process wedges TempDir removal and the test binary's deletion.
+	time.Sleep(7*time.Second - elapsed)
+}
+
+// TestMain doubles as the helper process: re-invoked with -p by the
+// tests above it plays a claude CLI that hangs ("sleep": 30s, killed
+// by the ctx) or hangs after spawning a stdout-inheriting grandchild
+// ("spawn"; the grandchild sleeps ~6s in the system temp dir) — it
+// gates every test run in this package, so keep the guard exact.
 func TestMain(m *testing.M) {
-	if os.Getenv("GO_AIMEM_HELPER_SLEEP") != "" && len(os.Args) > 1 && os.Args[1] == "-p" {
-		time.Sleep(30 * time.Second)
+	if mode := os.Getenv("GO_AIMEM_HELPER"); mode != "" && len(os.Args) > 1 && os.Args[1] == "-p" {
+		sleep := 30 * time.Second
+		if mode == "spawn" {
+			exe, _ := os.Executable()
+			child := exec.Command(exe, "-p")
+			child.Env = append(os.Environ(), "GO_AIMEM_HELPER=sleep6")
+			child.Dir = os.TempDir() // never hold the test's TempDir
+			child.Stdout = os.Stdout // inherit the pipe: the orphan that used to wedge Output()
+			child.Start()
+		}
+		if mode == "sleep6" {
+			sleep = 6 * time.Second
+		}
+		time.Sleep(sleep)
 		os.Exit(0)
 	}
 	os.Exit(m.Run())

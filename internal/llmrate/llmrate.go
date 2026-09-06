@@ -132,16 +132,26 @@ func Retries() int { _, r := conf(); return r }
 func Wait() {
 	iv, _ := conf()
 	mu.Lock()
-	defer mu.Unlock()
 	gap := iv + penalty
 	if gap <= 0 {
 		last = time.Now()
+		mu.Unlock()
 		return
 	}
-	if s := time.Until(last.Add(gap)); s > 0 {
-		time.Sleep(s)
+	// Reserve the next slot UNDER the lock, sleep OUTSIDE it: sleeping
+	// while holding the mutex made every other llmrate caller — health's
+	// Status(), a recall's query embedding — block for up to the full
+	// penalty behind one paced call (arch review, PR #17). Concurrent
+	// waiters each reserve a later slot, preserving the spacing.
+	slot := last.Add(gap)
+	if now := time.Now(); slot.Before(now) {
+		slot = now
 	}
-	last = time.Now()
+	last = slot
+	mu.Unlock()
+	if d := time.Until(slot); d > 0 {
+		time.Sleep(d)
+	}
 }
 
 // Penalize widens the spacing after a detected block (doubles, from a

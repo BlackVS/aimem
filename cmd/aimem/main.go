@@ -884,7 +884,12 @@ func docCmd(args []string) error {
 		if runModel == "" {
 			runModel = "haiku"
 		}
-		syn = &curate.ClaudeExtractor{Model: runModel, WorkDir: workDir}
+		// Doc synthesis embeds a whole chapter's facts per prompt
+		// (unbounded, unlike extraction's clipped 50-event window) and
+		// GenerateDoc persists nothing until every section succeeds — a
+		// bound sized for extraction would turn one slow section into a
+		// deterministic, token-burning freshness outage.
+		syn = &curate.ClaudeExtractor{Model: runModel, WorkDir: workDir, Timeout: 10 * time.Minute}
 	default:
 		return fmt.Errorf("unknown backend %q (claude|openai)", *backend)
 	}

@@ -15,14 +15,23 @@ currently 9); a binary refuses a database newer than it understands.
 
 ### Fixed
 
-- **The claude curation backend is paced and time-bounded**
-  (architecture review S4). `claude -p` ran with no timeout: a hung
-  CLI blocked the hub's entire hourly sweep forever (the oneshot
-  curate unit has no timeout of its own). Extraction calls now go
-  through the same llmrate pacing as the OpenAI backend and are
-  killed at a 5-minute bound — the cursor stays unadvanced and the
-  next timer tick retries naturally. Deliberately no retry loop, per
-  the recorded curation-failure design.
+- **The claude curation backend is paced, time-bounded, and a full
+  llmrate citizen** (architecture review S4; hardened by the max-level
+  review). `claude -p` ran with no timeout: a hung CLI blocked the
+  hub's entire hourly sweep forever. Calls now go through llmrate
+  pacing, are killed at the shared 5-minute completion bound
+  (`cmd.WaitDelay` force-closes pipes so an orphaned CLI grandchild
+  cannot wedge the kill — proven by a grandchild test), report clean
+  completions to llmrate (a persisted penalty now decays on
+  claude-backend hubs) and rate-limit-shaped CLI failures widen it.
+  The prompt travels over stdin, never argv — as argv, Windows'
+  command-line limit and Go's CVE-2024-24576 newline mitigation made
+  every chatty batch fail permanently on npm-shim installs. Doc
+  synthesis gets its own 10-minute bound (whole-chapter prompts).
+  `llmrate.Wait` now sleeps outside the pacer mutex, so a paced call
+  no longer blocks health checks and query embeddings behind it.
+  Deliberately no retry loop, per the recorded curation-failure
+  design: the cursor stays unadvanced and the next tick retries.
 - **MCP `recall_memory` honors its token budget across scopes**
   (architecture review S7). The budget was applied per resolved scope,
   so `scope: "both"` with two declared groups returned up to 4× the
