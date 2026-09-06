@@ -21,6 +21,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"sort"
 	"strings"
 	"time"
@@ -146,6 +147,78 @@ func (d *DB) originAliases() map[string]string {
 	m := map[string]string{}
 	json.Unmarshal([]byte(raw), &m)
 	return m
+}
+
+// MergeOriginAliases unions a peer's alias map into the local one with
+// LOCAL precedence on conflicting keys (a→b here vs a→c there keeps
+// a→b — a local repair is never rewritten by a peer's) and re-points
+// chains to their terminal target (bounded walk, so an accidental
+// cycle cannot loop). Pure function, shared by rename/merge and the
+// sync import so the two can never disagree.
+func MergeOriginAliases(local, peer map[string]string) map[string]string {
+	out := map[string]string{}
+	maps.Copy(out, peer)
+	maps.Copy(out, local) // second copy wins: local precedence on conflicts
+	for k, v := range out {
+		seen := map[string]bool{k: true}
+		for out[v] != "" && !seen[v] {
+			seen[v] = true
+			v = out[v]
+		}
+		out[k] = v
+	}
+	return out
+}
+
+// ApplyOriginAliases merges the given aliases into the DB's recorded
+// map and relabels EXISTING "project:<old>" citations through the
+// merged result. Recording the alias makes future imports normalize
+// (addSources); relabeling existing rows is what heals a DB that never
+// ran the original merge — before this, a hub that missed the relabel
+// kept its ghost rows forever and re-pushed the dead label to every
+// peer on each sync (architecture review S3).
+func (d *DB) ApplyOriginAliases(add map[string]string) (touched int, changed bool, err error) {
+	if len(add) == 0 {
+		return 0, false, nil
+	}
+	local := d.originAliases()
+	if local == nil {
+		local = map[string]string{}
+	}
+	merged := MergeOriginAliases(local, add)
+	if len(merged) != len(local) {
+		changed = true
+	} else {
+		for k, v := range merged {
+			if local[k] != v {
+				changed = true
+				break
+			}
+		}
+	}
+	for old, to := range merged {
+		oldSrc, newSrc := "project:"+old, "project:"+to
+		if res, err := d.sql.Exec(`UPDATE OR IGNORE memory_sources SET event_id = ? WHERE event_id = ?`, newSrc, oldSrc); err == nil {
+			if n, _ := res.RowsAffected(); n > 0 {
+				touched += int(n)
+			}
+		}
+		if res, err := d.sql.Exec(`DELETE FROM memory_sources WHERE event_id = ?`, oldSrc); err == nil {
+			if n, _ := res.RowsAffected(); n > 0 {
+				touched += int(n)
+			}
+		}
+	}
+	if changed {
+		raw, merr := json.Marshal(merged)
+		if merr != nil {
+			return touched, false, merr
+		}
+		if err := d.SetMeta("origin_aliases", string(raw)); err != nil {
+			return touched, false, err
+		}
+	}
+	return touched, changed, nil
 }
 
 func (d *DB) addSources(memoryID string, eventIDs []string) error {
