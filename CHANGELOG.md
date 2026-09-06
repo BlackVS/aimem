@@ -15,6 +15,30 @@ currently 9); a binary refuses a database newer than it understands.
 
 ### Fixed
 
+- **The claude curation backend is paced, time-bounded, and a full
+  llmrate citizen** (architecture review S4; hardened by the max-level
+  review). `claude -p` ran with no timeout: a hung CLI blocked the
+  hub's entire hourly sweep forever. Calls now go through llmrate
+  pacing, are killed at the shared 5-minute completion bound
+  (`cmd.WaitDelay` force-closes pipes so an orphaned CLI grandchild
+  cannot wedge the kill — proven by a grandchild test; a SUCCESSFUL
+  run whose straggler held the pipe is salvaged, not re-billed),
+  report clean completions to llmrate (a persisted penalty now decays
+  on claude-backend hubs), and claude-shaped rate blocks ("usage
+  limit reached", 429/529/overloaded — on stderr or inside the stdout
+  JSON) widen it. The prompt travels over stdin, never argv — as
+  argv, Windows' 32K command-line limit bites and cmd.exe's unquoting
+  (npm .cmd shim) is an injection surface the caller owns. Doc
+  synthesis gets a shared 10-minute bound on BOTH backends
+  (whole-chapter prompts); the admin provider test gets 30s and skips
+  the batch pacer (a diagnostic probe must not queue behind the very
+  outage it is diagnosing). `llmrate.Wait` reserves slots and sleeps
+  outside the pacer mutex — a paced call no longer blocks health
+  checks or query embeddings — and a `Penalize` while callers are
+  queued re-spaces them at the widened gap instead of letting the
+  in-flight burst keep the old cadence.
+  Deliberately no retry loop, per the recorded curation-failure
+  design: the cursor stays unadvanced and the next tick retries.
 - **MCP `recall_memory` honors its token budget across scopes**
   (architecture review S7). The budget was applied per resolved scope,
   so `scope: "both"` with two declared groups returned up to 4× the

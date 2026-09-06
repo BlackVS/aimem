@@ -1,10 +1,19 @@
 package llmrate
 
 import (
+	"os"
+	"slices"
 	"strings"
 	"testing"
 	"time"
 )
+
+// TestMain pins a tiny base interval BEFORE conf()'s sync.Once latches,
+// so the Wait tests measure their own gaps, not the 2s default.
+func TestMain(m *testing.M) {
+	os.Setenv("AIMEM_LLM_INTERVAL", "0.05")
+	os.Exit(m.Run())
+}
 
 func TestBlockedClassification(t *testing.T) {
 	cases := []struct {
@@ -71,5 +80,83 @@ func TestPenaltyAdaptsAndPersists(t *testing.T) {
 func TestClip(t *testing.T) {
 	if got := Clip(strings.Repeat("x", 500), 100); len(got) > 120 || !strings.HasSuffix(got, "(truncated)") {
 		t.Fatalf("clip: %q", got)
+	}
+}
+
+// resetPacing puts the pacer into a known state for a Wait test.
+func resetPacing(t *testing.T, pen time.Duration) {
+	t.Helper()
+	mu.Lock()
+	last = time.Time{}
+	penalty = pen
+	penGen = 0
+	mu.Unlock()
+	t.Cleanup(func() {
+		mu.Lock()
+		last, penalty, penGen = time.Time{}, 0, 0
+		mu.Unlock()
+	})
+}
+
+// TestWaitDoesNotHoldMutexWhileSleeping: the bug the reservation model
+// fixes — a sleeping waiter must not block other llmrate users
+// (Status, Penalize, another Wait's reservation).
+func TestWaitDoesNotHoldMutexWhileSleeping(t *testing.T) {
+	resetPacing(t, 400*time.Millisecond)
+	go Wait() // first call fires immediately, reserving t0
+	go Wait() // second reserves t0+gap and sleeps ~400ms
+	time.Sleep(50 * time.Millisecond)
+	start := time.Now()
+	Status() // locks mu internally
+	if e := time.Since(start); e > 150*time.Millisecond {
+		t.Fatalf("Status blocked %s behind a sleeping Wait", e)
+	}
+	time.Sleep(500 * time.Millisecond) // let the waiters drain before cleanup
+}
+
+// TestWaitSpacingConcurrent: N concurrent callers must return spaced
+// by at least the gap, in some order — the pacing contract.
+func TestWaitSpacingConcurrent(t *testing.T) {
+	const gap = 120 * time.Millisecond
+	resetPacing(t, gap) // interval defaults may add more; only a lower bound is asserted
+	done := make(chan time.Time, 3)
+	for range 3 {
+		go func() { Wait(); done <- time.Now() }()
+	}
+	var times []time.Time
+	for range 3 {
+		times = append(times, <-done)
+	}
+	slices.SortFunc(times, func(a, b time.Time) int { return a.Compare(b) })
+	for i := 1; i < len(times); i++ {
+		if d := times[i].Sub(times[i-1]); d < gap-30*time.Millisecond {
+			t.Fatalf("returns %d and %d only %s apart (gap %s)", i-1, i, d, gap)
+		}
+	}
+}
+
+// TestPenalizeWidensQueuedWaiters: a Penalize while waiters sleep must
+// widen THEIR remaining spacing, not just future reservations —
+// otherwise an in-flight burst keeps hammering a blocked upstream at
+// the old cadence (max-review finding on PR #17).
+func TestPenalizeWidensQueuedWaiters(t *testing.T) {
+	resetPacing(t, 100*time.Millisecond)
+	start := time.Now()
+	done := make(chan time.Duration, 2)
+	for range 2 {
+		go func() { Wait(); done <- time.Since(start) }()
+	}
+	time.Sleep(30 * time.Millisecond) // let them reserve their slots
+	Penalize("test block")            // penalty jumps to the 5s floor
+	var returns []time.Duration
+	for range 2 {
+		returns = append(returns, <-done)
+	}
+	slices.Sort(returns)
+	// The first caller fired before the block. The second must have
+	// been re-queued to the widened gap (>=5s floor) instead of keeping
+	// its original ~100ms slot.
+	if returns[1] < 1*time.Second {
+		t.Fatalf("queued waiter returned at %s — old-cadence slot survived a Penalize", returns[1])
 	}
 }

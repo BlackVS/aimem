@@ -10,7 +10,9 @@ package curate
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -412,11 +414,59 @@ func Run(reg *store.Registry, root, projectID string, ex Extractor, opts RunOpts
 	return rep, nil
 }
 
+// completionTimeout is the shared one-completion bound for BOTH
+// backends: the OpenAI http.Client and the claude CLI default. One
+// policy constant, not two drifting numbers (arch review, PR #17).
+const completionTimeout = 5 * time.Minute
+
+// DocSynthesisTimeout is the per-completion bound for design-doc
+// synthesis, deliberately wider than completionTimeout: a section
+// prompt embeds a chapter's facts (large, and GenerateDoc persists
+// nothing until every section succeeds), so an extraction-sized bound
+// turns one slow section into a deterministic token-burning freshness
+// outage. Exported so every doc caller — either backend — uses the
+// same number.
+const DocSynthesisTimeout = 10 * time.Minute
+
+// claudeWaitDelay bounds pipe-close after a timeout kill (see Complete).
+var claudeWaitDelay = 10 * time.Second
+
+// claudeBlocked reports whether a claude CLI failure looks
+// rate-limit-shaped. The CLI does not emit Cloudflare HTML — it says
+// things like "Claude AI usage limit reached|<ts>" on stderr or
+// carries "API Error: 429 ..." inside its stdout JSON — so the generic
+// llmrate detector alone would never fire here.
+func claudeBlocked(msg string) bool {
+	if llmrate.BlockedMessage(msg) {
+		return true
+	}
+	m := strings.ToLower(msg)
+	for _, s := range []string{"usage limit", "rate limit", "429", "529", "overloaded"} {
+		if strings.Contains(m, s) {
+			return true
+		}
+	}
+	return false
+}
+
 // ClaudeExtractor runs headless Claude Code as the extraction backend —
 // covered by the user's subscription, no per-token API billing.
 type ClaudeExtractor struct {
 	Model   string // e.g. "haiku" (default): cheap and sufficient for extraction
 	WorkDir string // run outside any real project so curator turns don't pollute its journal
+	// Bin and Timeout default to "claude" and completionTimeout; fields
+	// rather than globals so callers with different correct bounds (doc
+	// synthesis: DocSynthesisTimeout) and tests set their own without
+	// changing everyone else's.
+	Bin     string
+	Timeout time.Duration
+	// NoPace skips the llmrate spacing — ONLY for one-shot,
+	// human-triggered probes (the admin provider test): interactive
+	// singles are exactly the traffic shape that never trips upstream
+	// rate rules, and a diagnostic probe must not queue up to two
+	// minutes behind the batch pacer during the very outage it is
+	// diagnosing. Batch callers never set it.
+	NoPace bool
 }
 
 const promptHeader = `You are a knowledge curator for a software project. Below are recent
@@ -584,24 +634,104 @@ func (c *ClaudeExtractor) Extract(events []store.StoredEvent, maxFacts int, grou
 	return props, u, err
 }
 
-// Complete runs one headless claude turn — shared by extraction and by
-// design-doc synthesis.
+// Complete runs one headless claude turn — shared by extraction,
+// design-doc synthesis, the chapter-refile proposer, and the admin
+// provider test. Paced through llmrate like the OpenAI backend (a
+// sweep is a burst of calls, whatever the backend) and bounded by a
+// hard timeout: a hung CLI used to block the hub's hourly sweep
+// FOREVER — the oneshot curate unit has no timeout of its own
+// (architecture review S4). Deliberately NO retry loop: a failed call
+// surfaces to its caller (for extraction, the cursor stays unadvanced
+// and the next timer tick retries naturally — the recorded
+// curation-failure design).
+//
+// The prompt travels over STDIN, never argv: prompts realistically
+// exceed Windows' 32K CreateProcess limit, and for the npm claude.cmd
+// shim os/exec documents that cmd.exe "has a different unquoting
+// algorithm" the CALLER must handle — as argv, event-derived prompt
+// text would reach cmd.exe's parser unescaped (an injection surface,
+// CVE-2024-24576's class). Stdin has neither problem.
 func (c *ClaudeExtractor) Complete(prompt string) (string, Usage, error) {
 	var u Usage
 	model := c.Model
 	if model == "" {
 		model = "haiku"
 	}
-	cmd := exec.Command("claude", "-p", prompt,
+	bin := c.Bin
+	if bin == "" {
+		bin = "claude"
+	}
+	timeout := c.Timeout
+	if timeout <= 0 {
+		timeout = completionTimeout
+	}
+	if !c.NoPace {
+		llmrate.Wait()
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, bin, "-p",
 		"--model", model, "--output-format", "json")
+	cmd.Stdin = strings.NewReader(prompt)
+	// On ctx expiry Go kills only the DIRECT child; the claude CLI is a
+	// Node program that spawns subprocesses (on Windows the .cmd shim
+	// guarantees a grandchild), and an orphan holding the inherited
+	// stdout keeps cmd.Output() blocked past the kill — the documented
+	// Cmd.WaitDelay case. WaitDelay forcibly closes the pipes so the
+	// timeout actually bounds Complete. (Package var only for the test
+	// that proves the grandchild case.)
+	cmd.WaitDelay = claudeWaitDelay
 	if c.WorkDir != "" {
 		cmd.Dir = c.WorkDir
 	}
 	out, err := cmd.Output()
 	if err != nil {
+		// A SUCCESSFUL run whose lingering subprocess held the pipe past
+		// WaitDelay surfaces as ErrWaitDelay with the full result already
+		// in out — failing here would discard a paid-for completion and
+		// deterministically repeat the spend every sweep.
+		if errors.Is(err, exec.ErrWaitDelay) && cmd.ProcessState != nil && cmd.ProcessState.Success() {
+			return c.finish(out)
+		}
+		if errors.Is(ctx.Err(), context.DeadlineExceeded) {
+			// Wrap both: DeadlineExceeded so callers can errors.Is the
+			// timeout, and the exec error for the exit detail.
+			return "", u, fmt.Errorf("claude -p timed out after %s: %w (%w)", timeout, context.DeadlineExceeded, err)
+		}
+		// The CLI reports API failures as JSON on STDOUT (is_error) and
+		// exits nonzero — surface both streams, and let rate-limit
+		// shapes on either widen the pacing.
+		diag := llmrate.Clip(strings.TrimSpace(string(out)), 200)
+		var ee *exec.ExitError
+		if errors.As(err, &ee) && len(ee.Stderr) > 0 {
+			if diag != "" {
+				diag += " | "
+			}
+			diag += llmrate.Clip(strings.TrimSpace(string(ee.Stderr)), 200)
+		}
+		if diag != "" {
+			if claudeBlocked(diag) {
+				llmrate.Penalize("claude CLI: " + diag)
+			}
+			return "", u, fmt.Errorf("claude -p failed: %w (%s)", err, diag)
+		}
 		return "", u, fmt.Errorf("claude -p failed: %w", err)
 	}
-	return parseClaudeResult(out)
+	return c.finish(out)
+}
+
+// finish parses a completed CLI run and keeps the llmrate protocol
+// honest: clean completions decay any persisted penalty, and an
+// is_error result that is rate-limit-shaped widens it.
+func (c *ClaudeExtractor) finish(out []byte) (string, Usage, error) {
+	res, u, err := parseClaudeResult(out)
+	switch {
+	case err == nil:
+		llmrate.Recover()
+	case claudeBlocked(err.Error()):
+		llmrate.Penalize("claude CLI: " + llmrate.Clip(err.Error(), 200))
+	}
+	return res, u, err
 }
 
 // parseClaudeResult decodes the headless CLI's JSON wrapper. The
@@ -649,7 +779,8 @@ func parseClaudeResult(out []byte) (string, Usage, error) {
 type OpenAIExtractor struct {
 	BaseURL string // e.g. https://api.openai.com/v1
 	APIKey  string
-	Model   string // e.g. a small routed model on the proxy
+	Model   string        // e.g. a small routed model on the proxy
+	Timeout time.Duration // per-completion bound; 0 = completionTimeout
 }
 
 func (o *OpenAIExtractor) Extract(events []store.StoredEvent, maxFacts int, groups []GroupHint) ([]Proposal, Usage, error) {
@@ -691,6 +822,10 @@ func (o *OpenAIExtractor) Complete(prompt string) (string, Usage, error) {
 			Message string `json:"message"`
 		} `json:"error"`
 	}
+	timeout := o.Timeout
+	if timeout <= 0 {
+		timeout = completionTimeout
+	}
 	var status int
 	for attempt := 0; ; attempt++ {
 		llmrate.Wait()
@@ -700,7 +835,7 @@ func (o *OpenAIExtractor) Complete(prompt string) (string, Usage, error) {
 		}
 		req.Header.Set("Content-Type", "application/json")
 		req.Header.Set("Authorization", "Bearer "+o.APIKey)
-		resp, err := (&http.Client{Timeout: 300 * time.Second}).Do(req)
+		resp, err := (&http.Client{Timeout: timeout}).Do(req)
 		if err != nil {
 			return "", u, err
 		}

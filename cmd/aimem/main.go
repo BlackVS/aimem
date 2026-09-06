@@ -877,14 +877,16 @@ func docCmd(args []string) error {
 		if !ok || ep.Kind != "openai" {
 			return fmt.Errorf("no openai endpoint for model %q: bind it in providers.json or set AIMEM_OPENAI_API_KEY", runModel)
 		}
-		syn = &curate.OpenAIExtractor{BaseURL: ep.BaseURL, APIKey: ep.Token, Model: ep.Model}
+		syn = &curate.OpenAIExtractor{BaseURL: ep.BaseURL, APIKey: ep.Token, Model: ep.Model,
+			Timeout: curate.DocSynthesisTimeout}
 	case "claude":
 		workDir := filepath.Join(stateRoot(), "curator-workdir")
 		os.MkdirAll(workDir, 0o700)
 		if runModel == "" {
 			runModel = "haiku"
 		}
-		syn = &curate.ClaudeExtractor{Model: runModel, WorkDir: workDir}
+		syn = &curate.ClaudeExtractor{Model: runModel, WorkDir: workDir,
+			Timeout: curate.DocSynthesisTimeout}
 	default:
 		return fmt.Errorf("unknown backend %q (claude|openai)", *backend)
 	}
