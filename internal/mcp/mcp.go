@@ -361,26 +361,45 @@ func (s *srv) run(p *toolParams) (string, error) {
 		if err != nil {
 			return "", err
 		}
+		// ONE budget for the whole answer, not per scope: the per-scope
+		// server trim alone meant scope "both" with N groups returned up
+		// to (N+2) x budget tokens into the agent's context (architecture
+		// review S7). Each scope still fetches under the budget (a
+		// bounding cap), then the combined output trims against the same
+		// budget with the usual ~4 chars/token estimate — the pooled rule
+		// session-facts always applied. Scope order (project, groups,
+		// user) is the priority order, so the trim keeps the nearest
+		// scopes' best hits.
+		budget := a.TokenBudget
+		if budget <= 0 {
+			budget = 1000 // mirror the server-side default
+		}
 		var b strings.Builder
-		total := 0
+		total, used := 0, 0
 		for _, proj := range projs {
 			var res struct {
 				Memories []store.Memory `json:"memories"`
 			}
 			if err := s.get(fmt.Sprintf("/v1/projects/%s/memories/recall?q=%s&budget=%d&tag=%s&kind=%s",
-				url.PathEscape(proj), url.QueryEscape(a.Query), a.TokenBudget,
+				url.PathEscape(proj), url.QueryEscape(a.Query), budget,
 				url.QueryEscape(a.Tag), url.QueryEscape(a.Kind)), &res); err != nil {
 				return "", err
 			}
 			for _, m := range res.Memories {
-				total++
 				tags := ""
 				if len(m.Tags) > 0 {
 					tags = " #" + strings.Join(m.Tags, " #")
 				}
-				fmt.Fprintf(&b, "[%s] (%s %s conf=%.1f corroborated %dx since %s%s) %s\n",
+				line := fmt.Sprintf("[%s] (%s %s conf=%.1f corroborated %dx since %s%s) %s\n",
 					m.ID, scopeName(proj, s.project), m.Kind, m.Confidence,
 					m.Corroboration, m.CreatedAt[:10], tags, m.Text)
+				t := len(line)/4 + 1
+				if used+t > budget && total > 0 {
+					return b.String(), nil // budget spent; always at least one hit
+				}
+				b.WriteString(line)
+				used += t
+				total++
 			}
 		}
 		if total == 0 {

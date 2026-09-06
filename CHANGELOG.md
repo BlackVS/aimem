@@ -15,6 +15,14 @@ currently 9); a binary refuses a database newer than it understands.
 
 ### Fixed
 
+- **MCP `recall_memory` honors its token budget across scopes**
+  (architecture review S7). The budget was applied per resolved scope,
+  so `scope: "both"` with two declared groups returned up to 4× the
+  requested tokens into the agent's context. The combined answer now
+  trims against one budget (the pooled rule session-facts always
+  used), with scope order — project, groups, user — as the priority
+  order, and always at least one hit.
+
 - **Origin-alias repairs now propagate over sync** (data integrity;
   architecture review S3, the mechanism behind the long-lived
   "gitea ghost"). A merge/rename's citation relabel recorded its alias

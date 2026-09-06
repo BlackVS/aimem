@@ -2,6 +2,7 @@ package mcp
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -161,4 +162,64 @@ func TestUpdateDocConflictHandsBackBothSides(t *testing.T) {
 			t.Fatalf("conflict message missing %q: %v", want, err)
 		}
 	}
+}
+
+// TestRecallBudgetIsPooledAcrossScopes: architecture review S7 — the
+// token budget must bound the WHOLE recall answer, not each scope.
+// Before the fix, scope "both" with two groups returned up to 4x the
+// requested budget into the agent's context.
+func TestRecallBudgetIsPooledAcrossScopes(t *testing.T) {
+	// Fake service: every scope returns 20 memories of ~40 tokens each.
+	mux := http.NewServeMux()
+	mux.HandleFunc("GET /v1/projects/{p}/memories/recall", func(w http.ResponseWriter, r *http.Request) {
+		var mems []map[string]any
+		for i := 0; i < 20; i++ {
+			mems = append(mems, map[string]any{
+				"id":   fmt.Sprintf("%s-%02d", r.PathValue("p"), i),
+				"text": strings.Repeat("word ", 30), "kind": "fact",
+				"confidence": 0.7, "created_at": "2026-09-01T00:00:00Z",
+			})
+		}
+		json.NewEncoder(w).Encode(map[string]any{"memories": mems})
+	})
+	svc := httptest.NewServer(mux)
+	defer svc.Close()
+
+	s := &srv{
+		api:     svc.Client(),
+		project: "projA",
+		groups:  []string{"group-g1", "group-g2"},
+	}
+	// Route the fake through the srv's fixed http://aimem host.
+	s.api.Transport = &rewriteHost{to: svc.URL[len("http://"):], rt: http.DefaultTransport}
+
+	const budget = 300
+	var p toolParams
+	p.Name = "recall_memory"
+	p.Arguments.Query = "anything"
+	p.Arguments.Scope = "both"
+	p.Arguments.TokenBudget = budget
+	out, err := s.run(&p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if est := len(out) / 4; est > budget+40 { // one-hit overshoot allowed
+		t.Fatalf("pooled budget exceeded: ~%d tokens for budget %d", est, budget)
+	}
+	if !strings.Contains(out, "projA-00") {
+		t.Fatal("first (project-scope) hit missing — trim must keep priority order")
+	}
+	if strings.Contains(out, "user-") {
+		t.Fatal("user-scope hits present despite budget exhausted by nearer scopes")
+	}
+}
+
+type rewriteHost struct {
+	to string
+	rt http.RoundTripper
+}
+
+func (h *rewriteHost) RoundTrip(r *http.Request) (*http.Response, error) {
+	r.URL.Host = h.to
+	return h.rt.RoundTrip(r)
 }
