@@ -61,6 +61,16 @@ func ExportGroupConfig(reg *Registry, ids []string, enc *json.Encoder) error {
 				return err
 			}
 		}
+		// Origin aliases travel too (architecture review S3): the relabel
+		// a merge/rename performs is machine-local, and a peer that never
+		// ran it keeps its ghost citations forever AND re-pushes the dead
+		// label on every sync. Shipping the alias map lets the import
+		// side merge it and relabel its own rows.
+		if al, _ := db.GetMeta("origin_aliases"); al != "" {
+			if err := enc.Encode(ConfigRecord{Project: id, Key: "origin_aliases", Value: al}); err != nil {
+				return err
+			}
+		}
 	}
 	return nil
 }
@@ -103,6 +113,25 @@ func ImportGroupConfigRecord(reg *Registry, rec ConfigRecord) (msg string, appli
 			}
 		}
 		return "", false
+	}
+	if rec.Key == "origin_aliases" {
+		peer := map[string]string{}
+		if json.Unmarshal([]byte(rec.Value), &peer) != nil || len(peer) == 0 {
+			return "", false
+		}
+		db, err := reg.Open(rec.Project)
+		if err != nil {
+			return "", false
+		}
+		// Merge semantics are neither fill-only nor newest-wins: aliases
+		// UNION (local precedence on a conflicting key), chains re-point,
+		// and existing citations relabel through the merged map — the
+		// repair a merge/rename performed elsewhere completes here.
+		touched, changed, err := db.ApplyOriginAliases(peer)
+		if err != nil || (!changed && touched == 0) {
+			return "", false
+		}
+		return fmt.Sprintf("origin aliases %s merged from peer (%d citation(s) relabeled)", rec.Project, touched), true
 	}
 	if !slices.Contains(GroupConfigKeys, rec.Key) {
 		return "", false

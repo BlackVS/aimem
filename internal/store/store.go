@@ -234,7 +234,6 @@ func (r *Registry) renameSources(oldID, newID string) int {
 	if err != nil {
 		return 0
 	}
-	oldSrc, newSrc := "project:"+oldID, "project:"+newID
 	touched := 0
 	for _, e := range entries {
 		if !e.IsDir() || !strings.HasPrefix(e.Name(), "group-") {
@@ -244,34 +243,16 @@ func (r *Registry) renameSources(oldID, newID string) int {
 		if err != nil {
 			continue
 		}
-		if res, err := db.sql.Exec(`UPDATE OR IGNORE memory_sources SET event_id = ? WHERE event_id = ?`, newSrc, oldSrc); err == nil {
-			if n, _ := res.RowsAffected(); n > 0 {
-				touched += int(n)
-			}
-		}
-		if res, err := db.sql.Exec(`DELETE FROM memory_sources WHERE event_id = ?`, oldSrc); err == nil {
-			if n, _ := res.RowsAffected(); n > 0 {
-				touched += int(n)
-			}
-		}
 		// The local rewrite alone is not durable: sync UNIONS sources, so
 		// a peer copy that still holds the old label pushes it right back
 		// (lived 2026-08-30: a machine with only ssh down kept
-		// resurrecting a merged id every 10 minutes). Record the alias so
-		// addSources normalizes every future import; chains re-point.
-		al := db.originAliases()
-		if al == nil {
-			al = map[string]string{}
-		}
-		al[oldID] = newID
-		for k, v := range al {
-			if v == oldID {
-				al[k] = newID
-			}
-		}
-		if raw, err := json.Marshal(al); err == nil {
-			db.SetMeta("origin_aliases", string(raw))
-		}
+		// resurrecting a merged id every 10 minutes). ApplyOriginAliases
+		// records the alias so addSources normalizes every future import
+		// (chains re-point), relabels existing rows, and — since the
+		// aliases ride group-config sync — propagates the repair to peers
+		// that never ran this merge.
+		n, _, _ := db.ApplyOriginAliases(map[string]string{oldID: newID})
+		touched += n
 	}
 	return touched
 }

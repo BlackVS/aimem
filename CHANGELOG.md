@@ -13,7 +13,18 @@ currently 9); a binary refuses a database newer than it understands.
 
 ## [Unreleased]
 
-Nothing yet.
+### Fixed
+
+- **Origin-alias repairs now propagate over sync** (data integrity;
+  architecture review S3, the mechanism behind the long-lived
+  "gitea ghost"). A merge/rename's citation relabel recorded its alias
+  map only in the local group DB — a peer that never ran the operation
+  kept its dead `project:` citations forever and re-pushed the dead
+  label back to everyone on each sync. The alias map now rides
+  group-config sync: the import side merges it (union, local
+  precedence on conflicts, chains re-pointed) and relabels its own
+  existing citations, so one repair anywhere heals the fleet. Old
+  peers ignore the new record; nothing else changes shape.
 
 ## [0.3.24] — 2026-09-05
 
