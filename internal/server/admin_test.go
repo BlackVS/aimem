@@ -12,6 +12,7 @@ import (
 	"strings"
 	"testing"
 
+	"aimem/internal/schema"
 	"aimem/internal/store"
 )
 
@@ -238,5 +239,86 @@ func TestReviewWindowsMatchConsole(t *testing.T) {
 	}
 	if !slices.Equal(got, reviewWindows) {
 		t.Fatalf("console #revDays offers %v; server reviewWindows = %v — keep them identical", got, reviewWindows)
+	}
+}
+
+// TestOverviewReviewMapWiring pins the index→window re-keying and the
+// contracts the console's fail-open filter rests on: every row ships a
+// review map with ALL window keys (zeros included — a healthy empty
+// queue must be distinguishable from an absent map, which signals a
+// count-query error), and the response carries review_windows.
+func TestOverviewReviewMapWiring(t *testing.T) {
+	s, reg := testServer(t)
+	db, _ := reg.Open("proj-aged")
+	// ImportMemory honors CreatedAt and writes no audit rows, so the
+	// review predicate's last_seen falls back to 2020 — stale at every
+	// window without reaching into store internals.
+	if err := db.ImportMemory(&store.Memory{
+		ID: "aged-1", Text: "an old thin fact", Kind: "fact",
+		Confidence: 0.6, CreatedAt: "2020-01-01T00:00:00Z", Actor: "test",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	reg.Open("proj-clean") // active project, empty queue
+
+	rec := req(t, http.HandlerFunc(s.overview), "GET", "/v1/overview", "")
+	var out struct {
+		Projects []struct {
+			ID     string         `json:"id"`
+			Review map[string]int `json:"review"`
+			Stats  struct {
+				Docs    int `json:"docs"`
+				Records int `json:"records"`
+			} `json:"stats"`
+		} `json:"projects"`
+		ReviewWindows []int `json:"review_windows"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &out); err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Equal(out.ReviewWindows, reviewWindows) {
+		t.Fatalf("review_windows = %v, want %v", out.ReviewWindows, reviewWindows)
+	}
+	rows := map[string]map[string]int{}
+	for _, p := range out.Projects {
+		rows[p.ID] = p.Review
+	}
+	for _, id := range []string{"proj-aged", "proj-clean"} {
+		m := rows[id]
+		if m == nil {
+			t.Fatalf("%s: review map absent — zeros must ship, absence means error", id)
+		}
+		for _, d := range reviewWindows {
+			if _, ok := m[strconv.Itoa(d)]; !ok {
+				t.Fatalf("%s: window %d missing from review map %v", id, d, m)
+			}
+		}
+	}
+	// The aged fact qualifies at EVERY window (2020 is older than 90d);
+	// the clean project counts zero everywhere. A swapped index/key
+	// basis breaks one of these.
+	for _, d := range reviewWindows {
+		k := strconv.Itoa(d)
+		if rows["proj-aged"][k] != 1 {
+			t.Fatalf("proj-aged[%s]=%d, want 1", k, rows["proj-aged"][k])
+		}
+		if rows["proj-clean"][k] != 0 {
+			t.Fatalf("proj-clean[%s]=%d, want 0", k, rows["proj-clean"][k])
+		}
+	}
+}
+
+// TestWikiSentinelsOutsideProjectIDSpace: the Wiki dropdown's mode
+// toggles use option values that must NEVER be legal project ids —
+// scrape them from the page and check against the real validator.
+func TestWikiSentinelsOutsideProjectIDSpace(t *testing.T) {
+	ms := regexp.MustCompile(`<option value="(\*+)"`).FindAllStringSubmatch(string(adminHTML), -1)
+	if len(ms) != 2 {
+		t.Fatalf("expected the 2 wiki mode sentinels in admin.html, found %d — scrape or markup drifted", len(ms))
+	}
+	for _, m := range ms {
+		if schema.ValidProjectID(m[1]) {
+			t.Fatalf("sentinel %q is a valid project id — collision with a real project possible", m[1])
+		}
 	}
 }

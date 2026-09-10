@@ -327,10 +327,11 @@ func (s *Server) curateRuns(w http.ResponseWriter, r *http.Request) {
 }
 
 // reviewWindows are the age windows (days) the console's Review days
-// selector offers. The overview computes a queue count per window and
-// SHIPS THIS LIST in its response, so the page derives its filter keys
-// from the server instead of a comment keeping two files in sync
-// (TestReviewWindowsMatchConsole pins the #revDays options to it).
+// selector offers. The overview computes a queue count per window;
+// the console reads its own #revDays options (pinned to this list by
+// TestReviewWindowsMatchConsole — THAT test is what holds the two
+// files together), and review_windows ships in the response for any
+// other consumer.
 var reviewWindows = []int{7, 30, 90}
 
 // overview is the GUI's one-shot bootstrap: every project with stats,

@@ -414,8 +414,13 @@ func (d *DB) Stats() (ProjectStats, error) {
 	}
 	// Docs and wiki records ride the same one-shot stats so consumers
 	// (the console's content-aware dropdowns, the TUI) never need an
-	// N+1 sweep to learn which projects hold content.
-	if err := d.sql.QueryRow(`SELECT COUNT(*) FROM docs WHERE deleted = 0`).Scan(&s.Docs); err != nil {
+	// N+1 sweep to learn which projects hold content. Docs counts
+	// tombstones too: the console's Docs tab lists retired docs (their
+	// version history is restorable), so retiring a project's last doc
+	// must not make the project — and the way back — unreachable.
+	// Records stays live-only: the wiki tab hides deleted records, and
+	// its "all projects…" switch is the escape hatch docs don't have.
+	if err := d.sql.QueryRow(`SELECT COUNT(*) FROM docs`).Scan(&s.Docs); err != nil {
 		return s, err
 	}
 	if err := d.sql.QueryRow(`SELECT COUNT(*) FROM col_records WHERE deleted = 0`).Scan(&s.Records); err != nil {

@@ -29,8 +29,13 @@ currently 10); a binary refuses a database newer than it understands.
   errored, or a window the server did not send, stays OFFERED — a
   possibly-empty queue beats a scope silently hidden. The per-project
   counts and the window list ride the existing one-shot /v1/overview
-  (no N+1 requests); a test pins the console's day options to the
-  server's window list.
+  (no N+1 requests); the console builds its day options from the
+  server-sent window list (static markup is the fallback for older
+  hubs, pinned by a test). The Docs filter counts retired docs too —
+  the tab lists them with restorable history, so retiring a project's
+  last doc must not make the project unreachable. Each tab's refresh
+  button now re-fetches the overview snapshot before rebuilding its
+  dropdown, and the Wiki mode toggle keeps the project being viewed.
 
 ### Fixed
 

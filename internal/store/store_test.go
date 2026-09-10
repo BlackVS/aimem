@@ -1,6 +1,7 @@
 package store
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 	"runtime"
@@ -347,8 +348,12 @@ func TestStatsCountsDocsAndRecords(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if s.Docs != 1 || s.Records != 1 {
-		t.Fatalf("docs=%d records=%d, want 1/1 (tombstoned doc excluded)", s.Docs, s.Records)
+	// Docs counts the tombstone too — the console's Docs tab lists
+	// retired docs (restorable history), so the dropdown filter riding
+	// this count must keep such a project reachable. Records is
+	// live-only: the wiki tab hides deleted records.
+	if s.Docs != 2 || s.Records != 1 {
+		t.Fatalf("docs=%d records=%d, want 2/1 (tombstoned doc counted)", s.Docs, s.Records)
 	}
 	empty, _ := r.Open("proj-b")
 	es, _ := empty.Stats()
@@ -411,5 +416,59 @@ func TestReviewCountMatchesQueue(t *testing.T) {
 	}
 	if counts[1] != 0 {
 		t.Fatalf("stricter window must count 0, got %d — per-window sums leaked", counts[1])
+	}
+}
+
+// TestMigrationV9ToV10 exercises the upgrade path a real populated DB
+// takes: roll a fully-migrated database back to v9 (drop the v10
+// index, rewind schema_version), reopen, and assert the migration
+// re-applies cleanly and idempotently.
+func TestMigrationV9ToV10(t *testing.T) {
+	root := t.TempDir()
+	r, err := NewRegistry(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	db, _ := r.Open("proj-a")
+	db.Append(testEvent("k1", "t1"))
+	if _, _, err := db.Remember("a fact with audit rows", "test", RememberOpts{Kind: "fact"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.sql.Exec(`DROP INDEX idx_memory_audit_memory`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.sql.Exec(`UPDATE meta SET value='9' WHERE key='schema_version'`); err != nil {
+		t.Fatal(err)
+	}
+	r.Close()
+
+	for pass := 1; pass <= 2; pass++ { // second open proves idempotency
+		r2, err := NewRegistry(root)
+		if err != nil {
+			t.Fatal(err)
+		}
+		db2, err := r2.OpenExisting("proj-a")
+		if err != nil {
+			t.Fatalf("pass %d: reopen (migration) failed: %v", pass, err)
+		}
+		var v, idx string
+		db2.sql.QueryRow(`SELECT value FROM meta WHERE key='schema_version'`).Scan(&v)
+		db2.sql.QueryRow(`SELECT name FROM sqlite_master WHERE type='index' AND name='idx_memory_audit_memory'`).Scan(&idx)
+		if v != "10" || idx == "" {
+			t.Fatalf("pass %d: schema_version=%q index=%q — v10 not applied", pass, v, idx)
+		}
+		r2.Close()
+	}
+}
+
+// TestProjectStatsWireNames pins the JSON field names the console's
+// Docs/Wiki dropdown filters read (stats.docs / stats.records) — a
+// renamed tag would silently empty both dropdowns with a green suite.
+func TestProjectStatsWireNames(t *testing.T) {
+	b, _ := json.Marshal(ProjectStats{Docs: 3, Records: 4})
+	var m map[string]any
+	json.Unmarshal(b, &m)
+	if m["docs"] != float64(3) || m["records"] != float64(4) {
+		t.Fatalf("wire names drifted: %s", b)
 	}
 }
