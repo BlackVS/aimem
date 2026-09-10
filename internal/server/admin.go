@@ -14,6 +14,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"time"
 )
 
 //go:embed admin.html
@@ -325,6 +326,14 @@ func (s *Server) curateRuns(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+// reviewWindows are the age windows (days) the console's Review days
+// selector offers. The overview computes a queue count per window;
+// the console reads its own #revDays options (pinned to this list by
+// TestReviewWindowsMatchConsole — THAT test is what holds the two
+// files together), and review_windows ships in the response for any
+// other consumer.
+var reviewWindows = []int{7, 30, 90}
+
 // overview is the GUI's one-shot bootstrap: every project with stats,
 // plus group config and membership, so the page renders without an N+1
 // request storm.
@@ -337,12 +346,18 @@ func (s *Server) overview(w http.ResponseWriter, r *http.Request) {
 	type row struct {
 		ID       string          `json:"id"`
 		Stats    any             `json:"stats"`
+		Review   map[string]int  `json:"review,omitempty"` // review-queue size per days window
 		Groups   []string        `json:"groups,omitempty"`
 		About    string          `json:"about,omitempty"`
 		Policy   string          `json:"policy,omitempty"`
 		Chapters json.RawMessage `json:"chapters,omitempty"`
 		Features json.RawMessage `json:"features,omitempty"`
 		DocTS    string          `json:"doc_ts,omitempty"` // design_doc_ts when a doc exists
+	}
+	cutoffs := make([]string, len(reviewWindows))
+	now := time.Now().UTC()
+	for i, d := range reviewWindows {
+		cutoffs[i] = now.AddDate(0, 0, -d).Format(time.RFC3339)
 	}
 	out := make([]row, 0, len(ids))
 	for _, id := range ids {
@@ -352,6 +367,17 @@ func (s *Server) overview(w http.ResponseWriter, r *http.Request) {
 		}
 		rw := row{ID: id}
 		rw.Stats, _ = db.Stats()
+		if counts, err := db.ReviewCounts(cutoffs, -1); err == nil {
+			rw.Review = map[string]int{}
+			for i, d := range reviewWindows {
+				rw.Review[strconv.Itoa(d)] = counts[i]
+			}
+		} else {
+			// A missing map is the client's FAIL-OPEN signal: the scope
+			// stays offered rather than silently vanishing behind a DB
+			// error indistinguishable from an empty queue.
+			s.log.Warn("overview review counts", "project", id, "err", err)
+		}
 		if raw, _ := db.GetMeta("groups"); raw != "" {
 			json.Unmarshal([]byte(raw), &rw.Groups)
 		}
@@ -368,5 +394,5 @@ func (s *Server) overview(w http.ResponseWriter, r *http.Request) {
 		}
 		out = append(out, rw)
 	}
-	s.ok(w, map[string]any{"projects": out})
+	s.ok(w, map[string]any{"projects": out, "review_windows": reviewWindows})
 }

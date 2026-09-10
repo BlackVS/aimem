@@ -364,7 +364,7 @@ func (r *Registry) Close() {
 	r.dbs = map[string]*DB{}
 }
 
-const currentSchema = 9
+const currentSchema = 10
 
 // SetMeta / GetMeta store small key-value project metadata (e.g. the
 // project's declared knowledge groups, stamped from event pushes so the
@@ -393,6 +393,8 @@ type ProjectStats struct {
 	Memories    int    `json:"memories"` // live only
 	Pinned      int    `json:"pinned"`
 	Embedded    int    `json:"embedded"` // live memories with any embedding
+	Docs        int    `json:"docs"`     // live shared documents
+	Records     int    `json:"records"`  // live wiki/collection records
 }
 
 func (d *DB) Stats() (ProjectStats, error) {
@@ -408,6 +410,20 @@ func (d *DB) Stats() (ProjectStats, error) {
 	}
 	if err := d.sql.QueryRow(`SELECT COUNT(DISTINCT e.memory_id) FROM memory_embeddings e
 			JOIN memories m ON m.id = e.memory_id WHERE m.expired_at IS NULL`).Scan(&s.Embedded); err != nil {
+		return s, err
+	}
+	// Docs and wiki records ride the same one-shot stats so consumers
+	// (the console's content-aware dropdowns, the TUI) never need an
+	// N+1 sweep to learn which projects hold content. Docs counts
+	// tombstones too: the console's Docs tab lists retired docs (their
+	// version history is restorable), so retiring a project's last doc
+	// must not make the project — and the way back — unreachable.
+	// Records stays live-only: the wiki tab hides deleted records, and
+	// its "all projects…" switch is the escape hatch docs don't have.
+	if err := d.sql.QueryRow(`SELECT COUNT(*) FROM docs`).Scan(&s.Docs); err != nil {
+		return s, err
+	}
+	if err := d.sql.QueryRow(`SELECT COUNT(*) FROM col_records WHERE deleted = 0`).Scan(&s.Records); err != nil {
 		return s, err
 	}
 	return s, nil
@@ -672,6 +688,18 @@ CREATE TABLE col_revisions(
   PRIMARY KEY(collection, id, rev)
 );
 UPDATE meta SET value='9' WHERE key='schema_version';`); err != nil {
+			return err
+		}
+	}
+	// v10: memory_audit is only ever probed per-memory (MAX(ts) for the
+	// review-staleness predicate) yet its sole index was the PK — a full
+	// table scan per live memory, multiplied across every project once
+	// /v1/overview began carrying per-window review counts (PR #20).
+	// (memory_id, ts) serves that MAX with an index-only descent.
+	if v < 10 {
+		if err := d.step(`
+CREATE INDEX idx_memory_audit_memory ON memory_audit(memory_id, ts);
+UPDATE meta SET value='10' WHERE key='schema_version';`); err != nil {
 			return err
 		}
 	}

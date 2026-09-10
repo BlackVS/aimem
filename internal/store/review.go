@@ -17,6 +17,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"strings"
 )
 
 // Review defaults: a fact untouched for a month with at most this many
@@ -41,6 +42,49 @@ type ReviewItem struct {
 	LastSeen      string  `json:"last_seen"`
 }
 
+// reviewCandidatesSQL is the ONE definition of the staleness
+// candidate set — id, corroboration, last_seen for every active,
+// unpinned fact. ReviewCounts and ReviewQueue both build on it, so
+// the console's dropdown filter and the queue it opens can never
+// disagree about which facts qualify.
+const reviewCandidatesSQL = `
+		SELECT m.id, m.text, m.kind, m.confidence, m.created_at, m.actor,
+		  (SELECT COUNT(*) FROM memory_sources s WHERE s.memory_id = m.id) AS corroboration,
+		  COALESCE((SELECT MAX(a.ts) FROM memory_audit a WHERE a.memory_id = m.id
+		            AND a.op IN ('remember','reassert','confirm')), m.created_at) AS last_seen
+		FROM memories m
+		WHERE m.expired_at IS NULL AND m.superseded_by IS NULL AND m.pinned = 0`
+
+// ReviewCounts reports, for each cutoff, how many facts match the
+// review predicate (UNCAPPED — ReviewQueue clamps its listing, so a
+// large count can exceed what one queue page shows). This is the
+// existence probe behind the console's Review dropdown; one
+// single-pass query however many cutoffs.
+func (d *DB) ReviewCounts(cutoffs []string, maxCorroboration int) ([]int, error) {
+	if len(cutoffs) == 0 {
+		return nil, nil
+	}
+	if maxCorroboration < 0 {
+		maxCorroboration = DefaultReviewMaxCorroboration
+	}
+	sums := make([]string, len(cutoffs))
+	args := make([]any, 0, len(cutoffs)+1)
+	for i, c := range cutoffs {
+		sums[i] = `COALESCE(SUM(last_seen < ?), 0)`
+		args = append(args, c)
+	}
+	args = append(args, maxCorroboration)
+	dest := make([]int, len(cutoffs))
+	scan := make([]any, len(cutoffs))
+	for i := range dest {
+		scan[i] = &dest[i]
+	}
+	err := d.sql.QueryRow(`SELECT `+strings.Join(sums, ", ")+` FROM (`+
+		reviewCandidatesSQL+`
+	) WHERE corroboration <= ?`, args...).Scan(scan...)
+	return dest, err
+}
+
 // ReviewQueue lists active, unpinned facts whose last assertion or
 // validation predates cutoff (RFC3339) and whose corroboration is at
 // most maxCorroboration — oldest and least confident first, so the
@@ -52,13 +96,9 @@ func (d *DB) ReviewQueue(cutoff string, maxCorroboration, limit int) ([]ReviewIt
 	if maxCorroboration < 0 {
 		maxCorroboration = DefaultReviewMaxCorroboration
 	}
-	rows, err := d.sql.Query(`SELECT * FROM (
-		SELECT m.id, m.text, m.kind, m.confidence, m.created_at, m.actor,
-		  (SELECT COUNT(*) FROM memory_sources s WHERE s.memory_id = m.id) AS corroboration,
-		  COALESCE((SELECT MAX(a.ts) FROM memory_audit a WHERE a.memory_id = m.id
-		            AND a.op IN ('remember','reassert','confirm')), m.created_at) AS last_seen
-		FROM memories m
-		WHERE m.expired_at IS NULL AND m.superseded_by IS NULL AND m.pinned = 0
+	rows, err := d.sql.Query(`SELECT id, text, kind, confidence, created_at, actor,
+		corroboration, last_seen FROM (`+
+		reviewCandidatesSQL+`
 	) WHERE corroboration <= ? AND last_seen < ?
 	ORDER BY last_seen ASC, confidence ASC LIMIT ?`,
 		maxCorroboration, cutoff, limit)

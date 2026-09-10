@@ -1,6 +1,7 @@
 package store
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 	"runtime"
@@ -325,5 +326,149 @@ func TestRetentionByBytesKeepsSearchConsistent(t *testing.T) {
 	}
 	if hits, _ := db.Search("login", 0); len(hits) != 0 {
 		t.Fatalf("search returned %d hits from an emptied journal", len(hits))
+	}
+}
+
+func TestStatsCountsDocsAndRecords(t *testing.T) {
+	r := newTestRegistry(t)
+	db, _ := r.Open("proj-a")
+	if _, err := db.PutDoc("RUNBOOK", "body\n", "t", 0, false); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.PutDoc("GONE", "x\n", "t", 0, false); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.PutDoc("GONE", "", "t", 1, true); err != nil { // tombstone
+		t.Fatal(err)
+	}
+	if _, err := db.PutRecord("api", "a/b", []byte(`{}`), "t", 0, false); err != nil {
+		t.Fatal(err)
+	}
+	s, err := db.Stats()
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Docs counts the tombstone too — the console's Docs tab lists
+	// retired docs (restorable history), so the dropdown filter riding
+	// this count must keep such a project reachable. Records is
+	// live-only: the wiki tab hides deleted records.
+	if s.Docs != 2 || s.Records != 1 {
+		t.Fatalf("docs=%d records=%d, want 2/1 (tombstoned doc counted)", s.Docs, s.Records)
+	}
+	empty, _ := r.Open("proj-b")
+	es, _ := empty.Stats()
+	if es.Docs != 0 || es.Records != 0 {
+		t.Fatalf("empty project reports docs=%d records=%d", es.Docs, es.Records)
+	}
+}
+
+func TestReviewCountMatchesQueue(t *testing.T) {
+	r := newTestRegistry(t)
+	db, _ := r.Open("proj-a")
+	if _, _, err := db.Remember("an old thin fact", "test", RememberOpts{Kind: "fact"}); err != nil {
+		t.Fatal(err)
+	}
+	// Age it past any cutoff by backdating the created_at + audit trail.
+	if _, err := db.sql.Exec(`UPDATE memories SET created_at='2020-01-01T00:00:00Z'`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.sql.Exec(`UPDATE memory_audit SET ts='2020-01-01T00:00:00Z'`); err != nil {
+		t.Fatal(err)
+	}
+	// Facts every predicate clause must EXCLUDE, so a drifted clause in
+	// ReviewCounts alone fails this test instead of shipping a dropdown
+	// that disagrees with the queue: a pinned fact, a superseded fact,
+	// and one corroborated past the review threshold.
+	pinID, _, _ := db.Remember("a pinned fact", "test", RememberOpts{Kind: "fact"})
+	if err := db.Pin(pinID, true, "test"); err != nil {
+		t.Fatal(err)
+	}
+	oldID, _, _ := db.Remember("superseded wording", "test", RememberOpts{Kind: "fact"})
+	if _, err := db.Supersede(oldID, "current wording", "test", RememberOpts{}); err != nil {
+		t.Fatal(err)
+	}
+	corrID, _, _ := db.Remember("well corroborated fact", "test", RememberOpts{Kind: "fact"})
+	for i := 0; i < 3; i++ {
+		if err := db.addSources(corrID, []string{fmt.Sprintf("ev-%d", i)}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// Backdate EVERYTHING (again) so age alone excludes nothing.
+	if _, err := db.sql.Exec(`UPDATE memories SET created_at='2020-01-01T00:00:00Z'`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.sql.Exec(`UPDATE memory_audit SET ts='2020-01-01T00:00:00Z'`); err != nil {
+		t.Fatal(err)
+	}
+
+	c7 := time.Now().UTC().AddDate(0, 0, -7).Format(time.RFC3339)
+	ancient := time.Now().UTC().AddDate(-10, 0, 0).Format(time.RFC3339) // cutoff stricter than any fact
+	items, err := db.ReviewQueue(c7, -1, 100)
+	if err != nil {
+		t.Fatal(err)
+	}
+	counts, err := db.ReviewCounts([]string{c7, ancient}, -1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if counts[0] != len(items) || counts[0] != 2 {
+		t.Fatalf("ReviewCounts[7d]=%d, queue=%d, want both 2 (the thin fact + the superseding wording; pinned/superseded/corroborated excluded)", counts[0], len(items))
+	}
+	if counts[1] != 0 {
+		t.Fatalf("stricter window must count 0, got %d — per-window sums leaked", counts[1])
+	}
+}
+
+// TestMigrationV9ToV10 exercises the upgrade path a real populated DB
+// takes: roll a fully-migrated database back to v9 (drop the v10
+// index, rewind schema_version), reopen, and assert the migration
+// re-applies cleanly and idempotently.
+func TestMigrationV9ToV10(t *testing.T) {
+	root := t.TempDir()
+	r, err := NewRegistry(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	db, _ := r.Open("proj-a")
+	db.Append(testEvent("k1", "t1"))
+	if _, _, err := db.Remember("a fact with audit rows", "test", RememberOpts{Kind: "fact"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.sql.Exec(`DROP INDEX idx_memory_audit_memory`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.sql.Exec(`UPDATE meta SET value='9' WHERE key='schema_version'`); err != nil {
+		t.Fatal(err)
+	}
+	r.Close()
+
+	for pass := 1; pass <= 2; pass++ { // second open proves idempotency
+		r2, err := NewRegistry(root)
+		if err != nil {
+			t.Fatal(err)
+		}
+		db2, err := r2.OpenExisting("proj-a")
+		if err != nil {
+			t.Fatalf("pass %d: reopen (migration) failed: %v", pass, err)
+		}
+		var v, idx string
+		db2.sql.QueryRow(`SELECT value FROM meta WHERE key='schema_version'`).Scan(&v)
+		db2.sql.QueryRow(`SELECT name FROM sqlite_master WHERE type='index' AND name='idx_memory_audit_memory'`).Scan(&idx)
+		if v != "10" || idx == "" {
+			t.Fatalf("pass %d: schema_version=%q index=%q — v10 not applied", pass, v, idx)
+		}
+		r2.Close()
+	}
+}
+
+// TestProjectStatsWireNames pins the JSON field names the console's
+// Docs/Wiki dropdown filters read (stats.docs / stats.records) — a
+// renamed tag would silently empty both dropdowns with a green suite.
+func TestProjectStatsWireNames(t *testing.T) {
+	b, _ := json.Marshal(ProjectStats{Docs: 3, Records: 4})
+	var m map[string]any
+	json.Unmarshal(b, &m)
+	if m["docs"] != float64(3) || m["records"] != float64(4) {
+		t.Fatalf("wire names drifted: %s", b)
 	}
 }

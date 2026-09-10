@@ -268,7 +268,7 @@
   <section id="t-docs" hidden>
     <div class="row" style="margin-top:0">
       <select id="docProj" style="width:auto" onchange="loadDocs()"></select>
-      <button class="act" onclick="loadDocs()">refresh</button>
+      <button class="act" onclick="refreshTab(initDocs)">refresh</button>
       <span class="dim" id="docHint"></span>
     </div>
     <div id="docList"></div>
@@ -277,7 +277,7 @@
   <section id="t-wiki" hidden>
     <div class="row" style="margin-top:0">
       <select id="wikiProj" style="width:auto" onchange="loadCols()"></select>
-      <button class="act" onclick="loadCols()">refresh</button>
+      <button class="act" onclick="refreshTab(initWiki)">refresh</button>
       <span class="dim" id="wikiHint"></span>
     </div>
     <div class="dim" style="font-size:12px;margin:6px 0">Structured collections: live trees of
@@ -304,12 +304,12 @@
   <section id="t-review" hidden>
     <div class="row" style="margin-top:0">
       <select id="revProj" style="width:auto" onchange="loadReview()"></select>
-      <select id="revDays" style="width:auto" onchange="loadReview()">
+      <select id="revDays" style="width:auto" onchange="reviewDaysChanged()">
         <option value="7">7 days</option>
         <option value="30" selected>30 days</option>
         <option value="90">90 days</option>
       </select>
-      <button class="act" onclick="loadReview()">refresh</button>
+      <button class="act" onclick="refreshTab(initReview)">refresh</button>
       <span class="dim" id="revHint"></span>
     </div>
     <div class="dim" style="font-size:12px;margin:6px 0">Facts that are old, thinly corroborated,
@@ -392,6 +392,7 @@ async function boot(){
     }
     $("hostinfo").textContent = "· "+(h.projects??"?")+" projects"+(h.version?" · "+h.version:"");
     const o = await api("/v1/overview"); OV = o.projects||[];
+    applyReviewWindows(o.review_windows);
     renderKB(); renderGroups(); loadHealth();
   }catch(e){
     if(e.auth){$("gate").classList.remove("hide");
@@ -1381,16 +1382,52 @@ if(TOK) boot(); else $("gate").classList.remove("hide");
 // hands a conflict back rather than clobbering another machine's work.
 let docCur = null;           // {project, name, rev, body} being viewed
 let colCur = null;           // {project, col, id, rev} record being edited
-let docProjInit = false;
+
+// rebuildScopeSelect fills a per-scope dropdown from the current OV
+// snapshot, preserving the selection when it still qualifies — called
+// on EVERY tab entry, never latched: OV refreshes behind many flows,
+// and a frozen list would hide a project whose first doc/record just
+// arrived (or keep offering one whose queue emptied).
+function rebuildScopeSelect(sel, ids, extraHTML){
+  const keep = sel.value;
+  sel.innerHTML = ids.map(id=>`<option>${esc(id)}</option>`).join("") + (extraHTML||""); // extraHTML is TRUSTED markup: constants only, never server data
+  if(ids.includes(keep)) sel.value = keep;
+}
+
+// The review window list is SERVER-SENT (review_windows on
+// /v1/overview): the Review dropdown's per-window counts are computed
+// hub-side for exactly those windows, so the page must offer the same
+// set — a locally-invented window would have no count behind it. The
+// static options in the markup are the fallback for a hub too old to
+// send the field (and what TestReviewWindowsMatchConsole pins).
+function applyReviewWindows(ws){
+  if(!Array.isArray(ws) || !ws.length) return;
+  const sel = $("revDays"), keep = sel.value;
+  sel.innerHTML = ws.map(d=>`<option value="${+d}">${+d} days</option>`).join("");
+  sel.value = ws.map(String).includes(keep) ? keep
+            : (ws.includes(30) ? "30" : String(+ws[0]));
+}
+
+// A tab's "refresh" must refresh its SCOPE LIST too, and scope lists
+// are built from the OV snapshot — so re-fetch the overview first
+// (keeping the old snapshot if the fetch fails: stale beats blank),
+// then let the tab's init rebuild its dropdown and reload. Without
+// this, refresh re-listed the current scope while the dropdown kept
+// a stale project set.
+async function refreshTab(init){
+  try{
+    const o = await api("/v1/overview"); OV = o.projects||[];
+    applyReviewWindows(o.review_windows);
+  }catch(e){}
+  init();
+}
 
 function initDocs(){
-  if(!docProjInit){
-    // Any project can hold documents; groups are projects too, and a
-    // group runbook is the case with no bound file anywhere.
-    const ids = OV.map(p=>p.id).sort();
-    $("docProj").innerHTML = ids.map(id=>`<option>${esc(id)}</option>`).join("");
-    docProjInit = true;
-  }
+  // Only projects that HOLD documents (groups are projects too): docs
+  // arrive via client push, so an empty project here is a dead click —
+  // nothing to view, nothing to create from the console.
+  rebuildScopeSelect($("docProj"),
+    OV.filter(p=>p.stats && p.stats.docs>0).map(p=>p.id).sort());
   loadDocs();
 }
 
@@ -1401,7 +1438,7 @@ function initDocs(){
 async function loadDocs(keepView){
   const proj = $("docProj").value;
   if(!keepView){ $("docView").innerHTML = ""; docCur = null; }
-  if(!proj){ $("docList").innerHTML = '<div class="tc dim">no projects</div>'; return; }
+  if(!proj){ $("docList").innerHTML = '<div class="tc dim">no project holds shared documents yet — they arrive when a client publishes one</div>'; return; }
   try{
     const r = await api(`/v1/projects/${encodeURIComponent(proj)}/docs`);
     const docs = r.docs||[];
@@ -1426,22 +1463,54 @@ async function loadDocs(keepView){
 // CAS per record. The DEFAULT view of a collection is the rendered wiki —
 // readable first, editable per entry; the table is the operator's view.
 // The markdown in git is generated by `aimem col render`, never here.
-let wikiProjInit = false;
+let wikiAll = false;         // "all projects…" chosen: offer empty ones too
+let wikiPrev = "";           // last real project viewed (survives the mode toggle)
 let colData = null;          // {project, col, recs (with bodies), mode}
 
+// The mode-toggle option values use "*" — a character ValidProjectID
+// rejects — so no real project id can ever collide with a sentinel.
 function initWiki(){
-  if(!wikiProjInit){
-    const ids = OV.map(p=>p.id).sort();
-    $("wikiProj").innerHTML = ids.map(id=>`<option>${esc(id)}</option>`).join("");
-    wikiProjInit = true;
+  // Projects with records first-class; the "all projects…" switch
+  // exists because the FIRST record of a project must be creatable
+  // from here (newRec) — the one flow a hard filter breaks. The
+  // switch is two-way: the all-projects view carries the way back.
+  let ids, tail;
+  if(wikiAll){
+    ids = OV.map(p=>p.id).sort();
+    tail = `<option value="**">— only projects with records…</option>`;
+  }else{
+    ids = OV.filter(p=>p.stats && p.stats.records>0).map(p=>p.id).sort();
+    tail = `<option value="*">— all projects…</option>`;
+  }
+  rebuildScopeSelect($("wikiProj"), ids, tail);
+  // The mode toggle arrives here THROUGH a sentinel value, so
+  // rebuild's own keep-selection can't survive it — restore the last
+  // real project viewed when the new mode still offers it.
+  if(wikiPrev && ids.includes(wikiPrev)) $("wikiProj").value = wikiPrev;
+  // With zero real projects the sentinel is the only option and gets
+  // auto-selected — calling loadCols() would bounce the mode toggle in
+  // unbounded mutual recursion (found by the ultra security pass on a
+  // fresh, empty instance). Render the empty state directly instead;
+  // the toggle still works from a real user change event.
+  const v = $("wikiProj").value;
+  if(v === "*" || v === "**"){
+    $("colView").innerHTML = ""; colCur = null; colData = null;
+    $("colList").innerHTML = '<div class="tc dim">no projects yet — records appear once a project exists</div>';
+    return;
   }
   loadCols();
 }
 
 async function loadCols(){
+  const mode = $("wikiProj").value;
+  if(mode === "*" || mode === "**"){
+    wikiAll = (mode === "*");
+    return initWiki();
+  }
   const proj = $("wikiProj").value;
   $("colView").innerHTML = ""; colCur = null; colData = null;
-  if(!proj){ $("colList").innerHTML = '<div class="tc dim">no projects</div>'; return; }
+  if(!proj){ $("colList").innerHTML = '<div class="tc dim">no project holds wiki records yet — pick "all projects…" to start one</div>'; return; }
+  wikiPrev = proj;
   try{
     const r = await api(`/v1/projects/${encodeURIComponent(proj)}/collections`);
     const cols = r.collections||[];
@@ -1713,13 +1782,10 @@ async function retireDoc(proj, name, rev){
 // architecture's first storage kind, and until this tab it had no
 // console surface at all. Search FINDS things; retrieval stays where
 // it lives (Docs tab, Wiki tab, timeline).
-let srchProjInit = false;
 function initSearch(){
-  if(!srchProjInit){
-    const ids = OV.map(p=>p.id).sort();
-    $("srchProj").innerHTML = ids.map(id=>`<option>${esc(id)}</option>`).join("");
-    srchProjInit = true;
-  }
+  // All projects on purpose — search is the one tab where an "empty"
+  // scope is still a valid question. Rebuilt each entry like the rest.
+  rebuildScopeSelect($("srchProj"), OV.map(p=>p.id).sort());
   $("srchQ").focus();
 }
 
@@ -1753,20 +1819,33 @@ async function runSearch(){
 // audit trail; every verdict below is an ordinary audited write, so
 // acting on a row removes it. Never confirm without checking — a wrong
 // confirmation launders stale knowledge into fresh-looking knowledge.
-let revProjInit = false;
 
 function initReview(){
-  if(!revProjInit){
-    const ids = OV.map(p=>p.id).sort();
-    $("revProj").innerHTML = ids.map(id=>`<option>${esc(id)}</option>`).join("");
-    revProjInit = true;
-  }
+  rebuildRevProj();
+  loadReview();
+}
+
+// The dropdown offers only scopes whose queue is non-empty AT THE
+// SELECTED WINDOW (per-window counts ride /v1/overview; the window
+// list itself is server-sent — see review_windows). FAIL-OPEN twice:
+// a scope with no review map (its count query failed server-side) and
+// a window the map lacks (server/page skew) both stay OFFERED — a
+// possibly-empty queue beats a scope silently hidden behind an error.
+function rebuildRevProj(){
+  const days = $("revDays").value;
+  const ids = OV.filter(p=>!p.review || !(days in p.review) || p.review[days]>0)
+                .map(p=>p.id).sort();
+  rebuildScopeSelect($("revProj"), ids);
+}
+
+function reviewDaysChanged(){
+  rebuildRevProj();
   loadReview();
 }
 
 async function loadReview(){
   const proj = $("revProj").value;
-  if(!proj){ $("revList").innerHTML = '<div class="tc dim">no projects</div>'; return; }
+  if(!proj){ $("revList").innerHTML = `<div class="tc dim">nothing is stale at ${esc($("revDays").value)} days in any scope — try a wider window</div>`; return; }
   const days = $("revDays").value;
   try{
     const r = await api(`/v1/projects/${encodeURIComponent(proj)}/memories/review?days=${days}&limit=100`);
