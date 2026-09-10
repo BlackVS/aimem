@@ -364,7 +364,7 @@ func (r *Registry) Close() {
 	r.dbs = map[string]*DB{}
 }
 
-const currentSchema = 9
+const currentSchema = 10
 
 // SetMeta / GetMeta store small key-value project metadata (e.g. the
 // project's declared knowledge groups, stamped from event pushes so the
@@ -683,6 +683,18 @@ CREATE TABLE col_revisions(
   PRIMARY KEY(collection, id, rev)
 );
 UPDATE meta SET value='9' WHERE key='schema_version';`); err != nil {
+			return err
+		}
+	}
+	// v10: memory_audit is only ever probed per-memory (MAX(ts) for the
+	// review-staleness predicate) yet its sole index was the PK — a full
+	// table scan per live memory, multiplied across every project once
+	// /v1/overview began carrying per-window review counts (PR #20).
+	// (memory_id, ts) serves that MAX with an index-only descent.
+	if v < 10 {
+		if err := d.step(`
+CREATE INDEX idx_memory_audit_memory ON memory_audit(memory_id, ts);
+UPDATE meta SET value='10' WHERE key='schema_version';`); err != nil {
 			return err
 		}
 	}

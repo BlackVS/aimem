@@ -326,6 +326,13 @@ func (s *Server) curateRuns(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+// reviewWindows are the age windows (days) the console's Review days
+// selector offers. The overview computes a queue count per window and
+// SHIPS THIS LIST in its response, so the page derives its filter keys
+// from the server instead of a comment keeping two files in sync
+// (TestReviewWindowsMatchConsole pins the #revDays options to it).
+var reviewWindows = []int{7, 30, 90}
+
 // overview is the GUI's one-shot bootstrap: every project with stats,
 // plus group config and membership, so the page renders without an N+1
 // request storm.
@@ -346,11 +353,6 @@ func (s *Server) overview(w http.ResponseWriter, r *http.Request) {
 		Features json.RawMessage `json:"features,omitempty"`
 		DocTS    string          `json:"doc_ts,omitempty"` // design_doc_ts when a doc exists
 	}
-	// The Review dropdown offers only scopes with something to review AT
-	// THE SELECTED WINDOW, so it carries a count per window the console's
-	// days selector offers (keep this list in step with admin.html's
-	// #revDays options). One single-pass query per project.
-	reviewWindows := []int{7, 30, 90}
 	cutoffs := make([]string, len(reviewWindows))
 	now := time.Now().UTC()
 	for i, d := range reviewWindows {
@@ -369,6 +371,11 @@ func (s *Server) overview(w http.ResponseWriter, r *http.Request) {
 			for i, d := range reviewWindows {
 				rw.Review[strconv.Itoa(d)] = counts[i]
 			}
+		} else {
+			// A missing map is the client's FAIL-OPEN signal: the scope
+			// stays offered rather than silently vanishing behind a DB
+			// error indistinguishable from an empty queue.
+			s.log.Warn("overview review counts", "project", id, "err", err)
 		}
 		if raw, _ := db.GetMeta("groups"); raw != "" {
 			json.Unmarshal([]byte(raw), &rw.Groups)
@@ -386,5 +393,5 @@ func (s *Server) overview(w http.ResponseWriter, r *http.Request) {
 		}
 		out = append(out, rw)
 	}
-	s.ok(w, map[string]any{"projects": out})
+	s.ok(w, map[string]any{"projects": out, "review_windows": reviewWindows})
 }

@@ -42,11 +42,24 @@ type ReviewItem struct {
 	LastSeen      string  `json:"last_seen"`
 }
 
-// ReviewCounts reports, for each cutoff, how many facts ReviewQueue
-// would list under the same corroboration predicate — the existence
-// probe behind the console's Review dropdown, which offers only scopes
-// with something to review at the selected window. One single-pass
-// query however many cutoffs, so the overview never multiplies scans.
+// reviewCandidatesSQL is the ONE definition of the staleness
+// candidate set — id, corroboration, last_seen for every active,
+// unpinned fact. ReviewCounts and ReviewQueue both build on it, so
+// the console's dropdown filter and the queue it opens can never
+// disagree about which facts qualify.
+const reviewCandidatesSQL = `
+		SELECT m.id, m.text, m.kind, m.confidence, m.created_at, m.actor,
+		  (SELECT COUNT(*) FROM memory_sources s WHERE s.memory_id = m.id) AS corroboration,
+		  COALESCE((SELECT MAX(a.ts) FROM memory_audit a WHERE a.memory_id = m.id
+		            AND a.op IN ('remember','reassert','confirm')), m.created_at) AS last_seen
+		FROM memories m
+		WHERE m.expired_at IS NULL AND m.superseded_by IS NULL AND m.pinned = 0`
+
+// ReviewCounts reports, for each cutoff, how many facts match the
+// review predicate (UNCAPPED — ReviewQueue clamps its listing, so a
+// large count can exceed what one queue page shows). This is the
+// existence probe behind the console's Review dropdown; one
+// single-pass query however many cutoffs.
 func (d *DB) ReviewCounts(cutoffs []string, maxCorroboration int) ([]int, error) {
 	if len(cutoffs) == 0 {
 		return nil, nil
@@ -66,13 +79,8 @@ func (d *DB) ReviewCounts(cutoffs []string, maxCorroboration int) ([]int, error)
 	for i := range dest {
 		scan[i] = &dest[i]
 	}
-	err := d.sql.QueryRow(`SELECT `+strings.Join(sums, ", ")+` FROM (
-		SELECT m.id,
-		  (SELECT COUNT(*) FROM memory_sources s WHERE s.memory_id = m.id) AS corroboration,
-		  COALESCE((SELECT MAX(a.ts) FROM memory_audit a WHERE a.memory_id = m.id
-		            AND a.op IN ('remember','reassert','confirm')), m.created_at) AS last_seen
-		FROM memories m
-		WHERE m.expired_at IS NULL AND m.superseded_by IS NULL AND m.pinned = 0
+	err := d.sql.QueryRow(`SELECT `+strings.Join(sums, ", ")+` FROM (`+
+		reviewCandidatesSQL+`
 	) WHERE corroboration <= ?`, args...).Scan(scan...)
 	return dest, err
 }
@@ -88,13 +96,9 @@ func (d *DB) ReviewQueue(cutoff string, maxCorroboration, limit int) ([]ReviewIt
 	if maxCorroboration < 0 {
 		maxCorroboration = DefaultReviewMaxCorroboration
 	}
-	rows, err := d.sql.Query(`SELECT * FROM (
-		SELECT m.id, m.text, m.kind, m.confidence, m.created_at, m.actor,
-		  (SELECT COUNT(*) FROM memory_sources s WHERE s.memory_id = m.id) AS corroboration,
-		  COALESCE((SELECT MAX(a.ts) FROM memory_audit a WHERE a.memory_id = m.id
-		            AND a.op IN ('remember','reassert','confirm')), m.created_at) AS last_seen
-		FROM memories m
-		WHERE m.expired_at IS NULL AND m.superseded_by IS NULL AND m.pinned = 0
+	rows, err := d.sql.Query(`SELECT id, text, kind, confidence, created_at, actor,
+		corroboration, last_seen FROM (`+
+		reviewCandidatesSQL+`
 	) WHERE corroboration <= ? AND last_seen < ?
 	ORDER BY last_seen ASC, confidence ASC LIMIT ?`,
 		maxCorroboration, cutoff, limit)

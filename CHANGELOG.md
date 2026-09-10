@@ -9,7 +9,7 @@ upgrading a fleet.
 The format follows [Keep a Changelog](https://keepachangelog.com/1.1.0/);
 this project does not yet promise semantic versioning. The on-disk schema
 version is tracked separately (`currentSchema` in `internal/store/store.go`,
-currently 9); a binary refuses a database newer than it understands.
+currently 10); a binary refuses a database newer than it understands.
 
 ## [Unreleased]
 
@@ -24,8 +24,22 @@ currently 9); a binary refuses a database newer than it understands.
   lists projects holding records plus an "all projects…" entry — the
   one place an empty project must stay reachable, because a project's
   FIRST record is created from that tab. Empty states say why the
-  list is empty instead of "no projects". The per-project doc/record
-  counts ride the existing one-shot /v1/overview (no N+1 requests).
+  list is empty instead of "no projects", and the Review one names
+  the selected window. Fail-open by design: a scope whose count query
+  errored, or a window the server did not send, stays OFFERED — a
+  possibly-empty queue beats a scope silently hidden. The per-project
+  counts and the window list ride the existing one-shot /v1/overview
+  (no N+1 requests); a test pins the console's day options to the
+  server's window list.
+
+### Fixed
+
+- **Schema v10: `memory_audit` gains an index on (memory_id, ts).**
+  The review-staleness predicate probes MAX(ts) per live memory, and
+  the audit table's only index was its primary key — a full scan per
+  memory, newly multiplied across every project once the overview
+  began carrying review counts. Existing databases migrate on first
+  open, as always.
 
 ## [0.3.25] — 2026-09-06
 

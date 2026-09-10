@@ -6,6 +6,9 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"regexp"
+	"slices"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -210,5 +213,30 @@ func TestTCPAuthWrapper(t *testing.T) {
 	authed.ServeHTTP(w, r)
 	if w.Code != 200 {
 		t.Fatalf("correct token refused: %d", w.Code)
+	}
+}
+
+// TestReviewWindowsMatchConsole pins the console's #revDays option
+// values to the server's reviewWindows list — the coupling that, if
+// broken (an option added to one side only), silently empties the
+// Review dropdown at the new window.
+func TestReviewWindowsMatchConsole(t *testing.T) {
+	page := string(adminHTML)
+	i := strings.Index(page, `id="revDays"`)
+	if i < 0 {
+		t.Fatal("no #revDays select in admin.html")
+	}
+	end := strings.Index(page[i:], "</select>")
+	if end < 0 {
+		t.Fatal("unclosed #revDays select")
+	}
+	block := page[i : i+end]
+	var got []int
+	for _, m := range regexp.MustCompile(`<option value="(\d+)"`).FindAllStringSubmatch(block, -1) {
+		n, _ := strconv.Atoi(m[1])
+		got = append(got, n)
+	}
+	if !slices.Equal(got, reviewWindows) {
+		t.Fatalf("console #revDays offers %v; server reviewWindows = %v — keep them identical", got, reviewWindows)
 	}
 }

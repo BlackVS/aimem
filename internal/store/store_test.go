@@ -370,6 +370,32 @@ func TestReviewCountMatchesQueue(t *testing.T) {
 	if _, err := db.sql.Exec(`UPDATE memory_audit SET ts='2020-01-01T00:00:00Z'`); err != nil {
 		t.Fatal(err)
 	}
+	// Facts every predicate clause must EXCLUDE, so a drifted clause in
+	// ReviewCounts alone fails this test instead of shipping a dropdown
+	// that disagrees with the queue: a pinned fact, a superseded fact,
+	// and one corroborated past the review threshold.
+	pinID, _, _ := db.Remember("a pinned fact", "test", RememberOpts{Kind: "fact"})
+	if err := db.Pin(pinID, true, "test"); err != nil {
+		t.Fatal(err)
+	}
+	oldID, _, _ := db.Remember("superseded wording", "test", RememberOpts{Kind: "fact"})
+	if _, err := db.Supersede(oldID, "current wording", "test", RememberOpts{}); err != nil {
+		t.Fatal(err)
+	}
+	corrID, _, _ := db.Remember("well corroborated fact", "test", RememberOpts{Kind: "fact"})
+	for i := 0; i < 3; i++ {
+		if err := db.addSources(corrID, []string{fmt.Sprintf("ev-%d", i)}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// Backdate EVERYTHING (again) so age alone excludes nothing.
+	if _, err := db.sql.Exec(`UPDATE memories SET created_at='2020-01-01T00:00:00Z'`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.sql.Exec(`UPDATE memory_audit SET ts='2020-01-01T00:00:00Z'`); err != nil {
+		t.Fatal(err)
+	}
+
 	c7 := time.Now().UTC().AddDate(0, 0, -7).Format(time.RFC3339)
 	ancient := time.Now().UTC().AddDate(-10, 0, 0).Format(time.RFC3339) // cutoff stricter than any fact
 	items, err := db.ReviewQueue(c7, -1, 100)
@@ -380,8 +406,8 @@ func TestReviewCountMatchesQueue(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if counts[0] != len(items) || counts[0] != 1 {
-		t.Fatalf("ReviewCounts[7d]=%d, queue=%d, want both 1", counts[0], len(items))
+	if counts[0] != len(items) || counts[0] != 2 {
+		t.Fatalf("ReviewCounts[7d]=%d, queue=%d, want both 2 (the thin fact + the superseding wording; pinned/superseded/corroborated excluded)", counts[0], len(items))
 	}
 	if counts[1] != 0 {
 		t.Fatalf("stricter window must count 0, got %d — per-window sums leaked", counts[1])
