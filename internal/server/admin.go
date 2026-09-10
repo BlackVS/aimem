@@ -338,7 +338,7 @@ func (s *Server) overview(w http.ResponseWriter, r *http.Request) {
 	type row struct {
 		ID       string          `json:"id"`
 		Stats    any             `json:"stats"`
-		Review   int             `json:"review,omitempty"` // review-queue size at the UI's widest window
+		Review   map[string]int  `json:"review,omitempty"` // review-queue size per days window
 		Groups   []string        `json:"groups,omitempty"`
 		About    string          `json:"about,omitempty"`
 		Policy   string          `json:"policy,omitempty"`
@@ -346,11 +346,16 @@ func (s *Server) overview(w http.ResponseWriter, r *http.Request) {
 		Features json.RawMessage `json:"features,omitempty"`
 		DocTS    string          `json:"doc_ts,omitempty"` // design_doc_ts when a doc exists
 	}
-	// The Review dropdown offers only scopes with something to review.
-	// Counted at the UI's MOST INCLUSIVE window (7 days: a smaller age
-	// threshold qualifies more facts), so no scope a narrower selection
-	// could surface is ever hidden.
-	reviewCutoff := time.Now().UTC().AddDate(0, 0, -7).Format(time.RFC3339)
+	// The Review dropdown offers only scopes with something to review AT
+	// THE SELECTED WINDOW, so it carries a count per window the console's
+	// days selector offers (keep this list in step with admin.html's
+	// #revDays options). One single-pass query per project.
+	reviewWindows := []int{7, 30, 90}
+	cutoffs := make([]string, len(reviewWindows))
+	now := time.Now().UTC()
+	for i, d := range reviewWindows {
+		cutoffs[i] = now.AddDate(0, 0, -d).Format(time.RFC3339)
+	}
 	out := make([]row, 0, len(ids))
 	for _, id := range ids {
 		db, err := s.reg.Open(id)
@@ -359,7 +364,12 @@ func (s *Server) overview(w http.ResponseWriter, r *http.Request) {
 		}
 		rw := row{ID: id}
 		rw.Stats, _ = db.Stats()
-		rw.Review, _ = db.ReviewCount(reviewCutoff, -1)
+		if counts, err := db.ReviewCounts(cutoffs, -1); err == nil {
+			rw.Review = map[string]int{}
+			for i, d := range reviewWindows {
+				rw.Review[strconv.Itoa(d)] = counts[i]
+			}
+		}
 		if raw, _ := db.GetMeta("groups"); raw != "" {
 			json.Unmarshal([]byte(raw), &rw.Groups)
 		}

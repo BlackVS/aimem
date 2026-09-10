@@ -17,8 +17,9 @@ currently 9); a binary refuses a database newer than it understands.
 
 - **Console dropdowns offer only scopes with content** (user
   proposal): the Review tab lists only scopes whose review queue is
-  non-empty (counted server-side at the widest age window the days
-  selector offers, so narrowing never needs a hidden scope); the Docs
+  non-empty AT THE SELECTED AGE WINDOW — changing the 7/30/90-day
+  selector rebuilds the list from per-window counts, keeping the
+  current scope when it still qualifies; the Docs
   tab lists only projects holding shared documents; the Wiki tab
   lists projects holding records plus an "all projects…" entry — the
   one place an empty project must stay reachable, because a project's

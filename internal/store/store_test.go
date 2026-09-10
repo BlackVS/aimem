@@ -370,16 +370,20 @@ func TestReviewCountMatchesQueue(t *testing.T) {
 	if _, err := db.sql.Exec(`UPDATE memory_audit SET ts='2020-01-01T00:00:00Z'`); err != nil {
 		t.Fatal(err)
 	}
-	cutoff := time.Now().UTC().AddDate(0, 0, -7).Format(time.RFC3339)
-	items, err := db.ReviewQueue(cutoff, -1, 100)
+	c7 := time.Now().UTC().AddDate(0, 0, -7).Format(time.RFC3339)
+	ancient := time.Now().UTC().AddDate(-10, 0, 0).Format(time.RFC3339) // cutoff stricter than any fact
+	items, err := db.ReviewQueue(c7, -1, 100)
 	if err != nil {
 		t.Fatal(err)
 	}
-	n, err := db.ReviewCount(cutoff, -1)
+	counts, err := db.ReviewCounts([]string{c7, ancient}, -1)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if n != len(items) || n != 1 {
-		t.Fatalf("ReviewCount=%d, queue=%d, want both 1", n, len(items))
+	if counts[0] != len(items) || counts[0] != 1 {
+		t.Fatalf("ReviewCounts[7d]=%d, queue=%d, want both 1", counts[0], len(items))
+	}
+	if counts[1] != 0 {
+		t.Fatalf("stricter window must count 0, got %d — per-window sums leaked", counts[1])
 	}
 }

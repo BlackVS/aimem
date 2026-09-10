@@ -304,7 +304,7 @@
   <section id="t-review" hidden>
     <div class="row" style="margin-top:0">
       <select id="revProj" style="width:auto" onchange="loadReview()"></select>
-      <select id="revDays" style="width:auto" onchange="loadReview()">
+      <select id="revDays" style="width:auto" onchange="reviewDaysChanged()">
         <option value="7">7 days</option>
         <option value="30" selected>30 days</option>
         <option value="90">90 days</option>
@@ -1769,13 +1769,26 @@ let revProjInit = false;
 
 function initReview(){
   if(!revProjInit){
-    // Only scopes with a non-empty review queue (counted server-side
-    // at the widest window the days selector offers, so narrowing the
-    // window never needs scopes this filter hid).
-    const ids = OV.filter(p=>p.review>0).map(p=>p.id).sort();
-    $("revProj").innerHTML = ids.map(id=>`<option>${esc(id)}</option>`).join("");
+    rebuildRevProj();
     revProjInit = true;
   }
+  loadReview();
+}
+
+// The dropdown offers only scopes whose queue is non-empty AT THE
+// SELECTED WINDOW (per-window counts ride /v1/overview), so changing
+// the days selector rebuilds it — keeping the current scope when it
+// still qualifies.
+function rebuildRevProj(){
+  const days = $("revDays").value;
+  const keep = $("revProj").value;
+  const ids = OV.filter(p=>p.review && p.review[days]>0).map(p=>p.id).sort();
+  $("revProj").innerHTML = ids.map(id=>`<option>${esc(id)}</option>`).join("");
+  if(ids.includes(keep)) $("revProj").value = keep;
+}
+
+function reviewDaysChanged(){
+  rebuildRevProj();
   loadReview();
 }
 
