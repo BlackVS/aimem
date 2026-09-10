@@ -13,6 +13,8 @@ currently 10); a binary refuses a database newer than it understands.
 
 ## [Unreleased]
 
+## [0.3.26] — 2026-09-10
+
 ### Changed
 
 - **Console dropdowns offer only scopes with content** (user
@@ -45,6 +47,11 @@ currently 10); a binary refuses a database newer than it understands.
   memory, newly multiplied across every project once the overview
   began carrying review counts. Existing databases migrate on first
   open, as always.
+
+### Dependencies
+
+- modernc.org/sqlite 1.57.0 → 1.58.0 (SQLite 3.53.4; adds an
+  opt-in Linux OFD-locking switch, off by default).
 
 ## [0.3.25] — 2026-09-06
 
