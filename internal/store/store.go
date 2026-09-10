@@ -393,6 +393,8 @@ type ProjectStats struct {
 	Memories    int    `json:"memories"` // live only
 	Pinned      int    `json:"pinned"`
 	Embedded    int    `json:"embedded"` // live memories with any embedding
+	Docs        int    `json:"docs"`     // live shared documents
+	Records     int    `json:"records"`  // live wiki/collection records
 }
 
 func (d *DB) Stats() (ProjectStats, error) {
@@ -408,6 +410,15 @@ func (d *DB) Stats() (ProjectStats, error) {
 	}
 	if err := d.sql.QueryRow(`SELECT COUNT(DISTINCT e.memory_id) FROM memory_embeddings e
 			JOIN memories m ON m.id = e.memory_id WHERE m.expired_at IS NULL`).Scan(&s.Embedded); err != nil {
+		return s, err
+	}
+	// Docs and wiki records ride the same one-shot stats so consumers
+	// (the console's content-aware dropdowns, the TUI) never need an
+	// N+1 sweep to learn which projects hold content.
+	if err := d.sql.QueryRow(`SELECT COUNT(*) FROM docs WHERE deleted = 0`).Scan(&s.Docs); err != nil {
+		return s, err
+	}
+	if err := d.sql.QueryRow(`SELECT COUNT(*) FROM col_records WHERE deleted = 0`).Scan(&s.Records); err != nil {
 		return s, err
 	}
 	return s, nil

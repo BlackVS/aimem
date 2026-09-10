@@ -14,6 +14,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"time"
 )
 
 //go:embed admin.html
@@ -337,6 +338,7 @@ func (s *Server) overview(w http.ResponseWriter, r *http.Request) {
 	type row struct {
 		ID       string          `json:"id"`
 		Stats    any             `json:"stats"`
+		Review   int             `json:"review,omitempty"` // review-queue size at the UI's widest window
 		Groups   []string        `json:"groups,omitempty"`
 		About    string          `json:"about,omitempty"`
 		Policy   string          `json:"policy,omitempty"`
@@ -344,6 +346,11 @@ func (s *Server) overview(w http.ResponseWriter, r *http.Request) {
 		Features json.RawMessage `json:"features,omitempty"`
 		DocTS    string          `json:"doc_ts,omitempty"` // design_doc_ts when a doc exists
 	}
+	// The Review dropdown offers only scopes with something to review.
+	// Counted at the UI's MOST INCLUSIVE window (7 days: a smaller age
+	// threshold qualifies more facts), so no scope a narrower selection
+	// could surface is ever hidden.
+	reviewCutoff := time.Now().UTC().AddDate(0, 0, -7).Format(time.RFC3339)
 	out := make([]row, 0, len(ids))
 	for _, id := range ids {
 		db, err := s.reg.Open(id)
@@ -352,6 +359,7 @@ func (s *Server) overview(w http.ResponseWriter, r *http.Request) {
 		}
 		rw := row{ID: id}
 		rw.Stats, _ = db.Stats()
+		rw.Review, _ = db.ReviewCount(reviewCutoff, -1)
 		if raw, _ := db.GetMeta("groups"); raw != "" {
 			json.Unmarshal([]byte(raw), &rw.Groups)
 		}

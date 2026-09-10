@@ -13,7 +13,18 @@ currently 9); a binary refuses a database newer than it understands.
 
 ## [Unreleased]
 
-Nothing yet.
+### Changed
+
+- **Console dropdowns offer only scopes with content** (user
+  proposal): the Review tab lists only scopes whose review queue is
+  non-empty (counted server-side at the widest age window the days
+  selector offers, so narrowing never needs a hidden scope); the Docs
+  tab lists only projects holding shared documents; the Wiki tab
+  lists projects holding records plus an "all projects…" entry — the
+  one place an empty project must stay reachable, because a project's
+  FIRST record is created from that tab. Empty states say why the
+  list is empty instead of "no projects". The per-project doc/record
+  counts ride the existing one-shot /v1/overview (no N+1 requests).
 
 ## [0.3.25] — 2026-09-06
 

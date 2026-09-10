@@ -327,3 +327,59 @@ func TestRetentionByBytesKeepsSearchConsistent(t *testing.T) {
 		t.Fatalf("search returned %d hits from an emptied journal", len(hits))
 	}
 }
+
+func TestStatsCountsDocsAndRecords(t *testing.T) {
+	r := newTestRegistry(t)
+	db, _ := r.Open("proj-a")
+	if _, err := db.PutDoc("RUNBOOK", "body\n", "t", 0, false); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.PutDoc("GONE", "x\n", "t", 0, false); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.PutDoc("GONE", "", "t", 1, true); err != nil { // tombstone
+		t.Fatal(err)
+	}
+	if _, err := db.PutRecord("api", "a/b", []byte(`{}`), "t", 0, false); err != nil {
+		t.Fatal(err)
+	}
+	s, err := db.Stats()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if s.Docs != 1 || s.Records != 1 {
+		t.Fatalf("docs=%d records=%d, want 1/1 (tombstoned doc excluded)", s.Docs, s.Records)
+	}
+	empty, _ := r.Open("proj-b")
+	es, _ := empty.Stats()
+	if es.Docs != 0 || es.Records != 0 {
+		t.Fatalf("empty project reports docs=%d records=%d", es.Docs, es.Records)
+	}
+}
+
+func TestReviewCountMatchesQueue(t *testing.T) {
+	r := newTestRegistry(t)
+	db, _ := r.Open("proj-a")
+	if _, _, err := db.Remember("an old thin fact", "test", RememberOpts{Kind: "fact"}); err != nil {
+		t.Fatal(err)
+	}
+	// Age it past any cutoff by backdating the created_at + audit trail.
+	if _, err := db.sql.Exec(`UPDATE memories SET created_at='2020-01-01T00:00:00Z'`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.sql.Exec(`UPDATE memory_audit SET ts='2020-01-01T00:00:00Z'`); err != nil {
+		t.Fatal(err)
+	}
+	cutoff := time.Now().UTC().AddDate(0, 0, -7).Format(time.RFC3339)
+	items, err := db.ReviewQueue(cutoff, -1, 100)
+	if err != nil {
+		t.Fatal(err)
+	}
+	n, err := db.ReviewCount(cutoff, -1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n != len(items) || n != 1 {
+		t.Fatalf("ReviewCount=%d, queue=%d, want both 1", n, len(items))
+	}
+}

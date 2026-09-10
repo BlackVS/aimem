@@ -41,6 +41,26 @@ type ReviewItem struct {
 	LastSeen      string  `json:"last_seen"`
 }
 
+// ReviewCount reports how many facts ReviewQueue would list for the
+// same cutoff/corroboration predicate — the cheap existence probe the
+// console's Review dropdown uses to offer only scopes with something
+// to review.
+func (d *DB) ReviewCount(cutoff string, maxCorroboration int) (int, error) {
+	if maxCorroboration < 0 {
+		maxCorroboration = DefaultReviewMaxCorroboration
+	}
+	var n int
+	err := d.sql.QueryRow(`SELECT COUNT(*) FROM (
+		SELECT m.id,
+		  (SELECT COUNT(*) FROM memory_sources s WHERE s.memory_id = m.id) AS corroboration,
+		  COALESCE((SELECT MAX(a.ts) FROM memory_audit a WHERE a.memory_id = m.id
+		            AND a.op IN ('remember','reassert','confirm')), m.created_at) AS last_seen
+		FROM memories m
+		WHERE m.expired_at IS NULL AND m.superseded_by IS NULL AND m.pinned = 0
+	) WHERE corroboration <= ? AND last_seen < ?`, maxCorroboration, cutoff).Scan(&n)
+	return n, err
+}
+
 // ReviewQueue lists active, unpinned facts whose last assertion or
 // validation predates cutoff (RFC3339) and whose corroboration is at
 // most maxCorroboration — oldest and least confident first, so the
