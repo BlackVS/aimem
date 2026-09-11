@@ -13,6 +13,8 @@ currently 10); a binary refuses a database newer than it understands.
 
 ## [Unreleased]
 
+## [0.3.27] — 2026-09-11
+
 ### Added
 
 - **Codex CLI support** — aimem's third client, wired like the first
