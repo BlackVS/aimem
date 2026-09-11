@@ -28,8 +28,9 @@ machine state — and is overridden only by a Group Policy-enforced
 policy (`Get-ExecutionPolicy -List` showing MachinePolicy/UserPolicy),
 which no installer can and should not work around.
 
-Then **restart any running Claude Code or OpenCode session** — hooks and
-plugins are read at startup.
+Then **restart any running Claude Code, OpenCode, or Codex session** —
+hooks and plugins are read at startup. Codex additionally asks once, in
+its own UI, to review-and-trust the new hooks before running them.
 
 ### What the user-level install puts on the machine
 
@@ -38,12 +39,14 @@ plugins are read at startup.
 | `~/.local/bin/aimem` (`%LOCALAPPDATA%\aimem\bin\aimem.exe`) | the single static binary: CLI, service, hub, MCP server, curator |
 | `~/.claude/settings.json` | `Stop`, `StopFailure`, `PreCompact` hooks running `aimem submit-claude` |
 | `~/.config/opencode/plugins/aimem.ts` | the OpenCode plugin |
+| `~/.codex/hooks.json` | `Stop`, `PreCompact` hooks running `aimem submit-codex` |
+| `~/.codex/config.toml` | `[mcp_servers.aimem]` MCP registration (via `codex mcp add` when codex is on PATH) |
 | `~/.config/systemd/user/aimem.service` | the local service (Windows: an `aimem-serve` logon scheduled task) |
 | `~/.local/state/aimem/` | journals and memories, one SQLite database per project |
 
 Checkpoint hooks are installed at **user level only**. Never add
-`Stop`/`StopFailure`/`PreCompact` to a project's `.claude/settings.json`:
-registering them twice journals every turn twice.
+`Stop`/`StopFailure`/`PreCompact` to a project's `.claude/settings.json`
+or `.codex/hooks.json`: registering them twice journals every turn twice.
 
 ### What wiring a project adds to it
 
@@ -53,6 +56,7 @@ registering them twice journals every turn twice.
 | `AGENTS.md` | the handoff protocol (edit its project-context section) |
 | `CLAUDE.md` | a one-line stub importing `AGENTS.md` |
 | `.claude/settings.json` | a `SessionStart` hook running `aimem session-start` |
+| `.codex/hooks.json` | the same `SessionStart` hook for Codex (runs once the project is trusted in Codex). Codex runs hook commands without a shell, so this one cannot guard on aimem's presence — a collaborator without aimem sees a one-line hook failure per session start, nothing worse |
 | `.mcp.json`, `opencode.json` | MCP registration for recall |
 | `.aimem.json` | project identity, knowledge groups, hub binding |
 

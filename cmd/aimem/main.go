@@ -78,6 +78,8 @@ func main() {
 		err = submitCmd()
 	case "submit-claude":
 		err = submitClaudeCmd()
+	case "submit-codex":
+		err = submitCodexCmd()
 	case "spool-flush":
 		err = spoolFlushCmd()
 	case "export-events":
@@ -161,6 +163,8 @@ func usage() {
                              when the service is down (for adapters/plugins)
   submit-claude              Claude Code Stop/StopFailure hook adapter:
                              reads the hook payload on stdin
+  submit-codex               Codex CLI Stop/PreCompact hook adapter:
+                             reads the hook payload on stdin
   spool-flush                replay spooled checkpoints into the service
   export-events [-p <proj>]  dump journal events as JSONL (all projects
                              unless -p); for backup and cross-machine sync
@@ -202,8 +206,9 @@ func usage() {
                              RRF-merged); needs AIMEM_EMBED_MODEL +
                              AIMEM_OPENAI_API_KEY
   project-id [dir]           compute stable project identity for a directory
-  session-start [file]       Claude Code SessionStart hook adapter: emit the
-                             handoff (docs/SESSION-STATE.md) as hook JSON;
+  session-start [file]       SessionStart hook adapter (Claude Code and
+                             Codex share the wire format): emit the handoff
+                             (docs/SESSION-STATE.md) as hook JSON;
                              portable (no jq/bash), silent if file missing
   state-root                 print the state root path
   version                    print the binary version
@@ -411,10 +416,13 @@ func projectID(args []string) error {
 	return nil
 }
 
-// sessionStartCmd is the Claude Code SessionStart hook: it emits the project
-// handoff as additionalContext. Portable replacement for the jq/bash hook so
-// the same hook command works on Windows (cmd.exe) and Linux. A missing
-// handoff contributes nothing and never breaks session start.
+// sessionStartCmd is the SessionStart hook for Claude Code AND Codex —
+// Codex adopted Claude Code's hook wire format verbatim, including the
+// hookSpecificOutput/additionalContext shape (verified live against
+// codex-cli 0.153), so one adapter serves both. Portable replacement for
+// the jq/bash hook so the same hook command works on Windows (cmd.exe)
+// and Linux. A missing handoff contributes nothing and never breaks
+// session start.
 func sessionStartCmd(args []string) error {
 	p := filepath.Join("docs", "SESSION-STATE.md")
 	if len(args) > 0 {
@@ -1217,6 +1225,20 @@ func submitClaudeCmd() error {
 		return err
 	}
 	p, err := adapter.BuildClaudeEvent(raw)
+	if err != nil {
+		return err
+	}
+	_, err = adapter.NewClient(stateRoot()).Submit(p)
+	return err
+}
+
+// submitCodexCmd is the Codex CLI Stop/PreCompact hook entrypoint.
+func submitCodexCmd() error {
+	raw, err := io.ReadAll(io.LimitReader(os.Stdin, 1<<20))
+	if err != nil {
+		return err
+	}
+	p, err := adapter.BuildCodexEvent(raw)
 	if err != nil {
 		return err
 	}

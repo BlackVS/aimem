@@ -19,7 +19,8 @@ and record corrections found during implementation.
 ## Components
 
 ```
-Claude Code hooks ─┐                        ┌─ hourly curator (LLM)
+Claude Code hooks ─┐
+Codex CLI hooks  ──┤                        ┌─ hourly curator (LLM)
 OpenCode plugin  ──┼→ aimem serve (local) ──┼─ embeddings backfill
 CLI / MCP tools  ──┘   SQLite per project   └─ sync ⇆ hub (TLS 8440)
                                                 hub = same binary, merge point
@@ -35,6 +36,13 @@ CLI / MCP tools  ──┘   SQLite per project   └─ sync ⇆ hub (TLS 8440)
 - **OpenCode plugin** (`.opencode/plugin/aimem.ts`, installed globally):
   journals turns/errors, writes a compaction marker on summarize, and
   instructs the summarizer to end with a verbatim `AIMEM HANDOFF:` line.
+- **Codex CLI adapter**: user-level hooks `Stop`/`PreCompact`
+  (`~/.codex/hooks.json`) run `aimem submit-codex`, which parses the
+  session rollout and journals one event per turn. Codex adopted Claude
+  Code's hook wire format — same stdin payload, same SessionStart
+  `additionalContext` shape — so the project-scoped handoff hook reuses
+  `aimem session-start` unchanged, and MCP registers globally in
+  `~/.codex/config.toml`.
 - **Hub**: `aimem serve` on `aimem@hub.example.com`, TLS
   `https://hub.example.com:8440`, bearer-token auth. Receives real-time
   event pushes, serves search/recall/MCP, merges memories from all machines.
