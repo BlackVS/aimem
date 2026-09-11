@@ -6,8 +6,9 @@
 #   .\install.ps1 -UninstallUser
 #
 # User install: aimem.exe -> %LOCALAPPDATA%\aimem\bin (added to user PATH),
-# Claude Code checkpoint hooks, OpenCode global plugin, and a logon
-# scheduled task running `aimem serve` (headless via conhost).
+# Claude Code checkpoint hooks, OpenCode global plugin, Codex checkpoint
+# hooks + MCP registration, and a logon scheduled task running
+# `aimem serve` (headless via conhost).
 # NOTE: Windows support is best-effort; the service uses an AF_UNIX socket
 # (supported on Windows 10 1803+ / Go 1.23+ std). Report issues.
 param(
@@ -21,7 +22,11 @@ $BinDir = Join-Path $env:LOCALAPPDATA 'aimem\bin'
 $Exe = Join-Path $BinDir 'aimem.exe'
 $ClaudeSettings = Join-Path $env:USERPROFILE '.claude\settings.json'
 $OcPluginDir = Join-Path $env:USERPROFILE '.config\opencode\plugins'
+$CodexHome = if ($env:AIMEM_CODEX_HOME) { $env:AIMEM_CODEX_HOME } else { Join-Path $env:USERPROFILE '.codex' }
 $SubmitCmd = 'aimem submit-claude'
+# Codex space-splits hook commands and spawns them directly (no shell),
+# so its command must stay a bare program + args.
+$CodexSubmitCmd = 'aimem submit-codex'
 $SessionStartCmd = 'aimem session-start'
 
 function Say($m) { Write-Host "==> $m" }
@@ -46,8 +51,10 @@ function Write-Json($path, $obj) {
 }
 
 # Merge one checkpoint hook entry, keyed on the "aimem " command marker so
-# re-runs find it. Never touches other hooks.
-function Add-ClaudeHook($file, $event, $cmd, $status, $marker) {
+# re-runs find it. Never touches other hooks. Claude Code settings.json and
+# Codex hooks.json share the same hooks block shape, so one merger serves
+# both clients.
+function Add-AgentHook($file, $event, $cmd, $status, $marker) {
   $s = Read-Json $file
   if (-not $s.PSObject.Properties['hooks']) { $s | Add-Member hooks ([pscustomobject]@{}) }
   if (-not $s.hooks.PSObject.Properties[$event]) { $s.hooks | Add-Member $event @() }
@@ -104,13 +111,37 @@ function Install-User {
   $env:Path = "$env:Path;$BinDir"
 
   Say "Claude Code user hooks -> $ClaudeSettings"
-  Add-ClaudeHook $ClaudeSettings 'Stop'        $SubmitCmd 'Checkpointing turn'            'aimem submit-claude'
-  Add-ClaudeHook $ClaudeSettings 'StopFailure' $SubmitCmd 'Checkpointing failed turn'     'aimem submit-claude'
-  Add-ClaudeHook $ClaudeSettings 'PreCompact'  $SubmitCmd 'Journaling compaction marker'  'aimem submit-claude'
+  Add-AgentHook $ClaudeSettings 'Stop'        $SubmitCmd 'Checkpointing turn'            'aimem submit-claude'
+  Add-AgentHook $ClaudeSettings 'StopFailure' $SubmitCmd 'Checkpointing failed turn'     'aimem submit-claude'
+  Add-AgentHook $ClaudeSettings 'PreCompact'  $SubmitCmd 'Journaling compaction marker'  'aimem submit-claude'
 
   Say "OpenCode global plugin -> $OcPluginDir\aimem.ts"
   New-Item -ItemType Directory -Force $OcPluginDir | Out-Null
   Copy-Item (Join-Path $RepoDir '.opencode\plugin\aimem.ts') (Join-Path $OcPluginDir 'aimem.ts') -Force
+
+  # Codex CLI: same checkpoint hooks, user-level (loads regardless of
+  # project trust; Codex has no StopFailure). Wired even when codex is
+  # absent — inert config until Codex reads it, like the other clients.
+  $codexHooks = Join-Path $CodexHome 'hooks.json'
+  Say "Codex user hooks -> $codexHooks"
+  Add-AgentHook $codexHooks 'Stop'       $CodexSubmitCmd 'Checkpointing turn'           'aimem submit-codex'
+  Add-AgentHook $codexHooks 'PreCompact' $CodexSubmitCmd 'Journaling compaction marker' 'aimem submit-codex'
+  # MCP recall facade: Codex registers MCP servers globally in
+  # ~/.codex/config.toml. Prefer the official CLI writer; fall back to a
+  # guarded TOML append so the wiring lands without codex on PATH.
+  $codexCli = Get-Command codex -ErrorAction SilentlyContinue
+  if ($codexCli) {
+    codex mcp get aimem 2>$null | Out-Null
+    if ($LASTEXITCODE -ne 0) { codex mcp add aimem -- aimem mcp | Out-Null }
+  } else {
+    $codexToml = Join-Path $CodexHome 'config.toml'
+    $haveEntry = (Test-Path $codexToml) -and ((Get-Content $codexToml -Raw) -match '\[mcp_servers\.aimem\]')
+    if (-not $haveEntry) {
+      New-Item -ItemType Directory -Force $CodexHome | Out-Null
+      [System.IO.File]::AppendAllText($codexToml, "`n[mcp_servers.aimem]`ncommand = `"aimem`"`nargs = [`"mcp`"]`n", $Utf8NoBom)
+    }
+  }
+  Say 'Codex wired (first Codex run will ask once to trust the new hooks)'
 
   # Logon task for `aimem serve`; conhost --headless keeps it windowless.
   Say 'registering logon task aimem-serve'
@@ -146,7 +177,7 @@ function Install-User {
   try { & $Exe health | Out-Null; Say 'service healthy' }
   catch { Write-Warning 'service not answering yet; check: Get-ScheduledTask aimem-serve' }
   & $Exe spool-flush 2>$null | Out-Null
-  Say 'user install done. Restart running OpenCode and Claude Code sessions to activate.'
+  Say 'user install done. Restart running OpenCode, Claude Code, and Codex sessions to activate.'
 }
 
 function Wire-Project($dir) {
@@ -178,8 +209,14 @@ Updated: (date) | branch: (branch) | HEAD: (sha) | by: (client/session)
 
   # Claude Code: SessionStart handoff + project MCP registration.
   $ps = Join-Path $dir '.claude\settings.json'
-  Add-ClaudeHook $ps 'SessionStart' $SessionStartCmd 'Loading session handoff' 'aimem session-start'
+  Add-AgentHook $ps 'SessionStart' $SessionStartCmd 'Loading session handoff' 'aimem session-start'
   Say 'Claude Code SessionStart handoff hook wired'
+
+  # Codex: same handoff at session start, project-scoped (.codex/hooks.json;
+  # loads once the user trusts the project). `aimem session-start` emits
+  # the wire format both clients share.
+  Add-AgentHook (Join-Path $dir '.codex\hooks.json') 'SessionStart' $SessionStartCmd 'Loading session handoff' 'aimem session-start'
+  Say 'Codex SessionStart handoff hook wired'
 
   $mcpPath = Join-Path $dir '.mcp.json'
   $mcp = Read-Json $mcpPath
@@ -242,6 +279,22 @@ function Uninstall-User {
       }
       Write-Json $ClaudeSettings $s
     }
+  }
+  $codexHooks = Join-Path $CodexHome 'hooks.json'
+  if (Test-Path $codexHooks) {
+    $s = Read-Json $codexHooks
+    if ($s.PSObject.Properties['hooks']) {
+      foreach ($ev in @($s.hooks.PSObject.Properties.Name)) {
+        $kept = @($s.hooks.$ev | Where-Object {
+          -not (@($_.hooks | Where-Object { "$($_.command)" -match 'aimem submit-codex' }).Count)
+        })
+        if ($kept.Count) { $s.hooks.$ev = $kept } else { $s.hooks.PSObject.Properties.Remove($ev) }
+      }
+      Write-Json $codexHooks $s
+    }
+  }
+  if (Get-Command codex -ErrorAction SilentlyContinue) {
+    codex mcp remove aimem 2>$null | Out-Null
   }
   Say 'user install removed (journal data left untouched)'
 }

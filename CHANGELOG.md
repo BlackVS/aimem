@@ -13,6 +13,21 @@ currently 10); a binary refuses a database newer than it understands.
 
 ## [Unreleased]
 
+### Added
+
+- **Codex CLI support** — aimem's third client, wired like the first
+  two. Codex adopted Claude Code's hook wire format (verified live
+  against codex-cli 0.153), so the integration is symmetrical:
+  user-level `Stop`/`PreCompact` hooks in `~/.codex/hooks.json` run the
+  new `aimem submit-codex`, which parses the session rollout JSONL into
+  the same journal events (`client: "codex"`); the project-scoped
+  SessionStart handoff reuses `aimem session-start` unchanged
+  (`.codex/hooks.json`); recall registers as `[mcp_servers.aimem]` in
+  `~/.codex/config.toml` (via `codex mcp add` when codex is on PATH).
+  Both installers wire it; Codex asks once to trust the new hooks.
+  Codex hook commands are spawned without a shell, so they stay bare
+  `aimem …` invocations — no `command -v` guards.
+
 ## [0.3.26] — 2026-09-10
 
 ### Changed

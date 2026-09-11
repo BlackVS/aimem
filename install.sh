@@ -3,9 +3,10 @@
 #
 #   ./install.sh user               user-level install: binary -> ~/.local/bin,
 #                                   systemd user unit, Claude Code user hooks,
-#                                   OpenCode global plugin
+#                                   OpenCode global plugin, Codex user hooks
+#                                   + MCP registration
 #   ./install.sh project [dir]      wire one project: handoff template,
-#                                   session-start handoff loading for both
+#                                   session-start handoff loading for all
 #                                   clients, AGENTS.md protocol stub
 #   ./install.sh uninstall-user     remove everything `user` installed
 #
@@ -16,8 +17,13 @@ REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 BIN_DIR="${AIMEM_BIN_DIR:-$HOME/.local/bin}"
 CLAUDE_SETTINGS="${AIMEM_CLAUDE_SETTINGS:-$HOME/.claude/settings.json}"
 OC_PLUGIN_DIR="${AIMEM_OC_PLUGIN_DIR:-$HOME/.config/opencode/plugins}"
+CODEX_HOME_DIR="${AIMEM_CODEX_HOME:-$HOME/.codex}"
 UNIT_DIR="${AIMEM_UNIT_DIR:-$HOME/.config/systemd/user}"
 SUBMIT_CMD='command -v aimem >/dev/null 2>&1 && aimem submit-claude || true'
+# Codex space-splits hook commands and spawns them directly (no shell —
+# verified against codex-cli 0.153: quoted paths fail, shell operators
+# would too), so the command must be a bare program + args.
+CODEX_SUBMIT_CMD='aimem submit-codex'
 
 say() { printf '==> %s\n' "$*"; }
 need() { command -v "$1" >/dev/null 2>&1 || { echo "error: $1 is required" >&2; exit 1; }; }
@@ -55,6 +61,41 @@ remove_claude_hooks() { # file
     else . end' "$file" > "$tmp" && mv "$tmp" "$file"
 }
 
+# Merge one hook entry into a Codex hooks.json (~/.codex or <repo>/.codex).
+# Codex's hooks.json shape is Claude's settings.json hooks block verbatim,
+# so the merge logic matches add_claude_hook; the marker keys re-runs and
+# uninstalls. Codex asks the user to review-and-trust new hooks once.
+add_codex_hook() { # file event command status marker
+  local file=$1 event=$2 cmd=$3 status=$4 marker=$5
+  mkdir -p "$(dirname "$file")"
+  [ -s "$file" ] || echo '{}' > "$file"
+  jq -e . "$file" >/dev/null || { echo "error: $file is not valid JSON; fix it first" >&2; exit 1; }
+  local tmp
+  tmp=$(mktemp)
+  jq --arg ev "$event" --arg cmd "$cmd" --arg st "$status" --arg mk "$marker" '
+    .hooks[$ev] = ((.hooks[$ev] // []) |
+      if ([.[] | .hooks[]? | .command // ""] | any(contains($mk)))
+      then .
+      else . + [{"hooks":[{"type":"command","command":$cmd,"timeout":10,"statusMessage":$st}]}]
+      end)' "$file" > "$tmp" && mv "$tmp" "$file"
+}
+
+remove_codex_hooks() { # file marker
+  local file=$1 marker=$2
+  [ -s "$file" ] || return 0
+  local tmp
+  tmp=$(mktemp)
+  jq --arg mk "$marker" '
+    if .hooks then
+      .hooks |= with_entries(
+        .value |= map(select(
+          ([.hooks[]? | .command // ""] | any(contains($mk))) | not
+        ))
+      ) | .hooks |= with_entries(select(.value | length > 0))
+      | if (.hooks | length) == 0 then del(.hooks) else . end
+    else . end' "$file" > "$tmp" && mv "$tmp" "$file"
+}
+
 install_user() {
   need jq
   mkdir -p "$BIN_DIR"
@@ -84,6 +125,29 @@ install_user() {
   mkdir -p "$OC_PLUGIN_DIR"
   cp "$REPO_DIR/.opencode/plugin/aimem.ts" "$OC_PLUGIN_DIR/aimem.ts"
 
+  # Codex CLI: same checkpoint hooks, user-level (loads regardless of
+  # project trust). Codex has no StopFailure; Stop + PreCompact cover
+  # the journal. Wired even when codex is absent — the config is inert
+  # until Codex reads it, matching how the other clients are handled.
+  local codex_hooks="$CODEX_HOME_DIR/hooks.json"
+  say "Codex user hooks -> $codex_hooks"
+  add_codex_hook "$codex_hooks" Stop       "$CODEX_SUBMIT_CMD" "Checkpointing turn" "aimem submit-codex"
+  add_codex_hook "$codex_hooks" PreCompact "$CODEX_SUBMIT_CMD" "Journaling compaction marker" "aimem submit-codex"
+  # MCP recall facade: Codex registers MCP servers globally in
+  # ~/.codex/config.toml. Prefer the official CLI writer; fall back to a
+  # guarded TOML append so the wiring lands without codex on PATH.
+  if command -v codex >/dev/null 2>&1; then
+    codex mcp get aimem >/dev/null 2>&1 || codex mcp add aimem -- aimem mcp \
+      || echo "warning: codex mcp add failed; register aimem manually" >&2
+  else
+    local codex_toml="$CODEX_HOME_DIR/config.toml"
+    if ! grep -q '^\[mcp_servers\.aimem\]' "$codex_toml" 2>/dev/null; then
+      mkdir -p "$CODEX_HOME_DIR"
+      printf '\n[mcp_servers.aimem]\ncommand = "aimem"\nargs = ["mcp"]\n' >> "$codex_toml"
+    fi
+  fi
+  say "Codex wired (first Codex run will ask once to trust the new hooks)"
+
   if [ "${AIMEM_NO_SYSTEMD:-0}" != 1 ] && command -v systemctl >/dev/null 2>&1; then
     say "systemd user unit -> $UNIT_DIR/aimem.service"
     mkdir -p "$UNIT_DIR"
@@ -112,7 +176,7 @@ EOF
     say "skipping systemd (unavailable or AIMEM_NO_SYSTEMD=1); run 'aimem serve' manually"
   fi
 
-  say "user install done. Restart running OpenCode and Claude Code sessions to activate."
+  say "user install done. Restart running OpenCode, Claude Code, and Codex sessions to activate."
 }
 
 install_project() {
@@ -159,6 +223,13 @@ EOF
       else . + [{"hooks":[{"type":"command","command":$cmd,"timeout":10,"statusMessage":"Loading session handoff"}]}]
       end)' "$psettings" > "$tmp" && mv "$tmp" "$psettings"
   say "Claude Code SessionStart handoff hook wired"
+
+  # Codex: same handoff at session start, project-scoped (.codex/hooks.json;
+  # Codex loads it once the user trusts the project). `aimem session-start`
+  # emits the wire format both clients share.
+  add_codex_hook "$dir/.codex/hooks.json" SessionStart "aimem session-start" \
+    "Loading session handoff" "aimem session-start"
+  say "Codex SessionStart handoff hook wired"
 
   # MCP recall facade for both clients.
   local mcpjson="$dir/.mcp.json"
@@ -350,6 +421,10 @@ uninstall_user() {
   fi
   rm -f "$UNIT_DIR/aimem.service" "$BIN_DIR/aimem" "$OC_PLUGIN_DIR/aimem.ts"
   remove_claude_hooks "$CLAUDE_SETTINGS"
+  remove_codex_hooks "$CODEX_HOME_DIR/hooks.json" "aimem submit-codex"
+  if command -v codex >/dev/null 2>&1; then
+    codex mcp remove aimem >/dev/null 2>&1 || true
+  fi
   say "user install removed (journal data in ~/.local/state/aimem left untouched)"
 }
 
