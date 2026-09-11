@@ -26,7 +26,12 @@ currently 10); a binary refuses a database newer than it understands.
   `~/.codex/config.toml` (via `codex mcp add` when codex is on PATH).
   Both installers wire it; Codex asks once to trust the new hooks.
   Codex hook commands are spawned without a shell, so they stay bare
-  `aimem …` invocations — no `command -v` guards.
+  `aimem …` invocations — no `command -v` guards. Fail-open on the
+  capture side: an unreadable, unflushed, or absent rollout degrades
+  the checkpoint to what the hook payload alone carries (session,
+  turn, final reply) instead of losing the turn, and the Stop adapter
+  waits for the turn's `task_complete` line so late-flushed tool calls
+  still land.
 
 ## [0.3.26] — 2026-09-10
 

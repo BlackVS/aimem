@@ -127,15 +127,31 @@ function Install-User {
   Add-AgentHook $codexHooks 'Stop'       $CodexSubmitCmd 'Checkpointing turn'           'aimem submit-codex'
   Add-AgentHook $codexHooks 'PreCompact' $CodexSubmitCmd 'Journaling compaction marker' 'aimem submit-codex'
   # MCP recall facade: Codex registers MCP servers globally in
-  # ~/.codex/config.toml. Prefer the official CLI writer; fall back to a
-  # guarded TOML append so the wiring lands without codex on PATH.
-  $codexCli = Get-Command codex -ErrorAction SilentlyContinue
-  if ($codexCli) {
-    codex mcp get aimem 2>$null | Out-Null
-    if ($LASTEXITCODE -ne 0) { codex mcp add aimem -- aimem mcp | Out-Null }
-  } else {
+  # ~/.codex/config.toml. Prefer the official CLI writer; the guarded
+  # TOML append is the fallback BOTH when codex is off PATH and when
+  # `codex mcp add` fails. CAUTION: under this script's EAP=Stop, a
+  # `2>$null` on a native command turns its expected stderr ("server
+  # not registered") into a TERMINATING error in PS 5.1 — the codex
+  # calls run under a locally relaxed preference for that reason.
+  $mcpDone = $false
+  if (Get-Command codex -ErrorAction SilentlyContinue) {
+    $prevEap = $ErrorActionPreference
+    $ErrorActionPreference = 'Continue'
+    $null = codex mcp get aimem 2>$null
+    $mcpDone = ($LASTEXITCODE -eq 0)
+    if (-not $mcpDone) {
+      $null = codex mcp add aimem -- aimem mcp 2>$null
+      $mcpDone = ($LASTEXITCODE -eq 0)
+    }
+    $ErrorActionPreference = $prevEap
+    if (-not $mcpDone) { Write-Warning 'codex mcp add failed; falling back to config.toml append' }
+  }
+  if (-not $mcpDone) {
     $codexToml = Join-Path $CodexHome 'config.toml'
-    $haveEntry = (Test-Path $codexToml) -and ((Get-Content $codexToml -Raw) -match '\[mcp_servers\.aimem\]')
+    # Match hand-written spellings too (quoted key, inline table): a
+    # missed match would append a duplicate key and break the whole
+    # config.toml parse. A false positive merely skips the append.
+    $haveEntry = (Test-Path $codexToml) -and ((Get-Content $codexToml -Raw) -match '(?m)^\[mcp_servers\."?aimem"?\]|^\s*"?aimem"?\s*=\s*\{')
     if (-not $haveEntry) {
       New-Item -ItemType Directory -Force $CodexHome | Out-Null
       [System.IO.File]::AppendAllText($codexToml, "`n[mcp_servers.aimem]`ncommand = `"aimem`"`nargs = [`"mcp`"]`n", $Utf8NoBom)
@@ -294,7 +310,21 @@ function Uninstall-User {
     }
   }
   if (Get-Command codex -ErrorAction SilentlyContinue) {
-    codex mcp remove aimem 2>$null | Out-Null
+    # Same PS 5.1 trap as in Install-User: relax EAP around the native
+    # call or the expected "no such server" stderr becomes terminating.
+    $prevEap = $ErrorActionPreference
+    $ErrorActionPreference = 'Continue'
+    $null = codex mcp remove aimem 2>$null
+    $ErrorActionPreference = $prevEap
+  }
+  # The TOML-append fallback registration must come out here too — the
+  # CLI removal above only runs when codex is on PATH, which is exactly
+  # the case in which the fallback was NOT used.
+  $codexToml = Join-Path $CodexHome 'config.toml'
+  if (Test-Path $codexToml) {
+    $t = Get-Content $codexToml -Raw
+    $t2 = [regex]::Replace($t, '(?ms)^\[mcp_servers\.aimem\]\r?\n.*?(?=^\[|\z)', '')
+    if ($t2 -ne $t) { [System.IO.File]::WriteAllText($codexToml, $t2, $Utf8NoBom) }
   }
   Say 'user install removed (journal data left untouched)'
 }

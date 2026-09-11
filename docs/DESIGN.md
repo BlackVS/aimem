@@ -19,7 +19,8 @@ and record corrections found during implementation.
 ## Components
 
 ```
-Claude Code hooks ─┐                        ┌─ hourly curator (LLM)
+Claude Code hooks ─┐
+Codex CLI hooks  ──┤                        ┌─ hourly curator (LLM)
 OpenCode plugin  ──┼→ aimem serve (local) ──┼─ embeddings backfill
 CLI / MCP tools  ──┘   SQLite per project   └─ sync ⇆ hub (TLS 8440)
                                                 hub = same binary, merge point

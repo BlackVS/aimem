@@ -56,7 +56,7 @@ or `.codex/hooks.json`: registering them twice journals every turn twice.
 | `AGENTS.md` | the handoff protocol (edit its project-context section) |
 | `CLAUDE.md` | a one-line stub importing `AGENTS.md` |
 | `.claude/settings.json` | a `SessionStart` hook running `aimem session-start` |
-| `.codex/hooks.json` | the same `SessionStart` hook for Codex (runs once the project is trusted in Codex) |
+| `.codex/hooks.json` | the same `SessionStart` hook for Codex (runs once the project is trusted in Codex). Codex runs hook commands without a shell, so this one cannot guard on aimem's presence — a collaborator without aimem sees a one-line hook failure per session start, nothing worse |
 | `.mcp.json`, `opencode.json` | MCP registration for recall |
 | `.aimem.json` | project identity, knowledge groups, hub binding |
 

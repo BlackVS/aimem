@@ -68,24 +68,36 @@ func BuildCodexEvent(raw []byte) (*Payload, error) {
 	if err := json.Unmarshal(raw, &hp); err != nil {
 		return nil, fmt.Errorf("bad hook payload: %w", err)
 	}
-	if hp.SessionID == "" || hp.TranscriptPath == "" {
-		return nil, errors.New("hook payload missing session_id or transcript_path")
+	if hp.SessionID == "" {
+		return nil, errors.New("hook payload missing session_id")
 	}
-	// The Stop hook can fire before Codex flushes the turn's rollout
-	// lines; retry briefly until the turn's user prompt appears.
+	// The Stop hook can fire before Codex flushes the turn's trailing
+	// rollout lines (tool response_items, the final AgentMessage,
+	// task_complete); retry briefly until the turn's task_complete
+	// appears — the one line that marks the turn fully written. A
+	// rollout that stays unreadable or incomplete DEGRADES the event
+	// to what the payload alone carries instead of losing the turn:
+	// the hook payload has session, turn, and the final reply, and the
+	// journal's fail-open contract prefers a thin event over a hole.
+	// transcript_path is nullable in Codex's wire format; without it the
+	// payload-only degradation below is all there is.
 	var userReq, reply string
 	var tools []string
 	var lastTurnID string
-	var err error
-	for attempt := range 6 {
+	var turnDone bool
+	for attempt := 0; hp.TranscriptPath != "" && attempt < 6; attempt++ {
 		if attempt > 0 {
 			time.Sleep(250 * time.Millisecond)
 		}
-		userReq, reply, tools, lastTurnID, err = parseRollout(hp.TranscriptPath, hp.TurnID)
-		if err != nil {
-			return nil, err
+		var perr error
+		userReq, reply, tools, lastTurnID, turnDone, perr = parseRollout(hp.TranscriptPath, hp.TurnID)
+		if perr != nil {
+			fmt.Fprintf(os.Stderr, "aimem submit-codex: rollout %s: %v (journaling from hook payload only)\n",
+				hp.TranscriptPath, perr)
+			userReq, reply, tools, lastTurnID = "", "", nil, ""
+			break
 		}
-		if userReq != "" || hp.HookEventName != "Stop" {
+		if turnDone || hp.HookEventName != "Stop" {
 			break
 		}
 	}
@@ -101,7 +113,11 @@ func BuildCodexEvent(raw []byte) (*Payload, error) {
 		turnID = lastTurnID
 	}
 	if turnID == "" {
-		turnID = fmt.Sprintf("no-turn-%d", time.Now().Unix())
+		// Still nothing (empty or unreadable rollout): a CONSTANT
+		// fallback keeps the idempotency key stable across hook
+		// re-fires — a clock-derived id would mint a fresh key each
+		// time and defeat dedup exactly on the re-fire path.
+		turnID = "no-turn"
 	}
 	outcome := schema.OutcomeOK
 	kind := schema.KindTurn
@@ -147,11 +163,12 @@ func BuildCodexEvent(raw []byte) (*Payload, error) {
 // reply come from item_completed events, which carry the turn id; tool
 // names come from the response_item lines between that turn's
 // task_started and the next one, because response_item lines carry no
-// turn id of their own.
-func parseRollout(path, turnID string) (userReq, reply string, tools []string, lastTurnID string, err error) {
+// turn id of their own. turnDone reports whether the wanted turn's
+// task_complete was seen — the signal that its lines are fully flushed.
+func parseRollout(path, turnID string) (userReq, reply string, tools []string, lastTurnID string, turnDone bool, err error) {
 	f, err := os.Open(path)
 	if err != nil {
-		return "", "", nil, "", err
+		return "", "", nil, "", false, err
 	}
 	defer f.Close()
 	sc := bufio.NewScanner(f)
@@ -204,8 +221,11 @@ func parseRollout(path, turnID string) (userReq, reply string, tools []string, l
 					}
 				}
 			case "task_complete":
-				if (turnID == "" || ev.TurnID == turnID) && ev.LastAgentMessage != "" {
-					reply = ev.LastAgentMessage
+				if turnID == "" || ev.TurnID == turnID {
+					turnDone = true
+					if ev.LastAgentMessage != "" {
+						reply = ev.LastAgentMessage
+					}
 				}
 			}
 		case "response_item":
@@ -227,7 +247,7 @@ func parseRollout(path, turnID string) (userReq, reply string, tools []string, l
 		}
 	}
 	if err := sc.Err(); err != nil {
-		return "", "", nil, "", err
+		return "", "", nil, "", false, err
 	}
-	return userReq, reply, curTools, lastTurnID, nil
+	return userReq, reply, curTools, lastTurnID, turnDone, nil
 }

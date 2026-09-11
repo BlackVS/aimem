@@ -5,11 +5,15 @@ package adapter
 // SessionStart stdin payloads; the rollout lines come from
 // ~/.codex/sessions). Notable quirks the shapes pin: user item content
 // uses "text" but agent item content uses "Text"; response_item lines
-// carry no turn id, only event_msg lines do.
+// carry no turn id, only event_msg lines do; task_started re-fires for
+// a retried turn.
 
 import (
 	"encoding/json"
+	"os"
+	"strings"
 	"testing"
+	"time"
 
 	"aimem/internal/schema"
 )
@@ -22,41 +26,57 @@ func codexRolloutTwoTurns(t *testing.T) string {
 		`{"type":"response_item","payload":{"type":"custom_tool_call","status":"completed","name":"exec","input":"dir"}}`,
 		`{"type":"event_msg","payload":{"type":"item_completed","turn_id":"turn-1","item":{"type":"AgentMessage","id":"m1","content":[{"type":"Text","text":"old reply"}]}}}`,
 		`{"type":"event_msg","payload":{"type":"task_complete","turn_id":"turn-1","last_agent_message":"old reply"}}`,
+		// turn-2 starts, is abandoned after one tool call, and RESTARTS:
+		// the retry's task_started must reset the tool list.
 		`{"type":"event_msg","payload":{"type":"task_started","turn_id":"turn-2"}}`,
-		`{"type":"event_msg","payload":{"type":"item_completed","turn_id":"turn-2","item":{"type":"UserMessage","id":"i2","content":[{"type":"text","text":"fix the bug"}]}}}`,
+		`{"type":"response_item","payload":{"type":"custom_tool_call","name":"abandoned_probe","input":"x"}}`,
+		`{"type":"event_msg","payload":{"type":"task_started","turn_id":"turn-2"}}`,
+		`{"type":"event_msg","payload":{"type":"item_completed","turn_id":"turn-2","item":{"type":"UserMessage","id":"i2","content":[{"type":"text","text":"fix the bug"},{"type":"text","text":"and add a test"}]}}}`,
 		`{"type":"response_item","payload":{"type":"message","role":"assistant","content":[{"type":"output_text","text":"commentary"}]}}`,
 		`{"type":"response_item","payload":{"type":"function_call","name":"read_file","arguments":"{}"}}`,
+		`{"type":"response_item","payload":{"type":"local_shell_call","status":"completed"}}`,
 		`{"type":"response_item","payload":{"type":"custom_tool_call","name":"exec","input":"go test"}}`,
 		`{"type":"event_msg","payload":{"type":"item_completed","turn_id":"turn-2","item":{"type":"Reasoning","id":"r1","summary_text":[]}}}`,
-		`{"type":"event_msg","payload":{"type":"item_completed","turn_id":"turn-2","item":{"type":"AgentMessage","id":"m2","content":[{"type":"Text","text":"fixed and tested"}]}}}`,
-		`{"type":"event_msg","payload":{"type":"task_complete","turn_id":"turn-2","last_agent_message":"fixed and tested"}}`,
+		`{"type":"event_msg","payload":{"type":"item_completed","turn_id":"turn-2","item":{"type":"AgentMessage","id":"m2","content":[{"type":"Text","text":"rollout copy of the reply"}]}}}`,
+		`{"type":"event_msg","payload":{"type":"task_complete","turn_id":"turn-2","last_agent_message":"rollout copy of the reply"}}`,
 		`not even json`,
 	})
 }
 
-func TestBuildCodexEvent(t *testing.T) {
-	tp := codexRolloutTwoTurns(t)
-	raw, _ := json.Marshal(map[string]any{
-		"session_id": "sess-c", "turn_id": "turn-2", "transcript_path": tp,
-		"cwd": t.TempDir(), "hook_event_name": "Stop",
-		"stop_hook_active": false, "last_assistant_message": "fixed and tested",
-	})
+func buildCodex(t *testing.T, fields map[string]any) *Payload {
+	t.Helper()
+	raw, _ := json.Marshal(fields)
 	p, err := BuildCodexEvent(raw)
 	if err != nil {
 		t.Fatal(err)
 	}
+	return p
+}
+
+func TestBuildCodexEvent(t *testing.T) {
+	tp := codexRolloutTwoTurns(t)
+	p := buildCodex(t, map[string]any{
+		"session_id": "sess-c", "turn_id": "turn-2", "transcript_path": tp,
+		"cwd": t.TempDir(), "hook_event_name": "Stop",
+		"stop_hook_active": false, "last_assistant_message": "the final reply",
+	})
 	e := p.Event
 	if e.Client != "codex" {
 		t.Errorf("client: %q", e.Client)
 	}
-	if e.UserRequest != "fix the bug" {
-		t.Errorf("user request: %q (must be turn-2's, not turn-1's)", e.UserRequest)
+	if e.UserRequest != "fix the bug\nand add a test" {
+		t.Errorf("user request: %q (must be turn-2's multi-block prompt, not turn-1's)", e.UserRequest)
 	}
-	if e.AssistantReply != "fixed and tested" {
-		t.Errorf("reply: %q", e.AssistantReply)
+	// The payload's last_assistant_message DIFFERS from the rollout's
+	// flushed copy here, and must win: Stop can fire while the rollout
+	// still holds a partial or older AgentMessage.
+	if e.AssistantReply != "the final reply" {
+		t.Errorf("reply: %q (payload must beat the rollout copy)", e.AssistantReply)
 	}
-	// turn-1's exec call must not bleed into turn-2's tool list.
-	if len(e.ToolSummary) != 2 || e.ToolSummary[0] != "read_file" || e.ToolSummary[1] != "exec" {
+	// turn-1's exec and turn-2's ABANDONED first attempt must not bleed
+	// in; the nameless local_shell_call falls back to its type name.
+	if len(e.ToolSummary) != 3 || e.ToolSummary[0] != "read_file" ||
+		e.ToolSummary[1] != "local_shell_call" || e.ToolSummary[2] != "exec" {
 		t.Errorf("tools: %v", e.ToolSummary)
 	}
 	if e.TurnID != "turn-2" || e.IdempotencyKey != "codex:sess-c:turn-2" {
@@ -70,40 +90,95 @@ func TestBuildCodexEvent(t *testing.T) {
 	}
 }
 
-func TestBuildCodexEventPayloadReplyWins(t *testing.T) {
-	// The rollout may not have flushed the final AgentMessage when Stop
-	// fires; the payload's last_assistant_message is authoritative.
+func TestCodexStopWaitsForLateTurnFlush(t *testing.T) {
+	// Stop fires while the rollout holds only the turn's opening lines;
+	// the trailing tool call, reply, and task_complete land ~300ms
+	// later. The retry loop must wait for task_complete — the one line
+	// marking the turn fully flushed — and pick up the late tools.
 	tp := writeTranscript(t, []string{
 		`{"type":"event_msg","payload":{"type":"task_started","turn_id":"t1"}}`,
-		`{"type":"event_msg","payload":{"type":"item_completed","turn_id":"t1","item":{"type":"UserMessage","id":"i1","content":[{"type":"text","text":"ask"}]}}}`,
+		`{"type":"event_msg","payload":{"type":"item_completed","turn_id":"t1","item":{"type":"UserMessage","id":"i1","content":[{"type":"text","text":"slow ask"}]}}}`,
 	})
-	raw, _ := json.Marshal(map[string]any{
+	go func() {
+		time.Sleep(300 * time.Millisecond)
+		f, err := os.OpenFile(tp, os.O_APPEND|os.O_WRONLY, 0o600)
+		if err != nil {
+			return
+		}
+		defer f.Close()
+		f.WriteString(strings.Join([]string{
+			`{"type":"response_item","payload":{"type":"custom_tool_call","name":"exec","input":"ls"}}`,
+			`{"type":"event_msg","payload":{"type":"task_complete","turn_id":"t1","last_agent_message":"late flushed reply"}}`,
+		}, "\n") + "\n")
+	}()
+	p := buildCodex(t, map[string]any{
 		"session_id": "s", "turn_id": "t1", "transcript_path": tp,
 		"cwd": t.TempDir(), "hook_event_name": "Stop",
-		"last_assistant_message": "late reply",
 	})
-	p, err := BuildCodexEvent(raw)
-	if err != nil {
-		t.Fatal(err)
+	if p.Event.AssistantReply != "late flushed reply" {
+		t.Errorf("reply: %q (retry loop gave up before task_complete)", p.Event.AssistantReply)
 	}
-	if p.Event.AssistantReply != "late reply" {
-		t.Errorf("reply: %q", p.Event.AssistantReply)
+	if len(p.Event.ToolSummary) != 1 || p.Event.ToolSummary[0] != "exec" {
+		t.Errorf("tools: %v (late tool line missed)", p.Event.ToolSummary)
 	}
-	if p.Event.UserRequest != "ask" {
-		t.Errorf("user request: %q", p.Event.UserRequest)
+}
+
+func TestBuildCodexEventDegradesWithoutRollout(t *testing.T) {
+	// A missing/unreadable rollout (rotated file, sharing violation, a
+	// nullable transcript_path) must DEGRADE to a payload-only event,
+	// not lose the turn: fail-open is the journal's contract.
+	for name, fields := range map[string]map[string]any{
+		"unreadable path": {
+			"session_id": "s", "turn_id": "t9", "cwd": t.TempDir(),
+			"transcript_path": "Z:/does/not/exist.jsonl",
+			"hook_event_name": "Stop", "last_assistant_message": "still captured",
+		},
+		"null transcript_path": {
+			"session_id": "s", "turn_id": "t9", "cwd": t.TempDir(),
+			"hook_event_name": "Stop", "last_assistant_message": "still captured",
+		},
+	} {
+		p := buildCodex(t, fields)
+		if p.Event.AssistantReply != "still captured" || p.Event.TurnID != "t9" {
+			t.Errorf("%s: degraded event wrong: reply=%q turn=%q", name, p.Event.AssistantReply, p.Event.TurnID)
+		}
+		if p.Event.UserRequest != "" {
+			t.Errorf("%s: user request from nowhere: %q", name, p.Event.UserRequest)
+		}
+		if err := p.Event.Validate(); err != nil {
+			t.Errorf("%s: degraded event invalid: %v", name, err)
+		}
+	}
+}
+
+func TestBuildCodexEventNoTurnKeyStable(t *testing.T) {
+	// With no turn_id anywhere (empty rollout), the fallback id must be
+	// CONSTANT: a clock-derived id would mint a fresh idempotency key
+	// per hook re-fire and defeat dedup exactly where it matters.
+	tp := writeTranscript(t, []string{})
+	fields := map[string]any{
+		"session_id": "s", "transcript_path": tp,
+		"cwd": t.TempDir(), "hook_event_name": "PreCompact", "trigger": "auto",
+	}
+	p1 := buildCodex(t, fields)
+	time.Sleep(1100 * time.Millisecond) // cross a wall-clock second
+	p2 := buildCodex(t, fields)
+	if p1.Event.IdempotencyKey != p2.Event.IdempotencyKey {
+		t.Errorf("no-turn key unstable across re-fires: %s vs %s",
+			p1.Event.IdempotencyKey, p2.Event.IdempotencyKey)
+	}
+	if p1.Event.TurnID != "no-turn-compact" {
+		t.Errorf("turn id: %q", p1.Event.TurnID)
 	}
 }
 
 func TestBuildCodexEventPreCompact(t *testing.T) {
 	tp := codexRolloutTwoTurns(t)
-	raw, _ := json.Marshal(map[string]any{
+	fields := map[string]any{
 		"session_id": "sess-c", "transcript_path": tp, // no turn_id
 		"cwd": t.TempDir(), "hook_event_name": "PreCompact", "trigger": "auto",
-	})
-	p, err := BuildCodexEvent(raw)
-	if err != nil {
-		t.Fatal(err)
 	}
+	p := buildCodex(t, fields)
 	e := p.Event
 	if e.Kind != schema.KindCompactionMarker || e.Outcome != schema.OutcomePreCompaction {
 		t.Errorf("kind/outcome: %s/%s", e.Kind, e.Outcome)
@@ -115,7 +190,7 @@ func TestBuildCodexEventPreCompact(t *testing.T) {
 	if e.UserRequest != "compaction trigger: auto" || e.AssistantReply != "" || e.ToolSummary != nil {
 		t.Errorf("marker content leaked: %q / %q / %v", e.UserRequest, e.AssistantReply, e.ToolSummary)
 	}
-	p2, _ := BuildCodexEvent(raw)
+	p2 := buildCodex(t, fields)
 	if p2.Event.IdempotencyKey != e.IdempotencyKey {
 		t.Errorf("re-fired PreCompact changed key: %s vs %s", p2.Event.IdempotencyKey, e.IdempotencyKey)
 	}
@@ -123,8 +198,7 @@ func TestBuildCodexEventPreCompact(t *testing.T) {
 
 func TestBuildCodexEventRejectsIncomplete(t *testing.T) {
 	for _, raw := range []string{
-		`{"turn_id":"t","transcript_path":"x"}`,
-		`{"session_id":"s","turn_id":"t"}`,
+		`{"turn_id":"t","transcript_path":"x"}`, // no session_id
 		`no json`,
 	} {
 		if _, err := BuildCodexEvent([]byte(raw)); err == nil {
@@ -136,11 +210,16 @@ func TestBuildCodexEventRejectsIncomplete(t *testing.T) {
 func TestBuildCodexEventBOMTolerant(t *testing.T) {
 	tp := codexRolloutTwoTurns(t)
 	raw, _ := json.Marshal(map[string]any{
-		"session_id": "s", "turn_id": "turn-2", "transcript_path": tp,
+		"session_id": "sess-c", "turn_id": "turn-2", "transcript_path": tp,
 		"cwd": t.TempDir(), "hook_event_name": "Stop",
 	})
 	withBOM := append([]byte{0xEF, 0xBB, 0xBF}, raw...)
-	if _, err := BuildCodexEvent(withBOM); err != nil {
+	p, err := BuildCodexEvent(withBOM)
+	if err != nil {
 		t.Fatalf("BOM payload rejected: %v", err)
+	}
+	// Full binding must survive the BOM strip, not just the unmarshal.
+	if p.Event.TurnID != "turn-2" || p.Event.UserRequest != "fix the bug\nand add a test" {
+		t.Errorf("BOM payload mis-bound: turn=%q user=%q", p.Event.TurnID, p.Event.UserRequest)
 	}
 }

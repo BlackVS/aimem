@@ -28,21 +28,26 @@ CODEX_SUBMIT_CMD='aimem submit-codex'
 say() { printf '==> %s\n' "$*"; }
 need() { command -v "$1" >/dev/null 2>&1 || { echo "error: $1 is required" >&2; exit 1; }; }
 
-# Merge one checkpoint hook entry into a Claude settings file, keyed on the
-# marker string so re-runs and uninstalls find it. Never touches other hooks.
-add_claude_hook() { # file event command status
-  local file=$1 event=$2 cmd=$3 status=$4
+# Merge one checkpoint hook entry into a hooks config, keyed on the marker
+# string so re-runs and uninstalls find it. Never touches other hooks.
+# Claude Code's settings.json and Codex's hooks.json share this block shape.
+add_agent_hook() { # file event command status marker
+  local file=$1 event=$2 cmd=$3 status=$4 marker=$5
   mkdir -p "$(dirname "$file")"
   [ -s "$file" ] || echo '{}' > "$file"
   jq -e . "$file" >/dev/null || { echo "error: $file is not valid JSON; fix it first" >&2; exit 1; }
   local tmp
   tmp=$(mktemp)
-  jq --arg ev "$event" --arg cmd "$cmd" --arg st "$status" '
+  jq --arg ev "$event" --arg cmd "$cmd" --arg st "$status" --arg mk "$marker" '
     .hooks[$ev] = ((.hooks[$ev] // []) |
-      if ([.[] | .hooks[]? | .command // ""] | any(contains("aimem submit-claude")))
+      if ([.[] | .hooks[]? | .command // ""] | any(contains($mk)))
       then .
       else . + [{"hooks":[{"type":"command","command":$cmd,"timeout":10,"statusMessage":$st}]}]
       end)' "$file" > "$tmp" && mv "$tmp" "$file"
+}
+
+add_claude_hook() { # file event command status
+  add_agent_hook "$1" "$2" "$3" "$4" "aimem submit-claude"
 }
 
 remove_claude_hooks() { # file
@@ -59,25 +64,6 @@ remove_claude_hooks() { # file
       ) | .hooks |= with_entries(select(.value | length > 0))
       | if (.hooks | length) == 0 then del(.hooks) else . end
     else . end' "$file" > "$tmp" && mv "$tmp" "$file"
-}
-
-# Merge one hook entry into a Codex hooks.json (~/.codex or <repo>/.codex).
-# Codex's hooks.json shape is Claude's settings.json hooks block verbatim,
-# so the merge logic matches add_claude_hook; the marker keys re-runs and
-# uninstalls. Codex asks the user to review-and-trust new hooks once.
-add_codex_hook() { # file event command status marker
-  local file=$1 event=$2 cmd=$3 status=$4 marker=$5
-  mkdir -p "$(dirname "$file")"
-  [ -s "$file" ] || echo '{}' > "$file"
-  jq -e . "$file" >/dev/null || { echo "error: $file is not valid JSON; fix it first" >&2; exit 1; }
-  local tmp
-  tmp=$(mktemp)
-  jq --arg ev "$event" --arg cmd "$cmd" --arg st "$status" --arg mk "$marker" '
-    .hooks[$ev] = ((.hooks[$ev] // []) |
-      if ([.[] | .hooks[]? | .command // ""] | any(contains($mk)))
-      then .
-      else . + [{"hooks":[{"type":"command","command":$cmd,"timeout":10,"statusMessage":$st}]}]
-      end)' "$file" > "$tmp" && mv "$tmp" "$file"
 }
 
 remove_codex_hooks() { # file marker
@@ -131,17 +117,26 @@ install_user() {
   # until Codex reads it, matching how the other clients are handled.
   local codex_hooks="$CODEX_HOME_DIR/hooks.json"
   say "Codex user hooks -> $codex_hooks"
-  add_codex_hook "$codex_hooks" Stop       "$CODEX_SUBMIT_CMD" "Checkpointing turn" "aimem submit-codex"
-  add_codex_hook "$codex_hooks" PreCompact "$CODEX_SUBMIT_CMD" "Journaling compaction marker" "aimem submit-codex"
+  add_agent_hook "$codex_hooks" Stop       "$CODEX_SUBMIT_CMD" "Checkpointing turn" "aimem submit-codex"
+  add_agent_hook "$codex_hooks" PreCompact "$CODEX_SUBMIT_CMD" "Journaling compaction marker" "aimem submit-codex"
   # MCP recall facade: Codex registers MCP servers globally in
-  # ~/.codex/config.toml. Prefer the official CLI writer; fall back to a
-  # guarded TOML append so the wiring lands without codex on PATH.
+  # ~/.codex/config.toml. Prefer the official CLI writer; the guarded
+  # TOML append is the fallback BOTH when codex is off PATH and when
+  # `codex mcp add` fails (an old codex without the subcommand must not
+  # be reported as wired). The guard also matches hand-written spellings
+  # (quoted key, inline table) — a missed match would append a duplicate
+  # key and break the user's whole config.toml parse.
+  local mcp_done=0
   if command -v codex >/dev/null 2>&1; then
-    codex mcp get aimem >/dev/null 2>&1 || codex mcp add aimem -- aimem mcp \
-      || echo "warning: codex mcp add failed; register aimem manually" >&2
-  else
+    if codex mcp get aimem >/dev/null 2>&1 || codex mcp add aimem -- aimem mcp; then
+      mcp_done=1
+    else
+      echo "warning: codex mcp add failed; falling back to config.toml append" >&2
+    fi
+  fi
+  if [ "$mcp_done" != 1 ]; then
     local codex_toml="$CODEX_HOME_DIR/config.toml"
-    if ! grep -q '^\[mcp_servers\.aimem\]' "$codex_toml" 2>/dev/null; then
+    if ! grep -Eq '^\[mcp_servers\."?aimem"?\]|^[[:space:]]*"?aimem"?[[:space:]]*=[[:space:]]*\{' "$codex_toml" 2>/dev/null; then
       mkdir -p "$CODEX_HOME_DIR"
       printf '\n[mcp_servers.aimem]\ncommand = "aimem"\nargs = ["mcp"]\n' >> "$codex_toml"
     fi
@@ -227,7 +222,7 @@ EOF
   # Codex: same handoff at session start, project-scoped (.codex/hooks.json;
   # Codex loads it once the user trusts the project). `aimem session-start`
   # emits the wire format both clients share.
-  add_codex_hook "$dir/.codex/hooks.json" SessionStart "aimem session-start" \
+  add_agent_hook "$dir/.codex/hooks.json" SessionStart "aimem session-start" \
     "Loading session handoff" "aimem session-start"
   say "Codex SessionStart handoff hook wired"
 
@@ -424,6 +419,17 @@ uninstall_user() {
   remove_codex_hooks "$CODEX_HOME_DIR/hooks.json" "aimem submit-codex"
   if command -v codex >/dev/null 2>&1; then
     codex mcp remove aimem >/dev/null 2>&1 || true
+  fi
+  # The TOML-append fallback registration must come out here too — the
+  # `codex mcp remove` above only runs when codex is on PATH, which is
+  # exactly the case in which the fallback was NOT used. Drop our exact
+  # table (header to the next table header).
+  local codex_toml="$CODEX_HOME_DIR/config.toml"
+  if [ -f "$codex_toml" ] && grep -q '^\[mcp_servers\.aimem\]' "$codex_toml"; then
+    local tmp
+    tmp=$(mktemp)
+    awk '/^\[mcp_servers\.aimem\]/{drop=1;next} drop&&/^\[/{drop=0} !drop' \
+      "$codex_toml" > "$tmp" && mv "$tmp" "$codex_toml"
   fi
   say "user install removed (journal data in ~/.local/state/aimem left untouched)"
 }
