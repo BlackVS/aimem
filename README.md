@@ -260,3 +260,7 @@ Versions up to and including **v0.1.90** were published under MIT and
 irrevocably remain so; **v0.2.0 and later** are PolyForm Noncommercial.
 Contributions are accepted under the terms in
 [CONTRIBUTING.md](CONTRIBUTING.md).
+
+## hands review smoke test
+
+Throwaway change to exercise the label-driven review pipeline; this PR will be closed and the branch deleted.
