@@ -363,7 +363,7 @@ let TOK = localStorage.getItem("aimem_token") || "";
 let OV = [];            // overview rows
 let curGroup = "", curChap = "", curOrigin = "", curTags = [], memCache = {};
 let kbMenu = ""; // open ⋯ menu: "scope:<id>" | "chap:<id>:<name>" | ""
-let mergeFor = ""; // project whose ⋯ menu shows the inline merge chooser
+let mergeInto = ""; // target picked in the merge chooser (kbMenu "merge:<id>"); survives re-renders
 // 177 facts in one scope is normal, so the list pages: PAGE at a time,
 // extended in place rather than paginated, which keeps browser find
 // (and the search box above) working over everything on screen.
@@ -489,7 +489,7 @@ function treeEntry(g){
   let rows = `<div class="tg ${on?"on":""}" role="button" tabindex="0" title="${esc(g.id)}" `+
     `onclick="pickGroup('${g.id}')" onkeydown="if(event.key==='Enter')pickGroup('${g.id}')">`+
     `<span>${on?"▾":"▸"} ${esc(kbLabel(g.id))}</span>${count}${kebab}</div>`;
-  if(on && kbMenu==="scope:"+g.id){
+  if(on && (kbMenu==="scope:"+g.id || kbMenu==="merge:"+g.id)){
     // A derived project id is unreadable by design; the user DB and
     // group DBs are addressed by convention, so re-keying one orphans
     // every reference — rename and drop are ordinary-project actions.
@@ -498,7 +498,7 @@ function treeEntry(g){
         ? `<div class="tc" role="button" tabindex="0" onclick="tab('groups')"><span class="name">chapters, charter, AI propose / re-label (Groups tab)&hellip;</span></div>`
         : `<div class="tc" role="button" tabindex="0" onclick="renameProject('${esc(g.id)}')"><span class="name">rename project&hellip;</span></div>`+
           `<div class="tc" role="button" tabindex="0" onclick="mergeProjectUI('${esc(g.id)}')"><span class="name">merge into another project&hellip;</span></div>`+
-          (mergeFor===g.id ? mergeChooser(g.id) : "")+
+          (kbMenu==="merge:"+g.id ? mergeChooser(g.id) : "")+
           `<div class="tc danger" role="button" tabindex="0" onclick="dropProjectUI('${esc(g.id)}')"><span class="name">drop project&hellip;</span></div>`) +
       `</div>`;
   }
@@ -539,7 +539,7 @@ function treeEntry(g){
   }
   return rows;
 }
-function toggleKbMenu(key){ kbMenu = kbMenu===key ? "" : key; if(!kbMenu) mergeFor=""; renderTree(); }
+function toggleKbMenu(key){ kbMenu = (kbMenu===key || kbMenu==="merge:"+key.replace(/^scope:/,"")) ? "" : key; renderTree(); }
 
 // Drop is the console face of drop-project: files deleted on THIS hub.
 // The machines that feed it are untouched — their next checkpoint
@@ -652,21 +652,33 @@ function mergeCandidates(id){
 function mergeChooser(id){
   const others = mergeCandidates(id);
   if(!others.length) return `<div class="dim" style="font-size:12px;margin:0 10px 6px">no other project on this hub to merge into</div>`;
-  return `<div class="tc"><span class="name">into</span>`+
-    `<select id="mergeInto" onclick="event.stopPropagation()">${others.map(o=>`<option>${esc(o)}</option>`).join("")}</select>`+
-    `<button class="act danger" onclick="event.stopPropagation();mergeProjectDo('${esc(id)}')">merge</button>`+
+  // The select gets a row of its own: sharing one non-wrapping row with
+  // the buttons in the 230px sidebar shrank it to an unreadable sliver.
+  return `<div class="tc"><select id="mergeInto" style="flex:1;min-width:0" onclick="event.stopPropagation()" onchange="mergeInto=this.value">`+
+      others.map(o=>`<option${o===mergeInto?" selected":""}>${esc(o)}</option>`).join("")+`</select></div>`+
+    `<div class="tc"><button class="act danger" onclick="event.stopPropagation();mergeProjectDo('${esc(id)}')">merge into selected</button>`+
     `<button class="act" onclick="event.stopPropagation();mergeProjectCancel()">cancel</button></div>`+
     `<div class="dim" style="font-size:12px;margin:0 10px 6px">Its journal, facts and curation history fold into the target `+
     `(idempotent — a re-run completes, never duplicates) and shared knowledge bases relabel their citations; `+
     `the source is then removed. Refused if the source holds shared docs or collections (migrate those first).</div>`;
 }
-function mergeProjectUI(id){ mergeFor = mergeFor===id ? "" : id; renderTree(); }
-function mergeProjectCancel(){ mergeFor = ""; renderTree(); }
+// The chooser is a mode of the ⋯ menu key ("merge:<id>"), so every path
+// that closes the menu (scope switch, drop, rename, toggle) closes it
+// too — no second state to keep in lockstep. The picked target is held
+// in state and re-rendered as selected: the DOM alone would reset to
+// the first candidate on any unrelated tree re-render, and a merge is
+// destructive.
+function mergeProjectUI(id){
+  if(kbMenu==="merge:"+id){ kbMenu = "scope:"+id; }
+  else { kbMenu = "merge:"+id; mergeInto = mergeCandidates(id)[0]||""; }
+  renderTree();
+}
+function mergeProjectCancel(){ kbMenu = kbMenu.replace(/^merge:/,"scope:"); renderTree(); }
 async function mergeProjectDo(id){
-  const into = ($("mergeInto")||{}).value||"";
-  if(!into || into===id) return;
+  const into = mergeInto;
+  if(!into || into===id || !mergeCandidates(id).includes(into)) return;
   if(!confirm(`Merge "${id}" into "${into}"? "${id}" is then removed from this hub.`)) return;
-  mergeFor = ""; kbMenu = "";
+  kbMenu = ""; mergeInto = "";
   try{
     const r = await api("/v1/projects/"+encodeURIComponent(id)+"/merge-into",
       {method:"POST", body:JSON.stringify({into})});
