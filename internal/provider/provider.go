@@ -7,6 +7,7 @@ package provider
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 )
@@ -93,12 +94,20 @@ type Endpoint struct {
 }
 
 // Resolve returns the endpoint serving model: its registry binding when
-// one names a usable provider, else the env pair. ok=false means no
-// endpoint is configured anywhere (callers treat that as "LLM off",
-// matching the old missing-env contract).
+// it has one, else the env pair. ok=false means no endpoint is
+// configured (callers treat that as "LLM off", matching the old
+// missing-env contract) — or that the model IS bound but its provider
+// is unusable (no token). A bound model NEVER falls through to env: an
+// explicit binding is the operator's statement of where this model
+// lives, and quietly serving it from another endpoint makes a
+// misconfigured provider look healthy while an unrelated service
+// answers in its place. Explain names the reason when ok=false.
 func Resolve(root, model string) (Endpoint, bool) {
 	if ep, bound := ResolveBound(root, model); bound {
 		return ep, true
+	}
+	if _, isBound := Load(root).Models[model]; isBound {
+		return Endpoint{}, false
 	}
 	if key := os.Getenv("AIMEM_OPENAI_API_KEY"); key != "" {
 		base := os.Getenv("AIMEM_OPENAI_BASE_URL")
@@ -108,6 +117,27 @@ func Resolve(root, model string) (Endpoint, bool) {
 		return Endpoint{Kind: "openai", BaseURL: base, Token: key, Model: model}, true
 	}
 	return Endpoint{}, false
+}
+
+// Explain says why Resolve would report ok=false for model, in words an
+// operator can act on; "" when it would resolve.
+func Explain(root, model string) string {
+	r := Load(root)
+	b, bound := r.Models[model]
+	if !bound {
+		if os.Getenv("AIMEM_OPENAI_API_KEY") != "" {
+			return ""
+		}
+		return fmt.Sprintf("model %q has no binding and AIMEM_OPENAI_API_KEY is unset", model)
+	}
+	p, ok := r.Providers[b.Provider]
+	switch {
+	case !ok:
+		return fmt.Sprintf("model %q is bound to provider %q, which no longer exists", model, b.Provider)
+	case p.Kind != "claude" && p.Token == "":
+		return fmt.Sprintf("model %q is bound to provider %q, which has no token stored — save the provider with its token", model, b.Provider)
+	}
+	return ""
 }
 
 // ResolveBound resolves only through an explicit registry binding — no

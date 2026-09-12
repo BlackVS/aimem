@@ -146,8 +146,11 @@ func (s *Server) testProvider(w http.ResponseWriter, r *http.Request) {
 	}
 	ep, ok := provider.Resolve(s.reg.Root(), req.Model)
 	if !ok {
-		s.log.Warn("provider test unresolved", "model", req.Model)
-		s.fail(w, http.StatusBadRequest, fmt.Errorf("no endpoint for model %q (no binding, no env fallback)", req.Model))
+		// Say WHY — a test button that cannot name the misconfiguration
+		// it hit is the same lie as one that quietly succeeds elsewhere.
+		why := provider.Explain(s.reg.Root(), req.Model)
+		s.log.Warn("provider test unresolved", "model", req.Model, "why", why)
+		s.fail(w, http.StatusBadRequest, fmt.Errorf("%s", why))
 		return
 	}
 	start := time.Now()
@@ -169,10 +172,12 @@ func (s *Server) testProvider(w http.ResponseWriter, r *http.Request) {
 	}
 	if err != nil {
 		// Same shape as the success line below: a failure nobody can
-		// attribute to a model is nearly useless in the Log tab.
-		s.log.Warn("provider test failed", "model", req.Model, "op", req.Op,
-			"ms", time.Since(start).Milliseconds(), "err", err)
-		s.fail(w, http.StatusBadGateway, err)
+		// attribute to a model is nearly useless in the Log tab. The
+		// elapsed time rides in the message too — a 15s timeout and a
+		// 100ms rejection call for different fixes.
+		ms := time.Since(start).Milliseconds()
+		s.log.Warn("provider test failed", "model", req.Model, "op", req.Op, "ms", ms, "err", err)
+		s.fail(w, http.StatusBadGateway, fmt.Errorf("%v (after %dms)", err, ms))
 		return
 	}
 	if db, derr := s.reg.Open(store.UserScopeProject); derr == nil {
@@ -200,6 +205,11 @@ func (s *Server) providerModels(w http.ResponseWriter, r *http.Request) {
 	}
 	if p.Kind == "claude" {
 		s.ok(w, map[string]any{"models": []string{"haiku", "sonnet", "opus"}})
+		return
+	}
+	if p.Token == "" {
+		// Upstream would answer 401 — name the actual cause instead.
+		s.fail(w, http.StatusBadRequest, fmt.Errorf("provider %q has no token stored — save it with its token first", name))
 		return
 	}
 	base := p.BaseURL

@@ -3,6 +3,7 @@ package provider
 import (
 	"os"
 	"runtime"
+	"strings"
 	"testing"
 )
 
@@ -39,14 +40,38 @@ func TestResolvePrecedence(t *testing.T) {
 	if ep, ok = Resolve(root, "other"); !ok || ep.Token != "envkey" {
 		t.Fatalf("unbound fallback: %+v ok=%v", ep, ok)
 	}
-	// Broken binding (provider without token) falls back to env too.
+	// A BOUND model whose provider has no token must NOT fall back to
+	// env: the binding is explicit, and serving it from the env endpoint
+	// hid a misconfigured provider behind another vendor's errors.
 	r.Providers["hollow"] = Provider{Kind: "openai"}
 	r.Bind("m3", "hollow", "")
+	r.Bind("m4", "vanished", "")
 	if err := r.Save(root); err != nil {
 		t.Fatal(err)
 	}
-	if ep, ok = Resolve(root, "m3"); !ok || ep.Token != "envkey" {
-		t.Fatalf("hollow binding fallback: %+v ok=%v", ep, ok)
+	if ep, ok = Resolve(root, "m3"); ok {
+		t.Fatalf("hollow binding must not resolve (got %+v)", ep)
+	}
+	if why := Explain(root, "m3"); !strings.Contains(why, `"hollow"`) || !strings.Contains(why, "no token") {
+		t.Fatalf("explain hollow: %q", why)
+	}
+	if ep, ok = Resolve(root, "m4"); ok {
+		t.Fatalf("binding to a missing provider must not resolve (got %+v)", ep)
+	}
+	if why := Explain(root, "m4"); !strings.Contains(why, "no longer exists") {
+		t.Fatalf("explain vanished: %q", why)
+	}
+	// Explain is silent for models that resolve, and names the env gap
+	// for unbound models only when the env pair is unset.
+	if why := Explain(root, "m1"); why != "" {
+		t.Fatalf("explain resolvable: %q", why)
+	}
+	if why := Explain(root, "other"); why != "" {
+		t.Fatalf("explain env-served: %q", why)
+	}
+	t.Setenv("AIMEM_OPENAI_API_KEY", "")
+	if why := Explain(root, "other"); !strings.Contains(why, "AIMEM_OPENAI_API_KEY") {
+		t.Fatalf("explain unbound without env: %q", why)
 	}
 }
 

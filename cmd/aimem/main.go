@@ -883,7 +883,7 @@ func docCmd(args []string) error {
 		}
 		ep, ok := provider.Resolve(stateRoot(), runModel)
 		if !ok || ep.Kind != "openai" {
-			return fmt.Errorf("no openai endpoint for model %q: bind it in providers.json or set AIMEM_OPENAI_API_KEY", runModel)
+			return fmt.Errorf("no openai endpoint for model %q: %s", runModel, provider.Explain(stateRoot(), runModel))
 		}
 		syn = &curate.OpenAIExtractor{BaseURL: ep.BaseURL, APIKey: ep.Token, Model: ep.Model,
 			Timeout: curate.DocSynthesisTimeout}
@@ -1906,7 +1906,7 @@ func curateCmd(args []string) error {
 			}
 			ep, ok := provider.Resolve(root, m)
 			if !ok || ep.Kind != "openai" {
-				return fmt.Errorf("no openai endpoint for model %q: bind it in providers.json or set AIMEM_OPENAI_API_KEY", m)
+				return fmt.Errorf("no openai endpoint for model %q: %s", m, provider.Explain(root, m))
 			}
 			ex = &curate.OpenAIExtractor{BaseURL: ep.BaseURL, APIKey: ep.Token, Model: ep.Model}
 			runModel = m

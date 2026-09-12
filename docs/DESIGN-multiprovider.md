@@ -114,6 +114,20 @@ not a host global.
 - No secret sync or vault integration; one hub = one registry file.
 - No provider health checks in v1 (the first failing run says enough).
 
+## Correction (2026-09-12): env fallback is for UNBOUND models only
+
+The original resolution rule let a bound model fall through to the
+`AIMEM_OPENAI_*` env pair whenever its binding was unusable (provider
+missing, or an `openai`-kind provider with no token). In practice that
+turned a misconfiguration into a lie: a Hetzner binding saved without
+its token was silently served by the home hub's env endpoint (Google's
+OpenAI-compat), and the test button reported Google's "unexpected model
+name format" — an error about the wrong service entirely. Rule now: an
+explicit binding is the operator's statement of where a model lives;
+if it cannot be honored, resolution fails and `provider.Explain` names
+the reason. The env pair still serves models with no binding at all,
+which is the compatibility case it was designed for.
+
 ## Build order
 
 1. Registry file + resolution in embed/curate paths (env fallback).

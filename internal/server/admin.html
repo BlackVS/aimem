@@ -1166,7 +1166,8 @@ async function loadProviders(){
     return `<div class="row"><span style="width:110px">${esc(n)}</span>`+
       `<span class="chip">${esc(p.kind)}</span>`+
       `<span class="grow dim">${esc(p.base_url||"(default proxy)")}</span>`+
-      `<span class="dim">${esc(p.token||"no token")}</span>`+
+      (p.token || p.kind==="claude" ? `<span class="dim">${esc(p.token||"no token needed")}</span>`
+                                    : `<span class="bad">NO TOKEN — bound models will not resolve</span>`)+
       `<button class="act" onclick="editProvider('${esc(n)}')">edit</button>`+
       `<button class="act danger" onclick="delProvider('${esc(n)}')">delete</button></div>`;
   }).join("") : '<span class="dim">none yet — models use the host env fallback</span>';
@@ -1205,13 +1206,16 @@ function editProvider(n){const p=PROV.providers[n];$("pvName").value=n;$("pvKind
   $("pvUrl").value=p.base_url||"";$("pvTok").value="";}
 async function putProv(body,msg){
   try{ await api("/v1/config/providers",{method:"PUT",body:JSON.stringify(body)});
-    toast(msg); await loadProviders(); loadModels(); }catch(e){ toast(String(e)); }
+    toast(msg); await loadProviders(); loadModels(); return true; }catch(e){ toast(String(e)); return false; }
 }
-function saveProvider(){
+async function saveProvider(){
   const name=$("pvName").value.trim(); if(!name){toast("provider needs a name");return;}
-  putProv({set_provider:{name, kind:$("pvKind").value, base_url:$("pvUrl").value.trim(),
+  const ok = await putProv({set_provider:{name, kind:$("pvKind").value, base_url:$("pvUrl").value.trim(),
     token:$("pvTok").value.trim()}}, "provider saved");
-  $("pvTok").value="";
+  // Clear the pasted token only once the hub has it. Clearing on a
+  // REJECTED save (e.g. an uppercase name) silently discarded the token,
+  // and the retry then saved the provider with none (live, 2026-09-12).
+  if(ok) $("pvTok").value="";
 }
 function delProvider(n){ if(confirm(`Delete provider ${n} and its bindings?`)) putProv({delete_provider:n},"provider deleted"); }
 function bindModel(){
@@ -1229,10 +1233,17 @@ function unbindModel(m){ putProv({unbind:m},"model unbound"); }
 async function testModel(m,op,btn){
   const out=document.querySelector(`[data-test="${CSS.escape(m)}"]`);
   btn.disabled=true; out.textContent="testing "+op+"…"; out.className="dim";
+  const t0=performance.now();
   try{
     const r=await api("/v1/config/providers/test",{method:"POST",body:JSON.stringify({model:m,op})});
     out.textContent=`ok · ${r.latency_ms}ms · ${r.tokens} tok`; out.className="ok";
-  }catch(e){ out.textContent=String(e.message||e); out.className="bad"; }
+  }catch(e){
+    // The hub stamps its own elapsed time into provider errors; for
+    // failures that never reached it (transport, auth) measure here.
+    const msg=String(e.message||e);
+    out.textContent=/\d+ms/.test(msg) ? msg : `${msg} (after ${Math.round(performance.now()-t0)}ms)`;
+    out.className="bad";
+  }
   btn.disabled=false;
 }
 

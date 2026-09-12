@@ -13,6 +13,25 @@ currently 10); a binary refuses a database newer than it understands.
 
 ## [Unreleased]
 
+### Fixed
+
+- **Provider tests tell the truth about the configured provider.** A
+  model bound to a provider that could not serve it (no token stored)
+  used to fall through silently to the host's `AIMEM_OPENAI_*` env
+  endpoint, so the console's test button reported another vendor's
+  error for the wrong service (live: a Hetzner binding answered by
+  Google's "unexpected model name format"). Bound models now resolve
+  only through their binding; when that fails, the test button, the
+  model list, and the `curate`/`embed` CLI paths name the actual cause
+  ("provider X has no token stored"). Failed tests carry the elapsed
+  time so a 15s timeout and a 100ms rejection read differently; the
+  provider list flags tokenless providers.
+- **Console no longer discards a pasted token on a rejected save.**
+  The token field was cleared before the hub answered, so a save
+  refused for an invalid name (uppercase) ate the token, and the
+  corrected retry stored the provider with none — the root of the
+  case above. The field now clears only after the hub confirms.
+
 ## [0.3.27] — 2026-09-11
 
 ### Added

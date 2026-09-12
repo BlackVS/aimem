@@ -45,7 +45,11 @@ func (s *Server) curateSynth() (curate.Synthesizer, string, error) {
 	case "openai":
 		ep, ok := provider.Resolve(root, m)
 		if m == "" || !ok || ep.Kind != "openai" {
-			return nil, "", fmt.Errorf("no curate endpoint: bind AIMEM_CURATE_MODEL in providers.json or set AIMEM_OPENAI_API_KEY")
+			why := "AIMEM_CURATE_MODEL is unset"
+			if m != "" {
+				why = provider.Explain(root, m)
+			}
+			return nil, "", fmt.Errorf("no curate endpoint: %s", why)
 		}
 		return &curate.OpenAIExtractor{BaseURL: ep.BaseURL, APIKey: ep.Token, Model: ep.Model}, m, nil
 	default: // claude
