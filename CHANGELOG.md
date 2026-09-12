@@ -13,6 +13,16 @@ currently 10); a binary refuses a database newer than it understands.
 
 ## [Unreleased]
 
+### Changed
+
+- **Console: one shared status line for all model bindings.** The
+  per-binding reserved result line from 0.3.29 put a placeholder under
+  every row, which read as clutter (user notice). The bindings card
+  now has a single fixed-height "last test" line under the list; each
+  result names its model and op. Both earlier guarantees hold: nothing
+  renders inside a row, and the line's height is fixed, so neither the
+  buttons nor the rows ever move.
+
 ## [0.3.29] — 2026-09-12
 
 ### Changed

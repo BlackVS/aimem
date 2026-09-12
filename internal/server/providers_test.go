@@ -219,39 +219,41 @@ func TestConsoleProviderFormRules(t *testing.T) {
 	}
 }
 
-// Layout invariants for the bindings list, pinned by scraping the page
-// (no browser harness here): the test result is the LAST child of the
-// row and a full-width reserved line — inline between the buttons it
-// pushed "unbind" sideways, and on demand it would push the rows below;
-// long lists scroll inside their card so the bind form stays in view.
+// Layout invariants for the bindings card, pinned by scraping the page
+// (no browser harness here): test results go to ONE shared, fixed-height
+// status line under the list — never inside a row (that shoved "unbind"
+// sideways) and never a per-row placeholder (a line under every binding
+// read as clutter); long lists scroll inside their card so the bind
+// form stays in view.
 func TestConsoleBindingRowLayoutRules(t *testing.T) {
 	page := string(adminHTML)
 	css := page[:strings.Index(page, "</style>")]
 	for _, rule := range []string{
-		`.test-out{flex-basis:100%`,      // own line under the buttons
-		`min-height:1.3em`,               // reserved, not on demand
+		`#bindOut{`,                      // the one shared status line…
+		`min-height:1.3em`,               // …with a fixed height (no shifts)
 		`#provList,#bindList{max-height`, // bounded lists, form stays visible
 	} {
 		if !strings.Contains(css, rule) {
 			t.Errorf("layout rule missing from page CSS: %s", rule)
 		}
 	}
+	if !strings.Contains(page, `<div id="bindOut"`) {
+		t.Fatal("shared status line element missing from the bindings card")
+	}
+	// The row template holds buttons only — no result element of its own.
 	row := page[strings.Index(page, `onclick="testModel('`):]
 	row = row[:strings.Index(row, "</div>`")]
-	// The last OPENING tag in the row template must be the result div.
-	lastDiv, lastBtn, lastSpan := strings.LastIndex(row, "<div"), strings.LastIndex(row, "<button"), strings.LastIndex(row, "<span")
-	if lastDiv < lastBtn || lastDiv < lastSpan || !strings.HasPrefix(row[lastDiv:], `<div class="test-out`) {
-		t.Fatalf("test result must be the row's last element:\n%s", row)
+	if strings.Contains(row, "data-test") || strings.Contains(row, "test-out") {
+		t.Fatalf("binding row must not carry a per-row result element:\n%s", row)
 	}
-	if strings.Index(row, "unbind") > strings.Index(row, `class="test-out`) {
-		t.Fatal("test result renders before the unbind button (would push it sideways)")
-	}
-	// Every state write goes through one helper that keeps the structural
-	// class: a bare `className="bad"` would drop the element back inline.
+	// One writer targets the shared line and every result names its model.
 	fn := page[strings.Index(page, "async function testModel"):]
 	fn = fn[:strings.Index(fn, "\n}")]
-	if n := strings.Count(fn, ".className="); n != 1 || !strings.Contains(fn, `out.className="test-out "+kind`) {
-		t.Fatalf("result state must be written by the single test-out-preserving helper (found %d className writes)", n)
+	if !strings.Contains(fn, `const out=$("bindOut")`) || strings.Count(fn, ".className=") != 1 {
+		t.Fatalf("results must be written to #bindOut by the single helper:\n%s", fn)
+	}
+	if strings.Count(fn, "`${m} ${op}:") < 3 {
+		t.Fatal("every state of the shared line must name the model and op")
 	}
 	// Failures lead with the elapsed time so the clipped tail never
 	// hides the timeout-vs-rejection signal.
