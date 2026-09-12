@@ -13,6 +13,8 @@ currently 10); a binary refuses a database newer than it understands.
 
 ## [Unreleased]
 
+## [0.3.31] — 2026-09-12
+
 ### Changed
 
 - **Console: "merge into another project" picks the target from a
