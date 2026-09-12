@@ -34,11 +34,16 @@ currently 10); a binary refuses a database newer than it understands.
   explicit failure with the reason instead of silent service from the
   wrong endpoint — fix the provider (any non-empty token for an
   endpoint that needs none) or unbind the model to use env on purpose.
-  A `providers.json` that exists but does not parse now fails CLOSED
-  (no model resolves, every path says why, and the console refuses to
-  save over it) instead of counting as "no registry" — which had
-  quietly re-enabled the env routing for every bound model and would
-  have let one console save erase the operator's providers.
+  A `providers.json` that exists but cannot be read or parsed now
+  fails CLOSED (no model resolves, every path says why, and the
+  console refuses to save over it) instead of counting as "no
+  registry" — which had quietly re-enabled the env routing for every
+  bound model and would have let one console save erase the
+  operator's providers; only a genuinely missing file means "no
+  bindings". Curation's backend selection keeps "bound but unusable"
+  apart from "unbound": a broken binding no longer falls through to
+  the default claude backend (which ran the model on the wrong
+  service with no error).
 - **Console no longer discards a pasted token on a rejected save.**
   The token field was cleared before the hub answered, so a save
   refused for an invalid name (uppercase) ate the token, and the

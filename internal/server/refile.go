@@ -35,7 +35,15 @@ func (s *Server) curateSynth() (curate.Synthesizer, string, error) {
 		os.MkdirAll(workDir, 0o700)
 		return &curate.ClaudeExtractor{Model: model, WorkDir: workDir}
 	}
-	if ep, bound := provider.ResolveBound(root, m); bound {
+	// A binding that exists but cannot be honored stops here: falling
+	// through to the env-selected backend would run the model on the
+	// wrong service (a tokenless openai binding ending up in the claude
+	// CLI, say). Only a genuinely absent binding reaches the switch.
+	ep, isBound, why := provider.ResolveBound(root, m)
+	if isBound && why != "" {
+		return nil, "", fmt.Errorf("no curate endpoint: %s", why)
+	}
+	if isBound {
 		if ep.Kind == "claude" {
 			return claude(ep.Model), m, nil
 		}

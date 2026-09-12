@@ -52,16 +52,21 @@ type Registry struct {
 // Path returns the registry location for a state root.
 func Path(root string) string { return filepath.Join(root, "providers.json") }
 
-// Load reads the registry; a missing file yields an empty registry
+// Load reads the registry; a MISSING file yields an empty registry
 // (fail-open, like unset env — every model is unbound and resolution
-// goes to env). A present-but-unparseable file is recorded in LoadErr
-// and resolves nothing.
+// goes to env). Any other failure — unreadable, a directory, or
+// present-but-unparseable — is recorded in LoadErr and resolves
+// nothing: only "not there" may mean "no bindings".
 func Load(root string) *Registry {
 	r := &Registry{}
-	if raw, err := os.ReadFile(Path(root)); err == nil {
+	raw, err := os.ReadFile(Path(root))
+	switch {
+	case err == nil:
 		if uerr := json.Unmarshal(raw, r); uerr != nil {
 			r = &Registry{LoadErr: fmt.Errorf("%s: %w", Path(root), uerr)}
 		}
+	case !os.IsNotExist(err):
+		r = &Registry{LoadErr: err}
 	}
 	if r.Providers == nil {
 		r.Providers = map[string]Provider{}
@@ -145,11 +150,7 @@ func (r *Registry) bound(model string) (ep Endpoint, isBound bool, reason string
 // of the wrong kind (a claude binding where an OpenAI-compatible HTTP
 // endpoint is required), with the reason saying so.
 func Lookup(root, model, wantKind string) (Endpoint, string) {
-	r := Load(root)
-	if r.LoadErr != nil {
-		return Endpoint{}, fmt.Sprintf("provider registry could not be parsed (%v) — fix the file by hand; no model resolves until it does", r.LoadErr)
-	}
-	ep, isBound, reason := r.bound(model)
+	ep, isBound, reason := ResolveBound(root, model)
 	if !isBound {
 		key := os.Getenv("AIMEM_OPENAI_API_KEY")
 		if key == "" {
@@ -185,13 +186,17 @@ func Explain(root, model, wantKind string) string {
 
 // ResolveBound resolves only through an explicit registry binding — no
 // env fallback. Callers that let the binding's kind PICK the backend
-// (curate: claude CLI vs openai HTTP) must use this: the env pair may
-// complete an endpoint, but it must never flip a backend choice.
-func ResolveBound(root, model string) (Endpoint, bool) {
+// (curate: claude CLI vs openai HTTP) must use this, and must keep the
+// three states apart: isBound=false is the only state in which a
+// backend fallback is legitimate; isBound=true with a reason is a
+// binding (or registry) that cannot be honored, and falling back to
+// ANY backend from there re-creates the wrong-service failure. An
+// unreadable registry reports as bound-with-reason for every model,
+// because nothing can be known about bindings.
+func ResolveBound(root, model string) (ep Endpoint, isBound bool, reason string) {
 	r := Load(root)
 	if r.LoadErr != nil {
-		return Endpoint{}, false
+		return Endpoint{}, true, fmt.Sprintf("provider registry could not be read (%v) — fix it by hand; no model resolves until it does", r.LoadErr)
 	}
-	ep, isBound, reason := r.bound(model)
-	return ep, isBound && reason == ""
+	return r.bound(model)
 }

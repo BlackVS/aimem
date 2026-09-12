@@ -127,7 +127,7 @@ func TestProviderRegistryCorruptRefusesWrites(t *testing.T) {
 		t.Fatal(err)
 	}
 	w := req(t, h, "GET", "/v1/config/providers", "")
-	if w.Code != 409 || !strings.Contains(w.Body.String(), "could not be parsed") {
+	if w.Code != 409 || !strings.Contains(w.Body.String(), "could not be read") {
 		t.Fatalf("GET on corrupt registry: %d %s", w.Code, w.Body)
 	}
 	w = req(t, h, "PUT", "/v1/config/providers",
@@ -139,7 +139,7 @@ func TestProviderRegistryCorruptRefusesWrites(t *testing.T) {
 		t.Fatalf("corrupt registry was overwritten: %s", raw)
 	}
 	w = req(t, h, "POST", "/v1/config/providers/test", `{"model":"p/m","op":"chat"}`)
-	if w.Code != 400 || !strings.Contains(w.Body.String(), "could not be parsed") {
+	if w.Code != 400 || !strings.Contains(w.Body.String(), "could not be read") {
 		t.Fatalf("test on corrupt registry: %d %s", w.Code, w.Body)
 	}
 }
@@ -159,7 +159,27 @@ func TestCurateSynthExplains(t *testing.T) {
 	r.Save(reg.Root())
 	t.Setenv("AIMEM_CURATE_MODEL", "hollow/m")
 	if _, _, err := s.curateSynth(); err == nil || !strings.Contains(err.Error(), `provider "hollow"`) || !strings.Contains(err.Error(), "no token") {
-		t.Fatalf("tokenless binding: %v", err)
+		t.Fatalf("tokenless binding (openai backend): %v", err)
+	}
+	// The default (claude) and explicit claude backends must NOT pick
+	// up a broken openai binding either — that ran the model on the
+	// claude CLI, the wrong service, with no error.
+	for _, backend := range []string{"", "claude"} {
+		t.Setenv("AIMEM_CURATE_BACKEND", backend)
+		syn, _, err := s.curateSynth()
+		if err == nil || !strings.Contains(err.Error(), "no token") {
+			t.Fatalf("backend %q fell through a broken binding: syn=%T err=%v", backend, syn, err)
+		}
+	}
+	// A corrupt registry blocks every backend the same way.
+	if err := os.WriteFile(provider.Path(reg.Root()), []byte(`{"providers":{`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	for _, backend := range []string{"", "claude", "openai"} {
+		t.Setenv("AIMEM_CURATE_BACKEND", backend)
+		if syn, _, err := s.curateSynth(); err == nil || !strings.Contains(err.Error(), "could not be read") {
+			t.Fatalf("backend %q ran on a corrupt registry: syn=%T err=%v", backend, syn, err)
+		}
 	}
 }
 

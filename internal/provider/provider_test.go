@@ -128,11 +128,60 @@ func TestCorruptRegistryFailsClosed(t *testing.T) {
 	if _, ok := Resolve(root, "anything"); ok {
 		t.Fatal("corrupt registry resolved a model via env")
 	}
-	if why := Explain(root, "anything", ""); !strings.Contains(why, "could not be parsed") {
+	if why := Explain(root, "anything", ""); !strings.Contains(why, "could not be read") {
 		t.Fatalf("reason: %q", why)
 	}
-	if _, ok := ResolveBound(root, "anything"); ok {
-		t.Fatal("corrupt registry resolved a binding")
+	// For backend-picking callers a corrupt registry must read as
+	// "bound, with a problem" — never as "absent", which would license a
+	// backend fallback.
+	if _, isBound, why := ResolveBound(root, "anything"); !isBound || why == "" {
+		t.Fatalf("corrupt registry must report bound-with-reason, got bound=%v why=%q", isBound, why)
+	}
+}
+
+// Only "file not found" may mean "no bindings"; any other read failure
+// (permissions, a directory in the way) is a registry that cannot be
+// trusted and must fail closed like a parse error.
+func TestUnreadableRegistryFailsClosed(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("AIMEM_OPENAI_API_KEY", "envkey")
+	if err := os.Mkdir(Path(root), 0o700); err != nil { // a directory where the file should be
+		t.Fatal(err)
+	}
+	if r := Load(root); r.LoadErr == nil {
+		t.Fatal("read error not recorded")
+	}
+	if _, ok := Resolve(root, "m"); ok {
+		t.Fatal("unreadable registry resolved a model via env")
+	}
+	if why := Explain(root, "m", ""); !strings.Contains(why, "could not be read") {
+		t.Fatalf("reason: %q", why)
+	}
+	// And a genuinely missing file is still the fail-open case.
+	if r := Load(t.TempDir()); r.LoadErr != nil {
+		t.Fatalf("missing registry must be absent, not an error: %v", r.LoadErr)
+	}
+}
+
+// The three ResolveBound states, as backend-picking callers see them.
+func TestResolveBoundStates(t *testing.T) {
+	root := t.TempDir()
+	r := Load(root)
+	r.Providers["g"] = Provider{Kind: "openai", Token: "k"}
+	r.Providers["hollow"] = Provider{Kind: "openai"}
+	r.Bind("good", "g", "")
+	r.Bind("broken", "hollow", "")
+	if err := r.Save(root); err != nil {
+		t.Fatal(err)
+	}
+	if ep, isBound, why := ResolveBound(root, "good"); !isBound || why != "" || ep.Token != "k" {
+		t.Fatalf("good: %+v bound=%v why=%q", ep, isBound, why)
+	}
+	if _, isBound, why := ResolveBound(root, "broken"); !isBound || why == "" {
+		t.Fatalf("broken must be bound-with-reason: bound=%v why=%q", isBound, why)
+	}
+	if _, isBound, why := ResolveBound(root, "absent"); isBound || why != "" {
+		t.Fatalf("absent must be unbound without reason: bound=%v why=%q", isBound, why)
 	}
 }
 

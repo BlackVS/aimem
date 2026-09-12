@@ -1897,7 +1897,13 @@ func curateCmd(args []string) error {
 	// it as curate model); --backend / AIMEM_CURATE_BACKEND applies only
 	// to unbound models. Payloads use the resolved upstream name; run
 	// history keeps the local alias for attribution.
-	if ep, bound := provider.ResolveBound(root, m); bound {
+	ep, isBound, why := provider.ResolveBound(root, m)
+	if isBound && why != "" {
+		// A binding that cannot be honored never falls through to the
+		// --backend choice: that would run the model on the wrong service.
+		return fmt.Errorf("no curate endpoint: %s", why)
+	}
+	if isBound {
 		if ep.Kind == "claude" {
 			ex = claudeEx(ep.Model)
 		} else {
