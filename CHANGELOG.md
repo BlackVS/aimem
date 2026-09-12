@@ -13,6 +13,8 @@ currently 10); a binary refuses a database newer than it understands.
 
 ## [Unreleased]
 
+## [0.3.30] — 2026-09-12
+
 ### Changed
 
 - **Console: one shared status line for all model bindings.** The
