@@ -23,6 +23,9 @@ currently 10); a binary refuses a database newer than it understands.
   shifts the rows below either — prefixed with the op it belongs to
   (long errors clip with the full text on hover), and a toast echoes
   the outcome so it is seen even when the row is scrolled away.
+  Providers and model bindings also sit in separate cards now — one
+  shared card made the two lists and forms read as a single block
+  (user notice).
 
 ## [0.3.28] — 2026-09-12
 

@@ -250,7 +250,11 @@
         <input id="pvUrl" type="text" class="grow" placeholder="base url (blank = default proxy)">
         <input id="pvTok" type="password" class="inline" placeholder="token (blank = keep)" style="width:150px">
         <button class="act" onclick="saveProvider()">save</button></div>
-      <h2>model bindings</h2>
+    </div>
+    <!-- Bindings get their own card: sharing one with providers made the
+         two lists and their two forms read as one undifferentiated block. -->
+    <div class="card">
+      <h2 style="margin-top:0">model bindings</h2>
       <div id="bindList" class="dim"></div>
       <div class="row">
         <select id="bProv" style="min-width:120px" onchange="loadProviderModels()"></select>
