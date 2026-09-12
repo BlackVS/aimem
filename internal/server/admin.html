@@ -97,10 +97,12 @@
      #kbTree) so the add/bind form below each list stays in view instead
      of being pushed off the bottom of the page. */
   #provList,#bindList{max-height:45vh;overflow-y:auto}
-  /* Always one reserved line per binding: a result that appeared on
-     demand would grow the row and shift every row below it. */
-  .test-out{flex-basis:100%;font-size:13px;padding-left:4px;min-height:1.3em;
-            white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  /* ONE reserved status line for the whole bindings card (user
+     preference over a placeholder line under every row): a result never
+     renders inside a row, so no button is shoved sideways, and the
+     line's height is fixed, so no row is shifted either. */
+  #bindOut{font-size:13px;padding:4px;min-height:1.3em;white-space:nowrap;
+           overflow:hidden;text-overflow:ellipsis}
   .bar{height:10px;background:var(--well);border:1px solid var(--edge);position:relative;min-width:120px}
   .bar i{position:absolute;inset:0;background:var(--moss);width:0;transition:width .4s ease}
   .bar.warn i{background:var(--amber)} .bar.bad i{background:var(--rust)}
@@ -260,6 +262,7 @@
     <div class="card">
       <h2 style="margin-top:0">model bindings</h2>
       <div id="bindList" class="dim"></div>
+      <div id="bindOut" class="dim" title="">last test: —</div>
       <div class="row">
         <select id="bProv" style="min-width:120px" onchange="loadProviderModels()"></select>
         <select id="bUp" class="grow" onchange="bUpChanged()"></select>
@@ -1185,19 +1188,16 @@ async function loadProviders(){
   }).join("") : '<span class="dim">none yet — models use the host env fallback</span>';
   const models = Object.keys(PROV.models).sort();
   $("bindList").className="";
+  // The shared status line outlives the rows: reset it with the list so
+  // it never reports a binding that was just unbound or rebound.
+  $("bindOut").className="dim"; $("bindOut").textContent="last test: —"; $("bindOut").title="";
   $("bindList").innerHTML = models.map(m=>{
     const b=PROV.models[m], up=b.model&&b.model!==m?` <span class="dim">→ ${esc(b.model)}</span>`:"";
     return `<div class="row"><span class="grow">${esc(m)}${up}</span>`+
     `<span class="chip">${esc(b.provider)}</span>`+
     `<button class="act" onclick="testModel('${esc(m)}','chat',this)">test chat</button>`+
     `<button class="act" onclick="testModel('${esc(m)}','embed',this)">test embed</button>`+
-    `<button class="act danger" onclick="unbindModel('${esc(m)}')">unbind</button>`+
-    // The result gets its own RESERVED full-width line under the buttons:
-    // inline between them, its text pushed "unbind" sideways on every
-    // test, and an on-demand line would push the rows below instead.
-    // Neutral placeholder: this list re-renders after every provider
-    // mutation, so a claim like "not tested yet" would turn false.
-    `<div class="test-out dim" data-test="${esc(m)}" title="">—</div></div>`;}).join("");
+    `<button class="act danger" onclick="unbindModel('${esc(m)}')">unbind</button></div>`;}).join("");
   const sel=$("bProv").value;
   $("bProv").innerHTML = names.map(n=>`<option>${esc(n)}</option>`).join("");
   if(names.includes(sel)) $("bProv").value=sel;
@@ -1251,20 +1251,18 @@ function unbindModel(m){ putProv({unbind:m},"model unbound"); }
 // op is explicit ("chat"|"embed") — an embed-only model group rejects a
 // chat probe with a confusing transport error, so never guess the kind.
 async function testModel(m,op,btn){
-  const out=document.querySelector(`[data-test="${CSS.escape(m)}"]`);
-  // ONE writer for the result line: the structural class stays put and
-  // only the state colour changes, so no state can drop back to an
-  // inline element between the buttons. title = full text, because the
-  // reserved line clips long errors.
-  const show=(kind,text)=>{ out.className="test-out "+kind; out.textContent=text; out.title=text; };
-  btn.disabled=true; show("dim","testing "+op+"…");
+  // ONE shared status line for the card (results name the model); one
+  // writer for it. title = full text, because the line clips long errors.
+  const out=$("bindOut");
+  const show=(kind,text)=>{ out.className=kind; out.textContent=text; out.title=text; };
+  btn.disabled=true; show("dim",`${m} ${op}: testing…`);
   const t0=performance.now();
   try{
     const r=await api("/v1/config/providers/test",{method:"POST",body:JSON.stringify({model:m,op})});
-    show("ok",`${op}: ok · ${r.latency_ms}ms · ${r.tokens} tok`);
-    toast(`${m} ${op}: ok · ${r.latency_ms}ms`);
+    show("ok",`${m} ${op}: ok · ${r.latency_ms}ms · ${r.tokens} tok`);
+    toast(`${m} ${op}: ok · ${r.latency_ms}ms`); // the line can sit below the fold
   }catch(e){
-    if(e.auth){ show("bad","admin token rejected — reload and sign in again"); btn.disabled=false; return; }
+    if(e.auth){ show("bad",`${m} ${op}: admin token rejected — reload and sign in again`); btn.disabled=false; return; }
     // The elapsed time LEADS the line: the clipped tail is exactly where
     // the hub's "(after Nms)" stamp would sit, and "30042ms" vs "101ms"
     // is the one datum that separates a timeout from a rejection. The
@@ -1273,7 +1271,7 @@ async function testModel(m,op,btn){
     let msg=String(e.message||e), ms=Math.round(performance.now()-t0);
     const st=msg.match(/ \(after (\d+)ms\)$/);
     if(st){ ms=+st[1]; msg=msg.slice(0,st.index); }
-    show("bad",`${op}: failed after ${ms}ms — ${msg}`);
+    show("bad",`${m} ${op}: failed after ${ms}ms — ${msg}`);
     toast(`${m} ${op}: failed after ${ms}ms`);
   }
   btn.disabled=false;

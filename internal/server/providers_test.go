@@ -219,39 +219,66 @@ func TestConsoleProviderFormRules(t *testing.T) {
 	}
 }
 
-// Layout invariants for the bindings list, pinned by scraping the page
-// (no browser harness here): the test result is the LAST child of the
-// row and a full-width reserved line — inline between the buttons it
-// pushed "unbind" sideways, and on demand it would push the rows below;
-// long lists scroll inside their card so the bind form stays in view.
+// Layout invariants for the bindings card, pinned by scraping the page
+// (no browser harness here): test results go to ONE shared, fixed-height
+// status line under the list — never inside a row (that shoved "unbind"
+// sideways) and never a per-row placeholder (a line under every binding
+// read as clutter); long lists scroll inside their card so the bind
+// form stays in view.
 func TestConsoleBindingRowLayoutRules(t *testing.T) {
 	page := string(adminHTML)
 	css := page[:strings.Index(page, "</style>")]
-	for _, rule := range []string{
-		`.test-out{flex-basis:100%`,      // own line under the buttons
-		`min-height:1.3em`,               // reserved, not on demand
-		`#provList,#bindList{max-height`, // bounded lists, form stays visible
-	} {
-		if !strings.Contains(css, rule) {
-			t.Errorf("layout rule missing from page CSS: %s", rule)
-		}
+	if !strings.Contains(css, `#provList,#bindList{max-height`) {
+		t.Error("bounded-list rule missing (bind form would be pushed off the page)")
 	}
-	row := page[strings.Index(page, `onclick="testModel('`):]
-	row = row[:strings.Index(row, "</div>`")]
-	// The last OPENING tag in the row template must be the result div.
-	lastDiv, lastBtn, lastSpan := strings.LastIndex(row, "<div"), strings.LastIndex(row, "<button"), strings.LastIndex(row, "<span")
-	if lastDiv < lastBtn || lastDiv < lastSpan || !strings.HasPrefix(row[lastDiv:], `<div class="test-out`) {
-		t.Fatalf("test result must be the row's last element:\n%s", row)
+	// The fixed height must belong to the #bindOut rule itself, not merely
+	// appear somewhere in the stylesheet.
+	i := strings.Index(css, "#bindOut{")
+	if i < 0 || !strings.Contains(css[i:i+strings.Index(css[i:], "}")], "min-height:1.3em") {
+		t.Error("#bindOut rule must reserve its height (min-height:1.3em)")
 	}
-	if strings.Index(row, "unbind") > strings.Index(row, `class="test-out`) {
-		t.Fatal("test result renders before the unbind button (would push it sideways)")
+	// The shared line is a SIBLING after the list — never inside the 45vh
+	// scroller, where it could scroll out of sight.
+	list, out := strings.Index(page, `<div id="bindList"`), strings.Index(page, `<div id="bindOut"`)
+	if list < 0 || out < 0 || out < list {
+		t.Fatal("#bindList / #bindOut order wrong or missing")
 	}
-	// Every state write goes through one helper that keeps the structural
-	// class: a bare `className="bad"` would drop the element back inline.
+	between := page[list+len(`<div id="bindList"`) : out] // rest of the list tag, its close, whitespace
+	if strings.Contains(between, "<div") || !strings.Contains(between, "</div>") {
+		t.Fatalf("#bindOut must directly follow the closed #bindList element, got %q between", between)
+	}
+	// The row template is buttons and text only: NO element of any kind
+	// besides the buttons and the two spans — a result element in a row,
+	// under any name, is the regression this test exists to prevent.
+	tpl := page[strings.Index(page, "$(\"bindList\").innerHTML"):]
+	tpl = tpl[:strings.Index(tpl, ".join(\"\")")]
+	row := tpl[strings.Index(tpl, `<div class="row">`)+len(`<div class="row">`):]
+	// Two literal spans (name, provider chip); the upstream "→ x" span is
+	// interpolated via ${up}, defined above the row.
+	if strings.Contains(row, "<div") || strings.Contains(row, "bindOut") || strings.Count(row, "<span") != 2 {
+		t.Fatalf("binding row must hold only its name/upstream spans, provider chip, and buttons:\n%s", row)
+	}
+	// One writer targets the shared line; EVERY state names its model and
+	// op (a stray unprefixed state would erase which test the line is
+	// about); the list re-render resets the line so it cannot describe a
+	// binding that was just unbound.
 	fn := page[strings.Index(page, "async function testModel"):]
 	fn = fn[:strings.Index(fn, "\n}")]
-	if n := strings.Count(fn, ".className="); n != 1 || !strings.Contains(fn, `out.className="test-out "+kind`) {
-		t.Fatalf("result state must be written by the single test-out-preserving helper (found %d className writes)", n)
+	if !strings.Contains(fn, `const out=$("bindOut")`) || strings.Count(fn, ".className=") != 1 {
+		t.Fatalf("results must be written to #bindOut by the single helper:\n%s", fn)
+	}
+	// The helper is defined as `show=(kind,text)=>`, so every "show(" is a
+	// call; each call's text must open with the model/op prefix (the
+	// toasts carry it too, so count call sites, not prefixes).
+	shows := strings.Count(fn, "show(")
+	named := len(regexp.MustCompile("show\\(\"\\w+\",`\\$\\{m\\} \\$\\{op\\}:").FindAllString(fn, -1))
+	if shows == 0 || shows != named {
+		t.Fatalf("%d show() states but only %d name the model and op", shows, named)
+	}
+	lp := page[strings.Index(page, "async function loadProviders"):]
+	lp = lp[:strings.Index(lp, "\n}")]
+	if !strings.Contains(lp, `$("bindOut").textContent="last test: —"`) {
+		t.Fatal("list re-render (loadProviders) must reset the shared status line")
 	}
 	// Failures lead with the elapsed time so the clipped tail never
 	// hides the timeout-vs-rejection signal.
