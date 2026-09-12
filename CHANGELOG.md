@@ -25,7 +25,8 @@ currently 10); a binary refuses a database newer than it understands.
   the outcome so it is seen even when the row is scrolled away.
   Providers and model bindings also sit in separate cards now — one
   shared card made the two lists and forms read as a single block
-  (user notice).
+  (user notice) — and long lists scroll inside their card so the
+  add/bind form below stays in view (user question).
 
 ## [0.3.28] — 2026-09-12
 

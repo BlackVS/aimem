@@ -93,6 +93,10 @@
   td.num{color:var(--amber)}
   .row{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin:6px 0}
   .grow{flex:1}
+  /* Long provider/binding lists scroll INSIDE their card (same idea as
+     #kbTree) so the add/bind form below each list stays in view instead
+     of being pushed off the bottom of the page. */
+  #provList,#bindList{max-height:45vh;overflow-y:auto}
   /* Always one reserved line per binding: a result that appeared on
      demand would grow the row and shift every row below it. */
   .test-out{flex-basis:100%;font-size:13px;padding-left:4px;min-height:1.3em;
