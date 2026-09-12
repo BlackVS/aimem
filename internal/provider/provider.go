@@ -41,18 +41,27 @@ type Binding struct {
 type Registry struct {
 	Providers map[string]Provider `json:"providers"`
 	Models    map[string]Binding  `json:"models"`
+	// LoadErr is set when the file exists but does not parse. A corrupt
+	// registry must fail CLOSED: treating it as empty would make every
+	// bound model "unbound" and quietly re-enable the env routing the
+	// bindings exist to override — and a Save over it would erase the
+	// operator's providers.
+	LoadErr error `json:"-"`
 }
 
 // Path returns the registry location for a state root.
 func Path(root string) string { return filepath.Join(root, "providers.json") }
 
-// Load reads the registry; a missing or unreadable file yields an empty
-// registry (fail-open, like unset env), never an error — every model is
-// then unbound and resolution goes to env.
+// Load reads the registry; a missing file yields an empty registry
+// (fail-open, like unset env — every model is unbound and resolution
+// goes to env). A present-but-unparseable file is recorded in LoadErr
+// and resolves nothing.
 func Load(root string) *Registry {
 	r := &Registry{}
 	if raw, err := os.ReadFile(Path(root)); err == nil {
-		_ = json.Unmarshal(raw, r)
+		if uerr := json.Unmarshal(raw, r); uerr != nil {
+			r = &Registry{LoadErr: fmt.Errorf("%s: %w", Path(root), uerr)}
+		}
 	}
 	if r.Providers == nil {
 		r.Providers = map[string]Provider{}
@@ -136,7 +145,11 @@ func (r *Registry) bound(model string) (ep Endpoint, isBound bool, reason string
 // of the wrong kind (a claude binding where an OpenAI-compatible HTTP
 // endpoint is required), with the reason saying so.
 func Lookup(root, model, wantKind string) (Endpoint, string) {
-	ep, isBound, reason := Load(root).bound(model)
+	r := Load(root)
+	if r.LoadErr != nil {
+		return Endpoint{}, fmt.Sprintf("provider registry could not be parsed (%v) — fix the file by hand; no model resolves until it does", r.LoadErr)
+	}
+	ep, isBound, reason := r.bound(model)
 	if !isBound {
 		key := os.Getenv("AIMEM_OPENAI_API_KEY")
 		if key == "" {
@@ -175,6 +188,10 @@ func Explain(root, model, wantKind string) string {
 // (curate: claude CLI vs openai HTTP) must use this: the env pair may
 // complete an endpoint, but it must never flip a backend choice.
 func ResolveBound(root, model string) (Endpoint, bool) {
-	ep, isBound, reason := Load(root).bound(model)
+	r := Load(root)
+	if r.LoadErr != nil {
+		return Endpoint{}, false
+	}
+	ep, isBound, reason := r.bound(model)
 	return ep, isBound && reason == ""
 }

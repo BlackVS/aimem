@@ -37,6 +37,10 @@ func maskToken(t string) string {
 
 func (s *Server) getProviders(w http.ResponseWriter, _ *http.Request) {
 	reg := provider.Load(s.reg.Root())
+	if reg.LoadErr != nil {
+		s.fail(w, http.StatusConflict, fmt.Errorf("provider registry could not be parsed (%v) — fix the file by hand", reg.LoadErr))
+		return
+	}
 	provs := map[string]map[string]string{}
 	for name, p := range reg.Providers {
 		provs[name] = map[string]string{
@@ -73,6 +77,12 @@ func (s *Server) putProviders(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	reg := provider.Load(s.reg.Root())
+	if reg.LoadErr != nil {
+		// Saving would replace the operator's whole registry with this
+		// one mutation on top of an empty one.
+		s.fail(w, http.StatusConflict, fmt.Errorf("provider registry could not be parsed (%v) — fix the file by hand before saving", reg.LoadErr))
+		return
+	}
 	switch {
 	case req.SetProvider != nil:
 		p := req.SetProvider

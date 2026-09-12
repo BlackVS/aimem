@@ -6,6 +6,8 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+
+	"aimem/internal/provider"
 )
 
 // fakeEmbedServer answers /embeddings with vectors of the given width,
@@ -89,5 +91,44 @@ func TestEncodeDecodeCosine(t *testing.T) {
 	}
 	if c := Cosine([]float32{0, 0}, []float32{0, 0}); c != 0 {
 		t.Fatalf("zero vectors ranked: %f", c)
+	}
+}
+
+// The embed path must not go dark silently under the bound-only
+// resolution rule: a configured model whose provider cannot serve it
+// yields no client AND a reason naming the provider.
+func TestForModelReportsWhy(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("AIMEM_OPENAI_API_KEY", "envkey") // env is available and must NOT be used
+	r := provider.Load(root)
+	r.Providers["hollow"] = provider.Provider{Kind: "openai"}
+	r.Providers["ok"] = provider.Provider{Kind: "openai", BaseURL: "https://ok.example/v1", Token: "k"}
+	r.Providers["cl"] = provider.Provider{Kind: "claude"}
+	r.Bind("hollow/e", "hollow", "e")
+	r.Bind("ok/e", "ok", "e")
+	r.Bind("cl/e", "cl", "e")
+	if err := r.Save(root); err != nil {
+		t.Fatal(err)
+	}
+	if c := ForModel(root, "hollow/e"); c != nil {
+		t.Fatalf("tokenless binding produced a client: %+v", c)
+	}
+	t.Setenv("AIMEM_EMBED_MODEL", "hollow/e")
+	if why := Why(root); !strings.Contains(why, `provider "hollow"`) || !strings.Contains(why, "no token") {
+		t.Fatalf("why: %q", why)
+	}
+	if c := ForModel(root, "cl/e"); c != nil {
+		t.Fatalf("claude binding cannot embed but produced a client: %+v", c)
+	}
+	t.Setenv("AIMEM_EMBED_MODEL", "cl/e")
+	if why := Why(root); !strings.Contains(why, "claude") {
+		t.Fatalf("why for claude binding: %q", why)
+	}
+	if c := ForModel(root, "ok/e"); c == nil || c.Model != "e" || c.APIKey != "k" {
+		t.Fatalf("healthy binding: %+v", c)
+	}
+	t.Setenv("AIMEM_EMBED_MODEL", "")
+	if why := Why(root); !strings.Contains(why, "AIMEM_EMBED_MODEL is unset") {
+		t.Fatalf("why unset: %q", why)
 	}
 }

@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"regexp"
 	"strings"
 	"testing"
@@ -113,6 +114,33 @@ func TestProviderSaveBlankTokenKeepsStored(t *testing.T) {
 	json.Unmarshal(w.Body.Bytes(), &got)
 	if got.Providers["p"]["token"] != "••••en-1" {
 		t.Fatalf("blank token did not keep the stored one: %+v", got.Providers["p"])
+	}
+}
+
+// A corrupt registry is reported, never overwritten: one console save
+// on top of an unparseable file would replace every provider the
+// operator had with the single mutation just made.
+func TestProviderRegistryCorruptRefusesWrites(t *testing.T) {
+	s, reg := testServer(t)
+	h := s.Handler()
+	if err := os.WriteFile(provider.Path(reg.Root()), []byte(`{"providers":{`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	w := req(t, h, "GET", "/v1/config/providers", "")
+	if w.Code != 409 || !strings.Contains(w.Body.String(), "could not be parsed") {
+		t.Fatalf("GET on corrupt registry: %d %s", w.Code, w.Body)
+	}
+	w = req(t, h, "PUT", "/v1/config/providers",
+		`{"set_provider":{"name":"p","kind":"openai","base_url":"https://p.example/v1","token":"k"}}`)
+	if w.Code != 409 {
+		t.Fatalf("PUT on corrupt registry must be refused, got %d %s", w.Code, w.Body)
+	}
+	if raw, _ := os.ReadFile(provider.Path(reg.Root())); string(raw) != `{"providers":{` {
+		t.Fatalf("corrupt registry was overwritten: %s", raw)
+	}
+	w = req(t, h, "POST", "/v1/config/providers/test", `{"model":"p/m","op":"chat"}`)
+	if w.Code != 400 || !strings.Contains(w.Body.String(), "could not be parsed") {
+		t.Fatalf("test on corrupt registry: %d %s", w.Code, w.Body)
 	}
 }
 

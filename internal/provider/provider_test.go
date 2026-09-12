@@ -112,6 +112,30 @@ func TestExplainMatchesResolve(t *testing.T) {
 	}
 }
 
+// A registry that exists but does not parse must fail CLOSED: treating
+// it as empty would make every bound model "unbound" and re-open the
+// env routing this package's bindings exist to override.
+func TestCorruptRegistryFailsClosed(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("AIMEM_OPENAI_API_KEY", "envkey")
+	if err := os.WriteFile(Path(root), []byte(`{"providers":{"g":{"kind":"openai","token":"k"},}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	r := Load(root)
+	if r.LoadErr == nil {
+		t.Fatal("parse error not recorded")
+	}
+	if _, ok := Resolve(root, "anything"); ok {
+		t.Fatal("corrupt registry resolved a model via env")
+	}
+	if why := Explain(root, "anything", ""); !strings.Contains(why, "could not be parsed") {
+		t.Fatalf("reason: %q", why)
+	}
+	if _, ok := ResolveBound(root, "anything"); ok {
+		t.Fatal("corrupt registry resolved a binding")
+	}
+}
+
 func TestResolveAlias(t *testing.T) {
 	root := t.TempDir()
 	t.Setenv("AIMEM_OPENAI_API_KEY", "")

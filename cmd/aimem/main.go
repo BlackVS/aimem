@@ -1502,6 +1502,12 @@ func syncOne(dest, hubName, def string) error {
 func postSyncEmbed() {
 	c := embed.ForRoot(stateRoot())
 	if c == nil {
+		// Unset model = embeddings deliberately off, nothing to say. A
+		// SET model that cannot resolve is a misconfiguration: say so
+		// rather than let pulled facts stay BM25-only in silence.
+		if os.Getenv("AIMEM_EMBED_MODEL") != "" {
+			fmt.Fprintf(os.Stderr, "aimem sync: embeddings skipped: %s\n", embed.Why(stateRoot()))
+		}
 		return
 	}
 	reg, err := store.NewRegistry(stateRoot())
