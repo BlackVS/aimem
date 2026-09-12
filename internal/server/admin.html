@@ -363,6 +363,7 @@ let TOK = localStorage.getItem("aimem_token") || "";
 let OV = [];            // overview rows
 let curGroup = "", curChap = "", curOrigin = "", curTags = [], memCache = {};
 let kbMenu = ""; // open ⋯ menu: "scope:<id>" | "chap:<id>:<name>" | ""
+let mergeFor = ""; // project whose ⋯ menu shows the inline merge chooser
 // 177 facts in one scope is normal, so the list pages: PAGE at a time,
 // extended in place rather than paginated, which keeps browser find
 // (and the search box above) working over everything on screen.
@@ -497,6 +498,7 @@ function treeEntry(g){
         ? `<div class="tc" role="button" tabindex="0" onclick="tab('groups')"><span class="name">chapters, charter, AI propose / re-label (Groups tab)&hellip;</span></div>`
         : `<div class="tc" role="button" tabindex="0" onclick="renameProject('${esc(g.id)}')"><span class="name">rename project&hellip;</span></div>`+
           `<div class="tc" role="button" tabindex="0" onclick="mergeProjectUI('${esc(g.id)}')"><span class="name">merge into another project&hellip;</span></div>`+
+          (mergeFor===g.id ? mergeChooser(g.id) : "")+
           `<div class="tc danger" role="button" tabindex="0" onclick="dropProjectUI('${esc(g.id)}')"><span class="name">drop project&hellip;</span></div>`) +
       `</div>`;
   }
@@ -537,7 +539,7 @@ function treeEntry(g){
   }
   return rows;
 }
-function toggleKbMenu(key){ kbMenu = kbMenu===key ? "" : key; renderTree(); }
+function toggleKbMenu(key){ kbMenu = kbMenu===key ? "" : key; if(!kbMenu) mergeFor=""; renderTree(); }
 
 // Drop is the console face of drop-project: files deleted on THIS hub.
 // The machines that feed it are untouched — their next checkpoint
@@ -637,31 +639,39 @@ async function renameProject(id){
   toast("renamed to "+name.trim()+" - pin it in .aimem.json to make it stick");
   const o = await api("/v1/overview"); OV=o.projects||[]; renderGroups(); renderKB();
 }
-// mergeProjectUI folds one project into another — the fix for one real
+// Merging folds one project into another — the fix for one real
 // project living under two ids (a derived id from before its
 // .aimem.json {"project"} pin, plus the pinned name), which splits the
-// origin facet ("from RC" vs "from RC-000...").
-async function mergeProjectUI(id){
-  const others = OV.map(p=>p.id)
-    .filter(x=>x!==id && x!=="user" && !x.startsWith("group-")).sort();
-  const msg = [
-    `Merge "${id}" INTO which project? It is then removed.`,
-    "",
-    "Its journal, facts and curation history fold into the target "+
-      "(idempotent - a re-run completes, never duplicates), and shared "+
-      "knowledge bases relabel their citations. Use this when one real "+
-      "project exists under two ids. Refused if the source holds shared "+
-      "docs or collections (migrate those first).",
-    "",
-    "Existing projects: "+others.join(", ")
-  ].join("\n");
-  const into = prompt(msg, "");
-  if(into===null || !into.trim() || into.trim()===id) return;
+// origin facet ("from RC" vs "from RC-000..."). The target is picked
+// from a dropdown of the hub's projects INSIDE the ⋯ menu (user
+// request: the old prompt() box asked for a typed id and listed the
+// candidates as plain text).
+function mergeCandidates(id){
+  return OV.map(p=>p.id).filter(x=>x!==id && x!=="user" && !x.startsWith("group-")).sort();
+}
+function mergeChooser(id){
+  const others = mergeCandidates(id);
+  if(!others.length) return `<div class="dim" style="font-size:12px;margin:0 10px 6px">no other project on this hub to merge into</div>`;
+  return `<div class="tc"><span class="name">into</span>`+
+    `<select id="mergeInto" onclick="event.stopPropagation()">${others.map(o=>`<option>${esc(o)}</option>`).join("")}</select>`+
+    `<button class="act danger" onclick="event.stopPropagation();mergeProjectDo('${esc(id)}')">merge</button>`+
+    `<button class="act" onclick="event.stopPropagation();mergeProjectCancel()">cancel</button></div>`+
+    `<div class="dim" style="font-size:12px;margin:0 10px 6px">Its journal, facts and curation history fold into the target `+
+    `(idempotent — a re-run completes, never duplicates) and shared knowledge bases relabel their citations; `+
+    `the source is then removed. Refused if the source holds shared docs or collections (migrate those first).</div>`;
+}
+function mergeProjectUI(id){ mergeFor = mergeFor===id ? "" : id; renderTree(); }
+function mergeProjectCancel(){ mergeFor = ""; renderTree(); }
+async function mergeProjectDo(id){
+  const into = ($("mergeInto")||{}).value||"";
+  if(!into || into===id) return;
+  if(!confirm(`Merge "${id}" into "${into}"? "${id}" is then removed from this hub.`)) return;
+  mergeFor = ""; kbMenu = "";
   try{
     const r = await api("/v1/projects/"+encodeURIComponent(id)+"/merge-into",
-      {method:"POST", body:JSON.stringify({into:into.trim()})});
-    if(curGroup===id) curGroup = into.trim();
-    delete memCache[id]; delete memCache[into.trim()];
+      {method:"POST", body:JSON.stringify({into})});
+    if(curGroup===id) curGroup = into;
+    delete memCache[id]; delete memCache[into];
     toast(`merged: +${r.events} events, +${r.memories} facts into ${r.into}`);
     const o = await api("/v1/overview"); OV=o.projects||[]; renderGroups(); renderKB();
   }catch(e){ toast("merge failed: "+String(e.message||e)); }

@@ -322,3 +322,24 @@ func TestWikiSentinelsOutsideProjectIDSpace(t *testing.T) {
 		}
 	}
 }
+
+// The project-merge action must offer the target as a dropdown of the
+// hub's projects, never a free-text prompt listing candidates as text
+// (user notice): pinned by scraping the page like the other console
+// rules.
+func TestConsoleMergeUsesDropdown(t *testing.T) {
+	page := string(adminHTML)
+	fn := page[strings.Index(page, "function mergeChooser"):]
+	fn = fn[:strings.Index(fn, "async function mergeProjectDo")]
+	if !strings.Contains(fn, `<select id="mergeInto"`) {
+		t.Fatal("merge chooser must render a <select> of target projects")
+	}
+	if strings.Contains(fn, "prompt(") || strings.Contains(fn, "Existing projects") {
+		t.Fatal("merge flow must not fall back to a typed prompt or a plain-text project list")
+	}
+	do := page[strings.Index(page, "async function mergeProjectDo"):]
+	do = do[:strings.Index(do, "\n}")]
+	if !strings.Contains(do, `$("mergeInto")`) || strings.Contains(do, "prompt(") {
+		t.Fatal("mergeProjectDo must read the dropdown, not a prompt")
+	}
+}
