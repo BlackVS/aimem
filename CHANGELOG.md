@@ -13,6 +13,17 @@ currently 10); a binary refuses a database newer than it understands.
 
 ## [Unreleased]
 
+### Changed
+
+- **Console: provider test results no longer shove the buttons around.**
+  The chat/embed test result used to render inline between "test
+  embed" and "unbind", so every result pushed the button row sideways
+  (user notice). Each binding now has a permanently reserved result
+  line under its buttons — reserved, not on demand, so a result never
+  shifts the rows below either — prefixed with the op it belongs to
+  (long errors clip with the full text on hover), and a toast echoes
+  the outcome so it is seen even when the row is scrolled away.
+
 ## [0.3.28] — 2026-09-12
 
 ### Fixed

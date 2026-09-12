@@ -93,6 +93,10 @@
   td.num{color:var(--amber)}
   .row{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin:6px 0}
   .grow{flex:1}
+  /* Always one reserved line per binding: a result that appeared on
+     demand would grow the row and shift every row below it. */
+  .test-out{flex-basis:100%;font-size:13px;padding-left:4px;min-height:1.3em;
+            white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
   .bar{height:10px;background:var(--well);border:1px solid var(--edge);position:relative;min-width:120px}
   .bar i{position:absolute;inset:0;background:var(--moss);width:0;transition:width .4s ease}
   .bar.warn i{background:var(--amber)} .bar.bad i{background:var(--rust)}
@@ -1179,8 +1183,11 @@ async function loadProviders(){
     `<span class="chip">${esc(b.provider)}</span>`+
     `<button class="act" onclick="testModel('${esc(m)}','chat',this)">test chat</button>`+
     `<button class="act" onclick="testModel('${esc(m)}','embed',this)">test embed</button>`+
-    `<span class="dim" data-test="${esc(m)}"></span>`+
-    `<button class="act danger" onclick="unbindModel('${esc(m)}')">unbind</button></div>`;}).join("");
+    `<button class="act danger" onclick="unbindModel('${esc(m)}')">unbind</button>`+
+    // The result gets its own RESERVED full-width line under the buttons:
+    // inline between them, its text pushed "unbind" sideways on every
+    // test, and an on-demand line would push the rows below instead.
+    `<div class="test-out dim" data-test="${esc(m)}" title="">not tested yet</div></div>`;}).join("");
   const sel=$("bProv").value;
   $("bProv").innerHTML = names.map(n=>`<option>${esc(n)}</option>`).join("");
   if(names.includes(sel)) $("bProv").value=sel;
@@ -1235,18 +1242,21 @@ function unbindModel(m){ putProv({unbind:m},"model unbound"); }
 // chat probe with a confusing transport error, so never guess the kind.
 async function testModel(m,op,btn){
   const out=document.querySelector(`[data-test="${CSS.escape(m)}"]`);
-  btn.disabled=true; out.textContent="testing "+op+"…"; out.className="dim";
+  btn.disabled=true; out.textContent="testing "+op+"…"; out.className="test-out dim"; out.title="";
   const t0=performance.now();
   try{
     const r=await api("/v1/config/providers/test",{method:"POST",body:JSON.stringify({model:m,op})});
-    out.textContent=`ok · ${r.latency_ms}ms · ${r.tokens} tok`; out.className="ok";
+    out.textContent=`${op}: ok · ${r.latency_ms}ms · ${r.tokens} tok`; out.className="test-out ok";
+    toast(`${m} ${op}: ok · ${r.latency_ms}ms`);
   }catch(e){
-    if(e.auth){ out.textContent="admin token rejected — reload and sign in again"; out.className="bad"; btn.disabled=false; return; }
+    if(e.auth){ out.textContent="admin token rejected — reload and sign in again"; out.className="test-out bad"; btn.disabled=false; return; }
     // The hub stamps "(after Nms)" into provider errors it timed itself;
     // for failures that never reached it (transport) measure here.
     const msg=String(e.message||e);
-    out.textContent=/\(after \d+ms\)$/.test(msg) ? msg : `${msg} (after ${Math.round(performance.now()-t0)}ms)`;
-    out.className="bad";
+    out.textContent=`${op}: `+(/\(after \d+ms\)$/.test(msg) ? msg : `${msg} (after ${Math.round(performance.now()-t0)}ms)`);
+    out.title=out.textContent; // the reserved line clips long errors; hover shows all
+    out.className="test-out bad";
+    toast(`${m} ${op}: failed`);
   }
   btn.disabled=false;
 }
