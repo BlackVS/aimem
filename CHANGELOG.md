@@ -13,6 +13,8 @@ currently 10); a binary refuses a database newer than it understands.
 
 ## [Unreleased]
 
+## [0.3.29] — 2026-09-12
+
 ### Changed
 
 - **Console: provider test results no longer shove the buttons around.**
