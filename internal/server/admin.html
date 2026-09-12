@@ -1166,7 +1166,8 @@ async function loadProviders(){
     return `<div class="row"><span style="width:110px">${esc(n)}</span>`+
       `<span class="chip">${esc(p.kind)}</span>`+
       `<span class="grow dim">${esc(p.base_url||"(default proxy)")}</span>`+
-      `<span class="dim">${esc(p.token||"no token")}</span>`+
+      (p.token || p.kind==="claude" ? `<span class="dim">${esc(p.token||"no token needed")}</span>`
+                                    : `<span class="bad">NO TOKEN — bound models will not resolve</span>`)+
       `<button class="act" onclick="editProvider('${esc(n)}')">edit</button>`+
       `<button class="act danger" onclick="delProvider('${esc(n)}')">delete</button></div>`;
   }).join("") : '<span class="dim">none yet — models use the host env fallback</span>';
@@ -1205,13 +1206,19 @@ function editProvider(n){const p=PROV.providers[n];$("pvName").value=n;$("pvKind
   $("pvUrl").value=p.base_url||"";$("pvTok").value="";}
 async function putProv(body,msg){
   try{ await api("/v1/config/providers",{method:"PUT",body:JSON.stringify(body)});
-    toast(msg); await loadProviders(); loadModels(); }catch(e){ toast(String(e)); }
+    toast(msg); await loadProviders(); loadModels(); return true; }catch(e){ toast(String(e)); return false; }
 }
-function saveProvider(){
+async function saveProvider(){
   const name=$("pvName").value.trim(); if(!name){toast("provider needs a name");return;}
-  putProv({set_provider:{name, kind:$("pvKind").value, base_url:$("pvUrl").value.trim(),
-    token:$("pvTok").value.trim()}}, "provider saved");
-  $("pvTok").value="";
+  // Snapshot what is being sent; clear the field only once the hub has
+  // it AND it still holds that same value. Clearing on a REJECTED save
+  // silently discarded a pasted token (the retry then stored none), and
+  // clearing blindly after the await would wipe a token pasted for the
+  // NEXT provider while this save was in flight.
+  const token=$("pvTok").value.trim();
+  const ok = await putProv({set_provider:{name, kind:$("pvKind").value, base_url:$("pvUrl").value.trim(), token}},
+    "provider saved");
+  if(ok && $("pvTok").value.trim()===token) $("pvTok").value="";
 }
 function delProvider(n){ if(confirm(`Delete provider ${n} and its bindings?`)) putProv({delete_provider:n},"provider deleted"); }
 function bindModel(){
@@ -1229,10 +1236,18 @@ function unbindModel(m){ putProv({unbind:m},"model unbound"); }
 async function testModel(m,op,btn){
   const out=document.querySelector(`[data-test="${CSS.escape(m)}"]`);
   btn.disabled=true; out.textContent="testing "+op+"…"; out.className="dim";
+  const t0=performance.now();
   try{
     const r=await api("/v1/config/providers/test",{method:"POST",body:JSON.stringify({model:m,op})});
     out.textContent=`ok · ${r.latency_ms}ms · ${r.tokens} tok`; out.className="ok";
-  }catch(e){ out.textContent=String(e.message||e); out.className="bad"; }
+  }catch(e){
+    if(e.auth){ out.textContent="admin token rejected — reload and sign in again"; out.className="bad"; btn.disabled=false; return; }
+    // The hub stamps "(after Nms)" into provider errors it timed itself;
+    // for failures that never reached it (transport) measure here.
+    const msg=String(e.message||e);
+    out.textContent=/\(after \d+ms\)$/.test(msg) ? msg : `${msg} (after ${Math.round(performance.now()-t0)}ms)`;
+    out.className="bad";
+  }
   btn.disabled=false;
 }
 

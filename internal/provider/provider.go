@@ -1,12 +1,15 @@
 // Package provider resolves which endpoint serves a model. A host-local
 // registry (<state-root>/providers.json, mode 0600, never synced — tokens
-// are host secrets) maps model names to named providers; the legacy
-// AIMEM_OPENAI_* env pair remains the fallback so hosts without the file
-// keep today's behavior unchanged (docs/DESIGN-multiprovider.md).
+// are host secrets) maps model names to named providers. The legacy
+// AIMEM_OPENAI_* env pair serves models that have NO binding, so hosts
+// without the file keep the pre-registry behavior; a model that IS bound
+// resolves only through its binding (docs/DESIGN-multiprovider.md,
+// "Correction 2026-09-12").
 package provider
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 )
@@ -38,18 +41,32 @@ type Binding struct {
 type Registry struct {
 	Providers map[string]Provider `json:"providers"`
 	Models    map[string]Binding  `json:"models"`
+	// LoadErr is set when the file exists but does not parse. A corrupt
+	// registry must fail CLOSED: treating it as empty would make every
+	// bound model "unbound" and quietly re-enable the env routing the
+	// bindings exist to override — and a Save over it would erase the
+	// operator's providers.
+	LoadErr error `json:"-"`
 }
 
 // Path returns the registry location for a state root.
 func Path(root string) string { return filepath.Join(root, "providers.json") }
 
-// Load reads the registry; a missing or unreadable file yields an empty
-// registry (fail-open, like unset env), never an error — resolution then
-// falls through to env.
+// Load reads the registry; a MISSING file yields an empty registry
+// (fail-open, like unset env — every model is unbound and resolution
+// goes to env). Any other failure — unreadable, a directory, or
+// present-but-unparseable — is recorded in LoadErr and resolves
+// nothing: only "not there" may mean "no bindings".
 func Load(root string) *Registry {
 	r := &Registry{}
-	if raw, err := os.ReadFile(Path(root)); err == nil {
-		_ = json.Unmarshal(raw, r)
+	raw, err := os.ReadFile(Path(root))
+	switch {
+	case err == nil:
+		if uerr := json.Unmarshal(raw, r); uerr != nil {
+			r = &Registry{LoadErr: fmt.Errorf("%s: %w", Path(root), uerr)}
+		}
+	case !os.IsNotExist(err):
+		r = &Registry{LoadErr: err}
 	}
 	if r.Providers == nil {
 		r.Providers = map[string]Provider{}
@@ -92,51 +109,94 @@ type Endpoint struct {
 	Model   string
 }
 
-// Resolve returns the endpoint serving model: its registry binding when
-// one names a usable provider, else the env pair. ok=false means no
-// endpoint is configured anywhere (callers treat that as "LLM off",
-// matching the old missing-env contract).
-func Resolve(root, model string) (Endpoint, bool) {
-	if ep, bound := ResolveBound(root, model); bound {
-		return ep, true
-	}
-	if key := os.Getenv("AIMEM_OPENAI_API_KEY"); key != "" {
-		base := os.Getenv("AIMEM_OPENAI_BASE_URL")
-		if base == "" {
-			base = DefaultBaseURL
-		}
-		return Endpoint{Kind: "openai", BaseURL: base, Token: key, Model: model}, true
-	}
-	return Endpoint{}, false
-}
-
-// ResolveBound resolves only through an explicit registry binding — no
-// env fallback. Callers that let the binding's kind PICK the backend
-// (curate: claude CLI vs openai HTTP) must use this: the env pair may
-// complete an endpoint, but it must never flip a backend choice.
-func ResolveBound(root, model string) (Endpoint, bool) {
-	r := Load(root)
+// bound classifies a model's registry binding: the endpoint it names,
+// or the reason it cannot serve. isBound=false means the model has no
+// binding at all (the env pair's territory). ONE decision tree, so the
+// verdict and its explanation cannot drift apart.
+func (r *Registry) bound(model string) (ep Endpoint, isBound bool, reason string) {
 	b, ok := r.Models[model]
 	if !ok {
-		return Endpoint{}, false
+		return Endpoint{}, false, ""
 	}
 	upstream := b.Model
 	if upstream == "" {
 		upstream = model
 	}
 	p, ok := r.Providers[b.Provider]
-	if !ok {
-		return Endpoint{}, false
-	}
-	if p.Kind == "claude" {
-		return Endpoint{Kind: "claude", Model: upstream}, true
-	}
-	if p.Token == "" {
-		return Endpoint{}, false
+	switch {
+	case !ok:
+		return Endpoint{}, true, fmt.Sprintf("model %q is bound to provider %q, which no longer exists", model, b.Provider)
+	case p.Kind == "claude":
+		return Endpoint{Kind: "claude", Model: upstream}, true, ""
+	case p.Token == "":
+		// The registry has never served a tokenless endpoint; auth-free
+		// proxies take any non-empty placeholder.
+		return Endpoint{}, true, fmt.Sprintf("model %q is bound to provider %q, which has no token stored — save the provider with its token (any non-empty value for an endpoint that needs none)", model, b.Provider)
 	}
 	base := p.BaseURL
 	if base == "" {
 		base = DefaultBaseURL
 	}
-	return Endpoint{Kind: "openai", BaseURL: base, Token: p.Token, Model: upstream}, true
+	return Endpoint{Kind: "openai", BaseURL: base, Token: p.Token, Model: upstream}, true, ""
+}
+
+// Lookup is the one resolution verdict for a model: its endpoint, or a
+// reason (in words an operator can act on) why none serves it. A bound
+// model resolves only through its binding — an explicit binding is the
+// operator's statement of where the model lives, and quietly serving it
+// from the env endpoint made a misconfigured provider look healthy while
+// an unrelated service answered in its place. Unbound models use the
+// AIMEM_OPENAI_* env pair. wantKind, when set, also rejects an endpoint
+// of the wrong kind (a claude binding where an OpenAI-compatible HTTP
+// endpoint is required), with the reason saying so.
+func Lookup(root, model, wantKind string) (Endpoint, string) {
+	ep, isBound, reason := ResolveBound(root, model)
+	if !isBound {
+		key := os.Getenv("AIMEM_OPENAI_API_KEY")
+		if key == "" {
+			return Endpoint{}, fmt.Sprintf("model %q has no binding and AIMEM_OPENAI_API_KEY is unset", model)
+		}
+		base := os.Getenv("AIMEM_OPENAI_BASE_URL")
+		if base == "" {
+			base = DefaultBaseURL
+		}
+		ep = Endpoint{Kind: "openai", BaseURL: base, Token: key, Model: model}
+	}
+	if reason != "" {
+		return Endpoint{}, reason
+	}
+	if wantKind != "" && ep.Kind != wantKind {
+		return Endpoint{}, fmt.Sprintf("model %q resolves to a %s endpoint, but a %s one is required here", model, ep.Kind, wantKind)
+	}
+	return ep, ""
+}
+
+// Resolve is Lookup without a kind requirement; ok=false means no
+// endpoint serves the model (callers treat that as "LLM off").
+func Resolve(root, model string) (Endpoint, bool) {
+	ep, reason := Lookup(root, model, "")
+	return ep, reason == ""
+}
+
+// Explain is the reason half of Lookup: "" when the model resolves.
+func Explain(root, model, wantKind string) string {
+	_, reason := Lookup(root, model, wantKind)
+	return reason
+}
+
+// ResolveBound resolves only through an explicit registry binding — no
+// env fallback. Callers that let the binding's kind PICK the backend
+// (curate: claude CLI vs openai HTTP) must use this, and must keep the
+// three states apart: isBound=false is the only state in which a
+// backend fallback is legitimate; isBound=true with a reason is a
+// binding (or registry) that cannot be honored, and falling back to
+// ANY backend from there re-creates the wrong-service failure. An
+// unreadable registry reports as bound-with-reason for every model,
+// because nothing can be known about bindings.
+func ResolveBound(root, model string) (ep Endpoint, isBound bool, reason string) {
+	r := Load(root)
+	if r.LoadErr != nil {
+		return Endpoint{}, true, fmt.Sprintf("provider registry could not be read (%v) — fix it by hand; no model resolves until it does", r.LoadErr)
+	}
+	return r.bound(model)
 }

@@ -881,9 +881,9 @@ func docCmd(args []string) error {
 		if runModel == "" {
 			return fmt.Errorf("openai backend needs --model or AIMEM_CURATE_MODEL")
 		}
-		ep, ok := provider.Resolve(stateRoot(), runModel)
-		if !ok || ep.Kind != "openai" {
-			return fmt.Errorf("no openai endpoint for model %q: bind it in providers.json or set AIMEM_OPENAI_API_KEY", runModel)
+		ep, why := provider.Lookup(stateRoot(), runModel, "openai")
+		if why != "" {
+			return fmt.Errorf("no openai endpoint: %s", why)
 		}
 		syn = &curate.OpenAIExtractor{BaseURL: ep.BaseURL, APIKey: ep.Token, Model: ep.Model,
 			Timeout: curate.DocSynthesisTimeout}
@@ -938,7 +938,7 @@ func dedupCmd(args []string) error {
 	// the same key the writers used — not the bare model name.
 	model := embed.ForRoot(stateRoot()).Key()
 	if model == "" {
-		return fmt.Errorf("dedup needs AIMEM_EMBED_MODEL (vectors are compared per model)")
+		return fmt.Errorf("dedup needs a working embedding model (vectors are compared per model): %s", embed.Why(stateRoot()))
 	}
 	reg, err := store.NewRegistry(stateRoot())
 	if err != nil {
@@ -1502,6 +1502,12 @@ func syncOne(dest, hubName, def string) error {
 func postSyncEmbed() {
 	c := embed.ForRoot(stateRoot())
 	if c == nil {
+		// Unset model = embeddings deliberately off, nothing to say. A
+		// SET model that cannot resolve is a misconfiguration: say so
+		// rather than let pulled facts stay BM25-only in silence.
+		if os.Getenv("AIMEM_EMBED_MODEL") != "" {
+			fmt.Fprintf(os.Stderr, "aimem sync: embeddings skipped: %s\n", embed.Why(stateRoot()))
+		}
 		return
 	}
 	reg, err := store.NewRegistry(stateRoot())
@@ -1891,7 +1897,13 @@ func curateCmd(args []string) error {
 	// it as curate model); --backend / AIMEM_CURATE_BACKEND applies only
 	// to unbound models. Payloads use the resolved upstream name; run
 	// history keeps the local alias for attribution.
-	if ep, bound := provider.ResolveBound(root, m); bound {
+	ep, isBound, why := provider.ResolveBound(root, m)
+	if isBound && why != "" {
+		// A binding that cannot be honored never falls through to the
+		// --backend choice: that would run the model on the wrong service.
+		return fmt.Errorf("no curate endpoint: %s", why)
+	}
+	if isBound {
 		if ep.Kind == "claude" {
 			ex = claudeEx(ep.Model)
 		} else {
@@ -1904,9 +1916,9 @@ func curateCmd(args []string) error {
 			if m == "" {
 				return fmt.Errorf("openai backend needs --model or AIMEM_CURATE_MODEL")
 			}
-			ep, ok := provider.Resolve(root, m)
-			if !ok || ep.Kind != "openai" {
-				return fmt.Errorf("no openai endpoint for model %q: bind it in providers.json or set AIMEM_OPENAI_API_KEY", m)
+			ep, why := provider.Lookup(root, m, "openai")
+			if why != "" {
+				return fmt.Errorf("no openai endpoint: %s", why)
 			}
 			ex = &curate.OpenAIExtractor{BaseURL: ep.BaseURL, APIKey: ep.Token, Model: ep.Model}
 			runModel = m
@@ -1987,7 +1999,7 @@ func embedCmd(args []string) error {
 	root := stateRoot()
 	c := embed.ForRoot(root)
 	if c == nil {
-		return fmt.Errorf("embedding not configured: set AIMEM_EMBED_MODEL and bind the model in providers.json or set AIMEM_OPENAI_API_KEY")
+		return fmt.Errorf("embedding not configured: %s", embed.Why(root))
 	}
 	reg, err := store.NewRegistry(root)
 	if err != nil {

@@ -42,7 +42,14 @@ type Server struct {
 }
 
 func New(reg *store.Registry, log *slog.Logger) *Server {
-	return &Server{reg: reg, log: log, emb: embed.ForRoot(reg.Root())}
+	s := &Server{reg: reg, log: log, emb: embed.ForRoot(reg.Root())}
+	// Semantic recall degrading to BM25 must never be silent: an
+	// embedding model that is configured but cannot resolve is a
+	// misconfiguration, and this line is the only place it would show.
+	if s.emb == nil && os.Getenv("AIMEM_EMBED_MODEL") != "" {
+		log.Warn("semantic recall off", "why", embed.Why(reg.Root()))
+	}
+	return s
 }
 
 // WithLogRing exposes ring on /v1/logs for the admin GUI's Log tab.

@@ -35,7 +35,15 @@ func (s *Server) curateSynth() (curate.Synthesizer, string, error) {
 		os.MkdirAll(workDir, 0o700)
 		return &curate.ClaudeExtractor{Model: model, WorkDir: workDir}
 	}
-	if ep, bound := provider.ResolveBound(root, m); bound {
+	// A binding that exists but cannot be honored stops here: falling
+	// through to the env-selected backend would run the model on the
+	// wrong service (a tokenless openai binding ending up in the claude
+	// CLI, say). Only a genuinely absent binding reaches the switch.
+	ep, isBound, why := provider.ResolveBound(root, m)
+	if isBound && why != "" {
+		return nil, "", fmt.Errorf("no curate endpoint: %s", why)
+	}
+	if isBound {
 		if ep.Kind == "claude" {
 			return claude(ep.Model), m, nil
 		}
@@ -43,9 +51,12 @@ func (s *Server) curateSynth() (curate.Synthesizer, string, error) {
 	}
 	switch os.Getenv("AIMEM_CURATE_BACKEND") {
 	case "openai":
-		ep, ok := provider.Resolve(root, m)
-		if m == "" || !ok || ep.Kind != "openai" {
-			return nil, "", fmt.Errorf("no curate endpoint: bind AIMEM_CURATE_MODEL in providers.json or set AIMEM_OPENAI_API_KEY")
+		if m == "" {
+			return nil, "", fmt.Errorf("no curate endpoint: AIMEM_CURATE_MODEL is unset")
+		}
+		ep, why := provider.Lookup(root, m, "openai")
+		if why != "" {
+			return nil, "", fmt.Errorf("no curate endpoint: %s", why)
 		}
 		return &curate.OpenAIExtractor{BaseURL: ep.BaseURL, APIKey: ep.Token, Model: ep.Model}, m, nil
 	default: // claude

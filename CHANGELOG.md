@@ -13,6 +13,43 @@ currently 10); a binary refuses a database newer than it understands.
 
 ## [Unreleased]
 
+### Fixed
+
+- **Provider tests tell the truth about the configured provider.** A
+  model bound to a provider that could not serve it (no token stored)
+  used to fall through silently to the host's `AIMEM_OPENAI_*` env
+  endpoint, so the console's test button reported another vendor's
+  error for the wrong service (live: a Hetzner binding answered by
+  Google's "unexpected model name format"). Bound models now resolve
+  only through their binding; when that fails, the test button, the
+  model list, the hub's curate factory, and the `curate`/`doc`/
+  `embed`/`dedup` CLI paths all name the actual cause ("provider X has
+  no token stored", "resolves to a claude endpoint but an openai one
+  is required here"), and the service logs why semantic recall is off
+  at startup instead of degrading to BM25 silently. Failed tests carry
+  the elapsed time so a 15s timeout and a 100ms rejection read
+  differently; the provider list flags tokenless providers.
+  **Upgrade note:** a host that happened to serve a *bound* model
+  through the env pair because its provider had no token now gets an
+  explicit failure with the reason instead of silent service from the
+  wrong endpoint — fix the provider (any non-empty token for an
+  endpoint that needs none) or unbind the model to use env on purpose.
+  A `providers.json` that exists but cannot be read or parsed now
+  fails CLOSED (no model resolves, every path says why, and the
+  console refuses to save over it) instead of counting as "no
+  registry" — which had quietly re-enabled the env routing for every
+  bound model and would have let one console save erase the
+  operator's providers; only a genuinely missing file means "no
+  bindings". Curation's backend selection keeps "bound but unusable"
+  apart from "unbound": a broken binding no longer falls through to
+  the default claude backend (which ran the model on the wrong
+  service with no error).
+- **Console no longer discards a pasted token on a rejected save.**
+  The token field was cleared before the hub answered, so a save
+  refused for an invalid name (uppercase) ate the token, and the
+  corrected retry stored the provider with none — the root of the
+  case above. The field now clears only after the hub confirms.
+
 ## [0.3.27] — 2026-09-11
 
 ### Added

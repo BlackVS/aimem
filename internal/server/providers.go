@@ -37,6 +37,10 @@ func maskToken(t string) string {
 
 func (s *Server) getProviders(w http.ResponseWriter, _ *http.Request) {
 	reg := provider.Load(s.reg.Root())
+	if reg.LoadErr != nil {
+		s.fail(w, http.StatusConflict, fmt.Errorf("provider registry could not be read (%v) — fix the file by hand", reg.LoadErr))
+		return
+	}
 	provs := map[string]map[string]string{}
 	for name, p := range reg.Providers {
 		provs[name] = map[string]string{
@@ -73,6 +77,12 @@ func (s *Server) putProviders(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	reg := provider.Load(s.reg.Root())
+	if reg.LoadErr != nil {
+		// Saving would replace the operator's whole registry with this
+		// one mutation on top of an empty one.
+		s.fail(w, http.StatusConflict, fmt.Errorf("provider registry could not be read (%v) — fix the file by hand before saving", reg.LoadErr))
+		return
+	}
 	switch {
 	case req.SetProvider != nil:
 		p := req.SetProvider
@@ -144,10 +154,13 @@ func (s *Server) testProvider(w http.ResponseWriter, r *http.Request) {
 		s.fail(w, http.StatusBadRequest, fmt.Errorf("body wants {\"model\": \"...\", \"op\": \"embed|chat\"}"))
 		return
 	}
-	ep, ok := provider.Resolve(s.reg.Root(), req.Model)
-	if !ok {
-		s.log.Warn("provider test unresolved", "model", req.Model)
-		s.fail(w, http.StatusBadRequest, fmt.Errorf("no endpoint for model %q (no binding, no env fallback)", req.Model))
+	// One lookup yields the endpoint OR the reason — a test button that
+	// cannot name the misconfiguration it hit is the same lie as one
+	// that quietly succeeds elsewhere.
+	ep, why := provider.Lookup(s.reg.Root(), req.Model, "")
+	if why != "" {
+		s.log.Warn("provider test unresolved", "model", req.Model, "why", why)
+		s.fail(w, http.StatusBadRequest, fmt.Errorf("%s", why))
 		return
 	}
 	start := time.Now()
@@ -169,10 +182,12 @@ func (s *Server) testProvider(w http.ResponseWriter, r *http.Request) {
 	}
 	if err != nil {
 		// Same shape as the success line below: a failure nobody can
-		// attribute to a model is nearly useless in the Log tab.
-		s.log.Warn("provider test failed", "model", req.Model, "op", req.Op,
-			"ms", time.Since(start).Milliseconds(), "err", err)
-		s.fail(w, http.StatusBadGateway, err)
+		// attribute to a model is nearly useless in the Log tab. The
+		// elapsed time rides in the message too — a 15s timeout and a
+		// 100ms rejection call for different fixes.
+		ms := time.Since(start).Milliseconds()
+		s.log.Warn("provider test failed", "model", req.Model, "op", req.Op, "ms", ms, "err", err)
+		s.fail(w, http.StatusBadGateway, fmt.Errorf("%v (after %dms)", err, ms))
 		return
 	}
 	if db, derr := s.reg.Open(store.UserScopeProject); derr == nil {
@@ -200,6 +215,13 @@ func (s *Server) providerModels(w http.ResponseWriter, r *http.Request) {
 	}
 	if p.Kind == "claude" {
 		s.ok(w, map[string]any{"models": []string{"haiku", "sonnet", "opus"}})
+		return
+	}
+	if p.Token == "" {
+		// Upstream would answer 401 — name the actual cause instead. The
+		// registry has never served a tokenless endpoint (bindings to
+		// one do not resolve), so this is the same rule, said early.
+		s.fail(w, http.StatusBadRequest, fmt.Errorf("provider %q has no token stored — save it with its token first (any non-empty value for an endpoint that needs none)", name))
 		return
 	}
 	base := p.BaseURL
