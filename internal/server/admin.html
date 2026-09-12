@@ -1195,7 +1195,9 @@ async function loadProviders(){
     // The result gets its own RESERVED full-width line under the buttons:
     // inline between them, its text pushed "unbind" sideways on every
     // test, and an on-demand line would push the rows below instead.
-    `<div class="test-out dim" data-test="${esc(m)}" title="">not tested yet</div></div>`;}).join("");
+    // Neutral placeholder: this list re-renders after every provider
+    // mutation, so a claim like "not tested yet" would turn false.
+    `<div class="test-out dim" data-test="${esc(m)}" title="">—</div></div>`;}).join("");
   const sel=$("bProv").value;
   $("bProv").innerHTML = names.map(n=>`<option>${esc(n)}</option>`).join("");
   if(names.includes(sel)) $("bProv").value=sel;
@@ -1250,21 +1252,29 @@ function unbindModel(m){ putProv({unbind:m},"model unbound"); }
 // chat probe with a confusing transport error, so never guess the kind.
 async function testModel(m,op,btn){
   const out=document.querySelector(`[data-test="${CSS.escape(m)}"]`);
-  btn.disabled=true; out.textContent="testing "+op+"…"; out.className="test-out dim"; out.title="";
+  // ONE writer for the result line: the structural class stays put and
+  // only the state colour changes, so no state can drop back to an
+  // inline element between the buttons. title = full text, because the
+  // reserved line clips long errors.
+  const show=(kind,text)=>{ out.className="test-out "+kind; out.textContent=text; out.title=text; };
+  btn.disabled=true; show("dim","testing "+op+"…");
   const t0=performance.now();
   try{
     const r=await api("/v1/config/providers/test",{method:"POST",body:JSON.stringify({model:m,op})});
-    out.textContent=`${op}: ok · ${r.latency_ms}ms · ${r.tokens} tok`; out.className="test-out ok";
+    show("ok",`${op}: ok · ${r.latency_ms}ms · ${r.tokens} tok`);
     toast(`${m} ${op}: ok · ${r.latency_ms}ms`);
   }catch(e){
-    if(e.auth){ out.textContent="admin token rejected — reload and sign in again"; out.className="test-out bad"; btn.disabled=false; return; }
-    // The hub stamps "(after Nms)" into provider errors it timed itself;
-    // for failures that never reached it (transport) measure here.
-    const msg=String(e.message||e);
-    out.textContent=`${op}: `+(/\(after \d+ms\)$/.test(msg) ? msg : `${msg} (after ${Math.round(performance.now()-t0)}ms)`);
-    out.title=out.textContent; // the reserved line clips long errors; hover shows all
-    out.className="test-out bad";
-    toast(`${m} ${op}: failed`);
+    if(e.auth){ show("bad","admin token rejected — reload and sign in again"); btn.disabled=false; return; }
+    // The elapsed time LEADS the line: the clipped tail is exactly where
+    // the hub's "(after Nms)" stamp would sit, and "30042ms" vs "101ms"
+    // is the one datum that separates a timeout from a rejection. The
+    // hub stamps errors it timed itself; transport failures that never
+    // reached it are measured here.
+    let msg=String(e.message||e), ms=Math.round(performance.now()-t0);
+    const st=msg.match(/ \(after (\d+)ms\)$/);
+    if(st){ ms=+st[1]; msg=msg.slice(0,st.index); }
+    show("bad",`${op}: failed after ${ms}ms — ${msg}`);
+    toast(`${m} ${op}: failed after ${ms}ms`);
   }
   btn.disabled=false;
 }

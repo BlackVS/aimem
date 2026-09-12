@@ -21,8 +21,10 @@ currently 10); a binary refuses a database newer than it understands.
   (user notice). Each binding now has a permanently reserved result
   line under its buttons — reserved, not on demand, so a result never
   shifts the rows below either — prefixed with the op it belongs to
-  (long errors clip with the full text on hover), and a toast echoes
-  the outcome so it is seen even when the row is scrolled away.
+  (failures lead with the elapsed time — "failed after 30042ms — …" —
+  so the clipped tail never hides the timeout-vs-rejection signal;
+  full text on hover), and a toast echoes the outcome so it is seen
+  even when the row is scrolled away.
   Providers and model bindings also sit in separate cards now — one
   shared card made the two lists and forms read as a single block
   (user notice) — and long lists scroll inside their card so the
