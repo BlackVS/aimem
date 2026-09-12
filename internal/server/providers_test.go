@@ -228,32 +228,57 @@ func TestConsoleProviderFormRules(t *testing.T) {
 func TestConsoleBindingRowLayoutRules(t *testing.T) {
 	page := string(adminHTML)
 	css := page[:strings.Index(page, "</style>")]
-	for _, rule := range []string{
-		`#bindOut{`,                      // the one shared status line…
-		`min-height:1.3em`,               // …with a fixed height (no shifts)
-		`#provList,#bindList{max-height`, // bounded lists, form stays visible
-	} {
-		if !strings.Contains(css, rule) {
-			t.Errorf("layout rule missing from page CSS: %s", rule)
-		}
+	if !strings.Contains(css, `#provList,#bindList{max-height`) {
+		t.Error("bounded-list rule missing (bind form would be pushed off the page)")
 	}
-	if !strings.Contains(page, `<div id="bindOut"`) {
-		t.Fatal("shared status line element missing from the bindings card")
+	// The fixed height must belong to the #bindOut rule itself, not merely
+	// appear somewhere in the stylesheet.
+	i := strings.Index(css, "#bindOut{")
+	if i < 0 || !strings.Contains(css[i:i+strings.Index(css[i:], "}")], "min-height:1.3em") {
+		t.Error("#bindOut rule must reserve its height (min-height:1.3em)")
 	}
-	// The row template holds buttons only — no result element of its own.
-	row := page[strings.Index(page, `onclick="testModel('`):]
-	row = row[:strings.Index(row, "</div>`")]
-	if strings.Contains(row, "data-test") || strings.Contains(row, "test-out") {
-		t.Fatalf("binding row must not carry a per-row result element:\n%s", row)
+	// The shared line is a SIBLING after the list — never inside the 45vh
+	// scroller, where it could scroll out of sight.
+	list, out := strings.Index(page, `<div id="bindList"`), strings.Index(page, `<div id="bindOut"`)
+	if list < 0 || out < 0 || out < list {
+		t.Fatal("#bindList / #bindOut order wrong or missing")
 	}
-	// One writer targets the shared line and every result names its model.
+	between := page[list+len(`<div id="bindList"`) : out] // rest of the list tag, its close, whitespace
+	if strings.Contains(between, "<div") || !strings.Contains(between, "</div>") {
+		t.Fatalf("#bindOut must directly follow the closed #bindList element, got %q between", between)
+	}
+	// The row template is buttons and text only: NO element of any kind
+	// besides the buttons and the two spans — a result element in a row,
+	// under any name, is the regression this test exists to prevent.
+	tpl := page[strings.Index(page, "$(\"bindList\").innerHTML"):]
+	tpl = tpl[:strings.Index(tpl, ".join(\"\")")]
+	row := tpl[strings.Index(tpl, `<div class="row">`)+len(`<div class="row">`):]
+	// Two literal spans (name, provider chip); the upstream "→ x" span is
+	// interpolated via ${up}, defined above the row.
+	if strings.Contains(row, "<div") || strings.Contains(row, "bindOut") || strings.Count(row, "<span") != 2 {
+		t.Fatalf("binding row must hold only its name/upstream spans, provider chip, and buttons:\n%s", row)
+	}
+	// One writer targets the shared line; EVERY state names its model and
+	// op (a stray unprefixed state would erase which test the line is
+	// about); the list re-render resets the line so it cannot describe a
+	// binding that was just unbound.
 	fn := page[strings.Index(page, "async function testModel"):]
 	fn = fn[:strings.Index(fn, "\n}")]
 	if !strings.Contains(fn, `const out=$("bindOut")`) || strings.Count(fn, ".className=") != 1 {
 		t.Fatalf("results must be written to #bindOut by the single helper:\n%s", fn)
 	}
-	if strings.Count(fn, "`${m} ${op}:") < 3 {
-		t.Fatal("every state of the shared line must name the model and op")
+	// The helper is defined as `show=(kind,text)=>`, so every "show(" is a
+	// call; each call's text must open with the model/op prefix (the
+	// toasts carry it too, so count call sites, not prefixes).
+	shows := strings.Count(fn, "show(")
+	named := len(regexp.MustCompile("show\\(\"\\w+\",`\\$\\{m\\} \\$\\{op\\}:").FindAllString(fn, -1))
+	if shows == 0 || shows != named {
+		t.Fatalf("%d show() states but only %d name the model and op", shows, named)
+	}
+	lp := page[strings.Index(page, "async function loadProviders"):]
+	lp = lp[:strings.Index(lp, "\n}")]
+	if !strings.Contains(lp, `$("bindOut").textContent="last test: —"`) {
+		t.Fatal("list re-render (loadProviders) must reset the shared status line")
 	}
 	// Failures lead with the elapsed time so the clipped tail never
 	// hides the timeout-vs-rejection signal.

@@ -1188,6 +1188,9 @@ async function loadProviders(){
   }).join("") : '<span class="dim">none yet — models use the host env fallback</span>';
   const models = Object.keys(PROV.models).sort();
   $("bindList").className="";
+  // The shared status line outlives the rows: reset it with the list so
+  // it never reports a binding that was just unbound or rebound.
+  $("bindOut").className="dim"; $("bindOut").textContent="last test: —"; $("bindOut").title="";
   $("bindList").innerHTML = models.map(m=>{
     const b=PROV.models[m], up=b.model&&b.model!==m?` <span class="dim">→ ${esc(b.model)}</span>`:"";
     return `<div class="row"><span class="grow">${esc(m)}${up}</span>`+
@@ -1257,8 +1260,9 @@ async function testModel(m,op,btn){
   try{
     const r=await api("/v1/config/providers/test",{method:"POST",body:JSON.stringify({model:m,op})});
     show("ok",`${m} ${op}: ok · ${r.latency_ms}ms · ${r.tokens} tok`);
+    toast(`${m} ${op}: ok · ${r.latency_ms}ms`); // the line can sit below the fold
   }catch(e){
-    if(e.auth){ show("bad","admin token rejected — reload and sign in again"); btn.disabled=false; return; }
+    if(e.auth){ show("bad",`${m} ${op}: admin token rejected — reload and sign in again`); btn.disabled=false; return; }
     // The elapsed time LEADS the line: the clipped tail is exactly where
     // the hub's "(after Nms)" stamp would sit, and "30042ms" vs "101ms"
     // is the one datum that separates a timeout from a rejection. The
@@ -1268,6 +1272,7 @@ async function testModel(m,op,btn){
     const st=msg.match(/ \(after (\d+)ms\)$/);
     if(st){ ms=+st[1]; msg=msg.slice(0,st.index); }
     show("bad",`${m} ${op}: failed after ${ms}ms — ${msg}`);
+    toast(`${m} ${op}: failed after ${ms}ms`);
   }
   btn.disabled=false;
 }

@@ -19,9 +19,12 @@ currently 10); a binary refuses a database newer than it understands.
   per-binding reserved result line from 0.3.29 put a placeholder under
   every row, which read as clutter (user notice). The bindings card
   now has a single fixed-height "last test" line under the list; each
-  result names its model and op. Both earlier guarantees hold: nothing
-  renders inside a row, and the line's height is fixed, so neither the
-  buttons nor the rows ever move.
+  result names its model and op, the line resets whenever the list
+  re-renders (so it never describes a binding that was just unbound),
+  and the toast stays for the case where the line sits below the
+  fold. Both earlier guarantees hold: nothing renders inside a row,
+  and the line's height is fixed, so neither the buttons nor the rows
+  ever move.
 
 ## [0.3.29] — 2026-09-12
 
