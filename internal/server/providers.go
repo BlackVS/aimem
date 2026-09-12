@@ -144,11 +144,11 @@ func (s *Server) testProvider(w http.ResponseWriter, r *http.Request) {
 		s.fail(w, http.StatusBadRequest, fmt.Errorf("body wants {\"model\": \"...\", \"op\": \"embed|chat\"}"))
 		return
 	}
-	ep, ok := provider.Resolve(s.reg.Root(), req.Model)
-	if !ok {
-		// Say WHY — a test button that cannot name the misconfiguration
-		// it hit is the same lie as one that quietly succeeds elsewhere.
-		why := provider.Explain(s.reg.Root(), req.Model)
+	// One lookup yields the endpoint OR the reason — a test button that
+	// cannot name the misconfiguration it hit is the same lie as one
+	// that quietly succeeds elsewhere.
+	ep, why := provider.Lookup(s.reg.Root(), req.Model, "")
+	if why != "" {
 		s.log.Warn("provider test unresolved", "model", req.Model, "why", why)
 		s.fail(w, http.StatusBadRequest, fmt.Errorf("%s", why))
 		return
@@ -208,8 +208,10 @@ func (s *Server) providerModels(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if p.Token == "" {
-		// Upstream would answer 401 — name the actual cause instead.
-		s.fail(w, http.StatusBadRequest, fmt.Errorf("provider %q has no token stored — save it with its token first", name))
+		// Upstream would answer 401 — name the actual cause instead. The
+		// registry has never served a tokenless endpoint (bindings to
+		// one do not resolve), so this is the same rule, said early.
+		s.fail(w, http.StatusBadRequest, fmt.Errorf("provider %q has no token stored — save it with its token first (any non-empty value for an endpoint that needs none)", name))
 		return
 	}
 	base := p.BaseURL

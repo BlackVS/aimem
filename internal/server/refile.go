@@ -43,12 +43,11 @@ func (s *Server) curateSynth() (curate.Synthesizer, string, error) {
 	}
 	switch os.Getenv("AIMEM_CURATE_BACKEND") {
 	case "openai":
-		ep, ok := provider.Resolve(root, m)
-		if m == "" || !ok || ep.Kind != "openai" {
-			why := "AIMEM_CURATE_MODEL is unset"
-			if m != "" {
-				why = provider.Explain(root, m)
-			}
+		if m == "" {
+			return nil, "", fmt.Errorf("no curate endpoint: AIMEM_CURATE_MODEL is unset")
+		}
+		ep, why := provider.Lookup(root, m, "openai")
+		if why != "" {
 			return nil, "", fmt.Errorf("no curate endpoint: %s", why)
 		}
 		return &curate.OpenAIExtractor{BaseURL: ep.BaseURL, APIKey: ep.Token, Model: ep.Model}, m, nil

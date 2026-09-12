@@ -40,7 +40,7 @@ func TestResolvePrecedence(t *testing.T) {
 	if ep, ok = Resolve(root, "other"); !ok || ep.Token != "envkey" {
 		t.Fatalf("unbound fallback: %+v ok=%v", ep, ok)
 	}
-	// A BOUND model whose provider has no token must NOT fall back to
+	// A BOUND model whose provider cannot serve it must NOT fall back to
 	// env: the binding is explicit, and serving it from the env endpoint
 	// hid a misconfigured provider behind another vendor's errors.
 	r.Providers["hollow"] = Provider{Kind: "openai"}
@@ -52,26 +52,63 @@ func TestResolvePrecedence(t *testing.T) {
 	if ep, ok = Resolve(root, "m3"); ok {
 		t.Fatalf("hollow binding must not resolve (got %+v)", ep)
 	}
-	if why := Explain(root, "m3"); !strings.Contains(why, `"hollow"`) || !strings.Contains(why, "no token") {
-		t.Fatalf("explain hollow: %q", why)
-	}
 	if ep, ok = Resolve(root, "m4"); ok {
 		t.Fatalf("binding to a missing provider must not resolve (got %+v)", ep)
 	}
-	if why := Explain(root, "m4"); !strings.Contains(why, "no longer exists") {
-		t.Fatalf("explain vanished: %q", why)
+}
+
+// The contract every caller relies on: Explain is empty exactly when
+// Resolve succeeds, over the whole case set — one classifier, no drift.
+func TestExplainMatchesResolve(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("AIMEM_OPENAI_API_KEY", "envkey")
+	r := Load(root)
+	r.Providers["g"] = Provider{Kind: "openai", Token: "gkey"}
+	r.Providers["cl"] = Provider{Kind: "claude"}
+	r.Providers["hollow"] = Provider{Kind: "openai"}
+	r.Bind("healthy", "g", "")
+	r.Bind("viacli", "cl", "")
+	r.Bind("tokenless", "hollow", "")
+	r.Bind("orphan", "vanished", "")
+	if err := r.Save(root); err != nil {
+		t.Fatal(err)
 	}
-	// Explain is silent for models that resolve, and names the env gap
-	// for unbound models only when the env pair is unset.
-	if why := Explain(root, "m1"); why != "" {
-		t.Fatalf("explain resolvable: %q", why)
+	cases := map[string]string{ // model -> expected reason fragment ("" = resolves)
+		"healthy":   "",
+		"viacli":    "",
+		"tokenless": `provider "hollow"`,
+		"orphan":    "no longer exists",
+		"unbound":   "", // env serves it
 	}
-	if why := Explain(root, "other"); why != "" {
-		t.Fatalf("explain env-served: %q", why)
+	for m, want := range cases {
+		_, ok := Resolve(root, m)
+		why := Explain(root, m, "")
+		if (why == "") != ok {
+			t.Errorf("%s: Resolve ok=%v but Explain=%q", m, ok, why)
+		}
+		if want != "" && !strings.Contains(why, want) {
+			t.Errorf("%s: reason %q lacks %q", m, why, want)
+		}
 	}
+	if !strings.Contains(Explain(root, "tokenless", ""), "no token") {
+		t.Errorf("tokenless reason must say so: %q", Explain(root, "tokenless", ""))
+	}
+	// The kind requirement: a claude binding is healthy in general but
+	// not where an OpenAI-compatible endpoint is required — and the
+	// reason must say that, not stay empty.
+	if ep, why := Lookup(root, "viacli", "openai"); why == "" || !strings.Contains(why, "claude") {
+		t.Errorf("claude binding under wantKind=openai: ep=%+v why=%q", ep, why)
+	}
+	if _, why := Lookup(root, "healthy", "openai"); why != "" {
+		t.Errorf("openai binding under wantKind=openai: %q", why)
+	}
+	// Unbound without env: both halves flip together.
 	t.Setenv("AIMEM_OPENAI_API_KEY", "")
-	if why := Explain(root, "other"); !strings.Contains(why, "AIMEM_OPENAI_API_KEY") {
-		t.Fatalf("explain unbound without env: %q", why)
+	if _, ok := Resolve(root, "unbound"); ok {
+		t.Error("unbound resolved with env unset")
+	}
+	if why := Explain(root, "unbound", ""); !strings.Contains(why, "AIMEM_OPENAI_API_KEY") {
+		t.Errorf("unbound without env: %q", why)
 	}
 }
 

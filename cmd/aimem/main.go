@@ -881,9 +881,9 @@ func docCmd(args []string) error {
 		if runModel == "" {
 			return fmt.Errorf("openai backend needs --model or AIMEM_CURATE_MODEL")
 		}
-		ep, ok := provider.Resolve(stateRoot(), runModel)
-		if !ok || ep.Kind != "openai" {
-			return fmt.Errorf("no openai endpoint for model %q: %s", runModel, provider.Explain(stateRoot(), runModel))
+		ep, why := provider.Lookup(stateRoot(), runModel, "openai")
+		if why != "" {
+			return fmt.Errorf("no openai endpoint: %s", why)
 		}
 		syn = &curate.OpenAIExtractor{BaseURL: ep.BaseURL, APIKey: ep.Token, Model: ep.Model,
 			Timeout: curate.DocSynthesisTimeout}
@@ -938,7 +938,7 @@ func dedupCmd(args []string) error {
 	// the same key the writers used — not the bare model name.
 	model := embed.ForRoot(stateRoot()).Key()
 	if model == "" {
-		return fmt.Errorf("dedup needs AIMEM_EMBED_MODEL (vectors are compared per model)")
+		return fmt.Errorf("dedup needs a working embedding model (vectors are compared per model): %s", embed.Why(stateRoot()))
 	}
 	reg, err := store.NewRegistry(stateRoot())
 	if err != nil {
@@ -1904,9 +1904,9 @@ func curateCmd(args []string) error {
 			if m == "" {
 				return fmt.Errorf("openai backend needs --model or AIMEM_CURATE_MODEL")
 			}
-			ep, ok := provider.Resolve(root, m)
-			if !ok || ep.Kind != "openai" {
-				return fmt.Errorf("no openai endpoint for model %q: %s", m, provider.Explain(root, m))
+			ep, why := provider.Lookup(root, m, "openai")
+			if why != "" {
+				return fmt.Errorf("no openai endpoint: %s", why)
 			}
 			ex = &curate.OpenAIExtractor{BaseURL: ep.BaseURL, APIKey: ep.Token, Model: ep.Model}
 			runModel = m
@@ -1987,7 +1987,7 @@ func embedCmd(args []string) error {
 	root := stateRoot()
 	c := embed.ForRoot(root)
 	if c == nil {
-		return fmt.Errorf("embedding not configured: set AIMEM_EMBED_MODEL and bind the model in providers.json or set AIMEM_OPENAI_API_KEY")
+		return fmt.Errorf("embedding not configured: %s", embed.Why(root))
 	}
 	reg, err := store.NewRegistry(root)
 	if err != nil {

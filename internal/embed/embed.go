@@ -60,14 +60,26 @@ func ForRoot(root string) *Client {
 	return ForModel(root, os.Getenv("AIMEM_EMBED_MODEL"))
 }
 
-// ForModel resolves model through the provider registry (env fallback)
-// into a client; nil when no endpoint serves it.
+// Why says, in operator terms, why ForRoot would return nil: the model
+// is unset, or its endpoint cannot serve (provider.Lookup's reason).
+// "" when embeddings are on.
+func Why(root string) string {
+	model := os.Getenv("AIMEM_EMBED_MODEL")
+	if model == "" {
+		return "AIMEM_EMBED_MODEL is unset"
+	}
+	return provider.Explain(root, model, "openai")
+}
+
+// ForModel resolves model through the provider registry (its binding,
+// or the env pair for an unbound name) into a client; nil when no
+// OpenAI-compatible endpoint serves it — Why has the reason.
 func ForModel(root, model string) *Client {
 	if model == "" {
 		return nil
 	}
-	ep, ok := provider.Resolve(root, model)
-	if !ok || ep.Kind != "openai" {
+	ep, why := provider.Lookup(root, model, "openai")
+	if why != "" {
 		return nil
 	}
 	dim, _ := strconv.Atoi(os.Getenv("AIMEM_EMBED_DIM"))

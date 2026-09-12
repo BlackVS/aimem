@@ -1210,12 +1210,15 @@ async function putProv(body,msg){
 }
 async function saveProvider(){
   const name=$("pvName").value.trim(); if(!name){toast("provider needs a name");return;}
-  const ok = await putProv({set_provider:{name, kind:$("pvKind").value, base_url:$("pvUrl").value.trim(),
-    token:$("pvTok").value.trim()}}, "provider saved");
-  // Clear the pasted token only once the hub has it. Clearing on a
-  // REJECTED save (e.g. an uppercase name) silently discarded the token,
-  // and the retry then saved the provider with none (live, 2026-09-12).
-  if(ok) $("pvTok").value="";
+  // Snapshot what is being sent; clear the field only once the hub has
+  // it AND it still holds that same value. Clearing on a REJECTED save
+  // silently discarded a pasted token (the retry then stored none), and
+  // clearing blindly after the await would wipe a token pasted for the
+  // NEXT provider while this save was in flight.
+  const token=$("pvTok").value.trim();
+  const ok = await putProv({set_provider:{name, kind:$("pvKind").value, base_url:$("pvUrl").value.trim(), token}},
+    "provider saved");
+  if(ok && $("pvTok").value.trim()===token) $("pvTok").value="";
 }
 function delProvider(n){ if(confirm(`Delete provider ${n} and its bindings?`)) putProv({delete_provider:n},"provider deleted"); }
 function bindModel(){
@@ -1238,10 +1241,11 @@ async function testModel(m,op,btn){
     const r=await api("/v1/config/providers/test",{method:"POST",body:JSON.stringify({model:m,op})});
     out.textContent=`ok · ${r.latency_ms}ms · ${r.tokens} tok`; out.className="ok";
   }catch(e){
-    // The hub stamps its own elapsed time into provider errors; for
-    // failures that never reached it (transport, auth) measure here.
+    if(e.auth){ out.textContent="admin token rejected — reload and sign in again"; out.className="bad"; btn.disabled=false; return; }
+    // The hub stamps "(after Nms)" into provider errors it timed itself;
+    // for failures that never reached it (transport) measure here.
     const msg=String(e.message||e);
-    out.textContent=/\d+ms/.test(msg) ? msg : `${msg} (after ${Math.round(performance.now()-t0)}ms)`;
+    out.textContent=/\(after \d+ms\)$/.test(msg) ? msg : `${msg} (after ${Math.round(performance.now()-t0)}ms)`;
     out.className="bad";
   }
   btn.disabled=false;

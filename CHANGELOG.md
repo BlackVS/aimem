@@ -22,10 +22,18 @@ currently 10); a binary refuses a database newer than it understands.
   error for the wrong service (live: a Hetzner binding answered by
   Google's "unexpected model name format"). Bound models now resolve
   only through their binding; when that fails, the test button, the
-  model list, and the `curate`/`embed` CLI paths name the actual cause
-  ("provider X has no token stored"). Failed tests carry the elapsed
-  time so a 15s timeout and a 100ms rejection read differently; the
-  provider list flags tokenless providers.
+  model list, the hub's curate factory, and the `curate`/`doc`/
+  `embed`/`dedup` CLI paths all name the actual cause ("provider X has
+  no token stored", "resolves to a claude endpoint but an openai one
+  is required here"), and the service logs why semantic recall is off
+  at startup instead of degrading to BM25 silently. Failed tests carry
+  the elapsed time so a 15s timeout and a 100ms rejection read
+  differently; the provider list flags tokenless providers.
+  **Upgrade note:** a host that happened to serve a *bound* model
+  through the env pair because its provider had no token now gets an
+  explicit failure with the reason instead of silent service from the
+  wrong endpoint — fix the provider (any non-empty token for an
+  endpoint that needs none) or unbind the model to use env on purpose.
 - **Console no longer discards a pasted token on a rejected save.**
   The token field was cleared before the hub answered, so a save
   refused for an invalid name (uppercase) ate the token, and the
