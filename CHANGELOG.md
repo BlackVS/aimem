@@ -13,6 +13,17 @@ currently 10); a binary refuses a database newer than it understands.
 
 ## [Unreleased]
 
+### Changed
+
+- **Console: "merge into another project" picks the target from a
+  dropdown.** The action used a browser prompt box that asked for a
+  typed project id and listed the candidates as plain text (user
+  notice). It now opens an inline chooser inside the project's ⋯ menu:
+  a dropdown of the hub's other projects, a merge button, cancel — no
+  free-text id, no list to read. The merge itself is unchanged
+  (idempotent fold, citations relabelled, source removed) and still
+  asks for one confirmation naming both projects.
+
 ## [0.3.30] — 2026-09-12
 
 ### Changed

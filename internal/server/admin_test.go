@@ -322,3 +322,46 @@ func TestWikiSentinelsOutsideProjectIDSpace(t *testing.T) {
 		}
 	}
 }
+
+// The project-merge action must offer the target as a dropdown of the
+// hub's projects, never a free-text prompt listing candidates as text
+// (user notice); the picked target is state (a DOM-only selection would
+// reset on any unrelated tree re-render — and the action is
+// destructive); the chooser is a mode of the one menu key, so no second
+// state can fall out of sync with the menu.
+func TestConsoleMergeUsesDropdown(t *testing.T) {
+	page := string(adminHTML)
+	fn := page[strings.Index(page, "function mergeChooser"):]
+	fn = fn[:strings.Index(fn, "async function mergeProjectDo")]
+	if !strings.Contains(fn, `<select id="mergeInto"`) {
+		t.Fatal("merge chooser must render a <select> of target projects")
+	}
+	if strings.Contains(fn, "prompt(") || strings.Contains(fn, "Existing projects") {
+		t.Fatal("merge flow must not fall back to a typed prompt or a plain-text project list")
+	}
+	if !strings.Contains(fn, `onchange="mergeInto=this.value"`) || !strings.Contains(fn, `o===mergeInto?" selected":""`) {
+		t.Fatal("merge target must be held in state and rendered as selected")
+	}
+	// The select owns its row: sharing a non-wrapping row with the buttons
+	// inside the 230px sidebar shrank it to an unreadable sliver.
+	sel := fn[strings.Index(fn, `<select id="mergeInto"`):]
+	sel = sel[:strings.Index(sel, "</div>")]
+	if strings.Contains(sel, "<button") || !strings.Contains(sel, "flex:1;min-width:0") {
+		t.Fatal("merge target select must fill a row of its own, with the buttons on the next row")
+	}
+	do := page[strings.Index(page, "async function mergeProjectDo"):]
+	do = do[:strings.Index(do, "\n}")]
+	if !strings.Contains(do, "const into = mergeInto") || strings.Contains(do, "prompt(") {
+		t.Fatal("mergeProjectDo must take the target from state, not a prompt")
+	}
+	// Reachable: the scope menu offers the action and renders the chooser
+	// in merge mode.
+	menu := page[strings.Index(page, `kbMenu==="scope:"+g.id`):]
+	menu = menu[:strings.Index(menu, "</div>`;")]
+	if !strings.Contains(menu, "mergeProjectUI(") || !strings.Contains(menu, `kbMenu==="merge:"+g.id ? mergeChooser(g.id)`) {
+		t.Fatal("scope menu must offer the merge action and render the chooser in merge mode")
+	}
+	if strings.Contains(page, "mergeFor") {
+		t.Fatal("chooser visibility must be a mode of kbMenu, not a second state variable")
+	}
+}
