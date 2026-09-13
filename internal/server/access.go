@@ -17,13 +17,60 @@ import (
 // Access management is admin-only. No request field can create an admin token.
 // The local operator uses the same routes through the existing trusted socket.
 func (s *Server) accessStore(w http.ResponseWriter) (*access.Store, bool) {
-	db, err := access.Open(s.reg.Root())
+	db, err := s.openAccess(true)
 	if err != nil {
 		s.fail(w, 500, fmt.Errorf("access store unavailable"))
 		s.log.Error("open access store", "err", err)
 		return nil, false
 	}
 	return db, true
+}
+
+func (s *Server) openAccess(create bool) (*access.Store, error) {
+	s.accessMu.Lock()
+	defer s.accessMu.Unlock()
+	if s.accessClosed {
+		return nil, fmt.Errorf("server is closed")
+	}
+	if s.accessDB != nil {
+		return s.accessDB, nil
+	}
+	open := access.OpenExisting
+	if create {
+		open = access.Open
+	}
+	db, err := open(s.reg.Root())
+	if err != nil {
+		return nil, err
+	}
+	s.accessDB = db
+	return db, nil
+}
+
+// Close releases server-owned storage after its HTTP listeners have stopped.
+func (s *Server) Close() error {
+	s.accessMu.Lock()
+	defer s.accessMu.Unlock()
+	if s.accessClosed {
+		return nil
+	}
+	s.accessClosed = true
+	if s.accessDB != nil {
+		return s.accessDB.Close()
+	}
+	return nil
+}
+
+func (s *Server) removeAccessGrant(w http.ResponseWriter, r *http.Request) {
+	db, ok := s.accessStore(w)
+	if !ok {
+		return
+	}
+	if err := db.SetGrant(accessActor(r), r.PathValue("instance"), r.PathValue("kind"), r.PathValue("id"), false); err != nil {
+		s.accessError(w, err)
+		return
+	}
+	s.ok(w, map[string]bool{"ok": true})
 }
 func accessActor(r *http.Request) string {
 	if id, ok := IdentityFrom(r.Context()); ok {
@@ -56,7 +103,6 @@ func (s *Server) getAccess(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	defer db.Close()
 	result, err := db.Snapshot()
 	if err != nil {
 		s.fail(w, 500, fmt.Errorf("cannot read access state"))
@@ -98,7 +144,6 @@ func (s *Server) createAccessUser(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	defer db.Close()
 	u, err := db.CreateUser(accessActor(r), req.Name)
 	if err != nil {
 		s.accessError(w, err)
@@ -122,7 +167,6 @@ func (s *Server) updateAccessUser(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	defer db.Close()
 	if err := db.SetUser(accessActor(r), r.PathValue("id"), req.Name, *req.Disabled); err != nil {
 		s.accessError(w, err)
 		return
@@ -140,7 +184,6 @@ func (s *Server) createAccessGroup(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	defer db.Close()
 	g, err := db.CreateGroup(accessActor(r), req.Name)
 	if err != nil {
 		s.accessError(w, err)
@@ -153,7 +196,6 @@ func (s *Server) setAccessMember(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	defer db.Close()
 	if err := db.SetMember(accessActor(r), r.PathValue("g"), r.PathValue("u"), r.Method == "PUT"); err != nil {
 		s.accessError(w, err)
 		return
@@ -171,7 +213,6 @@ func (s *Server) setAccessGrant(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	defer db.Close()
 	if err := db.SetGrant(accessActor(r), project, r.PathValue("kind"), r.PathValue("id"), r.Method == "PUT"); err != nil {
 		s.accessError(w, err)
 		return
@@ -202,7 +243,6 @@ func (s *Server) issueAccessToken(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	defer db.Close()
 	token, secret, err := db.Issue(accessActor(r), req.UserID, req.Label, project, req.ExpiresAt)
 	if err != nil {
 		s.accessError(w, err)
@@ -216,7 +256,6 @@ func (s *Server) revokeAccessToken(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	defer db.Close()
 	if err := db.Revoke(accessActor(r), r.PathValue("id")); err != nil {
 		s.accessError(w, err)
 		return
@@ -255,7 +294,6 @@ func (s *Server) accessIdentity(w http.ResponseWriter, r *http.Request) {
 			if !ok {
 				return
 			}
-			defer db.Close()
 			_, err = db.Authorize(strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer "), instance)
 			if err != nil && !errors.Is(err, access.ErrDenied) {
 				s.fail(w, 500, fmt.Errorf("cannot check project access"))

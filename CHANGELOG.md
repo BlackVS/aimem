@@ -13,6 +13,13 @@ currently 10); a binary refuses a database newer than it understands.
 
 ## [Unreleased]
 
+### Fixed
+
+- Reuse one server-owned access database handle and avoid migration write locks
+  when opening a current schema; permission checks still read current state.
+  Administrators can remove stale project grants by stored instance ID using
+  `aimem access grant-rm-instance`, including after project deletion or merge.
+
 ### Added
 
 - **Project access foundation for the planned task subsystem.** Hub-local users,

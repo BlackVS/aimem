@@ -81,6 +81,16 @@ func OpenExisting(root string) (*Store, error) {
 }
 
 func (s *Store) migrate() error {
+	var current int
+	if err := s.db.QueryRow("PRAGMA user_version").Scan(&current); err != nil {
+		return err
+	}
+	if current == 1 {
+		return nil
+	}
+	if current > 1 {
+		return fmt.Errorf("access schema %d is newer than supported schema 1", current)
+	}
 	tx, err := s.db.Begin()
 	if err != nil {
 		return err

@@ -137,6 +137,13 @@ ordinary token has an `aimem_user_` prefix, an expiry at most 366 days away, and
 only its digest is stored. Authentication checks revocation/expiry/user state on
 each request. Administration changes and audit records commit together.
 
+The server lazily opens one access-store handle shared by authentication and
+management routes and closes it at shutdown. Failed opens are retryable; ordinary
+authentication does not create a missing store. Opening an already current schema
+does not take a migration write lock. Identity and permission results are not
+cached, so revocation and membership changes remain effective on subsequent calls.
+Stop the service before replacing or restoring its access database file.
+
 Project grants bind to a generated, host-local `access-id` file in the existing
 project directory. It moves on rename and disappears on drop; a newly created
 project receives a new identity. This deliberately avoids writable/synced meta
@@ -165,6 +172,15 @@ do not prevent listing users or tokens, and listing does not create identities.
 The token issue response displays the secret
 once. For direct assignment use `grant add <project> user <user-id>`; `member rm`
 and `grant rm` remove the corresponding access path.
+
+After project deletion or merge, use the stored `project_instance` from `list`
+with `aimem access grant-rm-instance <project-instance> <user|group> <subject-id>`.
+Its admin-only HTTP route is `DELETE /v1/access/grants/{instance}/{kind}/{id}`.
+Removal is audited and can be retried. It only removes the specified grant and
+does not resolve a project name, so recreating that name cannot target the new
+project accidentally. Revoke obsolete project tokens separately by token ID with
+`token-revoke`; their metadata and past audit records are retained. Cleanup is
+explicit administration, not an automatic cross-database project-delete operation.
 
 Admin HTTP clients use `/v1/access`, `/v1/access/users`, `/v1/access/groups`,
 `/v1/projects/{p}/access/{kind}/{id}` and `/v1/access/tokens`; exact bodies and

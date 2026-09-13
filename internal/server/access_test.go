@@ -6,11 +6,131 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
 	"aimem/internal/access"
 )
+
+func TestServerAccessStoreLifecycle(t *testing.T) {
+	s, reg := testServer(t)
+	if _, ok := s.authenticate("admin", "aimem_user_"+strings.Repeat("0", 64)); ok {
+		t.Fatal("invalid credential authenticated")
+	}
+	if _, err := os.Stat(filepath.Join(reg.Root(), "access.db")); !os.IsNotExist(err) {
+		t.Fatalf("authentication created store: %v", err)
+	}
+	const count = 16
+	dbs := make([]*access.Store, count)
+	errs := make([]error, count)
+	var wg sync.WaitGroup
+	for i := range count {
+		wg.Go(func() { dbs[i], errs[i] = s.openAccess(true) })
+	}
+	wg.Wait()
+	for i := range count {
+		if errs[i] != nil || dbs[i] != dbs[0] {
+			t.Fatalf("open %d: %v", i, errs[i])
+		}
+	}
+	u, err := dbs[0].CreateUser("admin", "Alice")
+	if err != nil {
+		t.Fatal(err)
+	}
+	token, secret, err := dbs[0].Issue("admin", u.ID, "agent", "", time.Now().Add(time.Hour))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := s.authenticate("admin", secret); !ok {
+		t.Fatal("credential rejected")
+	}
+	other, err := access.OpenExisting(reg.Root())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := other.Revoke("admin", token.ID); err != nil {
+		t.Fatal(err)
+	}
+	other.Close()
+	if _, ok := s.authenticate("admin", secret); ok {
+		t.Fatal("cached credential survived revocation")
+	}
+	if err := s.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := dbs[0].Snapshot(); err == nil {
+		t.Fatal("store still open")
+	}
+	if _, err := s.openAccess(true); err == nil {
+		t.Fatal("closed server reopened store")
+	}
+	if _, ok := s.authenticate("admin", secret); ok {
+		t.Fatal("closed server authenticated user")
+	}
+	if err := s.Close(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestRemoveGrantForDeletedProjectInstance(t *testing.T) {
+	s, reg := testServer(t)
+	if _, err := reg.Open("original"); err != nil {
+		t.Fatal(err)
+	}
+	instance, err := reg.ProjectAccessID("original")
+	if err != nil {
+		t.Fatal(err)
+	}
+	db, err := s.openAccess(true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	u, err := db.CreateUser("admin", "Alice")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := db.SetGrant("admin", instance, "user", u.ID, true); err != nil {
+		t.Fatal(err)
+	}
+	_, secret, err := db.Issue("admin", u.ID, "agent", instance, time.Now().Add(time.Hour))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := reg.Drop("original"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := reg.Open("original"); err != nil {
+		t.Fatal(err)
+	}
+	newInstance, err := reg.ProjectAccessID("original")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := db.SetGrant("admin", newInstance, "user", u.ID, true); err != nil {
+		t.Fatal(err)
+	}
+	h := s.authWrapper("admin", s.Handler())
+	path := "/v1/access/grants/" + instance + "/user/" + u.ID
+	if w := authedReq(t, h, "DELETE", path, secret, ""); w.Code != 403 {
+		t.Fatalf("ordinary removal: %d", w.Code)
+	}
+	for range 2 {
+		if w := authedReq(t, h, "DELETE", path, "admin", ""); w.Code != 200 {
+			t.Fatalf("admin removal: %d %s", w.Code, w.Body)
+		}
+	}
+	snapshot, err := db.Snapshot()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(snapshot.Grants) != 1 || snapshot.Grants[0].Project != newInstance {
+		t.Fatalf("wrong grants: %+v", snapshot.Grants)
+	}
+	if snapshot.Audit[0].Action != "grant.false" || snapshot.Audit[0].Subject != instance+"/user/"+u.ID {
+		t.Fatalf("missing removal audit: %+v", snapshot.Audit[0])
+	}
+}
 
 func TestAccessManagementAndOrdinaryTokenBoundary(t *testing.T) {
 	s, reg := testServer(t)

@@ -16,8 +16,10 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
+	"aimem/internal/access"
 	"aimem/internal/embed"
 	"aimem/internal/llmrate"
 	"aimem/internal/schema"
@@ -35,10 +37,13 @@ var Version = ""
 
 // Server routes API requests onto a store registry.
 type Server struct {
-	reg  *store.Registry
-	log  *slog.Logger
-	emb  *embed.Client // nil = semantic recall off (BM25 only)
-	ring *LogRing      // nil = no admin Log tab data
+	reg          *store.Registry
+	log          *slog.Logger
+	emb          *embed.Client // nil = semantic recall off (BM25 only)
+	ring         *LogRing      // nil = no admin Log tab data
+	accessMu     sync.Mutex
+	accessDB     *access.Store
+	accessClosed bool
 }
 
 func New(reg *store.Registry, log *slog.Logger) *Server {
@@ -89,6 +94,7 @@ type Route struct {
 func (s *Server) Routes() []Route {
 	return []Route{
 		{"GET", "/v1/access", s.getAccess, true},
+		{"DELETE", "/v1/access/grants/{instance}/{kind}/{id}", s.removeAccessGrant, true},
 		{"GET", "/v1/access/identity", s.accessIdentity, false},
 		{"POST", "/v1/access/users", s.createAccessUser, true},
 		{"PUT", "/v1/access/users/{id}", s.updateAccessUser, true},

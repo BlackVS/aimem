@@ -149,6 +149,14 @@
         "responses": {"200": {"description": "Grant absent"}}
       }
     },
+    "/v1/access/grants/{instance}/{kind}/{id}": {
+      "delete": {
+        "summary": "Remove a grant by stored project-instance ID, including after project deletion",
+        "x-role": "admin",
+        "parameters": [{"name": "instance", "in": "path", "required": true, "schema": {"type": "string"}}, {"name": "kind", "in": "path", "required": true, "schema": {"type": "string", "enum": ["user", "group"]}}, {"name": "id", "in": "path", "required": true, "schema": {"type": "string"}}],
+        "responses": {"200": {"description": "Grant absent; removal audited. Does not revoke tokens or change other grants."}, "400": {"description": "Invalid subject or grant kind"}}
+      }
+    },
     "/v1/access/tokens": {
       "post": {
         "summary": "Issue an ordinary user token; admin issuance is host-console only",
