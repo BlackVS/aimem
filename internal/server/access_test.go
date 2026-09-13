@@ -198,7 +198,7 @@ func TestAccessListingSurvivesUninitializedAndDamagedProjects(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(reg.Root(), "projects", "unused", "access-id")); !os.IsNotExist(err) {
 		t.Fatalf("identity inspection created project identity: %v", err)
 	}
-	for project, status := range map[string]int{"missing": 404, "damaged": 500} {
+	for project, status := range map[string]int{"missing": 404, "damaged": 500, "group-x": 404, "user": 404, "..": 404, "has%20space": 404, "a%2Fb": 404, strings.Repeat("x", 129): 404} {
 		w := authedReq(t, h, "GET", "/v1/access/identity?project="+project, secret, "")
 		if w.Code != status {
 			t.Fatalf("%s identity: %d %s", project, w.Code, w.Body)

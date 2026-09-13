@@ -242,7 +242,7 @@ func (s *Server) accessIdentity(w http.ResponseWriter, r *http.Request) {
 	if project != "" {
 		instance, err := s.reg.ExistingProjectAccessID(project)
 		if err != nil {
-			if errors.Is(err, os.ErrNotExist) {
+			if errors.Is(err, os.ErrNotExist) || errors.Is(err, store.ErrInvalidAccessProject) {
 				s.fail(w, 404, fmt.Errorf("unknown project"))
 			} else {
 				s.log.Error("read project access identity", "err", err)

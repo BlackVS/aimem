@@ -14,6 +14,8 @@ import (
 
 var accessIDPattern = regexp.MustCompile(`^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$`)
 
+var ErrInvalidAccessProject = errors.New("access assignments require an existing ordinary project")
+
 // ProjectAccessID is a host-local identity for authorization grants. It moves
 // with the existing project directory on rename and disappears on deletion.
 // Unlike mutable/synced meta it cannot be overwritten by a writer API call.
@@ -30,7 +32,7 @@ func (r *Registry) ExistingProjectAccessID(project string) (string, error) {
 
 func (r *Registry) projectAccessID(project string, create bool) (string, error) {
 	if !schema.ValidProjectID(project) || project == UserScopeProject || strings.HasPrefix(project, "group-") {
-		return "", fmt.Errorf("access assignments require an existing ordinary project")
+		return "", ErrInvalidAccessProject
 	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
