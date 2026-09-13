@@ -80,6 +80,91 @@
     }
   ],
   "paths": {
+    "/v1/access": {
+      "get": {
+        "summary": "List users, access groups, membership, grants, ordinary-token metadata and the last 100 administration audit events",
+        "x-role": "admin",
+        "responses": {"200": {"description": "Access snapshot; no secrets or token digests"}}
+      }
+    },
+    "/v1/access/identity": {
+      "get": {
+        "summary": "Inspect authenticated identity and current task-write permission for an optional project",
+        "description": "Also available to ordinary user tokens. This foundation exposes no task CRUD yet; ordinary tokens are refused on all other existing non-public endpoints. Legacy writer/admin credentials retain their existing rights.",
+        "x-role": "writer",
+        "parameters": [{"name": "project", "in": "query", "schema": {"type": "string"}}],
+        "responses": {"200": {"description": "Identity and effective task access"}, "401": {"description": "Invalid, expired, revoked or disabled credential"}}
+      }
+    },
+    "/v1/access/users": {
+      "post": {
+        "summary": "Create a user (not an admin)",
+        "x-role": "admin",
+        "requestBody": {"required": true, "content": {"application/json": {"schema": {"type": "object", "additionalProperties": false, "required": ["name"], "properties": {"name": {"type": "string", "maxLength": 128}}}}}},
+        "responses": {"200": {"description": "User ID, name and disabled state"}}
+      }
+    },
+    "/v1/access/users/{id}": {
+      "put": {
+        "summary": "Set user name and disabled state",
+        "x-role": "admin",
+        "parameters": [{"name": "id", "in": "path", "required": true, "schema": {"type": "string"}}],
+        "requestBody": {"required": true, "content": {"application/json": {"schema": {"type": "object", "additionalProperties": false, "required": ["name", "disabled"], "properties": {"name": {"type": "string", "maxLength": 128}, "disabled": {"type": "boolean"}}}}}},
+        "responses": {"200": {"description": "Updated; disabled users cannot authenticate"}}
+      }
+    },
+    "/v1/access/groups": {
+      "post": {
+        "summary": "Create an access group, separate from knowledge groups",
+        "x-role": "admin",
+        "requestBody": {"required": true, "content": {"application/json": {"schema": {"type": "object", "additionalProperties": false, "required": ["name"], "properties": {"name": {"type": "string", "maxLength": 128}}}}}},
+        "responses": {"200": {"description": "Access group ID and name"}}
+      }
+    },
+    "/v1/access/groups/{g}/members/{u}": {
+      "put": {
+        "summary": "Add an existing user to an access group",
+        "x-role": "admin",
+        "parameters": [{"name": "g", "in": "path", "required": true, "schema": {"type": "string"}}, {"name": "u", "in": "path", "required": true, "schema": {"type": "string"}}],
+        "responses": {"200": {"description": "Membership present"}}
+      },
+      "delete": {
+        "summary": "Remove access-group membership",
+        "x-role": "admin",
+        "parameters": [{"name": "g", "in": "path", "required": true, "schema": {"type": "string"}}, {"name": "u", "in": "path", "required": true, "schema": {"type": "string"}}],
+        "responses": {"200": {"description": "Membership absent; other direct/group grants remain effective"}}
+      }
+    },
+    "/v1/projects/{p}/access/{kind}/{id}": {
+      "put": {
+        "summary": "Grant project task contribution to a user or access group",
+        "x-role": "admin",
+        "parameters": [{"$ref": "#/components/parameters/p"}, {"name": "kind", "in": "path", "required": true, "schema": {"type": "string", "enum": ["user", "group"]}}, {"name": "id", "in": "path", "required": true, "schema": {"type": "string"}}],
+        "responses": {"200": {"description": "Grant present; returns stable host-local project instance"}}
+      },
+      "delete": {
+        "summary": "Remove a direct or group project grant",
+        "x-role": "admin",
+        "parameters": [{"$ref": "#/components/parameters/p"}, {"name": "kind", "in": "path", "required": true, "schema": {"type": "string", "enum": ["user", "group"]}}, {"name": "id", "in": "path", "required": true, "schema": {"type": "string"}}],
+        "responses": {"200": {"description": "Grant absent"}}
+      }
+    },
+    "/v1/access/tokens": {
+      "post": {
+        "summary": "Issue an ordinary user token; admin issuance is host-console only",
+        "x-role": "admin",
+        "requestBody": {"required": true, "content": {"application/json": {"schema": {"type": "object", "additionalProperties": false, "required": ["user_id", "label", "expires_at"], "properties": {"user_id": {"type": "string"}, "label": {"type": "string"}, "project": {"type": "string", "description": "Existing project with contributor access; omit or empty for read-only"}, "expires_at": {"type": "string", "format": "date-time", "description": "Future expiry, at most 366 days away"}}}}}},
+        "responses": {"200": {"description": "Ordinary token metadata and secret, shown once; response is no-store"}, "400": {"description": "Invalid fields; role/admin fields are never accepted"}, "403": {"description": "User lacks project access or is disabled"}}
+      }
+    },
+    "/v1/access/tokens/{id}": {
+      "delete": {
+        "summary": "Revoke an ordinary token",
+        "x-role": "admin",
+        "parameters": [{"name": "id", "in": "path", "required": true, "schema": {"type": "string"}}],
+        "responses": {"200": {"description": "Revoked for subsequent requests; attribution retained"}}
+      }
+    },
     "/": {
       "get": {
         "summary": "Public status page (HTML)",
