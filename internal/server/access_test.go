@@ -180,4 +180,28 @@ func TestAccessListingSurvivesUninitializedAndDamagedProjects(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(reg.Root(), "projects", "unused", "access-id")); !os.IsNotExist(err) {
 		t.Fatalf("listing created project identity: %v", err)
 	}
+	db, err := access.Open(reg.Root())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	_, secret, err := db.Issue("admin", result.Users[0].ID, "read-only", "", time.Now().Add(time.Hour))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, project := range []string{"unused", "good"} {
+		w := authedReq(t, h, "GET", "/v1/access/identity?project="+project, secret, "")
+		if w.Code != 200 || !strings.Contains(w.Body.String(), `"task_write":false`) {
+			t.Fatalf("read-only eligibility: %d %s", w.Code, w.Body)
+		}
+	}
+	if _, err := os.Stat(filepath.Join(reg.Root(), "projects", "unused", "access-id")); !os.IsNotExist(err) {
+		t.Fatalf("identity inspection created project identity: %v", err)
+	}
+	for project, status := range map[string]int{"missing": 404, "damaged": 500} {
+		w := authedReq(t, h, "GET", "/v1/access/identity?project="+project, secret, "")
+		if w.Code != status {
+			t.Fatalf("%s identity: %d %s", project, w.Code, w.Body)
+		}
+	}
 }

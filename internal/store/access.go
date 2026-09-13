@@ -22,7 +22,8 @@ func (r *Registry) ProjectAccessID(project string) (string, error) {
 	return r.projectAccessID(project, true)
 }
 
-// ExistingProjectAccessID reads an identity without creating it.
+// ExistingProjectAccessID reads an identity without creating it. An existing
+// project with no identity returns an empty string and no error.
 func (r *Registry) ExistingProjectAccessID(project string) (string, error) {
 	return r.projectAccessID(project, false)
 }
@@ -45,7 +46,7 @@ func (r *Registry) projectAccessID(project string, create bool) (string, error) 
 	path := filepath.Join(dir, "access-id")
 	if _, err := os.Lstat(path); errors.Is(err, os.ErrNotExist) {
 		if !create {
-			return "", err
+			return "", nil
 		}
 		// Publish only a complete, synced value. Link is no-replace, unlike
 		// Rename on Unix: concurrent registries must never replace an ID that

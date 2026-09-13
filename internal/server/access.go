@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"os"
 	"strings"
 	"time"
 
@@ -73,6 +74,10 @@ func (s *Server) getAccess(w http.ResponseWriter, r *http.Request) {
 		}
 		instance, err := s.reg.ExistingProjectAccessID(project)
 		if err != nil {
+			s.log.Warn("cannot read project access identity", "err", err)
+			continue
+		}
+		if instance == "" {
 			continue
 		}
 		instances[instance] = project
@@ -235,22 +240,29 @@ func (s *Server) accessIdentity(w http.ResponseWriter, r *http.Request) {
 	project := r.URL.Query().Get("project")
 	allowed := false
 	if project != "" {
-		instance, err := s.reg.ProjectAccessID(project)
+		instance, err := s.reg.ExistingProjectAccessID(project)
 		if err != nil {
-			s.fail(w, 404, fmt.Errorf("unknown project"))
+			if errors.Is(err, os.ErrNotExist) {
+				s.fail(w, 404, fmt.Errorf("unknown project"))
+			} else {
+				s.log.Error("read project access identity", "err", err)
+				s.fail(w, 500, fmt.Errorf("project access identity unavailable"))
+			}
 			return
 		}
-		db, ok := s.accessStore(w)
-		if !ok {
-			return
+		if instance != "" {
+			db, ok := s.accessStore(w)
+			if !ok {
+				return
+			}
+			defer db.Close()
+			_, err = db.Authorize(strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer "), instance)
+			if err != nil && !errors.Is(err, access.ErrDenied) {
+				s.fail(w, 500, fmt.Errorf("cannot check project access"))
+				return
+			}
+			allowed = err == nil
 		}
-		defer db.Close()
-		_, err = db.Authorize(strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer "), instance)
-		if err != nil && !errors.Is(err, access.ErrDenied) {
-			s.fail(w, 500, fmt.Errorf("cannot check project access"))
-			return
-		}
-		allowed = err == nil
 	}
 	s.ok(w, map[string]any{"user_id": id.UserID, "token_id": id.TokenID, "name": id.Name, "role": "user", "task_read": "all-projects", "project": project, "task_write": allowed})
 }
