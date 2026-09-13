@@ -3,6 +3,8 @@ package server
 import (
 	"encoding/json"
 	"net/http"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -130,11 +132,52 @@ func TestAccessRejectsMissingProjectAndInvalidCredential(t *testing.T) {
 	if w.Code == 200 {
 		t.Fatal("missing project accepted")
 	}
+	if strings.Contains(w.Body.String(), "lstat") || strings.Contains(w.Body.String(), "projects") {
+		t.Fatal("grant response exposes filesystem details", w.Body)
+	}
+	w = authedReq(t, h, "POST", "/v1/access/tokens", "admin", `{"project":"missing"}`)
+	if w.Code != 400 || strings.Contains(w.Body.String(), "lstat") || strings.Contains(w.Body.String(), "projects") {
+		t.Fatal("token issue response exposes filesystem details", w.Body)
+	}
 	if _, err := reg.OpenExisting("missing"); err == nil {
 		t.Fatal("access grant created project")
 	}
 	// Failed ordinary authentication does not fall back to configured admin.
 	if w := authedReq(t, h, "GET", "/v1/access", "aimem_user_"+strings.Repeat("0", 64), ""); w.Code != http.StatusUnauthorized {
 		t.Fatalf("invalid ordinary token: %d", w.Code)
+	}
+}
+
+func TestAccessListingSurvivesUninitializedAndDamagedProjects(t *testing.T) {
+	s, reg := testServer(t)
+	for _, project := range []string{"good", "unused", "damaged"} {
+		if _, err := reg.Open(project); err != nil {
+			t.Fatal(err)
+		}
+	}
+	id, err := reg.ProjectAccessID("good")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(reg.Root(), "projects", "husk"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(reg.Root(), "projects", "damaged", "access-id"), []byte("partial"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	h := s.authWrapper("admin", s.Handler())
+	if w := authedReq(t, h, "POST", "/v1/access/users", "admin", `{"name":"Alice"}`); w.Code != 200 {
+		t.Fatal(w.Body)
+	}
+	w := authedReq(t, h, "GET", "/v1/access", "admin", "")
+	var result struct {
+		Users    []access.User     `json:"users"`
+		Projects map[string]string `json:"projects"`
+	}
+	if w.Code != 200 || json.Unmarshal(w.Body.Bytes(), &result) != nil || len(result.Users) != 1 || result.Users[0].Name != "Alice" || len(result.Projects) != 1 || result.Projects[id] != "good" {
+		t.Fatalf("listing unavailable or incomplete: %d %s", w.Code, w.Body)
+	}
+	if _, err := os.Stat(filepath.Join(reg.Root(), "projects", "unused", "access-id")); !os.IsNotExist(err) {
+		t.Fatalf("listing created project identity: %v", err)
 	}
 }

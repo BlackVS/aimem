@@ -154,7 +154,10 @@ aimem access user-set <user-id> Alice disabled
 
 Use `-` instead of the project to issue a read-only token. `list` returns IDs,
 membership/grants, token metadata, a project-instance/name map, and the last 100
-audit entries; no secrets or digests. The token issue response displays the secret
+audit entries; no secrets or digests. The project map includes only readable,
+existing access identities; unrelated damaged or uninitialized project directories
+do not prevent listing users or tokens, and listing does not create identities.
+The token issue response displays the secret
 once. For direct assignment use `grant add <project> user <user-id>`; `member rm`
 and `grant rm` remove the corresponding access path.
 

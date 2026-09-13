@@ -71,10 +71,9 @@ func (s *Server) getAccess(w http.ResponseWriter, r *http.Request) {
 		if project == store.UserScopeProject || strings.HasPrefix(project, "group-") {
 			continue
 		}
-		instance, err := s.reg.ProjectAccessID(project)
+		instance, err := s.reg.ExistingProjectAccessID(project)
 		if err != nil {
-			s.fail(w, 500, fmt.Errorf("cannot resolve project access identity"))
-			return
+			continue
 		}
 		instances[instance] = project
 	}
@@ -159,7 +158,8 @@ func (s *Server) setAccessMember(w http.ResponseWriter, r *http.Request) {
 func (s *Server) setAccessGrant(w http.ResponseWriter, r *http.Request) {
 	project, err := s.reg.ProjectAccessID(r.PathValue("p"))
 	if err != nil {
-		s.fail(w, 400, err)
+		s.log.Error("resolve access project", "err", err)
+		s.fail(w, 400, fmt.Errorf("project is unavailable for access assignments"))
 		return
 	}
 	db, ok := s.accessStore(w)
@@ -188,7 +188,8 @@ func (s *Server) issueAccessToken(w http.ResponseWriter, r *http.Request) {
 		var err error
 		project, err = s.reg.ProjectAccessID(req.Project)
 		if err != nil {
-			s.fail(w, 400, err)
+			s.log.Error("resolve access project", "err", err)
+			s.fail(w, 400, fmt.Errorf("project is unavailable for access assignments"))
 			return
 		}
 	}

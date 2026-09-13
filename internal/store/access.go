@@ -19,6 +19,15 @@ var accessIDPattern = regexp.MustCompile(`^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-
 // Unlike mutable/synced meta it cannot be overwritten by a writer API call.
 // A recreated project with the same name never inherits the old grants.
 func (r *Registry) ProjectAccessID(project string) (string, error) {
+	return r.projectAccessID(project, true)
+}
+
+// ExistingProjectAccessID reads an identity without creating it.
+func (r *Registry) ExistingProjectAccessID(project string) (string, error) {
+	return r.projectAccessID(project, false)
+}
+
+func (r *Registry) projectAccessID(project string, create bool) (string, error) {
 	if !schema.ValidProjectID(project) || project == UserScopeProject || strings.HasPrefix(project, "group-") {
 		return "", fmt.Errorf("access assignments require an existing ordinary project")
 	}
@@ -35,6 +44,9 @@ func (r *Registry) ProjectAccessID(project string) (string, error) {
 	}
 	path := filepath.Join(dir, "access-id")
 	if _, err := os.Lstat(path); errors.Is(err, os.ErrNotExist) {
+		if !create {
+			return "", err
+		}
 		// Publish only a complete, synced value. Link is no-replace, unlike
 		// Rename on Unix: concurrent registries must never replace an ID that
 		// another writer has already bound grants to.
