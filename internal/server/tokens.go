@@ -19,6 +19,9 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
+
+	"aimem/internal/access"
 )
 
 // TokenEntry is one named token. Only the digest is ever on disk; the
@@ -84,8 +87,10 @@ func HashToken(secret string) string {
 // Identity is who authenticated on the TCP listener. Requests over the
 // local unix socket carry none and are trusted as the local operator.
 type Identity struct {
-	Name string
-	Role string // "writer" | "admin"
+	Name    string
+	Role    string // legacy "writer"/"admin", or scoped ordinary "user"
+	UserID  string
+	TokenID string
 }
 
 type identityKey struct{}
@@ -114,6 +119,20 @@ func (s *Server) authenticate(envToken, presented string) (Identity, bool) {
 		if subtle.ConstantTimeCompare(presentedDigest, []byte(HashToken(envToken))) == 1 {
 			id, ok = Identity{Name: "env", Role: "admin"}, true
 		}
+	}
+	// Ordinary user credentials never inherit a legacy writer role. Admin
+	// credentials remain exclusively in the host-managed registry/environment.
+	if !ok && strings.HasPrefix(presented, "aimem_user_") {
+		db, err := access.OpenExisting(s.reg.Root())
+		if err != nil {
+			return Identity{}, false
+		}
+		defer db.Close()
+		user, err := db.Authenticate(presented)
+		if err != nil {
+			return Identity{}, false
+		}
+		return Identity{Name: user.Name, Role: "user", UserID: user.UserID, TokenID: user.TokenID}, true
 	}
 	for _, t := range LoadTokens(s.reg.Root()) {
 		if len(t.SHA256) != sha256.Size*2 {

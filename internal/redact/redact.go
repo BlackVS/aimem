@@ -37,6 +37,7 @@ var patterns = []pattern{
 	// Common credential assignments: KEY=value, "api_key": "value", etc.
 	{"credential assignment", false, regexp.MustCompile(`(?i)\b(api[_-]?key|apikey|secret[_-]?key|client[_-]?secret|secret|access[_-]?token|refresh[_-]?token|auth[_-]?token|token|passwd|password|access[_-]?key)\b["']?\s*[:=]\s*["']?[^\s"',;]{8,}`)},
 	// Well-known token shapes.
+	{"aimem user token", true, regexp.MustCompile(`\baimem_user_[0-9a-f]{64}\b`)},
 	{"AWS access key id", true, regexp.MustCompile(`\bAKIA[0-9A-Z]{16}\b`)},
 	{"GitHub PAT", true, regexp.MustCompile(`\bghp_[A-Za-z0-9]{30,}\b`)},
 	{"GitHub fine-grained PAT", true, regexp.MustCompile(`\bgithub_pat_[A-Za-z0-9_]{30,}\b`)},

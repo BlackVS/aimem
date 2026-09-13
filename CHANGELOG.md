@@ -13,6 +13,17 @@ currently 10); a binary refuses a database newer than it understands.
 
 ## [Unreleased]
 
+### Added
+
+- **Project access foundation for the planned task subsystem.** Hub-local users,
+  access groups, direct/group project grants, and expiring/revocable ordinary
+  tokens, with transactional administration audit. Admin-only HTTP endpoints and
+  `aimem access` host CLI manage them; `/v1/access/identity` checks current identity
+  and project write eligibility. Host-console admin tokens keep full access.
+  New ordinary tokens cannot access legacy writer APIs or MCP until task-specific
+  permissions are wired in the next increment; existing credentials retain their
+  behavior. Project grants survive rename and are not inherited on name reuse.
+
 ## [0.3.31] — 2026-09-12
 
 ### Changed

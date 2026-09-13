@@ -88,6 +88,17 @@ type Route struct {
 // /v1/status) are exempted from auth in authWrapper, not here.
 func (s *Server) Routes() []Route {
 	return []Route{
+		{"GET", "/v1/access", s.getAccess, true},
+		{"GET", "/v1/access/identity", s.accessIdentity, false},
+		{"POST", "/v1/access/users", s.createAccessUser, true},
+		{"PUT", "/v1/access/users/{id}", s.updateAccessUser, true},
+		{"POST", "/v1/access/groups", s.createAccessGroup, true},
+		{"PUT", "/v1/access/groups/{g}/members/{u}", s.setAccessMember, true},
+		{"DELETE", "/v1/access/groups/{g}/members/{u}", s.setAccessMember, true},
+		{"PUT", "/v1/projects/{p}/access/{kind}/{id}", s.setAccessGrant, true},
+		{"DELETE", "/v1/projects/{p}/access/{kind}/{id}", s.setAccessGrant, true},
+		{"POST", "/v1/access/tokens", s.issueAccessToken, true},
+		{"DELETE", "/v1/access/tokens/{id}", s.revokeAccessToken, true},
 		{"GET", "/v1/health", s.health, false},
 		{"POST", "/v1/events", s.append, false},
 		{"GET", "/v1/projects", s.projects, false},
@@ -424,6 +435,13 @@ func (s *Server) authWrapper(token string, next http.Handler) http.Handler {
 		id, ok := s.authenticate(token, presented)
 		if !ok {
 			w.WriteHeader(http.StatusUnauthorized)
+			return
+		}
+		// This access-control foundation does not grant new ordinary tokens
+		// the legacy writer surface (nor /mcp's trusted local API client).
+		// Task routes will get explicit permissions in their own increment.
+		if id.Role == "user" && !(r.Method == "GET" && r.URL.Path == "/v1/access/identity") {
+			s.fail(w, http.StatusForbidden, fmt.Errorf("ordinary token is not authorized for this endpoint"))
 			return
 		}
 		next.ServeHTTP(w, r.WithContext(withIdentity(r.Context(), id)))
