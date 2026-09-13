@@ -19,6 +19,30 @@ func testStore(t *testing.T) *Store {
 	t.Cleanup(func() { s.Close() })
 	return s
 }
+
+func TestOpenExistingDoesNotAcquireWriteLock(t *testing.T) {
+	root := t.TempDir()
+	first, err := Open(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer first.Close()
+	tx, err := first.db.Begin()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer tx.Rollback()
+	// A current schema can be opened/read while another connection owns the
+	// reserved write lock. A migration transaction here would time out.
+	second, err := OpenExisting(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer second.Close()
+	if _, err := second.Authenticate("invalid"); !errors.Is(err, ErrDenied) {
+		t.Fatalf("read under reserved writer: %v", err)
+	}
+}
 func TestPermissionsAndRevocation(t *testing.T) {
 	s := testStore(t)
 	u, err := s.CreateUser("admin", "Alice")

@@ -15,6 +15,7 @@ func TestAccessCommandContracts(t *testing.T) {
 		{[]string{"group-add", "Developers"}, "POST", "/v1/access/groups"},
 		{[]string{"member", "add", "g", "u"}, "PUT", "/v1/access/groups/g/members/u"},
 		{[]string{"grant", "rm", "p", "user", "u"}, "DELETE", "/v1/projects/p/access/user/u"},
+		{[]string{"grant-rm-instance", "instance", "group", "g"}, "DELETE", "/v1/access/grants/instance/group/g"},
 		{[]string{"token-issue", "u", "agent", "-", "2027-01-01T00:00:00Z"}, "POST", "/v1/access/tokens"},
 		{[]string{"token-revoke", "t"}, "DELETE", "/v1/access/tokens/t"},
 	} {

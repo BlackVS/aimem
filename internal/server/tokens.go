@@ -20,8 +20,6 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-
-	"aimem/internal/access"
 )
 
 // TokenEntry is one named token. Only the digest is ever on disk; the
@@ -123,11 +121,10 @@ func (s *Server) authenticate(envToken, presented string) (Identity, bool) {
 	// Ordinary user credentials never inherit a legacy writer role. Admin
 	// credentials remain exclusively in the host-managed registry/environment.
 	if !ok && strings.HasPrefix(presented, "aimem_user_") {
-		db, err := access.OpenExisting(s.reg.Root())
+		db, err := s.openAccess(false)
 		if err != nil {
 			return Identity{}, false
 		}
-		defer db.Close()
 		user, err := db.Authenticate(presented)
 		if err != nil {
 			return Identity{}, false

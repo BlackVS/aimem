@@ -16,6 +16,7 @@ const accessUsage = `usage: aimem access list
        aimem access group-add <name>
        aimem access member <add|rm> <group-id> <user-id>
        aimem access grant <add|rm> <project> <user|group> <subject-id>
+       aimem access grant-rm-instance <project-instance> <user|group> <subject-id>
        aimem access token-issue <user-id> <label> <project|-> <expiry-RFC3339>
        aimem access token-revoke <token-id>
 
@@ -111,6 +112,10 @@ func accessRequest(args []string) (method, path string, body any, err error) {
 	case "token-revoke":
 		if len(args) == 2 {
 			return "DELETE", "/v1/access/tokens/" + q(args[1]), nil, nil
+		}
+	case "grant-rm-instance":
+		if len(args) == 4 && (args[2] == "user" || args[2] == "group") {
+			return "DELETE", "/v1/access/grants/" + q(args[1]) + "/" + args[2] + "/" + q(args[3]), nil, nil
 		}
 	}
 	return fail()

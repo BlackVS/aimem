@@ -273,6 +273,7 @@ func serve() error {
 	}
 	defer reg.Close()
 	srv := server.New(reg, log).WithLogRing(ring)
+	defer srv.Close()
 	httpSrv, _, err := srv.ListenAndServe(root)
 	if err != nil {
 		return err
@@ -298,6 +299,9 @@ func serve() error {
 		tcpSrv.Shutdown(ctx)
 	}
 	httpSrv.Shutdown(ctx)
+	if err := srv.Close(); err != nil {
+		return err
+	}
 	reg.Close()
 	if err := server.WriteSentinel(root); err != nil {
 		return err

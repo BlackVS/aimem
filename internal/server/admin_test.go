@@ -23,7 +23,9 @@ func testServer(t *testing.T) (*Server, *store.Registry) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { reg.Close() })
-	return New(reg, slog.New(slog.NewTextHandler(new(strings.Builder), nil))), reg
+	s := New(reg, slog.New(slog.NewTextHandler(new(strings.Builder), nil)))
+	t.Cleanup(func() { s.Close() })
+	return s, reg
 }
 
 func req(t *testing.T, h http.Handler, method, path, body string) *httptest.ResponseRecorder {
