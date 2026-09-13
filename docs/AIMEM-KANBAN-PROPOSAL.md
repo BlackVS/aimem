@@ -1,7 +1,9 @@
 # Aimem Kanban Proposal
 
-Status: **proposal, not implemented**, revised 2026-09-13 against v0.3.31,
-source `207997a81ef3f4cf017b3ffcb573a770dcac3d4b`.
+Status: **task subsystem proposed, not implemented**, revised 2026-09-13 against
+`dcc466f305c6a2d9ce5927a3e0c7770e1c3893fe`. The access foundation is merged in
+[PR #35](https://github.com/BlackVS/aimem/pull/35); task comments are part of the
+initial task delivery below.
 
 ## Purpose
 
@@ -28,7 +30,7 @@ after the task APIs, permissions and upgrade behavior have proved reliable.
 | MCP collection lists expose metadata, without typed task filters | Add task-specific list/get/update tools |
 | Journal events capture turns, failures and compaction; retention can delete them | Task changes need their own history |
 | SESSION-STATE is an authored local file, published and reconciled as a document | Link to tasks; do not render over the handoff |
-| Named tokens currently have global writer/admin roles | Project-scoped task writes need the access-control extension |
+| Access users, groups, project grants and ordinary tokens are implemented; ordinary tokens only reach identity inspection | Task operations must explicitly apply the existing project authorization checks |
 
 Sources: [storage guide](STORAGE-GUIDE.md), [main design](DESIGN.md),
 [collections](DESIGN-structured-docs.md),
@@ -46,6 +48,7 @@ storage does not require a new server or a central task database. Start with:
 
 - `tasks`: current task state and revision.
 - `task_history`: accepted changes, actor, time, and resulting revision.
+- `task_comments`: append-only discussion, separate from automatic change history.
 
 A task contains an immutable UUID, title, objective, acceptance criteria,
 non-goals, state, optional assignee and blocker, dependency task IDs, current
@@ -54,8 +57,8 @@ revision, and creation/update times. Keep long reports in documents or CI/review
 systems and link to them. Set explicit body/history limits before implementation;
 never silently prune task history using the collection revision policy.
 
-Writes use expected-revision CAS. Update task state and append its history entry
-in the same transaction. On conflict, return current state for the writer to
+Task field/state writes use expected-revision CAS. Update task state and append
+its history entry in the same transaction. On conflict, return current state for the writer to
 re-read and reapply intent. Creation/retries need an idempotency key so a timeout
 does not produce duplicate tasks or changes. Task history is independent of
 session checkpointing and must be included in backup/restore.
@@ -64,6 +67,45 @@ One task has one owning project. Cross-project work links separate tasks; no
 copies of a task on several boards. Dependency links are advisory initially;
 strict cycle enforcement and atomic changes across projects are deferred.
 Task assignment may reference a user or access group, but grants no permissions.
+
+## Task Comments
+
+Each task has a chronological discussion for progress notes, questions, review
+findings and handoffs. A comment contains an immutable UUID, owning task ID,
+Markdown body, server-assigned author and creation time. Attribute ordinary
+callers by stable user and token IDs; retain a display-name snapshot so later
+renaming does not rewrite past attribution. Existing admin callers use their
+authenticated admin identity. Clients cannot submit a different author or time.
+
+Store comments with their task in its project database and include them in
+backup/restore. Reading follows task-read permissions; appending requires the
+same current project assignment and token write scope as changing the task.
+Read-only and other-project tokens cannot comment. Admin can append to any task.
+Comments remain readable after task archival and project rename. Archived tasks
+reject new comments until an authorized task update unarchives them; terminal
+state alone does not prevent discussion.
+
+Comments are append-only in v1, including for their author and admin: corrections
+are new comments. No edit/delete endpoint, threads, replies, reactions, attachments
+or notifications initially. Keep automatic state/field changes in `task_history`;
+a future task page may show history and comments together without duplicating
+comment bodies into history.
+
+Append does not change the task's revision or require expected-revision CAS;
+independent comments must not cause task-edit conflicts. Check task existence,
+archive state and insert the comment within one project transaction. Require an
+idempotency key scoped to task and authenticated caller: replaying the same key
+and body returns the original comment, while a changed body returns a conflict.
+Recheck authorization on every attempt, including retries. A committed append
+must survive a lost response without producing a duplicate on retry; after
+authorization, replay returns that comment even if the task was since archived.
+
+Accept nonblank UTF-8 Markdown up to 32 KiB per comment; reject oversized bodies
+and detected secrets using aimem's authored-content checks. Lists use stable
+server append order and cursor pagination, default 20 and maximum 100 comments.
+Task summaries and task JSON link to discussion instead of embedding an unbounded
+thread. Comments are untrusted authored content for agents; any later Markdown UI
+must render them safely without executing embedded HTML or scripts.
 
 ## States
 
@@ -103,8 +145,8 @@ Use aimem's existing HTTPS listener and token validation for both MCP and direct
 HTTP clients; extend the authenticated identity with user/project permissions.
 
 The hub enforces the same rule for every mutation through MCP, HTTP, CLI and UI,
-including evidence, assignment and archive changes. A project argument or editable
-configuration cannot grant access. Task assignees do not act as locks; authorized
+including comments, evidence, assignment and archive changes. A project argument
+or editable configuration cannot grant access. Task assignees do not act as locks; authorized
 same-project agents may update using CAS. No automatic curator-driven transitions.
 
 ## Direct References: MCP Or HTTP JSON
@@ -121,6 +163,9 @@ Proposed resources, **not existing routes**:
 | `GET /v1/projects/{project}/tasks` | Filtered, paginated task summaries |
 | `GET /v1/tasks/{id}` | Current task JSON, including status and next action |
 | `GET /v1/tasks/{id}/history` | Paginated change history |
+| `GET /v1/tasks/{id}/comments` | Paginated discussion |
+| `POST /v1/tasks/{id}/comments` | Append a comment with an idempotency key |
+| `GET /v1/tasks/{id}/comments/{comment_id}` | Permanent individual comment JSON |
 | `/admin?task={id}` | Small human-readable task-only view |
 
 A document can contain a direct link such as:
@@ -136,6 +181,12 @@ use normal bearer authentication; errors must not masquerade as task JSON or
 return a login page in place of data. Links contain no credentials and do not
 grant access. An external client needs an authorized token, but no MCP or SDK.
 
+Comment JSON includes its own canonical URL and parent task URL. Individual
+comment references use the task and comment UUIDs, survive project rename and
+archival, and require the same authentication as task references. Looking up a
+comment under a different task ID returns not found. Comment routes above are
+proposed contracts; they do not exist in the merged access foundation.
+
 Task URLs use immutable IDs so title changes, state transitions, and archiving
 cannot break references. Resolve IDs from existing project partitions; any lookup
 index is derived and rebuildable. Preserve reachability after project rename and
@@ -150,7 +201,8 @@ placeholder origins; internal task URLs stay out of public PR text where require
 ## Task Tools And Dashboard
 
 Initial task MCP operations: `list_tasks`, `get_task`, `create_task`, `update_task`,
-and `get_task_history`. `update_task` handles permitted field/state/archive changes
+`get_task_history`, `list_task_comments`, `get_task_comment`, and `add_task_comment`.
+`update_task` handles permitted field/state/archive changes
 through one validated service with expected revision and idempotency key. Add more
 specialized tools only when needed. Lists support state and assignee filters,
 exclude archived tasks by default, and return small paginated summaries.
@@ -163,6 +215,8 @@ The first UI can be a task list and task-only page with copy-link actions. Later
 add a Kanban board using the existing project selector and the same list/update
 API. Dragging a card is an ordinary CAS state change; show conflicts instead of
 silently overwriting. There is no separate dashboard database.
+The task-only page includes paginated discussion, add-comment and copy-comment-link
+actions through the same API.
 
 ## Evidence And Repository Rules
 
@@ -196,14 +250,18 @@ queue or cross-hub task protocol in v1.
 Deliver serial increments:
 
 1. Minimal users/groups/project assignments and tokens on the existing HTTPS/auth
-   foundation, with admin-only management and permission tests.
-2. Task storage/service with migrations and CAS history, followed by MCP and HTTP
-   task operations and stable JSON references; trial real project tasks.
+   foundation, with admin-only management and permission tests (merged). Before
+   task traffic grows, finish access-store reuse and stale project-grant cleanup.
+2. Task storage/service with migrations, CAS history and append-only comments,
+   followed by MCP and HTTP task/comment operations and stable JSON references;
+   trial real project tasks.
 3. Task list/detail page, followed by the board on the same API.
 
 Verify project write boundaries and admin access, concurrent writes/retries,
 history atomicity, HTTP/MCP parity, direct links after archive/rename/restore,
-and resumption from a linked task. Specify safe project removal and backup behavior
+comment attribution, pagination, size limits, retry deduplication, independent
+concurrent appends, rejection of cross-project/read-only comment writes, and
+resumption from a linked task or comment. Specify safe project removal and backup behavior
 before shipping storage changes. Use the repository's sensitive-surface review
 gate for auth/schema changes.
 

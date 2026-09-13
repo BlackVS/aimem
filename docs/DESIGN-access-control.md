@@ -1,7 +1,7 @@
 # Users, Groups, Project Access, And Tokens
 
-Status: **access foundation implemented locally; task/UI integration pending**,
-2026-09-13. Companion to
+Status: **access foundation merged in PR #35; task/UI integration pending**,
+2026-09-13, source `dcc466f305c6a2d9ce5927a3e0c7770e1c3893fe`. Companion to
 [Kanban](AIMEM-KANBAN-PROPOSAL.md). Keep the first version small.
 
 Proposed milestone: v0.4.0, alongside Kanban. Reuse aimem's built-in HTTPS
@@ -41,6 +41,11 @@ and the token's write-project restriction to match the task's actual project.
 A user assigned to several projects can have a separate agent token for each.
 Removing the user's last assignment to a project removes write access there.
 Disabled users and expired/revoked tokens cannot access tasks.
+
+Task comments use the same permissions: all authenticated task readers may read
+them; appending requires project write access. Comment authorship comes from the
+authenticated caller, using stable user/token IDs for ordinary credentials.
+Comments are append-only in v1, so no role has a comment edit/delete operation.
 
 The hub enforces this for HTTP and MCP alike. Request parameters, current
 working directory, and task assignment are not authorization. Admin has full
