@@ -224,9 +224,12 @@ func repoKey(repo string) string {
 	return hex.EncodeToString(sum[:8])
 }
 
-// CacheDir is where the files of a commit live once fetched.
+// CacheDir is where the files of one selection live once fetched: keyed
+// by repository, commit and manifest, because two manifests at one commit
+// are two different sets and each must serve from its own complete entry.
 func CacheDir(root string, ref Ref) string {
-	return filepath.Join(root, "process", repoKey(ref.Repo), ref.Commit)
+	sum := sha256.Sum256([]byte(ref.Manifest))
+	return filepath.Join(root, "process", repoKey(ref.Repo), ref.Commit+"-"+hex.EncodeToString(sum[:4]))
 }
 
 // FetchTimeout bounds one Git contact. Only a cache miss pays it: the
@@ -276,7 +279,7 @@ func fetchNoValidate(ctx context.Context, root string, ref Ref) Result {
 			return Result{Status: StatusUnavailable, Err: fmt.Errorf("commit %s is not what %s points at (fetched at depth 1); select the commit the ref holds, or a ref that holds the commit", ref.Commit[:12], ref.Ref)}
 		}
 	}
-	tmp, err := os.MkdirTemp(filepath.Dir(dir), ".tmp-"+ref.Commit[:12]+"-")
+	tmp, err := os.MkdirTemp(filepath.Dir(dir), ".tmp-"+filepath.Base(dir)+"-")
 	if err != nil {
 		return Result{Status: StatusUnavailable, Err: err}
 	}
@@ -400,10 +403,28 @@ func git(ctx context.Context, dir string, args ...string) ([]byte, error) {
 		cmd.Dir = dir
 	}
 	// Never a prompt: a private source without credentials is a denial,
-	// reported as one, not a hung session start.
+	// reported as one, not a hung session start. ssh in batch mode for
+	// the same reason, unless the machine configured its own command.
 	cmd.Env = append(os.Environ(), "GIT_TERMINAL_PROMPT=0", "GCM_INTERACTIVE=never")
-	out, err := cmd.CombinedOutput()
-	return out, err
+	if os.Getenv("GIT_SSH_COMMAND") == "" {
+		cmd.Env = append(cmd.Env, "GIT_SSH_COMMAND=ssh -o BatchMode=yes")
+	}
+	return runBounded(cmd)
+}
+
+// PipeDrainDelay bounds how long a finished (or killed) git may keep us
+// waiting for its output pipes: a transport or credential helper that
+// inherited them and stalls would otherwise hold the session start past
+// the context deadline (os/exec: Wait waits for the pipes, not the
+// process, and WaitDelay is what closes them).
+const PipeDrainDelay = 2 * time.Second
+
+// runBounded runs a context-bound command and returns its combined
+// output, guaranteed to return within the context deadline plus
+// PipeDrainDelay even if a descendant keeps the output pipes open.
+func runBounded(cmd *exec.Cmd) ([]byte, error) {
+	cmd.WaitDelay = PipeDrainDelay
+	return cmd.CombinedOutput()
 }
 
 func show(ctx context.Context, repoDir, commit, p string) ([]byte, error) {
@@ -500,9 +521,20 @@ func Bootstrap(set *Set, projectID string, installed func(name string) bool) (st
 	}
 	unit := b.String()
 	if len(unit) > set.Manifest.BudgetBytes {
-		return "", fmt.Errorf("process bootstrap is %d bytes, over the manifest's budget of %d: not injected — read it with `aimem process show`", len(unit), set.Manifest.BudgetBytes)
+		return "", fmt.Errorf("process bootstrap is %d bytes, over the manifest's budget of %d: not injected — read it in full with `aimem process show --full`", len(unit), set.Manifest.BudgetBytes)
 	}
 	return unit, nil
+}
+
+// BootstrapFull is Bootstrap without the budget: the retrieval path the
+// over-budget notice names, for a person or an agent reading the whole
+// unit on demand rather than receiving it at session start.
+func BootstrapFull(set *Set, projectID string, installed func(name string) bool) string {
+	saved := set.Manifest.BudgetBytes
+	set.Manifest.BudgetBytes = int(^uint(0) >> 1)
+	unit, _ := Bootstrap(set, projectID, installed)
+	set.Manifest.BudgetBytes = saved
+	return unit
 }
 
 // SkillInstalled reports whether a skill directory of that name exists in

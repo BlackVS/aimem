@@ -30,7 +30,7 @@ import (
 func processCmd(args []string) error {
 	usage := `usage: aimem process select <repo> <commit> <manifest> [--ref <branch|tag>] [--expect <commit>] [-p <project>]
        aimem process clear --expect <commit> [-p <project>]
-       aimem process show [--template <kind>] [-p <project>]
+       aimem process show [--full] [--template <kind>] [-p <project>]
 
 select/clear run on the hub host (admin); show runs anywhere and prints
 what the session-start hook injects for this project.`
@@ -91,10 +91,11 @@ what the session-start hook injects for this project.`
 		fs := flag.NewFlagSet("process show", flag.ExitOnError)
 		p := fs.String("p", "", "project id (default: current directory's project)")
 		tmpl := fs.String("template", "", "print this template from the process set instead of the bootstrap")
+		full := fs.Bool("full", false, "print the whole unit regardless of the manifest's injection budget")
 		fs.Parse(args[1:])
 		// A named project is still resolved through this directory's hub
 		// binding: the reference lives on the hub the project is bound to.
-		text, set := processBootstrap(".", *p)
+		text, set := processBootstrap(".", *p, *full)
 		if *tmpl != "" {
 			if set == nil {
 				return errors.New("process set unavailable: " + strings.TrimSpace(text))
@@ -130,8 +131,9 @@ const hubLookupTimeout = 1500 * time.Millisecond
 // the handbook when the hub says tasks are on and a process reference
 // is selected, or an explicit availability notice otherwise. Every step
 // is bounded and fails to a notice, never to a blocked session start.
-// The returned Set is non-nil only when a process set was obtained.
-func processBootstrap(dir, projectID string) (string, *process.Set) {
+// The returned Set is non-nil only when a process set was obtained. full
+// skips the injection budget: the read path the over-budget notice names.
+func processBootstrap(dir, projectID string, full bool) (string, *process.Set) {
 	root := stateRoot()
 	id := projectID
 	if id == "" {
@@ -202,9 +204,14 @@ func processBootstrap(dir, projectID string) (string, *process.Set) {
 		return fmt.Sprintf("process context unavailable: %v (selection %s @ %s)", res.Err, ref.Repo, ref.Commit[:12]), nil
 	}
 	home, _ := os.UserHomeDir()
-	text, err := process.Bootstrap(res.Set, id, process.SkillInstalled(dir, home))
-	if err != nil {
-		return "process context unavailable: " + err.Error(), res.Set
+	var text string
+	if full {
+		text = process.BootstrapFull(res.Set, id, process.SkillInstalled(dir, home))
+	} else {
+		var err error
+		if text, err = process.Bootstrap(res.Set, id, process.SkillInstalled(dir, home)); err != nil {
+			return "process context unavailable: " + err.Error(), res.Set
+		}
 	}
 	if observed != "" {
 		text = fmt.Sprintf("NOTE: the hub is unreachable; the process selection below is as last observed at %s and tasks availability is unknown. Cached context never authorizes a task write.\n", observed) + text
@@ -245,7 +252,7 @@ func hubGetJSON(hub *adapter.HubConfig, path string, into any) error {
 // processNotice is the session-start hook's slice: the bootstrap, or the
 // availability notice, as its own block after the handoff.
 func processNotice() string {
-	text, _ := processBootstrap(".", "")
+	text, _ := processBootstrap(".", "", false)
 	if strings.TrimSpace(text) == "" {
 		return ""
 	}

@@ -476,6 +476,36 @@ func (d *DB) SetMeta(key, value string) error {
 	return err
 }
 
+// MetaTx runs fn inside one IMMEDIATE transaction over the meta table, so
+// a read, a comparison and the writes that depend on it are one atomic
+// step: two callers that both read the same value cannot both write —
+// the second one's fn sees the first one's result. fn returning an error
+// rolls everything back and that error is returned.
+func (d *DB) MetaTx(fn func(get func(key string) (string, error), set func(key, value string) error) error) error {
+	tx, err := d.sql.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	get := func(key string) (string, error) {
+		var v string
+		err := tx.QueryRow(`SELECT value FROM meta WHERE key=?`, key).Scan(&v)
+		if errors.Is(err, sql.ErrNoRows) {
+			return "", nil
+		}
+		return v, err
+	}
+	set := func(key, value string) error {
+		_, err := tx.Exec(`INSERT INTO meta(key,value) VALUES(?,?)
+			ON CONFLICT(key) DO UPDATE SET value=excluded.value`, key, value)
+		return err
+	}
+	if err := fn(get, set); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
 func (d *DB) GetMeta(key string) (string, error) {
 	var v string
 	err := d.sql.QueryRow(`SELECT value FROM meta WHERE key=?`, key).Scan(&v)

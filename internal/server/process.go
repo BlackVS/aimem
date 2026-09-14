@@ -92,10 +92,18 @@ func (s *Server) getProcessRef(w http.ResponseWriter, r *http.Request) {
 	s.ok(w, out)
 }
 
+// processConflict carries the current selection to the loser of a
+// compare-and-swap, so the admin decides again on what they now see.
+type processConflict struct{ current *process.Ref }
+
+func (processConflict) Error() string { return "process reference changed since you read it" }
+
 // putProcessRef selects or clears the reference. The body's
 // expected_commit must equal the current selection's commit ("" when there
-// is none), or the write is refused with the current selection so the
-// admin can decide again on what they now see.
+// is none). The comparison, the write and the history update are one
+// atomic storage step, so two admins who both read the same selection
+// cannot both write: the second sees the first's result and is refused
+// with 409 and that current selection.
 func (s *Server) putProcessRef(w http.ResponseWriter, r *http.Request) {
 	db := s.processProject(w, r)
 	if db == nil {
@@ -112,61 +120,81 @@ func (s *Server) putProcessRef(w http.ResponseWriter, r *http.Request) {
 		s.fail(w, http.StatusBadRequest, fmt.Errorf("invalid JSON body: %w", err))
 		return
 	}
-	cur, err := currentProcessRef(db)
-	if err != nil {
-		s.fail(w, http.StatusInternalServerError, err)
-		return
+	ref := req.Ref
+	if !req.Clear {
+		if err := ref.Validate(); err != nil {
+			s.fail(w, http.StatusBadRequest, err)
+			return
+		}
+		ref.SelectedAt = time.Now().UTC().Format(time.RFC3339)
+		ref.SelectedBy = taskActor(r).Name
 	}
-	curCommit := ""
-	if cur != nil {
-		curCommit = cur.Commit
-	}
-	if req.ExpectedCommit != curCommit {
+	var result *process.Ref
+	err := db.MetaTx(func(get func(string) (string, error), set func(string, string) error) error {
+		v, err := get(processMetaKey)
+		if err != nil {
+			return err
+		}
+		var cur *process.Ref
+		if v != "" {
+			cur = &process.Ref{}
+			if err := json.Unmarshal([]byte(v), cur); err != nil {
+				return fmt.Errorf("stored process reference is unreadable: %w", err)
+			}
+		}
+		curCommit := ""
+		if cur != nil {
+			curCommit = cur.Commit
+		}
+		if req.ExpectedCommit != curCommit {
+			return processConflict{current: cur}
+		}
+		if req.Clear {
+			if cur == nil {
+				return errors.New("nothing to clear")
+			}
+			result = nil
+			return set(processMetaKey, "")
+		}
+		raw, _ := json.Marshal(ref)
+		if err := set(processMetaKey, string(raw)); err != nil {
+			return err
+		}
+		// The selection history, newest first, bounded — in the same
+		// transaction, so a lost entry is impossible.
+		var hist []process.Ref
+		if h, err := get(processHistoryKey); err == nil && h != "" {
+			json.Unmarshal([]byte(h), &hist)
+		}
+		hist = append([]process.Ref{ref}, hist...)
+		if len(hist) > processHistoryMax {
+			hist = hist[:processHistoryMax]
+		}
+		hraw, err := json.Marshal(hist)
+		if err != nil {
+			return err
+		}
+		result = &ref
+		return set(processHistoryKey, string(hraw))
+	})
+	var conflict processConflict
+	switch {
+	case errors.As(err, &conflict):
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusConflict)
-		json.NewEncoder(w).Encode(map[string]any{"error": "process reference changed since you read it", "current": cur})
+		json.NewEncoder(w).Encode(map[string]any{"error": conflict.Error(), "current": conflict.current})
 		return
-	}
-	if req.Clear {
-		if cur == nil {
-			s.fail(w, http.StatusBadRequest, errors.New("nothing to clear"))
-			return
-		}
-		if err := db.SetMeta(processMetaKey, ""); err != nil {
-			s.fail(w, http.StatusInternalServerError, err)
-			return
-		}
-		s.log.Info("process reference cleared", "project", r.PathValue("p"), "by", taskActor(r).Name)
-		s.ok(w, map[string]any{"project": r.PathValue("p"), "current": nil})
-		return
-	}
-	ref := req.Ref
-	if err := ref.Validate(); err != nil {
+	case err != nil && err.Error() == "nothing to clear":
 		s.fail(w, http.StatusBadRequest, err)
 		return
-	}
-	ref.SelectedAt = time.Now().UTC().Format(time.RFC3339)
-	ref.SelectedBy = taskActor(r).Name
-	raw, _ := json.Marshal(ref)
-	if err := db.SetMeta(processMetaKey, string(raw)); err != nil {
+	case err != nil:
 		s.fail(w, http.StatusInternalServerError, err)
 		return
 	}
-	// Retain the selection history, newest first, bounded: historical
-	// evidence names commits, and a changed selection must not orphan it.
-	var hist []process.Ref
-	if h, err := db.GetMeta(processHistoryKey); err == nil && h != "" {
-		json.Unmarshal([]byte(h), &hist)
+	if result == nil {
+		s.log.Info("process reference cleared", "project", r.PathValue("p"), "by", taskActor(r).Name)
+	} else {
+		s.log.Info("process reference selected", "project", r.PathValue("p"), "commit", result.Commit, "by", result.SelectedBy)
 	}
-	hist = append([]process.Ref{ref}, hist...)
-	if len(hist) > processHistoryMax {
-		hist = hist[:processHistoryMax]
-	}
-	if hraw, err := json.Marshal(hist); err == nil {
-		if err := db.SetMeta(processHistoryKey, string(hraw)); err != nil {
-			s.log.Warn("process history not retained", "project", r.PathValue("p"), "err", err)
-		}
-	}
-	s.log.Info("process reference selected", "project", r.PathValue("p"), "commit", ref.Commit, "by", ref.SelectedBy)
-	s.ok(w, map[string]any{"project": r.PathValue("p"), "current": ref})
+	s.ok(w, map[string]any{"project": r.PathValue("p"), "current": result})
 }

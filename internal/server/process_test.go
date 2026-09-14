@@ -2,7 +2,9 @@ package server
 
 import (
 	"encoding/json"
+	"net/http"
 	"strings"
+	"sync"
 	"testing"
 )
 
@@ -87,5 +89,51 @@ func TestProcessReferenceSelection(t *testing.T) {
 	}
 	if w := taskReq(t, f.h, "GET", "/v1/projects/user/process", f.alice, "", ""); w.Code != 400 {
 		t.Fatalf("reserved project: %d", w.Code)
+	}
+}
+
+// Two admins who both read the same selection cannot both write: the
+// comparison and the write are one storage step, so exactly one of a
+// burst of concurrent changes lands and the rest are refused with the
+// winner's selection; the history holds exactly the entries that landed.
+func TestProcessReferenceCompareAndSwapIsAtomic(t *testing.T) {
+	f := newTaskFixture(t)
+	c0 := strings.Repeat("0", 40)
+	if w := taskReq(t, f.h, "PUT", "/v1/projects/alpha/process", f.admin, "", `{"repo":"https://example.com/p.git","commit":"`+c0+`","manifest":"m.json","expected_commit":""}`); w.Code != 200 {
+		t.Fatalf("seed: %d %s", w.Code, w.Body)
+	}
+	const n = 16
+	var wg sync.WaitGroup
+	codes := make([]int, n)
+	for i := 0; i < n; i++ {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			commit := strings.Repeat(string(rune('a'+i%6)), 40)
+			w := taskReq(t, f.h, "PUT", "/v1/projects/alpha/process", f.admin, "", `{"repo":"https://example.com/p.git","commit":"`+commit+`","manifest":"m.json","expected_commit":"`+c0+`"}`)
+			codes[i] = w.Code
+		}(i)
+	}
+	wg.Wait()
+	won := 0
+	for _, c := range codes {
+		switch c {
+		case http.StatusOK:
+			won++
+		case http.StatusConflict:
+		default:
+			t.Fatalf("unexpected status %d in %v", c, codes)
+		}
+	}
+	if won != 1 {
+		t.Fatalf("exactly one concurrent change must win, got %d: %v", won, codes)
+	}
+	w := taskReq(t, f.h, "GET", "/v1/projects/alpha/process?history=1", f.admin, "", "")
+	var out struct {
+		Current struct{ Commit string }   `json:"current"`
+		History []struct{ Commit string } `json:"history"`
+	}
+	if w.Code != 200 || json.Unmarshal(w.Body.Bytes(), &out) != nil || len(out.History) != 2 || out.History[0].Commit != out.Current.Commit || out.History[1].Commit != c0 {
+		t.Fatalf("history after the race: %d %s", w.Code, w.Body)
 	}
 }

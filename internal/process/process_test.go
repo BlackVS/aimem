@@ -6,8 +6,10 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestRefValidate(t *testing.T) {
@@ -201,13 +203,96 @@ func TestBootstrapBudgetAndSkills(t *testing.T) {
 		t.Fatal("checklists must be in a stable order")
 	}
 	set.Manifest.BudgetBytes = 64
-	if _, err := Bootstrap(set, "alpha", installed); err == nil || !strings.Contains(err.Error(), "over the manifest's budget") || !strings.Contains(err.Error(), "aimem process show") {
+	if _, err := Bootstrap(set, "alpha", installed); err == nil || !strings.Contains(err.Error(), "over the manifest's budget") || !strings.Contains(err.Error(), "aimem process show --full") {
 		t.Fatalf("over budget must refuse with the retrieval path: %v", err)
+	}
+	// The path the notice names returns the whole unit and leaves the
+	// budget as it was.
+	if full := BootstrapFull(set, "alpha", installed); !strings.Contains(full, "[dod-1] merged") || set.Manifest.BudgetBytes != 64 {
+		t.Fatalf("full read: %q budget=%d", full, set.Manifest.BudgetBytes)
 	}
 	home := t.TempDir()
 	os.MkdirAll(filepath.Join(home, ".claude", "skills", "oh-code-review"), 0o700)
 	is := SkillInstalled(t.TempDir(), home)
 	if !is("oh-code-review") || is("nope") || is("Bad Name") {
 		t.Fatal("skill detection")
+	}
+}
+
+// Two manifests at one commit are two sets: each fetches into its own
+// entry and each serves from its own cache afterwards.
+func TestFetchTwoManifestsAtOneCommit(t *testing.T) {
+	files := fixtureFiles()
+	files["process/other.json"] = `{"version":1,"handbook":"process/HANDBOOK.md","budget_bytes":4096}`
+	repo, sha := makeRepo(t, files)
+	root := t.TempDir()
+	a := Ref{Repo: "file://" + filepath.ToSlash(repo), Commit: sha, Manifest: "process/manifest.json", Ref: "main"}
+	b := a
+	b.Manifest = "process/other.json"
+	if res := fetchNoValidate(context.Background(), root, a); res.Status != StatusFetched {
+		t.Fatalf("first manifest: %s %v", res.Status, res.Err)
+	}
+	if res := fetchNoValidate(context.Background(), root, b); res.Status != StatusFetched || len(res.Set.Checklists) != 0 {
+		t.Fatalf("second manifest at the same commit: %s %v", res.Status, res.Err)
+	}
+	if CacheDir(root, a) == CacheDir(root, b) {
+		t.Fatal("cache entries must differ per manifest")
+	}
+	os.RemoveAll(repo)
+	for _, r := range []Ref{a, b} {
+		if res := fetchNoValidate(context.Background(), root, r); res.Status != StatusCached {
+			t.Fatalf("%s must serve from its own cache: %s %v", r.Manifest, res.Status, res.Err)
+		}
+	}
+}
+
+// A killed git whose descendant still holds the output pipes must not
+// hold the caller: the wait is bounded by PipeDrainDelay. The test binary
+// plays both the parent (killed at the deadline) and the grandchild
+// (which keeps stderr and sleeps on).
+func TestRunBoundedReturnsDespiteHeldPipes(t *testing.T) {
+	if os.Getenv("PROCESS_TEST_HELPER") == "parent" {
+		child := exec.Command(os.Args[0], "-test.run=TestRunBoundedReturnsDespiteHeldPipes")
+		child.Env = append(os.Environ(), "PROCESS_TEST_HELPER=grandchild")
+		child.Stdout, child.Stderr = os.Stdout, os.Stderr // inherit the pipes and hold them
+		if err := child.Start(); err != nil {
+			os.Exit(3)
+		}
+		time.Sleep(30 * time.Second)
+		os.Exit(0)
+	}
+	if os.Getenv("PROCESS_TEST_HELPER") == "grandchild" {
+		// Record the pid so the test can end this process afterwards: it
+		// would otherwise outlive the package and hold the test binary.
+		os.WriteFile(os.Getenv("PROCESS_TEST_PIDFILE"), []byte(strconv.Itoa(os.Getpid())), 0o600)
+		time.Sleep(30 * time.Second)
+		os.Exit(0)
+	}
+	pidfile := filepath.Join(t.TempDir(), "grandchild.pid")
+	ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, os.Args[0], "-test.run=TestRunBoundedReturnsDespiteHeldPipes")
+	cmd.Env = append(os.Environ(), "PROCESS_TEST_HELPER=parent", "PROCESS_TEST_PIDFILE="+pidfile)
+	start := time.Now()
+	_, err := runBounded(cmd)
+	took := time.Since(start)
+	t.Cleanup(func() {
+		for i := 0; i < 50; i++ { // the grandchild writes its pid right after starting
+			if b, rerr := os.ReadFile(pidfile); rerr == nil {
+				if pid, perr := strconv.Atoi(strings.TrimSpace(string(b))); perr == nil {
+					if pr, ferr := os.FindProcess(pid); ferr == nil {
+						pr.Kill()
+					}
+				}
+				return
+			}
+			time.Sleep(100 * time.Millisecond)
+		}
+	})
+	if err == nil {
+		t.Fatal("the deadline must end the command with an error")
+	}
+	if took > 500*time.Millisecond+PipeDrainDelay+3*time.Second {
+		t.Fatalf("runBounded held for %v despite the held pipes", took)
 	}
 }
