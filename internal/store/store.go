@@ -32,6 +32,12 @@ type Registry struct {
 	dbs       map[string]*DB
 	hints     *taskHints   // where tasks were last seen; see taskloc.go
 	taskScans atomic.Int64 // full project scans by LocateTask (observability, tests)
+	// lifecycleGen counts project lifecycle changes (rename, merge, drop),
+	// twice each: once as one begins and once as it ends. A task scan
+	// that saw it move overlapped a change, so its project list may have
+	// been stale; LocateTask scans again and never remembers such a result.
+	lifecycleGen atomic.Int64
+	scanHook     func() // tests: runs after a scan enumerated the projects
 }
 
 // DB is one project's journal database.
@@ -192,6 +198,8 @@ func (r *Registry) Drop(projectID string) error {
 	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	r.lifecycleGen.Add(1)
+	defer r.lifecycleGen.Add(1)
 	if db, ok := r.dbs[projectID]; ok {
 		// Through the live handle first, so a refusal leaves the handle
 		// other callers still hold usable. The read waits for the single
@@ -263,6 +271,8 @@ func (r *Registry) Rename(oldID, newID string) error {
 func (r *Registry) moveProject(oldID, newID string) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	r.lifecycleGen.Add(1)
+	defer r.lifecycleGen.Add(1)
 	dir := filepath.Join(r.root, "projects", oldID)
 	if _, err := os.Stat(dir); err != nil {
 		return fmt.Errorf("no such project %q", oldID)
@@ -347,6 +357,8 @@ func (r *Registry) MergeProject(oldID, newID string) (events, mems, runs, cites 
 	if oldID == newID {
 		return 0, 0, 0, 0, fmt.Errorf("source and target are the same project")
 	}
+	r.lifecycleGen.Add(1)
+	defer r.lifecycleGen.Add(1)
 	dst, err := r.OpenExisting(newID)
 	if err != nil {
 		return 0, 0, 0, 0, fmt.Errorf("no such target project %q — a missing target makes this a rename, not a merge", newID)

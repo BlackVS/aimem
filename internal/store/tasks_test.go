@@ -1097,6 +1097,54 @@ func TestLocateTaskHints(t *testing.T) {
 	}
 }
 
+// A rename that lands between a scan's project listing and its reads can
+// make the scan miss a task that exists (the old name is gone or holds a
+// recreated empty project; the new name was not in the listing). Such a
+// scan must be repeated, and its miss must never be remembered — the
+// external review of this change found the interleaving.
+func TestLocateTaskScanOverlappingRename(t *testing.T) {
+	r := newTestRegistry(t)
+	a, _ := r.Open("proj-a")
+	ta := mustCreate(t, a, "moving", "k-m")
+	r.hints = newTaskHints() // as after a restart: no hint for ta
+	fired := 0
+	r.scanHook = func() {
+		if fired > 0 {
+			return
+		}
+		fired++
+		if err := r.Rename("proj-a", "proj-z"); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := r.Open("proj-a"); err != nil { // a checkpoint recreates the old name, empty
+			t.Fatal(err)
+		}
+	}
+	if p, _, err := r.LocateTask(ta.ID); err != nil || p != "proj-z" {
+		t.Fatalf("task moved during the scan: %s %v", p, err)
+	}
+	if fired != 1 || r.taskScans.Load() != 2 {
+		t.Fatalf("expected one overlapped scan and one retry: fired=%d scans=%d", fired, r.taskScans.Load())
+	}
+	// The retry's answer is remembered; the overlapped one was not.
+	r.scanHook = nil
+	if p, _, err := r.LocateTask(ta.ID); err != nil || p != "proj-z" {
+		t.Fatalf("after the race: %s %v", p, err)
+	}
+	if r.taskScans.Load() != 2 {
+		t.Fatalf("a hit after the retry scanned again: %d", r.taskScans.Load())
+	}
+	// A miss observed during a lifecycle change is not remembered either.
+	other := uuidv7.New()
+	r.scanHook = func() { r.lifecycleGen.Add(1) } // every scan overlaps a change
+	if _, _, err := r.LocateTask(other); !errors.Is(err, ErrTaskNotFound) {
+		t.Fatalf("miss under churn: %v", err)
+	}
+	if r.hints.missed(other) {
+		t.Fatal("a miss seen under lifecycle churn must not be remembered")
+	}
+}
+
 // The hint maps are bounded: past the cap they reset rather than grow.
 func TestTaskHintsBounded(t *testing.T) {
 	h := newTaskHints()

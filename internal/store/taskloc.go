@@ -104,14 +104,29 @@ func (r *Registry) LocateTask(id string) (string, *DB, error) {
 	if r.hints.missed(id) {
 		return "", nil, ErrTaskNotFound
 	}
-	p, db, err := r.scanForTask(id)
-	switch {
-	case err == nil:
-		r.hints.put(id, p)
-	case errors.Is(err, ErrTaskNotFound):
-		r.hints.noteMiss(id)
+	var (
+		p   string
+		db  *DB
+		err error
+	)
+	for attempt := 0; attempt < 3; attempt++ {
+		gen := r.lifecycleGen.Load()
+		p, db, err = r.scanForTask(id)
+		if r.lifecycleGen.Load() != gen {
+			// A rename, merge or drop overlapped the scan: the project
+			// list it walked may not have held the task's current home.
+			// Scan again; never remember a result from a moving target.
+			continue
+		}
+		switch {
+		case err == nil:
+			r.hints.put(id, p)
+		case errors.Is(err, ErrTaskNotFound):
+			r.hints.noteMiss(id)
+		}
+		return p, db, err
 	}
-	return p, db, err
+	return p, db, err // lifecycle still churning: answer, remember nothing
 }
 
 func (r *Registry) scanForTask(id string) (string, *DB, error) {
@@ -119,6 +134,9 @@ func (r *Registry) scanForTask(id string) (string, *DB, error) {
 	projects, err := r.Projects()
 	if err != nil {
 		return "", nil, err
+	}
+	if r.scanHook != nil {
+		r.scanHook()
 	}
 	var unreadable error
 	for _, p := range projects {
