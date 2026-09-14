@@ -13,6 +13,17 @@ currently 13); a binary refuses a database newer than it understands.
 
 ## [Unreleased]
 
+## [0.5.0] — 2026-09-14
+
+### Data integrity
+
+- **Two schema bumps since 0.4.0 (v12 epics, v13 typed references), and
+  the v13 step rewrites stored task data in place.** Back up the hub's
+  state directory before upgrading: a database opened by this build is
+  refused by older builds, and the reference rewrite (task bodies, history
+  and retry receipts) has no reverse migration. Details under Changed and
+  Added below.
+
 ### Changed
 
 - **Typed references (schema v13): `candidate_refs` and `evidence_refs`
