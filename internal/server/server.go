@@ -432,24 +432,13 @@ func (s *Server) ListenAndServe(root string) (*http.Server, net.Listener, error)
 // exercise the REAL gate rather than a re-implementation that can drift.
 func (s *Server) authWrapper(token string, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		// Four unauthenticated GETs, and only four. /admin and /tasks are
-		// static chrome with zero data — they collect a token in the
-		// browser and call the API with it. / and /v1/status are public by
-		// construction: liveness, build, uptime, nothing about what the
-		// hub holds. Everything else stays token-gated.
+		// The unauthenticated surface is exactly publicGETs: two pages of
+		// static chrome with zero data (they collect a token in the
+		// browser and call the API with it) and two liveness answers.
+		// Everything else stays token-gated.
 		if r.Method == http.MethodGet {
-			switch r.URL.Path {
-			case "/admin":
-				s.adminPage(w, r)
-				return
-			case "/tasks":
-				s.tasksPage(w, r)
-				return
-			case "/":
-				s.statusPage(w, r)
-				return
-			case "/v1/status":
-				s.status(w, r)
+			if h := s.publicGETs()[r.URL.Path]; h != nil {
+				h(w, r)
 				return
 			}
 		}
@@ -473,6 +462,19 @@ func (s *Server) authWrapper(token string, next http.Handler) http.Handler {
 		}
 		next.ServeHTTP(w, r.WithContext(withIdentity(r.Context(), id)))
 	})
+}
+
+// publicGETs is the complete unauthenticated surface: the console and task
+// page shells (no data), the status page and the status JSON (liveness,
+// build, uptime — nothing about what the hub holds). The gate, the OpenAPI
+// parity test and the ordinary-token gate test all read this one map.
+func (s *Server) publicGETs() map[string]http.HandlerFunc {
+	return map[string]http.HandlerFunc{
+		"/admin":     s.adminPage,
+		"/tasks":     s.tasksPage,
+		"/":          s.statusPage,
+		"/v1/status": s.status,
+	}
 }
 
 // TCPHandler is the complete hub-mode surface behind the bearer gate: the

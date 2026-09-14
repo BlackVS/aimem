@@ -15,12 +15,12 @@ Stage 1 (storage and integrity) is merged (PR #38): `internal/store/tasks.go`
 with schema 11 (`store.go`), lifecycle refusals in `Registry.Drop`/
 `MergeProject`, and `internal/store/tasks_test.go`.
 
-Stage 2 (authorized HTTP and MCP) is implemented on branch `feat/task-service`:
+Stage 2 (authorized HTTP and MCP) is merged (PR #39):
 `internal/server/tasks.go` (routes, actor, per-attempt authorization, strict
 decoding, status mapping, in-process MCP dispatch), `internal/mcp/tasks.go`
 (eight task tools, the hub principal, the local hub caller), `Registry.LocateTask`,
 `access.Store.CanWrite`, `Identity.Project`, `HubConfig.TaskToken` and the
-`aimem hub task-token` command. No UI yet (stage 3).
+`aimem hub task-token` command.
 
 Stage 3, first increment (task list/detail/discussion) is implemented on
 `feat/task-ui` as `internal/server/tasks.html`, served at `GET /tasks` (public
@@ -30,17 +30,22 @@ chrome like `/admin`, holding no data). Decisions:
   endpoints an ordinary token cannot reach; the task page calls only the
   task routes and the identity check, so every credential class the design
   names works with exactly the authority the service grants it. The console
-  links to it, and `/admin?task=<id>` forwards to `/tasks?task=<id>`.
+  links to it, and `/admin?task=<id>` forwards to `/tasks?task=<id>` in the
+  browser (a script in the console shell; not an HTTP redirect).
 - **The URL is the state.** `/tasks?project=<id>`, `/tasks?task=<id>`,
   `/tasks?task=<id>&comment=<id>` are the copy-link targets; the JSON link
   is the served `links.self`. Links never carry the token.
-- **Every write is the agent's write.** Create and comment carry one
-  idempotency key per open form until success; edit and the state selector
-  send the full content with `expected_revision`; a 409 shows the current
-  task beside the attempt with "reload" and "reapply on the current
-  revision" — never a silent overwrite.
-- **Write permission is asked, not assumed:** `/v1/access/identity?project=`
-  per opened task decides whether the edit, state and comment controls show;
+- **Every write is the agent's write.** Every task write carries an
+  idempotency key (one per open form until success — create, comment, edit,
+  state); edit and the state selector additionally send the full content
+  with `expected_revision`; a 409 shows the current task beside the attempt
+  with "reload" and "reapply on the current revision" (the served current
+  task replaces the stale one outright) — never a silent overwrite. A board
+  card drag is the same call: full content, `expected_revision`, a key.
+- **Write permission is asked, not assumed** for ordinary tokens:
+  `/v1/access/identity?project=` per project (the list's create button and
+  the opened task's edit, state and comment controls); admin credentials
+  write everywhere and a legacy writer never writes tasks, by construction;
   a refusal on the server still wins.
 - **Markdown renders safely:** escaped first, then paragraphs, headings,
   lists, code, bold and bare http(s) links (`rel="noopener"`, never fetched).

@@ -6,6 +6,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"regexp"
 	"runtime"
 	"strings"
 	"testing"
@@ -219,7 +220,7 @@ func TestOrdinaryTokenGateMatrix(t *testing.T) {
 	h := f.s.TCPHandler(f.env, map[string]http.Handler{"/mcp": http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { mcpHits++ })})
 	fill := strings.NewReplacer("{p}", "alpha", "{id}", uuidv7.New(), "{c}", uuidv7.New(), "{s}", "s1", "{key}", "about",
 		"{name}", "RUNBOOK", "{instance}", "x", "{kind}", "user", "{g}", "g", "{u}", "u", "{id...}", "x", "{$}", "")
-	public := map[string]bool{"/": true, "/admin": true, "/tasks": true, "/v1/status": true}
+	public := f.s.publicGETs()
 	for _, rt := range f.s.Routes() {
 		path := fill.Replace(rt.Pattern)
 		if path == "" {
@@ -231,7 +232,7 @@ func TestOrdinaryTokenGateMatrix(t *testing.T) {
 		}
 		w := taskReq(t, h, rt.Method, path, f.alice, "", body)
 		switch {
-		case public[path] || (rt.Method == "GET" && path == "/v1/access/identity"):
+		case public[path] != nil || (rt.Method == "GET" && path == "/v1/access/identity"):
 		case rt.Ordinary():
 			if w.Code == 401 || w.Code == 403 {
 				t.Errorf("%s %s: ordinary route refused at the gate: %d %s", rt.Method, rt.Pattern, w.Code, w.Body)
@@ -562,31 +563,66 @@ func TestTaskRoutesProjectsRenameAndReservedScopes(t *testing.T) {
 func TestTasksPageIsPublicChrome(t *testing.T) {
 	f := newTaskFixture(t)
 	w := taskReq(t, f.h, "GET", "/tasks", "", "", "")
-	if w.Code != 200 || !strings.HasPrefix(w.Header().Get("Content-Type"), "text/html") || !strings.Contains(w.Header().Get("Content-Security-Policy"), "default-src 'none'") {
+	if w.Code != 200 || !strings.HasPrefix(w.Header().Get("Content-Type"), "text/html") {
 		t.Fatalf("tasks page: %d %v", w.Code, w.Header())
 	}
+	// One policy for both pages, and it closes framing, form posts and
+	// base overrides on top of the subresource and connect restrictions.
+	csp := w.Header().Get("Content-Security-Policy")
+	if admin := taskReq(t, f.h, "GET", "/admin", "", "", "").Header().Get("Content-Security-Policy"); csp != admin {
+		t.Fatalf("pages disagree on CSP:\n%s\n%s", csp, admin)
+	}
+	for _, d := range []string{"default-src 'none'", "connect-src 'self'", "frame-ancestors 'none'", "form-action 'none'", "base-uri 'none'"} {
+		if !strings.Contains(csp, d) {
+			t.Fatalf("CSP lacks %q: %s", d, csp)
+		}
+	}
 	page := string(tasksHTML)
-	i, j := strings.Index(page, "<script>"), strings.LastIndex(page, "</script>")
-	if bad := scanJSStrings(page[i:j]); len(bad) > 0 {
+	open, closeAt := strings.Index(page, "<script>"), strings.LastIndex(page, "</script>")
+	if open < 0 || closeAt < open {
+		t.Fatal("tasks.html has no <script> block")
+	}
+	if bad := scanJSStrings(page[open+len("<script>") : closeAt]); len(bad) > 0 {
 		t.Fatalf("unterminated string literals at script lines %v", bad)
 	}
-	for _, path := range []string{`"/v1/projects/"+encodeURIComponent(PROJ)+"/tasks?"`, `"/v1/tasks/"+encodeURIComponent(`, `"/v1/access/identity"`} {
-		if !strings.Contains(page, path) {
-			t.Fatalf("page does not call %s", path)
+	// The page's call surface is exactly what an ordinary token may reach
+	// plus the identity check and the optional project listing: every
+	// api("/v1/...") literal in the page must start with an allowed prefix.
+	allowed := []string{"/v1/access/identity", "/v1/projects/", "/v1/tasks/"}
+	seen := map[string]bool{}
+	for _, m := range regexp.MustCompile(`api\("(/v1/[^"]*)"`).FindAllStringSubmatch(page, -1) {
+		call := m[1]
+		if call == "/v1/projects" { // the optional listing; refused for ordinary tokens and caught
+			seen[call] = true
+			continue
 		}
+		ok := false
+		for _, p := range allowed {
+			if strings.HasPrefix(call, p) {
+				ok, seen[p] = true, true
+			}
+		}
+		if !ok {
+			t.Fatalf("page calls %q, outside the ordinary-token surface", call)
+		}
+	}
+	for _, p := range append(allowed, "/v1/projects") {
+		if !seen[p] {
+			t.Fatalf("page no longer calls %s", p)
+		}
+	}
+	if !strings.Contains(page, "catch(_){ PROJECTS = null; }") {
+		t.Fatal("project listing must be optional for ordinary tokens")
 	}
 	// The write decision is the identity endpoint's task_write answer.
 	if !strings.Contains(page, "task_write") {
 		t.Fatal("page must read task_write from the identity endpoint")
 	}
-	// The one legacy call is the project listing, and it is optional: the
-	// page falls back to a typed project when the credential is refused.
-	if !strings.Contains(page, `catch(_){ PROJECTS = null; }`) {
-		t.Fatal("project listing must be optional for ordinary tokens")
-	}
-	// A deep link into the console's task view lands here.
-	if !strings.Contains(string(adminHTML), `location.replace("/tasks?"`) {
-		t.Fatal("console must forward /admin?task= to the task page")
+	// A deep link into the console's task view lands here, and the console
+	// does not boot while forwarding.
+	console := string(adminHTML)
+	if !strings.Contains(console, `location.replace("/tasks?"`) || !strings.Contains(console, "if(TOK && !FORWARDING) boot();") {
+		t.Fatal("console must forward /admin?task= to the task page without booting")
 	}
 }
 

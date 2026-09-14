@@ -182,7 +182,7 @@ What keeps it accurate instead is a **parity test** in
 and every mux route must appear in the spec, so drift is a CI failure
 (the same pin-docs-to-reality move as `TestAdminPageScriptParses`).
 The spec is served at `GET /v1/openapi.json` **behind the bearer
-token** — the three-route unauthenticated surface is an invariant —
+token** — the unauthenticated surface — static, data-free pages plus liveness (`/`, `/v1/status`, `/admin`, `/tasks`) — is an invariant —
 and no Swagger UI is embedded (the console is the human interface;
 external viewers render the file fine). Sequencing: written after the
 sync routes and named tokens land, so per-route roles are in it from

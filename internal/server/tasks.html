@@ -11,7 +11,10 @@
      the task service admits — an ordinary user token sees exactly what the
      service lets it see, and every write here is the same CAS write an
      agent makes. The variable contract is copied, not shared: both pages
-     are single embedded files behind a CSP that allows inline styles only. */
+     are single embedded files. The CSP allows inline script and style (the
+     page IS one inline script), so escaping every interpolation is the XSS
+     defence; the policy closes the other doors (no subresources, no
+     cross-origin fetches, no framing, no form posts). */
   :root{
     --ink:#0e1210; --panel:#141a15; --well:#0a0e0b; --edge:#26332a;
     --bone:#d6ddd2; --dim:#8a9a8d;
@@ -52,7 +55,7 @@
   .chip{display:inline-block;background:var(--well);border:1px solid var(--edge);color:var(--dim);
         padding:1px 8px;margin:1px 4px 1px 0;font-size:12px;cursor:default;white-space:nowrap}
   .chip.on{color:var(--moss-deep);background:var(--moss);border-color:var(--moss)}
-  .chip.click{cursor:pointer}
+  .chip.click{cursor:pointer;font:inherit;font-size:12px}
   .chip.click:hover{border-color:var(--moss);color:var(--bone)}
   .dim{color:var(--dim)} .warn{color:var(--amber)} .bad{color:var(--rust)} .ok{color:var(--moss)}
   input,textarea,select{background:var(--well);border:1px solid var(--edge);color:var(--bone);
@@ -73,12 +76,17 @@
   #gate .box{width:min(480px,90vw)}
   #toast{position:fixed;bottom:14px;right:14px;background:var(--well);border:1px solid var(--moss);
          padding:8px 14px;opacity:0;transition:opacity .2s;max-width:60vw}
+  /* When the clipboard is unavailable (plain-HTTP hubs have no secure
+     context) the link is shown selected for a manual copy. */
+  #linkBox{position:fixed;bottom:14px;left:14px;right:14px;background:var(--panel);border:1px solid var(--moss);padding:8px 10px}
+  #linkBox input{font:13px var(--mono)}
   /* State colour: one hue per stage of life, chosen from the palette. */
   .st{font-weight:700}
   .st-BACKLOG{color:var(--dim)} .st-READY{color:var(--tide)} .st-IN_PROGRESS{color:var(--amber)}
   .st-REVIEW{color:var(--iris)} .st-BLOCKED{color:var(--rust)} .st-DONE{color:var(--moss)} .st-CANCELLED{color:var(--dim);text-decoration:line-through}
   /* Task rows: a list is for scanning — title first, state and time on the edge. */
-  .trow{display:flex;gap:10px;align-items:baseline;padding:7px 4px;border-bottom:1px solid var(--edge);cursor:pointer}
+  .trow{display:flex;gap:10px;align-items:baseline;padding:7px 4px;border-bottom:1px solid var(--edge);cursor:pointer;
+        color:inherit;text-decoration:none}
   .trow:hover{background:var(--well)}
   .trow .title{flex:1;font:15px/1.4 var(--text);min-width:0;overflow:hidden;text-overflow:ellipsis}
   .trow .meta{color:var(--dim);font-size:12px;white-space:nowrap}
@@ -159,7 +167,9 @@
     </div>
   </section>
 </main>
-<div id="toast"></div>
+<div id="toast" role="status" aria-live="polite"></div>
+<div id="linkBox" hidden><div class="row" style="margin:0"><span class="dim" id="linkWhat"></span>
+  <input id="linkText" readonly class="grow" aria-label="link to copy"><button class="act" onclick="$('linkBox').hidden=true">close</button></div></div>
 <script>
 "use strict";
 const THEME = localStorage.getItem("aimem_theme") || "";
@@ -182,7 +192,7 @@ let HIST = {after:0}, CMT = {after:0};
 let KEYS = {};                      // idempotency keys per open form: retry-safe until success
 
 const $ = id => document.getElementById(id);
-const esc = s => String(s??"").replace(/[&<>"]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+const esc = s => String(s??"").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
 function toast(m){const t=$("toast");t.textContent=m;t.style.opacity=1;setTimeout(()=>t.style.opacity=0,3200);}
 function ago(ts){if(!ts)return"-";const s=(Date.now()-Date.parse(ts))/1e3;
   if(s<90)return Math.round(s)+"s ago";if(s<5400)return Math.round(s/60)+"m ago";
@@ -205,7 +215,7 @@ async function api(path, opt, k){
   return body;
 }
 function saveTok(){TOK=$("tok").value.trim();localStorage.setItem("aimem_token",TOK);boot();}
-function logout(){localStorage.removeItem("aimem_token");TOK="";location.reload();}
+function logout(){localStorage.removeItem("aimem_token");localStorage.removeItem("aimem_task_project");TOK="";location.reload();}
 
 /* ---------- Markdown, rendered safely: escaped first, then a few shapes. ---------- */
 function md2html(md){
@@ -250,8 +260,36 @@ function route(){
   if(q.get("project")){ PROJ = q.get("project"); localStorage.setItem("aimem_task_project", PROJ); }
   showList();
 }
+// The clipboard API exists only in secure contexts; a plain-HTTP hub gets
+// the legacy copy command, and if that is refused too the link is shown
+// selected so it can be copied by hand. Never a modal dialog.
 function copy(text, what){
-  navigator.clipboard.writeText(text).then(()=>toast(what+" copied"), ()=>{ prompt(what, text); });
+  if(window.isSecureContext && navigator.clipboard){
+    navigator.clipboard.writeText(text).then(()=>toast(what+" copied"), ()=>copyFallback(text, what));
+    return;
+  }
+  copyFallback(text, what);
+}
+function copyFallback(text, what){
+  const ta = document.createElement("textarea"); ta.value = text; ta.style.position = "fixed"; ta.style.opacity = "0";
+  document.body.appendChild(ta); ta.select();
+  let ok = false; try{ ok = document.execCommand("copy"); }catch(_){}
+  ta.remove();
+  if(ok){ toast(what+" copied"); return; }
+  $("linkWhat").textContent = what; $("linkText").value = text; $("linkBox").hidden = false; $("linkText").select();
+}
+// Write permission for a project is the service's answer for THIS
+// credential, asked now: admin credentials write everywhere, an ordinary
+// token only where it was issued and while its user holds a grant, a
+// legacy writer never writes tasks. A server refusal still wins.
+async function canWrite(project){
+  if(!ME) return false;
+  if(ME.role==="admin") return true;
+  if(ME.role!=="user") return false;
+  try{ const r = await api("/v1/access/identity?project="+encodeURIComponent(project)); return !!r.task_write; }catch(_){ return false; }
+}
+function stateChipsHTML(){
+  return ['',...STATES].map(s=>`<button type="button" class="chip click${FILTER.state===s?' on':''}" onclick="FILTER.state='${s}';listTasks(true)">${s||'all'}</button>`).join("");
 }
 
 async function boot(){
@@ -286,8 +324,9 @@ function showList(){
   $("v-task").hidden = true; $("v-list").hidden = false; CUR = null;
   document.title = (PROJ? PROJ+" · " : "")+"aimem tasks";
   if(PROJECTS) $("projSel").value = PROJECTS.includes(PROJ)?PROJ:""; else $("projIn").value = PROJ;
-  $("filters").hidden = !PROJ; $("newBtn").hidden = !PROJ;
-  $("stateChips").innerHTML = ['',...STATES].map(s=>`<span class="chip click${FILTER.state===s?' on':''}" onclick="FILTER.state='${s}';listTasks(true)">${s||'all'}</span>`).join("");
+  $("filters").hidden = !PROJ; $("newBtn").hidden = true;
+  if(PROJ) canWrite(PROJ).then(ok => { if(PROJ) $("newBtn").hidden = !ok; });
+  $("stateChips").innerHTML = stateChipsHTML();
   $("archChk").checked = FILTER.archived;
   if(PROJ) listTasks(true); else { $("list").innerHTML = '<div class="dim">Pick or enter a project.</div>'; $("moreBtn").hidden = true; }
 }
@@ -301,15 +340,15 @@ async function listTasks(reset){
   try{
     const page = await api("/v1/projects/"+encodeURIComponent(PROJ)+"/tasks?"+q);
     for(const t of page.tasks){
-      $("list").insertAdjacentHTML("beforeend", `<div class="trow${t.archived?' archived':''}" onclick="go('${taskURL(t.id)}')">
+      $("list").insertAdjacentHTML("beforeend", `<a class="trow${t.archived?' archived':''}" href="${taskURL(t.id)}" onclick="return go('${taskURL(t.id)}')">
         <span class="title">${esc(t.title)}</span>${stChip(t.state)}
-        <span class="meta">r${t.revision} · ${ago(t.updated_at)}${t.assignee?' · '+esc(t.assignee.kind)+'/'+short(t.assignee.id):''}</span></div>`);
+        <span class="meta">r${t.revision} · ${ago(t.updated_at)}${t.assignee?' · '+esc(t.assignee.kind)+'/'+esc(short(t.assignee.id)):''}</span></a>`);
     }
     CURSOR = page.next_cursor||"";
     $("moreBtn").hidden = !CURSOR;
     $("listNote").textContent = $("list").children.length ? "" : "no tasks"+(FILTER.state?" in "+FILTER.state:"");
-    $("stateChips").innerHTML = ['',...STATES].map(s=>`<span class="chip click${FILTER.state===s?' on':''}" onclick="FILTER.state='${s}';listTasks(true)">${s||'all'}</span>`).join("");
-  }catch(e){ if(e.auth) return boot(); $("listNote").textContent = e.message; $("list").innerHTML = ""; }
+    $("stateChips").innerHTML = stateChipsHTML();
+  }catch(e){ if(e.auth) return boot(); $("listNote").textContent = e.message; if(reset) $("list").innerHTML = ""; }
 }
 
 /* ---------- Content form: create and edit share it (the update is a full replacement). ---------- */
@@ -349,6 +388,7 @@ function toggleNew(){
   const f = $("newForm");
   if(!f.hidden){ f.hidden = true; return; }
   f.hidden = false;
+  spent("new"); // one key per OPEN form: a reopened form is a new create
   f.innerHTML = `<h2 style="margin-top:0">new task in ${esc(PROJ)}</h2>`+contentForm(null,"new")+
     `<div class="row" style="margin-top:10px"><button class="act on" onclick="createTask()">create</button>
      <button class="act" onclick="toggleNew()">cancel</button><span class="dim">retry-safe: this form keeps one idempotency key until the create succeeds</span></div>`;
@@ -372,21 +412,11 @@ async function showTask(id, commentID){
   PROJ = CUR.project; localStorage.setItem("aimem_task_project", PROJ);
   document.title = CUR.title+" · aimem tasks";
   $("taskCrumb").textContent = " · "+CUR.project+" · "+short(CUR.id);
-  await checkWrite();
+  CAN_WRITE = await canWrite(CUR.project);
   renderTask();
   HIST = {after:0}; CMT = {after:0};
   await Promise.all([loadHistory(true), loadComments(true)]);
   if(commentID){ const el = document.getElementById("c-"+commentID); if(el){ el.classList.add("target"); el.scrollIntoView({block:"center"}); } }
-}
-// Write permission is the service's answer for THIS credential and THIS
-// project, asked now: an ordinary token writes only where it was issued and
-// while its user holds a grant; a legacy writer never writes tasks.
-async function checkWrite(){
-  CAN_WRITE = false;
-  if(!ME) return;
-  if(ME.role==="admin"){ CAN_WRITE = true; return; }
-  if(ME.role!=="user") return;
-  try{ const r = await api("/v1/access/identity?project="+encodeURIComponent(CUR.project)); CAN_WRITE = !!r.task_write; }catch(_){}
 }
 function fieldHTML(k, label, md){
   const v = CUR[k]; if(!v) return "";
@@ -406,8 +436,7 @@ function renderTask(){
       ${t.assignee?` · assignee <span class="chip">${esc(t.assignee.kind)}/${esc(t.assignee.id)}</span>`:''}</div>
     <div class="row acts">
       <button class="act" onclick="copy(location.origin+taskURL(CUR.id),'task link')">copy link</button>
-      <button class="act" onclick="copy(location.origin+CUR.links.self,'JSON link')">copy JSON link</button>
-      <a class="act" style="text-decoration:none;padding:2px 8px;font-size:12px;border:1px solid var(--edge)" href="${esc(t.links.self)}" target="_blank" rel="noopener">open JSON</a>
+      <button class="act" onclick="copy(location.origin+CUR.links.self,'JSON link')" title="the task as JSON; the API needs the bearer token">copy JSON link</button>
       ${CAN_WRITE?`<span class="dim" style="margin-left:8px">state</span><select id="quickState" class="inline" onchange="quickState(this.value)">${STATES.map(s=>`<option${t.state===s?' selected':''}>${s}</option>`).join("")}</select>
       <button class="act" onclick="editTask()">edit</button>`:''}
     </div>
@@ -458,10 +487,14 @@ function showConflict(current, attempt, kname){
   $("editBox").innerHTML = `<div class="card conflict"><b class="bad">revision conflict</b>: the task is at r${current.revision}
     (${stChip(current.state)} <span class="prose">${esc(current.title)}</span>), you edited r${CUR.revision}.
     <div class="row"><button class="act" onclick="showTask(CUR.id)">reload current (discard my change)</button>
-    <button class="act" onclick="reapply(${esc(JSON.stringify(current)).replace(/'/g,'&#39;')}, ${esc(JSON.stringify(attempt)).replace(/'/g,'&#39;')})">reapply my change on r${current.revision}</button></div></div>`;
+    <button class="act" onclick="reapply(${esc(JSON.stringify(current))}, ${esc(JSON.stringify(attempt))})">reapply my change on r${current.revision}</button></div></div>`;
 }
+// The served current task replaces the stale one outright (a field the
+// other writer cleared must not survive), the card re-renders from it, and
+// the attempt is offered on top.
 function reapply(current, attempt){
-  CUR = Object.assign({}, CUR, current);
+  CUR = current;
+  renderTask();
   $("editBox").innerHTML = `<h2>reapply on revision ${CUR.revision}</h2>`+contentForm(Object.assign({}, attempt),"ed")+
     `<div class="row" style="margin-top:10px"><button class="act on" onclick="saveTask(readForm('ed'),'edit:'+CUR.id+':'+CUR.revision)">save</button>
      <button class="act" onclick="showTask(CUR.id)">cancel</button></div>`;

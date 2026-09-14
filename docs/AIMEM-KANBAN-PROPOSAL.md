@@ -161,7 +161,7 @@ program or external agent without MCP can follow a normal web task reference and
 receive JSON. Both paths expose the same task ID, revision and current state;
 neither requires loading a dashboard or scraping a web page.
 
-Proposed resources, **not existing routes**:
+Resources (implemented in stages 2 and 3):
 
 | Resource | Purpose |
 | --- | --- |
@@ -190,7 +190,7 @@ Comment JSON includes its own canonical URL and parent task URL. Individual
 comment references use the task and comment UUIDs, survive project rename and
 archival, and require the same authentication as task references. Looking up a
 comment under a different task ID returns not found. Comment routes above are
-proposed contracts; they do not exist in the merged access foundation.
+implemented in stage 2 (see the implementation plan).
 
 Task URLs use immutable IDs so title changes, state transitions, and archiving
 cannot break references. Resolve IDs from existing project partitions; any lookup

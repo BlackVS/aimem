@@ -84,7 +84,7 @@ the binary. Everything stateful lives outside the binary — config
 | `/tasks` | none to load | The task page (list, detail, history, discussion). Holds no data; it asks for a token in the browser — an ordinary project token works, and sees exactly what the task service allows it. `/tasks?task=<id>` and `/tasks?task=<id>&comment=<id>` are the copyable links. |
 | everything else | `Authorization: Bearer $AIMEM_HTTP_TOKEN` | The whole API — projects, memories, usage, logs, config. |
 
-Those first three are the complete unauthenticated surface. Adding a
+Those first four are the complete unauthenticated surface. Adding a
 field to `/v1/status` is a disclosure decision: hubs listen on routable
 names, so anything served there is served to the internet.
 

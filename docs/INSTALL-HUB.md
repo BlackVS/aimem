@@ -124,7 +124,7 @@ gated; the same file ships in the repo).
 | `/tasks` | none to load | the task page; any token the task service admits (ordinary project tokens included) |
 | everything else | `Authorization: Bearer <token>` | the whole API |
 
-Those first three are the complete unauthenticated surface. A hub listens
+Those first four are the complete unauthenticated surface. A hub listens
 on a routable name, so anything served without the token is served to
 whoever can reach the port.
 

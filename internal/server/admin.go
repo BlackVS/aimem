@@ -23,10 +23,17 @@ var adminHTML []byte
 //go:embed tasks.html
 var tasksHTML []byte
 
+// pagePolicy is the CSP of both browser pages. They are single inline
+// scripts, so inline script and style are allowed and escaping is the XSS
+// defence; everything else is closed: no subresources, same-origin fetches
+// only, no framing (clickjacking a logged-in viewer), no form posts and no
+// base override (the exfiltration routes an escaping slip would need).
+const pagePolicy = "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; connect-src 'self'; " +
+	"frame-ancestors 'none'; form-action 'none'; base-uri 'none'"
+
 func (s *Server) adminPage(w http.ResponseWriter, _ *http.Request) {
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	w.Header().Set("Content-Security-Policy",
-		"default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; connect-src 'self'")
+	w.Header().Set("Content-Security-Policy", pagePolicy)
 	// The page evolves with the binary; a stale cached copy talks to a
 	// newer API and confuses its operator.
 	w.Header().Set("Cache-Control", "no-cache")
@@ -40,8 +47,7 @@ func (s *Server) adminPage(w http.ResponseWriter, _ *http.Request) {
 // lets it.
 func (s *Server) tasksPage(w http.ResponseWriter, _ *http.Request) {
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	w.Header().Set("Content-Security-Policy",
-		"default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; connect-src 'self'")
+	w.Header().Set("Content-Security-Policy", pagePolicy)
 	w.Header().Set("Cache-Control", "no-cache")
 	w.Write(tasksHTML)
 }
