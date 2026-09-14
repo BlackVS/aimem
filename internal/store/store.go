@@ -161,6 +161,16 @@ func (r *Registry) Drop(projectID string) error {
 	if _, err := os.Stat(dir); err != nil {
 		return fmt.Errorf("no such project %q", projectID)
 	}
+	// Tasks have no export/removal path yet, so a task-bearing project is
+	// never deleted. Checked here, AFTER the handle is closed and under the
+	// lock every writer must take to reopen: a create that raced us
+	// either committed first (and we refuse) or fails on the closed
+	// handle — it cannot land between this check and the removal.
+	if has, err := fileHasTasks(filepath.Join(dir, "journal.db")); err != nil {
+		return err
+	} else if has {
+		return ErrProjectHasTasks
+	}
 	return os.RemoveAll(dir)
 }
 
@@ -305,6 +315,11 @@ func (r *Registry) MergeProject(oldID, newID string) (events, mems, runs, cites 
 	if cols, _ := src.ListCollections(); len(cols) > 0 {
 		return 0, 0, 0, 0, fmt.Errorf("source %q holds %d collection(s); migrate them first — record ids could collide silently", oldID, len(cols))
 	}
+	if has, err := src.HasTasks(); err != nil {
+		return 0, 0, 0, 0, err
+	} else if has {
+		return 0, 0, 0, 0, fmt.Errorf("source %q: %w", oldID, ErrProjectHasTasks)
+	}
 	since := ""
 	for {
 		evs, err := src.EventsSince(since, 500)
@@ -343,11 +358,20 @@ func (r *Registry) MergeProject(oldID, newID string) (events, mems, runs, cites 
 	// moveProject does — an open SQLite file must not be deleted under
 	// its connection).
 	r.mu.Lock()
+	defer r.mu.Unlock()
 	if db, ok := r.dbs[oldID]; ok {
 		db.sql.Close()
 		delete(r.dbs, oldID)
 	}
-	r.mu.Unlock()
+	// The early HasTasks check above ran without the lock; a task created
+	// while the copy was in flight would otherwise be deleted with the
+	// source. Re-check after eviction, under the lock (see Drop).
+	srcPath := filepath.Join(r.root, "projects", oldID, "journal.db")
+	if has, err := fileHasTasks(srcPath); err != nil {
+		return events, mems, runs, cites, fmt.Errorf("history merged, but the source could not be checked for tasks: %w (safe to re-run)", err)
+	} else if has {
+		return events, mems, runs, cites, fmt.Errorf("history merged, but the source gained tasks during the merge and was kept: %w (safe to re-run)", ErrProjectHasTasks)
+	}
 	if err := os.RemoveAll(filepath.Join(r.root, "projects", oldID)); err != nil {
 		return events, mems, runs, cites, fmt.Errorf("history merged, but the source was not removed: %w (safe to re-run)", err)
 	}
@@ -364,7 +388,7 @@ func (r *Registry) Close() {
 	r.dbs = map[string]*DB{}
 }
 
-const currentSchema = 10
+const currentSchema = 11
 
 // SetMeta / GetMeta store small key-value project metadata (e.g. the
 // project's declared knowledge groups, stamped from event pushes so the
@@ -700,6 +724,14 @@ UPDATE meta SET value='9' WHERE key='schema_version';`); err != nil {
 		if err := d.step(`
 CREATE INDEX idx_memory_audit_memory ON memory_audit(memory_id, ts);
 UPDATE meta SET value='10' WHERE key='schema_version';`); err != nil {
+			return err
+		}
+	}
+	if v < 11 {
+		// Task tables (tasks.go): additive, one transaction with the
+		// version bump. Reserved stores (user, group-*) get the tables too
+		// — the schema is uniform — but tasks.go refuses to write there.
+		if err := d.step(taskSchemaSQL); err != nil {
 			return err
 		}
 	}

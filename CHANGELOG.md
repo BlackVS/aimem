@@ -9,9 +9,27 @@ upgrading a fleet.
 The format follows [Keep a Changelog](https://keepachangelog.com/1.1.0/);
 this project does not yet promise semantic versioning. The on-disk schema
 version is tracked separately (`currentSchema` in `internal/store/store.go`,
-currently 10); a binary refuses a database newer than it understands.
+currently 11); a binary refuses a database newer than it understands.
 
 ## [Unreleased]
+
+### Added
+
+- **Task storage (schema v11), stage 1 of the Kanban work — internal only.**
+  Each ordinary project database gains `tasks`, `task_history`,
+  `task_comments` and `task_requests`: current task with expected-revision
+  CAS and a complete actor-stamped history row per accepted revision;
+  append-only Markdown comments with stable IDs and a database append
+  sequence for paging; retry receipts committed with their mutation so a
+  timed-out create/update/comment replays to its original result instead of
+  duplicating. Bounds, UTF-8/control-character checks and the authored-
+  content secret refusal apply to every field. No HTTP route, MCP tool, CLI
+  command or UI touches tasks yet (stage 2 adds the authorized service);
+  existing databases migrate on first open. **Lifecycle:** a project that
+  holds any task — archived included — now refuses `drop` and refuses to be
+  the source of a `merge` (checked race-safely against concurrent task
+  creation) until a task-preserving export/removal exists; rename keeps
+  every task, comment, history row and receipt reachable.
 
 ### Fixed
 

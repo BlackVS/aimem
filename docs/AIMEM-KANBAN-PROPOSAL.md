@@ -5,6 +5,9 @@ Status: **task subsystem proposed, not implemented**, revised 2026-09-13 against
 [PR #35](https://github.com/BlackVS/aimem/pull/35); task comments are part of the
 initial task delivery below.
 
+Continuation guide: [task backend implementation plan](DESIGN-task-backend-implementation.md)
+defines the staged storage/service/HTTP/MCP work and its verification requirements.
+
 ## Purpose
 
 Add current work tracking to aimem so agents can discover active tasks, their
