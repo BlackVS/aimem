@@ -91,6 +91,15 @@ currently 11); a binary refuses a database newer than it understands.
 
 ### Fixed
 
+- **Retry receipts survive a content field being added later.** A task
+  write's retry receipt fingerprints the request so a replay returns the
+  original result and a changed request is a conflict. The fingerprint was
+  the request's JSON as the binary encodes it, so a field added to the task
+  content in a later version would have turned every retry across that
+  upgrade into a conflict. It now ignores zero-valued fields, sorts keys
+  and names its format; a later empty field does not change it, an absent
+  optional field and an empty one match (the replace-all rule), and a
+  changed value is still a conflict.
 - **Task lookup no longer scans every project on every read.** Resolving a
   task id to its project opened and queried every ordinary project per
   lookup — for any valid credential, hit or miss. The hub now remembers
