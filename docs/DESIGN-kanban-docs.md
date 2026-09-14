@@ -223,8 +223,10 @@ target; a bare PR number, commit hash or run id is insufficient. Internal
 targets identify the project or knowledge-group scope as applicable,
 plus the task id, document name or collection and record id (correction
 at implementation: the owning hub is not part of the reference while a
-task board lives on one hub; a hub identity is a later addition). A Git-homed document uses a repository-qualified reference rather
-than an ambiguous local path. References grant no access to their
+task board lives on one hub; a hub identity is a later addition). A
+Git-homed document is a `url` reference to the repository's copy, never
+an ambiguous local path (a `doc` reference names a document in this
+hub's shared documents only). References grant no access to their
 targets.
 
 Validation checks the shape appropriate to each kind. Link rendering
@@ -234,9 +236,9 @@ preserves an unstructured reference as escaped, non-clickable text.
 
 **Compatibility policy: a pre-1.0 break with a migration, not a dual
 contract.** The installed base at the time of writing is one hub and one
-agent identity on a release hours old, so the typed form replaces the
-string form in the next release rather than living beside it. The
-schema migration rewrites every stored string reference — in current
+agent identity on a release hours old, so the typed form replaced the
+string form in the next release (schema 13) rather than living beside
+it. The schema migration rewrites every stored string reference — in current
 snapshots, history and saved retry results — to `url` when it is a valid
 HTTP(S) URL and to `text` otherwise, preserving the exact text and never
 inferring a target; nothing is silently rewritten to a guessed identity.

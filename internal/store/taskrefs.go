@@ -1,6 +1,7 @@
 package store
 
 import (
+	"bytes"
 	"database/sql"
 	"encoding/json"
 	"errors"
@@ -38,13 +39,17 @@ var ErrLegacyTaskRef = errors.New("references are objects {kind, ref, note?, sco
 
 // UnmarshalJSON refuses the legacy string form with the reason, so a
 // client still sending strings learns the shape instead of a type error.
+// Unknown keys are errors here as they are one level up: under a
+// replace-all update a misspelled "note" must not silently clear one.
 func (r *TaskRef) UnmarshalJSON(b []byte) error {
 	if len(b) > 0 && b[0] == '"' {
 		return ErrLegacyTaskRef
 	}
 	type plain TaskRef
 	var p plain
-	if err := json.Unmarshal(b, &p); err != nil {
+	dec := json.NewDecoder(bytes.NewReader(b))
+	dec.DisallowUnknownFields()
+	if err := dec.Decode(&p); err != nil {
 		return err
 	}
 	*r = TaskRef(p)

@@ -31,8 +31,11 @@ currently 13); a binary refuses a database newer than it understands.
   sends strings is refused with 400 naming the new shape; old readers
   receive the typed form. The task page renders links only for http(s)
   URLs of the external kinds and for task ids, and edits references one
-  per line as `kind ref | note`. Schema bump: a database opened by this
-  build is refused by older builds.
+  per line as `kind ref | note` (`kind scope:ref` for a doc or record in
+  another project or group). Schema bump: a database opened by this
+  build is refused by older builds, and the rewrite of task bodies,
+  history and receipts is in place and one-way: back up the database
+  before upgrading.
 
 ### Added
 

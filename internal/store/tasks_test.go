@@ -1541,9 +1541,11 @@ func TestMigrateToSchema13RewritesRefsAndReceipts(t *testing.T) {
 	// with digests computed over the string-shaped inputs.
 	id := uuidv7.New()
 	now := nowUTC()
-	oldContent := map[string]any{"title": "old", "objective": "", "acceptance_criteria": "", "non_goals": "", "state": "BACKLOG",
-		"blocker": "", "dependencies": []any{}, "candidate_refs": []any{"https://example.com/pull/1", "reviewed by hand"},
-		"evidence_refs": []any{}, "next_action": "", "archived": false}
+	assignee := &TaskAssignee{Kind: "user", ID: uuidv7.New()}
+	oldContent := map[string]any{"title": "old", "objective": "ship it", "acceptance_criteria": "", "non_goals": "", "state": "BACKLOG",
+		"blocker": "", "dependencies": []any{}, "candidate_refs": []any{"https://example.com/pull/1", "reviewed by hand", "javascript:alert(1)"},
+		"evidence_refs": []any{}, "next_action": "push", "archived": false,
+		"assignee": map[string]any{"kind": assignee.Kind, "id": assignee.ID}}
 	snap1 := map[string]any{"id": id, "revision": float64(1), "created_at": now, "updated_at": now}
 	for k, v := range oldContent {
 		snap1[k] = v
@@ -1576,6 +1578,7 @@ func TestMigrateToSchema13RewritesRefsAndReceipts(t *testing.T) {
 		{`INSERT INTO task_history(task_id, revision, body) VALUES(?,?,?)`, []any{id, 2, mustJSON(map[string]any{"task": snap2, "actor": json.RawMessage(actor)})}},
 		{`INSERT INTO task_requests(actor, operation, scope, key, digest, result) VALUES(?,?,?,?,?,?)`, []any{actorKey, "create", "", "k-old-create", d1, mustJSON(snap1)}},
 		{`INSERT INTO task_requests(actor, operation, scope, key, digest, result) VALUES(?,?,?,?,?,?)`, []any{actorKey, "update", id, "k-old-update", d2, mustJSON(snap2)}},
+		{`INSERT INTO task_requests(actor, operation, scope, key, digest, result) VALUES(?,?,?,?,?,?)`, []any{actorKey, "comment", id, "k-old-comment", "1:comment-digest", `{"id":"c1","body":"a comment, not a task"}`}},
 		{`UPDATE meta SET value='12' WHERE key='schema_version'`, nil},
 	} {
 		if _, err := db.sql.Exec(stmt.q, stmt.args...); err != nil {
@@ -1601,9 +1604,19 @@ func TestMigrateToSchema13RewritesRefsAndReceipts(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := []TaskRef{{Kind: "url", Ref: "https://example.com/pull/1"}, {Kind: "text", Ref: "reviewed by hand"}}
-	if len(got.CandidateRefs) != 2 || got.CandidateRefs[0] != want[0] || got.CandidateRefs[1] != want[1] {
+	// Only a valid http(s) URL becomes url; a hostile scheme is text.
+	want := []TaskRef{{Kind: "url", Ref: "https://example.com/pull/1"}, {Kind: "text", Ref: "reviewed by hand"}, {Kind: "text", Ref: "javascript:alert(1)"}}
+	if len(got.CandidateRefs) != 3 || got.CandidateRefs[0] != want[0] || got.CandidateRefs[1] != want[1] || got.CandidateRefs[2] != want[2] {
 		t.Fatalf("snapshot references: %+v", got.CandidateRefs)
+	}
+	// Everything else rides through untouched.
+	if got.Objective != "ship it" || got.NextAction != "push" || got.Assignee == nil || *got.Assignee != *assignee || got.Title != "old (edited)" {
+		t.Fatalf("other fields after migration: %+v", got.TaskContent)
+	}
+	var commentDigest, commentResult string
+	db2.sql.QueryRow(`SELECT digest, result FROM task_requests WHERE key='k-old-comment'`).Scan(&commentDigest, &commentResult)
+	if commentDigest != "1:comment-digest" || commentResult != `{"id":"c1","body":"a comment, not a task"}` {
+		t.Fatalf("comment receipt touched: %s %s", commentDigest, commentResult)
 	}
 	if len(got.EvidenceRefs) != 2 || got.EvidenceRefs[0].Kind != "url" || got.EvidenceRefs[1] != (TaskRef{Kind: "text", Ref: "CI green"}) {
 		t.Fatalf("snapshot evidence: %+v", got.EvidenceRefs)
@@ -1613,7 +1626,7 @@ func TestMigrateToSchema13RewritesRefsAndReceipts(t *testing.T) {
 		t.Fatalf("history references: %+v %v", h, err)
 	}
 	// The lost-response retries, now in the typed form of the same content.
-	typedCreate := TaskContent{Title: "old", State: "BACKLOG", CandidateRefs: want}
+	typedCreate := TaskContent{Title: "old", Objective: "ship it", NextAction: "push", State: "BACKLOG", CandidateRefs: want, Assignee: assignee}
 	again, err := db2.CreateTask(typedCreate, aliceActor, "k-old-create")
 	if err != nil || again.ID != id || again.Revision != 1 {
 		t.Fatalf("create retry across the upgrade must replay the original: %+v %v", again, err)
@@ -1630,7 +1643,9 @@ func TestMigrateToSchema13RewritesRefsAndReceipts(t *testing.T) {
 	if _, err := db2.CreateTask(changed, aliceActor, "k-old-create"); !errors.Is(err, ErrTaskRetryConflict) {
 		t.Fatalf("changed content under the old key must conflict: %v", err)
 	}
-	// A second open changes nothing.
+	// The step run again over typed data (the version rewound) changes
+	// nothing: objects pass through, and the receipts still replay.
+	db2.sql.Exec(`UPDATE meta SET value='12' WHERE key='schema_version'`)
 	r2.Close()
 	r3, _ := NewRegistry(root)
 	t.Cleanup(r3.Close)
@@ -1638,7 +1653,10 @@ func TestMigrateToSchema13RewritesRefsAndReceipts(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got3, _ := db3.GetTask(id); got3.CandidateRefs[0] != want[0] {
-		t.Fatalf("second open: %+v", got3.CandidateRefs)
+	if got3, _ := db3.GetTask(id); len(got3.CandidateRefs) != 3 || got3.CandidateRefs[0] != want[0] || got3.CandidateRefs[2] != want[2] {
+		t.Fatalf("re-run over typed data: %+v", got3.CandidateRefs)
+	}
+	if again, err := db3.CreateTask(typedCreate, aliceActor, "k-old-create"); err != nil || again.ID != id {
+		t.Fatalf("create retry after the re-run: %+v %v", again, err)
 	}
 }

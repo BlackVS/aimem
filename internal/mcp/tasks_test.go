@@ -603,10 +603,28 @@ func TestTypedReferencesInToolArgs(t *testing.T) {
 		t.Fatalf("typed args: %+v %v", a, err)
 	}
 	body, err := a.content()
-	if err != nil || body["evidence_refs"] == nil {
-		t.Fatalf("content marshal: %v %v", body, err)
+	if err != nil {
+		t.Fatalf("content marshal: %v", err)
+	}
+	raw, _ := json.Marshal(body["evidence_refs"])
+	var back []store.TaskRef
+	if json.Unmarshal(raw, &back) != nil || len(back) != 1 || back[0] != (store.TaskRef{Kind: "ci", Ref: "https://example.com/runs/1", Note: "green"}) {
+		t.Fatalf("evidence_refs through content(): %s", raw)
+	}
+	a, err = decodeTaskArgs(json.RawMessage(`{"title":"t","idempotency_key":"k","candidate_refs":[{"kind":"doc","ref":"DESIGN","scope":"other-project"}]}`))
+	if err != nil {
+		t.Fatalf("scoped doc ref: %v", err)
+	}
+	body, _ = a.content()
+	raw, _ = json.Marshal(body["candidate_refs"])
+	if json.Unmarshal(raw, &back) != nil || len(back) != 1 || back[0] != (store.TaskRef{Kind: "doc", Ref: "DESIGN", Scope: "other-project"}) {
+		t.Fatalf("candidate_refs through content(): %s", raw)
 	}
 	if _, err := decodeTaskArgs(json.RawMessage(`{"title":"t","idempotency_key":"k","evidence_refs":["https://example.com/runs/1"]}`)); err == nil || !strings.Contains(err.Error(), "objects {kind, ref") {
 		t.Fatalf("legacy strings in args: %v", err)
+	}
+	// A misspelled key inside a reference is an error, never a silent clear.
+	if _, err := decodeTaskArgs(json.RawMessage(`{"title":"t","idempotency_key":"k","evidence_refs":[{"kind":"ci","ref":"https://example.com/runs/1","notes":"green"}]}`)); err == nil || !strings.Contains(err.Error(), "notes") {
+		t.Fatalf("unknown key in a reference: %v", err)
 	}
 }

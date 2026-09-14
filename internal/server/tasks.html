@@ -634,13 +634,13 @@ function fieldHTML(k, label, md){
 // allow one — an http(s) URL for commit/pr/ci/url, a task id for task —
 // and as escaped text otherwise; the kind is shown as a chip and the
 // note follows. Never a link from a scheme the kind does not admit.
-const LINK_KINDS = {commit:1, pr:1, ci:1, url:1};
+const LINK_KINDS = new Set(["commit", "pr", "ci", "url"]);
 function refHTML(r){
   if(typeof r === "string") return esc(r); // never sent by this hub since schema 13; shown as text if ever seen
   const kind = esc(r.kind||"text"), ref = String(r.ref||""), note = r.note ? ` <span class="dim">— ${esc(r.note)}</span>` : "";
   const scope = r.scope ? `<span class="dim">${esc(r.scope)}:</span>` : "";
   let body;
-  if(LINK_KINDS[r.kind] && /^https?:\/\//i.test(ref)) body = `<a href="${esc(ref)}" target="_blank" rel="noopener noreferrer">${esc(ref)}</a>`;
+  if(LINK_KINDS.has(r.kind) && /^https?:\/\//i.test(ref)) body = `<a href="${esc(ref)}" target="_blank" rel="noopener noreferrer">${esc(ref)}</a>`;
   else if(r.kind==="task" && /^[0-9a-f-]{36}$/.test(ref)) body = `<a href="${taskURL(ref)}" onclick="return go('${taskURL(ref)}')">${esc(short(ref))}</a>`;
   else body = esc(ref);
   return `<span class="chip">${kind}</span> ${scope}${body}${note}`;
@@ -650,19 +650,31 @@ function refsHTML(k, label){
   return `<div class="field"><div class="k">${label}</div><div class="refs">${v.map(r=>`<div>${refHTML(r)}</div>`).join("")}</div></div>`;
 }
 // The form edits references one per line as "kind ref | note"; a doc or
-// record reference in another project or group is "kind scope:ref".
+// record reference in another project or group is "kind scope:ref". A
+// backslash escapes what a line cannot carry otherwise: "\n" is a
+// newline, "\|" a bar, "\\" a backslash, so a text reference holding a
+// newline or " | " survives an unrelated edit unchanged.
+const escRef = s => String(s).replace(/[\\|\n]/g, c => c === "\n" ? "\\n" : "\\" + c);
+const unescRef = s => s.replace(/\\(.)/g, (_, c) => c === "n" ? "\n" : c);
 function refLines(refs){
-  return (refs||[]).map(r => typeof r === "string" ? "text "+r : `${r.kind} ${r.scope?r.scope+":":""}${r.ref}${r.note?" | "+r.note:""}`).join("\n");
+  return (refs||[]).map(r => typeof r === "string" ? "text "+escRef(r) : `${r.kind} ${r.scope?r.scope+":":""}${escRef(r.ref)}${r.note?" | "+escRef(r.note):""}`).join("\n");
 }
 const REF_KINDS = ["task","doc","record","commit","pr","ci","url","text"];
+function splitNote(rest){ // at the first unescaped " | "
+  for(let i = 0; i < rest.length; i++){
+    if(rest[i] === "\\"){ i++; continue; }
+    if(rest.startsWith(" | ", i)) return [rest.slice(0, i), rest.slice(i+3)];
+  }
+  return [rest, null];
+}
 function parseRefs(text){
   return text.split("\n").map(l=>l.trim()).filter(Boolean).map(line => {
     let kind = "text", rest = line;
     const sp = line.indexOf(" ");
     if(sp > 0 && REF_KINDS.includes(line.slice(0, sp))){ kind = line.slice(0, sp); rest = line.slice(sp+1).trim(); }
-    const bar = rest.indexOf(" | ");
-    const r = {kind, ref: bar >= 0 ? rest.slice(0, bar).trim() : rest};
-    if(bar >= 0) r.note = rest.slice(bar+3).trim();
+    const [refPart, notePart] = splitNote(rest);
+    const r = {kind, ref: unescRef(refPart.trim())};
+    if(notePart !== null) r.note = unescRef(notePart.trim());
     if((kind==="doc"||kind==="record") && r.ref.includes(":")){ const c = r.ref.indexOf(":"); r.scope = r.ref.slice(0,c); r.ref = r.ref.slice(c+1); }
     return r;
   });

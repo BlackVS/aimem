@@ -772,7 +772,7 @@ func TestTasksPageIsPublicChrome(t *testing.T) {
 	// cleared before the first query of another project.
 	for _, want := range []string{`view=board`, `ondrop=`, `if(t.archived){ if(from) countCol(from); return; }`, `if(SEEN[t.id] > t.revision) return;`,
 		"${t&&t.epic&&!EPICS[t.epic]?`<option value=\"${esc(t.epic)}\" selected>", `EPICS = {}; EPICS_PROJ = project; FILTER.epic = "";`, `const gen = ++EPICS_GEN;`,
-		`if(LINK_KINDS[r.kind] && /^https?:\/\//i.test(ref)) body =`, `function parseRefs(text){`, `candidate_refs:parseRefs(g("candidate_refs")), evidence_refs:parseRefs(g("evidence_refs")),`, `if(gen!==EPICS_GEN) return;`, `EPICS = got;`, `loadEpics(CUR.project);`,
+		`if(LINK_KINDS.has(r.kind) && /^https?:\/\//i.test(ref)) body =`, `function parseRefs(text){`, `const [refPart, notePart] = splitNote(rest);`, `if(rest[i] === "\\"){ i++; continue; }`, `candidate_refs:parseRefs(g("candidate_refs")), evidence_refs:parseRefs(g("evidence_refs")),`, `if(gen!==EPICS_GEN) return;`, `EPICS = got;`, `loadEpics(CUR.project);`,
 		`let TOK_REMEMBERED = !!TOK;`, `TOK_REMEMBERED=false;`,
 		`TOK_REMEMBERED?"The token remembered in this browser from an earlier visit was rejected (invalid, expired, revoked, or the user is disabled) — paste a current one.":"That token was rejected (invalid, expired, revoked, or the user is disabled)."`} {
 		if !strings.Contains(page, want) {
