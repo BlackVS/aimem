@@ -11,6 +11,17 @@ this project does not yet promise semantic versioning. The on-disk schema
 version is tracked separately (`currentSchema` in `internal/store/store.go`,
 currently 11); a binary refuses a database newer than it understands.
 
+## [Unreleased]
+
+### Fixed
+
+- **Task page: a rejected stored token is named as the remembered one.** A
+  token left in the browser by an earlier visit that the hub no longer
+  accepts produced "That token was rejected", which read as if the user
+  had just typed a bad one. The gate now says the token remembered in this
+  browser from an earlier visit was rejected and asks for a current one; a
+  token the user just typed keeps the plain message.
+
 ## [0.4.0] — 2026-09-14
 
 ### Added

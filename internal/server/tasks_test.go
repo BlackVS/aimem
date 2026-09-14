@@ -640,7 +640,11 @@ func TestTasksPageIsPublicChrome(t *testing.T) {
 	// archived (by another client meanwhile) must take it off the board —
 	// and the newest revision seen must outlive the card, so a delayed
 	// older response cannot put it back.
-	for _, want := range []string{`view=board`, `ondrop=`, `if(t.archived){ if(from) countCol(from); return; }`, `if(SEEN[t.id] > t.revision) return;`} {
+	// A stored token rejected at load is named as the remembered one (the
+	// user did not type it); a token just typed keeps the plain message.
+	for _, want := range []string{`view=board`, `ondrop=`, `if(t.archived){ if(from) countCol(from); return; }`, `if(SEEN[t.id] > t.revision) return;`,
+		`let TOK_REMEMBERED = !!TOK;`, `TOK_REMEMBERED=false;`,
+		`TOK_REMEMBERED?"The token remembered in this browser from an earlier visit was rejected (invalid, expired, revoked, or the user is disabled) — paste a current one.":"That token was rejected (invalid, expired, revoked, or the user is disabled)."`} {
 		if !strings.Contains(page, want) {
 			t.Fatalf("board: page lacks %q", want)
 		}

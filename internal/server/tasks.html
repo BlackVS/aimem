@@ -199,6 +199,9 @@ function setTheme(t){
 }
 const STATES = ["BACKLOG","READY","IN_PROGRESS","REVIEW","BLOCKED","DONE","CANCELLED"];
 let TOK = localStorage.getItem("aimem_token") || "";
+// A token found in storage at load came from an earlier visit; a rejection
+// of it must say so, or it reads as if the user just typed a bad one.
+let TOK_REMEMBERED = !!TOK;
 let ME = null;                      // identity: {name, role, ...}
 let PROJ = localStorage.getItem("aimem_task_project") || "";
 let PROJECTS = null;                // dropdown source when the credential may list projects
@@ -240,7 +243,7 @@ async function api(path, opt, k){
   if(!r.ok){ const e = new Error((body&&body.error)||text||("HTTP "+r.status)); e.status=r.status; e.body=body; throw e; }
   return body;
 }
-function saveTok(){TOK=$("tok").value.trim();localStorage.setItem("aimem_token",TOK);boot();}
+function saveTok(){TOK=$("tok").value.trim();TOK_REMEMBERED=false;localStorage.setItem("aimem_token",TOK);boot();}
 function logout(){localStorage.removeItem("aimem_token");localStorage.removeItem("aimem_task_project");TOK="";location.reload();}
 
 /* ---------- Markdown, rendered safely: escaped first, then a few shapes. ---------- */
@@ -341,7 +344,7 @@ async function boot(){
     route();
   }catch(e){
     if(e.auth){$("gate").classList.remove("hide");
-      $("gateErr").textContent=TOK?"That token was rejected (invalid, expired, revoked, or the user is disabled).":"";}
+      $("gateErr").textContent=!TOK?"":TOK_REMEMBERED?"The token remembered in this browser from an earlier visit was rejected (invalid, expired, revoked, or the user is disabled) — paste a current one.":"That token was rejected (invalid, expired, revoked, or the user is disabled).";}
     else $("gateErr").textContent = String(e.message||e);
   }
 }
