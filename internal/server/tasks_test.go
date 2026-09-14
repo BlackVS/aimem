@@ -327,7 +327,8 @@ func TestOrdinaryTokenGateMatrix(t *testing.T) {
 	// consults: widening it is a deliberate, reviewed change.
 	want := []string{"GET /v1/projects/{p}/tasks", "POST /v1/projects/{p}/tasks", "GET /v1/tasks/{id}", "PUT /v1/tasks/{id}",
 		"GET /v1/tasks/{id}/history", "GET /v1/tasks/{id}/comments", "POST /v1/tasks/{id}/comments", "GET /v1/tasks/{id}/comments/{c}", "POST /mcp",
-		"GET /v1/projects"} // the listing, read only, reserved stores filtered (TestProjectListForOrdinaryTokens)
+		"GET /v1/projects",             // the listing, read only, reserved stores filtered (TestProjectListForOrdinaryTokens)
+		"GET /v1/projects/{p}/process"} // the selected process reference (TestProcessReferenceSelection)
 	if len(ordinaryRoutes) != len(want) {
 		t.Fatalf("ordinary surface changed: %v", ordinaryRoutes)
 	}

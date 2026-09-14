@@ -53,6 +53,7 @@ var ordinaryRoutes = func() map[string]bool {
 	m := maps.Clone(taskRoutes)
 	m["POST /mcp"] = true
 	m["GET /v1/projects"] = true
+	m["GET /v1/projects/{p}/process"] = true // the selected process reference: what an agent needs to find its rules; grants no repository access
 	return m
 }()
 

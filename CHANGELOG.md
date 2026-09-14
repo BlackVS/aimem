@@ -15,6 +15,24 @@ currently 11); a binary refuses a database newer than it understands.
 
 ### Added
 
+- **A project's process documents come from Git at a pinned commit; the
+  session start injects them.** An admin selects, per project, the
+  repository, commit and manifest that hold the handbook, the checklists
+  gating READY and DONE and the task templates (`aimem process select
+  <repo> <commit> <manifest> [--ref <branch>] [--expect <commit>]` on the
+  hub host, or `PUT /v1/projects/{p}/process`, with a compare-and-swap on
+  the previous commit and the history retained); the hub stores the
+  reference only. Every credential may read the selection. On a machine,
+  `aimem process show` — and the session-start hook, when the project's
+  tasks are on — fetches the files with the machine's own Git access (by
+  full hash, or by the ref with the hash verified) into a per-commit cache
+  promoted only when complete, and injects one bounded unit: the signal
+  that tasks are on and which tools exist, the process set's identity,
+  the required skills with whether this machine has them, the handbook
+  and the checklists. Unavailable, denied and unreachable are reported as
+  such; an unreachable hub falls back to the selection as last observed
+  with a warning; a unit over the manifest's budget is not injected and
+  says how to read it. Nothing is written into the repository.
 - **Tasks are enabled per project, by an admin.** A project's tasks are
   on only when an admin has switched them on: through the console's
   project menu, the admin API (`PUT /v1/projects/{p}/meta/tasks` with
