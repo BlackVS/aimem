@@ -6,7 +6,6 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
-	"regexp"
 	"runtime"
 	"strings"
 	"testing"
@@ -569,8 +568,12 @@ func TestTasksPageIsPublicChrome(t *testing.T) {
 	// One policy for both pages, and it closes framing, form posts and
 	// base overrides on top of the subresource and connect restrictions.
 	csp := w.Header().Get("Content-Security-Policy")
-	if admin := taskReq(t, f.h, "GET", "/admin", "", "", "").Header().Get("Content-Security-Policy"); csp != admin {
-		t.Fatalf("pages disagree on CSP:\n%s\n%s", csp, admin)
+	admin := taskReq(t, f.h, "GET", "/admin", "", "", "")
+	if a := admin.Header().Get("Content-Security-Policy"); csp != a {
+		t.Fatalf("pages disagree on CSP:\n%s\n%s", csp, a)
+	}
+	if c := w.Header().Get("Cache-Control"); c != "no-cache" || c != admin.Header().Get("Cache-Control") {
+		t.Fatalf("pages must not be cached: %q vs %q", c, admin.Header().Get("Cache-Control"))
 	}
 	for _, d := range []string{"default-src 'none'", "connect-src 'self'", "frame-ancestors 'none'", "form-action 'none'", "base-uri 'none'"} {
 		if !strings.Contains(csp, d) {
@@ -585,38 +588,44 @@ func TestTasksPageIsPublicChrome(t *testing.T) {
 	if bad := scanJSStrings(page[open+len("<script>") : closeAt]); len(bad) > 0 {
 		t.Fatalf("unterminated string literals at script lines %v", bad)
 	}
-	// The page's call surface is exactly what an ordinary token may reach
-	// plus the identity check and the optional project listing: every
-	// api("/v1/...") literal in the page must start with an allowed prefix.
-	allowed := []string{"/v1/access/identity", "/v1/projects/", "/v1/tasks/"}
-	seen := map[string]bool{}
-	for _, m := range regexp.MustCompile(`api\("(/v1/[^"]*)"`).FindAllStringSubmatch(page, -1) {
-		call := m[1]
-		if call == "/v1/projects" { // the optional listing; refused for ordinary tokens and caught
-			seen[call] = true
-			continue
+	// The page's call surface is pinned exactly: every api(...) call site's
+	// path expression is listed here, api() is the only egress (one fetch
+	// in the whole page), and each path is a task route, the identity
+	// check, or the optional project listing (refused for ordinary tokens
+	// and caught). A new call is a reviewed edit.
+	want := map[string]bool{
+		`"/v1/access/identity?project="+encodeURIComponent(project)`: true,
+		`"/v1/access/identity"`: true,
+		`"/v1/projects"`:        true,
+		`"/v1/projects/"+encodeURIComponent(PROJ)+"/tasks?"+q`:                          true,
+		`"/v1/projects/"+encodeURIComponent(PROJ)+"/tasks"`:                             true,
+		`"/v1/tasks/"+encodeURIComponent(id)`:                                           true,
+		`"/v1/tasks/"+encodeURIComponent(CUR.id)`:                                       true,
+		`"/v1/tasks/"+encodeURIComponent(CUR.id)+"/history?limit=20&after="+HIST.after`: true,
+		`"/v1/tasks/"+encodeURIComponent(CUR.id)+"/comments?limit=20&after="+CMT.after`: true,
+		`"/v1/tasks/"+encodeURIComponent(CUR.id)+"/comments"`:                           true,
+	}
+	got := map[string]bool{}
+	for _, expr := range apiCallSites(page) {
+		if !want[expr] {
+			t.Fatalf("page calls api(%s), not in the pinned call surface", expr)
 		}
-		ok := false
-		for _, p := range allowed {
-			if strings.HasPrefix(call, p) {
-				ok, seen[p] = true, true
-			}
-		}
-		if !ok {
-			t.Fatalf("page calls %q, outside the ordinary-token surface", call)
+		got[expr] = true
+	}
+	for expr := range want {
+		if !got[expr] {
+			t.Fatalf("page no longer calls api(%s)", expr)
 		}
 	}
-	for _, p := range append(allowed, "/v1/projects") {
-		if !seen[p] {
-			t.Fatalf("page no longer calls %s", p)
-		}
+	if n := strings.Count(page, "fetch("); n != 1 {
+		t.Fatalf("api() must be the page's only egress: %d fetch( sites", n)
 	}
 	if !strings.Contains(page, "catch(_){ PROJECTS = null; }") {
 		t.Fatal("project listing must be optional for ordinary tokens")
 	}
 	// The write decision is the identity endpoint's task_write answer.
-	if !strings.Contains(page, "task_write") {
-		t.Fatal("page must read task_write from the identity endpoint")
+	if !strings.Contains(page, "return !!r.task_write;") {
+		t.Fatal("page must decide writes from the identity endpoint's task_write")
 	}
 	// A deep link into the console's task view lands here, and the console
 	// does not boot while forwarding.
@@ -624,6 +633,40 @@ func TestTasksPageIsPublicChrome(t *testing.T) {
 	if !strings.Contains(console, `location.replace("/tasks?"`) || !strings.Contains(console, "if(TOK && !FORWARDING) boot();") {
 		t.Fatal("console must forward /admin?task= to the task page without booting")
 	}
+}
+
+// apiCallSites returns the first-argument expression of every api(...)
+// call in the page (parentheses balanced, up to the first top-level comma).
+func apiCallSites(page string) []string {
+	var out []string
+	for i := 0; ; {
+		j := strings.Index(page[i:], "api(")
+		if j < 0 {
+			break
+		}
+		start := i + j + len("api(")
+		if strings.HasSuffix(page[:i+j], "function ") { // the definition itself
+			i = start
+			continue
+		}
+		depth, k := 0, start
+		for ; k < len(page); k++ {
+			c := page[k]
+			if c == '(' {
+				depth++
+			} else if c == ')' {
+				if depth == 0 {
+					break
+				}
+				depth--
+			} else if c == ',' && depth == 0 {
+				break
+			}
+		}
+		out = append(out, strings.TrimSpace(page[start:k]))
+		i = k
+	}
+	return out
 }
 
 // The local unix socket carries no identity: the operator's CLI works and

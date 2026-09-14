@@ -458,6 +458,20 @@ Valid, out of stage 1's scope, owned by the stage-2 service unless noted:
 - **Replace-all updates over JSON.** Absent and empty optional fields encode
   identically; the transport must decide whether a partial body is an
   error (strict) or a clear, and document it.
+- **Task page (stage 3) follow-ups.** (a) A JavaScript check in CI: a Go
+  test that runs `node --check` on each page's extracted script when node
+  is present, plus a node step in the lint job; today only a string-literal
+  lexer guards the two inline scripts. (b) Unit tests for the page's
+  rendering helpers (`esc`, `inline`, `md2html`, the conflict card's
+  JSON-in-attribute round trip) and its state machine (routing, conflict →
+  reapply, one key per open form, the copy fallback) — browser-only today,
+  proven by a manual run per PR. (c) The console's own `esc()` does not
+  encode the apostrophe while it builds inline handlers with single-quoted
+  arguments from stored names; back-port the task page's escaper and add a
+  test. (d) The page spells `TaskContent` three times (form, reader,
+  projection); derive them from one field list and assert it against the
+  storage type's JSON tags, since a dropped field is silently erased by the
+  replace-all update.
 - **Format characters.** Storage rejects bidirectional overrides (U+202A–E,
   U+2066–9) and C0/C1 controls; other zero-width/format characters pass and
   are the renderer's concern.

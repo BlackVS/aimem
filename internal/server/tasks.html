@@ -123,7 +123,7 @@
     <div id="gateErr" class="bad"></div>
   </div>
 </div>
-<header><a href="/tasks" onclick="return go('/tasks')">aimem tasks</a> <span class="sub" id="who"></span>
+<header><a href="/tasks" onclick="return go(listURL())">aimem tasks</a> <span class="sub" id="who"></span>
   <span class="right"><a href="/admin" class="dim" id="consoleLink" hidden>console</a>
   <select id="themeSel" onchange="setTheme(this.value)" aria-label="color scheme" style="padding:2px 6px">
     <option value="">moss</option><option value="slate">slate</option>
@@ -190,6 +190,8 @@ let CUR = null;                     // open task (served view)
 let CAN_WRITE = false;              // for CUR's project, this credential, this attempt
 let HIST = {after:0}, CMT = {after:0};
 let KEYS = {};                      // idempotency keys per open form: retry-safe until success
+let NAV = 0;                        // navigation epoch: a load that outlives its view must not render
+let BUSY = {};                      // in-flight pagers, so a double click cannot fetch a page twice
 
 const $ = id => document.getElementById(id);
 const esc = s => String(s??"").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
@@ -301,7 +303,8 @@ async function boot(){
     // Only admin and legacy writer credentials may list projects; an
     // ordinary token names its project (it is the one the token was
     // issued for) — the field remembers it in this browser.
-    try{ const p = await api("/v1/projects"); PROJECTS = (p.projects||p||[]).map(x=>x.id||x).filter(id=>id!=="user"&&!String(id).startsWith("group-")).sort(); }
+    // Reserved stores never hold tasks (mirrors store.IsReservedProject).
+    try{ const p = await api("/v1/projects"); PROJECTS = (p.projects||[]).filter(id=>id!=="user"&&!id.startsWith("group-")).sort(); }
     catch(_){ PROJECTS = null; }
     if(PROJECTS){
       const sel = $("projSel"); sel.hidden=false;
@@ -321,17 +324,20 @@ function setProject(id){
 
 /* ---------- List ---------- */
 function showList(){
+  NAV++;
   $("v-task").hidden = true; $("v-list").hidden = false; CUR = null;
   document.title = (PROJ? PROJ+" · " : "")+"aimem tasks";
   if(PROJECTS) $("projSel").value = PROJECTS.includes(PROJ)?PROJ:""; else $("projIn").value = PROJ;
   $("filters").hidden = !PROJ; $("newBtn").hidden = true;
-  if(PROJ) canWrite(PROJ).then(ok => { if(PROJ) $("newBtn").hidden = !ok; });
+  if(PROJ){ const asked = PROJ; canWrite(asked).then(ok => { if(PROJ===asked && CUR===null) $("newBtn").hidden = !ok; }); }
   $("stateChips").innerHTML = stateChipsHTML();
   $("archChk").checked = FILTER.archived;
   if(PROJ) listTasks(true); else { $("list").innerHTML = '<div class="dim">Pick or enter a project.</div>'; $("moreBtn").hidden = true; }
 }
 async function listTasks(reset){
+  if(BUSY.list) return;
   if(reset){ CURSOR=""; $("list").innerHTML=""; FILTER.archived = $("archChk").checked; }
+  const my = NAV; BUSY.list = true; $("moreBtn").disabled = true;
   const q = new URLSearchParams();
   if(FILTER.state) q.set("state", FILTER.state);
   if(FILTER.archived) q.set("include_archived","true");
@@ -339,6 +345,7 @@ async function listTasks(reset){
   q.set("limit","50");
   try{
     const page = await api("/v1/projects/"+encodeURIComponent(PROJ)+"/tasks?"+q);
+    if(my!==NAV) return;
     for(const t of page.tasks){
       $("list").insertAdjacentHTML("beforeend", `<a class="trow${t.archived?' archived':''}" href="${taskURL(t.id)}" onclick="return go('${taskURL(t.id)}')">
         <span class="title">${esc(t.title)}</span>${stChip(t.state)}
@@ -348,7 +355,8 @@ async function listTasks(reset){
     $("moreBtn").hidden = !CURSOR;
     $("listNote").textContent = $("list").children.length ? "" : "no tasks"+(FILTER.state?" in "+FILTER.state:"");
     $("stateChips").innerHTML = stateChipsHTML();
-  }catch(e){ if(e.auth) return boot(); $("listNote").textContent = e.message; if(reset) $("list").innerHTML = ""; }
+  }catch(e){ if(e.auth) return boot(); if(my!==NAV) return; $("listNote").textContent = e.message; if(reset) $("list").innerHTML = ""; }
+  finally{ BUSY.list = false; $("moreBtn").disabled = false; }
 }
 
 /* ---------- Content form: create and edit share it (the update is a full replacement). ---------- */
@@ -403,19 +411,29 @@ async function createTask(){
 }
 
 /* ---------- Task detail ---------- */
+// Every await checks the navigation epoch: a task opened, then left before
+// its loads return, must not paint its rows or its permissions into the
+// view that replaced it.
 async function showTask(id, commentID){
+  const my = ++NAV;
   $("v-list").hidden = true; $("v-task").hidden = false;
   $("task").innerHTML = '<div class="dim">loading…</div>'; $("hist").innerHTML=""; $("comments").innerHTML="";
+  let task;
   try{
-    CUR = await api("/v1/tasks/"+encodeURIComponent(id));
-  }catch(e){ if(e.auth) return boot(); $("task").innerHTML = `<div class="card bad">${esc(e.message)}</div>`; return; }
+    task = await api("/v1/tasks/"+encodeURIComponent(id));
+  }catch(e){ if(e.auth) return boot(); if(my===NAV) $("task").innerHTML = `<div class="card bad">${esc(e.message)}</div>`; return; }
+  if(my!==NAV) return;
+  CUR = task;
   PROJ = CUR.project; localStorage.setItem("aimem_task_project", PROJ);
   document.title = CUR.title+" · aimem tasks";
   $("taskCrumb").textContent = " · "+CUR.project+" · "+short(CUR.id);
-  CAN_WRITE = await canWrite(CUR.project);
+  const ok = await canWrite(CUR.project);
+  if(my!==NAV) return;
+  CAN_WRITE = ok;
   renderTask();
   HIST = {after:0}; CMT = {after:0};
   await Promise.all([loadHistory(true), loadComments(true)]);
+  if(my!==NAV) return;
   if(commentID){ const el = document.getElementById("c-"+commentID); if(el){ el.classList.add("target"); el.scrollIntoView({block:"center"}); } }
 }
 function fieldHTML(k, label, md){
@@ -480,21 +498,23 @@ async function saveTask(content, kname){
     toast(e.message);
   }
 }
-// Never overwrite silently: the current task is shown beside the attempt,
-// and the only ways out are to reload it or to reapply on top of it.
+// Never overwrite silently. The served current task replaces the stale one
+// outright (a field the other writer cleared must not survive) and the card
+// re-renders from it, so the header, the state selector and any later quick
+// change all describe the winning revision; the attempt is kept beside it,
+// and the ways out are to drop it or to reapply it on top.
 function showConflict(current, attempt, kname){
   spent(kname);
-  $("editBox").innerHTML = `<div class="card conflict"><b class="bad">revision conflict</b>: the task is at r${current.revision}
-    (${stChip(current.state)} <span class="prose">${esc(current.title)}</span>), you edited r${CUR.revision}.
-    <div class="row"><button class="act" onclick="showTask(CUR.id)">reload current (discard my change)</button>
-    <button class="act" onclick="reapply(${esc(JSON.stringify(current))}, ${esc(JSON.stringify(attempt))})">reapply my change on r${current.revision}</button></div></div>`;
-}
-// The served current task replaces the stale one outright (a field the
-// other writer cleared must not survive), the card re-renders from it, and
-// the attempt is offered on top.
-function reapply(current, attempt){
+  const mine = CUR.revision;
   CUR = current;
   renderTask();
+  loadHistory(true);
+  $("editBox").innerHTML = `<div class="card conflict"><b class="bad">revision conflict</b>: the task is now at r${current.revision}
+    (${stChip(current.state)} <span class="prose">${esc(current.title)}</span>) — shown above; you edited r${mine}.
+    <div class="row"><button class="act" onclick="$('editBox').innerHTML=''">drop my change</button>
+    <button class="act" onclick="reapply(${esc(JSON.stringify(attempt))})">reapply my change on r${current.revision}</button></div></div>`;
+}
+function reapply(attempt){
   $("editBox").innerHTML = `<h2>reapply on revision ${CUR.revision}</h2>`+contentForm(Object.assign({}, attempt),"ed")+
     `<div class="row" style="margin-top:10px"><button class="act on" onclick="saveTask(readForm('ed'),'edit:'+CUR.id+':'+CUR.revision)">save</button>
      <button class="act" onclick="showTask(CUR.id)">cancel</button></div>`;
@@ -503,21 +523,28 @@ function reapply(current, attempt){
 
 /* ---------- History and discussion ---------- */
 async function loadHistory(reset){
+  if(BUSY.hist) return;
   if(reset){ HIST = {after:0}; $("hist").innerHTML=""; }
+  const my = NAV; BUSY.hist = true; $("histMore").disabled = true;
   try{
     const p = await api("/v1/tasks/"+encodeURIComponent(CUR.id)+"/history?limit=20&after="+HIST.after);
+    if(my!==NAV) return;
     for(const ch of p.changes){
       const a = ch.actor, t = ch.task;
       $("hist").insertAdjacentHTML("beforeend", `<div class="hrow"><span class="n">r${t.revision}</span>${stChip(t.state)}
         <span>${esc(t.title)}</span><span class="dim">${esc(a.kind)} <b>${esc(a.name)}</b> · ${ago(t.updated_at)}${t.archived?' · archived':''}</span></div>`);
     }
     HIST.after = p.next_cursor||0; $("histMore").hidden = !p.next_cursor;
-  }catch(e){ if(e.auth) return boot(); $("hist").innerHTML = `<span class="bad">${esc(e.message)}</span>`; }
+  }catch(e){ if(e.auth) return boot(); if(my===NAV) $("hist").innerHTML = `<span class="bad">${esc(e.message)}</span>`; }
+  finally{ BUSY.hist = false; $("histMore").disabled = false; }
 }
 async function loadComments(reset){
+  if(BUSY.cmt) return;
   if(reset){ CMT = {after:0}; $("comments").innerHTML=""; }
+  const my = NAV; BUSY.cmt = true; $("cmtMore").disabled = true;
   try{
     const p = await api("/v1/tasks/"+encodeURIComponent(CUR.id)+"/comments?limit=20&after="+CMT.after);
+    if(my!==NAV) return;
     for(const c of p.comments){
       $("comments").insertAdjacentHTML("beforeend", `<div class="comment" id="c-${esc(c.id)}">
         <div class="who"><span>${esc(c.actor.kind)}</span><b>${esc(c.actor.name)}</b><span>${ago(c.created_at)}</span><span>#${c.sequence}</span>
@@ -526,7 +553,8 @@ async function loadComments(reset){
     }
     CMT.after = p.next_cursor||0; $("cmtMore").hidden = !p.next_cursor;
     if(!$("comments").children.length) $("comments").innerHTML = '<div class="dim">no discussion yet</div>';
-  }catch(e){ if(e.auth) return boot(); $("comments").innerHTML = `<span class="bad">${esc(e.message)}</span>`; }
+  }catch(e){ if(e.auth) return boot(); if(my===NAV) $("comments").innerHTML = `<span class="bad">${esc(e.message)}</span>`; }
+  finally{ BUSY.cmt = false; $("cmtMore").disabled = false; }
 }
 async function addComment(){
   const body = $("cmtBody").value; if(!body.trim()) return;

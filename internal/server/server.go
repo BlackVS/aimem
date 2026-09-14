@@ -48,6 +48,8 @@ type Server struct {
 	mux          http.Handler // route-table handler for in-process task dispatch
 	ordOnce      sync.Once
 	ord          *http.ServeMux // ordinary-token allow-list, built from ordinaryRoutes
+	pubOnce      sync.Once
+	pub          map[string]http.HandlerFunc // publicGETs, built once
 }
 
 func New(reg *store.Registry, log *slog.Logger) *Server {
@@ -97,8 +99,8 @@ func (rt Route) Ordinary() bool { return ordinaryRoutes[rt.Method+" "+rt.Pattern
 
 // Routes enumerates the complete HTTP surface. Admin marks operator
 // actions (config, destructive project ops, logs); everything else is
-// available to writer tokens. The three public pages (/admin, /,
-// /v1/status) are exempted from auth in authWrapper, not here.
+// available to writer tokens. The unauthenticated pages are exempted
+// from auth in authWrapper via publicGETs, not here.
 func (s *Server) Routes() []Route {
 	return []Route{
 		{"GET", "/v1/access", s.getAccess, true},
@@ -469,12 +471,15 @@ func (s *Server) authWrapper(token string, next http.Handler) http.Handler {
 // build, uptime — nothing about what the hub holds). The gate, the OpenAPI
 // parity test and the ordinary-token gate test all read this one map.
 func (s *Server) publicGETs() map[string]http.HandlerFunc {
-	return map[string]http.HandlerFunc{
-		"/admin":     s.adminPage,
-		"/tasks":     s.tasksPage,
-		"/":          s.statusPage,
-		"/v1/status": s.status,
-	}
+	s.pubOnce.Do(func() {
+		s.pub = map[string]http.HandlerFunc{
+			"/admin":     s.adminPage,
+			"/tasks":     s.tasksPage,
+			"/":          s.statusPage,
+			"/v1/status": s.status,
+		}
+	})
+	return s.pub
 }
 
 // TCPHandler is the complete hub-mode surface behind the bearer gate: the
