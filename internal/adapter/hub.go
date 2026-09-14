@@ -29,6 +29,11 @@ type HubConfig struct {
 	URL   string `json:"url"` // e.g. https://hub.example.com:8440
 	Token string `json:"token"`
 	Sync  string `json:"sync,omitempty"` // optional ssh destination for `aimem sync --hub`
+	// TaskToken is the ordinary (per-user, per-project) token the local
+	// MCP facade presents for task tools. Separate from Token on purpose:
+	// the checkpoint token is a shared writer credential and must never
+	// carry task authority.
+	TaskToken string `json:"task_token,omitempty"`
 	// Insecure skips TLS certificate verification for this hub — for the
 	// self-signed phase of a fresh hub (still TLS on the wire + bearer
 	// token). Drop it once a real certificate is installed.
@@ -127,7 +132,8 @@ func LoadHub(root string) *HubConfig {
 	return hubs[def]
 }
 
-// SaveHub sets/replaces the default hub, preserving other named entries
+// SaveHub sets/replaces the default hub's URL and checkpoint token,
+// preserving other named entries and the default entry's other settings
 // (legacy `aimem hub <url> <token>` path).
 func SaveHub(root string, c *HubConfig) error {
 	hubs, def := LoadHubs(root)
@@ -137,8 +143,27 @@ func SaveHub(root string, c *HubConfig) error {
 	if def == "" {
 		def = DefaultHubName
 	}
-	hubs[def] = c
+	hubs[def] = c.Over(hubs[def])
 	return SaveHubs(root, hubs, def)
+}
+
+// Over returns c completed from prev for a re-run of `hub add` / `hub <url>
+// <token>` against the SAME host: the sync destination and the task
+// credential carry over when not restated. A different URL inherits
+// nothing (a per-user credential must never travel to another host), and
+// the TLS downgrade is never inherited: --insecure is restated or gone.
+func (c *HubConfig) Over(prev *HubConfig) *HubConfig {
+	out := *c
+	if prev == nil || prev.URL != c.URL {
+		return &out
+	}
+	if out.Sync == "" {
+		out.Sync = prev.Sync
+	}
+	if out.TaskToken == "" {
+		out.TaskToken = prev.TaskToken
+	}
+	return &out
 }
 
 // ResolveHub maps a project's hub binding to a configured hub: the named

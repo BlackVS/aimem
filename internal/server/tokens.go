@@ -89,6 +89,7 @@ type Identity struct {
 	Role    string // legacy "writer"/"admin", or scoped ordinary "user"
 	UserID  string
 	TokenID string
+	Project string // ordinary tokens: the access instance the token was issued for
 }
 
 type identityKey struct{}
@@ -129,7 +130,7 @@ func (s *Server) authenticate(envToken, presented string) (Identity, bool) {
 		if err != nil {
 			return Identity{}, false
 		}
-		return Identity{Name: user.Name, Role: "user", UserID: user.UserID, TokenID: user.TokenID}, true
+		return Identity{Name: user.Name, Role: "user", UserID: user.UserID, TokenID: user.TokenID, Project: user.Project}, true
 	}
 	for _, t := range LoadTokens(s.reg.Root()) {
 		if len(t.SHA256) != sha256.Size*2 {

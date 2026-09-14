@@ -41,6 +41,7 @@ const (
 )
 
 var (
+	ErrTaskInvalid       = errors.New("invalid task input")
 	ErrTaskNotFound      = errors.New("task or comment not found")
 	ErrTaskArchived      = errors.New("task is archived; unarchive it before adding discussion")
 	ErrTaskRetryConflict = errors.New("idempotency key already used with different input")
@@ -154,14 +155,6 @@ func (e *TaskConflict) Error() string {
 
 func validTaskState(s string) bool { return slices.Contains(TaskStates, s) }
 
-// clip bounds a caller-supplied value before it is echoed in an error.
-func clip(s string) string {
-	if len(s) > 64 {
-		return s[:64] + "…"
-	}
-	return s
-}
-
 // taskText validates authored text: UTF-8, bounded, no control characters
 // beyond newline/tab, and no high-confidence secret shapes (the same tier
 // that refuses a document — never silently redact authored content).
@@ -203,7 +196,7 @@ func (c *TaskContent) validate() error {
 		return fmt.Errorf("title: %w", err)
 	}
 	if !validTaskState(c.State) {
-		return fmt.Errorf("invalid task state %q (want one of %s)", clip(c.State), strings.Join(TaskStates, ", "))
+		return fmt.Errorf("invalid task state (want one of %s)", strings.Join(TaskStates, ", "))
 	}
 	if c.Archived && c.State != "DONE" && c.State != "CANCELLED" {
 		return errors.New("only DONE or CANCELLED tasks can be archived")
@@ -216,7 +209,7 @@ func (c *TaskContent) validate() error {
 	}
 	for _, id := range c.Dependencies {
 		if !taskIDRE.MatchString(id) {
-			return fmt.Errorf("dependency %q is not a task ID", clip(id))
+			return errors.New("each dependency must be a task ID")
 		}
 	}
 	for _, l := range []struct {
@@ -247,11 +240,52 @@ func (c *TaskContent) validate() error {
 	return nil
 }
 
+// IsReservedProject reports a store that never holds tasks: the user
+// memory store and the knowledge-group stores.
+func IsReservedProject(id string) bool {
+	return id == UserScopeProject || strings.HasPrefix(id, "group-")
+}
+
 func (d *DB) taskScopeOK() error {
-	if d.projectID == UserScopeProject || strings.HasPrefix(d.projectID, "group-") {
+	if IsReservedProject(d.projectID) {
 		return ErrTaskReservedScope
 	}
 	return nil
+}
+
+// LocateTask resolves a task ID to its owning project by scanning every
+// existing ordinary project: the partition is the authority, so a rename
+// shows on the next lookup and no second registry can drift. A project
+// that cannot be opened is skipped with its error retained: the task is
+// reported not found only when every project was readable.
+func (r *Registry) LocateTask(id string) (string, *DB, error) {
+	if !taskIDRE.MatchString(id) {
+		return "", nil, ErrTaskNotFound
+	}
+	projects, err := r.Projects()
+	if err != nil {
+		return "", nil, err
+	}
+	var unreadable error
+	for _, p := range projects {
+		if IsReservedProject(p) {
+			continue
+		}
+		db, err := r.OpenExisting(p)
+		if err != nil {
+			unreadable = fmt.Errorf("project %q could not be opened: %w", p, err)
+			continue
+		}
+		if _, err := db.GetTask(id); err == nil {
+			return p, db, nil
+		} else if !errors.Is(err, ErrTaskNotFound) {
+			unreadable = fmt.Errorf("project %q could not be read: %w", p, err)
+		}
+	}
+	if unreadable != nil {
+		return "", nil, fmt.Errorf("task lookup incomplete: %w", unreadable)
+	}
+	return "", nil, ErrTaskNotFound
 }
 
 // taskMutation runs fn inside one immediate transaction with a retry
@@ -271,7 +305,7 @@ func taskMutation[T any](d *DB, actor TaskActor, op, scope, key string, input an
 		return zero, err
 	}
 	if err := taskText(key, MaxTaskKeyBytes, true); err != nil {
-		return zero, fmt.Errorf("idempotency key: %w", err)
+		return zero, invalid(fmt.Errorf("idempotency key: %w", err))
 	}
 	canon, err := json.Marshal(input)
 	if err != nil {
@@ -325,7 +359,7 @@ func (d *DB) CreateTask(content TaskContent, actor TaskActor, key string) (Task,
 		content.State = "BACKLOG"
 	}
 	if err := content.validate(); err != nil {
-		return Task{}, err
+		return Task{}, invalid(err)
 	}
 	return taskMutation(d, actor, "create", "", key, content, func(tx *sql.Tx) (Task, error) {
 		now := nowUTC()
@@ -340,10 +374,10 @@ func (d *DB) UpdateTask(id string, content TaskContent, expected int64, actor Ta
 		return Task{}, ErrTaskNotFound
 	}
 	if expected < 1 {
-		return Task{}, errors.New("expected_revision must be a positive revision")
+		return Task{}, invalid(errors.New("expected_revision must be a positive revision"))
 	}
 	if err := content.validate(); err != nil {
-		return Task{}, err
+		return Task{}, invalid(err)
 	}
 	input := struct {
 		Content  TaskContent `json:"content"`
@@ -426,7 +460,7 @@ func (d *DB) AddTaskComment(taskID, body string, actor TaskActor, key string) (T
 		return TaskComment{}, ErrTaskNotFound
 	}
 	if err := taskText(body, MaxTaskCommentBytes, true); err != nil {
-		return TaskComment{}, fmt.Errorf("comment: %w", err)
+		return TaskComment{}, invalid(fmt.Errorf("comment: %w", err))
 	}
 	return taskMutation(d, actor, "comment", taskID, key, body, func(tx *sql.Tx) (TaskComment, error) {
 		t, err := readTask(tx, taskID)
@@ -480,10 +514,13 @@ func taskPageLimit(limit int) (int, error) {
 		return 20, nil
 	}
 	if limit < 1 || limit > 100 {
-		return 0, errors.New("limit must be between 1 and 100")
+		return 0, invalid(errors.New("limit must be between 1 and 100"))
 	}
 	return limit, nil
 }
+
+// invalid marks a caller-input error so a transport can answer 400.
+func invalid(err error) error { return fmt.Errorf("%w: %w", ErrTaskInvalid, err) }
 
 // TaskFilter selects summaries; archived tasks are excluded unless asked
 // for. After is the last task ID of the previous page.
@@ -519,13 +556,13 @@ func (d *DB) ListTasks(f TaskFilter) (TaskPage, error) {
 		return out, err
 	}
 	if f.State != "" && !validTaskState(f.State) {
-		return out, fmt.Errorf("invalid task state %q", clip(f.State))
+		return out, invalid(errors.New("invalid task state filter"))
 	}
 	if f.After != "" && !taskIDRE.MatchString(f.After) {
-		return out, errors.New("invalid task cursor")
+		return out, invalid(errors.New("invalid task cursor"))
 	}
 	if f.Assignee != nil && ((f.Assignee.Kind != "user" && f.Assignee.Kind != "group") || !taskIDRE.MatchString(f.Assignee.ID)) {
-		return out, errors.New("invalid assignee filter")
+		return out, invalid(errors.New("invalid assignee filter"))
 	}
 	query := `SELECT body FROM tasks WHERE id > ?`
 	args := []any{f.After}
@@ -580,7 +617,7 @@ func (d *DB) TaskHistory(id string, after int64, limit int) (TaskHistoryPage, er
 		return out, err
 	}
 	if after < 0 {
-		return out, errors.New("invalid history cursor")
+		return out, invalid(errors.New("invalid history cursor"))
 	}
 	if _, err := d.GetTask(id); err != nil {
 		return out, err
@@ -623,7 +660,7 @@ func (d *DB) TaskComments(id string, after int64, limit int) (TaskCommentPage, e
 		return out, err
 	}
 	if after < 0 {
-		return out, errors.New("invalid comment cursor")
+		return out, invalid(errors.New("invalid comment cursor"))
 	}
 	if _, err := d.GetTask(id); err != nil {
 		return out, err

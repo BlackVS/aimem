@@ -284,7 +284,9 @@ func serve() error {
 		tcpSrv, err = srv.ListenTCP(listen,
 			os.Getenv("AIMEM_HTTP_TOKEN"),
 			os.Getenv("AIMEM_TLS_CERT"), os.Getenv("AIMEM_TLS_KEY"),
-			map[string]http.Handler{"/mcp": mcp.NewHTTPHandler(client())})
+			map[string]http.Handler{"/mcp": mcp.NewHTTPHandler(client(), func(r *http.Request) (mcp.TaskCallFunc, bool) {
+				return srv.MCPPrincipal(r)
+			})})
 		if err != nil {
 			return err
 		}
@@ -2118,6 +2120,11 @@ func hubCmd(args []string) error {
 			if h.Insecure {
 				line += "  [insecure: self-signed]"
 			}
+			if h.TaskToken != "" {
+				line += "  task-credential:set"
+			} else {
+				line += "  task-credential:none"
+			}
 			fmt.Println(line)
 		}
 		if len(hubs) > 1 {
@@ -2128,8 +2135,27 @@ func hubCmd(args []string) error {
 	usage := `usage: aimem hub <url> <token>                      set/replace the default hub
        aimem hub add <name> <url> <token> [--sync <ssh-dest>] [--default]
        aimem hub rm <name>
-       aimem hub default <name>`
+       aimem hub default <name>
+       aimem hub task-token <name> <ordinary-token>   credential the MCP task tools present to this hub`
 	switch args[0] {
+	case "task-token":
+		if len(args) != 3 {
+			return fmt.Errorf("%s", usage)
+		}
+		hubs, def := adapter.LoadHubs(root)
+		h, ok := hubs[args[1]]
+		if !ok {
+			return fmt.Errorf("no hub named %q", args[1])
+		}
+		if !strings.HasPrefix(args[2], "aimem_user_") {
+			return fmt.Errorf("task credential must be an ordinary token issued by the hub admin (aimem access token-issue), not the hub's checkpoint token")
+		}
+		h.TaskToken = args[2]
+		if err := adapter.SaveHubs(root, hubs, def); err != nil {
+			return err
+		}
+		fmt.Printf("task credential stored for hub %q; MCP task tools use it\n", args[1])
+		return nil
 	case "add":
 		fs := flag.NewFlagSet("hub add", flag.ExitOnError)
 		syncDest := fs.String("sync", "", "ssh destination for `aimem sync --hub <name>` (e.g. aimem@hub.example.com)")
@@ -2159,7 +2185,7 @@ func hubCmd(args []string) error {
 		if hubs == nil {
 			hubs = map[string]*adapter.HubConfig{}
 		}
-		hubs[name] = &adapter.HubConfig{URL: strings.TrimRight(pos[1], "/"), Token: pos[2], Sync: *syncDest, Insecure: *insecure}
+		hubs[name] = (&adapter.HubConfig{URL: strings.TrimRight(pos[1], "/"), Token: pos[2], Sync: *syncDest, Insecure: *insecure}).Over(hubs[name])
 		if *makeDefault || def == "" {
 			def = name
 		}

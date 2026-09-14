@@ -15,6 +15,32 @@ currently 11); a binary refuses a database newer than it understands.
 
 ### Added
 
+- **Task service over HTTP and MCP, stage 2 of the Kanban work.** The
+  storage from stage 1 is now reachable: `GET/POST /v1/projects/{p}/tasks`,
+  `GET/PUT /v1/tasks/{id}`, `GET /v1/tasks/{id}/history`, `GET/POST
+  /v1/tasks/{id}/comments`, `GET /v1/tasks/{id}/comments/{c}` (OpenAPI
+  updated), and eight MCP tools (`list_tasks`, `get_task`, `create_task`,
+  `update_task`, `get_task_history`, `list_task_comments`,
+  `get_task_comment`, `add_task_comment`). Writes carry their retry key in
+  the `Idempotency-Key` header / `idempotency_key` argument; bodies are
+  decoded strictly (unknown fields, trailing values and oversized bodies are
+  refused); a stale `expected_revision` answers 409 with the current task.
+  **Authorization, re-checked on every attempt:** admin credentials and the
+  local operator socket write anywhere; an ordinary token writes only in the
+  project it was issued for and only while its user holds a current grant;
+  cross-project and read-only ordinary tokens read everything; legacy
+  writer tokens read tasks but never write them. Ordinary tokens are
+  admitted to their identity check, the task routes and `/mcp` only, where
+  they see the task tools alone; an assignee must name an existing user or
+  access group. **MCP trust boundary:** on the hub, task tools run
+  in-process with the identity of the request itself, never through the
+  hub's trusted local client (which legacy tools keep using); the local
+  stdio facade sends task tools to the project's hub with a dedicated
+  per-user credential stored by the new `aimem hub task-token <hub>
+  <ordinary-token>` — no credential configured is an actionable error, never
+  a fallback to the checkpoint token or the local socket. Task history and
+  comments record stable user/token IDs for ordinary actors and the trusted
+  name for admins.
 - **Task storage (schema v11), stage 1 of the Kanban work — internal only.**
   Each ordinary project database gains `tasks`, `task_history`,
   `task_comments` and `task_requests`: current task with expected-revision

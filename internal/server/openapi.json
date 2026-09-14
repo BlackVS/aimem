@@ -84,93 +84,786 @@
       "get": {
         "summary": "List users, access groups, membership, grants, ordinary-token metadata and the last 100 administration audit events",
         "x-role": "admin",
-        "responses": {"200": {"description": "Access snapshot; no secrets or token digests"}}
+        "responses": {
+          "200": {
+            "description": "Access snapshot; no secrets or token digests"
+          }
+        }
       }
     },
     "/v1/access/identity": {
       "get": {
         "summary": "Inspect authenticated identity and current task-write permission for an optional project",
-        "description": "Also available to ordinary user tokens. This foundation exposes no task CRUD yet; ordinary tokens are refused on all other existing non-public endpoints. Legacy writer/admin credentials retain their existing rights.",
+        "description": "Also available to ordinary user tokens. Ordinary tokens may additionally use the task routes and /mcp task tools; they are refused on every other non-public endpoint. Legacy writer/admin credentials retain their existing rights.",
         "x-role": "writer",
-        "parameters": [{"name": "project", "in": "query", "schema": {"type": "string"}}],
-        "responses": {"200": {"description": "Identity and effective task access"}, "401": {"description": "Invalid, expired, revoked or disabled credential"}}
+        "parameters": [
+          {
+            "name": "project",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Identity and effective task access"
+          },
+          "401": {
+            "description": "Invalid, expired, revoked or disabled credential"
+          }
+        }
+      }
+    },
+    "/v1/projects/{p}/tasks": {
+      "get": {
+        "summary": "List task summaries of a project",
+        "description": "Archived tasks are excluded unless include_archived=true. Pages default 20, max 100; pass next_cursor as after. Ordinary user tokens may call this route; writes are authorized per attempt against the task's owning project (token issued for that project instance and a current grant), legacy writer tokens read only, admin tokens do everything.",
+        "x-role": "writer",
+        "parameters": [
+          {
+            "name": "p",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "state",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "assignee",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "include_archived",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean"
+            }
+          },
+          {
+            "name": "after",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          },
+          "400": {
+            "description": "Validation failure (bad cursor, limit or filter)"
+          },
+          "401": {
+            "description": "Invalid, expired, revoked or disabled credential"
+          },
+          "404": {
+            "description": "Unknown project, task or comment"
+          }
+        }
+      },
+      "post": {
+        "summary": "Create a task in an existing ordinary project",
+        "description": "Body is the editable content (title required; state defaults to BACKLOG). Never creates a project. Ordinary user tokens may call this route; writes are authorized per attempt against the task's owning project (token issued for that project instance and a current grant), legacy writer tokens read only, admin tokens do everything. Retry keys travel in the Idempotency-Key header.",
+        "x-role": "writer",
+        "parameters": [
+          {
+            "name": "p",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "OK"
+          },
+          "400": {
+            "description": "Validation failure (bounds, unknown field, missing Idempotency-Key, reserved project)"
+          },
+          "401": {
+            "description": "Invalid, expired, revoked or disabled credential"
+          },
+          "403": {
+            "description": "Credential may not write tasks in this project"
+          },
+          "404": {
+            "description": "Unknown project, task or comment"
+          },
+          "409": {
+            "description": "Revision conflict (body carries current), idempotency key reused with different input, or archived task"
+          },
+          "413": {
+            "description": "Request body larger than 256 KiB"
+          }
+        }
+      }
+    },
+    "/v1/tasks/{id}": {
+      "get": {
+        "summary": "Read one task",
+        "description": "Current content, revision, owning project (resolved at read time, so a rename is reflected) and origin-relative links. Ordinary user tokens may call this route; writes are authorized per attempt against the task's owning project (token issued for that project instance and a current grant), legacy writer tokens read only, admin tokens do everything.",
+        "x-role": "writer",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          },
+          "400": {
+            "description": "Validation failure"
+          },
+          "401": {
+            "description": "Invalid, expired, revoked or disabled credential"
+          },
+          "404": {
+            "description": "Unknown project, task or comment"
+          }
+        }
+      },
+      "put": {
+        "summary": "Replace a task's editable fields under expected-revision CAS",
+        "description": "Body is the full editable content plus expected_revision; omitted optional fields clear. A stale revision answers 409 with the current task. Ordinary user tokens may call this route; writes are authorized per attempt against the task's owning project (token issued for that project instance and a current grant), legacy writer tokens read only, admin tokens do everything. Retry keys travel in the Idempotency-Key header.",
+        "x-role": "writer",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK"
+          },
+          "400": {
+            "description": "Validation failure (bounds, unknown field, missing Idempotency-Key, reserved project)"
+          },
+          "401": {
+            "description": "Invalid, expired, revoked or disabled credential"
+          },
+          "403": {
+            "description": "Credential may not write tasks in this project"
+          },
+          "404": {
+            "description": "Unknown project, task or comment"
+          },
+          "409": {
+            "description": "Revision conflict (body carries `current` in the same shape as a read), idempotency key reused with different input, or archived task"
+          },
+          "413": {
+            "description": "Request body larger than 256 KiB"
+          }
+        }
+      }
+    },
+    "/v1/tasks/{id}/history": {
+      "get": {
+        "summary": "Accepted revisions in order",
+        "description": "Each entry is the complete snapshot plus the actor; after is the last revision seen. Ordinary user tokens may call this route; writes are authorized per attempt against the task's owning project (token issued for that project instance and a current grant), legacy writer tokens read only, admin tokens do everything.",
+        "x-role": "writer",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "after",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          },
+          "400": {
+            "description": "Validation failure (bad cursor, limit or filter)"
+          },
+          "401": {
+            "description": "Invalid, expired, revoked or disabled credential"
+          },
+          "404": {
+            "description": "Unknown project, task or comment"
+          }
+        }
+      }
+    },
+    "/v1/tasks/{id}/comments": {
+      "get": {
+        "summary": "Comments in append order",
+        "description": "after is the last sequence seen; the cursor is stable while later comments arrive. Ordinary user tokens may call this route; writes are authorized per attempt against the task's owning project (token issued for that project instance and a current grant), legacy writer tokens read only, admin tokens do everything.",
+        "x-role": "writer",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "after",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          },
+          "400": {
+            "description": "Validation failure (bad cursor, limit or filter)"
+          },
+          "401": {
+            "description": "Invalid, expired, revoked or disabled credential"
+          },
+          "404": {
+            "description": "Unknown project, task or comment"
+          }
+        }
+      },
+      "post": {
+        "summary": "Append an immutable Markdown comment",
+        "description": "Body is {\"body\": <markdown>}; author and time are recorded by the service; the task revision is untouched. Refused on an archived task. Ordinary user tokens may call this route; writes are authorized per attempt against the task's owning project (token issued for that project instance and a current grant), legacy writer tokens read only, admin tokens do everything. Retry keys travel in the Idempotency-Key header.",
+        "x-role": "writer",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "OK"
+          },
+          "400": {
+            "description": "Validation failure (bounds, unknown field, missing Idempotency-Key, reserved project)"
+          },
+          "401": {
+            "description": "Invalid, expired, revoked or disabled credential"
+          },
+          "403": {
+            "description": "Credential may not write tasks in this project"
+          },
+          "404": {
+            "description": "Unknown project, task or comment"
+          },
+          "409": {
+            "description": "Revision conflict (body carries current), idempotency key reused with different input, or archived task"
+          },
+          "413": {
+            "description": "Request body larger than 256 KiB"
+          }
+        }
+      }
+    },
+    "/v1/tasks/{id}/comments/{c}": {
+      "get": {
+        "summary": "Read one comment",
+        "description": "A comment under the wrong task is not found. Ordinary user tokens may call this route; writes are authorized per attempt against the task's owning project (token issued for that project instance and a current grant), legacy writer tokens read only, admin tokens do everything.",
+        "x-role": "writer",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "c",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          },
+          "400": {
+            "description": "Validation failure"
+          },
+          "401": {
+            "description": "Invalid, expired, revoked or disabled credential"
+          },
+          "404": {
+            "description": "Unknown project, task or comment"
+          }
+        }
       }
     },
     "/v1/access/users": {
       "post": {
         "summary": "Create a user (not an admin)",
         "x-role": "admin",
-        "requestBody": {"required": true, "content": {"application/json": {"schema": {"type": "object", "additionalProperties": false, "required": ["name"], "properties": {"name": {"type": "string", "maxLength": 128}}}}}},
-        "responses": {"200": {"description": "User ID, name and disabled state"}}
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "name"
+                ],
+                "properties": {
+                  "name": {
+                    "type": "string",
+                    "maxLength": 128
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "User ID, name and disabled state"
+          }
+        }
       }
     },
     "/v1/access/users/{id}": {
       "put": {
         "summary": "Set user name and disabled state",
         "x-role": "admin",
-        "parameters": [{"name": "id", "in": "path", "required": true, "schema": {"type": "string"}}],
-        "requestBody": {"required": true, "content": {"application/json": {"schema": {"type": "object", "additionalProperties": false, "required": ["name", "disabled"], "properties": {"name": {"type": "string", "maxLength": 128}, "disabled": {"type": "boolean"}}}}}},
-        "responses": {"200": {"description": "Updated; disabled users cannot authenticate"}}
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "name",
+                  "disabled"
+                ],
+                "properties": {
+                  "name": {
+                    "type": "string",
+                    "maxLength": 128
+                  },
+                  "disabled": {
+                    "type": "boolean"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Updated; disabled users cannot authenticate"
+          }
+        }
       }
     },
     "/v1/access/groups": {
       "post": {
         "summary": "Create an access group, separate from knowledge groups",
         "x-role": "admin",
-        "requestBody": {"required": true, "content": {"application/json": {"schema": {"type": "object", "additionalProperties": false, "required": ["name"], "properties": {"name": {"type": "string", "maxLength": 128}}}}}},
-        "responses": {"200": {"description": "Access group ID and name"}}
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "name"
+                ],
+                "properties": {
+                  "name": {
+                    "type": "string",
+                    "maxLength": 128
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Access group ID and name"
+          }
+        }
       }
     },
     "/v1/access/groups/{g}/members/{u}": {
       "put": {
         "summary": "Add an existing user to an access group",
         "x-role": "admin",
-        "parameters": [{"name": "g", "in": "path", "required": true, "schema": {"type": "string"}}, {"name": "u", "in": "path", "required": true, "schema": {"type": "string"}}],
-        "responses": {"200": {"description": "Membership present"}}
+        "parameters": [
+          {
+            "name": "g",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "u",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Membership present"
+          }
+        }
       },
       "delete": {
         "summary": "Remove access-group membership",
         "x-role": "admin",
-        "parameters": [{"name": "g", "in": "path", "required": true, "schema": {"type": "string"}}, {"name": "u", "in": "path", "required": true, "schema": {"type": "string"}}],
-        "responses": {"200": {"description": "Membership absent; other direct/group grants remain effective"}}
+        "parameters": [
+          {
+            "name": "g",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "u",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Membership absent; other direct/group grants remain effective"
+          }
+        }
       }
     },
     "/v1/projects/{p}/access/{kind}/{id}": {
       "put": {
         "summary": "Grant project task contribution to a user or access group",
         "x-role": "admin",
-        "parameters": [{"$ref": "#/components/parameters/p"}, {"name": "kind", "in": "path", "required": true, "schema": {"type": "string", "enum": ["user", "group"]}}, {"name": "id", "in": "path", "required": true, "schema": {"type": "string"}}],
-        "responses": {"200": {"description": "Grant present; returns stable host-local project instance"}}
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/p"
+          },
+          {
+            "name": "kind",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "user",
+                "group"
+              ]
+            }
+          },
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Grant present; returns stable host-local project instance"
+          }
+        }
       },
       "delete": {
         "summary": "Remove a direct or group project grant",
         "x-role": "admin",
-        "parameters": [{"$ref": "#/components/parameters/p"}, {"name": "kind", "in": "path", "required": true, "schema": {"type": "string", "enum": ["user", "group"]}}, {"name": "id", "in": "path", "required": true, "schema": {"type": "string"}}],
-        "responses": {"200": {"description": "Grant absent"}}
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/p"
+          },
+          {
+            "name": "kind",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "user",
+                "group"
+              ]
+            }
+          },
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Grant absent"
+          }
+        }
       }
     },
     "/v1/access/grants/{instance}/{kind}/{id}": {
       "delete": {
         "summary": "Remove a grant by stored project-instance ID, including after project deletion",
         "x-role": "admin",
-        "parameters": [{"name": "instance", "in": "path", "required": true, "schema": {"type": "string"}}, {"name": "kind", "in": "path", "required": true, "schema": {"type": "string", "enum": ["user", "group"]}}, {"name": "id", "in": "path", "required": true, "schema": {"type": "string"}}],
-        "responses": {"200": {"description": "Grant absent; removal audited. Does not revoke tokens or change other grants."}, "400": {"description": "Invalid subject or grant kind"}}
+        "parameters": [
+          {
+            "name": "instance",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "kind",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "user",
+                "group"
+              ]
+            }
+          },
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Grant absent; removal audited. Does not revoke tokens or change other grants."
+          },
+          "400": {
+            "description": "Invalid subject or grant kind"
+          }
+        }
       }
     },
     "/v1/access/tokens": {
       "post": {
         "summary": "Issue an ordinary user token; admin issuance is host-console only",
         "x-role": "admin",
-        "requestBody": {"required": true, "content": {"application/json": {"schema": {"type": "object", "additionalProperties": false, "required": ["user_id", "label", "expires_at"], "properties": {"user_id": {"type": "string"}, "label": {"type": "string"}, "project": {"type": "string", "description": "Existing project with contributor access; omit or empty for read-only"}, "expires_at": {"type": "string", "format": "date-time", "description": "Future expiry, at most 366 days away"}}}}}},
-        "responses": {"200": {"description": "Ordinary token metadata and secret, shown once; response is no-store"}, "400": {"description": "Invalid fields; role/admin fields are never accepted"}, "403": {"description": "User lacks project access or is disabled"}}
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "user_id",
+                  "label",
+                  "expires_at"
+                ],
+                "properties": {
+                  "user_id": {
+                    "type": "string"
+                  },
+                  "label": {
+                    "type": "string"
+                  },
+                  "project": {
+                    "type": "string",
+                    "description": "Existing project with contributor access; omit or empty for read-only"
+                  },
+                  "expires_at": {
+                    "type": "string",
+                    "format": "date-time",
+                    "description": "Future expiry, at most 366 days away"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Ordinary token metadata and secret, shown once; response is no-store"
+          },
+          "400": {
+            "description": "Invalid fields; role/admin fields are never accepted"
+          },
+          "403": {
+            "description": "User lacks project access or is disabled"
+          }
+        }
       }
     },
     "/v1/access/tokens/{id}": {
       "delete": {
         "summary": "Revoke an ordinary token",
         "x-role": "admin",
-        "parameters": [{"name": "id", "in": "path", "required": true, "schema": {"type": "string"}}],
-        "responses": {"200": {"description": "Revoked for subsequent requests; attribution retained"}}
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Revoked for subsequent requests; attribution retained"
+          }
+        }
       }
     },
     "/": {

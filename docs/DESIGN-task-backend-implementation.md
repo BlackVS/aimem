@@ -1,7 +1,8 @@
 # Task Backend Implementation Plan
 
-Status: implementation handoff, 2026-09-14. No task implementation is merged or
-exposed. Baseline: `4e7021533a1aefb2635e28a071953f2061f1df5b` on `master`.
+Status: stages 1 and 2 implemented (storage merged in PR #38; the HTTP/MCP
+service on `feat/task-service`), 2026-09-14. Stage 3 (UI) is open. Original
+baseline: `4e7021533a1aefb2635e28a071953f2061f1df5b` on `master`.
 Read this alongside [the Kanban proposal](AIMEM-KANBAN-PROPOSAL.md) and
 [access control](DESIGN-access-control.md). Those documents contain the approved
 product contract; this document gives the next agent an implementation sequence
@@ -10,12 +11,59 @@ changing the contract.
 
 ## Resume State
 
-Stage 1 (storage and integrity) is implemented on branch `feat/task-storage`
-as `internal/store/tasks.go` with schema 11 (`store.go`), lifecycle refusals
-in `Registry.Drop`/`MergeProject`, and `internal/store/tasks_test.go`. The
-earlier untested draft (`docs/drafts/task-storage.go.txt`) is superseded and
-removed. Nothing is exposed yet: no HTTP route, MCP tool, CLI command or UI
-reads or writes tasks; the service layer is stage 2.
+Stage 1 (storage and integrity) is merged (PR #38): `internal/store/tasks.go`
+with schema 11 (`store.go`), lifecycle refusals in `Registry.Drop`/
+`MergeProject`, and `internal/store/tasks_test.go`.
+
+Stage 2 (authorized HTTP and MCP) is implemented on branch `feat/task-service`:
+`internal/server/tasks.go` (routes, actor, per-attempt authorization, strict
+decoding, status mapping, in-process MCP dispatch), `internal/mcp/tasks.go`
+(eight task tools, the hub principal, the local hub caller), `Registry.LocateTask`,
+`access.Store.CanWrite`, `Identity.Project`, `HubConfig.TaskToken` and the
+`aimem hub task-token` command. No UI yet (stage 3).
+
+Decisions taken while implementing stage 2:
+
+- **Local socket = operator.** Requests over the unix socket carry no
+  identity and act as the admin actor named `local`, consistent with every
+  other socket route (the socket already drops and renames projects). The
+  stdio MCP facade never uses the socket for tasks (below).
+- **Ordinary tokens reach exactly:** their identity check, the task routes,
+  and `POST /mcp` — the patterns in `ordinaryRoutes`, matched by the mux's
+  own rules (never a prefix), shown by `Route.Ordinary()` and pinned by a
+  test that walks the whole route table. Every task write re-runs the
+  authorization: token issued for this project's access instance AND the
+  user holds a current grant (`CanWrite`), both read fresh; reads need only
+  a valid credential. Legacy writer tokens read tasks, never write them.
+- **MCP on the hub** dispatches task tools in-process against the task
+  routes with the request's own identity (`Server.MCPPrincipal`), never via
+  the trusted local client; an ordinary token's `tools/list` shows the task
+  tools alone and a hidden legacy tool called by name is refused. Nothing is
+  cached across requests.
+- **MCP locally (stdio)** sends task tools to the project's bound hub with
+  `HubConfig.TaskToken` (`hub.json`, 0600, set by `aimem hub task-token`,
+  must be an `aimem_user_…` token). Missing hub or credential is an
+  actionable error; the checkpoint token is never used for tasks.
+- **Global task lookup** is a scan of existing ordinary projects
+  (`Registry.LocateTask`); an unreadable project makes a miss inconclusive
+  (error) rather than "not found". Links are origin-relative paths.
+- **Update body** is the full editable content plus `expected_revision`
+  (strict decoding, so unknown fields are refused; omitted optional fields
+  clear, as the storage contract says).
+- **Validation errors never echo caller values** for state or dependencies
+  (the external review's follow-up from PR #38).
+- **Assignee existence** is the service's check (400 when the user or
+  access group does not exist); storage keeps validating the shape only.
+- **Response shapes.** Every task body (reads, 201s, the 409 `current`)
+  is the same view: snapshot + `project` + `links`; list rows carry their
+  own `links.self`; `next_cursor` is absent on the last page. MCP arguments
+  are decoded strictly (a misspelled field is an error, never a silent
+  clear under replace-all), the editable content is the storage type
+  itself, and every paging tool takes `after` (task id for lists, number
+  for history and comments, echoed as number or string).
+- **Hub config re-registration.** `hub add` / `hub <url> <token>` on the
+  same host keep the task credential and sync target; a new host inherits
+  nothing; `--insecure` must be restated.
 
 Decisions taken while implementing stage 1 (corrections to the draft):
 
@@ -234,7 +282,7 @@ replication to existing journal/knowledge sync as part of this work.
 
 ## HTTP Contract For The Second Increment
 
-These routes are proposed and must not be advertised as implemented yet:
+These routes are implemented in stage 2 (`internal/server/tasks.go`):
 
 | Method and path | Behavior |
 | --- | --- |
@@ -263,10 +311,12 @@ contain tokens or grant access. A derived ID-to-project index may be added later
 first implement a correct existing-project scan with explicit unavailable/error
 behavior and tests for rename. Never create a second authoritative task registry.
 
-Add actual routes and schemas together with OpenAPI parity coverage. Ordinary
-tokens currently have an exact identity-route allow-list in `authWrapper`;
-extend only the new task paths and recheck authorization inside their service.
-Do not broadly admit `/v1/projects/*` or arbitrary `/mcp` tool calls.
+Routes and schemas ship together with OpenAPI parity coverage. Ordinary
+tokens pass `authWrapper` for exactly: the identity route, the task
+routes, and `POST /mcp` (`ordinaryRoutes`, matched by pattern, pinned by a test
+that walks the route table); authorization is rechecked inside the task
+service. Nothing else under `/v1` admits them, and `/mcp` admits them only to
+the task tools.
 
 ## MCP Integration And The Critical Trust Boundary
 
@@ -275,13 +325,14 @@ Expose `list_tasks`, `get_task`, `create_task`, `update_task`, `get_task_history
 schemas and structured JSON results with bounded pages, current revisions and
 reference links. The model supplies IDs/content/keys, never credentials or actors.
 
-Remote MCP currently uses `NewHTTPHandler(api)` with a shared client to the
-trusted local HTTP socket. That path does **not** propagate the remote caller's
-authority today. Simply allowing ordinary tokens through `/mcp` would expose a
-privilege bypass through legacy tools. Fix the boundary explicitly: dispatch new
-task tools into the same task service with the request's authenticated context,
-or use an equivalent transport that carries and revalidates the caller's bearer
-credential. Do not trust client-set identity headers on a local socket.
+Remote MCP is `NewHTTPHandler(api, principal)`: legacy tools keep the shared
+client to the trusted local socket (admin and legacy-writer callers only); task
+tools are dispatched in-process into the task routes with the identity the
+bearer middleware authenticated for that request (`Server.MCPPrincipal` binds
+it itself). Allowing ordinary tokens through `/mcp` without this would have
+been a privilege bypass through legacy tools; with it, an ordinary caller's
+dispatcher lists task tools only and refuses a hidden tool by name. Nothing
+about identity is read from headers the client sets.
 
 For an ordinary remote caller, list and dispatch only permitted task tools;
 direct JSON-RPC calls to hidden legacy tools must still be rejected. Preserve
@@ -357,9 +408,11 @@ Valid, out of stage 1's scope, owned by the stage-2 service unless noted:
   operator-facing message says so and a re-run is refused until the task
   is removed. A registry-level "merging" guard is the fix.
 - **Admin receipt principal.** Admin actors key receipts on the trusted
-  identity's name; the server's admin identities carry no stable ID yet.
-  Stage 2 defines one (token entry ID) and keys on it; the name stays a
-  display snapshot.
+  identity's name (`admin/<name>`), still true after stage 2: the server's
+  admin identities (env token, tokens.json entries) carry no stable ID.
+  Renaming a token entry changes its receipt namespace. Give tokens.json
+  entries an ID, carry it on `Identity`, key on it; the name stays a display
+  snapshot.
 - **Receipt digest format.** The digest is over the JSON encoding of the Go
   input; adding a field to `TaskContent` changes it and turns a retry across
   that upgrade into a conflict. Store a digest format version, or hash an
@@ -378,11 +431,46 @@ Valid, out of stage 1's scope, owned by the stage-2 service unless noted:
   U+2066–9) and C0/C1 controls; other zero-width/format characters pass and
   are the renderer's concern.
 
+Recorded by the stage-2 review (service), owned by stage 3 or later:
+
+- **Hub-name resolution fails open on an unreadable `.aimem.json`.**
+  `ident.readConfig` strips a BOM, but on any other parse failure it prints a
+  one-shot stderr warning (invisible to an MCP client) and returns an empty
+  config, so `ProjectHubName` yields "" (the default hub) and the stdio
+  facade's task tools would route to the default hub with that hub's task
+  credential. Boundary: `internal/ident` config reading. First increment: a
+  sentinel error for "present but unreadable" that `taskCallerFor` turns
+  into a refusal, with a malformed-JSON config test.
+- **OpenAPI `x-role` vocabulary** (public/writer/admin) cannot express the
+  ordinary-user principal the task routes admit; the prose says it. Extend
+  the vocabulary and the parity test together when the console consumes it.
+- **Task lookup cost.** `Registry.LocateTask` opens (and caches, migrating on
+  first open) every ordinary project per lookup; the derived ID-to-project
+  index is the deferred fix. Reads by any valid credential trigger it, so
+  the lowest-authority token drives an O(projects) amplification per miss:
+  cap the scan or add a small negative cache before the index lands.
+- **Admin actor names collide by construction.** The socket operator is
+  `admin/local`; a tokens.json admin entry named `local` shares its receipt
+  namespace. Resolved with the stable admin ID above.
+- **`hub.json` mode.** `SaveHubs` creates the file 0600 but does not tighten
+  a pre-existing looser mode and does not write atomically; the file now
+  holds a second credential. Mirror `SaveTokens` (tmp + rename, chmod).
+- **Two spellings of "may this user write this project".** The identity
+  endpoint uses `Authorize(secret, instance)`; the task routes use the
+  instance match plus `CanWrite`. Equivalent today; fold into one helper
+  before either is tightened.
+- **Admin token names reach the actor validator.** A tokens.json entry named
+  with more than 128 bytes or a control character makes every task write a
+  500 ("invalid actor name" is only in the log). Validate names in `aimem
+  token add`.
+
 ## Draft Review Checklist (resolved by stage 1)
 
 The checklist that gated the removed draft, kept for the record; items 1, 2, 4
-and 7 are done in `tasks.go`/`tasks_test.go`, the refusal half of 6 too; the
-warning tier of 6 and items 3 and 5 belong to the stage-2 service:
+and 7 are done in stage 1, items 3 (assignee existence is checked by the
+service against the access store; shape by storage) and 5 (owning project and
+links are resolved per request) in stage 2; the warning tier of 6 remains
+open for the transport that surfaces warnings:
 
 1. Wire schema 11 and lifecycle protection, or revise the approach; the draft
    cannot compile because `DB.taskMu` does not exist.
@@ -399,6 +487,6 @@ warning tier of 6 and items 3 and 5 belong to the stage-2 service:
 7. Add meaningful migration, transaction-failure, concurrency and lifecycle tests
    before considering any draft code an implementation milestone.
 
-Stage 1 is on `feat/task-storage`. Do not publish new MCP definitions without
-enforcement or change the public version. Resume with stage 2 (the authorized
-service) from the merged storage stage, and preserve the approved simple scope.
+Stages 1 and 2 are done (see Resume State). Do not change the public version
+as part of this work. Resume with stage 3 (task list/detail/discussion UI, then
+the board) on the same service, and preserve the approved simple scope.
