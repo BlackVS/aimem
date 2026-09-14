@@ -1,11 +1,13 @@
 package mcp
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -287,6 +289,73 @@ func TestTaskCallerForUsesHubTaskToken(t *testing.T) {
 	}
 	if len(seen) != 1 {
 		t.Fatalf("refusals must not call the hub: %q", seen)
+	}
+}
+
+func callTool(t *testing.T, s *srv, name string, args map[string]any) (string, bool) {
+	t.Helper()
+	raw, _ := json.Marshal(map[string]any{"jsonrpc": "2.0", "id": 1, "method": "tools/call", "params": map[string]any{"name": name, "arguments": args}})
+	var resp struct {
+		Result map[string]any `json:"result"`
+	}
+	if err := json.Unmarshal(s.handle(context.Background(), raw), &resp); err != nil {
+		t.Fatal(err)
+	}
+	return toolText(resp.Result)
+}
+
+// A page larger than the old 1 MiB cap arrives intact; a body beyond the
+// real cap is an error, never a truncated success; a malformed body is an
+// error too.
+func TestLocalTaskCallerLargePages(t *testing.T) {
+	f := newHub(t)
+	ts := httptest.NewServer(f.h)
+	defer ts.Close()
+	root := t.TempDir()
+	if err := adapter.SaveHubs(root, map[string]*adapter.HubConfig{"home": {URL: ts.URL, Token: "checkpoint", TaskToken: f.alice}}, "home"); err != nil {
+		t.Fatal(err)
+	}
+	s := &srv{project: "alpha", taskSetup: func() (TaskCallFunc, error) { return taskCallerFor(root, "") }}
+	text, isErr := callTool(t, s, "create_task", map[string]any{"title": "big", "idempotency_key": "big"})
+	if isErr {
+		t.Fatal(text)
+	}
+	var task struct {
+		ID string `json:"id"`
+	}
+	json.Unmarshal([]byte(text), &task)
+	body := strings.Repeat("x", 30*1024)
+	for i := range 40 {
+		if text, isErr := callTool(t, s, "add_task_comment", map[string]any{"id": task.ID, "body": body, "idempotency_key": "c" + strconv.Itoa(i)}); isErr {
+			t.Fatal(text)
+		}
+	}
+	text, isErr = callTool(t, s, "list_task_comments", map[string]any{"id": task.ID, "limit": 40})
+	if isErr {
+		t.Fatalf("large page: %s", text)
+	}
+	var page struct {
+		Comments []struct{ Body string } `json:"comments"`
+	}
+	if err := json.Unmarshal([]byte(text), &page); err != nil || len(page.Comments) != 40 || len(page.Comments[39].Body) != 30*1024 {
+		t.Fatalf("large page must arrive intact: %v %d", err, len(page.Comments))
+	}
+	huge := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte(`{"tasks":["`))
+		w.Write(bytes.Repeat([]byte("y"), maxTaskResponseBytes))
+		w.Write([]byte(`"]}`))
+	}))
+	defer huge.Close()
+	s2 := &srv{project: "alpha", tasks: hubCaller(huge.URL, "aimem_user_x", huge.Client())}
+	if text, isErr := callTool(t, s2, "list_tasks", nil); !isErr || !strings.Contains(text, "exceeds") {
+		t.Fatalf("oversized body must be an error: %v %s", isErr, text[:min(80, len(text))])
+	}
+	bad := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { w.Write([]byte(`{"tasks": [`)) }))
+	defer bad.Close()
+	s3 := &srv{project: "alpha", tasks: hubCaller(bad.URL, "aimem_user_x", bad.Client())}
+	if text, isErr := callTool(t, s3, "list_tasks", nil); !isErr || !strings.Contains(text, "malformed") {
+		t.Fatalf("malformed body must be an error: %v %s", isErr, text)
 	}
 }
 

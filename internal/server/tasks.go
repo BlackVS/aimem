@@ -150,9 +150,14 @@ func (s *Server) taskProject(w http.ResponseWriter, r *http.Request) (string, *s
 		return "", nil
 	}
 	db, err := s.reg.OpenExisting(p)
-	if err != nil {
-		s.log.Warn("task project open", "project", p, "err", err)
+	if errors.Is(err, store.ErrNoSuchProject) {
 		s.fail(w, http.StatusNotFound, errors.New("unknown project"))
+		return "", nil
+	}
+	if err != nil {
+		// The project exists but cannot be opened: a fault, never "absent".
+		s.log.Error("task project open", "project", p, "err", err)
+		s.fail(w, http.StatusInternalServerError, errors.New("task storage failure"))
 		return "", nil
 	}
 	return p, db

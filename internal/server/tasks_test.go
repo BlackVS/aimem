@@ -474,6 +474,25 @@ func TestTaskRoutesStorageFaultMapping(t *testing.T) {
 	if w.Code != 500 {
 		t.Fatalf("inconclusive lookup must be a fault, not a miss: %d %s", w.Code, w.Body)
 	}
+	// Project-addressed routes: an existing project that cannot be opened
+	// is a fault, an absent one is a miss, and neither body names internals.
+	for _, c := range []struct {
+		method, path, key, body string
+		want                    int
+	}{
+		{"GET", "/v1/projects/aaa-broken/tasks", "", "", 500},
+		{"POST", "/v1/projects/aaa-broken/tasks", "kb", taskBody, 500},
+		{"GET", "/v1/projects/absent/tasks", "", "", 404},
+		{"POST", "/v1/projects/absent/tasks", "ka", taskBody, 404},
+	} {
+		w := taskReq(t, f.h, c.method, c.path, f.admin, c.key, c.body)
+		if w.Code != c.want {
+			t.Fatalf("%s %s: %d %s", c.method, c.path, w.Code, w.Body)
+		}
+		if b := strings.ToLower(w.Body.String()); strings.Contains(b, "sqlite") || strings.Contains(b, "journal.db") || strings.Contains(b, "migrat") {
+			t.Fatalf("%s %s leaks internals: %s", c.method, c.path, w.Body)
+		}
+	}
 	body := strings.ToLower(w.Body.String())
 	rootHint := strings.ToLower(filepath.Base(filepath.Dir(f.reg.Root()))) // the temp dir's test-named parent
 	if strings.Contains(body, "aaa-broken") || strings.Contains(body, "sqlite") || strings.Contains(body, "journal.db") || strings.Contains(body, rootHint) {

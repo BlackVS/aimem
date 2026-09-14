@@ -274,7 +274,7 @@ func (s *srv) taskTool(ctx context.Context, name string, raw json.RawMessage) (s
 		}
 		var pretty bytes.Buffer
 		if json.Indent(&pretty, resp, "", "  ") != nil {
-			return string(resp), nil
+			return "", errors.New("the hub returned a malformed task response")
 		}
 		return pretty.String(), nil
 	}
@@ -447,6 +447,12 @@ func taskCallerFor(root, hubName string) (TaskCallFunc, error) {
 	return hubCaller(hub.URL, hub.TaskToken, hub.HTTPClient()), nil
 }
 
+// maxTaskResponseBytes bounds one hub response. The largest legal page is
+// 100 comments or history snapshots of 32 KiB each; JSON escaping can
+// inflate a byte to six, so 32 MiB holds any permitted page, and a longer
+// body is an error rather than a silently truncated success.
+const maxTaskResponseBytes = 32 << 20
+
 // hubCaller performs task-API requests against a hub with one bearer.
 func hubCaller(base, bearer string, client *http.Client) TaskCallFunc {
 	return func(ctx context.Context, method, path string, headers map[string]string, body []byte) (int, []byte, error) {
@@ -464,9 +470,12 @@ func hubCaller(base, bearer string, client *http.Client) TaskCallFunc {
 			return 0, nil, fmt.Errorf("hub unreachable: %w", err)
 		}
 		defer resp.Body.Close()
-		raw, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+		raw, err := io.ReadAll(io.LimitReader(resp.Body, maxTaskResponseBytes+1))
 		if err != nil {
 			return 0, nil, err
+		}
+		if len(raw) > maxTaskResponseBytes {
+			return 0, nil, fmt.Errorf("the hub's response exceeds %d bytes; ask for a smaller page", maxTaskResponseBytes)
 		}
 		return resp.StatusCode, raw, nil
 	}

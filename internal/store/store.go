@@ -126,7 +126,7 @@ func (r *Registry) Open(projectID string) (*DB, error) {
 // polling a dropped id).
 func (r *Registry) OpenExisting(projectID string) (*DB, error) {
 	if !schema.ValidProjectID(projectID) {
-		return nil, fmt.Errorf("invalid project id %q", projectID)
+		return nil, fmt.Errorf("%w: invalid project id %q", ErrNoSuchProject, projectID)
 	}
 	r.mu.Lock()
 	cached := r.dbs[projectID]
@@ -135,10 +135,14 @@ func (r *Registry) OpenExisting(projectID string) (*DB, error) {
 		return cached, nil
 	}
 	if _, err := os.Stat(filepath.Join(r.root, "projects", projectID)); err != nil {
-		return nil, fmt.Errorf("no such project %q", projectID)
+		return nil, fmt.Errorf("%w: %q", ErrNoSuchProject, projectID)
 	}
 	return r.Open(projectID)
 }
+
+// ErrNoSuchProject marks an OpenExisting miss (absent or invalid id), as
+// opposed to a project that exists but cannot be opened.
+var ErrNoSuchProject = errors.New("no such project")
 
 // Drop closes a project's database and deletes it from disk — journal,
 // memories, embeddings, everything. Meant for stale duplicates (e.g. a
