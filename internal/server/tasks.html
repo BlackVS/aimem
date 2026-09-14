@@ -542,15 +542,15 @@ function contentForm(t, prefix){
     <label class="f">next action</label><textarea id="${prefix}-next_action" rows="2">${v('next_action')}</textarea>
     <label class="f">blocker</label><textarea id="${prefix}-blocker" rows="2">${v('blocker')}</textarea>
     <div class="row"><div class="grow"><label class="f">dependencies (task ids, one per line)</label><textarea id="${prefix}-dependencies" rows="2">${lines('dependencies')}</textarea></div>
-      <div class="grow"><label class="f">candidate refs (one per line)</label><textarea id="${prefix}-candidate_refs" rows="2">${lines('candidate_refs')}</textarea></div>
-      <div class="grow"><label class="f">evidence refs (one per line)</label><textarea id="${prefix}-evidence_refs" rows="2">${lines('evidence_refs')}</textarea></div></div>`;
+      <div class="grow"><label class="f">candidate refs (one per line: kind ref | note)</label><textarea id="${prefix}-candidate_refs" rows="2">${esc(refLines(t&&t.candidate_refs))}</textarea></div>
+      <div class="grow"><label class="f">evidence refs (one per line: kind ref | note)</label><textarea id="${prefix}-evidence_refs" rows="2">${esc(refLines(t&&t.evidence_refs))}</textarea></div></div>`;
 }
 function readForm(prefix){
   const g = k => $(prefix+"-"+k).value;
   const list = k => g(k).split("\n").map(s=>s.trim()).filter(Boolean);
   const c = {title:g("title").trim(), state:g("state"), objective:g("objective"), acceptance_criteria:g("acceptance_criteria"),
     non_goals:g("non_goals"), next_action:g("next_action"), blocker:g("blocker"),
-    dependencies:list("dependencies"), candidate_refs:list("candidate_refs"), evidence_refs:list("evidence_refs"),
+    dependencies:list("dependencies"), candidate_refs:parseRefs(g("candidate_refs")), evidence_refs:parseRefs(g("evidence_refs")),
     archived:$(prefix+"-arch").checked};
   const kind = $(prefix+"-akind").value, id = $(prefix+"-aid").value.trim();
   if(kind && id) c.assignee = {kind, id};
@@ -630,9 +630,59 @@ function fieldHTML(k, label, md){
   const v = CUR[k]; if(!v) return "";
   return `<div class="field"><div class="k">${label}</div><div class="prose">${md?md2html(v):esc(v)}</div></div>`;
 }
+// A typed reference renders as a link only when its kind and its value
+// allow one — an http(s) URL for commit/pr/ci/url, a task id for task —
+// and as escaped text otherwise; the kind is shown as a chip and the
+// note follows. Never a link from a scheme the kind does not admit.
+const LINK_KINDS = new Set(["commit", "pr", "ci", "url"]);
+function refHTML(r){
+  if(typeof r === "string") return esc(r); // never sent by this hub since schema 13; shown as text if ever seen
+  const kind = esc(r.kind||"text"), ref = String(r.ref||""), note = r.note ? ` <span class="dim">— ${esc(r.note)}</span>` : "";
+  const scope = r.scope ? `<span class="dim">${esc(r.scope)}:</span>` : "";
+  let body;
+  if(LINK_KINDS.has(r.kind) && /^https?:\/\//i.test(ref)) body = `<a href="${esc(ref)}" target="_blank" rel="noopener noreferrer">${esc(ref)}</a>`;
+  else if(r.kind==="task" && /^[0-9a-f-]{36}$/.test(ref)) body = `<a href="${taskURL(ref)}" onclick="return go('${taskURL(ref)}')">${esc(short(ref))}</a>`;
+  else body = esc(ref);
+  return `<span class="chip">${kind}</span> ${scope}${body}${note}`;
+}
 function refsHTML(k, label){
   const v = CUR[k]||[]; if(!v.length) return "";
-  return `<div class="field"><div class="k">${label}</div><div class="refs">${v.map(r=>`<div>${inline(r)}</div>`).join("")}</div></div>`;
+  return `<div class="field"><div class="k">${label}</div><div class="refs">${v.map(r=>`<div>${refHTML(r)}</div>`).join("")}</div></div>`;
+}
+// The form edits references one per line as "kind ref | note"; a doc or
+// record reference in another project or group is "kind scope:ref". A
+// backslash escapes what a line cannot carry otherwise: "\n" is a
+// newline, "\r" a carriage return (a textarea would fold it into a line
+// break), "\|" a bar, "\\" a backslash, "\s" and "\t" a space or tab at
+// either end, so a text reference holding any of them survives an
+// unrelated edit unchanged. The parser strips only that ASCII whitespace
+// (never Unicode spaces, which the codec does not protect).
+const ESC = {"\n": "\\n", "\r": "\\r", " ": "\\s", "\t": "\\t"}, UNESC = {n: "\n", r: "\r", s: " ", t: "\t"};
+const escRef = s => String(s).replace(/[\\|\n\r]/g, c => ESC[c] || "\\" + c).replace(/^[ \t]|[ \t]$/g, c => ESC[c]);
+const unescRef = s => s.replace(/\\(.)/g, (_, c) => UNESC[c] || c);
+function refLines(refs){
+  return (refs||[]).map(r => typeof r === "string" ? "text "+escRef(r) : `${r.kind} ${r.scope?r.scope+":":""}${escRef(r.ref)}${r.note?" | "+escRef(r.note):""}`).join("\n");
+}
+const REF_KINDS = ["task","doc","record","commit","pr","ci","url","text"];
+function splitNote(rest){ // at the first unescaped " | "
+  for(let i = 0; i < rest.length; i++){
+    if(rest[i] === "\\"){ i++; continue; }
+    if(rest.startsWith(" | ", i)) return [rest.slice(0, i), rest.slice(i+3)];
+  }
+  return [rest, null];
+}
+const strip = s => s.replace(/^[ \t\r]+|[ \t\r]+$/g, "");
+function parseRefs(text){
+  return text.split("\n").map(strip).filter(Boolean).map(line => {
+    let kind = "text", rest = line;
+    const sp = line.indexOf(" ");
+    if(sp > 0 && REF_KINDS.includes(line.slice(0, sp))){ kind = line.slice(0, sp); rest = strip(line.slice(sp+1)); }
+    const [refPart, notePart] = splitNote(rest);
+    const r = {kind, ref: unescRef(strip(refPart))};
+    if(notePart !== null) r.note = unescRef(strip(notePart));
+    if((kind==="doc"||kind==="record") && r.ref.includes(":")){ const c = r.ref.indexOf(":"); r.scope = r.ref.slice(0,c); r.ref = r.ref.slice(c+1); }
+    return r;
+  });
 }
 function renderTask(){
   const t = CUR;

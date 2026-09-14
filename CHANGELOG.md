@@ -9,9 +9,33 @@ upgrading a fleet.
 The format follows [Keep a Changelog](https://keepachangelog.com/1.1.0/);
 this project does not yet promise semantic versioning. The on-disk schema
 version is tracked separately (`currentSchema` in `internal/store/store.go`,
-currently 12); a binary refuses a database newer than it understands.
+currently 13); a binary refuses a database newer than it understands.
 
 ## [Unreleased]
+
+### Changed
+
+- **Typed references (schema v13): `candidate_refs` and `evidence_refs`
+  are objects, not strings.** Each reference is `{kind, ref, note?,
+  scope?}` with kind one of `task` (a task id), `doc` (a document name),
+  `record` (`<collection>/<record id>`), `commit`, `pr`, `ci`, `url` (an
+  http(s) URL naming the service and the target — a bare number or hash
+  is refused) and `text` (free text), so the board can link and the
+  agents can check what a reference points at. This is a pre-1.0 break
+  with a migration, not a dual contract: on upgrade every stored string
+  reference — in current tasks, history and saved retry results — becomes
+  `url` when it is a valid http(s) URL and `text` otherwise, with its
+  exact content and never a guessed target, and every task retry receipt's
+  digest is recomputed from its saved result, so a request committed
+  before the upgrade still replays as its typed retry. A write that still
+  sends strings is refused with 400 naming the new shape; old readers
+  receive the typed form. The task page renders links only for http(s)
+  URLs of the external kinds and for task ids, and edits references one
+  per line as `kind ref | note` (`kind scope:ref` for a doc or record in
+  another project or group). Schema bump: a database opened by this
+  build is refused by older builds, and the rewrite of task bodies,
+  history and receipts is in place and one-way: back up the database
+  before upgrading.
 
 ### Added
 

@@ -153,6 +153,21 @@ var taskToolDefs = []map[string]any{
 	},
 }
 
+// taskRefProp is the typed reference: kind says what ref holds — task: a
+// task id; doc: a document name; record: <collection>/<record id>;
+// commit, pr, ci, url: an http(s) URL naming the service and the target;
+// text: free text. Strings are refused since schema 13.
+func taskRefProp() map[string]any {
+	return map[string]any{"type": "object", "description": "typed reference {kind, ref, note?, scope?}",
+		"properties": map[string]any{
+			"kind":  propEnum("what ref holds", store.TaskRefKinds...),
+			"ref":   prop("string", "task id | document name | <collection>/<record id> | http(s) URL | text"),
+			"note":  prop("string", "optional note (at most 512 bytes)"),
+			"scope": prop("string", "doc/record only: the project or group the target lives in (default: this project)"),
+		},
+		"required": []string{"kind", "ref"}}
+}
+
 func assigneeProp(desc string) map[string]any {
 	return map[string]any{"type": "object", "description": desc + ": {kind: user|group, id: <access identity uuid>}",
 		"properties": map[string]any{"kind": propEnum("user or group", "user", "group"), "id": prop("string", "identity uuid")},
@@ -169,8 +184,8 @@ func taskContentProps(extra map[string]any) map[string]any {
 		"assignee":            assigneeProp("optional assignee"),
 		"blocker":             prop("string", "what blocks it, if BLOCKED"),
 		"dependencies":        map[string]any{"type": "array", "items": prop("string", "task id"), "description": "advisory task ids this depends on"},
-		"candidate_refs":      map[string]any{"type": "array", "items": prop("string", "reference"), "description": "candidate references (PRs, docs, links)"},
-		"evidence_refs":       map[string]any{"type": "array", "items": prop("string", "reference"), "description": "evidence references"},
+		"candidate_refs":      map[string]any{"type": "array", "items": taskRefProp(), "description": "candidate references (the PR, branch, doc or task under consideration), typed"},
+		"evidence_refs":       map[string]any{"type": "array", "items": taskRefProp(), "description": "evidence references (CI runs, reviews, merged commits), typed"},
 		"next_action":         prop("string", "the next concrete step"),
 		"archived":            prop("boolean", "archive (DONE/CANCELLED only)"),
 		"epic":                prop("string", "optional epic id: an OPEN epic of the same project (an assignment a task already has survives the epic's retirement)"),

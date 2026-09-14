@@ -65,3 +65,23 @@ func TestOpenAPIMatchesRouteTable(t *testing.T) {
 		}
 	}
 }
+
+// The two task write routes describe the typed reference shape (the
+// bodies themselves are deliberately loose objects, so the description
+// is the contract the spec carries).
+func TestOpenAPIDescribesTypedReferences(t *testing.T) {
+	var spec struct {
+		Paths map[string]map[string]struct {
+			Description string `json:"description"`
+		} `json:"paths"`
+	}
+	if err := json.Unmarshal(openAPISpec, &spec); err != nil {
+		t.Fatal(err)
+	}
+	for _, rt := range []struct{ path, method string }{{"/v1/projects/{p}/tasks", "post"}, {"/v1/tasks/{id}", "put"}} {
+		d := spec.Paths[rt.path][rt.method].Description
+		if !strings.Contains(d, "typed references {kind, ref, note?, scope?}") || !strings.Contains(d, "a bare string is refused with 400") {
+			t.Errorf("%s %s does not describe typed references: %q", rt.method, rt.path, d)
+		}
+	}
+}

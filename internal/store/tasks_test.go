@@ -95,7 +95,7 @@ func TestMigrationV10ToV11(t *testing.T) {
 		}
 		var v string
 		db2.sql.QueryRow(`SELECT value FROM meta WHERE key='schema_version'`).Scan(&v)
-		if v != "12" {
+		if v != fmt.Sprint(currentSchema) {
 			t.Fatalf("pass %d: schema_version=%q", pass, v)
 		}
 		for _, tbl := range []string{"tasks", "task_history", "task_comments", "task_requests", "epics", "epic_history"} {
@@ -171,16 +171,16 @@ func TestTaskValidationBounds(t *testing.T) {
 	bad("bad assignee", TaskContent{Title: "t", Assignee: &TaskAssignee{Kind: "robot", ID: uuidv7.New()}}, "assignee")
 	bad("bad assignee id", TaskContent{Title: "t", Assignee: &TaskAssignee{Kind: "user", ID: "alice"}}, "assignee")
 	bad("bad dependency", TaskContent{Title: "t", Dependencies: []string{"nope"}}, "dependency")
-	many := make([]string, MaxTaskListEntries+1)
+	many := make([]TaskRef, MaxTaskListEntries+1)
 	for i := range many {
-		many[i] = "ref"
+		many[i] = TaskRef{Kind: "text", Ref: "ref"}
 	}
 	bad("too many refs", TaskContent{Title: "t", EvidenceRefs: many}, "at most")
-	bad("long ref", TaskContent{Title: "t", CandidateRefs: []string{strings.Repeat("r", MaxTaskRefBytes+1)}}, "candidate_refs")
+	bad("long ref", TaskContent{Title: "t", CandidateRefs: []TaskRef{{Kind: "text", Ref: strings.Repeat("r", MaxTaskRefBytes+1)}}}, "candidate_refs")
 	bad("control char", TaskContent{Title: "t\x00"}, "control")
-	bad("control char in ref", TaskContent{Title: "t", EvidenceRefs: []string{"r\x00"}}, "evidence_refs")
-	bad("secret in ref", TaskContent{Title: "t", CandidateRefs: []string{"-----BEGIN RSA PRIVATE KEY-----\nMIIE"}}, "secret")
-	bad("blank ref", TaskContent{Title: "t", CandidateRefs: []string{" "}}, "candidate_refs")
+	bad("control char in ref", TaskContent{Title: "t", EvidenceRefs: []TaskRef{{Kind: "text", Ref: "r\x00"}}}, "evidence_refs")
+	bad("secret in ref", TaskContent{Title: "t", CandidateRefs: []TaskRef{{Kind: "text", Ref: "-----BEGIN RSA PRIVATE KEY-----\nMIIE"}}}, "secret")
+	bad("blank ref", TaskContent{Title: "t", CandidateRefs: []TaskRef{{Kind: "text", Ref: " "}}}, "candidate_refs")
 	bad("invalid utf8", TaskContent{Title: "t\xff"}, "UTF-8")
 	bad("secret", TaskContent{Title: "t", Objective: "-----BEGIN RSA PRIVATE KEY-----\nMIIE"}, "secret")
 	bad("oversized content", TaskContent{Title: "t", Objective: strings.Repeat("a", MaxTaskBytes)}, "limit")
@@ -188,17 +188,17 @@ func TestTaskValidationBounds(t *testing.T) {
 	if _, err := db.CreateTask(content(strings.Repeat("x", MaxTaskTitleBytes)), aliceActor, "k-title-max"); err != nil {
 		t.Fatalf("title at limit: %v", err)
 	}
-	if _, err := db.CreateTask(TaskContent{Title: "t", CandidateRefs: []string{strings.Repeat("r", MaxTaskRefBytes)}}, aliceActor, strings.Repeat("k", MaxTaskKeyBytes)); err != nil {
+	if _, err := db.CreateTask(TaskContent{Title: "t", CandidateRefs: []TaskRef{{Kind: "text", Ref: strings.Repeat("r", MaxTaskRefBytes)}}}, aliceActor, strings.Repeat("k", MaxTaskKeyBytes)); err != nil {
 		t.Fatalf("ref and key at limit: %v", err)
 	}
-	full := make([]string, MaxTaskListEntries)
+	full := make([]TaskRef, MaxTaskListEntries)
 	for i := range full {
-		full[i] = "ref"
+		full[i] = TaskRef{Kind: "text", Ref: "ref"}
 	}
 	if _, err := db.CreateTask(TaskContent{Title: "t", EvidenceRefs: full}, aliceActor, "k-refs-max"); err != nil {
 		t.Fatalf("%d refs: %v", MaxTaskListEntries, err)
 	}
-	exact := TaskContent{Title: "t", State: "BACKLOG", Dependencies: []string{}, CandidateRefs: []string{}, EvidenceRefs: []string{}}
+	exact := TaskContent{Title: "t", State: "BACKLOG", Dependencies: []string{}, CandidateRefs: []TaskRef{}, EvidenceRefs: []TaskRef{}}
 	b, _ := json.Marshal(exact)
 	exact.Objective = strings.Repeat("a", MaxTaskBytes-len(b))
 	if b, _ := json.Marshal(exact); len(b) != MaxTaskBytes {
@@ -1436,6 +1436,9 @@ func TestMigrateToSchema12(t *testing.T) {
 	}
 	db, _ := r.Open("proj-a")
 	tk := mustCreate(t, db, "old", "k-old")
+	if _, err := db.UpdateTask(tk.ID, content("old (edited)"), 1, aliceActor, "k-old-upd"); err != nil {
+		t.Fatal(err)
+	}
 	// Rewind to schema 11 by removing what 12 added.
 	for _, q := range []string{
 		`DROP INDEX idx_tasks_epic`, `ALTER TABLE tasks DROP COLUMN epic`,
@@ -1458,7 +1461,7 @@ func TestMigrateToSchema12(t *testing.T) {
 	}
 	var v string
 	db2.sql.QueryRow(`SELECT value FROM meta WHERE key='schema_version'`).Scan(&v)
-	if v != "12" {
+	if v != fmt.Sprint(currentSchema) {
 		t.Fatalf("schema version after migration: %s", v)
 	}
 	page, err := db2.ListTasks(TaskFilter{})
@@ -1467,5 +1470,217 @@ func TestMigrateToSchema12(t *testing.T) {
 	}
 	if _, err := db2.CreateEpic(EpicContent{Title: "after"}, aliceActor, "e-after"); err != nil {
 		t.Fatalf("epics usable after migration: %v", err)
+	}
+	// Receipts the real write path stored replay after the 13 step
+	// recomputed their digests: the same keys with the same content return
+	// the original results, not conflicts.
+	if again, err := db2.CreateTask(content("old"), aliceActor, "k-old"); err != nil || again.ID != tk.ID || again.Revision != 1 {
+		t.Fatalf("create retry across the upgrade: %+v %v", again, err)
+	}
+	if again, err := db2.UpdateTask(tk.ID, content("old (edited)"), 1, aliceActor, "k-old-upd"); err != nil || again.Revision != 2 {
+		t.Fatalf("update retry across the upgrade: %+v %v", again, err)
+	}
+}
+
+// Each reference kind validates what its ref must hold; strings are
+// refused at decode with the reason; only http(s) URLs of the external
+// kinds and task ids are linkable.
+func TestTaskRefKinds(t *testing.T) {
+	_, db := taskDB(t)
+	id := uuidv7.New()
+	good := []TaskRef{
+		{Kind: "task", Ref: id, Note: "blocks this"},
+		{Kind: "doc", Ref: "RUNBOOK"},
+		{Kind: "doc", Ref: "SESSION-STATE", Scope: "group-infra"},
+		{Kind: "record", Ref: "api/endpoints/tasks"},
+		{Kind: "commit", Ref: "https://example.com/org/repo/commit/0123abcd"},
+		{Kind: "pr", Ref: "https://example.com/org/repo/pull/52"},
+		{Kind: "ci", Ref: "https://example.com/org/repo/actions/runs/1"},
+		{Kind: "url", Ref: "https://example.com/anything"},
+		{Kind: "text", Ref: "reviewed by hand on 2026-09-14"},
+	}
+	made, err := db.CreateTask(TaskContent{Title: "refs", CandidateRefs: good, EvidenceRefs: good}, aliceActor, "k-refs-good")
+	if err != nil {
+		t.Fatalf("good references refused: %v", err)
+	}
+	// Note and scope survive storage, not just the returned value.
+	stored, err := db.GetTask(made.ID)
+	if err != nil || len(stored.CandidateRefs) != len(good) || len(stored.EvidenceRefs) != len(good) {
+		t.Fatalf("read back: %+v %v", stored, err)
+	}
+	for i := range good {
+		if stored.CandidateRefs[i] != good[i] || stored.EvidenceRefs[i] != good[i] {
+			t.Fatalf("reference %d after a read-back: %+v vs %+v", i, stored.CandidateRefs[i], good[i])
+		}
+	}
+	bad := map[string]TaskRef{
+		"url empty host": {Kind: "url", Ref: "https://"},
+		"url no host":    {Kind: "url", Ref: "http:///path"},
+		"pr whitespace":  {Kind: "pr", Ref: "https://example.com/a b"},
+		"kind":           {Kind: "issue", Ref: "x"},
+		"task id":        {Kind: "task", Ref: "not-an-id"},
+		"doc name":       {Kind: "doc", Ref: "docs/RUNBOOK.md"},
+		"record shape":   {Kind: "record", Ref: "noslash"},
+		"pr number":      {Kind: "pr", Ref: "52"},
+		"commit hash":    {Kind: "commit", Ref: "0123abcd"},
+		"url scheme":     {Kind: "url", Ref: "javascript:alert(1)"},
+		"url ftp":        {Kind: "url", Ref: "ftp://example.com/x"},
+		"scope kind":     {Kind: "url", Ref: "https://example.com/", Scope: "alpha"},
+		"scope shape":    {Kind: "doc", Ref: "RUNBOOK", Scope: "not a project"},
+		"long note":      {Kind: "text", Ref: "x", Note: strings.Repeat("n", MaxTaskRefNoteBytes+1)},
+	}
+	for name, r := range bad {
+		if _, err := db.CreateTask(TaskContent{Title: "refs", EvidenceRefs: []TaskRef{r}}, aliceActor, "k-refs-"+name); !errors.Is(err, ErrTaskInvalid) {
+			t.Errorf("%s: accepted or wrong error: %v", name, err)
+		}
+	}
+	var c TaskContent
+	err = json.Unmarshal([]byte(`{"title":"t","candidate_refs":["https://example.com/pr/1"]}`), &c)
+	if !errors.Is(err, ErrLegacyTaskRef) {
+		t.Fatalf("legacy string must be refused with the reason: %v", err)
+	}
+}
+
+// The schema-13 migration rewrites stored strings to typed references
+// with their exact text and recomputes the task receipts from their saved
+// results, so a request committed before the upgrade (its response lost)
+// replays as its typed retry, and changed content still conflicts.
+func TestMigrateToSchema13RewritesRefsAndReceipts(t *testing.T) {
+	root := t.TempDir()
+	r, err := NewRegistry(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	db, _ := r.Open("proj-a")
+	// A pre-upgrade create and update, as the v0.4.0 binary stored them:
+	// string references in the snapshot, the history and the receipts,
+	// with digests computed over the string-shaped inputs.
+	id := uuidv7.New()
+	now := nowUTC()
+	assignee := &TaskAssignee{Kind: "user", ID: uuidv7.New()}
+	oldContent := map[string]any{"title": "old", "objective": "ship it", "acceptance_criteria": "", "non_goals": "", "state": "BACKLOG",
+		"blocker": "", "dependencies": []any{}, "candidate_refs": []any{"https://example.com/pull/1", "reviewed by hand", "javascript:alert(1)"},
+		"evidence_refs": []any{}, "next_action": "push", "archived": false,
+		"assignee": map[string]any{"kind": assignee.Kind, "id": assignee.ID}}
+	snap1 := map[string]any{"id": id, "revision": float64(1), "created_at": now, "updated_at": now}
+	for k, v := range oldContent {
+		snap1[k] = v
+	}
+	newContent := map[string]any{}
+	for k, v := range oldContent {
+		newContent[k] = v
+	}
+	newContent["title"] = "old (edited)"
+	newContent["evidence_refs"] = []any{"https://example.com/actions/runs/9", "CI green"}
+	snap2 := map[string]any{}
+	for k, v := range snap1 {
+		snap2[k] = v
+	}
+	for k, v := range newContent {
+		snap2[k] = v
+	}
+	snap2["revision"] = float64(2)
+	mustJSON := func(v any) string { b, _ := json.Marshal(v); return string(b) }
+	d1, _ := receiptDigest(oldContent)
+	d2, _ := receiptDigest(map[string]any{"content": newContent, "expected": float64(1)})
+	actor, _ := json.Marshal(aliceActor)
+	actorKey, _ := aliceActor.key()
+	for _, stmt := range []struct {
+		q    string
+		args []any
+	}{
+		{`INSERT INTO tasks(id, state, archived, assignee, epic, body) VALUES(?,?,?,?,?,?)`, []any{id, "BACKLOG", 0, assignee.column(), "", mustJSON(snap2)}},
+		{`INSERT INTO task_history(task_id, revision, body) VALUES(?,?,?)`, []any{id, 1, mustJSON(map[string]any{"task": snap1, "actor": json.RawMessage(actor)})}},
+		{`INSERT INTO task_history(task_id, revision, body) VALUES(?,?,?)`, []any{id, 2, mustJSON(map[string]any{"task": snap2, "actor": json.RawMessage(actor)})}},
+		{`INSERT INTO task_requests(actor, operation, scope, key, digest, result) VALUES(?,?,?,?,?,?)`, []any{actorKey, "create", "", "k-old-create", d1, mustJSON(snap1)}},
+		{`INSERT INTO task_requests(actor, operation, scope, key, digest, result) VALUES(?,?,?,?,?,?)`, []any{actorKey, "update", id, "k-old-update", d2, mustJSON(snap2)}},
+		{`INSERT INTO task_requests(actor, operation, scope, key, digest, result) VALUES(?,?,?,?,?,?)`, []any{actorKey, "comment", id, "k-old-comment", "1:comment-digest", `{"id":"c1","body":"a comment, not a task"}`}},
+		{`INSERT INTO task_requests(actor, operation, scope, key, digest, result) VALUES(?,?,?,?,?,?)`, []any{actorKey, "epic-create", "", "k-old-epic", "1:epic-digest", `{"id":"e1","title":"an epic, not a task","revision":1}`}},
+		{`UPDATE meta SET value='12' WHERE key='schema_version'`, nil},
+	} {
+		if _, err := db.sql.Exec(stmt.q, stmt.args...); err != nil {
+			t.Fatalf("%s: %v", stmt.q, err)
+		}
+	}
+	r.Close()
+	r2, err := NewRegistry(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(r2.Close)
+	db2, err := r2.Open("proj-a")
+	if err != nil {
+		t.Fatalf("reopen migrates: %v", err)
+	}
+	var v string
+	db2.sql.QueryRow(`SELECT value FROM meta WHERE key='schema_version'`).Scan(&v)
+	if v != fmt.Sprint(currentSchema) {
+		t.Fatalf("schema version: %s", v)
+	}
+	got, err := db2.GetTask(id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Only a valid http(s) URL becomes url; a hostile scheme is text.
+	want := []TaskRef{{Kind: "url", Ref: "https://example.com/pull/1"}, {Kind: "text", Ref: "reviewed by hand"}, {Kind: "text", Ref: "javascript:alert(1)"}}
+	if len(got.CandidateRefs) != 3 || got.CandidateRefs[0] != want[0] || got.CandidateRefs[1] != want[1] || got.CandidateRefs[2] != want[2] {
+		t.Fatalf("snapshot references: %+v", got.CandidateRefs)
+	}
+	// Everything else rides through untouched.
+	if got.Objective != "ship it" || got.NextAction != "push" || got.Assignee == nil || *got.Assignee != *assignee || got.Title != "old (edited)" {
+		t.Fatalf("other fields after migration: %+v", got.TaskContent)
+	}
+	var commentDigest, commentResult string
+	db2.sql.QueryRow(`SELECT digest, result FROM task_requests WHERE key='k-old-comment'`).Scan(&commentDigest, &commentResult)
+	if commentDigest != "1:comment-digest" || commentResult != `{"id":"c1","body":"a comment, not a task"}` {
+		t.Fatalf("comment receipt touched: %s %s", commentDigest, commentResult)
+	}
+	var epicDigest, epicResult string
+	db2.sql.QueryRow(`SELECT digest, result FROM task_requests WHERE key='k-old-epic'`).Scan(&epicDigest, &epicResult)
+	if epicDigest != "1:epic-digest" || epicResult != `{"id":"e1","title":"an epic, not a task","revision":1}` {
+		t.Fatalf("epic receipt touched: %s %s", epicDigest, epicResult)
+	}
+	if len(got.EvidenceRefs) != 2 || got.EvidenceRefs[0].Kind != "url" || got.EvidenceRefs[1] != (TaskRef{Kind: "text", Ref: "CI green"}) {
+		t.Fatalf("snapshot evidence: %+v", got.EvidenceRefs)
+	}
+	h, err := db2.TaskHistory(id, 0, 0)
+	if err != nil || len(h.Changes) != 2 || h.Changes[0].Task.CandidateRefs[0] != want[0] || h.Changes[1].Task.EvidenceRefs[1].Ref != "CI green" {
+		t.Fatalf("history references: %+v %v", h, err)
+	}
+	// The lost-response retries, now in the typed form of the same content.
+	typedCreate := TaskContent{Title: "old", Objective: "ship it", NextAction: "push", State: "BACKLOG", CandidateRefs: want, Assignee: assignee}
+	again, err := db2.CreateTask(typedCreate, aliceActor, "k-old-create")
+	if err != nil || again.ID != id || again.Revision != 1 {
+		t.Fatalf("create retry across the upgrade must replay the original: %+v %v", again, err)
+	}
+	typedUpdate := typedCreate
+	typedUpdate.Title = "old (edited)"
+	typedUpdate.EvidenceRefs = []TaskRef{{Kind: "url", Ref: "https://example.com/actions/runs/9"}, {Kind: "text", Ref: "CI green"}}
+	up, err := db2.UpdateTask(id, typedUpdate, 1, aliceActor, "k-old-update")
+	if err != nil || up.Revision != 2 || up.Title != "old (edited)" {
+		t.Fatalf("update retry across the upgrade must replay the original: %+v %v", up, err)
+	}
+	changed := typedCreate
+	changed.Title = "different"
+	if _, err := db2.CreateTask(changed, aliceActor, "k-old-create"); !errors.Is(err, ErrTaskRetryConflict) {
+		t.Fatalf("changed content under the old key must conflict: %v", err)
+	}
+	// The step run again over typed data (the version rewound) changes
+	// nothing: objects pass through, and the receipts still replay.
+	if _, err := db2.sql.Exec(`UPDATE meta SET value='12' WHERE key='schema_version'`); err != nil {
+		t.Fatalf("rewind: %v", err)
+	}
+	r2.Close()
+	r3, _ := NewRegistry(root)
+	t.Cleanup(r3.Close)
+	db3, err := r3.Open("proj-a")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got3, _ := db3.GetTask(id); len(got3.CandidateRefs) != 3 || got3.CandidateRefs[0] != want[0] || got3.CandidateRefs[2] != want[2] {
+		t.Fatalf("re-run over typed data: %+v", got3.CandidateRefs)
+	}
+	if again, err := db3.CreateTask(typedCreate, aliceActor, "k-old-create"); err != nil || again.ID != id {
+		t.Fatalf("create retry after the re-run: %+v %v", again, err)
 	}
 }

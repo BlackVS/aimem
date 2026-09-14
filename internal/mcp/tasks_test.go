@@ -526,6 +526,29 @@ func TestTaskToolDefsAreValidSchema(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	// The reference lists advertise the typed object with the kind enum,
+	// never the strings the decoder refuses.
+	wantKinds, _ := json.Marshal(store.TaskRefKinds)
+	seen := 0
+	for _, d := range taskToolDefs {
+		props := d["inputSchema"].(map[string]any)["properties"].(map[string]any)
+		for _, field := range []string{"candidate_refs", "evidence_refs"} {
+			list, ok := props[field].(map[string]any)
+			if !ok {
+				continue
+			}
+			seen++
+			items := list["items"].(map[string]any)
+			req, _ := json.Marshal(items["required"])
+			kinds, _ := json.Marshal(items["properties"].(map[string]any)["kind"].(map[string]any)["enum"])
+			if items["type"] != "object" || string(req) != `["kind","ref"]` || string(kinds) != string(wantKinds) {
+				t.Fatalf("%v.%s items: %v", d["name"], field, items)
+			}
+		}
+	}
+	if seen != 4 { // create_task and update_task, two lists each
+		t.Fatalf("reference lists in the tool schemas: %d", seen)
+	}
 	if strings.Contains(string(raw), `"required":null`) {
 		t.Fatal("a null required list breaks strict MCP clients")
 	}
@@ -592,5 +615,39 @@ func TestEpicToolsDispatch(t *testing.T) {
 	off := &srv{project: "alpha", taskState: taskStateDisabled}
 	if resp := off.handle(context.Background(), []byte(`{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"list_epics","arguments":{}}}`)); !strings.Contains(string(resp), "not enabled") {
 		t.Fatalf("epic tool by name with tasks off: %s", resp)
+	}
+}
+
+// The tool arguments carry typed references through unchanged, and a
+// string array is refused at the argument decoder with the reason.
+func TestTypedReferencesInToolArgs(t *testing.T) {
+	a, err := decodeTaskArgs(json.RawMessage(`{"title":"t","idempotency_key":"k","evidence_refs":[{"kind":"ci","ref":"https://example.com/runs/1","note":"green"}]}`))
+	if err != nil || len(a.EvidenceRefs) != 1 || a.EvidenceRefs[0].Kind != "ci" || a.EvidenceRefs[0].Note != "green" {
+		t.Fatalf("typed args: %+v %v", a, err)
+	}
+	body, err := a.content()
+	if err != nil {
+		t.Fatalf("content marshal: %v", err)
+	}
+	raw, _ := json.Marshal(body["evidence_refs"])
+	var back []store.TaskRef
+	if json.Unmarshal(raw, &back) != nil || len(back) != 1 || back[0] != (store.TaskRef{Kind: "ci", Ref: "https://example.com/runs/1", Note: "green"}) {
+		t.Fatalf("evidence_refs through content(): %s", raw)
+	}
+	a, err = decodeTaskArgs(json.RawMessage(`{"title":"t","idempotency_key":"k","candidate_refs":[{"kind":"doc","ref":"DESIGN","scope":"other-project"}]}`))
+	if err != nil {
+		t.Fatalf("scoped doc ref: %v", err)
+	}
+	body, _ = a.content()
+	raw, _ = json.Marshal(body["candidate_refs"])
+	if json.Unmarshal(raw, &back) != nil || len(back) != 1 || back[0] != (store.TaskRef{Kind: "doc", Ref: "DESIGN", Scope: "other-project"}) {
+		t.Fatalf("candidate_refs through content(): %s", raw)
+	}
+	if _, err := decodeTaskArgs(json.RawMessage(`{"title":"t","idempotency_key":"k","evidence_refs":["https://example.com/runs/1"]}`)); err == nil || !strings.Contains(err.Error(), "objects {kind, ref") {
+		t.Fatalf("legacy strings in args: %v", err)
+	}
+	// A misspelled key inside a reference is an error, never a silent clear.
+	if _, err := decodeTaskArgs(json.RawMessage(`{"title":"t","idempotency_key":"k","evidence_refs":[{"kind":"ci","ref":"https://example.com/runs/1","notes":"green"}]}`)); err == nil || !strings.Contains(err.Error(), "notes") {
+		t.Fatalf("unknown key in a reference: %v", err)
 	}
 }
