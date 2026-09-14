@@ -203,6 +203,9 @@ function ago(ts){if(!ts)return"-";const s=(Date.now()-Date.parse(ts))/1e3;
 const newKey = () => (crypto.randomUUID ? crypto.randomUUID() : String(Date.now())+Math.random());
 function key(name){ if(!KEYS[name]) KEYS[name]=newKey(); return KEYS[name]; }
 function spent(name){ delete KEYS[name]; }
+// A request retires only the key it carried: a late answer for an older
+// form must not take the key a newer form is still relying on for its retry.
+function spentIf(name, k){ if(KEYS[name]===k) delete KEYS[name]; }
 
 // Every call carries the token; a write carries its retry key. A 409 is
 // surfaced with its body so a revision conflict can show the current task
@@ -409,10 +412,10 @@ function toggleNew(){
   key("new"); $("new-title").focus();
 }
 async function createTask(){
-  const my = NAV, project = NEW_PROJ; // the form's project, never the selector's
+  const my = NAV, project = NEW_PROJ, k = key("new"); // the form's project and key, never the selector's or a newer form's
   try{
-    const t = await api("/v1/projects/"+encodeURIComponent(project)+"/tasks", {method:"POST", body:JSON.stringify(readForm("new"))}, key("new"));
-    spent("new");
+    const t = await api("/v1/projects/"+encodeURIComponent(project)+"/tasks", {method:"POST", body:JSON.stringify(readForm("new"))}, k);
+    spentIf("new", k);
     if(my!==NAV) return;
     $("newForm").hidden = true; toast("created "+short(t.id));
     go(taskURL(t.id));
@@ -440,22 +443,28 @@ async function showTask(id, commentID){
   if(my!==NAV) return;
   CAN_WRITE = ok;
   renderTask();
+  $("cmtBtn").disabled = false; // the comment form is per view
   HIST = {after:0}; CMT = {after:0};
   await Promise.all([loadHistory(true), loadComments(true)]);
   if(my!==NAV) return;
   if(commentID) await revealComment(commentID, my);
 }
 // A comment link may point past the first page: resolve the comment (a
-// wrong parent is "not found"), then follow the cursors until it is on
-// the page, then highlight it.
+// wrong parent is "not found") and, if it is not on the first page, show
+// the discussion from that comment onward — the API pages forward from a
+// sequence, so landing costs one request whatever the thread's length —
+// with a way back to the start. Then highlight it.
 async function revealComment(commentID, my){
   let target;
   try{ target = await api("/v1/tasks/"+encodeURIComponent(CUR.id)+"/comments/"+encodeURIComponent(commentID)); }
   catch(e){ if(e.auth) return boot(); if(my===NAV) toast("comment: "+e.message); return; }
-  for(let pages = 0; my===NAV && !document.getElementById("c-"+commentID) && CMT.after && CMT.after < target.sequence && pages < 50; pages++){
-    await loadComments(false);
-  }
   if(my!==NAV) return;
+  if(!document.getElementById("c-"+commentID)){
+    $("comments").innerHTML = `<div class="dim" style="margin:8px 0">discussion from comment #${target.sequence} — <button type="button" class="act" onclick="loadComments(true)">show from the start</button></div>`;
+    CMT = {after: target.sequence - 1};
+    await loadComments(false);
+    if(my!==NAV) return;
+  }
   const el = document.getElementById("c-"+commentID);
   if(el){ el.classList.add("target"); el.scrollIntoView({block:"center"}); }
 }
@@ -515,11 +524,11 @@ function editTask(){
 // dropped — the write itself happened or did not on the server, and the
 // view that replaced this one must not be repainted with another task.
 async function saveTask(content, kname){
-  const my = NAV, id = CUR.id;
+  const my = NAV, id = CUR.id, k = key(kname);
   const body = Object.assign({}, content, {expected_revision: CUR.revision});
   try{
-    const saved = await api("/v1/tasks/"+encodeURIComponent(id), {method:"PUT", body:JSON.stringify(body)}, key(kname));
-    spent(kname);
+    const saved = await api("/v1/tasks/"+encodeURIComponent(id), {method:"PUT", body:JSON.stringify(body)}, k);
+    spentIf(kname, k);
     if(my!==NAV) return;
     CUR = saved; toast("saved r"+CUR.revision); renderTask(); HIST = {after:0}; loadHistory(true);
   }catch(e){
@@ -581,21 +590,21 @@ async function loadComments(reset){
         <div class="prose">${md2html(c.body)}</div></div>`);
     }
     CMT.after = p.next_cursor||0; $("cmtMore").hidden = !p.next_cursor;
-    if(!$("comments").children.length) $("comments").innerHTML = '<div class="dim">no discussion yet</div>';
+    if(!$("comments").querySelector(".comment")) $("comments").innerHTML = '<div class="dim">no discussion yet</div>';
   }catch(e){ if(e.auth) return boot(); if(my===NAV && seq===SEQ.cmt) $("comments").innerHTML = `<span class="bad">${esc(e.message)}</span>`; }
   finally{ if(seq===SEQ.cmt) $("cmtMore").disabled = false; }
 }
 async function addComment(){
   const body = $("cmtBody").value; if(!body.trim()) return;
-  const my = NAV, id = CUR.id, kname = "cmt:"+id; $("cmtBtn").disabled = true;
+  const my = NAV, id = CUR.id, kname = "cmt:"+id, k = key(kname); $("cmtBtn").disabled = true;
   try{
-    const c = await api("/v1/tasks/"+encodeURIComponent(id)+"/comments", {method:"POST", body:JSON.stringify({body})}, key(kname));
-    spent(kname);
+    const c = await api("/v1/tasks/"+encodeURIComponent(id)+"/comments", {method:"POST", body:JSON.stringify({body})}, k);
+    spentIf(kname, k);
     if(my!==NAV) return;
     $("cmtBody").value=""; toast("comment #"+c.sequence+" added");
     await loadComments(true);
   }catch(e){ if(e.auth) return boot(); if(my===NAV) toast(e.message); }
-  finally{ if(my===NAV) $("cmtBtn").disabled = false; }
+  finally{ $("cmtBtn").disabled = false; } // the button belongs to whichever view is current; a late answer only releases it
 }
 if(!TOK) $("gate").classList.remove("hide"); else boot();
 </script>
