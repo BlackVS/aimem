@@ -615,6 +615,22 @@ func TestDropAndMergeRefuseTaskBearingProjects(t *testing.T) {
 // Concurrent create versus drop: whichever wins, no task is ever lost. A
 // drop that succeeds means no create committed; a create that committed
 // means the drop refused.
+// A project directory without a database file (a first open interrupted
+// before SQLite created it) holds no tasks and must still be droppable.
+func TestDropProjectWithoutDatabaseFile(t *testing.T) {
+	r := newTestRegistry(t)
+	dir := filepath.Join(r.root, "projects", "proj-empty")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := r.Drop("proj-empty"); err != nil {
+		t.Fatalf("drop of a database-less project dir: %v", err)
+	}
+	if _, err := os.Stat(dir); !os.IsNotExist(err) {
+		t.Fatalf("directory still present after drop: %v", err)
+	}
+}
+
 func TestDropRacesTaskCreation(t *testing.T) {
 	for round := range 12 {
 		r := newTestRegistry(t)

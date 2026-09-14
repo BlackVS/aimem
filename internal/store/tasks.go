@@ -19,6 +19,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"os"
 	"regexp"
 	"slices"
 	"strings"
@@ -641,6 +642,9 @@ func (d *DB) HasTasks() (bool, error) {
 // the cached handle, so no writer can commit into the file between this
 // check and the removal: a task-bearing project is never deleted.
 func fileHasTasks(path string) (bool, error) {
+	if _, err := os.Stat(path); os.IsNotExist(err) {
+		return false, nil // no database (interrupted first open): nothing to keep
+	}
 	sdb, err := sql.Open("sqlite", "file:"+path+"?mode=ro&_pragma=busy_timeout(5000)")
 	if err != nil {
 		return false, err
