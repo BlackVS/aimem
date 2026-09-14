@@ -560,3 +560,37 @@ func TestHubTaskTokenRoundTrips(t *testing.T) {
 		t.Fatalf("task token lost: %+v", got["home"])
 	}
 }
+
+// The epic tools are task tools: listed with them, hidden and refused
+// with them, and dispatched to the project-scoped epic routes.
+func TestEpicToolsDispatch(t *testing.T) {
+	var got []string
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		got = append(got, r.Method+" "+r.URL.String())
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte(`{"epics":[]}`))
+	}))
+	defer ts.Close()
+	s := &srv{project: "alpha", tasks: hubCaller(ts.URL, "aimem_user_alice", ts.Client())}
+	for _, name := range []string{"list_epics", "get_epic", "create_epic", "update_epic"} {
+		if !isTaskTool(name) {
+			t.Fatalf("%s must be a task tool", name)
+		}
+	}
+	calls := []string{
+		`{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"list_epics","arguments":{"include_retired":true}}}`,
+		`{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"create_epic","arguments":{"title":"e","target":"v1","idempotency_key":"k1"}}}`,
+	}
+	for _, c := range calls {
+		if resp := s.handle(context.Background(), []byte(c)); strings.Contains(string(resp), "isError") {
+			t.Fatalf("call failed: %s", resp)
+		}
+	}
+	if len(got) != 2 || got[0] != "GET /v1/projects/alpha/epics?include_retired=true" || got[1] != "POST /v1/projects/alpha/epics" {
+		t.Fatalf("dispatched: %v", got)
+	}
+	off := &srv{project: "alpha", taskState: taskStateDisabled}
+	if resp := off.handle(context.Background(), []byte(`{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"list_epics","arguments":{}}}`)); !strings.Contains(string(resp), "not enabled") {
+		t.Fatalf("epic tool by name with tasks off: %s", resp)
+	}
+}

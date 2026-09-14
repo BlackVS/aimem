@@ -37,6 +37,10 @@ var taskRoutes = map[string]bool{
 	"GET /v1/tasks/{id}/comments":     true,
 	"POST /v1/tasks/{id}/comments":    true,
 	"GET /v1/tasks/{id}/comments/{c}": true,
+	"GET /v1/projects/{p}/epics":      true,
+	"POST /v1/projects/{p}/epics":     true,
+	"GET /v1/projects/{p}/epics/{e}":  true,
+	"PUT /v1/projects/{p}/epics/{e}":  true,
 }
 
 // ordinaryRoutes is the exact surface an ordinary (scoped user) token may
@@ -54,6 +58,7 @@ var ordinaryRoutes = func() map[string]bool {
 	m["POST /mcp"] = true
 	m["GET /v1/projects"] = true
 	m["GET /v1/projects/{p}/process"] = true // the selected process reference: what an agent needs to find its rules; grants no repository access
+	m["GET /v1/access/directory"] = true     // id, kind, name, enabled of every user and group: what the board labels assignees with
 	return m
 }()
 
@@ -342,7 +347,7 @@ func (s *Server) idempotencyKey(w http.ResponseWriter, r *http.Request) (string,
 // faults never echo internal detail.
 func (s *Server) taskError(w http.ResponseWriter, err error) {
 	switch {
-	case errors.Is(err, store.ErrTaskNotFound):
+	case errors.Is(err, store.ErrTaskNotFound), errors.Is(err, store.ErrEpicNotFound):
 		s.fail(w, http.StatusNotFound, err)
 	case errors.Is(err, store.ErrTaskArchived), errors.Is(err, store.ErrTaskRetryConflict):
 		s.fail(w, http.StatusConflict, err)
@@ -394,6 +399,7 @@ func (s *Server) listTasks(w http.ResponseWriter, r *http.Request) {
 		}
 		f.Assignee = &store.TaskAssignee{Kind: kind, ID: id}
 	}
+	f.Epic = q.Get("epic")
 	page, err := db.ListTasks(f)
 	if err != nil {
 		s.taskError(w, err)

@@ -327,8 +327,10 @@ func TestOrdinaryTokenGateMatrix(t *testing.T) {
 	// consults: widening it is a deliberate, reviewed change.
 	want := []string{"GET /v1/projects/{p}/tasks", "POST /v1/projects/{p}/tasks", "GET /v1/tasks/{id}", "PUT /v1/tasks/{id}",
 		"GET /v1/tasks/{id}/history", "GET /v1/tasks/{id}/comments", "POST /v1/tasks/{id}/comments", "GET /v1/tasks/{id}/comments/{c}", "POST /mcp",
-		"GET /v1/projects",             // the listing, read only, reserved stores filtered (TestProjectListForOrdinaryTokens)
-		"GET /v1/projects/{p}/process"} // the selected process reference (TestProcessReferenceSelection)
+		"GET /v1/projects",                                                                                                              // the listing, read only, reserved stores filtered (TestProjectListForOrdinaryTokens)
+		"GET /v1/projects/{p}/process",                                                                                                  // the selected process reference (TestProcessReferenceSelection)
+		"GET /v1/projects/{p}/epics", "POST /v1/projects/{p}/epics", "GET /v1/projects/{p}/epics/{e}", "PUT /v1/projects/{p}/epics/{e}", // epics (TestEpicRoutes)
+		"GET /v1/access/directory"} // the identity directory (TestAccessDirectory)
 	if len(ordinaryRoutes) != len(want) {
 		t.Fatalf("ordinary surface changed: %v", ordinaryRoutes)
 	}
@@ -340,7 +342,7 @@ func TestOrdinaryTokenGateMatrix(t *testing.T) {
 	mcpHits := 0
 	h := f.s.TCPHandler(f.env, map[string]http.Handler{"/mcp": http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { mcpHits++ })})
 	fill := strings.NewReplacer("{p}", "alpha", "{id}", uuidv7.New(), "{c}", uuidv7.New(), "{s}", "s1", "{key}", "about",
-		"{name}", "RUNBOOK", "{instance}", "x", "{kind}", "user", "{g}", "g", "{u}", "u", "{id...}", "x", "{$}", "")
+		"{name}", "RUNBOOK", "{instance}", "x", "{kind}", "user", "{g}", "g", "{u}", "u", "{id...}", "x", "{$}", "", "{e}", uuidv7.New())
 	public := f.s.publicGETs()
 	for _, rt := range f.s.Routes() {
 		path := fill.Replace(rt.Pattern)
@@ -722,6 +724,7 @@ func TestTasksPageIsPublicChrome(t *testing.T) {
 		`"/v1/projects"`:        true,
 		`"/v1/projects/"+encodeURIComponent(PROJ)+"/tasks?"+q`:                               true,
 		`"/v1/projects/"+encodeURIComponent(project)+"/tasks"`:                               true,
+		`"/v1/projects/"+encodeURIComponent(project)+"/epics?include_retired=true"`:          true,
 		`"/v1/tasks/"+encodeURIComponent(id)`:                                                true,
 		`"/v1/tasks/"+encodeURIComponent(CUR.id)+"/history?limit=20&after="+HIST.after`:      true,
 		`"/v1/tasks/"+encodeURIComponent(CUR.id)+"/comments?limit=20&after="+CMT.after`:      true,
@@ -904,5 +907,116 @@ func TestMCPPrincipalDispatch(t *testing.T) {
 	}
 	if c, only := f.s.MCPPrincipal(httptest.NewRequest("POST", "/mcp", nil)); c != nil || only {
 		t.Fatal("no identity: no task caller, legacy tools untouched")
+	}
+}
+
+// Epic routes: reads on the ordinary surface, writes authorized like task
+// writes (grant, enablement), the revision conflict carrying the current
+// epic, retirement refusing new task assignments but keeping existing
+// ones, and the epic filter on the task list.
+func TestEpicRoutes(t *testing.T) {
+	f := newTaskFixture(t)
+	w := taskReq(t, f.h, "POST", "/v1/projects/alpha/epics", f.alice, "e1", `{"title":"release 0.5","objective":"typed refs","target":"v0.5.0"}`)
+	if w.Code != 201 {
+		t.Fatalf("create epic: %d %s", w.Code, w.Body)
+	}
+	var e struct {
+		ID       string                `json:"id"`
+		Revision int64                 `json:"revision"`
+		State    string                `json:"state"`
+		Links    struct{ Self string } `json:"links"`
+	}
+	json.Unmarshal(w.Body.Bytes(), &e)
+	if e.State != "OPEN" || e.Links.Self != "/v1/projects/alpha/epics/"+e.ID {
+		t.Fatalf("epic view: %s", w.Body)
+	}
+	if w := taskReq(t, f.h, "POST", "/v1/projects/alpha/epics", f.writer, "e2", `{"title":"nope"}`); w.Code != 403 {
+		t.Fatalf("writer token created an epic: %d", w.Code)
+	}
+	if w := taskReq(t, f.h, "POST", "/v1/projects/alpha/epics", f.bob, "e3", `{"title":"nope"}`); w.Code != 403 {
+		t.Fatalf("read-only token created an epic: %d", w.Code)
+	}
+	if w := taskReq(t, f.h, "GET", "/v1/projects/alpha/epics/"+e.ID, f.bob, "", ""); w.Code != 200 {
+		t.Fatalf("read by read-only token: %d", w.Code)
+	}
+	if w := taskReq(t, f.h, "GET", "/v1/projects/alpha/epics/"+uuidv7.New(), f.bob, "", ""); w.Code != 404 {
+		t.Fatalf("missing epic: %d", w.Code)
+	}
+	// A task under the epic, and the filter.
+	w = taskReq(t, f.h, "POST", "/v1/projects/alpha/tasks", f.alice, "t1", `{"title":"under","epic":"`+e.ID+`"}`)
+	if w.Code != 201 || !strings.Contains(w.Body.String(), `"epic":"`+e.ID+`"`) {
+		t.Fatalf("task under epic: %d %s", w.Code, w.Body)
+	}
+	task := decodeTask(t, w)
+	taskReq(t, f.h, "POST", "/v1/projects/alpha/tasks", f.alice, "t2", `{"title":"elsewhere"}`)
+	w = taskReq(t, f.h, "GET", "/v1/projects/alpha/tasks?epic="+e.ID, f.bob, "", "")
+	if w.Code != 200 || strings.Count(w.Body.String(), `"id":"`) != 1 || !strings.Contains(w.Body.String(), `"epic":"`+e.ID+`"`) {
+		t.Fatalf("epic filter: %d %s", w.Code, w.Body)
+	}
+	if w := taskReq(t, f.h, "GET", "/v1/projects/alpha/tasks?epic=nope", f.bob, "", ""); w.Code != 400 {
+		t.Fatalf("bad epic filter: %d", w.Code)
+	}
+	if w := taskReq(t, f.h, "POST", "/v1/projects/alpha/tasks", f.alice, "t3", `{"title":"orphan","epic":"`+uuidv7.New()+`"}`); w.Code != 400 {
+		t.Fatalf("missing epic on a task: %d %s", w.Code, w.Body)
+	}
+	// Stale revision conflicts with the current epic in the body.
+	w = taskReq(t, f.h, "PUT", "/v1/projects/alpha/epics/"+e.ID, f.alice, "e4", `{"title":"release 0.5","state":"RETIRED","expected_revision":9}`)
+	if w.Code != 409 || !strings.Contains(w.Body.String(), `"current"`) {
+		t.Fatalf("stale epic update: %d %s", w.Code, w.Body)
+	}
+	// Retire; existing assignment survives; a new one is refused; the
+	// list hides it unless asked.
+	w = taskReq(t, f.h, "PUT", "/v1/projects/alpha/epics/"+e.ID, f.alice, "e5", `{"title":"release 0.5","state":"RETIRED","expected_revision":1}`)
+	if w.Code != 200 || !strings.Contains(w.Body.String(), `"state":"RETIRED"`) {
+		t.Fatalf("retire: %d %s", w.Code, w.Body)
+	}
+	w = taskReq(t, f.h, "PUT", "/v1/tasks/"+task.ID, f.alice, "t1b", `{"title":"under (edited)","state":"READY","epic":"`+e.ID+`","expected_revision":1}`)
+	if w.Code != 200 {
+		t.Fatalf("existing assignment after retirement: %d %s", w.Code, w.Body)
+	}
+	if w := taskReq(t, f.h, "POST", "/v1/projects/alpha/tasks", f.alice, "t4", `{"title":"late","epic":"`+e.ID+`"}`); w.Code != 400 {
+		t.Fatalf("new assignment to a retired epic: %d %s", w.Code, w.Body)
+	}
+	if w := taskReq(t, f.h, "GET", "/v1/projects/alpha/epics", f.bob, "", ""); w.Code != 200 || strings.Contains(w.Body.String(), e.ID) {
+		t.Fatalf("retired epic listed by default: %d %s", w.Code, w.Body)
+	}
+	if w := taskReq(t, f.h, "GET", "/v1/projects/alpha/epics?include_retired=true", f.bob, "", ""); w.Code != 200 || !strings.Contains(w.Body.String(), e.ID) {
+		t.Fatalf("retired epic on request: %d %s", w.Code, w.Body)
+	}
+	// Tasks off: epic mutations refused, reads kept.
+	if w := taskReq(t, f.h, "PUT", "/v1/projects/alpha/meta/tasks", f.admin, "", `{"value":"off"}`); w.Code != 200 {
+		t.Fatalf("switch off: %d", w.Code)
+	}
+	if w := taskReq(t, f.h, "POST", "/v1/projects/alpha/epics", f.admin, "e6", `{"title":"while off"}`); w.Code != 403 {
+		t.Fatalf("epic create with tasks off: %d %s", w.Code, w.Body)
+	}
+	if w := taskReq(t, f.h, "GET", "/v1/projects/alpha/epics?include_retired=true", f.alice, "", ""); w.Code != 200 {
+		t.Fatalf("epic read with tasks off: %d", w.Code)
+	}
+}
+
+// The identity directory returns exactly id, kind, name and enabled for
+// every user and group, to any credential class, and nothing else.
+func TestAccessDirectory(t *testing.T) {
+	f := newTaskFixture(t)
+	for _, tok := range []string{f.alice, f.bob, f.writer, f.admin} {
+		w := taskReq(t, f.h, "GET", "/v1/access/directory", tok, "", "")
+		if w.Code != 200 {
+			t.Fatalf("directory for %q: %d %s", tok[:6], w.Code, w.Body)
+		}
+		var out struct {
+			Identities []map[string]any `json:"identities"`
+		}
+		if err := json.Unmarshal(w.Body.Bytes(), &out); err != nil || len(out.Identities) < 2 {
+			t.Fatalf("directory shape: %s", w.Body)
+		}
+		for _, id := range out.Identities {
+			if len(id) != 4 || id["id"] == nil || id["kind"] == nil || id["name"] == nil || id["enabled"] == nil {
+				t.Fatalf("directory entry must be exactly id/kind/name/enabled: %v", id)
+			}
+		}
+		if !strings.Contains(w.Body.String(), `"name":"Alice"`) || strings.Contains(w.Body.String(), "token") || strings.Contains(w.Body.String(), "grant") {
+			t.Fatalf("directory content: %s", w.Body)
+		}
 	}
 }

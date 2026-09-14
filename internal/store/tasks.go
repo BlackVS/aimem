@@ -113,6 +113,11 @@ type TaskContent struct {
 	EvidenceRefs       []string      `json:"evidence_refs"`
 	NextAction         string        `json:"next_action"`
 	Archived           bool          `json:"archived"`
+	// Epic is the optional grouping above the task: an OPEN epic of the
+	// same project (checked inside the write's transaction). Omitted on
+	// the wire when empty, so older readers and the retry digest see the
+	// content they always saw.
+	Epic string `json:"epic,omitempty"`
 }
 
 // Task is the current row. The owning project is NOT stored in the
@@ -203,6 +208,9 @@ func (c *TaskContent) validate() error {
 	}
 	if c.Assignee != nil && ((c.Assignee.Kind != "user" && c.Assignee.Kind != "group") || !taskIDRE.MatchString(c.Assignee.ID)) {
 		return errors.New("assignee must be {kind: user|group, id: <access identity UUID>}")
+	}
+	if c.Epic != "" && !taskIDRE.MatchString(c.Epic) {
+		return errors.New("epic must be an epic id")
 	}
 	if len(c.Dependencies) > MaxTaskListEntries || len(c.CandidateRefs) > MaxTaskListEntries || len(c.EvidenceRefs) > MaxTaskListEntries {
 		return fmt.Errorf("at most %d entries per dependency or reference list", MaxTaskListEntries)
@@ -397,6 +405,9 @@ func (d *DB) CreateTask(content TaskContent, actor TaskActor, key string) (Task,
 		return Task{}, invalid(err)
 	}
 	t, err := taskMutation(d, actor, "create", "", key, content, func(tx *sql.Tx) (Task, error) {
+		if err := checkEpicAssignable(tx, content.Epic, ""); err != nil {
+			return Task{}, err
+		}
 		now := nowUTC()
 		t := Task{ID: uuidv7.New(), Revision: 1, TaskContent: content, CreatedAt: now, UpdatedAt: now}
 		return t, saveTask(tx, t, actor, true)
@@ -430,6 +441,9 @@ func (d *DB) UpdateTask(id string, content TaskContent, expected int64, actor Ta
 		if t.Revision != expected {
 			return Task{}, &TaskConflict{Current: t}
 		}
+		if err := checkEpicAssignable(tx, content.Epic, t.Epic); err != nil {
+			return Task{}, err
+		}
 		t.TaskContent = content
 		t.Revision++
 		t.UpdatedAt = nowUTC()
@@ -446,11 +460,11 @@ func saveTask(tx *sql.Tx, t Task, actor TaskActor, create bool) error {
 		return err
 	}
 	if create {
-		_, err = tx.Exec(`INSERT INTO tasks(id, state, archived, assignee, body) VALUES(?,?,?,?,?)`,
-			t.ID, t.State, boolInt(t.Archived), t.Assignee.column(), string(body))
+		_, err = tx.Exec(`INSERT INTO tasks(id, state, archived, assignee, epic, body) VALUES(?,?,?,?,?,?)`,
+			t.ID, t.State, boolInt(t.Archived), t.Assignee.column(), t.Epic, string(body))
 	} else {
-		_, err = tx.Exec(`UPDATE tasks SET state=?, archived=?, assignee=?, body=? WHERE id=?`,
-			t.State, boolInt(t.Archived), t.Assignee.column(), string(body), t.ID)
+		_, err = tx.Exec(`UPDATE tasks SET state=?, archived=?, assignee=?, epic=?, body=? WHERE id=?`,
+			t.State, boolInt(t.Archived), t.Assignee.column(), t.Epic, string(body), t.ID)
 	}
 	if err != nil {
 		return err
@@ -566,6 +580,7 @@ func invalid(err error) error { return fmt.Errorf("%w: %w", ErrTaskInvalid, err)
 type TaskFilter struct {
 	State           string
 	Assignee        *TaskAssignee
+	Epic            string // only tasks under this epic
 	IncludeArchived bool
 	After           string
 	Limit           int
@@ -577,6 +592,7 @@ type TaskSummary struct {
 	Title     string        `json:"title"`
 	State     string        `json:"state"`
 	Assignee  *TaskAssignee `json:"assignee,omitempty"`
+	Epic      string        `json:"epic,omitempty"`
 	Archived  bool          `json:"archived"`
 	Revision  int64         `json:"revision"`
 	UpdatedAt string        `json:"updated_at"`
@@ -603,6 +619,9 @@ func (d *DB) ListTasks(f TaskFilter) (TaskPage, error) {
 	if f.Assignee != nil && ((f.Assignee.Kind != "user" && f.Assignee.Kind != "group") || !taskIDRE.MatchString(f.Assignee.ID)) {
 		return out, invalid(errors.New("invalid assignee filter"))
 	}
+	if f.Epic != "" && !taskIDRE.MatchString(f.Epic) {
+		return out, invalid(errors.New("invalid epic filter"))
+	}
 	query := `SELECT body FROM tasks WHERE id > ?`
 	args := []any{f.After}
 	if !f.IncludeArchived {
@@ -615,6 +634,10 @@ func (d *DB) ListTasks(f TaskFilter) (TaskPage, error) {
 	if f.Assignee != nil {
 		query += ` AND assignee = ?`
 		args = append(args, f.Assignee.column())
+	}
+	if f.Epic != "" {
+		query += ` AND epic = ?`
+		args = append(args, f.Epic)
 	}
 	query += ` ORDER BY id LIMIT ?`
 	args = append(args, limit+1)
@@ -636,7 +659,7 @@ func (d *DB) ListTasks(f TaskFilter) (TaskPage, error) {
 		if err := json.Unmarshal([]byte(body), &t); err != nil {
 			return out, err
 		}
-		out.Tasks = append(out.Tasks, TaskSummary{ID: t.ID, Title: t.Title, State: t.State, Assignee: t.Assignee,
+		out.Tasks = append(out.Tasks, TaskSummary{ID: t.ID, Title: t.Title, State: t.State, Assignee: t.Assignee, Epic: t.Epic,
 			Archived: t.Archived, Revision: t.Revision, UpdatedAt: t.UpdatedAt})
 	}
 	return out, rows.Err()

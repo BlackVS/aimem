@@ -42,6 +42,7 @@ var taskToolDefs = []map[string]any{
 			"project":          prop("string", "project id (defaults to the current project)"),
 			"state":            propEnum("only this state", "BACKLOG", "READY", "IN_PROGRESS", "REVIEW", "BLOCKED", "DONE", "CANCELLED"),
 			"assignee":         assigneeProp("only this assignee"),
+			"epic":             prop("string", "only tasks under this epic id"),
 			"include_archived": prop("boolean", "include archived tasks"),
 			"after":            prop("string", "next_cursor from the previous page"),
 			"limit":            prop("integer", "page size (default 20, max 100)"),
@@ -98,6 +99,49 @@ var taskToolDefs = []map[string]any{
 		}, "task_id", "comment_id"),
 	},
 	{
+		"name":        "list_epics",
+		"description": "Epics of a project: the grouping above tasks that a release or milestone maps to. OPEN ones unless include_retired.",
+		"inputSchema": objSchema(map[string]any{
+			"project":         prop("string", "project id (defaults to the current project)"),
+			"include_retired": prop("boolean", "include RETIRED epics"),
+		}),
+	},
+	{
+		"name":        "get_epic",
+		"description": "Read one epic of a project by id.",
+		"inputSchema": objSchema(map[string]any{
+			"project": prop("string", "project id (defaults to the current project)"),
+			"id":      prop("string", "epic id"),
+		}, "id"),
+	},
+	{
+		"name": "create_epic",
+		"description": "Create an epic in a project. Requires an idempotency_key you choose; " +
+			"retrying with the same key and content returns the epic created the first time.",
+		"inputSchema": objSchema(map[string]any{
+			"project":         prop("string", "project id (defaults to the current project)"),
+			"title":           prop("string", "short title (at most 256 bytes)"),
+			"objective":       prop("string", "what the epic delivers"),
+			"target":          prop("string", "the release or milestone it maps to"),
+			"idempotency_key": prop("string", "your unique key for this create (retry-safe)"),
+		}, "title", "idempotency_key"),
+	},
+	{
+		"name": "update_epic",
+		"description": "Replace an epic's fields under the expected_revision you read; state RETIRED retires it " +
+			"(existing task assignments survive; new ones are refused). A stale revision returns the current epic.",
+		"inputSchema": objSchema(map[string]any{
+			"project":           prop("string", "project id (defaults to the current project)"),
+			"id":                prop("string", "epic id"),
+			"title":             prop("string", "short title (at most 256 bytes)"),
+			"objective":         prop("string", "what the epic delivers"),
+			"state":             propEnum("OPEN or RETIRED", "OPEN", "RETIRED"),
+			"target":            prop("string", "the release or milestone it maps to"),
+			"expected_revision": prop("integer", "the revision you read"),
+			"idempotency_key":   prop("string", "your unique key for this update (retry-safe)"),
+		}, "id", "title", "expected_revision", "idempotency_key"),
+	},
+	{
 		"name": "add_task_comment",
 		"description": "Append a Markdown comment to a task (never edits the task). Requires an idempotency_key; " +
 			"the author and time are recorded by the service.",
@@ -129,6 +173,7 @@ func taskContentProps(extra map[string]any) map[string]any {
 		"evidence_refs":       map[string]any{"type": "array", "items": prop("string", "reference"), "description": "evidence references"},
 		"next_action":         prop("string", "the next concrete step"),
 		"archived":            prop("boolean", "archive (DONE/CANCELLED only)"),
+		"epic":                prop("string", "optional epic id: an OPEN epic of the same project (an assignment a task already has survives the epic's retirement)"),
 	}
 	for k, v := range extra {
 		props[k] = v
@@ -160,6 +205,8 @@ type taskArgs struct {
 	IdempotencyKey   string          `json:"idempotency_key"`
 	ExpectedRevision int64           `json:"expected_revision"`
 	IncludeArchived  bool            `json:"include_archived"`
+	IncludeRetired   bool            `json:"include_retired"`
+	Target           string          `json:"target"`
 	After            json.RawMessage `json:"after"` // list: task id; history/comments: integer
 	Limit            int             `json:"limit"`
 	Body             string          `json:"body"`
@@ -317,6 +364,9 @@ func (s *srv) taskTool(ctx context.Context, name string, raw json.RawMessage) (s
 		if a.IncludeArchived {
 			q.Set("include_archived", "true")
 		}
+		if a.Epic != "" {
+			q.Set("epic", a.Epic)
+		}
 		after, err := a.afterString()
 		if err != nil {
 			return "", err
@@ -338,6 +388,53 @@ func (s *srv) taskTool(ctx context.Context, name string, raw json.RawMessage) (s
 			return "", err
 		}
 		return call("GET", "/v1/tasks/"+id, nil, "")
+	case "list_epics":
+		p, err := project()
+		if err != nil {
+			return "", err
+		}
+		path := "/v1/projects/" + p + "/epics"
+		if a.IncludeRetired {
+			path += "?include_retired=true"
+		}
+		return call("GET", path, nil, "")
+	case "get_epic":
+		p, err := project()
+		if err != nil {
+			return "", err
+		}
+		id, err := taskID(a.ID)
+		if err != nil {
+			return "", err
+		}
+		return call("GET", "/v1/projects/"+p+"/epics/"+id, nil, "")
+	case "create_epic":
+		p, err := project()
+		if err != nil {
+			return "", err
+		}
+		k, err := key()
+		if err != nil {
+			return "", err
+		}
+		return call("POST", "/v1/projects/"+p+"/epics", map[string]any{"title": a.Title, "objective": a.Objective, "state": a.State, "target": a.Target}, k)
+	case "update_epic":
+		p, err := project()
+		if err != nil {
+			return "", err
+		}
+		id, err := taskID(a.ID)
+		if err != nil {
+			return "", err
+		}
+		k, err := key()
+		if err != nil {
+			return "", err
+		}
+		if a.ExpectedRevision < 1 {
+			return "", errors.New("expected_revision is required")
+		}
+		return call("PUT", "/v1/projects/"+p+"/epics/"+id, map[string]any{"title": a.Title, "objective": a.Objective, "state": a.State, "target": a.Target, "expected_revision": a.ExpectedRevision}, k)
 	case "create_task":
 		p, err := project()
 		if err != nil {

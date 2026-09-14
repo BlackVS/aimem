@@ -465,7 +465,7 @@ func (r *Registry) Close() {
 	r.dbs = map[string]*DB{}
 }
 
-const currentSchema = 11
+const currentSchema = 12
 
 // SetMeta / GetMeta store small key-value project metadata (e.g. the
 // project's declared knowledge groups, stamped from event pushes so the
@@ -871,6 +871,27 @@ CREATE TABLE task_requests(
   result TEXT NOT NULL,
   PRIMARY KEY(actor, operation, scope, key));
 UPDATE meta SET value='11' WHERE key='schema_version';`); err != nil {
+			return err
+		}
+	}
+	if v < 12 {
+		// Epics (epics.go): a task-shaped grouping table with its own
+		// history, and the task's optional epic column, indexed for the
+		// filter. Additive; one transaction with the version bump.
+		if err := d.step(`
+CREATE TABLE epics(
+  id TEXT PRIMARY KEY,
+  state TEXT NOT NULL,
+  body TEXT NOT NULL);
+CREATE INDEX idx_epics_state ON epics(state, id);
+CREATE TABLE epic_history(
+  epic_id TEXT NOT NULL REFERENCES epics(id),
+  revision INTEGER NOT NULL,
+  body TEXT NOT NULL,
+  PRIMARY KEY(epic_id, revision));
+ALTER TABLE tasks ADD COLUMN epic TEXT NOT NULL DEFAULT '';
+CREATE INDEX idx_tasks_epic ON tasks(epic, id);
+UPDATE meta SET value='12' WHERE key='schema_version';`); err != nil {
 			return err
 		}
 	}

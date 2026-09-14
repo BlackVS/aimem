@@ -115,6 +115,55 @@
         }
       }
     },
+    "/v1/projects/{p}/epics": {
+      "get": {
+        "summary": "List a project's epics (OPEN unless include_retired=true)",
+        "description": "Ordinary user tokens may call this route. An epic is the grouping above tasks that a release or milestone maps to.",
+        "x-role": "writer",
+        "parameters": [
+          {"name": "p", "in": "path", "required": true, "schema": {"type": "string"}},
+          {"name": "include_retired", "in": "query", "required": false, "schema": {"type": "string"}}
+        ],
+        "responses": {"200": {"description": "epic list"}}
+      },
+      "post": {
+        "summary": "Create an epic",
+        "description": "Body: title (required), objective, target, state (OPEN by default). Authorized like a task write in this project (ordinary token issued for the project with a current grant, or admin; tasks must be enabled). Retry keys travel in the Idempotency-Key header.",
+        "x-role": "writer",
+        "parameters": [{"name": "p", "in": "path", "required": true, "schema": {"type": "string"}}],
+        "responses": {"201": {"description": "the epic"}, "400": {"description": "invalid content"}, "403": {"description": "not authorized or tasks not enabled"}}
+      }
+    },
+    "/v1/projects/{p}/epics/{e}": {
+      "get": {
+        "summary": "Read one epic",
+        "description": "Ordinary user tokens may call this route.",
+        "x-role": "writer",
+        "parameters": [
+          {"name": "p", "in": "path", "required": true, "schema": {"type": "string"}},
+          {"name": "e", "in": "path", "required": true, "schema": {"type": "string"}}
+        ],
+        "responses": {"200": {"description": "the epic"}, "404": {"description": "no such epic"}}
+      },
+      "put": {
+        "summary": "Replace an epic's fields under expected_revision; state RETIRED retires it",
+        "description": "Authorized like a task write. A stale expected_revision returns 409 with the current epic. Retirement keeps existing task assignments and refuses new ones; ids are never reused.",
+        "x-role": "writer",
+        "parameters": [
+          {"name": "p", "in": "path", "required": true, "schema": {"type": "string"}},
+          {"name": "e", "in": "path", "required": true, "schema": {"type": "string"}}
+        ],
+        "responses": {"200": {"description": "the epic"}, "409": {"description": "revision conflict, current epic in the body"}}
+      }
+    },
+    "/v1/access/directory": {
+      "get": {
+        "summary": "The identity directory: id, kind, name and enabled of every user and group",
+        "description": "Ordinary user tokens may call this route: it is what the task page labels assignees and comment authors with. Nothing else about an identity is returned (no tokens, grants or project lists); effective permissions stay in the access store.",
+        "x-role": "writer",
+        "responses": {"200": {"description": "identities"}}
+      }
+    },
     "/v1/projects/{p}/process": {
       "get": {
         "summary": "The project's selected process reference (repository, ref, commit, manifest)",
@@ -198,6 +247,14 @@
           },
           {
             "name": "assignee",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "epic",
             "in": "query",
             "required": false,
             "schema": {

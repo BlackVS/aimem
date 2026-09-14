@@ -437,6 +437,7 @@ func TestMigrationV9ToV10(t *testing.T) {
 	// Roll back to a genuine v9 file: no v10 index and no v11 task tables.
 	for _, stmt := range []string{
 		`DROP INDEX idx_memory_audit_memory`,
+		`DROP TABLE epic_history`, `DROP TABLE epics`,
 		`DROP TABLE task_requests`, `DROP TABLE task_comments`, `DROP TABLE task_history`, `DROP TABLE tasks`,
 		`UPDATE meta SET value='9' WHERE key='schema_version'`,
 	} {
@@ -459,7 +460,7 @@ func TestMigrationV9ToV10(t *testing.T) {
 		db2.sql.QueryRow(`SELECT value FROM meta WHERE key='schema_version'`).Scan(&v)
 		db2.sql.QueryRow(`SELECT name FROM sqlite_master WHERE type='index' AND name='idx_memory_audit_memory'`).Scan(&idx)
 		db2.sql.QueryRow(`SELECT name FROM sqlite_master WHERE type='table' AND name='tasks'`).Scan(&tasks)
-		if v != "11" || idx == "" || tasks == "" {
+		if v != fmt.Sprint(currentSchema) || idx == "" || tasks == "" {
 			t.Fatalf("pass %d: schema_version=%q index=%q tasks=%q — v10/v11 not applied", pass, v, idx, tasks)
 		}
 		if evs, _ := db2.RecentEvents(10); len(evs) != 1 {
