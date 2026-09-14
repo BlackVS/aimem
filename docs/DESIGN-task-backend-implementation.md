@@ -1,9 +1,11 @@
 # Task Backend Implementation Plan
 
 Status: stages 1, 2 and 3 merged (PR #38, PR #39, PR #40 task page, PR #41
-board), 2026-09-14. Stage 4 (the access section in the console) is planned
-below and not started; the user's order is agent enablement first (the
-tools agents use, on the primary hub), the console section after.
+board) and released as v0.4.0 on 2026-09-14; agent enablement done the
+same day (PR #43, #44, #45; the primary hub and one workstation upgraded;
+the backlog runs as tasks there). Next: the four increments of [the
+documents an AI-driven Kanban needs](DESIGN-kanban-docs.md), then stage 4
+(the access section in the console), then the remaining follow-ups.
 Original baseline: `4e7021533a1aefb2635e28a071953f2061f1df5b` on `master`.
 Read this alongside [the Kanban proposal](AIMEM-KANBAN-PROPOSAL.md) and
 [access control](DESIGN-access-control.md). Those documents contain the approved
@@ -169,7 +171,15 @@ staying on the current stable release while other projects depend on them;
 (c) one user and ordinary token per agent machine, stored with `aimem hub
 task-token`, and this project's backlog entered as tasks there. Each code
 item is its own serial PR; the release and the install are separate acts
-the user authorizes explicitly.
+the user authorizes explicitly. Done 2026-09-14: (a) PR #43, #44, #45;
+(b) v0.4.0 on the primary hub and this workstation, the peer hub kept on
+its stable release; (c) one agent user and token per machine, the backlog
+entered as tasks. Work runs through the board from here.
+
+**Then the Kanban-documents increments** (accepted 2026-09-14, see
+[DESIGN-kanban-docs.md](DESIGN-kanban-docs.md)), serial, in this order:
+enablement and tool listing; reference selection and the hook bootstrap;
+epics; typed references. Stage 4 follows them.
 
 The user has authorized implementation, not release, deployment, automatic merge,
 or an unlimited redesign. v0.4.0 remains a proposed milestone. Follow the current
@@ -682,9 +692,9 @@ open for the transport that surfaces warnings:
 7. Add meaningful migration, transaction-failure, concurrency and lifecycle tests
    before considering any draft code an implementation milestone.
 
-Stages 1, 2 and 3 are merged (see Resume State). Do not change the public
-version as part of this work. Next: agent enablement (see "Scope And
-Delivery Boundaries"), then stage 4 (the access section in the console,
-which absorbs stage-3 follow-up (c)), then the remaining stage-2 and stage-3
-follow-ups recorded above, in the order the board's use surfaces them.
-Preserve the approved simple scope.
+Stages 1, 2 and 3 are merged and released; agent enablement is done (see
+Resume State and "Scope And Delivery Boundaries"). Next: the four
+Kanban-documents increments in their agreed order, then stage 4 (the
+access section in the console, which absorbs stage-3 follow-up (c)), then
+the remaining stage-2 and stage-3 follow-ups recorded above, in the order
+the board's use surfaces them. Preserve the approved simple scope.

@@ -1,11 +1,18 @@
 # Aimem Kanban Proposal
 
 Status: **task storage (stage 1), HTTP/MCP task service (stage 2), the task
-page and the Kanban board on it (stage 3) merged**; an access-management
-section in the console is planned as stage 4 of the
+page and the Kanban board on it (stage 3) merged and released (v0.4.0)**;
+an access-management section in the console is planned as stage 4 of the
 [implementation plan](DESIGN-task-backend-implementation.md), revised
 2026-09-14; product contract revised 2026-09-13 against
-`dcc466f305c6a2d9ce5927a3e0c7770e1c3893fe`. The access foundation is merged in
+`dcc466f305c6a2d9ce5927a3e0c7770e1c3893fe`. **Amended 2026-09-14 by [the
+documents an AI-driven Kanban needs](DESIGN-kanban-docs.md)** in two
+places: tasks are enabled per project by an admin on the owning hub (a
+disabled project refuses task, comment and epic mutations and keeps
+reads), and the ordinary-token surface gains scoped process-reference,
+directory and epic routes. That document also adds epics, typed
+references (replacing the free-string evidence fields in a pre-1.0
+break) and the process-document model; the rest of this contract stands. The access foundation is merged in
 [PR #35](https://github.com/BlackVS/aimem/pull/35); task comments are part of the
 initial task delivery below.
 
