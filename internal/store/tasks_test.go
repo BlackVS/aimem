@@ -72,7 +72,10 @@ func TestMigrationV10ToV11(t *testing.T) {
 	if _, err := db.PutRecord("api", "a/b", []byte(`{}`), "t", 0, false); err != nil {
 		t.Fatal(err)
 	}
+	// Rewind through both task-era steps: 12 (epics, the epic column) and
+	// 11 (the task tables); the migration must replay both, twice.
 	for _, stmt := range []string{
+		`DROP TABLE epic_history`, `DROP TABLE epics`,
 		`DROP TABLE task_requests`, `DROP TABLE task_comments`, `DROP TABLE task_history`, `DROP TABLE tasks`,
 		`UPDATE meta SET value='10' WHERE key='schema_version'`,
 	} {
@@ -92,10 +95,10 @@ func TestMigrationV10ToV11(t *testing.T) {
 		}
 		var v string
 		db2.sql.QueryRow(`SELECT value FROM meta WHERE key='schema_version'`).Scan(&v)
-		if v != "11" {
+		if v != "12" {
 			t.Fatalf("pass %d: schema_version=%q", pass, v)
 		}
-		for _, tbl := range []string{"tasks", "task_history", "task_comments", "task_requests"} {
+		for _, tbl := range []string{"tasks", "task_history", "task_comments", "task_requests", "epics", "epic_history"} {
 			var name string
 			if db2.sql.QueryRow(`SELECT name FROM sqlite_master WHERE type='table' AND name=?`, tbl).Scan(&name); name == "" {
 				t.Fatalf("pass %d: table %s missing", pass, tbl)
@@ -111,7 +114,7 @@ func TestMigrationV10ToV11(t *testing.T) {
 			t.Fatalf("pass %d: collections lost", pass)
 		}
 		if pass == 2 {
-			db2.sql.Exec(`UPDATE meta SET value='12' WHERE key='schema_version'`)
+			db2.sql.Exec(fmt.Sprintf(`UPDATE meta SET value='%d' WHERE key='schema_version'`, currentSchema+1))
 		}
 		r2.Close()
 	}
@@ -1328,5 +1331,141 @@ func TestTaskBackupRestore(t *testing.T) {
 	}
 	if again, err := db2.CreateTask(content("backed up"), aliceActor, "k-bak"); err != nil || again.ID != task.ID {
 		t.Fatalf("restored receipt: %+v %v", again, err)
+	}
+}
+
+// Epics: receipt-backed create, revision-checked update and retirement;
+// a task's epic must exist here and, for a new assignment, be OPEN; an
+// assignment the task already has survives retirement; the indexed epic
+// column and the snapshot agree, and the list filter uses the column.
+func TestEpicsLifecycleAndTaskAssignment(t *testing.T) {
+	r := newTestRegistry(t)
+	db, _ := r.Open("proj-a")
+	e, err := db.CreateEpic(EpicContent{Title: "v0.5", Objective: "typed refs", Target: "v0.5.0"}, aliceActor, "e-1")
+	if err != nil || e.Revision != 1 || e.State != "OPEN" {
+		t.Fatalf("create: %+v %v", e, err)
+	}
+	if again, err := db.CreateEpic(EpicContent{Title: "v0.5", Objective: "typed refs", Target: "v0.5.0"}, aliceActor, "e-1"); err != nil || again.ID != e.ID {
+		t.Fatalf("replay must return the original: %+v %v", again, err)
+	}
+	if _, err := db.CreateEpic(EpicContent{Title: ""}, aliceActor, "e-bad"); !errors.Is(err, ErrTaskInvalid) {
+		t.Fatalf("empty title: %v", err)
+	}
+	if _, err := db.CreateEpic(EpicContent{Title: "x", State: "CLOSED"}, aliceActor, "e-bad2"); !errors.Is(err, ErrTaskInvalid) {
+		t.Fatalf("bad state: %v", err)
+	}
+	// A task under the epic; a task under a missing epic is refused.
+	c := content("under")
+	c.Epic = e.ID
+	tk, err := db.CreateTask(c, aliceActor, "t-1")
+	if err != nil || tk.Epic != e.ID {
+		t.Fatalf("task under epic: %+v %v", tk, err)
+	}
+	c2 := content("orphan")
+	c2.Epic = uuidv7.New()
+	if _, err := db.CreateTask(c2, aliceActor, "t-2"); !errors.Is(err, ErrTaskInvalid) {
+		t.Fatalf("missing epic: %v", err)
+	}
+	c3 := content("shape")
+	c3.Epic = "not-an-id"
+	if _, err := db.CreateTask(c3, aliceActor, "t-3"); !errors.Is(err, ErrTaskInvalid) {
+		t.Fatalf("bad epic id: %v", err)
+	}
+	// The column agrees with the snapshot and drives the filter.
+	var col string
+	if err := db.sql.QueryRow(`SELECT epic FROM tasks WHERE id=?`, tk.ID).Scan(&col); err != nil || col != e.ID {
+		t.Fatalf("epic column: %q %v", col, err)
+	}
+	mustCreate(t, db, "elsewhere", "t-4")
+	page, err := db.ListTasks(TaskFilter{Epic: e.ID})
+	if err != nil || len(page.Tasks) != 1 || page.Tasks[0].ID != tk.ID || page.Tasks[0].Epic != e.ID {
+		t.Fatalf("filter by epic: %+v %v", page, err)
+	}
+	if _, err := db.ListTasks(TaskFilter{Epic: "nope"}); !errors.Is(err, ErrTaskInvalid) {
+		t.Fatalf("bad epic filter: %v", err)
+	}
+	// Update with a stale revision conflicts and carries the current epic.
+	_, err = db.UpdateEpic(e.ID, EpicContent{Title: "v0.5 renamed"}, 5, aliceActor, "e-2")
+	var conflict *EpicConflict
+	if !errors.As(err, &conflict) || conflict.Current.Revision != 1 {
+		t.Fatalf("stale update: %v", err)
+	}
+	// Retire: the existing assignment survives; a new one is refused.
+	retired, err := db.UpdateEpic(e.ID, EpicContent{Title: "v0.5", State: "RETIRED"}, 1, aliceActor, "e-3")
+	if err != nil || retired.Revision != 2 || retired.State != "RETIRED" {
+		t.Fatalf("retire: %+v %v", retired, err)
+	}
+	keep := tk.TaskContent
+	keep.Title = "under (edited)"
+	if _, err := db.UpdateTask(tk.ID, keep, tk.Revision, aliceActor, "t-1b"); err != nil {
+		t.Fatalf("existing assignment must survive retirement: %v", err)
+	}
+	c5 := content("late")
+	c5.Epic = e.ID
+	if _, err := db.CreateTask(c5, aliceActor, "t-5"); !errors.Is(err, ErrTaskInvalid) {
+		t.Fatalf("new assignment to a retired epic: %v", err)
+	}
+	// Listing: OPEN only by default, RETIRED on request; history retained.
+	open, _ := db.ListEpics(false)
+	all, _ := db.ListEpics(true)
+	if len(open) != 0 || len(all) != 1 || all[0].Revision != 2 {
+		t.Fatalf("list: open=%d all=%d", len(open), len(all))
+	}
+	var n int
+	if err := db.sql.QueryRow(`SELECT COUNT(*) FROM epic_history WHERE epic_id=?`, e.ID).Scan(&n); err != nil || n != 2 {
+		t.Fatalf("epic history rows: %d %v", n, err)
+	}
+	if _, err := db.GetEpic(uuidv7.New()); !errors.Is(err, ErrEpicNotFound) {
+		t.Fatalf("missing epic read: %v", err)
+	}
+	// Reserved stores refuse epics like tasks.
+	u, _ := r.Open(UserScopeProject)
+	if _, err := u.CreateEpic(EpicContent{Title: "x"}, aliceActor, "e-u"); !errors.Is(err, ErrTaskReservedScope) {
+		t.Fatalf("reserved scope: %v", err)
+	}
+}
+
+// A schema-11 database (tasks without the epic column, no epics tables)
+// migrates to 12 on open: tables and column present, version bumped, and
+// the tasks it held list with an empty epic.
+func TestMigrateToSchema12(t *testing.T) {
+	root := t.TempDir()
+	r, err := NewRegistry(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	db, _ := r.Open("proj-a")
+	tk := mustCreate(t, db, "old", "k-old")
+	// Rewind to schema 11 by removing what 12 added.
+	for _, q := range []string{
+		`DROP INDEX idx_tasks_epic`, `ALTER TABLE tasks DROP COLUMN epic`,
+		`DROP TABLE epic_history`, `DROP INDEX idx_epics_state`, `DROP TABLE epics`,
+		`UPDATE meta SET value='11' WHERE key='schema_version'`,
+	} {
+		if _, err := db.sql.Exec(q); err != nil {
+			t.Fatalf("%s: %v", q, err)
+		}
+	}
+	r.Close()
+	r2, err := NewRegistry(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(r2.Close)
+	db2, err := r2.Open("proj-a")
+	if err != nil {
+		t.Fatalf("reopen migrates: %v", err)
+	}
+	var v string
+	db2.sql.QueryRow(`SELECT value FROM meta WHERE key='schema_version'`).Scan(&v)
+	if v != "12" {
+		t.Fatalf("schema version after migration: %s", v)
+	}
+	page, err := db2.ListTasks(TaskFilter{})
+	if err != nil || len(page.Tasks) != 1 || page.Tasks[0].ID != tk.ID || page.Tasks[0].Epic != "" {
+		t.Fatalf("old task after migration: %+v %v", page, err)
+	}
+	if _, err := db2.CreateEpic(EpicContent{Title: "after"}, aliceActor, "e-after"); err != nil {
+		t.Fatalf("epics usable after migration: %v", err)
 	}
 }

@@ -1,8 +1,9 @@
 # The documents an AI-driven Kanban needs
 
 Status: **accepted 2026-09-14; increments 1 (per-project enablement and
-tool listing) and 2 (process reference selection and the hook bootstrap)
-implemented** — epics and typed references are not. Written after the task backend (storage, service, page and
+tool listing), 2 (process reference selection and the hook bootstrap) and
+3 (epics as a table in the task schema, with the identity directory)
+implemented** — typed references are not. Written after the task backend (storage, service, page and
 board; v0.4.0) shipped and the first agent-side fixes landed, when it
 became clear that the shared-documents feature predates the Kanban idea
 and was never asked what a process run by agents needs from it.

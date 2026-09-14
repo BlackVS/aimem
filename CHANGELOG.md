@@ -9,12 +9,28 @@ upgrading a fleet.
 The format follows [Keep a Changelog](https://keepachangelog.com/1.1.0/);
 this project does not yet promise semantic versioning. The on-disk schema
 version is tracked separately (`currentSchema` in `internal/store/store.go`,
-currently 11); a binary refuses a database newer than it understands.
+currently 12); a binary refuses a database newer than it understands.
 
 ## [Unreleased]
 
 ### Added
 
+- **Epics (schema v12): the grouping above tasks.** An `epics` table beside
+  `tasks` with its own history — id, title, objective, state OPEN or
+  RETIRED, the release or milestone it targets, revision — written through
+  the same receipt-backed, revision-checked mutation as tasks. A task
+  carries an optional `epic`, checked inside its own write transaction to
+  be an OPEN epic of the same project; an assignment a task already has
+  survives the epic's retirement, so links and history keep resolving, and
+  ids are never reused. Routes `GET/POST /v1/projects/{p}/epics` and
+  `GET/PUT /v1/projects/{p}/epics/{e}` on the ordinary surface (writes
+  authorized like task writes), the `epic` filter on the task list, MCP
+  tools `list_epics`, `get_epic`, `create_epic`, `update_epic` and the
+  `epic` argument of `list_tasks`, an epic filter and labels on the task
+  page's list and board and an epic field on the task form. Also the
+  identity directory, `GET /v1/access/directory`: id, kind, name and
+  enabled of every user and group, what the page labels assignees with.
+  Schema bump: a database opened by this build is refused by older builds.
 - **A project's process documents come from Git at a pinned commit; the
   session start injects them.** An admin selects, per project, the
   repository, commit and manifest that hold the handbook, the checklists

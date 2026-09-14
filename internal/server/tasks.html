@@ -160,6 +160,7 @@
     <div class="row" id="filters" hidden>
       <span class="viewsw"><button type="button" class="act" id="vwList" onclick="setView('list')">list</button><button type="button" class="act" id="vwBoard" onclick="setView('board')">board</button></span>
       <span id="listOnly"><span class="dim" style="margin-left:8px">state</span><span id="stateChips"></span></span>
+      <select id="epicSel" class="inline" aria-label="epic" onchange="FILTER.epic=this.value;refreshView()"><option value="">all epics</option></select>
       <label class="dim" style="margin-left:auto" id="archLbl"><input type="checkbox" id="archChk" style="width:auto" onchange="listTasks(true)"> archived</label>
     </div>
     <div id="newForm" class="card" hidden></div>
@@ -206,7 +207,10 @@ let TOK_REMEMBERED = !!TOK;
 let ME = null;                      // identity: {name, role, ...}
 let PROJ = localStorage.getItem("aimem_task_project") || "";
 let PROJECTS = null;                // dropdown source when the credential may list projects
-let FILTER = {state:"", archived:false};
+let FILTER = {state:"", archived:false, epic:""};
+let EPICS = {};           // id -> epic, for this project (labels and the filter)
+let EPICS_PROJ = "";      // the project EPICS was loaded for
+let EPICS_GEN = 0;        // one per load: a response from a superseded load touches nothing shared
 let CURSOR = "";                    // list paging
 let CUR = null;                     // open task (served view)
 let CAN_WRITE = false;              // for CUR's project, this credential, this attempt
@@ -328,6 +332,30 @@ async function canWrite(project){
     if(r.tasks_enabled===false) return false;
     return ME.role==="admin" || !!r.task_write; }catch(_){ return false; }
 }
+// Epics of the current project: loaded once per project (RETIRED included,
+// so a task under a retired epic still shows its name), never trusted
+// over the hub — the filter and the labels are conveniences.
+// The epic filter belongs to the project the epics were loaded for, and
+// this loader is the one place a project change happens — from the list,
+// the board or a task opened directly — so it clears the filter
+// synchronously, before any query that follows can be built.
+async function loadEpics(project){
+  if(EPICS_PROJ===project) return;
+  const gen = ++EPICS_GEN;
+  EPICS = {}; EPICS_PROJ = project; FILTER.epic = "";
+  $("epicSel").innerHTML = '<option value="">all epics</option>';
+  // The response is collected locally; only the load that is still the
+  // current one may publish it, so a late answer from a previous project
+  // (or a load this one superseded) never lands in the shared cache.
+  const got = {};
+  try{ const r = await api("/v1/projects/"+encodeURIComponent(project)+"/epics?include_retired=true"); for(const e of (r.epics||[])) got[e.id] = e; }
+  catch(_){ if(gen===EPICS_GEN) EPICS_PROJ = ""; return; }
+  if(gen!==EPICS_GEN) return;
+  EPICS = got;
+  $("epicSel").innerHTML = '<option value="">all epics</option>' + Object.values(EPICS).map(e => `<option value="${esc(e.id)}"${e.id===FILTER.epic?' selected':''}>${esc(e.title)}${e.state==="RETIRED"?" (retired)":""}</option>`).join("");
+}
+function epicLabel(id){ const e = EPICS[id]; return e ? e.title : short(id); }
+function refreshView(){ if(VIEW==="board") loadBoard(); else listTasks(true); }
 function stateChipsHTML(){
   return ['',...STATES].map(s=>`<button type="button" class="chip click${FILTER.state===s?' on':''}" onclick="FILTER.state='${s}';listTasks(true)">${s||'all'}</button>`).join("");
 }
@@ -373,6 +401,7 @@ function showList(){
   if(PROJ){ const asked = PROJ; canWrite(asked).then(ok => { if(PROJ===asked && CUR===null){ $("newBtn").hidden = !ok; $("tasksOff").textContent = TASKS_OFF_NOTE; $("tasksOff").hidden = !TASKS_OFF[asked]; } }); }
   $("stateChips").innerHTML = stateChipsHTML();
   $("archChk").checked = FILTER.archived;
+  if(PROJ) loadEpics(PROJ); // clears the epic filter synchronously on a project change
   const board = VIEW==="board";
   $("vwList").classList.toggle("on", !board); $("vwBoard").classList.toggle("on", board);
   $("listOnly").hidden = board; $("archLbl").hidden = board;
@@ -390,6 +419,7 @@ async function listTasks(reset){
   const q = new URLSearchParams();
   if(FILTER.state) q.set("state", FILTER.state);
   if(FILTER.archived) q.set("include_archived","true");
+  if(FILTER.epic) q.set("epic", FILTER.epic);
   if(CURSOR) q.set("after", CURSOR);
   q.set("limit","50");
   try{
@@ -398,7 +428,7 @@ async function listTasks(reset){
     for(const t of page.tasks){
       $("list").insertAdjacentHTML("beforeend", `<a class="trow${t.archived?' archived':''}" href="${taskURL(t.id)}" onclick="return go('${taskURL(t.id)}')">
         <span class="title">${esc(t.title)}</span>${stChip(t.state)}
-        <span class="meta">r${t.revision} · ${ago(t.updated_at)}${t.assignee?' · '+esc(t.assignee.kind)+'/'+esc(short(t.assignee.id)):''}</span></a>`);
+        <span class="meta">r${t.revision} · ${ago(t.updated_at)}${t.assignee?' · '+esc(t.assignee.kind)+'/'+esc(short(t.assignee.id)):''}${t.epic?' · '+esc(epicLabel(t.epic)):''}</span></a>`);
     }
     CURSOR = page.next_cursor||"";
     $("moreBtn").hidden = !CURSOR;
@@ -427,7 +457,7 @@ async function loadBoard(){
   let after = "", n = 0;
   try{
     do{
-      const q = new URLSearchParams({limit:"100"}); if(after) q.set("after", after);
+      const q = new URLSearchParams({limit:"100"}); if(after) q.set("after", after); if(FILTER.epic) q.set("epic", FILTER.epic);
       const page = await api("/v1/projects/"+encodeURIComponent(PROJ)+"/tasks?"+q);
       if(my!==NAV || seq!==SEQ.board) return;
       for(const t of page.tasks){ placeCard(t); n++; }
@@ -449,7 +479,7 @@ function placeCard(t){
   if(t.archived){ if(from) countCol(from); return; }
   const html = `<div class="tcard" id="card-${esc(t.id)}" draggable="${BOARD_CAN}" ondragstart="dragStart(event,'${esc(t.id)}')" ondragend="this.classList.remove('moving')">
     <a href="${taskURL(t.id)}" onclick="return go('${taskURL(t.id)}')">${esc(t.title)}</a>
-    <div class="meta"><span>r${t.revision}</span><span>${ago(t.updated_at)}</span>${t.assignee?`<span>${esc(t.assignee.kind)}/${esc(short(t.assignee.id))}</span>`:''}
+    <div class="meta"><span>r${t.revision}</span><span>${ago(t.updated_at)}</span>${t.assignee?`<span>${esc(t.assignee.kind)}/${esc(short(t.assignee.id))}</span>`:''}${t.epic?`<span>${esc(epicLabel(t.epic))}</span>`:''}
       ${BOARD_CAN?`<select aria-label="move to" onchange="moveTask('${esc(t.id)}', this.value)"><option value="">move to…</option>${STATES.filter(s=>s!==t.state).map(s=>`<option>${s}</option>`).join("")}</select>`:''}</div></div>`;
   $("col-"+t.state).insertAdjacentHTML("beforeend", html);
   countCol(t.state); if(from && from!==t.state) countCol(from);
@@ -505,6 +535,7 @@ function contentForm(t, prefix){
       <div class="row" style="margin:0"><select id="${prefix}-akind" class="inline"><option value="">none</option><option${a&&a.kind==='user'?' selected':''}>user</option><option${a&&a.kind==='group'?' selected':''}>group</option></select>
       <input id="${prefix}-aid" class="grow" placeholder="identity uuid" value="${a?esc(a.id):''}"></div></div>
       <div><label class="f">archived</label><input type="checkbox" id="${prefix}-arch" style="width:auto"${t&&t.archived?' checked':''}> <span class="dim">DONE/CANCELLED only</span></div></div>
+    <label class="f">epic</label><select id="${prefix}-epic"><option value="">none</option>${Object.values(EPICS).filter(e=>e.state==="OPEN"||(t&&t.epic===e.id)).map(e=>`<option value="${esc(e.id)}"${t&&t.epic===e.id?' selected':''}>${esc(e.title)}${e.state==="RETIRED"?" (retired)":""}</option>`).join("")}${t&&t.epic&&!EPICS[t.epic]?`<option value="${esc(t.epic)}" selected>${esc(short(t.epic))} (epic kept)</option>`:''}</select>
     <label class="f">objective</label><textarea id="${prefix}-objective" rows="3">${v('objective')}</textarea>
     <label class="f">acceptance criteria</label><textarea id="${prefix}-acceptance_criteria" rows="3">${v('acceptance_criteria')}</textarea>
     <label class="f">non-goals</label><textarea id="${prefix}-non_goals" rows="2">${v('non_goals')}</textarea>
@@ -523,6 +554,7 @@ function readForm(prefix){
     archived:$(prefix+"-arch").checked};
   const kind = $(prefix+"-akind").value, id = $(prefix+"-aid").value.trim();
   if(kind && id) c.assignee = {kind, id};
+  const epic = $(prefix+"-epic").value; if(epic) c.epic = epic;
   return c;
 }
 function toggleNew(){
@@ -562,6 +594,7 @@ async function showTask(id, commentID){
   if(my!==NAV) return;
   CUR = task;
   PROJ = CUR.project; localStorage.setItem("aimem_task_project", PROJ);
+  loadEpics(CUR.project); // labels and the edit form's options; the form keeps the current epic regardless
   document.title = CUR.title+" · aimem tasks";
   $("taskCrumb").textContent = " · "+CUR.project+" · "+short(CUR.id);
   const ok = await canWrite(CUR.project);
@@ -629,6 +662,7 @@ function contentOf(t){
     next_action:t.next_action||"", blocker:t.blocker||"", dependencies:t.dependencies||[], candidate_refs:t.candidate_refs||[],
     evidence_refs:t.evidence_refs||[], archived:!!t.archived};
   if(t.assignee) c.assignee = t.assignee;
+  if(t.epic) c.epic = t.epic;
   return c;
 }
 // A state change is an ordinary CAS update of the whole content: leaving a
