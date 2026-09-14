@@ -480,7 +480,11 @@ Valid, out of stage 1's scope, owned by the stage-2 service unless noted:
   test. (d) The page spells `TaskContent` three times (form, reader,
   projection); derive them from one field list and assert it against the
   storage type's JSON tags, since a dropped field is silently erased by the
-  replace-all update.
+  replace-all update. (e) Board interactions (drop, move, an out-of-order
+  reload, the permission race) are browser-only behaviour; same harness.
+  (f) A board move re-creates the card element, so keyboard focus is lost
+  after each move and the "move to" select is not labelled with its task;
+  update the card in place and label the select.
 - **Format characters.** Storage rejects bidirectional overrides (U+202A–E,
   U+2066–9) and C0/C1 controls; other zero-width/format characters pass and
   are the renderer's concern.
