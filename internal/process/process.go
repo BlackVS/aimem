@@ -404,12 +404,29 @@ func git(ctx context.Context, dir string, args ...string) ([]byte, error) {
 	}
 	// Never a prompt: a private source without credentials is a denial,
 	// reported as one, not a hung session start. ssh in batch mode for
-	// the same reason, unless the machine configured its own command.
+	// the same reason — but only on a machine that configured no ssh
+	// command of its own: GIT_SSH_COMMAND overrides core.sshCommand and
+	// GIT_SSH, and those are exactly the access this design reuses.
 	cmd.Env = append(os.Environ(), "GIT_TERMINAL_PROMPT=0", "GCM_INTERACTIVE=never")
-	if os.Getenv("GIT_SSH_COMMAND") == "" {
+	if dir != "" && !sshCommandConfigured(ctx, dir) {
 		cmd.Env = append(cmd.Env, "GIT_SSH_COMMAND=ssh -o BatchMode=yes")
 	}
 	return runBounded(cmd)
+}
+
+// sshCommandConfigured reports whether this machine (or the cache
+// repository) already names the ssh command git should use — through the
+// environment or git configuration — in which case it is left alone.
+func sshCommandConfigured(ctx context.Context, dir string) bool {
+	if os.Getenv("GIT_SSH_COMMAND") != "" || os.Getenv("GIT_SSH") != "" {
+		return true
+	}
+	ctx, cancel := context.WithTimeout(ctx, FetchTimeout)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, "git", "config", "--get", "core.sshCommand")
+	cmd.Dir = dir
+	out, err := runBounded(cmd)
+	return err == nil && strings.TrimSpace(string(out)) != ""
 }
 
 // PipeDrainDelay bounds how long a finished (or killed) git may keep us

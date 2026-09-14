@@ -296,3 +296,41 @@ func TestRunBoundedReturnsDespiteHeldPipes(t *testing.T) {
 		t.Fatalf("runBounded held for %v despite the held pipes", took)
 	}
 }
+
+// The batch-mode ssh default must never replace an ssh command the
+// machine configured — through GIT_SSH_COMMAND, GIT_SSH or
+// core.sshCommand — because that configuration is how a private
+// repository is reached at all.
+func TestSSHDefaultYieldsToConfiguredCommand(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not installed")
+	}
+	dir := t.TempDir()
+	if out, err := exec.Command("git", "init", "-q", "--bare", dir).CombinedOutput(); err != nil {
+		t.Fatalf("git init: %v %s", err, out)
+	}
+	cfg := filepath.Join(t.TempDir(), "gitconfig")
+	os.WriteFile(cfg, []byte("[user]\n\tname = t\n"), 0o600)
+	t.Setenv("GIT_CONFIG_GLOBAL", cfg)
+	t.Setenv("GIT_CONFIG_SYSTEM", filepath.Join(t.TempDir(), "none"))
+	t.Setenv("GIT_SSH_COMMAND", "")
+	t.Setenv("GIT_SSH", "")
+	ctx := context.Background()
+	if sshCommandConfigured(ctx, dir) {
+		t.Fatal("nothing configured must report false")
+	}
+	t.Setenv("GIT_SSH", "/usr/local/bin/my-ssh")
+	if !sshCommandConfigured(ctx, dir) {
+		t.Fatal("GIT_SSH must be honoured")
+	}
+	t.Setenv("GIT_SSH", "")
+	t.Setenv("GIT_SSH_COMMAND", "ssh -i /keys/id")
+	if !sshCommandConfigured(ctx, dir) {
+		t.Fatal("GIT_SSH_COMMAND must be honoured")
+	}
+	t.Setenv("GIT_SSH_COMMAND", "")
+	os.WriteFile(cfg, []byte("[core]\n\tsshCommand = ssh -i /keys/id\n"), 0o600)
+	if !sshCommandConfigured(ctx, dir) {
+		t.Fatal("core.sshCommand in the global config must be honoured")
+	}
+}
