@@ -569,10 +569,14 @@ Valid, out of stage 1's scope, owned by the stage-2 service unless noted:
   Renaming a token entry changes its receipt namespace. Give tokens.json
   entries an ID, carry it on `Identity`, key on it; the name stays a display
   snapshot.
-- **Receipt digest format.** The digest is over the JSON encoding of the Go
-  input; adding a field to `TaskContent` changes it and turns a retry across
-  that upgrade into a conflict. Store a digest format version, or hash an
-  explicit field list, before the first such field is added.
+- **Receipt digest format.** Done (agent enablement, third PR): the digest
+  is over the input's JSON with zero-valued members removed and keys
+  sorted, prefixed with a format number (`receiptDigest`,
+  `internal/store/tasks.go`). A field added later arrives empty and does
+  not change it; absent and empty optional fields fingerprint the same,
+  matching the replace-all contract; a receipt in an unknown format is a
+  conflict, never a silent match. Landed before the first release with
+  tasks, so no stored receipt predates the format.
 - **Retention.** Snapshots are stored three times (current, history,
   receipt) and nothing prunes them; receipts never expire. Accepted for
   stage 1 (bounded fields, human-paced writes); revisit with export.
