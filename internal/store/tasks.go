@@ -764,3 +764,68 @@ func fileHasTasks(path string) (bool, error) {
 	err = tx.QueryRow(`SELECT EXISTS(SELECT 1 FROM tasks)`).Scan(&exists)
 	return exists, err
 }
+
+// TasksMetaKey is the project metadata key that says whether tasks are
+// enabled for a project: "on" or "off"; unset means off. It is set only by
+// an admin — the console, the admin API, the host CLI — never by an
+// ordinary token, a task write or sync, and it is read by every credential
+// through the identity route.
+const TasksMetaKey = "tasks"
+
+// TasksEnabled reports whether tasks are enabled for this project.
+func (d *DB) TasksEnabled() (bool, error) {
+	v, err := d.GetMeta(TasksMetaKey)
+	if err != nil {
+		return false, err
+	}
+	return v == "on", nil
+}
+
+// EnableTasksWherePresent is the upgrade migration for per-project
+// enablement: every ordinary project that already holds a task (archived
+// included) and has no setting yet is switched on. It only ever writes
+// where the key is unset, so running it at every start is the same as
+// running it once: a later admin "off" is never undone, and a project
+// created after the upgrade stays off until an admin switches it on. A
+// project that cannot be opened is skipped and reported; the rest are
+// still handled. Returns the ids it enabled.
+func (r *Registry) EnableTasksWherePresent() ([]string, error) {
+	projects, err := r.Projects()
+	if err != nil {
+		return nil, err
+	}
+	var enabled []string
+	var skipped error
+	for _, p := range projects {
+		if IsReservedProject(p) {
+			continue
+		}
+		db, err := r.OpenExisting(p)
+		if err != nil {
+			skipped = errors.Join(skipped, fmt.Errorf("project %q: %w", p, err))
+			continue
+		}
+		v, err := db.GetMeta(TasksMetaKey)
+		if err != nil {
+			skipped = errors.Join(skipped, fmt.Errorf("project %q: %w", p, err))
+			continue
+		}
+		if v != "" {
+			continue
+		}
+		has, err := db.HasTasks()
+		if err != nil {
+			skipped = errors.Join(skipped, fmt.Errorf("project %q: %w", p, err))
+			continue
+		}
+		if !has {
+			continue
+		}
+		if err := db.SetMeta(TasksMetaKey, "on"); err != nil {
+			skipped = errors.Join(skipped, fmt.Errorf("project %q: %w", p, err))
+			continue
+		}
+		enabled = append(enabled, p)
+	}
+	return enabled, skipped
+}

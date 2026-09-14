@@ -5,6 +5,7 @@ package main
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
@@ -114,6 +115,8 @@ func main() {
 		fmt.Println(stateRoot())
 	case "meta":
 		err = metaCmd(args)
+	case "tasks":
+		err = tasksCmd(args)
 	case "group":
 		err = groupCmd(args)
 	case "drop-project":
@@ -218,6 +221,7 @@ func usage() {
   version                    print the binary version
   tui                        interactive dashboard (q quits)
   meta       [-p] <key>      print a project meta value
+  tasks      on|off [-p]     enable or disable tasks for a project (admin; on the hub host)
   dedup      [-p|--all] [--sim 0.90] [--dry-run]
                              fold near-identical memories onto one survivor
                              (pinned wins, else newest; tags/sources merged,
@@ -274,6 +278,12 @@ func serve() error {
 	defer reg.Close()
 	srv := server.New(reg, log).WithLogRing(ring)
 	defer srv.Close()
+	// Per-project task enablement: projects that already hold tasks are
+	// switched on once (the key is only ever written where unset, so a
+	// later admin "off" survives every restart).
+	if enabled, merr := reg.EnableTasksWherePresent(); len(enabled) > 0 || merr != nil {
+		log.Info("task enablement migration", "enabled", enabled, "skipped", merr)
+	}
 	httpSrv, _, err := srv.ListenAndServe(root)
 	if err != nil {
 		return err
@@ -552,6 +562,44 @@ func metaCmd(args []string) error {
 		return err
 	}
 	fmt.Println(v)
+	return nil
+}
+
+// tasksCmd switches per-project task enablement on the hub this runs on:
+// an admin decision, recorded in the project's metadata through the
+// running service (the host console is admin), never by editing files.
+func tasksCmd(args []string) error {
+	usage := "usage: aimem tasks on|off [-p <project>]"
+	if len(args) == 0 || (args[0] != "on" && args[0] != "off") {
+		return fmt.Errorf("%s", usage)
+	}
+	fs := flag.NewFlagSet("tasks", flag.ExitOnError)
+	p := fs.String("p", "", "project id (default: current directory's project)")
+	fs.Parse(args[1:])
+	proj := *p
+	if proj == "" {
+		id, err := ident.ProjectID(".")
+		if err != nil {
+			return err
+		}
+		proj = id
+	}
+	body, _ := json.Marshal(map[string]string{"value": args[0]})
+	req, err := http.NewRequest(http.MethodPut, "http://aimem/v1/projects/"+url.PathEscape(proj)+"/meta/"+store.TasksMetaKey, bytes.NewReader(body))
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := client().Do(req)
+	if err != nil {
+		return fmt.Errorf("%w (is the local aimem service running?)", err)
+	}
+	defer resp.Body.Close()
+	data, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("HTTP %d: %s", resp.StatusCode, strings.TrimSpace(string(data)))
+	}
+	fmt.Printf("tasks %s for project %q\n", args[0], proj)
 	return nil
 }
 

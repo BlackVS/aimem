@@ -110,6 +110,9 @@ func taskActor(r *http.Request) store.TaskActor {
 // for this project's instance and its user holds a current grant. Both
 // are re-read every time — a grant removed a second ago is gone now.
 func (s *Server) authorizeTaskWrite(w http.ResponseWriter, r *http.Request, project string) bool {
+	if !s.tasksEnabledFor(w, project) {
+		return false
+	}
 	id, ok := IdentityFrom(r.Context())
 	if !ok || id.Role == "admin" {
 		return true
@@ -140,6 +143,35 @@ func (s *Server) authorizeTaskWrite(w http.ResponseWriter, r *http.Request, proj
 	}
 	if !allowed {
 		s.fail(w, http.StatusForbidden, errors.New("no current write grant on this project"))
+		return false
+	}
+	return true
+}
+
+// ErrTasksDisabled is the refusal every task mutation gets in a project
+// whose tasks an admin has not enabled.
+var ErrTasksDisabled = errors.New("tasks are not enabled for this project; an admin enables them on the hub (the console, or `aimem tasks on -p <project>` on the hub host)")
+
+// tasksEnabledFor refuses a mutation in a project whose tasks are not
+// enabled — for every credential, the local operator and admin tokens
+// included: enablement is an admin decision recorded on the hub, and no
+// caller's authority stands in for it. Read every time; a cached answer
+// never authorizes a write.
+func (s *Server) tasksEnabledFor(w http.ResponseWriter, project string) bool {
+	db, err := s.reg.OpenExisting(project)
+	if err != nil {
+		s.log.Error("task enablement", "project", project, "err", err)
+		s.fail(w, http.StatusInternalServerError, errors.New("task enablement unavailable"))
+		return false
+	}
+	on, err := db.TasksEnabled()
+	if err != nil {
+		s.log.Error("task enablement", "project", project, "err", err)
+		s.fail(w, http.StatusInternalServerError, errors.New("task enablement unavailable"))
+		return false
+	}
+	if !on {
+		s.fail(w, http.StatusForbidden, ErrTasksDisabled)
 		return false
 	}
 	return true

@@ -1059,6 +1059,43 @@ func TestLocateTask(t *testing.T) {
 	}
 }
 
+// The enablement migration switches on exactly the ordinary projects that
+// already hold a task and have no setting; it never touches a project an
+// admin has set, a task-free project, or a reserved store, and running it
+// again does nothing.
+func TestEnableTasksWherePresent(t *testing.T) {
+	r := newTestRegistry(t)
+	a, _ := r.Open("proj-a")
+	if _, err := r.Open("proj-b"); err != nil {
+		t.Fatal(err)
+	}
+	c, _ := r.Open("proj-c")
+	if _, err := r.Open(UserScopeProject); err != nil {
+		t.Fatal(err)
+	}
+	mustCreate(t, a, "held", "k-a")
+	mustCreate(t, c, "held too", "k-c")
+	if err := c.SetMeta(TasksMetaKey, "off"); err != nil { // an admin's later decision
+		t.Fatal(err)
+	}
+	enabled, err := r.EnableTasksWherePresent()
+	if err != nil || len(enabled) != 1 || enabled[0] != "proj-a" {
+		t.Fatalf("enabled %v, %v; want [proj-a]", enabled, err)
+	}
+	for p, want := range map[string]string{"proj-a": "on", "proj-b": "", "proj-c": "off"} {
+		db, _ := r.Open(p)
+		if v, _ := db.GetMeta(TasksMetaKey); v != want {
+			t.Fatalf("%s: tasks=%q want %q", p, v, want)
+		}
+	}
+	if on, _ := a.TasksEnabled(); !on {
+		t.Fatal("proj-a must report enabled")
+	}
+	if enabled, err := r.EnableTasksWherePresent(); err != nil || len(enabled) != 0 {
+		t.Fatalf("second run changed something: %v %v", enabled, err)
+	}
+}
+
 // Location hints spare the full scan: a create seeds one, a scan result
 // is remembered, a conclusive miss is remembered briefly, and none of it
 // is trusted over the partition — a stale hint costs one scan and is

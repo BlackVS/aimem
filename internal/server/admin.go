@@ -6,6 +6,7 @@ package server
 // API with it, so serving the page unauthenticated leaks nothing.
 
 import (
+	"aimem/internal/store"
 	_ "embed"
 	"encoding/json"
 	"fmt"
@@ -54,7 +55,7 @@ func (s *Server) tasksPage(w http.ResponseWriter, _ *http.Request) { servePage(w
 // metaKeys the GUI may read/write; readOnlyMetaKeys are readable but only
 // the service itself writes them (doc synthesis output). Everything else
 // stays CLI/service-only.
-var metaKeys = map[string]bool{"about": true, "policy": true, "chapters": true, "groups": true, "features": true}
+var metaKeys = map[string]bool{"about": true, "policy": true, "chapters": true, "groups": true, "features": true, store.TasksMetaKey: true}
 var readOnlyMetaKeys = map[string]bool{"design_doc": true, "design_doc_ts": true, "chapter_proposal": true}
 
 func (s *Server) getMeta(w http.ResponseWriter, r *http.Request) {
@@ -98,6 +99,19 @@ func (s *Server) putMeta(w http.ResponseWriter, r *http.Request) {
 	if key == "policy" && req.Value != "" && req.Value != "all" && req.Value != "domain" {
 		s.fail(w, http.StatusBadRequest, fmt.Errorf("policy must be all or domain"))
 		return
+	}
+	// Task enablement is an admin decision: the host console (no bearer
+	// identity) or an admin token. A writer token may set every other
+	// exposed key as before, never this one.
+	if key == store.TasksMetaKey {
+		if id, ok := IdentityFrom(r.Context()); ok && id.Role != "admin" {
+			s.fail(w, http.StatusForbidden, fmt.Errorf("enabling or disabling tasks is an admin action"))
+			return
+		}
+		if req.Value != "on" && req.Value != "off" {
+			s.fail(w, http.StatusBadRequest, fmt.Errorf("tasks must be on or off"))
+			return
+		}
 	}
 	if db := s.withDB(w, r); db != nil {
 		if err := db.SetMeta(key, req.Value); err != nil {

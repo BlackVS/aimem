@@ -329,6 +329,28 @@ manual step remains.
 Embed spend is metered into the run history and budget-gated.
 Unset env = BM25-only recall — everything still works.
 
+### Enabling tasks for a project
+
+Tasks (the Kanban work: the `/tasks` page, the task routes, the MCP task
+tools) are off for a project until an admin switches them on. Most
+projects on a hub are journals and memories and never need them.
+
+```sh
+aimem tasks on  -p <project>     # on the hub host, as the service user
+aimem tasks off -p <project>
+```
+
+The console offers the same switch in a project's menu ("tasks (Kanban):
+switch on / off"), and the admin API is `PUT /v1/projects/<p>/meta/tasks`
+with `{"value":"on"}` or `"off"`; a writer token cannot set it. Switching
+off refuses every task mutation immediately, for every credential, and
+keeps the tasks readable through their links; switching on again resumes.
+On upgrade to the first release with this setting, every project that
+already held a task was switched on once; nothing switches a project on
+after that except an admin. An agent whose session started with tasks on
+gets one notice when the hub turns them off, and needs a session restart
+to see the tools again after they are switched back on.
+
 ## 5. Releases
 
 Releases are cut by pushing a tag:

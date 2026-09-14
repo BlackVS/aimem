@@ -61,7 +61,11 @@ func newTaskFixture(t *testing.T) *taskFixture {
 	t.Helper()
 	s, reg := testServer(t)
 	for _, p := range []string{"alpha", "beta"} {
-		if _, err := reg.Open(p); err != nil {
+		db, err := reg.Open(p)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := db.SetMeta(store.TasksMetaKey, "on"); err != nil { // the admin's decision, made here
 			t.Fatal(err)
 		}
 	}
@@ -243,6 +247,77 @@ func TestProjectListForOrdinaryTokens(t *testing.T) {
 		if !slices.Contains(got, store.UserScopeProject) || !slices.Contains(got, "group-shared") {
 			t.Fatalf("legacy credential's listing changed: %v", got)
 		}
+	}
+}
+
+// Task enablement is an admin decision recorded on the hub: a disabled
+// project refuses every mutation — create, update, comment — from every
+// credential, the local operator and admin tokens included, and keeps its
+// reads; the setting itself is writable by the host console and admin
+// tokens only, and every credential reads it through the identity route.
+func TestTaskEnablementGate(t *testing.T) {
+	f := newTaskFixture(t)
+	create := func(token string, want int) string {
+		t.Helper()
+		w := taskReq(t, f.h, "POST", "/v1/projects/alpha/tasks", token, "k-"+uuidv7.New(), `{"title":"gate"}`)
+		if w.Code != want {
+			t.Fatalf("create as %q: %d %s (want %d)", token[:6], w.Code, w.Body, want)
+		}
+		var out struct {
+			ID string `json:"id"`
+		}
+		json.Unmarshal(w.Body.Bytes(), &out)
+		return out.ID
+	}
+	id := create(f.alice, 201)
+	// Switch off through the admin API; the writer token may not.
+	if w := taskReq(t, f.h, "PUT", "/v1/projects/alpha/meta/tasks", f.writer, "", `{"value":"off"}`); w.Code != 403 {
+		t.Fatalf("writer token switched tasks: %d %s", w.Code, w.Body)
+	}
+	if w := taskReq(t, f.h, "PUT", "/v1/projects/alpha/meta/tasks", f.admin, "", `{"value":"maybe"}`); w.Code != 400 {
+		t.Fatalf("bad value accepted: %d %s", w.Code, w.Body)
+	}
+	if w := taskReq(t, f.h, "PUT", "/v1/projects/alpha/meta/tasks", f.admin, "", `{"value":"off"}`); w.Code != 200 {
+		t.Fatalf("admin could not switch tasks off: %d %s", w.Code, w.Body)
+	}
+	for _, tok := range []string{f.alice, f.admin, f.env} {
+		create(tok, 403)
+	}
+	// The local operator (socket, no bearer) is refused too.
+	w := taskReq(t, f.s.Handler(), "POST", "/v1/projects/alpha/tasks", "", "k-local", `{"title":"gate"}`)
+	if w.Code != 403 || !strings.Contains(w.Body.String(), "not enabled") {
+		t.Fatalf("local operator wrote into a disabled project: %d %s", w.Code, w.Body)
+	}
+	if w := taskReq(t, f.h, "PUT", "/v1/tasks/"+id, f.alice, "k-upd", `{"title":"gate","state":"READY","expected_revision":1}`); w.Code != 403 {
+		t.Fatalf("update in a disabled project: %d %s", w.Code, w.Body)
+	}
+	if w := taskReq(t, f.h, "POST", "/v1/tasks/"+id+"/comments", f.alice, "k-cmt", `{"body":"x"}`); w.Code != 403 {
+		t.Fatalf("comment in a disabled project: %d %s", w.Code, w.Body)
+	}
+	// Reads stay: the list, the task and the identity's answer.
+	if w := taskReq(t, f.h, "GET", "/v1/projects/alpha/tasks", f.alice, "", ""); w.Code != 200 {
+		t.Fatalf("list in a disabled project: %d", w.Code)
+	}
+	if w := taskReq(t, f.h, "GET", "/v1/tasks/"+id, f.bob, "", ""); w.Code != 200 {
+		t.Fatalf("read in a disabled project: %d", w.Code)
+	}
+	for _, tok := range []string{f.alice, f.admin, f.writer} {
+		w := taskReq(t, f.h, "GET", "/v1/access/identity?project=alpha", tok, "", "")
+		if w.Code != 200 || !strings.Contains(w.Body.String(), `"tasks_enabled":false`) {
+			t.Fatalf("identity for %q must say tasks are off: %d %s", tok[:6], w.Code, w.Body)
+		}
+	}
+	if w := taskReq(t, f.h, "GET", "/v1/access/identity?project=nope", f.admin, "", ""); w.Code != 404 {
+		t.Fatalf("identity for an unknown project: %d %s", w.Code, w.Body)
+	}
+	// The host console switches it back on; writes resume.
+	w = taskReq(t, f.s.Handler(), "PUT", "/v1/projects/alpha/meta/tasks", "", "", `{"value":"on"}`)
+	if w.Code != 200 {
+		t.Fatalf("host console could not switch tasks on: %d %s", w.Code, w.Body)
+	}
+	create(f.alice, 201)
+	if w := taskReq(t, f.h, "GET", "/v1/access/identity?project=alpha", f.alice, "", ""); !strings.Contains(w.Body.String(), `"tasks_enabled":true`) {
+		t.Fatalf("identity after re-enable: %s", w.Body)
 	}
 }
 
@@ -699,7 +774,7 @@ func TestTasksPageIsPublicChrome(t *testing.T) {
 		t.Fatal("project listing must be optional for ordinary tokens")
 	}
 	// The write decision is the identity endpoint's task_write answer.
-	if !strings.Contains(page, "return !!r.task_write;") {
+	if !strings.Contains(page, `TASKS_OFF[project] = r.tasks_enabled===false;`) || !strings.Contains(page, `if(r.tasks_enabled===false) return false;`) || !strings.Contains(page, `return ME.role==="admin" || !!r.task_write;`) {
 		t.Fatal("page must decide writes from the identity endpoint's task_write")
 	}
 	// A deep link into the console's task view lands here, and the console
@@ -748,10 +823,15 @@ func apiCallSites(page string) []string {
 // is stamped "local".
 func TestTaskRoutesLocalSocketIsOperator(t *testing.T) {
 	s, reg := testServer(t)
+	h := s.Handler()
 	if _, err := reg.Open("alpha"); err != nil {
 		t.Fatal(err)
 	}
-	h := s.Handler()
+	// The operator switches tasks on through the same socket first: the
+	// gate applies to the operator too.
+	if w := taskReq(t, h, "PUT", "/v1/projects/alpha/meta/tasks", "", "", `{"value":"on"}`); w.Code != 200 {
+		t.Fatalf("operator could not enable tasks: %d %s", w.Code, w.Body)
+	}
 	w := taskReq(t, h, "POST", "/v1/projects/alpha/tasks", "", "k1", taskBody)
 	if w.Code != 201 {
 		t.Fatalf("local create: %d %s", w.Code, w.Body)

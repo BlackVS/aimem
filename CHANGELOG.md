@@ -13,6 +13,27 @@ currently 11); a binary refuses a database newer than it understands.
 
 ## [Unreleased]
 
+### Added
+
+- **Tasks are enabled per project, by an admin.** A project's tasks are
+  on only when an admin has switched them on: through the console's
+  project menu, the admin API (`PUT /v1/projects/{p}/meta/tasks` with
+  `on`/`off`), or `aimem tasks on|off -p <project>` on the hub host. Every
+  task mutation — create, update, comment — in a project whose tasks are
+  off is refused with 403 for every credential, the local operator and
+  admin tokens included; reads stay. On upgrade the hub switches on every
+  project that already holds a task (archived included), once: the setting
+  is only ever written where unset, so a later admin "off" survives
+  restarts, and a project created afterwards stays off until switched on.
+  The identity route answers `tasks_enabled` for a named project to every
+  credential; the task page says when a project's tasks are off instead
+  of offering a create or a drag; the stdio MCP facade asks the hub once
+  at session start and hides the task tools (refusing them by name) when
+  the project is off, lists them when it is on or when the hub could not
+  be asked, and says "Kanban availability changed for this project.
+  Restart the session to refresh its tools and process context" once if
+  the hub turns a session that started on away.
+
 ### Changed
 
 - **Ordinary tokens may list projects; the task page shows every

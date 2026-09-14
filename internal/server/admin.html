@@ -504,6 +504,7 @@ function treeEntry(g){
         ? `<div class="tc" role="button" tabindex="0" onclick="tab('groups')"><span class="name">chapters, charter, AI propose / re-label (Groups tab)&hellip;</span></div>`
         : `<div class="tc" role="button" tabindex="0" onclick="renameProject('${esc(g.id)}')"><span class="name">rename project&hellip;</span></div>`+
           `<div class="tc" role="button" tabindex="0" onclick="mergeProjectUI('${esc(g.id)}')"><span class="name">merge into another project&hellip;</span></div>`+
+          `<div class="tc" role="button" tabindex="0" onclick="toggleTasksUI('${esc(g.id)}')"><span class="name">tasks (Kanban): switch on / off&hellip;</span></div>`+
           (kbMenu==="merge:"+g.id ? mergeChooser(g.id) : "")+
           `<div class="tc danger" role="button" tabindex="0" onclick="dropProjectUI('${esc(g.id)}')"><span class="name">drop project&hellip;</span></div>`) +
       `</div>`;
@@ -547,6 +548,18 @@ function treeEntry(g){
 }
 function toggleKbMenu(key){ kbMenu = (kbMenu===key || kbMenu==="merge:"+key.replace(/^scope:/,"")) ? "" : key; renderTree(); }
 
+// Task enablement is an admin decision recorded on the hub (project meta
+// key "tasks"): read the current value, flip it, say what happened. A
+// writer token gets the hub's refusal in the toast.
+async function toggleTasksUI(id){
+  const p = `/v1/projects/${encodeURIComponent(id)}/meta/tasks`;
+  try{
+    const cur = (await api(p)).value === "on";
+    const next = cur ? "off" : "on";
+    await api(p, {method:"PUT", body: JSON.stringify({value: next})});
+    toast(`tasks ${next} for ${id}`);
+  }catch(e){ toast(String(e.message||e)); }
+}
 // Drop is the console face of drop-project: files deleted on THIS hub.
 // The machines that feed it are untouched — their next checkpoint
 // re-creates the id — so the honest framing is "remove from this hub".
