@@ -351,6 +351,42 @@ after that except an admin. An agent whose session started with tasks on
 gets one notice when the hub turns them off, and needs a session restart
 to see the tools again after they are switched back on.
 
+### Selecting a project's process documents
+
+When a project's tasks are on, its agents receive the process documents
+at session start: the handbook (states, who moves a task, evidence and
+review rules), the checklists that gate READY and DONE, and where the
+task templates are. The hub holds only a reference to them; the files
+live in a Git repository and every machine fetches them with its own
+access.
+
+```sh
+aimem process select https://example.com/team/process.git \
+    3f2a…(40-hex commit) process/manifest.json --ref main -p <project>
+aimem process select … --expect <current commit>     # change it later
+aimem process clear --expect <current commit>
+aimem process show -p <project>                      # what a session gets
+```
+
+The manifest is JSON (`version` 1): `handbook` (Markdown path),
+`checklists` (task state to a JSON file of `{state, items:[{id,text}]}`),
+`templates` (kind to a JSON file), `skills` (installed skill names the
+process requires) and an optional `budget_bytes` for the injected unit
+(24 KiB by default). A selection names a full commit id, so what a
+session sees is exactly what was reviewed; the `--ref` lets a machine
+fetch from a server that refuses fetch-by-hash, and the commit must be
+what that ref holds. Changing the selection needs the currently selected
+commit (`--expect`), so two admins cannot overwrite each other unseen;
+every selection stays in the project's history.
+
+Each machine keeps a cache per commit under its state directory; the
+first session after a selection pays one bounded Git fetch, later ones
+none. A machine without read access to the repository sees "access
+denied" and nothing else; a hub that cannot be reached leaves the session
+with the selection as last observed and a warning; a unit larger than
+the budget is not injected and the notice says to read it with `aimem
+process show`.
+
 ## 5. Releases
 
 Releases are cut by pushing a tag:

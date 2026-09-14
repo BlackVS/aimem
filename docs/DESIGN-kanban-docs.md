@@ -1,7 +1,8 @@
 # The documents an AI-driven Kanban needs
 
-Status: **accepted 2026-09-14; increment 1 (per-project enablement and
-tool listing) implemented** — the rest is not. Written after the task backend (storage, service, page and
+Status: **accepted 2026-09-14; increments 1 (per-project enablement and
+tool listing) and 2 (process reference selection and the hook bootstrap)
+implemented** — epics and typed references are not. Written after the task backend (storage, service, page and
 board; v0.4.0) shipped and the first agent-side fixes landed, when it
 became clear that the shared-documents feature predates the Kanban idea
 and was never asked what a process run by agents needs from it.
@@ -356,9 +357,16 @@ retrieval and cache, availability diagnostics and the plugin's equivalent.
 ## Remaining implementation choices
 
 - Set concrete bootstrap size budgets and bounded hub/Git fetch deadlines.
-- Fix the manifest and checklist file format (one format, parsed
-  identically by the hook and the plugin; a JSON manifest naming Markdown
-  bodies and a JSON checklist with stable item ids is the obvious choice).
+- Manifest and checklist format: fixed at increment 2 as JSON — a
+  manifest `{version:1, handbook, checklists:{STATE: path}, templates:
+  {kind: path}, skills:[…], budget_bytes}` and a checklist `{state,
+  items:[{id, text}]}`, parsed by one package (`internal/process`) that
+  the hook and the CLI share. The "expected metadata revision" for a
+  selection change is a compare-and-swap on the previously selected
+  commit, which needs no schema change. The OpenCode plugin has no
+  session-start hook today; `aimem process show` prints the same unit for
+  any client that can run a command, and the plugin integration is a
+  follow-up.
 - Specify the typed-reference schema per kind, the epic routes and tools,
   and the migration's exact rewrite rules and its test corpus.
 

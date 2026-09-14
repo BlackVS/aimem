@@ -124,6 +124,8 @@ func (s *Server) Routes() []Route {
 		{"GET", "/v1/tasks/{id}/comments", s.listTaskComments, false},
 		{"POST", "/v1/tasks/{id}/comments", s.addTaskComment, false},
 		{"GET", "/v1/tasks/{id}/comments/{c}", s.getTaskComment, false},
+		{"GET", "/v1/projects/{p}/process", s.getProcessRef, false},
+		{"PUT", "/v1/projects/{p}/process", s.putProcessRef, true},
 		{"GET", "/v1/health", s.health, false},
 		{"POST", "/v1/events", s.append, false},
 		{"GET", "/v1/projects", s.projects, false},

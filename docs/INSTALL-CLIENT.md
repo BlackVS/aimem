@@ -144,6 +144,15 @@ the tools; on lists them; a hub that cannot be reached lists them too,
 with the hub refusing writes if the project turns out to be off. A change
 of the setting takes a session restart to show.
 
+When tasks are on and the hub admin has selected a process reference,
+the session-start hook also injects the project's process documents —
+the handbook and the READY/DONE checklists — fetched from the named Git
+commit with this machine's own Git access and cached per commit. `aimem
+process show` prints exactly what a session receives, including the
+notice when something is unavailable (no selection, no access to the
+repository, the hub unreachable, the unit over its budget). The first
+session after a selection pays one bounded fetch; later ones none.
+
 (`--sync <ssh-dest>` on `hub add` is only for hubs old enough to lack
 the sync API; current hubs sync over HTTPS with the same token. Hub
 NAMES are machine-local, but use the same names on every machine — a

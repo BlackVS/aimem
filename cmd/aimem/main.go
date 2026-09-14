@@ -117,6 +117,8 @@ func main() {
 		err = metaCmd(args)
 	case "tasks":
 		err = tasksCmd(args)
+	case "process":
+		err = processCmd(args)
 	case "group":
 		err = groupCmd(args)
 	case "drop-project":
@@ -222,6 +224,7 @@ func usage() {
   tui                        interactive dashboard (q quits)
   meta       [-p] <key>      print a project meta value
   tasks      on|off [-p]     enable or disable tasks for a project (admin; on the hub host)
+  process    select|clear|show  the project's process reference (Git repo, commit, manifest); show prints the session bootstrap
   dedup      [-p|--all] [--sim 0.90] [--dry-run]
                              fold near-identical memories onto one survivor
                              (pinned wins, else newest; tags/sources merged,
@@ -458,6 +461,11 @@ func sessionStartCmd(args []string) error {
 	// empty unless .aimem.json sets "session_facts".
 	ctx += sessionFactsNotice()
 	ctx += mergePreviewNotice()
+	// The process context for a project whose tasks are on: the handbook
+	// and checklists from the selected Git commit, or an explicit
+	// availability notice (docs/DESIGN-kanban-docs.md). Bounded; never a
+	// blocked session start.
+	ctx += processNotice()
 	if ctx == "" {
 		return nil
 	}

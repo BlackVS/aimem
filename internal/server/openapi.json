@@ -115,6 +115,65 @@
         }
       }
     },
+    "/v1/projects/{p}/process": {
+      "get": {
+        "summary": "The project's selected process reference (repository, ref, commit, manifest)",
+        "description": "Ordinary user tokens may call this route: the reference is what an agent needs to find the project's process documents and grants no access to the repository. 404 when nothing is selected; ?history=1 adds the retained earlier selections, newest first, and answers 200 even when nothing is selected now.",
+        "x-role": "writer",
+        "parameters": [
+          {
+            "name": "p",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "history",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "current selection (and history)"
+          },
+          "404": {
+            "description": "no selection, or unknown project"
+          }
+        }
+      },
+      "put": {
+        "summary": "Select or clear the project's process reference (admin)",
+        "description": "Body: repo (https/ssh/git@ URL), commit (full 40-hex), manifest (relative path in the repository), optional ref (branch or tag for servers that refuse fetch-by-hash), and expected_commit — the commit currently selected, empty when none — or the write is refused with 409 and the current selection. {\"clear\":true,\"expected_commit\":...} clears. Every selection is retained in the project's history.",
+        "x-role": "admin",
+        "parameters": [
+          {
+            "name": "p",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "the new selection"
+          },
+          "400": {
+            "description": "malformed selection"
+          },
+          "409": {
+            "description": "expected_commit does not match the current selection"
+          }
+        }
+      }
+    },
     "/v1/projects/{p}/tasks": {
       "get": {
         "summary": "List task summaries of a project",
