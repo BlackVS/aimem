@@ -13,6 +13,18 @@ currently 11); a binary refuses a database newer than it understands.
 
 ## [Unreleased]
 
+### Changed
+
+- **Ordinary tokens may list projects; the task page shows every
+  credential a project picker.** `GET /v1/projects` is now within an
+  ordinary token's surface, read only, returning the ordinary projects
+  only (the user memory store and the knowledge groups are filtered out
+  for it; legacy writer and admin credentials receive every id as
+  before). The `/tasks` page therefore offers the same drop-down to an
+  ordinary token that admins had, instead of a free-text project field;
+  the field stays as the fallback if the listing fails. Creating and
+  deleting projects remain admin actions on the console.
+
 ### Fixed
 
 - **Task page: a rejected stored token is named as the remembered one.** A

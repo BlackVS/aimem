@@ -950,6 +950,7 @@
     "/v1/projects": {
       "get": {
         "summary": "List project ids",
+        "description": "Also available to ordinary user tokens, which receive the ordinary projects only (the user memory store and the knowledge groups are filtered out); legacy writer and admin credentials receive every id.",
         "x-role": "writer",
         "responses": {
           "200": {

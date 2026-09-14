@@ -41,13 +41,18 @@ var taskRoutes = map[string]bool{
 
 // ordinaryRoutes is the exact surface an ordinary (scoped user) token may
 // reach besides its identity check: the task routes, whose handlers
-// authorize every write themselves, and POST /mcp, whose dispatcher hides
-// every legacy tool from such a caller. Matched by the mux's own rules
-// against these exact patterns — never by prefix — so a future route is
-// refused until it is listed here (and Route.Ordinary shows it).
+// authorize every write themselves; POST /mcp, whose dispatcher hides
+// every legacy tool from such a caller; and the project listing, read
+// only, with the reserved stores filtered out for such a caller — an
+// ordinary token may read tasks in every ordinary project already, so the
+// names of those projects are within its view, and the task page needs
+// them for its project picker. Matched by the mux's own rules against
+// these exact patterns — never by prefix — so a future route is refused
+// until it is listed here (and Route.Ordinary shows it).
 var ordinaryRoutes = func() map[string]bool {
 	m := maps.Clone(taskRoutes)
 	m["POST /mcp"] = true
+	m["GET /v1/projects"] = true
 	return m
 }()
 

@@ -14,6 +14,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -627,11 +628,20 @@ func (s *Server) health(w http.ResponseWriter, _ *http.Request) {
 	s.ok(w, body)
 }
 
-func (s *Server) projects(w http.ResponseWriter, _ *http.Request) {
+func (s *Server) projects(w http.ResponseWriter, r *http.Request) {
 	ids, err := s.reg.Projects()
 	if err != nil {
 		s.fail(w, http.StatusInternalServerError, err)
 		return
+	}
+	// An ordinary token sees the ordinary projects only: the reserved
+	// stores (the user memory DB, the knowledge groups) never hold tasks
+	// and are not within its view.
+	if id, ok := IdentityFrom(r.Context()); ok && id.Role == "user" {
+		ids = slices.DeleteFunc(slices.Clone(ids), store.IsReservedProject)
+	}
+	if ids == nil {
+		ids = []string{}
 	}
 	s.ok(w, map[string]any{"projects": ids})
 }

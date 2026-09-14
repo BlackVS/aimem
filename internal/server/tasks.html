@@ -331,9 +331,9 @@ async function boot(){
     $("gate").classList.add("hide");
     $("who").textContent = "· "+ME.name+" ("+ME.role+")";
     $("consoleLink").hidden = ME.role==="user";
-    // Only admin and legacy writer credentials may list projects; an
-    // ordinary token names its project (it is the one the token was
-    // issued for) — the field remembers it in this browser.
+    // Every credential class may list the projects (an ordinary token
+    // gets the ordinary ones, filtered by the hub); the free-text field is
+    // the fallback if the listing fails, remembered in this browser.
     // Reserved stores never hold tasks (mirrors store.IsReservedProject).
     try{ const p = await api("/v1/projects"); PROJECTS = (p.projects||[]).filter(id=>id!=="user"&&!id.startsWith("group-")).sort(); }
     catch(_){ PROJECTS = null; }
