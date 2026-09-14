@@ -27,9 +27,12 @@ currently 11); a binary refuses a database newer than it understands.
   command or UI touches tasks yet (stage 2 adds the authorized service);
   existing databases migrate on first open. **Lifecycle:** a project that
   holds any task — archived included — now refuses `drop` and refuses to be
-  the source of a `merge` (checked race-safely against concurrent task
-  creation) until a task-preserving export/removal exists; rename keeps
-  every task, comment, history row and receipt reachable.
+  the source of a `merge` until a task-preserving export/removal exists; the
+  check waits for a task write already in flight, so a task is never created
+  and then deleted (a task landing mid-merge keeps the source; the history
+  copy into the target is idempotent). Rename keeps every task, comment,
+  history row and receipt reachable. **Upgrade note:** as with every schema
+  bump, a database opened by this build is refused by older builds.
 
 ### Fixed
 

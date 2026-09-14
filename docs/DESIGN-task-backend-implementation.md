@@ -23,12 +23,24 @@ Decisions taken while implementing stage 1 (corrections to the draft):
   connection, immediate transactions), so a task mutation owns the database
   for its transaction. The draft's `DB.taskMu` was unnecessary.
 - Lifecycle coordination lives at the registry lock. `Drop` and the final
-  step of `MergeProject` evict and close the cached handle (database/sql
-  waits for an in-flight transaction), then check for tasks through a fresh
-  read-only connection **under the same lock** before removing the
-  directory. A create racing a drop either committed first (the drop
-  refuses) or fails on the closed handle — proven by a concurrent test.
+  step of `MergeProject` evict and close the cached handle, then check for
+  tasks through a fresh connection **under the same lock** before removing
+  the directory. `database/sql.Close` does NOT end a transaction already in
+  flight on the closed handle, so the check takes an IMMEDIATE transaction
+  of its own: SQLite makes it wait for that writer to commit or roll back,
+  and a committed task is seen. New writers cannot start (closed handle;
+  reopen needs the lock). Proven by deterministic tests that hold a write
+  transaction open across the drop and across the merge's final step.
   `MergeProject` also refuses early, before copying, like docs/collections.
+  Known limitation (stage-2 follow-up): a task created during the copy is
+  caught only by the late check, after the history was folded into the
+  target and group citations were relabelled; the source is kept intact
+  and a re-run is refused until the task is gone. Stage 2 should add a
+  registry-level "merging" guard so the source refuses task writes for the
+  duration, then the late check becomes a pure safety net.
+- The warning tier of the authored-secret scan is not computed here.
+  Storage refuses the high-confidence tier only; the service computes and
+  transports warnings from the same scan, so signatures stay `(T, error)`.
 - Receipts are keyed by `(actor, operation, scope, key)` where scope is the
   task ID (empty for create); the canonical JSON of the input is hashed;
   replay returns the original result even after the task advanced; a
@@ -86,10 +98,9 @@ journal/memory sync and retention. Proposed schema 11 is additive and transactio
 | `task_comments` | Immutable UUID, parent task FK, Markdown body, actor, creation time, monotonically increasing database append sequence |
 | `task_requests` | Retry receipt keyed by actor/operation/scope/key, canonical request hash, original response; committed with its mutation |
 
-The draft stores typed snapshots as JSON plus a few indexed filter columns. That
-is an implementation option, not a requirement to duplicate every field. If
-retained, all copies must be updated in one transaction, with tests proving filter
-columns and returned snapshots agree. No schema change is needed in `access.db`.
+Stage 1 stores typed snapshots as JSON plus a few indexed filter columns
+(state, archived, assignee). All copies are updated in one transaction, with a
+test proving the filter columns, the stored snapshot and the returned task agree. No schema change is needed in `access.db`.
 
 A task has title, objective, acceptance criteria, non-goals, state, optional
 assignee, blocker, dependency task IDs, candidate/evidence references, next action,
@@ -124,8 +135,9 @@ transaction. Cycle enforcement is deferred.
 
 Validate decoded text before storage; JSON escaping must not bypass secret checks.
 Reject unsupported control characters. Preserve content exactly rather than
-redacting it silently. Use the existing authored-content warning/refusal tiers;
-include warnings in transport results without leaking matched secret values.
+redacting it silently. Use the existing authored-content warning/refusal tiers:
+storage refuses the high-confidence tier; the service computes the warning tier
+and includes warnings in transport results without leaking matched secret values.
 Actor display names are metadata too: bound and validate them before persistence.
 
 ## Task Writes And Retry Semantics
@@ -142,7 +154,8 @@ document store's relaxed "identical body succeeds despite stale revision" behavi
 into tasks: retries are handled explicitly by receipts.
 
 Require a key on create, update and comment append. Scope it to authenticated
-principal, operation, and task ID (project partition for create). For ordinary
+principal, operation, and task ID (empty scope for create; the receipt table
+already lives in the project's own database, so the project is implicit). For ordinary
 agents, identify the principal with stable user/token IDs; display-name changes
 must not change that key. Admin actor identity must come from the trusted auth
 layer, never a body field. Different ordinary tokens are distinct retry scopes;
@@ -204,9 +217,9 @@ task API and necessarily invalidates links.
 The refusal must be race-safe against task creation. Plan locking before coding:
 one registry/project lifecycle boundary must cover resolution, task operations,
 rename/drop/merge, and closing cached handles. Document one lock order and avoid
-reentering `Registry.Open` while holding its non-reentrant mutex. The draft's
-undefined `taskMu` is not a solution on its own. Test concurrent create versus
-drop/merge. An in-process mutex does not coordinate independent registries or
+reentering `Registry.Open` while holding its non-reentrant mutex. An in-process
+task mutex is not a solution on its own. Test concurrent create versus
+drop/merge (stage 1 does: see Resume State). An in-process mutex does not coordinate independent registries or
 processes; task mutations should enter the owning service, and offline maintenance
 must stop it. Do not claim cross-process safety from a Go mutex.
 
@@ -327,9 +340,9 @@ follow-ups become separate work. The user authorizes merge separately.
 
 ## Draft Review Checklist (resolved by stage 1)
 
-The checklist that gated the removed draft, kept for the record; items 1, 2, 4,
-6 (storage half) and 7 are done in `tasks.go`/`tasks_test.go`, 3 and 5 belong to
-the stage-2 service:
+The checklist that gated the removed draft, kept for the record; items 1, 2, 4
+and 7 are done in `tasks.go`/`tasks_test.go`, the refusal half of 6 too; the
+warning tier of 6 and items 3 and 5 belong to the stage-2 service:
 
 1. Wire schema 11 and lifecycle protection, or revise the approach; the draft
    cannot compile because `DB.taskMu` does not exist.
@@ -346,6 +359,6 @@ the stage-2 service:
 7. Add meaningful migration, transaction-failure, concurrency and lifecycle tests
    before considering any draft code an implementation milestone.
 
-Do not start by deploying the draft, publishing new MCP definitions without
-enforcement, or changing the public version. Resume from the verified baseline,
-implement the first bounded storage stage, and preserve the approved simple scope.
+Stage 1 is on `feat/task-storage`. Do not publish new MCP definitions without
+enforcement or change the public version. Resume with stage 2 (the authorized
+service) from the merged storage stage, and preserve the approved simple scope.

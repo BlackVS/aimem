@@ -2,12 +2,14 @@ package store
 
 import (
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"os"
 	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"aimem/internal/uuidv7"
 )
@@ -170,12 +172,18 @@ func TestTaskValidationBounds(t *testing.T) {
 	bad("too many refs", TaskContent{Title: "t", EvidenceRefs: many}, "at most")
 	bad("long ref", TaskContent{Title: "t", CandidateRefs: []string{strings.Repeat("r", MaxTaskRefBytes+1)}}, "candidate_refs")
 	bad("control char", TaskContent{Title: "t\x00"}, "control")
+	bad("control char in ref", TaskContent{Title: "t", EvidenceRefs: []string{"r\x00"}}, "evidence_refs")
+	bad("secret in ref", TaskContent{Title: "t", CandidateRefs: []string{"-----BEGIN RSA PRIVATE KEY-----\nMIIE"}}, "secret")
+	bad("blank ref", TaskContent{Title: "t", CandidateRefs: []string{" "}}, "candidate_refs")
 	bad("invalid utf8", TaskContent{Title: "t\xff"}, "UTF-8")
 	bad("secret", TaskContent{Title: "t", Objective: "-----BEGIN RSA PRIVATE KEY-----\nMIIE"}, "secret")
 	bad("oversized content", TaskContent{Title: "t", Objective: strings.Repeat("a", MaxTaskBytes)}, "limit")
 	// Exact boundaries are accepted.
 	if _, err := db.CreateTask(content(strings.Repeat("x", MaxTaskTitleBytes)), aliceActor, "k-title-max"); err != nil {
 		t.Fatalf("title at limit: %v", err)
+	}
+	if _, err := db.CreateTask(TaskContent{Title: "t", CandidateRefs: []string{strings.Repeat("r", MaxTaskRefBytes)}}, aliceActor, strings.Repeat("k", MaxTaskKeyBytes)); err != nil {
+		t.Fatalf("ref and key at limit: %v", err)
 	}
 	// Idempotency key bounds and secrets.
 	if _, err := db.CreateTask(content("t"), aliceActor, ""); err == nil || !strings.Contains(err.Error(), "idempotency key") {
@@ -209,13 +217,23 @@ func TestTaskFilterColumnsMatchSnapshot(t *testing.T) {
 	}
 	check := func(want Task) {
 		t.Helper()
-		var state, assignee string
+		var state, assignee, body string
 		var archived int
-		if err := db.sql.QueryRow(`SELECT state, archived, assignee FROM tasks WHERE id=?`, want.ID).Scan(&state, &archived, &assignee); err != nil {
+		if err := db.sql.QueryRow(`SELECT state, archived, assignee, body FROM tasks WHERE id=?`, want.ID).Scan(&state, &archived, &assignee, &body); err != nil {
 			t.Fatal(err)
 		}
-		if state != want.State || (archived == 1) != want.Archived || assignee != want.Assignee.column() {
-			t.Fatalf("columns (%s,%d,%s) disagree with snapshot %+v", state, archived, assignee, want.TaskContent)
+		var stored Task // the persisted snapshot, not the value the API returned
+		if err := json.Unmarshal([]byte(body), &stored); err != nil {
+			t.Fatal(err)
+		}
+		if state != stored.State || (archived == 1) != stored.Archived || assignee != stored.Assignee.column() {
+			t.Fatalf("columns (%s,%d,%s) disagree with the stored snapshot %+v", state, archived, assignee, stored.TaskContent)
+		}
+		if stored.Revision != want.Revision || stored.State != want.State || stored.Archived != want.Archived || stored.Assignee.column() != want.Assignee.column() {
+			t.Fatalf("stored snapshot %+v disagrees with the returned task %+v", stored, want)
+		}
+		if got, err := db.GetTask(want.ID); err != nil || got.Revision != want.Revision || got.State != want.State {
+			t.Fatalf("GetTask %+v %v", got, err)
 		}
 	}
 	check(task)
@@ -225,6 +243,30 @@ func TestTaskFilterColumnsMatchSnapshot(t *testing.T) {
 		t.Fatal(err)
 	}
 	check(task)
+}
+
+// A stale expected revision is a typed conflict carrying the CURRENT task,
+// and nothing is written for it.
+func TestTaskCASConflictCarriesCurrent(t *testing.T) {
+	_, db := taskDB(t)
+	task := mustCreate(t, db, "v1", "k-v1")
+	if _, err := db.UpdateTask(task.ID, content("v2"), 1, adminActor, "k-v2"); err != nil {
+		t.Fatal(err)
+	}
+	var tc *TaskConflict
+	_, err := db.UpdateTask(task.ID, content("stale"), 1, aliceActor, "k-stale")
+	if !errors.As(err, &tc) {
+		t.Fatalf("stale revision: %v", err)
+	}
+	if tc.Current.Revision != 2 || tc.Current.Title != "v2" || tc.Current.ID != task.ID {
+		t.Fatalf("conflict must carry the current task: %+v", tc.Current)
+	}
+	if n := countRows(t, db, "task_history", "task_id=?", task.ID); n != 2 {
+		t.Fatalf("history rows after a refused update: %d", n)
+	}
+	if n := countRows(t, db, "task_requests", "key=?", "k-stale"); n != 0 {
+		t.Fatal("a refused update must not consume its key")
+	}
 }
 
 // Two competing CAS updates: exactly one wins, the loser gets the current
@@ -357,6 +399,31 @@ func TestTaskRetryReceipts(t *testing.T) {
 	}
 }
 
+// The receipt scope is the task: the same actor, operation and key on two
+// tasks are two mutations, not a replay.
+func TestTaskReceiptScopeIsPerTask(t *testing.T) {
+	_, db := taskDB(t)
+	a := mustCreate(t, db, "a", "k-a")
+	b := mustCreate(t, db, "b", "k-b")
+	ca, err := db.AddTaskComment(a.ID, "same key", aliceActor, "c-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	cb, err := db.AddTaskComment(b.ID, "same key", aliceActor, "c-1")
+	if err != nil {
+		t.Fatalf("same key on another task must be a new comment: %v", err)
+	}
+	if cb.ID == ca.ID || cb.TaskID != b.ID {
+		t.Fatalf("scope leaked across tasks: %+v vs %+v", ca, cb)
+	}
+	if again, err := db.AddTaskComment(a.ID, "same key", aliceActor, "c-1"); err != nil || again.ID != ca.ID {
+		t.Fatalf("replay on the first task: %+v %v", again, err)
+	}
+	if n := countRows(t, db, "task_comments", "1=1"); n != 2 {
+		t.Fatalf("comments: %d", n)
+	}
+}
+
 func TestTaskComments(t *testing.T) {
 	_, db := taskDB(t)
 	task := mustCreate(t, db, "discuss", "k-discuss")
@@ -440,6 +507,18 @@ func TestTaskComments(t *testing.T) {
 	}
 	if _, err := db.AddTaskComment(task.ID, "   ", aliceActor, "c-blank"); err == nil {
 		t.Fatal("blank comment accepted")
+	}
+	if _, err := db.AddTaskComment(task.ID, "nul\x00", aliceActor, "c-nul"); err == nil || !strings.Contains(err.Error(), "control") {
+		t.Fatalf("control character in comment: %v", err)
+	}
+	if _, err := db.AddTaskComment(task.ID, "bad \xff utf8", aliceActor, "c-utf8"); err == nil || !strings.Contains(err.Error(), "UTF-8") {
+		t.Fatalf("invalid UTF-8 in comment: %v", err)
+	}
+	if _, err := db.AddTaskComment(task.ID, "-----BEGIN RSA PRIVATE KEY-----\nMIIE", aliceActor, "c-secret"); err == nil || !strings.Contains(err.Error(), "secret") {
+		t.Fatalf("secret in comment: %v", err)
+	}
+	if _, err := db.AddTaskComment(task.ID, strings.Repeat("b", MaxTaskCommentBytes), aliceActor, "c-max"); err != nil {
+		t.Fatalf("comment at limit: %v", err)
 	}
 	if _, err := db.AddTaskComment(uuidv7.New(), "orphan", aliceActor, "c-orphan"); !errors.Is(err, ErrTaskNotFound) {
 		t.Fatalf("comment on missing task: %v", err)
@@ -612,9 +691,6 @@ func TestDropAndMergeRefuseTaskBearingProjects(t *testing.T) {
 	}
 }
 
-// Concurrent create versus drop: whichever wins, no task is ever lost. A
-// drop that succeeds means no create committed; a create that committed
-// means the drop refused.
 // A project directory without a database file (a first open interrupted
 // before SQLite created it) holds no tasks and must still be droppable.
 func TestDropProjectWithoutDatabaseFile(t *testing.T) {
@@ -631,6 +707,107 @@ func TestDropProjectWithoutDatabaseFile(t *testing.T) {
 	}
 }
 
+// A create that already holds the write transaction when the drop starts:
+// closing the cached handle does not end it (database/sql only closes idle
+// connections), so the drop's check must wait for it and then see the
+// committed task.
+func TestDropWaitsForInFlightTaskWrite(t *testing.T) {
+	r := newTestRegistry(t)
+	db, err := r.Open("proj-inflight")
+	if err != nil {
+		t.Fatal(err)
+	}
+	tx, err := db.sql.Begin() // immediate: holds the write lock until Commit
+	if err != nil {
+		t.Fatal(err)
+	}
+	task := Task{ID: uuidv7.New(), Revision: 1, TaskContent: content("in flight"), CreatedAt: nowUTC(), UpdatedAt: nowUTC()}
+	if err := saveTask(tx, task, aliceActor, true); err != nil {
+		t.Fatal(err)
+	}
+	dropErr := make(chan error, 1)
+	go func() { dropErr <- r.Drop("proj-inflight") }()
+	time.Sleep(300 * time.Millisecond)
+	select {
+	case err := <-dropErr:
+		t.Fatalf("drop returned (%v) while a write transaction was still open", err)
+	default:
+	}
+	if err := tx.Commit(); err != nil {
+		t.Fatalf("commit on the evicted handle: %v", err)
+	}
+	if err := <-dropErr; !errors.Is(err, ErrProjectHasTasks) {
+		t.Fatalf("drop after the in-flight create committed: %v", err)
+	}
+	db2, err := r.OpenExisting("proj-inflight")
+	if err != nil {
+		t.Fatalf("project vanished: %v", err)
+	}
+	if got, err := db2.GetTask(task.ID); err != nil || got.Title != "in flight" {
+		t.Fatalf("task after refused drop: %+v %v", got, err)
+	}
+}
+
+// The same for a merge: a task that lands in the source while the history
+// is being copied keeps the source. The writer uses its own connection so
+// the early check (cached handle, committed snapshot) passes and the late,
+// locked re-check is the one that must catch it.
+func TestMergeKeepsSourceThatGainsTaskDuringCopy(t *testing.T) {
+	r := newTestRegistry(t)
+	src, err := r.Open("proj-src")
+	if err != nil {
+		t.Fatal(err)
+	}
+	src.Append(testEvent("k1", "t1"))
+	if _, err := r.Open("proj-dst"); err != nil {
+		t.Fatal(err)
+	}
+	direct, err := sql.Open("sqlite", "file:"+src.path+"?_txlock=immediate&_pragma=busy_timeout(5000)&_pragma=foreign_keys(ON)")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer direct.Close()
+	tx, err := direct.Begin()
+	if err != nil {
+		t.Fatal(err)
+	}
+	task := Task{ID: uuidv7.New(), Revision: 1, TaskContent: content("late arrival"), CreatedAt: nowUTC(), UpdatedAt: nowUTC()}
+	if err := saveTask(tx, task, aliceActor, true); err != nil {
+		t.Fatal(err)
+	}
+	mergeErr := make(chan error, 1)
+	go func() {
+		_, _, _, _, err := r.MergeProject("proj-src", "proj-dst")
+		mergeErr <- err
+	}()
+	time.Sleep(300 * time.Millisecond)
+	select {
+	case err := <-mergeErr:
+		t.Fatalf("merge returned (%v) while a write transaction was still open on the source", err)
+	default:
+	}
+	if err := tx.Commit(); err != nil {
+		t.Fatal(err)
+	}
+	if err := <-mergeErr; !errors.Is(err, ErrProjectHasTasks) {
+		t.Fatalf("merge must keep a source that gained a task: %v", err)
+	}
+	src2, err := r.OpenExisting("proj-src")
+	if err != nil {
+		t.Fatalf("source vanished: %v", err)
+	}
+	if got, err := src2.GetTask(task.ID); err != nil || got.Title != "late arrival" {
+		t.Fatalf("task after kept source: %+v %v", got, err)
+	}
+	dst, _ := r.OpenExisting("proj-dst")
+	if has, _ := dst.HasTasks(); has {
+		t.Fatal("merge must never move tasks")
+	}
+}
+
+// Concurrent create versus drop, unsynchronized: whichever wins, no task
+// is ever lost. A drop that succeeds means no create committed; a create
+// that committed means the drop refused.
 func TestDropRacesTaskCreation(t *testing.T) {
 	for round := range 12 {
 		r := newTestRegistry(t)

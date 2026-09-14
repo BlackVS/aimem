@@ -162,14 +162,14 @@ func (r *Registry) Drop(projectID string) error {
 		return fmt.Errorf("no such project %q", projectID)
 	}
 	// Tasks have no export/removal path yet, so a task-bearing project is
-	// never deleted. Checked here, AFTER the handle is closed and under the
-	// lock every writer must take to reopen: a create that raced us
-	// either committed first (and we refuse) or fails on the closed
-	// handle — it cannot land between this check and the removal.
+	// never deleted. Checked AFTER the handle is closed and under the lock
+	// every writer must take to reopen; fileHasTasks itself waits for a
+	// transaction that was already in flight on the closed handle, so a
+	// create that raced us either commits first (and we refuse) or fails.
 	if has, err := fileHasTasks(filepath.Join(dir, "journal.db")); err != nil {
-		return err
+		return fmt.Errorf("project %q not removed: cannot verify it holds no tasks: %w", projectID, err)
 	} else if has {
-		return ErrProjectHasTasks
+		return fmt.Errorf("project %q: %w", projectID, ErrProjectHasTasks)
 	}
 	return os.RemoveAll(dir)
 }
@@ -365,7 +365,10 @@ func (r *Registry) MergeProject(oldID, newID string) (events, mems, runs, cites 
 	}
 	// The early HasTasks check above ran without the lock; a task created
 	// while the copy was in flight would otherwise be deleted with the
-	// source. Re-check after eviction, under the lock (see Drop).
+	// source. Re-check after eviction, under the lock (see Drop). The
+	// history is already folded into the target by now (idempotently), so
+	// the source is kept as is; a re-run is refused by the early check
+	// until the task is gone — see the design doc's lifecycle follow-up.
 	srcPath := filepath.Join(r.root, "projects", oldID, "journal.db")
 	if has, err := fileHasTasks(srcPath); err != nil {
 		return events, mems, runs, cites, fmt.Errorf("history merged, but the source could not be checked for tasks: %w (safe to re-run)", err)

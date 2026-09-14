@@ -544,7 +544,8 @@ func (d *DB) ListTasks(f TaskFilter) (TaskPage, error) {
 		if err := json.Unmarshal([]byte(body), &t); err != nil {
 			return out, err
 		}
-		out.Tasks = append(out.Tasks, TaskSummary{t.ID, t.Title, t.State, t.Assignee, t.Archived, t.Revision, t.UpdatedAt})
+		out.Tasks = append(out.Tasks, TaskSummary{ID: t.ID, Title: t.Title, State: t.State, Assignee: t.Assignee,
+			Archived: t.Archived, Revision: t.Revision, UpdatedAt: t.UpdatedAt})
 	}
 	return out, rows.Err()
 }
@@ -637,21 +638,30 @@ func (d *DB) HasTasks() (bool, error) {
 	return exists, err
 }
 
-// fileHasTasks answers HasTasks for a database file no handle is open on.
-// Registry.Drop/MergeProject call it under the registry lock AFTER closing
-// the cached handle, so no writer can commit into the file between this
-// check and the removal: a task-bearing project is never deleted.
+// fileHasTasks answers HasTasks for a project file whose cached handle the
+// registry has evicted and closed. database/sql.Close does NOT end a
+// transaction already running on the old handle, so this takes its own
+// IMMEDIATE transaction: SQLite makes it wait (busy_timeout) for any
+// in-flight writer to commit or roll back before we read, so a task that
+// lands is seen. No new writer can start: the closed handle refuses one
+// and a reopen needs the registry lock the caller holds. An unreadable
+// file is reported, not treated as empty: refusing is the safe direction.
 func fileHasTasks(path string) (bool, error) {
 	if _, err := os.Stat(path); os.IsNotExist(err) {
 		return false, nil // no database (interrupted first open): nothing to keep
 	}
-	sdb, err := sql.Open("sqlite", "file:"+path+"?mode=ro&_pragma=busy_timeout(5000)")
+	sdb, err := sql.Open("sqlite", "file:"+path+"?mode=rw&_txlock=immediate&_pragma=busy_timeout(5000)")
 	if err != nil {
 		return false, err
 	}
 	defer sdb.Close()
+	tx, err := sdb.Begin()
+	if err != nil {
+		return false, err
+	}
+	defer tx.Rollback()
 	var exists bool
-	err = sdb.QueryRow(`SELECT EXISTS(SELECT 1 FROM tasks)`).Scan(&exists)
+	err = tx.QueryRow(`SELECT EXISTS(SELECT 1 FROM tasks)`).Scan(&exists)
 	if err != nil && strings.Contains(err.Error(), "no such table") {
 		return false, nil // pre-v11 file: cannot hold tasks
 	}
