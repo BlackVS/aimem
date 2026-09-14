@@ -109,8 +109,8 @@ type TaskContent struct {
 	Assignee           *TaskAssignee `json:"assignee,omitempty"`
 	Blocker            string        `json:"blocker"`
 	Dependencies       []string      `json:"dependencies"`
-	CandidateRefs      []string      `json:"candidate_refs"`
-	EvidenceRefs       []string      `json:"evidence_refs"`
+	CandidateRefs      []TaskRef     `json:"candidate_refs"`
+	EvidenceRefs       []TaskRef     `json:"evidence_refs"`
 	NextAction         string        `json:"next_action"`
 	Archived           bool          `json:"archived"`
 	// Epic is the optional grouping above the task: an OPEN epic of the
@@ -192,10 +192,10 @@ func (c *TaskContent) validate() error {
 		c.Dependencies = []string{}
 	}
 	if c.CandidateRefs == nil {
-		c.CandidateRefs = []string{}
+		c.CandidateRefs = []TaskRef{}
 	}
 	if c.EvidenceRefs == nil {
-		c.EvidenceRefs = []string{}
+		c.EvidenceRefs = []TaskRef{}
 	}
 	if err := taskText(c.Title, MaxTaskTitleBytes, true); err != nil {
 		return fmt.Errorf("title: %w", err)
@@ -212,22 +212,18 @@ func (c *TaskContent) validate() error {
 	if c.Epic != "" && !taskIDRE.MatchString(c.Epic) {
 		return errors.New("epic must be an epic id")
 	}
-	if len(c.Dependencies) > MaxTaskListEntries || len(c.CandidateRefs) > MaxTaskListEntries || len(c.EvidenceRefs) > MaxTaskListEntries {
+	if len(c.Dependencies) > MaxTaskListEntries {
 		return fmt.Errorf("at most %d entries per dependency or reference list", MaxTaskListEntries)
+	}
+	if err := validateRefs("candidate_refs", c.CandidateRefs); err != nil {
+		return err
+	}
+	if err := validateRefs("evidence_refs", c.EvidenceRefs); err != nil {
+		return err
 	}
 	for _, id := range c.Dependencies {
 		if !taskIDRE.MatchString(id) {
 			return errors.New("each dependency must be a task ID")
-		}
-	}
-	for _, l := range []struct {
-		name string
-		refs []string
-	}{{"candidate_refs", c.CandidateRefs}, {"evidence_refs", c.EvidenceRefs}} {
-		for _, ref := range l.refs {
-			if err := taskText(ref, MaxTaskRefBytes, true); err != nil {
-				return fmt.Errorf("%s: %w", l.name, err)
-			}
 		}
 	}
 	for _, f := range []struct{ name, text string }{

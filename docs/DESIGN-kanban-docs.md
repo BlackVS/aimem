@@ -1,9 +1,10 @@
 # The documents an AI-driven Kanban needs
 
-Status: **accepted 2026-09-14; increments 1 (per-project enablement and
-tool listing), 2 (process reference selection and the hook bootstrap) and
-3 (epics as a table in the task schema, with the identity directory)
-implemented** — typed references are not. Written after the task backend (storage, service, page and
+Status: **accepted 2026-09-14; all four increments implemented** —
+per-project enablement and tool listing, process reference selection and
+the hook bootstrap, epics as a table in the task schema with the identity
+directory, and typed references (schema 13, the pre-1.0 break with its
+migration and receipt recomputation). Written after the task backend (storage, service, page and
 board; v0.4.0) shipped and the first agent-side fixes landed, when it
 became clear that the shared-documents feature predates the Kanban idea
 and was never asked what a process run by agents needs from it.
@@ -213,15 +214,16 @@ tasks; the collections store is not involved. The indexed task reference
 and the task snapshot must agree. Not in scope: nesting, roll-up state,
 automatic epic closure or hard deletion of epics.
 
-**Typed references.** `candidate_refs` and `evidence_refs` are free
-strings today. Each becomes a typed reference: `kind`, `ref`, optional
-`note`, and explicit scope where the kind needs it. Kinds are `task`,
+**Typed references.** `candidate_refs` and `evidence_refs` were free
+strings before schema 13. Each is a typed reference: `kind`, `ref`,
+optional `note`, and explicit scope where the kind needs it. Kinds are `task`,
 `doc`, `record`, `commit`, `pr`, `ci`, `url` and `text`. External targets
 use canonical URLs that identify the repository or service as well as the
 target; a bare PR number, commit hash or run id is insufficient. Internal
-targets identify the owning hub and the project or knowledge-group scope
-as applicable, plus the task id, document name or collection and record
-id. A Git-homed document uses a repository-qualified reference rather
+targets identify the project or knowledge-group scope as applicable,
+plus the task id, document name or collection and record id (correction
+at implementation: the owning hub is not part of the reference while a
+task board lives on one hub; a hub identity is a later addition). A Git-homed document uses a repository-qualified reference rather
 than an ambiguous local path. References grant no access to their
 targets.
 

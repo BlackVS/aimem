@@ -303,7 +303,7 @@
       },
       "post": {
         "summary": "Create a task in an existing ordinary project",
-        "description": "Body is the editable content (title required; state defaults to BACKLOG). Never creates a project. Ordinary user tokens may call this route; writes are authorized per attempt against the task's owning project (token issued for that project instance and a current grant), legacy writer tokens read only, admin tokens do everything. Retry keys travel in the Idempotency-Key header.",
+        "description": "Body is the editable content (title required; state defaults to BACKLOG; candidate_refs and evidence_refs are typed references {kind, ref, note?, scope?} with kind one of task, doc, record, commit, pr, ci, url, text — a bare string is refused with 400 since schema 13). Never creates a project. Ordinary user tokens may call this route; writes are authorized per attempt against the task's owning project (token issued for that project instance and a current grant), legacy writer tokens read only, admin tokens do everything. Retry keys travel in the Idempotency-Key header.",
         "x-role": "writer",
         "parameters": [
           {

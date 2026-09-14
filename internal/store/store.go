@@ -465,7 +465,7 @@ func (r *Registry) Close() {
 	r.dbs = map[string]*DB{}
 }
 
-const currentSchema = 12
+const currentSchema = 13
 
 // SetMeta / GetMeta store small key-value project metadata (e.g. the
 // project's declared knowledge groups, stamped from event pushes so the
@@ -892,6 +892,14 @@ CREATE TABLE epic_history(
 ALTER TABLE tasks ADD COLUMN epic TEXT NOT NULL DEFAULT '';
 CREATE INDEX idx_tasks_epic ON tasks(epic, id);
 UPDATE meta SET value='12' WHERE key='schema_version';`); err != nil {
+			return err
+		}
+	}
+	if v < 13 {
+		// Typed references (taskrefs.go): a data rewrite of the stored
+		// string references and a recomputation of the task receipts,
+		// in Go, one transaction with the version bump. No DDL.
+		if err := d.migrateTypedRefs(); err != nil {
 			return err
 		}
 	}

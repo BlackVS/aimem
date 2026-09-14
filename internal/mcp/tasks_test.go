@@ -594,3 +594,19 @@ func TestEpicToolsDispatch(t *testing.T) {
 		t.Fatalf("epic tool by name with tasks off: %s", resp)
 	}
 }
+
+// The tool arguments carry typed references through unchanged, and a
+// string array is refused at the argument decoder with the reason.
+func TestTypedReferencesInToolArgs(t *testing.T) {
+	a, err := decodeTaskArgs(json.RawMessage(`{"title":"t","idempotency_key":"k","evidence_refs":[{"kind":"ci","ref":"https://example.com/runs/1","note":"green"}]}`))
+	if err != nil || len(a.EvidenceRefs) != 1 || a.EvidenceRefs[0].Kind != "ci" || a.EvidenceRefs[0].Note != "green" {
+		t.Fatalf("typed args: %+v %v", a, err)
+	}
+	body, err := a.content()
+	if err != nil || body["evidence_refs"] == nil {
+		t.Fatalf("content marshal: %v %v", body, err)
+	}
+	if _, err := decodeTaskArgs(json.RawMessage(`{"title":"t","idempotency_key":"k","evidence_refs":["https://example.com/runs/1"]}`)); err == nil || !strings.Contains(err.Error(), "objects {kind, ref") {
+		t.Fatalf("legacy strings in args: %v", err)
+	}
+}

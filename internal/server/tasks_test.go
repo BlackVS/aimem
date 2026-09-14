@@ -771,7 +771,8 @@ func TestTasksPageIsPublicChrome(t *testing.T) {
 	// epics are not loaded (a direct task link), and the epic filter is
 	// cleared before the first query of another project.
 	for _, want := range []string{`view=board`, `ondrop=`, `if(t.archived){ if(from) countCol(from); return; }`, `if(SEEN[t.id] > t.revision) return;`,
-		"${t&&t.epic&&!EPICS[t.epic]?`<option value=\"${esc(t.epic)}\" selected>", `EPICS = {}; EPICS_PROJ = project; FILTER.epic = "";`, `const gen = ++EPICS_GEN;`, `if(gen!==EPICS_GEN) return;`, `EPICS = got;`, `loadEpics(CUR.project);`,
+		"${t&&t.epic&&!EPICS[t.epic]?`<option value=\"${esc(t.epic)}\" selected>", `EPICS = {}; EPICS_PROJ = project; FILTER.epic = "";`, `const gen = ++EPICS_GEN;`,
+		`if(LINK_KINDS[r.kind] && /^https?:\/\//i.test(ref)) body =`, `function parseRefs(text){`, `candidate_refs:parseRefs(g("candidate_refs")), evidence_refs:parseRefs(g("evidence_refs")),`, `if(gen!==EPICS_GEN) return;`, `EPICS = got;`, `loadEpics(CUR.project);`,
 		`let TOK_REMEMBERED = !!TOK;`, `TOK_REMEMBERED=false;`,
 		`TOK_REMEMBERED?"The token remembered in this browser from an earlier visit was rejected (invalid, expired, revoked, or the user is disabled) — paste a current one.":"That token was rejected (invalid, expired, revoked, or the user is disabled)."`} {
 		if !strings.Contains(page, want) {
@@ -1022,5 +1023,23 @@ func TestAccessDirectory(t *testing.T) {
 		if !strings.Contains(w.Body.String(), `"name":"Alice"`) || strings.Contains(w.Body.String(), "token") || strings.Contains(w.Body.String(), "grant") {
 			t.Fatalf("directory content: %s", w.Body)
 		}
+	}
+}
+
+// Over HTTP: typed references round-trip; a string array is refused with
+// the reason; a wrong kind is refused.
+func TestTypedReferencesOverHTTP(t *testing.T) {
+	f := newTaskFixture(t)
+	w := taskReq(t, f.h, "POST", "/v1/projects/alpha/tasks", f.alice, "r1", `{"title":"typed","candidate_refs":[{"kind":"pr","ref":"https://example.com/org/repo/pull/7","note":"the candidate"}],"evidence_refs":[{"kind":"text","ref":"reviewed"}]}`)
+	if w.Code != 201 || !strings.Contains(w.Body.String(), `"kind":"pr"`) || !strings.Contains(w.Body.String(), `"note":"the candidate"`) {
+		t.Fatalf("typed create: %d %s", w.Code, w.Body)
+	}
+	w = taskReq(t, f.h, "POST", "/v1/projects/alpha/tasks", f.alice, "r2", `{"title":"legacy","candidate_refs":["https://example.com/pull/7"]}`)
+	if w.Code != 400 || !strings.Contains(w.Body.String(), "objects {kind, ref") {
+		t.Fatalf("legacy strings must be refused with the shape: %d %s", w.Code, w.Body)
+	}
+	w = taskReq(t, f.h, "POST", "/v1/projects/alpha/tasks", f.alice, "r3", `{"title":"bad","evidence_refs":[{"kind":"pr","ref":"7"}]}`)
+	if w.Code != 400 || !strings.Contains(w.Body.String(), "http(s) URL") {
+		t.Fatalf("bare pr number must be refused: %d %s", w.Code, w.Body)
 	}
 }
