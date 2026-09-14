@@ -6,12 +6,22 @@ board; v0.4.0) shipped and the first agent-side fixes landed, when it
 became clear that the shared-documents feature predates the Kanban idea
 and was never asked what a process run by agents needs from it.
 
-Companion to [the Kanban proposal](AIMEM-KANBAN-PROPOSAL.md) (the product
-contract for tasks, extended here with project enablement and scoped
-process-asset access), [the implementation
-plan](DESIGN-task-backend-implementation.md), [shared documents]
-(DESIGN-shared-docs.md) and [structured collections]
-(DESIGN-structured-docs.md). Record corrections here, not silently.
+Companion to [the Kanban proposal](AIMEM-KANBAN-PROPOSAL.md), [the
+implementation plan](DESIGN-task-backend-implementation.md), [shared
+documents](DESIGN-shared-docs.md) and [structured collections]
+(DESIGN-structured-docs.md). This document **amends the product contract**
+in two places: a project whose tasks are disabled refuses task, comment
+and epic mutations; and the ordinary-token surface gains the scoped
+process-reference, directory and epic routes. When it is accepted, the
+Kanban proposal's status line points here. Record corrections here, not
+silently.
+
+Reviewed twice on 2026-09-14: revised by a second agent (Git references
+instead of hub-stored bodies; server-side enablement; explicit
+availability states), then a fresh-eyes pass whose findings are folded in
+below (increments and their order, epics as task-schema storage, the
+compatibility policy for typed references, the unknown-availability rule,
+the directory's fields).
 
 ## The problem
 
@@ -98,8 +108,15 @@ Global process definitions in Git:
   hub collection records.
 
 The live *agent roster* remains on the hub, referencing access identities
-through a limited identity/capability directory. Effective permissions
-remain authoritative in the access system; roster entries grant no authority.
+through a limited identity directory. The directory is a read-only route
+on the ordinary surface that returns, for every user and group the access
+store holds: id, kind, name and whether it is enabled — the fields the
+board needs to label an assignee and a comment author, and nothing else
+(no tokens, no grants, no project lists). It is a discovery widening of
+the same kind as the project listing and is pinned the same way: in the
+ordinary-token gate matrix and by a handler test. Effective permissions
+remain authoritative in the access system; roster entries grant no
+authority.
 
 The manifest and required files form a consistent version at the pinned
 commit. Validate the complete set before atomically promoting it into the
@@ -163,15 +180,21 @@ checks target-project authority. Boundary: route authorization, admin
 selection, process-reference/directory/epic handlers, HTTP/MCP schemas,
 OpenAPI, client Git retrieval/cache, hooks and page consumers.
 
-**Task grouping.** A task gains an optional `epic` reference; epics are a
-project-scoped collection (`epics/<id>`: title, objective, state, the
-release or milestone it targets). The board filters by epic; a release
-maps to the set of tasks under its epics; a task without an epic is
-allowed and shows as such. Storage: one nullable indexed column and one
-filter; the epic record is an ordinary collection record with no new
-storage kind. Boundary: `TaskContent`, the list filter, the page's filter
-control, the MCP `list_tasks` argument and the scoped epic interfaces
-described above.
+**Task grouping.** A task gains an optional `epic` reference; epics live
+in the task schema (an `epics` table beside `tasks`, one schema bump:
+id, title, objective, state, the release or milestone it targets,
+revision, timestamps), written through the same receipt-backed mutation
+as tasks and read through routes and MCP tools of the same shape
+(`list_epics`, `get_epic`, `create_epic`, `update_epic`). An epic is a
+task-shaped entity — project scope, an id never reused, an
+expected-revision write, a retirement lifecycle, the enablement gate —
+so it gets task-shaped storage rather than a carve-out in the generic
+collection routes. The board filters by epic; a release maps to the set
+of tasks under its epics; a task without an epic is allowed and shows as
+such. Storage: the table, one nullable indexed column on `tasks` and one
+filter. Boundary: the task schema and migration, `TaskContent`, the list
+filter, the epic routes and tools, the page's filter control, the MCP
+`list_tasks` argument.
 
 Epic IDs are stable within the owning project. Creates require an unused
 ID; updates and retirement require an expected revision, with stale writes
@@ -182,66 +205,54 @@ resolve, and IDs are never reused. Retired epics cannot receive new task
 assignments, but an update retaining an existing assignment remains valid.
 Retirement is an explicit operation, not a roll-up of task states.
 
-Generic collection mutation routes must refuse writes and deletes to the
-reserved epic collection, including for callers that can edit ordinary
-collections; epic mutations go through the scoped service that enforces
-project enablement, permission, revision and lifecycle checks. The indexed
-task reference and task snapshot must agree. Not in scope: nesting,
-roll-up state, automatic epic closure or hard deletion of epics.
+Epic mutations go through the task service, which enforces project
+enablement, permission, revision and lifecycle checks exactly as for
+tasks; the collections store is not involved. The indexed task reference
+and the task snapshot must agree. Not in scope: nesting, roll-up state,
+automatic epic closure or hard deletion of epics.
 
 **Typed references.** `candidate_refs` and `evidence_refs` are free
-strings today. Introduce typed references with `kind`, `ref`, optional
-`note` and explicit scope where needed. Kinds are `task`, `doc`, `record`,
-`commit`, `pr`, `ci`, `url` and `text`. External targets use canonical URLs
-that identify the repository or service as well as the target; a bare PR
-number, commit hash or run id is insufficient. Internal targets identify
-the owning hub and project or knowledge-group scope as applicable, plus
-the task id, document name or collection and record id. A Git-homed
-document uses a repository-qualified reference rather than an ambiguous
-local path. References grant no access to their targets.
+strings today. Each becomes a typed reference: `kind`, `ref`, optional
+`note`, and explicit scope where the kind needs it. Kinds are `task`,
+`doc`, `record`, `commit`, `pr`, `ci`, `url` and `text`. External targets
+use canonical URLs that identify the repository or service as well as the
+target; a bare PR number, commit hash or run id is insufficient. Internal
+targets identify the owning hub and the project or knowledge-group scope
+as applicable, plus the task id, document name or collection and record
+id. A Git-homed document uses a repository-qualified reference rather
+than an ambiguous local path. References grant no access to their
+targets.
 
 Validation checks the shape appropriate to each kind. Link rendering
 allows only HTTP(S) URLs or application links constructed from validated
 internal identities; unsupported schemes are never clickable. `text`
-preserves unstructured references as escaped, non-clickable text. Legacy
-strings are classified as `url` only when they are valid HTTP(S) URLs;
-otherwise their exact text is preserved without guessing a target.
+preserves an unstructured reference as escaped, non-clickable text.
 
-Compatibility includes readers as well as writers. Existing API and MCP
-clients must continue receiving string arrays under their existing
-contract; accepting old writes while returning objects is insufficient.
-Typed references use an explicit v2 HTTP/MCP contract; v1 continues to
-serve string references with its compatibility guarantees. A
-versioned compatibility adapter preserves fields absent from the legacy
-schema, including `epic`, from the task at the expected revision. A stale
-revision still conflicts. Fields that the legacy schema does express keep
-their existing replace-all semantics; omission is not a general patch.
+**Compatibility policy: a pre-1.0 break with a migration, not a dual
+contract.** The installed base at the time of writing is one hub and one
+agent identity on a release hours old, so the typed form replaces the
+string form in the next release rather than living beside it. The
+schema migration rewrites every stored string reference — in current
+snapshots, history and saved retry results — to `url` when it is a valid
+HTTP(S) URL and to `text` otherwise, preserving the exact text and never
+inferring a target; nothing is silently rewritten to a guessed identity.
+Old clients that send string arrays receive a 400 naming the new shape;
+old clients that only read receive the typed form. Retry receipts:
+because the digest already ignores zero-valued members and names its
+format, a request replayed across the upgrade with the same key and the
+same *typed* content replays; a legacy string-array request replayed
+after the upgrade is refused by validation before any digest is
+computed, so no receipt is consulted or written. The alternative — a
+permanent v1/v2 contract with an edit adapter and ambiguity rules — was
+written out in an earlier revision and rejected as cost without a
+beneficiary; it is the right design the day a client outside this
+project depends on the string form, and that day has not come.
 
-An unchanged legacy string-list projection preserves its underlying typed
-references, including notes and scope. For an edited projection, define
-which transformations can be mapped unambiguously; reject ambiguous edits
-with an explicit compatibility error and a path to a typed-capable client.
-For example, two typed references sharing a URL but differing in note or
-kind cannot be distinguished by that string alone. Do not guess which
-reference the writer meant or silently discard typed details. The exact
-v2 HTTP routes, MCP exposure and mapping rules belong in the implementation
-plan; universally lossless legacy edits are not promised. No one-release
-automatic removal of legacy support is assumed; `text` remains supported.
-
-Storage decoding must support existing current-task snapshots, history
-and saved retry results. Historical evidence must remain readable and
-must not be silently rewritten to inferred targets. Define how reference
-normalization interacts with versioned retry digests: a previously
-accepted request replayed with the same credential and key must retain
-its retry behavior across the upgrade, and changed input must still
-conflict. An implementation plan must cover migration and mixed-version
-clients, not just the new request schema.
-
-Boundary: `TaskContent`, storage decoding and migration, retry receipts
-and digest compatibility, HTTP/MCP version negotiation and schemas, the
-page's renderer and the OpenAPI document. Not in scope: dereferencing,
-freshness checks or certifying evidence correctness (the proposal's
-"start with explicit agent checks" stands).
+Boundary: `TaskContent`, storage decoding and migration, the validation
+of each kind, the tool schemas, the page's renderer and the OpenAPI
+document. Not in scope: dereferencing, freshness checks or certifying
+evidence correctness (the proposal's "start with explicit agent checks"
+stands).
 
 **Server enablement.** Store the setting in project metadata on the owning
 hub, changed only through admin operations. The page reads it to label
@@ -250,7 +261,12 @@ project is enabled at session startup; the list stays fixed until the next
 session restart. The hub MCP endpoint serves multiple projects and may
 expose task tools, enforcing each target project's setting on every call.
 Hidden local tools must not bypass the setting when called by name.
-All service mutations check current enablement as well as existing task
+When the startup lookup fails (the hub offline or unreachable) the
+setting is unknown, not disabled: the facade lists the task tools and
+the session context carries the availability notice, because the hub
+refuses writes to a disabled project regardless and hiding the tools
+would make an offline start look like a disabled project. All service
+mutations check current enablement as well as existing task
 authorization; a cached setting never authorizes a write.
 
 Upgrade migration enables projects that already contain tasks, including
@@ -328,17 +344,48 @@ retrieval and cache, availability diagnostics and the plugin's equivalent.
 ## Remaining implementation choices
 
 - Set concrete bootstrap size budgets and bounded hub/Git fetch deadlines.
-- Specify v2 HTTP routes and MCP exposure, the scoped-reference schema and
-  unambiguous v1 edit mapping rules. Version selection is explicit; v1
-  clients never silently receive v2 representations.
+- Fix the manifest and checklist file format (one format, parsed
+  identically by the hook and the plugin; a JSON manifest naming Markdown
+  bodies and a JSON checklist with stable item ids is the obvious choice).
+- Specify the typed-reference schema per kind, the epic routes and tools,
+  and the migration's exact rewrite rules and its test corpus.
+
+## Increments
+
+Serial PRs, in this order (agreed with the user, 2026-09-14), each with
+its own boundary and the acceptance checks below that apply to it:
+
+1. **Enablement and tool listing.** Project metadata setting, admin
+   console and CLI operations, the migration that enables projects already
+   holding tasks, mutation refusals on disabled projects, the stdio
+   facade's startup listing with the unknown-availability rule, the
+   restart notice, the page label. Storage touched only by the metadata
+   key; ultra review (authorization gate).
+2. **Reference selection and the hook bootstrap.** Admin selection of
+   repository, commit and manifest with an expected metadata revision;
+   the scoped process-reference route; the manifest and checklist format;
+   client fetch with atomic cache promotion, the offline and denial
+   states, the bounded budget; the hook's and the plugin's context. No
+   task-schema change.
+3. **Epics.** The `epics` table (schema bump), the receipt-backed
+   mutations, retirement, the routes and tools, the task's `epic` column
+   and filter, the board's filter control. Ultra review (schema).
+4. **Typed references.** The typed shape per kind, validation, the
+   migration of stored strings, the renderer, the tool schemas and the
+   OpenAPI document; the pre-1.0 break. Ultra review (schema and the
+   retry receipts).
+
+The identity directory ships with the first increment that needs it —
+the board's assignee labels — which is 3 at the latest.
 
 ## Acceptance checks for implementation
 
-- Exercise old and new HTTP/MCP clients against upgraded storage containing
-  tasks, historical snapshots and retry receipts. Old reads still decode;
-  title-only legacy edits preserve epic assignments and typed details;
-  stale updates conflict; ambiguous reference edits fail explicitly without
-  changing stored content. Identical retries replay and changed input
+- Upgrade storage holding tasks, historical snapshots and retry receipts
+  with string references: every reference decodes typed afterwards, a
+  valid HTTP(S) string became `url` and any other string became `text`
+  with its exact text, nothing was rewritten to an inferred target. A
+  legacy string-array write is refused with a message naming the new
+  shape; a typed retry with the same key replays; changed typed input
   conflicts. Ambiguous identities and unsafe clickable schemes are refused.
 - Start a first session with `session_facts` absent or zero and verify that
   an enabled project gets its complete process bootstrap. Exercise disabled,
@@ -364,15 +411,21 @@ retrieval and cache, availability diagnostics and the plugin's equivalent.
 
 - Race epic updates and retirement; stale revisions conflict. Refuse
   cross-project or missing epic assignments, new assignments to retired
-  epics, ID reuse and generic collection mutations. Existing assignments
-  and historical links still resolve after retirement; task snapshots and
-  indexed epic filters agree.
+  epics and ID reuse. Existing assignments and historical links still
+  resolve after retirement; task snapshots and indexed epic filters agree.
+- The identity directory returns exactly id, kind, name and enabled for
+  every user and group, to any ordinary token, and nothing else; the gate
+  matrix and a handler test pin it.
 
 ## Dogfood first: aimem itself
 
 This repository is the first dogfood project, enabled by migration if it
 already contains tasks. An admin selects the Git repository, commit and
-manifest for its handbook, five-item DoR/DoD and task templates. These
+manifest for its handbook, five-item DoR/DoD and task templates. The
+repository is the private skills repository the installer already
+fetches from, so every agent machine holds read access to it today; the
+selection step confirms that access on each machine before the first
+bootstrap is trusted. These
 definitions are reviewed together in Git; the hub stores their reference
 only. The roster exposes the two agent identities that work here. The
 follow-up lists in the implementation plan become tasks under three epics:
@@ -386,5 +439,6 @@ want, and every agent on the hub sees tools it must not use. Without the
 placement rule, the process text will exist in three copies within a
 month. Without grouping and typed references, the board is a list of
 cards with prose pointers, and the "evidence rules" stay a convention no
-tool can check. Each piece is small; together they are what turns a task
+tool can check. None of the four increments is small any more, which is
+why they are ordered and serial; together they are what turns a task
 service into a process that agents can be trusted to run.
