@@ -15,6 +15,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	_ "modernc.org/sqlite"
@@ -26,9 +27,11 @@ import (
 
 // Registry opens and caches per-project stores under one state root.
 type Registry struct {
-	root string
-	mu   sync.Mutex
-	dbs  map[string]*DB
+	root      string
+	mu        sync.Mutex
+	dbs       map[string]*DB
+	hints     *taskHints   // where tasks were last seen; see taskloc.go
+	taskScans atomic.Int64 // full project scans by LocateTask (observability, tests)
 }
 
 // DB is one project's journal database.
@@ -36,6 +39,7 @@ type DB struct {
 	sql       *sql.DB
 	projectID string
 	path      string
+	hints     *taskHints // the registry's; a create records its task here
 }
 
 // StoredEvent is an event row as returned by queries.
@@ -58,7 +62,7 @@ func NewRegistry(root string) (*Registry, error) {
 		}
 		return nil, fmt.Errorf("state root %s is a symlink; refusing", root)
 	}
-	return &Registry{root: root, dbs: map[string]*DB{}}, nil
+	return &Registry{root: root, dbs: map[string]*DB{}, hints: newTaskHints()}, nil
 }
 
 // Root returns the state root path.
@@ -106,7 +110,7 @@ func (r *Registry) Open(projectID string) (*DB, error) {
 		return nil, err
 	}
 	sdb.SetMaxOpenConns(1) // serialize writers; modernc + single file
-	db := &DB{sql: sdb, projectID: projectID, path: path}
+	db := &DB{sql: sdb, projectID: projectID, path: path, hints: r.hints}
 	if err := db.migrate(); err != nil {
 		sdb.Close()
 		return nil, err
