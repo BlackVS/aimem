@@ -29,6 +29,11 @@ type HubConfig struct {
 	URL   string `json:"url"` // e.g. https://hub.example.com:8440
 	Token string `json:"token"`
 	Sync  string `json:"sync,omitempty"` // optional ssh destination for `aimem sync --hub`
+	// TaskToken is the ordinary (per-user, per-project) token the local
+	// MCP facade presents for task tools. Separate from Token on purpose:
+	// the checkpoint token is a shared writer credential and must never
+	// carry task authority.
+	TaskToken string `json:"task_token,omitempty"`
 	// Insecure skips TLS certificate verification for this hub — for the
 	// self-signed phase of a fresh hub (still TLS on the wire + bearer
 	// token). Drop it once a real certificate is installed.

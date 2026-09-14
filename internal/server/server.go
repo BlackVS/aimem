@@ -44,6 +44,8 @@ type Server struct {
 	accessMu     sync.Mutex
 	accessDB     *access.Store
 	accessClosed bool
+	muxOnce      sync.Once
+	mux          http.Handler // route-table handler for in-process task dispatch
 }
 
 func New(reg *store.Registry, log *slog.Logger) *Server {
@@ -105,6 +107,14 @@ func (s *Server) Routes() []Route {
 		{"DELETE", "/v1/projects/{p}/access/{kind}/{id}", s.setAccessGrant, true},
 		{"POST", "/v1/access/tokens", s.issueAccessToken, true},
 		{"DELETE", "/v1/access/tokens/{id}", s.revokeAccessToken, true},
+		{"GET", "/v1/projects/{p}/tasks", s.listTasks, false},
+		{"POST", "/v1/projects/{p}/tasks", s.createTask, false},
+		{"GET", "/v1/tasks/{id}", s.getTask, false},
+		{"PUT", "/v1/tasks/{id}", s.updateTask, false},
+		{"GET", "/v1/tasks/{id}/history", s.taskHistory, false},
+		{"GET", "/v1/tasks/{id}/comments", s.listTaskComments, false},
+		{"POST", "/v1/tasks/{id}/comments", s.addTaskComment, false},
+		{"GET", "/v1/tasks/{id}/comments/{c}", s.getTaskComment, false},
 		{"GET", "/v1/health", s.health, false},
 		{"POST", "/v1/events", s.append, false},
 		{"GET", "/v1/projects", s.projects, false},
@@ -443,15 +453,29 @@ func (s *Server) authWrapper(token string, next http.Handler) http.Handler {
 			w.WriteHeader(http.StatusUnauthorized)
 			return
 		}
-		// This access-control foundation does not grant new ordinary tokens
-		// the legacy writer surface (nor /mcp's trusted local API client).
-		// Task routes will get explicit permissions in their own increment.
-		if id.Role == "user" && !(r.Method == "GET" && r.URL.Path == "/v1/access/identity") {
+		// Ordinary tokens never get the legacy writer surface. They reach
+		// their identity check, the task routes (which authorize every
+		// write themselves) and /mcp (whose dispatcher hides every legacy
+		// tool from them) — see ordinaryTaskRoute.
+		if id.Role == "user" && !(r.Method == "GET" && r.URL.Path == "/v1/access/identity") && !ordinaryTaskRoute(r) {
 			s.fail(w, http.StatusForbidden, fmt.Errorf("ordinary token is not authorized for this endpoint"))
 			return
 		}
 		next.ServeHTTP(w, r.WithContext(withIdentity(r.Context(), id)))
 	})
+}
+
+// TCPHandler is the complete hub-mode surface behind the bearer gate: the
+// route table plus the extra handlers (e.g. /mcp), every request
+// authenticated by authWrapper. ListenTCP serves exactly this; tests in
+// other packages exercise the real gate through it.
+func (s *Server) TCPHandler(token string, extra map[string]http.Handler) http.Handler {
+	mux := http.NewServeMux()
+	mux.Handle("/", s.Handler())
+	for pattern, h := range extra {
+		mux.Handle(pattern, h)
+	}
+	return s.authWrapper(token, mux)
 }
 
 // ListenTCP starts the optional authenticated TCP listener (hub mode):
@@ -462,12 +486,7 @@ func (s *Server) ListenTCP(addr, token, certFile, keyFile string, extra map[stri
 	if token == "" {
 		return nil, errors.New("AIMEM_HTTP_TOKEN is required when AIMEM_HTTP_LISTEN is set")
 	}
-	mux := http.NewServeMux()
-	mux.Handle("/", s.Handler())
-	for pattern, h := range extra {
-		mux.Handle(pattern, h)
-	}
-	authed := s.authWrapper(token, mux)
+	authed := s.TCPHandler(token, extra)
 	srv := &http.Server{
 		Addr: addr, Handler: authed,
 		// Header timeout guards slowloris; the body timeouts are wide

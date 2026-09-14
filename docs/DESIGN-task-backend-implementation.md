@@ -10,12 +10,45 @@ changing the contract.
 
 ## Resume State
 
-Stage 1 (storage and integrity) is implemented on branch `feat/task-storage`
-as `internal/store/tasks.go` with schema 11 (`store.go`), lifecycle refusals
-in `Registry.Drop`/`MergeProject`, and `internal/store/tasks_test.go`. The
-earlier untested draft (`docs/drafts/task-storage.go.txt`) is superseded and
-removed. Nothing is exposed yet: no HTTP route, MCP tool, CLI command or UI
-reads or writes tasks; the service layer is stage 2.
+Stage 1 (storage and integrity) is merged (PR #38): `internal/store/tasks.go`
+with schema 11 (`store.go`), lifecycle refusals in `Registry.Drop`/
+`MergeProject`, and `internal/store/tasks_test.go`.
+
+Stage 2 (authorized HTTP and MCP) is implemented on branch `feat/task-service`:
+`internal/server/tasks.go` (routes, actor, per-attempt authorization, strict
+decoding, status mapping, in-process MCP dispatch), `internal/mcp/tasks.go`
+(eight task tools, the hub principal, the local hub caller), `Registry.LocateTask`,
+`access.Store.CanWrite`, `Identity.Project`, `HubConfig.TaskToken` and the
+`aimem hub task-token` command. No UI yet (stage 3).
+
+Decisions taken while implementing stage 2:
+
+- **Local socket = operator.** Requests over the unix socket carry no
+  identity and act as the admin actor named `local`, consistent with every
+  other socket route (the socket already drops and renames projects). The
+  stdio MCP facade never uses the socket for tasks (below).
+- **Ordinary tokens reach exactly:** their identity check, the task routes,
+  and `POST /mcp` (`ordinaryTaskRoute`). Every task write re-runs the
+  authorization: token issued for this project's access instance AND the
+  user holds a current grant (`CanWrite`), both read fresh; reads need only
+  a valid credential. Legacy writer tokens read tasks, never write them.
+- **MCP on the hub** dispatches task tools in-process against the task
+  routes with the request's own identity (`Server.MCPPrincipal`), never via
+  the trusted local client; an ordinary token's `tools/list` shows the task
+  tools alone and a hidden legacy tool called by name is refused. Nothing is
+  cached across requests.
+- **MCP locally (stdio)** sends task tools to the project's bound hub with
+  `HubConfig.TaskToken` (`hub.json`, 0600, set by `aimem hub task-token`,
+  must be an `aimem_user_…` token). Missing hub or credential is an
+  actionable error; the checkpoint token is never used for tasks.
+- **Global task lookup** is a scan of existing ordinary projects
+  (`Registry.LocateTask`); an unreadable project makes a miss inconclusive
+  (error) rather than "not found". Links are origin-relative paths.
+- **Update body** is the full editable content plus `expected_revision`
+  (strict decoding, so unknown fields are refused; omitted optional fields
+  clear, as the storage contract says).
+- **Validation errors never echo caller values** for state or dependencies
+  (the external review's follow-up from PR #38).
 
 Decisions taken while implementing stage 1 (corrections to the draft):
 
@@ -234,7 +267,7 @@ replication to existing journal/knowledge sync as part of this work.
 
 ## HTTP Contract For The Second Increment
 
-These routes are proposed and must not be advertised as implemented yet:
+These routes are implemented in stage 2 (`internal/server/tasks.go`):
 
 | Method and path | Behavior |
 | --- | --- |
@@ -399,6 +432,6 @@ warning tier of 6 and items 3 and 5 belong to the stage-2 service:
 7. Add meaningful migration, transaction-failure, concurrency and lifecycle tests
    before considering any draft code an implementation milestone.
 
-Stage 1 is on `feat/task-storage`. Do not publish new MCP definitions without
-enforcement or change the public version. Resume with stage 2 (the authorized
-service) from the merged storage stage, and preserve the approved simple scope.
+Stages 1 and 2 are done (see Resume State). Do not change the public version
+as part of this work. Resume with stage 3 (task list/detail/discussion UI, then
+the board) on the same service, and preserve the approved simple scope.

@@ -201,9 +201,10 @@ func TestAccessManagementAndOrdinaryTokenBoundary(t *testing.T) {
 			t.Fatalf("write permission for %s: %s", p, w.Body)
 		}
 	}
-	// New credentials cannot use legacy APIs or /mcp's trusted transport as
-	// an alternate write path. The task surface will be added separately.
-	for _, path := range []string{"/v1/projects", "/v1/access", "/v1/logs", "/mcp", "/v1/projects/alpha/memories"} {
+	// New credentials cannot use legacy APIs as an alternate write path.
+	// (/mcp admits them at the gate; its dispatcher then serves task tools
+	// only, with the caller's own authority — proven in internal/mcp.)
+	for _, path := range []string{"/v1/projects", "/v1/access", "/v1/logs", "/v1/projects/alpha/memories", "/v1/projects/alpha/docs/x"} {
 		w := authedReq(t, h, "POST", path, issued.Secret, `{}`)
 		if w.Code != 403 {
 			t.Fatalf("ordinary escaped via %s: %d", path, w.Code)

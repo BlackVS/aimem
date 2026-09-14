@@ -7,6 +7,7 @@ package mcp
 
 import (
 	"bufio"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -33,13 +34,13 @@ func Serve(api *http.Client, projectID string, groups []string) error {
 	in := bufio.NewScanner(os.Stdin)
 	in.Buffer(make([]byte, 1024*1024), 16*1024*1024)
 	out := bufio.NewWriter(os.Stdout)
-	s := &srv{api: api, project: projectID, groups: groups}
+	s := &srv{api: api, project: projectID, groups: groups, taskSetup: localTaskCaller}
 	for in.Scan() {
 		line := strings.TrimSpace(in.Text())
 		if line == "" {
 			continue
 		}
-		if resp := s.handle([]byte(line)); resp != nil {
+		if resp := s.handle(context.Background(), []byte(line)); resp != nil {
 			out.Write(append(resp, '\n'))
 			out.Flush()
 		}
@@ -51,6 +52,13 @@ type srv struct {
 	api     *http.Client
 	project string // "" on the hub: tools must pass an explicit project
 	groups  []string
+	// Task tools cross the trust boundary: tasks performs a task-API call
+	// with the caller's own authority (resolved lazily by taskSetup on the
+	// stdio facade, per request on the hub); tasksOnly hides every legacy
+	// tool from an ordinary token.
+	tasks     TaskCallFunc
+	taskSetup func() (TaskCallFunc, error)
+	tasksOnly bool
 }
 
 type rpcRequest struct {
@@ -79,7 +87,7 @@ type rpcError struct {
 	Message string `json:"message"`
 }
 
-func (s *srv) handle(raw []byte) []byte {
+func (s *srv) handle(ctx context.Context, raw []byte) []byte {
 	var req rpcRequest
 	if err := json.Unmarshal(raw, &req); err != nil {
 		return nil
@@ -96,9 +104,12 @@ func (s *srv) handle(raw []byte) []byte {
 	case "ping":
 		return reply(req.ID, map[string]any{}, nil)
 	case "tools/list":
-		return reply(req.ID, map[string]any{"tools": toolDefs}, nil)
+		if s.tasksOnly {
+			return reply(req.ID, map[string]any{"tools": taskToolDefs}, nil)
+		}
+		return reply(req.ID, map[string]any{"tools": append(append([]map[string]any{}, toolDefs...), taskToolDefs...)}, nil)
 	case "tools/call":
-		return s.toolCall(req)
+		return s.toolCall(ctx, req)
 	default:
 		return reply(req.ID, nil, &rpcError{Code: -32601, Message: "method not found: " + req.Method})
 	}
@@ -295,12 +306,27 @@ type toolParams struct {
 	} `json:"arguments"`
 }
 
-func (s *srv) toolCall(req rpcRequest) []byte {
+func (s *srv) toolCall(ctx context.Context, req rpcRequest) []byte {
 	var p toolParams
 	if err := json.Unmarshal(req.Params, &p); err != nil {
 		return reply(req.ID, nil, &rpcError{Code: -32602, Message: err.Error()})
 	}
-	text, err := s.run(&p)
+	var text string
+	var err error
+	switch {
+	case isTaskTool(p.Name):
+		var raw struct {
+			Arguments json.RawMessage `json:"arguments"`
+		}
+		json.Unmarshal(req.Params, &raw)
+		text, err = s.taskTool(ctx, p.Name, raw.Arguments)
+	case s.tasksOnly:
+		// An ordinary token's hidden legacy tools stay hidden when called
+		// by name: they would run with the hub's own trusted local client.
+		err = fmt.Errorf("tool %q is not available to this credential (task tools only)", p.Name)
+	default:
+		text, err = s.run(&p)
+	}
 	if err != nil {
 		// Tool-level errors go back as content with isError, per MCP.
 		return reply(req.ID, map[string]any{
@@ -661,9 +687,11 @@ func DefaultProject() (string, []string, error) {
 // each POST carries one JSON-RPC message and receives a JSON response (this
 // server never needs the SSE upgrade — all tools are quick request/reply).
 // Auth happens outside (bearer middleware on the TCP listener). Runs in hub
-// mode: tools must pass an explicit project argument.
-func NewHTTPHandler(api *http.Client) http.Handler {
-	s := &srv{api: api}
+// mode: tools must pass an explicit project argument. Legacy tools use the
+// trusted local client; task tools go through principal, which binds them
+// to the request's own authenticated identity and, for an ordinary token,
+// hides everything else. Nothing is cached across requests.
+func NewHTTPHandler(api *http.Client, principal PrincipalFunc) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
 			w.WriteHeader(http.StatusMethodNotAllowed)
@@ -674,7 +702,11 @@ func NewHTTPHandler(api *http.Client) http.Handler {
 			w.WriteHeader(http.StatusRequestEntityTooLarge)
 			return
 		}
-		resp := s.handle(raw)
+		s := &srv{api: api}
+		if principal != nil {
+			s.tasks, s.tasksOnly = principal(r)
+		}
+		resp := s.handle(r.Context(), raw)
 		if resp == nil {
 			w.WriteHeader(http.StatusAccepted) // notification
 			return

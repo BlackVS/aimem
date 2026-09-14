@@ -125,6 +125,18 @@ aimem hub               # list; the default is marked *
 aimem hub default home  # change the default
 ```
 
+Task tools (the Kanban work, `create_task` and friends in the MCP facade)
+use a separate per-user credential, never the writer token above: ask the
+hub admin for an ordinary token issued to your user for your project
+(`aimem access` on the hub) and store it with
+
+```sh
+aimem hub task-token home <aimem_user_...token>
+```
+
+Without it the task tools answer with exactly this instruction; nothing
+falls back to the writer token or to the local service.
+
 (`--sync <ssh-dest>` on `hub add` is only for hubs old enough to lack
 the sync API; current hubs sync over HTTPS with the same token. Hub
 NAMES are machine-local, but use the same names on every machine — a

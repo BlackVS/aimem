@@ -204,7 +204,21 @@ func TestTaskValidationBounds(t *testing.T) {
 	exact.Objective += "a"
 	bad("one byte over", exact, "limit")
 	bad("bidi override", TaskContent{Title: "fix\u202Eauth"}, "bidirectional")
-	bad("huge state", TaskContent{Title: "t", State: strings.Repeat("S", 1<<20)}, "invalid task state")
+	// Caller values never come back in the error: a secret-shaped state or
+	// dependency is neither stored nor echoed.
+	for name, c := range map[string]TaskContent{
+		"secret state":      {Title: "t", State: "-----BEGIN RSA PRIVATE KEY-----"},
+		"secret dependency": {Title: "t", Dependencies: []string{"sk-" + strings.Repeat("a", 40)}},
+		"huge state":        {Title: "t", State: strings.Repeat("S", 1<<20)},
+	} {
+		_, err := db.CreateTask(c, aliceActor, "k-"+name)
+		if err == nil || strings.Contains(err.Error(), "BEGIN") || strings.Contains(err.Error(), "sk-") || len(err.Error()) > 200 {
+			t.Fatalf("%s: %v", name, err)
+		}
+	}
+	if _, err := db.ListTasks(TaskFilter{State: "-----BEGIN RSA PRIVATE KEY-----"}); err == nil || strings.Contains(err.Error(), "BEGIN") {
+		t.Fatalf("filter echo: %v", err)
+	}
 	// Idempotency key bounds and secrets.
 	if _, err := db.CreateTask(content("t"), aliceActor, ""); err == nil || !strings.Contains(err.Error(), "idempotency key") {
 		t.Fatalf("blank key: %v", err)
@@ -946,6 +960,48 @@ func TestDropRacesTaskCreation(t *testing.T) {
 			}
 		}
 		r.Close()
+	}
+}
+
+// LocateTask scans existing ordinary projects only, follows a rename, and
+// never opens a store that cannot hold tasks.
+func TestLocateTask(t *testing.T) {
+	r := newTestRegistry(t)
+	a, _ := r.Open("proj-a")
+	b, _ := r.Open("proj-b")
+	if _, err := r.Open(UserScopeProject); err != nil {
+		t.Fatal(err)
+	}
+	ta := mustCreate(t, a, "in a", "k-a")
+	tb := mustCreate(t, b, "in b", "k-b")
+	if p, db, err := r.LocateTask(tb.ID); err != nil || p != "proj-b" || db != b {
+		t.Fatalf("locate b: %s %v", p, err)
+	}
+	if _, _, err := r.LocateTask(uuidv7.New()); !errors.Is(err, ErrTaskNotFound) {
+		t.Fatalf("missing: %v", err)
+	}
+	if _, _, err := r.LocateTask("not-an-id"); !errors.Is(err, ErrTaskNotFound) {
+		t.Fatalf("bad id: %v", err)
+	}
+	if err := r.Rename("proj-a", "proj-z"); err != nil {
+		t.Fatal(err)
+	}
+	if p, _, err := r.LocateTask(ta.ID); err != nil || p != "proj-z" {
+		t.Fatalf("after rename: %s %v", p, err)
+	}
+	// A dropped (task-free) project simply disappears from the scan; a
+	// garbage directory that cannot be opened is reported, not hidden.
+	if err := os.MkdirAll(filepath.Join(r.root, "projects", "proj-bad"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(r.root, "projects", "proj-bad", "journal.db"), []byte("junk"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if p, _, err := r.LocateTask(tb.ID); err != nil || p != "proj-b" {
+		t.Fatalf("found despite a bad sibling: %s %v", p, err)
+	}
+	if _, _, err := r.LocateTask(uuidv7.New()); err == nil || errors.Is(err, ErrTaskNotFound) {
+		t.Fatalf("an unreadable project must make a miss inconclusive: %v", err)
 	}
 }
 
