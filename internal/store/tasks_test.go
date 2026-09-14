@@ -185,6 +185,26 @@ func TestTaskValidationBounds(t *testing.T) {
 	if _, err := db.CreateTask(TaskContent{Title: "t", CandidateRefs: []string{strings.Repeat("r", MaxTaskRefBytes)}}, aliceActor, strings.Repeat("k", MaxTaskKeyBytes)); err != nil {
 		t.Fatalf("ref and key at limit: %v", err)
 	}
+	full := make([]string, MaxTaskListEntries)
+	for i := range full {
+		full[i] = "ref"
+	}
+	if _, err := db.CreateTask(TaskContent{Title: "t", EvidenceRefs: full}, aliceActor, "k-refs-max"); err != nil {
+		t.Fatalf("%d refs: %v", MaxTaskListEntries, err)
+	}
+	exact := TaskContent{Title: "t", State: "BACKLOG", Dependencies: []string{}, CandidateRefs: []string{}, EvidenceRefs: []string{}}
+	b, _ := json.Marshal(exact)
+	exact.Objective = strings.Repeat("a", MaxTaskBytes-len(b))
+	if b, _ := json.Marshal(exact); len(b) != MaxTaskBytes {
+		t.Fatalf("test setup: %d bytes", len(b))
+	}
+	if _, err := db.CreateTask(exact, aliceActor, "k-json-max"); err != nil {
+		t.Fatalf("content at exactly %d bytes: %v", MaxTaskBytes, err)
+	}
+	exact.Objective += "a"
+	bad("one byte over", exact, "limit")
+	bad("bidi override", TaskContent{Title: "fix\u202Eauth"}, "bidirectional")
+	bad("huge state", TaskContent{Title: "t", State: strings.Repeat("S", 1<<20)}, "invalid task state")
 	// Idempotency key bounds and secrets.
 	if _, err := db.CreateTask(content("t"), aliceActor, ""); err == nil || !strings.Contains(err.Error(), "idempotency key") {
 		t.Fatalf("blank key: %v", err)
@@ -421,6 +441,20 @@ func TestTaskReceiptScopeIsPerTask(t *testing.T) {
 	}
 	if n := countRows(t, db, "task_comments", "1=1"); n != 2 {
 		t.Fatalf("comments: %d", n)
+	}
+	// Operation is part of the key: update and comment may share one.
+	if _, err := db.UpdateTask(a.ID, content("a2"), 1, aliceActor, "shared"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.AddTaskComment(a.ID, "after update", aliceActor, "shared"); err != nil {
+		t.Fatalf("same key across operations must not collide: %v", err)
+	}
+	// The token is part of the principal: a fresh token replaying a create
+	// key (same user, same content) is a new mutation, not a replay.
+	other := TaskActor{Kind: "user", UserID: aliceActor.UserID, TokenID: uuidv7.New(), Name: aliceActor.Name}
+	again, err := db.CreateTask(content("a"), other, "k-a")
+	if err != nil || again.ID == a.ID {
+		t.Fatalf("new token must get its own task: %+v %v", again, err)
 	}
 }
 
@@ -727,17 +761,32 @@ func TestDropWaitsForInFlightTaskWrite(t *testing.T) {
 	}
 	dropErr := make(chan error, 1)
 	go func() { dropErr <- r.Drop("proj-inflight") }()
-	time.Sleep(300 * time.Millisecond)
+	// Drop holds the registry lock for its whole locked section; once we
+	// cannot take it, Drop is inside and — with our transaction open — has
+	// nowhere to go but wait.
+	deadline := time.Now().Add(5 * time.Second)
+	for r.mu.TryLock() {
+		r.mu.Unlock()
+		if time.Now().After(deadline) {
+			t.Fatal("drop never entered its locked section")
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	time.Sleep(100 * time.Millisecond)
 	select {
 	case err := <-dropErr:
 		t.Fatalf("drop returned (%v) while a write transaction was still open", err)
 	default:
 	}
 	if err := tx.Commit(); err != nil {
-		t.Fatalf("commit on the evicted handle: %v", err)
+		t.Fatalf("commit: %v", err)
 	}
 	if err := <-dropErr; !errors.Is(err, ErrProjectHasTasks) {
 		t.Fatalf("drop after the in-flight create committed: %v", err)
+	}
+	// A refused drop leaves the handle other callers hold usable.
+	if got, err := db.GetTask(task.ID); err != nil || got.Title != "in flight" {
+		t.Fatalf("task through the original handle after a refused drop: %+v %v", got, err)
 	}
 	db2, err := r.OpenExisting("proj-inflight")
 	if err != nil {
@@ -745,6 +794,59 @@ func TestDropWaitsForInFlightTaskWrite(t *testing.T) {
 	}
 	if got, err := db2.GetTask(task.ID); err != nil || got.Title != "in flight" {
 		t.Fatalf("task after refused drop: %+v %v", got, err)
+	}
+}
+
+// Files the dropping registry never opened: a legacy (pre-v11) file holds
+// no tasks and is dropped; a v11 file that lost its tasks table but still
+// holds history, or a file that is not a database, is refused — deletion
+// never proceeds on a file that cannot be verified.
+func TestDropChecksTasksOnUnopenedFiles(t *testing.T) {
+	root := t.TempDir()
+	r, err := NewRegistry(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	legacy, _ := r.Open("proj-legacy")
+	for _, stmt := range []string{
+		`DROP TABLE task_requests`, `DROP TABLE task_comments`, `DROP TABLE task_history`, `DROP TABLE tasks`,
+		`UPDATE meta SET value='10' WHERE key='schema_version'`,
+	} {
+		if _, err := legacy.sql.Exec(stmt); err != nil {
+			t.Fatal(err)
+		}
+	}
+	broken, _ := r.Open("proj-broken")
+	mustCreate(t, broken, "orphaned history", "k-orphan")
+	for _, stmt := range []string{`PRAGMA foreign_keys=OFF`, `DROP TABLE tasks`} {
+		if _, err := broken.sql.Exec(stmt); err != nil {
+			t.Fatal(err)
+		}
+	}
+	garbage := filepath.Join(root, "projects", "proj-garbage")
+	if err := os.MkdirAll(garbage, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(garbage, "journal.db"), []byte("not a database"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	r.Close()
+	r2, err := NewRegistry(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer r2.Close()
+	if err := r2.Drop("proj-legacy"); err != nil {
+		t.Fatalf("legacy file must drop: %v", err)
+	}
+	for _, id := range []string{"proj-broken", "proj-garbage"} {
+		err := r2.Drop(id)
+		if err == nil || errors.Is(err, ErrProjectHasTasks) {
+			t.Fatalf("%s: unverifiable file must be refused with its cause, got %v", id, err)
+		}
+		if _, err := os.Stat(filepath.Join(root, "projects", id)); err != nil {
+			t.Fatalf("%s: directory removed despite the refusal: %v", id, err)
+		}
 	}
 }
 
@@ -776,8 +878,10 @@ func TestMergeKeepsSourceThatGainsTaskDuringCopy(t *testing.T) {
 		t.Fatal(err)
 	}
 	mergeErr := make(chan error, 1)
+	var merged int
 	go func() {
-		_, _, _, _, err := r.MergeProject("proj-src", "proj-dst")
+		events, _, _, _, err := r.MergeProject("proj-src", "proj-dst")
+		merged = events
 		mergeErr <- err
 	}()
 	time.Sleep(300 * time.Millisecond)
@@ -791,6 +895,9 @@ func TestMergeKeepsSourceThatGainsTaskDuringCopy(t *testing.T) {
 	}
 	if err := <-mergeErr; !errors.Is(err, ErrProjectHasTasks) {
 		t.Fatalf("merge must keep a source that gained a task: %v", err)
+	}
+	if merged != 1 {
+		t.Fatalf("the refusal must come from the late check, after the copy: events=%d", merged)
 	}
 	src2, err := r.OpenExisting("proj-src")
 	if err != nil {

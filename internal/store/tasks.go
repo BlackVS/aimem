@@ -154,6 +154,14 @@ func (e *TaskConflict) Error() string {
 
 func validTaskState(s string) bool { return slices.Contains(TaskStates, s) }
 
+// clip bounds a caller-supplied value before it is echoed in an error.
+func clip(s string) string {
+	if len(s) > 64 {
+		return s[:64] + "…"
+	}
+	return s
+}
+
 // taskText validates authored text: UTF-8, bounded, no control characters
 // beyond newline/tab, and no high-confidence secret shapes (the same tier
 // that refuses a document — never silently redact authored content).
@@ -170,6 +178,9 @@ func taskText(s string, max int, required bool) error {
 	for _, r := range s {
 		if unicode.IsControl(r) && r != '\n' && r != '\r' && r != '\t' {
 			return errors.New("text contains an unsupported control character")
+		}
+		if (r >= 0x202A && r <= 0x202E) || (r >= 0x2066 && r <= 0x2069) {
+			return errors.New("text contains a bidirectional override character")
 		}
 	}
 	if _, refuse := redact.ScanAuthored(s); len(refuse) > 0 {
@@ -192,7 +203,7 @@ func (c *TaskContent) validate() error {
 		return fmt.Errorf("title: %w", err)
 	}
 	if !validTaskState(c.State) {
-		return fmt.Errorf("invalid task state %q (want one of %s)", c.State, strings.Join(TaskStates, ", "))
+		return fmt.Errorf("invalid task state %q (want one of %s)", clip(c.State), strings.Join(TaskStates, ", "))
 	}
 	if c.Archived && c.State != "DONE" && c.State != "CANCELLED" {
 		return errors.New("only DONE or CANCELLED tasks can be archived")
@@ -205,20 +216,25 @@ func (c *TaskContent) validate() error {
 	}
 	for _, id := range c.Dependencies {
 		if !taskIDRE.MatchString(id) {
-			return fmt.Errorf("dependency %q is not a task ID", id)
+			return fmt.Errorf("dependency %q is not a task ID", clip(id))
 		}
 	}
-	for name, refs := range map[string][]string{"candidate_refs": c.CandidateRefs, "evidence_refs": c.EvidenceRefs} {
-		for _, ref := range refs {
+	for _, l := range []struct {
+		name string
+		refs []string
+	}{{"candidate_refs", c.CandidateRefs}, {"evidence_refs", c.EvidenceRefs}} {
+		for _, ref := range l.refs {
 			if err := taskText(ref, MaxTaskRefBytes, true); err != nil {
-				return fmt.Errorf("%s: %w", name, err)
+				return fmt.Errorf("%s: %w", l.name, err)
 			}
 		}
 	}
-	for name, s := range map[string]string{"objective": c.Objective, "acceptance_criteria": c.AcceptanceCriteria,
-		"non_goals": c.NonGoals, "blocker": c.Blocker, "next_action": c.NextAction} {
-		if err := taskText(s, MaxTaskBytes, false); err != nil {
-			return fmt.Errorf("%s: %w", name, err)
+	for _, f := range []struct{ name, text string }{
+		{"objective", c.Objective}, {"acceptance_criteria", c.AcceptanceCriteria}, {"non_goals", c.NonGoals},
+		{"blocker", c.Blocker}, {"next_action", c.NextAction},
+	} {
+		if err := taskText(f.text, MaxTaskBytes, false); err != nil {
+			return fmt.Errorf("%s: %w", f.name, err)
 		}
 	}
 	b, err := json.Marshal(c)
@@ -503,7 +519,7 @@ func (d *DB) ListTasks(f TaskFilter) (TaskPage, error) {
 		return out, err
 	}
 	if f.State != "" && !validTaskState(f.State) {
-		return out, fmt.Errorf("invalid task state %q", f.State)
+		return out, fmt.Errorf("invalid task state %q", clip(f.State))
 	}
 	if f.After != "" && !taskIDRE.MatchString(f.After) {
 		return out, errors.New("invalid task cursor")
@@ -644,8 +660,9 @@ func (d *DB) HasTasks() (bool, error) {
 // IMMEDIATE transaction: SQLite makes it wait (busy_timeout) for any
 // in-flight writer to commit or roll back before we read, so a task that
 // lands is seen. No new writer can start: the closed handle refuses one
-// and a reopen needs the registry lock the caller holds. An unreadable
-// file is reported, not treated as empty: refusing is the safe direction.
+// and a reopen needs the registry lock the caller holds. A file below
+// schema 11 cannot hold tasks; anything else that cannot be read is
+// reported, not treated as empty: refusing is the safe direction.
 func fileHasTasks(path string) (bool, error) {
 	if _, err := os.Stat(path); os.IsNotExist(err) {
 		return false, nil // no database (interrupted first open): nothing to keep
@@ -660,42 +677,14 @@ func fileHasTasks(path string) (bool, error) {
 		return false, err
 	}
 	defer tx.Rollback()
+	var v int
+	if err := tx.QueryRow(`SELECT value FROM meta WHERE key='schema_version'`).Scan(&v); err != nil {
+		return false, err
+	}
+	if v < 11 {
+		return false, nil
+	}
 	var exists bool
 	err = tx.QueryRow(`SELECT EXISTS(SELECT 1 FROM tasks)`).Scan(&exists)
-	if err != nil && strings.Contains(err.Error(), "no such table") {
-		return false, nil // pre-v11 file: cannot hold tasks
-	}
 	return exists, err
 }
-
-const taskSchemaSQL = `
-CREATE TABLE tasks(
-  id TEXT PRIMARY KEY,
-  state TEXT NOT NULL,
-  archived INTEGER NOT NULL,
-  assignee TEXT NOT NULL,
-  body TEXT NOT NULL);
-CREATE INDEX idx_tasks_state ON tasks(archived, state, id);
-CREATE INDEX idx_tasks_assignee ON tasks(assignee, id);
-CREATE TABLE task_history(
-  task_id TEXT NOT NULL REFERENCES tasks(id),
-  revision INTEGER NOT NULL,
-  body TEXT NOT NULL,
-  PRIMARY KEY(task_id, revision));
-CREATE TABLE task_comments(
-  sequence INTEGER PRIMARY KEY AUTOINCREMENT,
-  id TEXT NOT NULL UNIQUE,
-  task_id TEXT NOT NULL REFERENCES tasks(id),
-  body TEXT NOT NULL,
-  actor TEXT NOT NULL,
-  created_at TEXT NOT NULL);
-CREATE INDEX idx_task_comments_task ON task_comments(task_id, sequence);
-CREATE TABLE task_requests(
-  actor TEXT NOT NULL,
-  operation TEXT NOT NULL,
-  scope TEXT NOT NULL,
-  key TEXT NOT NULL,
-  digest TEXT NOT NULL,
-  result TEXT NOT NULL,
-  PRIMARY KEY(actor, operation, scope, key));
-UPDATE meta SET value='11' WHERE key='schema_version';`

@@ -154,6 +154,14 @@ func (r *Registry) Drop(projectID string) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if db, ok := r.dbs[projectID]; ok {
+		// Through the live handle first, so a refusal leaves the handle
+		// other callers still hold usable. The read waits for the single
+		// connection, so a write in flight commits before we look.
+		if has, err := db.HasTasks(); err != nil {
+			return fmt.Errorf("project %q not removed: cannot verify it holds no tasks: %w", projectID, err)
+		} else if has {
+			return fmt.Errorf("project %q: %w", projectID, ErrProjectHasTasks)
+		}
 		db.sql.Close()
 		delete(r.dbs, projectID)
 	}
@@ -162,9 +170,9 @@ func (r *Registry) Drop(projectID string) error {
 		return fmt.Errorf("no such project %q", projectID)
 	}
 	// Tasks have no export/removal path yet, so a task-bearing project is
-	// never deleted. Checked AFTER the handle is closed and under the lock
-	// every writer must take to reopen; fileHasTasks itself waits for a
-	// transaction that was already in flight on the closed handle, so a
+	// never deleted. Checked again AFTER the handle is closed and under the
+	// lock every writer must take to reopen; fileHasTasks itself waits for
+	// a transaction that was still in flight on the closed handle, so a
 	// create that raced us either commits first (and we refuse) or fails.
 	if has, err := fileHasTasks(filepath.Join(dir, "journal.db")); err != nil {
 		return fmt.Errorf("project %q not removed: cannot verify it holds no tasks: %w", projectID, err)
@@ -359,21 +367,30 @@ func (r *Registry) MergeProject(oldID, newID string) (events, mems, runs, cites 
 	// its connection).
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	if db, ok := r.dbs[oldID]; ok {
-		db.sql.Close()
-		delete(r.dbs, oldID)
-	}
 	// The early HasTasks check above ran without the lock; a task created
 	// while the copy was in flight would otherwise be deleted with the
-	// source. Re-check after eviction, under the lock (see Drop). The
+	// source. Re-check under the lock — through the live handle first, so
+	// a refusal keeps it usable, then after eviction (see Drop). The
 	// history is already folded into the target by now (idempotently), so
 	// the source is kept as is; a re-run is refused by the early check
 	// until the task is gone — see the design doc's lifecycle follow-up.
+	kept := func(err error) error {
+		return fmt.Errorf("history merged, but the source was kept: %w (remove its tasks, then re-run)", err)
+	}
+	if db, ok := r.dbs[oldID]; ok {
+		if has, err := db.HasTasks(); err != nil {
+			return events, mems, runs, cites, kept(err)
+		} else if has {
+			return events, mems, runs, cites, kept(ErrProjectHasTasks)
+		}
+		db.sql.Close()
+		delete(r.dbs, oldID)
+	}
 	srcPath := filepath.Join(r.root, "projects", oldID, "journal.db")
 	if has, err := fileHasTasks(srcPath); err != nil {
-		return events, mems, runs, cites, fmt.Errorf("history merged, but the source could not be checked for tasks: %w (safe to re-run)", err)
+		return events, mems, runs, cites, kept(err)
 	} else if has {
-		return events, mems, runs, cites, fmt.Errorf("history merged, but the source gained tasks during the merge and was kept: %w (safe to re-run)", ErrProjectHasTasks)
+		return events, mems, runs, cites, kept(ErrProjectHasTasks)
 	}
 	if err := os.RemoveAll(filepath.Join(r.root, "projects", oldID)); err != nil {
 		return events, mems, runs, cites, fmt.Errorf("history merged, but the source was not removed: %w (safe to re-run)", err)
@@ -734,7 +751,39 @@ UPDATE meta SET value='10' WHERE key='schema_version';`); err != nil {
 		// Task tables (tasks.go): additive, one transaction with the
 		// version bump. Reserved stores (user, group-*) get the tables too
 		// — the schema is uniform — but tasks.go refuses to write there.
-		if err := d.step(taskSchemaSQL); err != nil {
+		// Like every step above this is a one-shot migration literal:
+		// later schema changes get their own step, never an edit here.
+		if err := d.step(`
+CREATE TABLE tasks(
+  id TEXT PRIMARY KEY,
+  state TEXT NOT NULL,
+  archived INTEGER NOT NULL,
+  assignee TEXT NOT NULL,
+  body TEXT NOT NULL);
+CREATE INDEX idx_tasks_state ON tasks(archived, state, id);
+CREATE INDEX idx_tasks_assignee ON tasks(assignee, id);
+CREATE TABLE task_history(
+  task_id TEXT NOT NULL REFERENCES tasks(id),
+  revision INTEGER NOT NULL,
+  body TEXT NOT NULL,
+  PRIMARY KEY(task_id, revision));
+CREATE TABLE task_comments(
+  sequence INTEGER PRIMARY KEY AUTOINCREMENT,
+  id TEXT NOT NULL UNIQUE,
+  task_id TEXT NOT NULL REFERENCES tasks(id),
+  body TEXT NOT NULL,
+  actor TEXT NOT NULL,
+  created_at TEXT NOT NULL);
+CREATE INDEX idx_task_comments_task ON task_comments(task_id, sequence);
+CREATE TABLE task_requests(
+  actor TEXT NOT NULL,
+  operation TEXT NOT NULL,
+  scope TEXT NOT NULL,
+  key TEXT NOT NULL,
+  digest TEXT NOT NULL,
+  result TEXT NOT NULL,
+  PRIMARY KEY(actor, operation, scope, key));
+UPDATE meta SET value='11' WHERE key='schema_version';`); err != nil {
 			return err
 		}
 	}

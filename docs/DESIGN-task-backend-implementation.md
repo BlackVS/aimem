@@ -338,6 +338,46 @@ and a posted exact-head review; medium review precedes every push. Use the curre
 delivery-first dispositions: only blockers reopen frozen implementation scope;
 follow-ups become separate work. The user authorizes merge separately.
 
+## Follow-Ups Recorded By The Stage-1 Review
+
+Valid, out of stage 1's scope, owned by the stage-2 service unless noted:
+
+- **Cross-process lifecycle.** The drop/merge task check is atomic within one
+  process (registry lock + waiting transaction). A second process (the host
+  CLI on a live daemon's state root) could commit a task between the check
+  and the removal. Stage 2 makes the daemon the single task writer; the CLI's
+  direct-registry drop against a running daemon is already unsupported for
+  the same reason (open handles), and should route through the admin API.
+- **Registry lock hold.** Drop and the merge's final step hold the global
+  registry lock across the task check (up to the 5 s busy timeout when a
+  write is in flight) and, for merge, across the directory removal. Rare
+  operator actions today; a per-project lifecycle state would narrow it.
+- **Half-applied merge.** See Resume State: a task created during the copy
+  keeps the source after the history was folded into the target; the
+  operator-facing message says so and a re-run is refused until the task
+  is removed. A registry-level "merging" guard is the fix.
+- **Admin receipt principal.** Admin actors key receipts on the trusted
+  identity's name; the server's admin identities carry no stable ID yet.
+  Stage 2 defines one (token entry ID) and keys on it; the name stays a
+  display snapshot.
+- **Receipt digest format.** The digest is over the JSON encoding of the Go
+  input; adding a field to `TaskContent` changes it and turns a retry across
+  that upgrade into a conflict. Store a digest format version, or hash an
+  explicit field list, before the first such field is added.
+- **Retention.** Snapshots are stored three times (current, history,
+  receipt) and nothing prunes them; receipts never expire. Accepted for
+  stage 1 (bounded fields, human-paced writes); revisit with export.
+- **Listing projection.** Summaries are built by decoding whole bodies;
+  promote title/revision/updated_at to columns if board polling shows it.
+- **Unassigned filter.** `TaskFilter.Assignee == nil` means "any"; add an
+  explicit tri-state when the board needs an "unassigned" lane.
+- **Replace-all updates over JSON.** Absent and empty optional fields encode
+  identically; the transport must decide whether a partial body is an
+  error (strict) or a clear, and document it.
+- **Format characters.** Storage rejects bidirectional overrides (U+202A–E,
+  U+2066–9) and C0/C1 controls; other zero-width/format characters pass and
+  are the renderer's concern.
+
 ## Draft Review Checklist (resolved by stage 1)
 
 The checklist that gated the removed draft, kept for the record; items 1, 2, 4

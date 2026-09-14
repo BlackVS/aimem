@@ -462,6 +462,14 @@ func TestMigrationV9ToV10(t *testing.T) {
 		if v != "11" || idx == "" || tasks == "" {
 			t.Fatalf("pass %d: schema_version=%q index=%q tasks=%q — v10/v11 not applied", pass, v, idx, tasks)
 		}
+		if evs, _ := db2.RecentEvents(10); len(evs) != 1 {
+			t.Fatalf("pass %d: journal lost across v9→v11: %d events", pass, len(evs))
+		}
+		var audits int
+		db2.sql.QueryRow(`SELECT COUNT(*) FROM memory_audit`).Scan(&audits)
+		if audits == 0 {
+			t.Fatalf("pass %d: memory audit rows lost across v9→v11", pass)
+		}
 		r2.Close()
 	}
 }
