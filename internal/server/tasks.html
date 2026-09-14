@@ -163,6 +163,7 @@
       <label class="dim" style="margin-left:auto" id="archLbl"><input type="checkbox" id="archChk" style="width:auto" onchange="listTasks(true)"> archived</label>
     </div>
     <div id="newForm" class="card" hidden></div>
+    <div id="tasksOff" class="dim" hidden></div>
     <div id="list"></div>
     <div class="row" id="listMore"><button class="act" id="moreBtn" hidden onclick="listTasks(false)">more</button>
       <span id="listNote" class="dim"></span></div>
@@ -365,9 +366,11 @@ function showList(){
   $("v-task").hidden = true; $("v-list").hidden = false; CUR = null;
   document.title = (PROJ? PROJ+" · " : "")+"aimem tasks";
   if(PROJECTS) $("projSel").value = PROJECTS.includes(PROJ)?PROJ:""; else $("projIn").value = PROJ;
-  $("filters").hidden = !PROJ; $("newBtn").hidden = true;
+  $("filters").hidden = !PROJ; $("newBtn").hidden = true; $("tasksOff").hidden = true; // the note belongs to the answer for this project
   if(!$("newForm").hidden && NEW_PROJ!==PROJ){ $("newForm").hidden = true; spent("new"); } // a form belongs to the project it opened for
-  if(PROJ){ const asked = PROJ; canWrite(asked).then(ok => { if(PROJ===asked && CUR===null){ $("newBtn").hidden = !ok; if(TASKS_OFF[asked]) $("listNote").textContent = TASKS_OFF_NOTE; } }); }
+  // The enablement note has its own element: the list loader rewrites
+  // listNote on every page and filter, and must not erase it.
+  if(PROJ){ const asked = PROJ; canWrite(asked).then(ok => { if(PROJ===asked && CUR===null){ $("newBtn").hidden = !ok; $("tasksOff").textContent = TASKS_OFF_NOTE; $("tasksOff").hidden = !TASKS_OFF[asked]; } }); }
   $("stateChips").innerHTML = stateChipsHTML();
   $("archChk").checked = FILTER.archived;
   const board = VIEW==="board";
@@ -420,7 +423,7 @@ async function loadBoard(){
   $("boardNote").textContent = "loading…";
   const can = await canWrite(project);
   if(my!==NAV || seq!==SEQ.board) return;
-  BOARD_CAN = can;
+  BOARD_CAN = can; $("tasksOff").textContent = TASKS_OFF_NOTE; $("tasksOff").hidden = !TASKS_OFF[project];
   let after = "", n = 0;
   try{
     do{

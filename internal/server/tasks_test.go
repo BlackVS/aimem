@@ -774,6 +774,14 @@ func TestTasksPageIsPublicChrome(t *testing.T) {
 		t.Fatal("project listing must be optional for ordinary tokens")
 	}
 	// The write decision is the identity endpoint's task_write answer.
+	// The enablement note lives in its own element (the list loader
+	// rewrites listNote on every page and filter), shown by the identity
+	// answer for the project on both the list and the board.
+	for _, want := range []string{`<div id="tasksOff" class="dim" hidden></div>`, `$("tasksOff").hidden = !TASKS_OFF[asked];`, `$("tasksOff").hidden = !TASKS_OFF[project];`, `$("tasksOff").hidden = true;`} {
+		if !strings.Contains(page, want) {
+			t.Fatalf("page lost the enablement note wiring: %s", want)
+		}
+	}
 	if !strings.Contains(page, `TASKS_OFF[project] = r.tasks_enabled===false;`) || !strings.Contains(page, `if(r.tasks_enabled===false) return false;`) || !strings.Contains(page, `return ME.role==="admin" || !!r.task_write;`) {
 		t.Fatal("page must decide writes from the identity endpoint's task_write")
 	}
