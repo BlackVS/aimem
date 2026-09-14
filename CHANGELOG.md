@@ -91,6 +91,15 @@ currently 11); a binary refuses a database newer than it understands.
 
 ### Fixed
 
+- **MCP task and document tools refuse an unreadable `.aimem.json`.** The
+  config read every capture path uses treats a file that exists but cannot
+  be parsed as absent (with one warning), so a checkpoint never blocks on a
+  broken file — but the stdio facade's task and document tools took that
+  "absent" for "the default hub" and would have sent a bound project's
+  traffic there with that hub's credential. They now read the binding
+  strictly (`ident.ProjectHubNameStrict`) and answer with the parse error
+  instead; nothing is sent to any hub until the file is fixed. Checkpoints
+  are unchanged.
 - Reuse one server-owned access database handle and avoid migration write locks
   when opening a current schema; permission checks still read current state.
   Administrators can remove stale project grants by stored instance ID using

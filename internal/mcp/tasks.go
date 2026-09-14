@@ -424,12 +424,18 @@ func pageQuery(after int64, limit int) string {
 // bound hub, with that hub's dedicated task credential. No credential
 // configured is an actionable error, never a fallback to the local socket
 // or to the hub's shared checkpoint token.
-func localTaskCaller() (TaskCallFunc, error) {
-	hubName, err := ident.ProjectHubName(".")
+func localTaskCaller() (TaskCallFunc, error) { return taskCallerIn(".", mcpStateRoot()) }
+
+// taskCallerIn resolves dir's hub binding strictly: a .aimem.json that
+// exists but cannot be parsed is a refusal, never a silent trip to the
+// default hub with that hub's credential (the fail-open read the capture
+// paths use would answer "default hub" for a broken file).
+func taskCallerIn(dir, root string) (TaskCallFunc, error) {
+	hubName, err := ident.ProjectHubNameStrict(dir)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("task tools refused: %w — fix the file; nothing was sent to any hub", err)
 	}
-	return taskCallerFor(mcpStateRoot(), hubName)
+	return taskCallerFor(root, hubName)
 }
 
 // taskCallerFor resolves the hub a project is bound to (hubName "" means

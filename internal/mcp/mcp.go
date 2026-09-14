@@ -739,9 +739,9 @@ func (s *srv) docProject(scope string) (string, *adapter.HubConfig, error) {
 	if project == "" {
 		return "", nil, fmt.Errorf("a project or group scope is required on this server")
 	}
-	hubName, err := ident.ProjectHubName(".")
+	hubName, err := ident.ProjectHubNameStrict(".")
 	if err != nil {
-		return "", nil, err // invalid binding must fail loudly, never route to the default hub
+		return "", nil, err // an invalid or unreadable binding fails loudly, never routes to the default hub
 	}
 	_, hub := adapter.ResolveHub(mcpStateRoot(), hubName)
 	if hub == nil {

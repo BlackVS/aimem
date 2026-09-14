@@ -607,14 +607,11 @@ Valid, out of stage 1's scope, owned by the stage-2 service unless noted:
 
 Recorded by the stage-2 review (service), owned by stage 3 or later:
 
-- **Hub-name resolution fails open on an unreadable `.aimem.json`.**
-  `ident.readConfig` strips a BOM, but on any other parse failure it prints a
-  one-shot stderr warning (invisible to an MCP client) and returns an empty
-  config, so `ProjectHubName` yields "" (the default hub) and the stdio
-  facade's task tools would route to the default hub with that hub's task
-  credential. Boundary: `internal/ident` config reading. First increment: a
-  sentinel error for "present but unreadable" that `taskCallerFor` turns
-  into a refusal, with a malformed-JSON config test.
+- **Hub-name resolution fails open on an unreadable `.aimem.json`.** Done
+  (agent enablement, first PR): `ident.ErrConfigUnreadable` and
+  `ProjectHubNameStrict`; the stdio facade's task tools (`taskCallerIn`)
+  and document tools refuse with the parse error instead of routing to the
+  default hub. The fail-open read the capture paths use is unchanged.
 - **OpenAPI `x-role` vocabulary** (public/writer/admin) cannot express the
   ordinary-user principal the task routes admit; the prose says it. Extend
   the vocabulary and the parity test together when the console consumes it.

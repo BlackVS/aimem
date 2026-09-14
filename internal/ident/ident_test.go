@@ -1,6 +1,7 @@
 package ident
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"testing"
@@ -67,6 +68,39 @@ func TestProjectHubName(t *testing.T) {
 	writeConfig(t, dir, `{"hub": "Not A Name"}`)
 	if _, err := ProjectHubName(dir); err == nil {
 		t.Fatal("invalid hub name accepted")
+	}
+}
+
+// A config file that exists but cannot be parsed stays "absent" for the
+// capture paths (a checkpoint never blocks on a broken file) but is an
+// error for a caller that routes data on the hub binding: taking "absent"
+// for "default hub" would send a bound project's traffic to the wrong hub.
+func TestUnreadableConfigIsStrictForRouting(t *testing.T) {
+	dir := t.TempDir()
+	writeConfig(t, dir, `{"hub": "home",`) // truncated by a crashed editor
+	if h, err := ProjectHubName(dir); err != nil || h != "" {
+		t.Fatalf("fail-open read must stay fail-open: %q err=%v", h, err)
+	}
+	if _, err := ProjectHubNameStrict(dir); !errors.Is(err, ErrConfigUnreadable) {
+		t.Fatalf("strict read of an unparseable file: err=%v; want ErrConfigUnreadable", err)
+	}
+	// Absent and BOM-prefixed files are fine strictly too; a parseable
+	// file with a bad name is the other error, not this one.
+	if err := os.Remove(filepath.Join(dir, ".aimem.json")); err != nil {
+		t.Fatal(err)
+	}
+	if h, err := ProjectHubNameStrict(dir); err != nil || h != "" {
+		t.Fatalf("absent config strictly: %q err=%v", h, err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, ".aimem.json"), append([]byte("\xef\xbb\xbf"), []byte(`{"hub":"home"}`)...), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if h, err := ProjectHubNameStrict(dir); err != nil || h != "home" {
+		t.Fatalf("BOM config strictly: %q err=%v", h, err)
+	}
+	writeConfig(t, dir, `{"hub": "Not A Name"}`)
+	if _, err := ProjectHubNameStrict(dir); err == nil || errors.Is(err, ErrConfigUnreadable) {
+		t.Fatalf("invalid name strictly: err=%v; want a name error", err)
 	}
 }
 
