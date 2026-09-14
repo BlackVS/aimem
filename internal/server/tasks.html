@@ -210,6 +210,7 @@ let PROJECTS = null;                // dropdown source when the credential may l
 let FILTER = {state:"", archived:false, epic:""};
 let EPICS = {};           // id -> epic, for this project (labels and the filter)
 let EPICS_PROJ = "";      // the project EPICS was loaded for
+let EPICS_GEN = 0;        // one per load: a response from a superseded load touches nothing shared
 let CURSOR = "";                    // list paging
 let CUR = null;                     // open task (served view)
 let CAN_WRITE = false;              // for CUR's project, this credential, this attempt
@@ -340,11 +341,17 @@ async function canWrite(project){
 // synchronously, before any query that follows can be built.
 async function loadEpics(project){
   if(EPICS_PROJ===project) return;
+  const gen = ++EPICS_GEN;
   EPICS = {}; EPICS_PROJ = project; FILTER.epic = "";
   $("epicSel").innerHTML = '<option value="">all epics</option>';
-  try{ const r = await api("/v1/projects/"+encodeURIComponent(project)+"/epics?include_retired=true"); for(const e of (r.epics||[])) EPICS[e.id] = e; }
-  catch(_){ EPICS_PROJ = ""; }
-  if(EPICS_PROJ!==project) return; // failed, or another project took over meanwhile
+  // The response is collected locally; only the load that is still the
+  // current one may publish it, so a late answer from a previous project
+  // (or a load this one superseded) never lands in the shared cache.
+  const got = {};
+  try{ const r = await api("/v1/projects/"+encodeURIComponent(project)+"/epics?include_retired=true"); for(const e of (r.epics||[])) got[e.id] = e; }
+  catch(_){ if(gen===EPICS_GEN) EPICS_PROJ = ""; return; }
+  if(gen!==EPICS_GEN) return;
+  EPICS = got;
   $("epicSel").innerHTML = '<option value="">all epics</option>' + Object.values(EPICS).map(e => `<option value="${esc(e.id)}"${e.id===FILTER.epic?' selected':''}>${esc(e.title)}${e.state==="RETIRED"?" (retired)":""}</option>`).join("");
 }
 function epicLabel(id){ const e = EPICS[id]; return e ? e.title : short(id); }
