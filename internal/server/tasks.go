@@ -13,7 +13,9 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"maps"
 	"net/http"
+	"path"
 	"strconv"
 	"strings"
 
@@ -24,13 +26,9 @@ import (
 // 32 KiB, escaping and whitespace need headroom, nothing needs more.
 const maxTaskRequestBytes = 256 << 10
 
-// ordinaryRoutes is the exact surface an ordinary (scoped user) token may
-// reach besides its identity check: the task routes, whose handlers
-// authorize every write themselves, and POST /mcp, whose dispatcher hides
-// every legacy tool from such a caller. Matched by the mux's own rules
-// against these exact patterns — never by prefix — so a future route is
-// refused until it is listed here (and Route.Ordinary shows it).
-var ordinaryRoutes = map[string]bool{
+// taskRoutes are the task routes: what the in-process MCP dispatcher may
+// call, and (with POST /mcp) the exact surface an ordinary token may reach.
+var taskRoutes = map[string]bool{
 	"GET /v1/projects/{p}/tasks":      true,
 	"POST /v1/projects/{p}/tasks":     true,
 	"GET /v1/tasks/{id}":              true,
@@ -39,8 +37,19 @@ var ordinaryRoutes = map[string]bool{
 	"GET /v1/tasks/{id}/comments":     true,
 	"POST /v1/tasks/{id}/comments":    true,
 	"GET /v1/tasks/{id}/comments/{c}": true,
-	"POST /mcp":                       true,
 }
+
+// ordinaryRoutes is the exact surface an ordinary (scoped user) token may
+// reach besides its identity check: the task routes, whose handlers
+// authorize every write themselves, and POST /mcp, whose dispatcher hides
+// every legacy tool from such a caller. Matched by the mux's own rules
+// against these exact patterns — never by prefix — so a future route is
+// refused until it is listed here (and Route.Ordinary shows it).
+var ordinaryRoutes = func() map[string]bool {
+	m := maps.Clone(taskRoutes)
+	m["POST /mcp"] = true
+	return m
+}()
 
 func (s *Server) ordinaryMux() *http.ServeMux {
 	s.ordOnce.Do(func() {
@@ -53,27 +62,41 @@ func (s *Server) ordinaryMux() *http.ServeMux {
 	return s.ord
 }
 
-// ordinaryAllowed reports whether r matches one of ordinaryRoutes exactly.
-// A non-canonical path (dot segments) makes the mux answer with a redirect
-// target instead of a registered pattern, so it is refused here.
+// canonicalPath reports whether the request path is already clean: the
+// mux would otherwise match (or redirect to) the cleaned path, and the
+// allow decision must be made on exactly the path a handler will see.
+func canonicalPath(r *http.Request) bool {
+	p := r.URL.EscapedPath()
+	c := path.Clean(p)
+	return p == c || p == c+"/"
+}
+
+// ordinaryAllowed reports whether r, on a canonical path, matches one of
+// ordinaryRoutes exactly by the mux's own rules.
 func (s *Server) ordinaryAllowed(r *http.Request) bool {
+	if !canonicalPath(r) {
+		return false
+	}
 	_, pattern := s.ordinaryMux().Handler(r)
 	return ordinaryRoutes[pattern]
 }
 
 // taskActor is the trusted actor a mutation is stamped with. The unix
 // socket carries no identity and is the local operator; admin credentials
-// keep their name; ordinary tokens carry stable user and token IDs. A
-// legacy writer never reaches a mutation (authorizeTaskWrite refuses it).
+// keep their name; ordinary tokens carry stable user and token IDs. Any
+// other role (a legacy writer) yields an actor storage refuses, so a
+// mutation handler that forgot authorizeTaskWrite still cannot write.
 func taskActor(r *http.Request) store.TaskActor {
 	id, ok := IdentityFrom(r.Context())
-	if !ok {
+	switch {
+	case !ok:
 		return store.TaskActor{Kind: "admin", Name: "local"}
-	}
-	if id.Role == "user" {
+	case id.Role == "user":
 		return store.TaskActor{Kind: "user", UserID: id.UserID, TokenID: id.TokenID, Name: id.Name}
+	case id.Role == "admin":
+		return store.TaskActor{Kind: "admin", Name: id.Name}
 	}
-	return store.TaskActor{Kind: "admin", Name: id.Name}
+	return store.TaskActor{Kind: id.Role, Name: id.Name}
 }
 
 // authorizeTaskWrite decides, for this attempt, whether the caller may
@@ -170,6 +193,21 @@ func taskView(project string, t store.Task) taskResponse {
 	}}
 }
 
+// taskRow is one list entry: the bounded summary plus its own link, so a
+// client never builds a task URL by hand.
+type taskRow struct {
+	store.TaskSummary
+	Links struct {
+		Self string `json:"self"`
+	} `json:"links"`
+}
+
+type taskListResponse struct {
+	Project string    `json:"project"`
+	Tasks   []taskRow `json:"tasks"`
+	Next    string    `json:"next_cursor,omitempty"`
+}
+
 type commentLinks struct {
 	Self string `json:"self"`
 	Task string `json:"task"`
@@ -223,6 +261,30 @@ func (s *Server) created(w http.ResponseWriter, v any) {
 	json.NewEncoder(w).Encode(v)
 }
 
+// assigneeExists refuses an assignee that names no known user or access
+// group (storage checks only the shape). Existence, not state: a disabled
+// user may still be named, and history stays readable either way.
+func (s *Server) assigneeExists(w http.ResponseWriter, a *store.TaskAssignee) bool {
+	if a == nil {
+		return true
+	}
+	db, ok := s.accessStore(w)
+	if !ok {
+		return false
+	}
+	exists, err := db.IdentityExists(a.Kind, a.ID)
+	if err != nil {
+		s.log.Error("assignee lookup", "err", err)
+		s.fail(w, http.StatusInternalServerError, errors.New("cannot check the assignee"))
+		return false
+	}
+	if !exists {
+		s.fail(w, http.StatusBadRequest, errors.New("assignee does not name a known user or access group"))
+		return false
+	}
+	return true
+}
+
 // idempotencyKey is the one transport for retry keys over HTTP.
 func (s *Server) idempotencyKey(w http.ResponseWriter, r *http.Request) (string, bool) {
 	key := r.Header.Get("Idempotency-Key")
@@ -233,17 +295,10 @@ func (s *Server) idempotencyKey(w http.ResponseWriter, r *http.Request) (string,
 	return key, true
 }
 
-// taskError maps storage outcomes to the documented statuses. A revision
-// conflict carries the current task — the caller has already passed the
-// read authorization every task route requires. Storage faults never echo
-// internal detail.
+// taskError maps storage outcomes to the documented statuses. Storage
+// faults never echo internal detail.
 func (s *Server) taskError(w http.ResponseWriter, err error) {
-	var conflict *store.TaskConflict
 	switch {
-	case errors.As(err, &conflict):
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusConflict)
-		json.NewEncoder(w).Encode(map[string]any{"error": err.Error(), "current": conflict.Current})
 	case errors.Is(err, store.ErrTaskNotFound):
 		s.fail(w, http.StatusNotFound, err)
 	case errors.Is(err, store.ErrTaskArchived), errors.Is(err, store.ErrTaskRetryConflict):
@@ -301,7 +356,13 @@ func (s *Server) listTasks(w http.ResponseWriter, r *http.Request) {
 		s.taskError(w, err)
 		return
 	}
-	s.ok(w, map[string]any{"project": project, "tasks": page.Tasks, "next_cursor": page.Next})
+	out := taskListResponse{Project: project, Tasks: make([]taskRow, 0, len(page.Tasks)), Next: page.Next}
+	for _, t := range page.Tasks {
+		row := taskRow{TaskSummary: t}
+		row.Links.Self = "/v1/tasks/" + t.ID
+		out.Tasks = append(out.Tasks, row)
+	}
+	s.ok(w, out)
 }
 
 func (s *Server) createTask(w http.ResponseWriter, r *http.Request) {
@@ -317,7 +378,7 @@ func (s *Server) createTask(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var content store.TaskContent
-	if !s.decodeTaskBody(w, r, &content) {
+	if !s.decodeTaskBody(w, r, &content) || !s.assigneeExists(w, content.Assignee) {
 		return
 	}
 	task, err := db.CreateTask(content, taskActor(r), key)
@@ -360,11 +421,20 @@ func (s *Server) updateTask(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var body taskUpdateBody
-	if !s.decodeTaskBody(w, r, &body) {
+	if !s.decodeTaskBody(w, r, &body) || !s.assigneeExists(w, body.Assignee) {
 		return
 	}
 	task, err := db.UpdateTask(r.PathValue("id"), body.TaskContent, body.ExpectedRevision, taskActor(r), key)
 	if err != nil {
+		// A revision conflict carries the current task in the same shape
+		// every read serves; the caller passed read authorization already.
+		var conflict *store.TaskConflict
+		if errors.As(err, &conflict) {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusConflict)
+			json.NewEncoder(w).Encode(map[string]any{"error": err.Error(), "current": taskView(project, conflict.Current)})
+			return
+		}
 		s.taskError(w, err)
 		return
 	}
@@ -392,7 +462,11 @@ func (s *Server) taskHistory(w http.ResponseWriter, r *http.Request) {
 		s.taskError(w, err)
 		return
 	}
-	s.ok(w, map[string]any{"project": project, "changes": page.Changes, "next_cursor": page.Next})
+	s.ok(w, struct {
+		Project string             `json:"project"`
+		Changes []store.TaskChange `json:"changes"`
+		Next    int64              `json:"next_cursor,omitempty"`
+	}{project, page.Changes, page.Next})
 }
 
 func (s *Server) listTaskComments(w http.ResponseWriter, r *http.Request) {
@@ -419,7 +493,11 @@ func (s *Server) listTaskComments(w http.ResponseWriter, r *http.Request) {
 	for _, c := range page.Comments {
 		out = append(out, commentView(project, c))
 	}
-	s.ok(w, map[string]any{"project": project, "comments": out, "next_cursor": page.Next})
+	s.ok(w, struct {
+		Project  string            `json:"project"`
+		Comments []commentResponse `json:"comments"`
+		Next     int64             `json:"next_cursor,omitempty"`
+	}{project, out, page.Next})
 }
 
 func (s *Server) addTaskComment(w http.ResponseWriter, r *http.Request) {
@@ -503,7 +581,7 @@ func (s *Server) MCPPrincipal(r *http.Request) (func(ctx context.Context, method
 		if err != nil {
 			return 0, nil, err
 		}
-		if req.URL.Path == "/mcp" || !s.ordinaryAllowed(req) {
+		if _, pattern := s.ordinaryMux().Handler(req); !canonicalPath(req) || !taskRoutes[pattern] {
 			return 0, nil, errors.New("not a task route")
 		}
 		req.Header.Set("Content-Type", "application/json")

@@ -30,8 +30,9 @@ currently 11); a binary refuses a database newer than it understands.
   project it was issued for and only while its user holds a current grant;
   cross-project and read-only ordinary tokens read everything; legacy
   writer tokens read tasks but never write them. Ordinary tokens are
-  admitted to the task routes and to `/mcp` only, where they see the task
-  tools alone. **MCP trust boundary:** on the hub, task tools run
+  admitted to their identity check, the task routes and `/mcp` only, where
+  they see the task tools alone; an assignee must name an existing user or
+  access group. **MCP trust boundary:** on the hub, task tools run
   in-process with the identity of the request itself, never through the
   hub's trusted local client (which legacy tools keep using); the local
   stdio facade sends task tools to the project's hub with a dedicated

@@ -202,6 +202,18 @@ func TestTaskRoutesAuthorization(t *testing.T) {
 // paths never reach a legacy handler in either direction.
 func TestOrdinaryTokenGateMatrix(t *testing.T) {
 	f := newTaskFixture(t)
+	// The admitted set is pinned here, independently of the map the gate
+	// consults: widening it is a deliberate, reviewed change.
+	want := []string{"GET /v1/projects/{p}/tasks", "POST /v1/projects/{p}/tasks", "GET /v1/tasks/{id}", "PUT /v1/tasks/{id}",
+		"GET /v1/tasks/{id}/history", "GET /v1/tasks/{id}/comments", "POST /v1/tasks/{id}/comments", "GET /v1/tasks/{id}/comments/{c}", "POST /mcp"}
+	if len(ordinaryRoutes) != len(want) {
+		t.Fatalf("ordinary surface changed: %v", ordinaryRoutes)
+	}
+	for _, p := range want {
+		if !ordinaryRoutes[p] {
+			t.Fatalf("ordinary surface lost %q", p)
+		}
+	}
 	mcpHits := 0
 	h := f.s.TCPHandler(f.env, map[string]http.Handler{"/mcp": http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { mcpHits++ })})
 	fill := strings.NewReplacer("{p}", "alpha", "{id}", uuidv7.New(), "{c}", uuidv7.New(), "{s}", "s1", "{key}", "about",
@@ -237,6 +249,19 @@ func TestOrdinaryTokenGateMatrix(t *testing.T) {
 	}
 	if w := taskReq(t, h, "PUT", "/v1/projects/alpha/tasks", f.alice, "", "{}"); w.Code != 403 {
 		t.Fatalf("PUT on the list route: %d", w.Code)
+	}
+	// A non-canonical path that would clean to a task route is refused at
+	// the gate itself, not left to the mux's redirect.
+	if w := taskReq(t, h, "GET", "/v1/logs/../tasks/"+uuidv7.New(), f.alice, "", ""); w.Code != 403 {
+		t.Fatalf("non-canonical path admitted: %d", w.Code)
+	}
+	// The actor derivation fails closed for a legacy writer even without
+	// the authorization step.
+	wid, _ := f.s.authenticate(f.env, f.writer)
+	wr := httptest.NewRequest("POST", "/", nil)
+	wr = wr.WithContext(withIdentity(wr.Context(), wid))
+	if a := taskActor(wr); a.Kind == "admin" || a.Kind == "user" {
+		t.Fatalf("writer must not become a trusted actor: %+v", a)
 	}
 	for _, p := range []string{"/v1/projects/alpha/tasks/../docs", "/v1/tasks/../projects/alpha/docs",
 		"/v1/tasks/x/../../projects/alpha/memories", "/v1/tasks/..%2Fprojects%2Falpha%2Fdocs", "/v1/tasks/%2e%2e/projects/alpha/docs"} {
@@ -290,6 +315,43 @@ func TestTaskRoutesCASCommentsAndPermissionChanges(t *testing.T) {
 	if w := taskReq(t, h, "PUT", "/v1/tasks/"+task.ID, f.alice, "u5", `{"title":"","state":"READY","expected_revision":2}`); w.Code != 400 {
 		t.Fatalf("validation: %d %s", w.Code, w.Body)
 	}
+	if w := taskReq(t, h, "PUT", "/v1/tasks/"+task.ID, f.alice, "u5b", `{"title":"x","state":"READY","expected_revision":2}`+strings.Repeat(" ", maxTaskRequestBytes)); w.Code != 413 {
+		t.Fatalf("oversized trailing bytes: %d", w.Code)
+	}
+	// Assignees must name a known identity; the 409 carries the full view.
+	if w := taskReq(t, h, "PUT", "/v1/tasks/"+task.ID, f.alice, "u5c", `{"title":"x","state":"READY","expected_revision":2,"assignee":{"kind":"user","id":"`+uuidv7.New()+`"}}`); w.Code != 400 || !strings.Contains(w.Body.String(), "assignee") {
+		t.Fatalf("unknown assignee: %d %s", w.Code, w.Body)
+	}
+	w = taskReq(t, h, "PUT", "/v1/tasks/"+task.ID, f.alice, "u5d", `{"title":"x","state":"READY","expected_revision":1,"assignee":{"kind":"user","id":"`+f.bobUser+`"}}`)
+	var conflictView struct {
+		Current taskResponse `json:"current"`
+	}
+	json.Unmarshal(w.Body.Bytes(), &conflictView)
+	if w.Code != 409 || conflictView.Current.Project != "alpha" || conflictView.Current.Links.Self != "/v1/tasks/"+task.ID {
+		t.Fatalf("409 must carry the task in its served shape: %d %s", w.Code, w.Body)
+	}
+	if w := taskReq(t, h, "PUT", "/v1/tasks/"+task.ID, f.alice, "u5e", `{"title":"x","state":"READY","expected_revision":2,"assignee":{"kind":"user","id":"`+f.bobUser+`"}}`); w.Code != 200 {
+		t.Fatalf("assign to a known user: %d %s", w.Code, w.Body)
+	}
+	if w := taskReq(t, h, "PUT", "/v1/tasks/"+task.ID, f.alice, "u5f", `{"title":"v2","state":"READY","expected_revision":3}`); w.Code != 200 {
+		t.Fatalf("clear assignee: %d %s", w.Code, w.Body)
+	}
+	// List-route validation.
+	for _, q := range []string{"?include_archived=yes", "?assignee=alice", "?limit=-1", "?limit=x", "?state=DOING"} {
+		if w := taskReq(t, h, "GET", "/v1/projects/alpha/tasks"+q, f.bob, "", ""); w.Code != 400 {
+			t.Fatalf("list %s: %d %s", q, w.Code, w.Body)
+		}
+	}
+	if w := taskReq(t, h, "GET", "/v1/projects/nope/tasks", f.bob, "", ""); w.Code != 404 {
+		t.Fatalf("list unknown project: %d", w.Code)
+	}
+	if w := taskReq(t, h, "GET", "/v1/projects/alpha/tasks?assignee=user/"+f.bobUser, f.bob, "", ""); w.Code != 200 || strings.Contains(w.Body.String(), task.ID) {
+		t.Fatalf("assignee filter after clearing: %d %s", w.Code, w.Body)
+	}
+	w = taskReq(t, h, "GET", "/v1/projects/alpha/tasks", f.bob, "", "")
+	if !strings.Contains(w.Body.String(), `"self":"/v1/tasks/`+task.ID+`"`) || strings.Contains(w.Body.String(), `"next_cursor"`) {
+		t.Fatalf("list rows carry links and the last page has no cursor: %s", w.Body)
+	}
 	// Comments: created, replayed, listed, fetched, wrong parent hidden.
 	w = taskReq(t, h, "POST", "/v1/tasks/"+task.ID+"/comments", f.alice, "c1", `{"body":"first **note**"}`)
 	if w.Code != 201 {
@@ -306,7 +368,7 @@ func TestTaskRoutesCASCommentsAndPermissionChanges(t *testing.T) {
 	if again.ID != c.ID {
 		t.Fatalf("comment replay: %s vs %s", again.ID, c.ID)
 	}
-	if got := decodeTask(t, taskReq(t, h, "GET", "/v1/tasks/"+task.ID, f.alice, "", "")); got.Revision != 2 {
+	if got := decodeTask(t, taskReq(t, h, "GET", "/v1/tasks/"+task.ID, f.alice, "", "")); got.Revision != 4 {
 		t.Fatalf("comment bumped the revision: %d", got.Revision)
 	}
 	if w := taskReq(t, h, "GET", "/v1/tasks/"+task.ID+"/comments/"+c.ID, f.bob, "", ""); w.Code != 200 {
@@ -317,14 +379,14 @@ func TestTaskRoutesCASCommentsAndPermissionChanges(t *testing.T) {
 		t.Fatalf("wrong parent: %d", w.Code)
 	}
 	w = taskReq(t, h, "GET", "/v1/tasks/"+task.ID+"/comments?limit=1", f.bob, "", "")
-	if w.Code != 200 || !strings.Contains(w.Body.String(), `"next_cursor"`) {
-		t.Fatalf("comments page: %d %s", w.Code, w.Body)
+	if w.Code != 200 || !strings.Contains(w.Body.String(), c.ID) || strings.Contains(w.Body.String(), `"next_cursor"`) {
+		t.Fatalf("single-page comments must carry no cursor: %d %s", w.Code, w.Body)
 	}
 	if w := taskReq(t, h, "GET", "/v1/tasks/"+task.ID+"/comments?limit=500", f.bob, "", ""); w.Code != 400 {
 		t.Fatalf("limit bound: %d", w.Code)
 	}
 	// Archive, then a new comment is refused while the replay still works.
-	w = taskReq(t, h, "PUT", "/v1/tasks/"+task.ID, f.alice, "u6", `{"title":"v2","state":"DONE","archived":true,"expected_revision":2}`)
+	w = taskReq(t, h, "PUT", "/v1/tasks/"+task.ID, f.alice, "u6", `{"title":"v2","state":"DONE","archived":true,"expected_revision":4}`)
 	if w.Code != 200 {
 		t.Fatalf("archive: %d %s", w.Code, w.Body)
 	}
@@ -378,15 +440,16 @@ func TestTaskRoutesCASCommentsAndPermissionChanges(t *testing.T) {
 	if w := taskReq(t, h, "POST", "/v1/projects/alpha/tasks", f.alice, "k10", taskBody); w.Code != 401 {
 		t.Fatalf("revoked token: %d", w.Code)
 	}
-	// Expiry: a token issued for one second is refused once it has passed.
-	_, short, err := db.Issue("admin", f.aliceUser, "short", f.alphaInstance, time.Now().Add(time.Second))
+	// Expiry: a token issued for two seconds (the store truncates expiry
+	// to whole seconds) is refused once it has passed.
+	_, short, err := db.Issue("admin", f.aliceUser, "short", f.alphaInstance, time.Now().Add(2*time.Second))
 	if err != nil {
 		t.Fatal(err)
 	}
 	if w := taskReq(t, h, "GET", "/v1/tasks/"+other.ID, short, "", ""); w.Code != 200 {
 		t.Fatalf("fresh short token: %d", w.Code)
 	}
-	time.Sleep(1200 * time.Millisecond)
+	time.Sleep(2100 * time.Millisecond)
 	if w := taskReq(t, h, "POST", "/v1/projects/alpha/tasks", short, "k11", taskBody); w.Code != 401 {
 		t.Fatalf("expired token: %d", w.Code)
 	}
@@ -412,7 +475,8 @@ func TestTaskRoutesStorageFaultMapping(t *testing.T) {
 		t.Fatalf("inconclusive lookup must be a fault, not a miss: %d %s", w.Code, w.Body)
 	}
 	body := strings.ToLower(w.Body.String())
-	if strings.Contains(body, "aaa-broken") || strings.Contains(body, "sqlite") || strings.Contains(body, "journal.db") || strings.Contains(body, f.reg.Root()) {
+	rootHint := strings.ToLower(filepath.Base(filepath.Dir(f.reg.Root()))) // the temp dir's test-named parent
+	if strings.Contains(body, "aaa-broken") || strings.Contains(body, "sqlite") || strings.Contains(body, "journal.db") || strings.Contains(body, rootHint) {
 		t.Fatalf("500 body leaks internals: %s", w.Body)
 	}
 }

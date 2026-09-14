@@ -18,10 +18,10 @@ import (
 	"net/http"
 	"net/url"
 	"strconv"
-	"strings"
 
 	"aimem/internal/adapter"
 	"aimem/internal/ident"
+	"aimem/internal/store"
 )
 
 // TaskCallFunc performs one task-API request with the caller's own
@@ -40,7 +40,7 @@ var taskToolDefs = []map[string]any{
 		"inputSchema": objSchema(map[string]any{
 			"project":          prop("string", "project id (defaults to the current project)"),
 			"state":            propEnum("only this state", "BACKLOG", "READY", "IN_PROGRESS", "REVIEW", "BLOCKED", "DONE", "CANCELLED"),
-			"assignee":         prop("string", "only this assignee, as kind/id (user/<uuid> or group/<uuid>)"),
+			"assignee":         assigneeProp("only this assignee"),
 			"include_archived": prop("boolean", "include archived tasks"),
 			"after":            prop("string", "next_cursor from the previous page"),
 			"limit":            prop("integer", "page size (default 20, max 100)"),
@@ -74,18 +74,18 @@ var taskToolDefs = []map[string]any{
 		"name":        "get_task_history",
 		"description": "Accepted revisions of a task in order, each with its full snapshot and actor.",
 		"inputSchema": objSchema(map[string]any{
-			"id":             prop("string", "task id"),
-			"after_revision": prop("integer", "next_cursor from the previous page"),
-			"limit":          prop("integer", "page size (default 20, max 100)"),
+			"id":    prop("string", "task id"),
+			"after": prop("integer", "next_cursor from the previous page"),
+			"limit": prop("integer", "page size (default 20, max 100)"),
 		}, "id"),
 	},
 	{
 		"name":        "list_task_comments",
 		"description": "Discussion of a task in append order (immutable Markdown comments).",
 		"inputSchema": objSchema(map[string]any{
-			"id":             prop("string", "task id"),
-			"after_sequence": prop("integer", "next_cursor from the previous page"),
-			"limit":          prop("integer", "page size (default 20, max 100)"),
+			"id":    prop("string", "task id"),
+			"after": prop("integer", "next_cursor from the previous page"),
+			"limit": prop("integer", "page size (default 20, max 100)"),
 		}, "id"),
 	},
 	{
@@ -108,6 +108,12 @@ var taskToolDefs = []map[string]any{
 	},
 }
 
+func assigneeProp(desc string) map[string]any {
+	return map[string]any{"type": "object", "description": desc + ": {kind: user|group, id: <access identity uuid>}",
+		"properties": map[string]any{"kind": propEnum("user or group", "user", "group"), "id": prop("string", "identity uuid")},
+		"required":   []string{"kind", "id"}}
+}
+
 func taskContentProps(extra map[string]any) map[string]any {
 	props := map[string]any{
 		"title":               prop("string", "short title (at most 256 bytes)"),
@@ -115,14 +121,13 @@ func taskContentProps(extra map[string]any) map[string]any {
 		"acceptance_criteria": prop("string", "how it is verified"),
 		"non_goals":           prop("string", "explicitly out of scope"),
 		"state":               propEnum("BACKLOG (default on create), READY, IN_PROGRESS, REVIEW, BLOCKED, DONE, CANCELLED", "BACKLOG", "READY", "IN_PROGRESS", "REVIEW", "BLOCKED", "DONE", "CANCELLED"),
-		"assignee": map[string]any{"type": "object", "description": "optional {kind: user|group, id: <access identity uuid>}",
-			"properties": map[string]any{"kind": prop("string", "user or group"), "id": prop("string", "identity uuid")}},
-		"blocker":        prop("string", "what blocks it, if BLOCKED"),
-		"dependencies":   map[string]any{"type": "array", "items": prop("string", "task id"), "description": "advisory task ids this depends on"},
-		"candidate_refs": map[string]any{"type": "array", "items": prop("string", "reference"), "description": "candidate references (PRs, docs, links)"},
-		"evidence_refs":  map[string]any{"type": "array", "items": prop("string", "reference"), "description": "evidence references"},
-		"next_action":    prop("string", "the next concrete step"),
-		"archived":       prop("boolean", "archive (DONE/CANCELLED only)"),
+		"assignee":            assigneeProp("optional assignee"),
+		"blocker":             prop("string", "what blocks it, if BLOCKED"),
+		"dependencies":        map[string]any{"type": "array", "items": prop("string", "task id"), "description": "advisory task ids this depends on"},
+		"candidate_refs":      map[string]any{"type": "array", "items": prop("string", "reference"), "description": "candidate references (PRs, docs, links)"},
+		"evidence_refs":       map[string]any{"type": "array", "items": prop("string", "reference"), "description": "evidence references"},
+		"next_action":         prop("string", "the next concrete step"),
+		"archived":            prop("boolean", "archive (DONE/CANCELLED only)"),
 	}
 	for k, v := range extra {
 		props[k] = v
@@ -140,91 +145,102 @@ var taskToolNames = func() map[string]bool {
 
 func isTaskTool(name string) bool { return taskToolNames[name] }
 
-// taskArgs are the task-tool arguments; content fields mirror the HTTP body.
+// taskArgs are the task-tool arguments: the editable content is the
+// storage type itself (one spelling, so a new field cannot be dropped on
+// the way through), plus addressing, paging and the retry key. Decoded
+// strictly, like the HTTP bodies they become: under replace-all updates a
+// misspelled field must be an error, never a silent clear.
 type taskArgs struct {
-	Project            string          `json:"project"`
-	ID                 string          `json:"id"`
-	TaskID             string          `json:"task_id"`
-	CommentID          string          `json:"comment_id"`
-	IdempotencyKey     string          `json:"idempotency_key"`
-	ExpectedRevision   int64           `json:"expected_revision"`
-	State              string          `json:"state"`
-	Assignee           json.RawMessage `json:"assignee"` // "kind/id" (list filter) or {kind,id} (content)
-	IncludeArchived    bool            `json:"include_archived"`
-	After              string          `json:"after"`
-	AfterRevision      int64           `json:"after_revision"`
-	AfterSequence      int64           `json:"after_sequence"`
-	Limit              int             `json:"limit"`
-	Title              string          `json:"title"`
-	Objective          string          `json:"objective"`
-	AcceptanceCriteria string          `json:"acceptance_criteria"`
-	NonGoals           string          `json:"non_goals"`
-	Blocker            string          `json:"blocker"`
-	Dependencies       []string        `json:"dependencies"`
-	CandidateRefs      []string        `json:"candidate_refs"`
-	EvidenceRefs       []string        `json:"evidence_refs"`
-	NextAction         string          `json:"next_action"`
-	Archived           bool            `json:"archived"`
-	Body               string          `json:"body"`
+	store.TaskContent
+	Project          string          `json:"project"`
+	ID               string          `json:"id"`
+	TaskID           string          `json:"task_id"`
+	CommentID        string          `json:"comment_id"`
+	IdempotencyKey   string          `json:"idempotency_key"`
+	ExpectedRevision int64           `json:"expected_revision"`
+	IncludeArchived  bool            `json:"include_archived"`
+	After            json.RawMessage `json:"after"` // list: task id; history/comments: integer
+	Limit            int             `json:"limit"`
+	Body             string          `json:"body"`
 }
 
-// assignee accepts either form the schemas document: the filter string
-// "kind/id" or the content object {kind, id}; "" when absent.
-func (a *taskArgs) assignee() (kind, id string, err error) {
-	if len(a.Assignee) == 0 || string(a.Assignee) == "null" {
-		return "", "", nil
+func decodeTaskArgs(raw json.RawMessage) (taskArgs, error) {
+	var a taskArgs
+	if len(raw) == 0 || string(raw) == "null" {
+		return a, nil
 	}
-	var str string
-	if json.Unmarshal(a.Assignee, &str) == nil {
-		k, i, ok := strings.Cut(str, "/")
-		if !ok {
-			return "", "", errors.New("assignee must be kind/id or {kind, id}")
-		}
-		return k, i, nil
+	dec := json.NewDecoder(bytes.NewReader(raw))
+	dec.DisallowUnknownFields()
+	if err := dec.Decode(&a); err != nil {
+		return a, fmt.Errorf("arguments: %w", err)
 	}
-	var obj struct{ Kind, ID string }
-	if err := json.Unmarshal(a.Assignee, &obj); err != nil {
-		return "", "", errors.New("assignee must be kind/id or {kind, id}")
-	}
-	return obj.Kind, obj.ID, nil
+	return a, nil
 }
 
+// content is the HTTP body for create/update: the content exactly as
+// given (nil lists included; the service normalises them).
 func (a *taskArgs) content() (map[string]any, error) {
-	c := map[string]any{
-		"title": a.Title, "objective": a.Objective, "acceptance_criteria": a.AcceptanceCriteria,
-		"non_goals": a.NonGoals, "state": a.State, "blocker": a.Blocker,
-		"dependencies": a.Dependencies, "candidate_refs": a.CandidateRefs, "evidence_refs": a.EvidenceRefs,
-		"next_action": a.NextAction, "archived": a.Archived,
-	}
-	kind, id, err := a.assignee()
+	raw, err := json.Marshal(a.TaskContent)
 	if err != nil {
 		return nil, err
 	}
-	if kind != "" || id != "" {
-		c["assignee"] = map[string]string{"kind": kind, "id": id}
+	var m map[string]any
+	if err := json.Unmarshal(raw, &m); err != nil {
+		return nil, err
 	}
-	return c, nil
+	return m, nil
+}
+
+// afterString is the list cursor (a task id); afterInt the history and
+// comment cursor (a sequence or revision, accepted as a number or a
+// numeric string so a model can echo next_cursor either way).
+func (a *taskArgs) afterString() (string, error) {
+	if len(a.After) == 0 || string(a.After) == "null" {
+		return "", nil
+	}
+	var v string
+	if err := json.Unmarshal(a.After, &v); err != nil {
+		return "", errors.New("after must be the next_cursor string from the previous page")
+	}
+	return v, nil
+}
+
+func (a *taskArgs) afterInt() (int64, error) {
+	if len(a.After) == 0 || string(a.After) == "null" {
+		return 0, nil
+	}
+	var n int64
+	if err := json.Unmarshal(a.After, &n); err == nil {
+		return n, nil
+	}
+	var v string
+	if err := json.Unmarshal(a.After, &v); err == nil {
+		if n, err := strconv.ParseInt(v, 10, 64); err == nil {
+			return n, nil
+		}
+	}
+	return 0, errors.New("after must be the next_cursor number from the previous page")
 }
 
 // taskTool translates one task tool call into a task-API request made
 // with the caller's authority and returns the JSON result as text.
 func (s *srv) taskTool(ctx context.Context, name string, raw json.RawMessage) (string, error) {
-	if s.tasks == nil {
-		if s.taskSetup != nil {
-			tasks, err := s.taskSetup()
-			if err != nil {
-				return "", err
-			}
-			s.tasks = tasks
-		} else {
-			return "", errors.New("task tools are not available on this server")
+	// The caller is resolved per call, never cached: on the stdio facade
+	// that re-reads hub.json, so a rotated task credential takes effect
+	// without a restart; on the hub it is already per request.
+	tasks := s.tasks
+	if tasks == nil && s.taskSetup != nil {
+		var err error
+		if tasks, err = s.taskSetup(); err != nil {
+			return "", err
 		}
 	}
-	var a taskArgs
-	if len(raw) > 0 {
-		if err := json.Unmarshal(raw, &a); err != nil {
-			return "", fmt.Errorf("arguments: %w", err)
-		}
+	if tasks == nil {
+		return "", errors.New("task tools are not available on this server")
+	}
+	a, err := decodeTaskArgs(raw)
+	if err != nil {
+		return "", err
 	}
 	call := func(method, path string, body any, key string) (string, error) {
 		var payload []byte
@@ -235,7 +251,7 @@ func (s *srv) taskTool(ctx context.Context, name string, raw json.RawMessage) (s
 		if key != "" {
 			headers["Idempotency-Key"] = key
 		}
-		status, resp, err := s.tasks(ctx, method, path, headers, payload)
+		status, resp, err := tasks(ctx, method, path, headers, payload)
 		if err != nil {
 			return "", err
 		}
@@ -294,16 +310,18 @@ func (s *srv) taskTool(ctx context.Context, name string, raw json.RawMessage) (s
 		if a.State != "" {
 			q.Set("state", a.State)
 		}
-		if kind, id, err := a.assignee(); err != nil {
-			return "", err
-		} else if kind != "" || id != "" {
-			q.Set("assignee", kind+"/"+id)
+		if a.Assignee != nil {
+			q.Set("assignee", a.Assignee.Kind+"/"+a.Assignee.ID)
 		}
 		if a.IncludeArchived {
 			q.Set("include_archived", "true")
 		}
-		if a.After != "" {
-			q.Set("after", a.After)
+		after, err := a.afterString()
+		if err != nil {
+			return "", err
+		}
+		if after != "" {
+			q.Set("after", after)
 		}
 		if a.Limit > 0 {
 			q.Set("limit", strconv.Itoa(a.Limit))
@@ -353,13 +371,21 @@ func (s *srv) taskTool(ctx context.Context, name string, raw json.RawMessage) (s
 		if err != nil {
 			return "", err
 		}
-		return call("GET", "/v1/tasks/"+id+"/history?"+pageQuery(a.AfterRevision, a.Limit), nil, "")
+		after, err := a.afterInt()
+		if err != nil {
+			return "", err
+		}
+		return call("GET", "/v1/tasks/"+id+"/history?"+pageQuery(after, a.Limit), nil, "")
 	case "list_task_comments":
 		id, err := taskID(a.ID)
 		if err != nil {
 			return "", err
 		}
-		return call("GET", "/v1/tasks/"+id+"/comments?"+pageQuery(a.AfterSequence, a.Limit), nil, "")
+		after, err := a.afterInt()
+		if err != nil {
+			return "", err
+		}
+		return call("GET", "/v1/tasks/"+id+"/comments?"+pageQuery(after, a.Limit), nil, "")
 	case "get_task_comment":
 		id, err := taskID(a.TaskID)
 		if err != nil {

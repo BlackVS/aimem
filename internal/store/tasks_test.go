@@ -236,6 +236,9 @@ func TestTaskValidationBounds(t *testing.T) {
 	if _, err := db.CreateTask(content("t"), TaskActor{Kind: "admin", Name: ""}, "k-actor3"); err == nil {
 		t.Fatal("blank actor name accepted")
 	}
+	if _, err := db.CreateTask(content("t"), TaskActor{Kind: "writer", Name: "legacy"}, "k-actor4"); err == nil {
+		t.Fatal("unknown actor kind accepted")
+	}
 }
 
 // The indexed filter columns and the JSON snapshot are written together;

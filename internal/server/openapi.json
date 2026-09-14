@@ -118,7 +118,7 @@
     "/v1/projects/{p}/tasks": {
       "get": {
         "summary": "List task summaries of a project",
-        "description": "Archived tasks are excluded unless include_archived=true. Pages default 20, max 100; pass next_cursor as after. Ordinary user tokens may call this route; writes are authorized per attempt against the task's owning project (token issued for that project instance and a current grant), legacy writer tokens read only, admin tokens do everything. Retry keys travel in the Idempotency-Key header.",
+        "description": "Archived tasks are excluded unless include_archived=true. Pages default 20, max 100; pass next_cursor as after. Ordinary user tokens may call this route; writes are authorized per attempt against the task's owning project (token issued for that project instance and a current grant), legacy writer tokens read only, admin tokens do everything.",
         "x-role": "writer",
         "parameters": [
           {
@@ -175,7 +175,7 @@
             "description": "OK"
           },
           "400": {
-            "description": "Validation failure (bounds, unknown field, missing Idempotency-Key, reserved project)"
+            "description": "Validation failure (bad cursor, limit or filter)"
           },
           "401": {
             "description": "Invalid, expired, revoked or disabled credential"
@@ -235,6 +235,9 @@
           },
           "409": {
             "description": "Revision conflict (body carries current), idempotency key reused with different input, or archived task"
+          },
+          "413": {
+            "description": "Request body larger than 256 KiB"
           }
         }
       }
@@ -242,7 +245,7 @@
     "/v1/tasks/{id}": {
       "get": {
         "summary": "Read one task",
-        "description": "Current content, revision, owning project (resolved at read time, so a rename is reflected) and origin-relative links. Ordinary user tokens may call this route; writes are authorized per attempt against the task's owning project (token issued for that project instance and a current grant), legacy writer tokens read only, admin tokens do everything. Retry keys travel in the Idempotency-Key header.",
+        "description": "Current content, revision, owning project (resolved at read time, so a rename is reflected) and origin-relative links. Ordinary user tokens may call this route; writes are authorized per attempt against the task's owning project (token issued for that project instance and a current grant), legacy writer tokens read only, admin tokens do everything.",
         "x-role": "writer",
         "parameters": [
           {
@@ -259,7 +262,7 @@
             "description": "OK"
           },
           "400": {
-            "description": "Validation failure (bounds, unknown field, missing Idempotency-Key, reserved project)"
+            "description": "Validation failure"
           },
           "401": {
             "description": "Invalid, expired, revoked or disabled credential"
@@ -318,7 +321,10 @@
             "description": "Unknown project, task or comment"
           },
           "409": {
-            "description": "Revision conflict (body carries current), idempotency key reused with different input, or archived task"
+            "description": "Revision conflict (body carries `current` in the same shape as a read), idempotency key reused with different input, or archived task"
+          },
+          "413": {
+            "description": "Request body larger than 256 KiB"
           }
         }
       }
@@ -326,7 +332,7 @@
     "/v1/tasks/{id}/history": {
       "get": {
         "summary": "Accepted revisions in order",
-        "description": "Each entry is the complete snapshot plus the actor; after is the last revision seen. Ordinary user tokens may call this route; writes are authorized per attempt against the task's owning project (token issued for that project instance and a current grant), legacy writer tokens read only, admin tokens do everything. Retry keys travel in the Idempotency-Key header.",
+        "description": "Each entry is the complete snapshot plus the actor; after is the last revision seen. Ordinary user tokens may call this route; writes are authorized per attempt against the task's owning project (token issued for that project instance and a current grant), legacy writer tokens read only, admin tokens do everything.",
         "x-role": "writer",
         "parameters": [
           {
@@ -359,7 +365,7 @@
             "description": "OK"
           },
           "400": {
-            "description": "Validation failure (bounds, unknown field, missing Idempotency-Key, reserved project)"
+            "description": "Validation failure (bad cursor, limit or filter)"
           },
           "401": {
             "description": "Invalid, expired, revoked or disabled credential"
@@ -373,7 +379,7 @@
     "/v1/tasks/{id}/comments": {
       "get": {
         "summary": "Comments in append order",
-        "description": "after is the last sequence seen; the cursor is stable while later comments arrive. Ordinary user tokens may call this route; writes are authorized per attempt against the task's owning project (token issued for that project instance and a current grant), legacy writer tokens read only, admin tokens do everything. Retry keys travel in the Idempotency-Key header.",
+        "description": "after is the last sequence seen; the cursor is stable while later comments arrive. Ordinary user tokens may call this route; writes are authorized per attempt against the task's owning project (token issued for that project instance and a current grant), legacy writer tokens read only, admin tokens do everything.",
         "x-role": "writer",
         "parameters": [
           {
@@ -406,7 +412,7 @@
             "description": "OK"
           },
           "400": {
-            "description": "Validation failure (bounds, unknown field, missing Idempotency-Key, reserved project)"
+            "description": "Validation failure (bad cursor, limit or filter)"
           },
           "401": {
             "description": "Invalid, expired, revoked or disabled credential"
@@ -466,6 +472,9 @@
           },
           "409": {
             "description": "Revision conflict (body carries current), idempotency key reused with different input, or archived task"
+          },
+          "413": {
+            "description": "Request body larger than 256 KiB"
           }
         }
       }
@@ -473,7 +482,7 @@
     "/v1/tasks/{id}/comments/{c}": {
       "get": {
         "summary": "Read one comment",
-        "description": "A comment under the wrong task is not found. Ordinary user tokens may call this route; writes are authorized per attempt against the task's owning project (token issued for that project instance and a current grant), legacy writer tokens read only, admin tokens do everything. Retry keys travel in the Idempotency-Key header.",
+        "description": "A comment under the wrong task is not found. Ordinary user tokens may call this route; writes are authorized per attempt against the task's owning project (token issued for that project instance and a current grant), legacy writer tokens read only, admin tokens do everything.",
         "x-role": "writer",
         "parameters": [
           {
@@ -498,7 +507,7 @@
             "description": "OK"
           },
           "400": {
-            "description": "Validation failure (bounds, unknown field, missing Idempotency-Key, reserved project)"
+            "description": "Validation failure"
           },
           "401": {
             "description": "Invalid, expired, revoked or disabled credential"

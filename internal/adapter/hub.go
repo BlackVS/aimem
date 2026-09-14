@@ -147,12 +147,14 @@ func SaveHub(root string, c *HubConfig) error {
 	return SaveHubs(root, hubs, def)
 }
 
-// Over returns c with every setting c leaves empty taken from prev: a
-// re-run of `hub add`/`hub <url> <token>` rotates what it names and keeps
-// the sync destination, TLS choice and task credential it does not.
+// Over returns c completed from prev for a re-run of `hub add` / `hub <url>
+// <token>` against the SAME host: the sync destination and the task
+// credential carry over when not restated. A different URL inherits
+// nothing (a per-user credential must never travel to another host), and
+// the TLS downgrade is never inherited: --insecure is restated or gone.
 func (c *HubConfig) Over(prev *HubConfig) *HubConfig {
 	out := *c
-	if prev == nil {
+	if prev == nil || prev.URL != c.URL {
 		return &out
 	}
 	if out.Sync == "" {
@@ -160,9 +162,6 @@ func (c *HubConfig) Over(prev *HubConfig) *HubConfig {
 	}
 	if out.TaskToken == "" {
 		out.TaskToken = prev.TaskToken
-	}
-	if !out.Insecure {
-		out.Insecure = prev.Insecure
 	}
 	return &out
 }

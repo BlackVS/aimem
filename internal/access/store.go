@@ -286,6 +286,19 @@ type rowQuery interface{ QueryRow(string, ...any) *sql.Row }
 // on every call; callers re-check per attempt and never cache the answer.
 func (s *Store) CanWrite(user, project string) (bool, error) { return canWrite(s.db, user, project) }
 
+// IdentityExists reports whether kind ("user" or "group") and id name a
+// known identity, disabled or not: an assignment must point at something
+// real; whether it is still active is the reader's concern.
+func (s *Store) IdentityExists(kind, id string) (bool, error) {
+	table := map[string]string{"user": "users", "group": "access_groups"}[kind]
+	if table == "" {
+		return false, nil
+	}
+	var n int
+	err := s.db.QueryRow("SELECT count(*) FROM "+table+" WHERE id=?", id).Scan(&n)
+	return n == 1, err
+}
+
 func canWrite(q rowQuery, user, project string) (bool, error) {
 	var n int
 	err := q.QueryRow(`SELECT count(*) FROM users u WHERE u.id=? AND u.disabled=0 AND EXISTS(

@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -210,13 +211,28 @@ func TestRemoteMCPTaskToolsUseTheCallersAuthority(t *testing.T) {
 	}
 	// The list filter takes the documented kind/id string; a numeric field
 	// sent as a string is a tool error, not a protocol error.
-	text, isErr = toolText(f.rpc(t, f.reader, "tools/call", map[string]any{"name": "list_tasks", "arguments": map[string]any{"project": "alpha", "assignee": "user/" + f.aliceID}}))
+	text, isErr = toolText(f.rpc(t, f.reader, "tools/call", map[string]any{"name": "list_tasks", "arguments": map[string]any{"project": "alpha", "assignee": map[string]string{"kind": "user", "id": f.aliceID}}}))
 	if isErr || !strings.Contains(text, `"tasks": []`) {
-		t.Fatalf("assignee filter as string: %v %s", isErr, text)
+		t.Fatalf("assignee filter: %v %s", isErr, text)
 	}
 	text, isErr = toolText(f.rpc(t, f.reader, "tools/call", map[string]any{"name": "list_tasks", "arguments": map[string]any{"project": "alpha", "limit": "20"}}))
 	if !isErr || !strings.Contains(text, "arguments") {
 		t.Fatalf("bad argument type must be a tool error: %v %s", isErr, text)
+	}
+	// Strict arguments: a misspelled field is an error, never a silent clear.
+	text, isErr = toolText(f.rpc(t, f.alice, "tools/call", map[string]any{"name": "update_task", "arguments": map[string]any{
+		"id": task.ID, "title": "via mcp", "state": "IN_PROGRESS", "expected_revision": 2, "idempotency_key": "m7", "next_actions": "typo"}}))
+	if !isErr || !strings.Contains(text, "next_actions") {
+		t.Fatalf("unknown argument must be refused: %v %s", isErr, text)
+	}
+	// Comment paging through the tool, cursor echoed as number or string.
+	text, isErr = toolText(f.rpc(t, f.reader, "tools/call", map[string]any{"name": "list_task_comments", "arguments": map[string]any{"id": task.ID, "limit": 1}}))
+	if isErr || !strings.Contains(text, "looks **good**") || strings.Contains(text, "next_cursor") {
+		t.Fatalf("list_task_comments: %v %s", isErr, text)
+	}
+	text, isErr = toolText(f.rpc(t, f.reader, "tools/call", map[string]any{"name": "get_task_history", "arguments": map[string]any{"id": task.ID, "after": "1"}}))
+	if isErr || !strings.Contains(text, `"revision": 2`) || strings.Contains(text, `"revision": 1`) {
+		t.Fatalf("history after cursor as string: %v %s", isErr, text)
 	}
 	// Legacy tools still work for the admin path... except that their local
 	// client points nowhere here, which is exactly the point: task tools
@@ -231,9 +247,12 @@ func TestRemoteMCPTaskToolsUseTheCallersAuthority(t *testing.T) {
 // that hub's task credential — never its checkpoint token; a missing
 // hub or credential is an actionable error, never a fallback.
 func TestTaskCallerForUsesHubTaskToken(t *testing.T) {
+	var mu sync.Mutex
 	var seen []string
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
 		seen = append(seen, r.Header.Get("Authorization"))
+		mu.Unlock()
 		w.Header().Set("Content-Type", "application/json")
 		w.Write([]byte(`{"tasks":[]}`))
 	}))
@@ -252,6 +271,8 @@ func TestTaskCallerForUsesHubTaskToken(t *testing.T) {
 	if status, _, err := call(context.Background(), "GET", "/v1/projects/alpha/tasks", nil, nil); err != nil || status != 200 {
 		t.Fatalf("call: %d %v", status, err)
 	}
+	mu.Lock()
+	defer mu.Unlock()
 	if len(seen) != 1 || seen[0] != "Bearer aimem_user_alice" {
 		t.Fatalf("the hub must see the task credential, never the checkpoint token: %q", seen)
 	}
