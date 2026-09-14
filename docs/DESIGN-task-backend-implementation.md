@@ -1,7 +1,8 @@
 # Task Backend Implementation Plan
 
-Status: stages 1 and 2 merged (PR #38, PR #39); stage 3's task page merged
-(PR #40) and its board increment on `feat/task-board`, 2026-09-14.
+Status: stages 1, 2 and 3 merged (PR #38, PR #39, PR #40 task page, PR #41
+board), 2026-09-14. Stage 4 (the access section in the console) is planned
+below and not started.
 Original baseline: `4e7021533a1aefb2635e28a071953f2061f1df5b` on `master`.
 Read this alongside [the Kanban proposal](AIMEM-KANBAN-PROPOSAL.md) and
 [access control](DESIGN-access-control.md). Those documents contain the approved
@@ -24,8 +25,8 @@ decoding, status mapping, in-process MCP dispatch), `internal/mcp/tasks.go`
 
 Stage 3, first increment (task list/detail/discussion) is merged (PR #40):
 `internal/server/tasks.html`, served at `GET /tasks` (public chrome like
-`/admin`, holding no data). The board (second increment, `feat/task-board`)
-is a view of the same page: one column per state fed by the same list route
+`/admin`, holding no data). The board (second increment, PR #41) is merged;
+it is a view of the same page: one column per state fed by the same list route
 (active tasks, the first 500), cards that open the task, and a drop or a
 keyboard "move to" that is the page's ordinary write — read fresh, replace
 under `expected_revision` with a retry key, un-archive when leaving a
@@ -151,6 +152,11 @@ Keep three serial delivery stages, each branched from the previous merged result
    end to end with ordinary and admin credentials.
 3. **Task UI.** Task list/detail/discussion first, Kanban board afterwards, all
    using the same service. UI implementation is outside the first two stages.
+4. **Access section in the console.** Users, access groups, project grants and
+   ordinary-token issue/revoke as a tab of `/admin`, over the access routes
+   that already exist. No new route, no new authority. Planned after stage 3
+   (see "Access Section In The Console"); the "small admin management UI"
+   the access design's first delivery names.
 
 The user has authorized implementation, not release, deployment, automatic merge,
 or an unlimited redesign. v0.4.0 remains a proposed milestone. Follow the current
@@ -429,6 +435,86 @@ and a posted exact-head review; medium review precedes every push. Use the curre
 delivery-first dispositions: only blockers reopen frozen implementation scope;
 follow-ups become separate work. The user authorizes merge separately.
 
+## Access Section In The Console (Stage 4)
+
+Today users, groups, grants and ordinary tokens are managed only by
+`aimem access` on the hub host (over the local socket) or by the admin HTTP
+routes with the admin token. Workable for a few users; the person who wants
+a task credential still needs an operator with a shell on the hub. The
+access design's first delivery already names "a small admin management UI";
+this is it, and it lives in `/admin` because the user set the split: the
+console is the setup and maintenance surface, `/tasks` is the work.
+
+**Objective.** An `access` tab in the console from which an admin can do
+everything `aimem access` does, and nothing more: see the access state,
+create and rename users, disable and re-enable them, create groups and
+change membership, grant and revoke a user's or group's access to a project,
+issue an ordinary token for a user (project-scoped or read-only) and revoke
+one. The secret is shown once, with a copy control, and never stored.
+
+**Routes reused, none added.** `GET /v1/access` (the snapshot plus the
+instance-to-project map), `POST /v1/access/users`, `PUT /v1/access/users/{id}`
+(name, disabled), `POST /v1/access/groups`, `PUT`/`DELETE
+/v1/access/groups/{g}/members/{u}`, `PUT`/`DELETE
+/v1/projects/{p}/access/{kind}/{id}`, `POST /v1/access/tokens` (user, label,
+project or none for read-only, expiry), `DELETE /v1/access/tokens/{id}`. All
+are admin-only already; the tab adds no authority and the service remains the
+authority. Admin tokens stay host-console only (`aimem token`): the tab does
+not issue them, and says so where an operator would look for it.
+
+**Decisions.**
+
+- **Admin only, decided by the server.** The tab shows when the console's
+  identity check reports the admin role and is hidden otherwise; a writer
+  token that reaches the routes anyway gets the 403 the routes already send.
+  Hiding is a courtesy, not the control.
+- **The snapshot is the truth.** Every write re-reads `GET /v1/access` and
+  re-renders from it; the page keeps no access state of its own. The access
+  routes carry no idempotency key, so each control is disabled while its
+  request is outstanding and re-enabled by the re-read, and a failed write
+  shows the server's message next to the control it came from.
+- **Secrets appear once.** The issued secret is rendered into a copy box in
+  the response handler only, never into a table, `localStorage`, the URL or
+  a link; the box closes on the next navigation within the console. The
+  same rule the task page follows for its token.
+- **Names are untrusted.** User, group and label names go into text and
+  attribute contexts, and the console builds inline handlers with
+  single-quoted arguments; the console's own `esc()` does not encode the
+  apostrophe (stage-3 follow-up (c)). Back-porting the task page's escaper,
+  with a test, is the first commit of this stage, before any name reaches a
+  handler.
+- **Same page policy.** The tab inherits the console's CSP; no new script
+  source, no inline event handler that the escaper does not cover.
+
+**Non-goals.** Admin token management; self-service (a user issuing their own
+token); password, SSO or any second credential type; group nesting;
+per-project roles beyond the existing read-everywhere/write-own-project
+model; bulk import; audit views beyond what the snapshot shows.
+
+**Acceptance criteria.**
+
+1. With an admin token the tab lists users (name, enabled, groups, token
+   count), groups (members), grants per project (subject and kind) and
+   tokens (user, label, project or read-only, expiry, revoked); with a writer
+   token the tab is absent and the routes refuse.
+2. Each mutation above completes through its existing route and the tab
+   shows the re-read state, or shows the server's error at the control.
+3. Issuing a token shows the secret exactly once with a copy control; a
+   re-read never shows it; the page test proves the secret is not written to
+   storage or into any link.
+4. The console's escaper encodes the apostrophe and a test pins it; a name
+   containing `'` renders and its controls work.
+5. The page test pins the tab's call surface to the routes listed above,
+   the way the task page's test pins its calls.
+
+**Increments** (serial PRs, ultra review: this is the security surface):
+
+1. Escaper back-port with its test; the read-only `access` tab over the
+   snapshot; users and groups (create, rename, enable/disable, membership).
+2. Grants and tokens (issue with the one-time secret; revoke), and the
+   manual's operator section pointing at the tab as the ordinary path, with
+   `aimem access` kept for the socket-only case.
+
 ## Follow-Ups Recorded By The Stage-1 Review
 
 Valid, out of stage 1's scope, owned by the stage-2 service unless noted:
@@ -545,7 +631,8 @@ open for the transport that surfaces warnings:
 7. Add meaningful migration, transaction-failure, concurrency and lifecycle tests
    before considering any draft code an implementation milestone.
 
-Stages 1 and 2 and the task page are merged; the board is on `feat/task-board`
-(see Resume State). Do not change the public version as part of this work.
-Next: the stage-2 and stage-3 follow-ups recorded above, in the order the
-board's use surfaces them. Preserve the approved simple scope.
+Stages 1, 2 and 3 are merged (see Resume State). Do not change the public
+version as part of this work. Next: stage 4 (the access section in the
+console, which absorbs stage-3 follow-up (c)), then the remaining stage-2 and
+stage-3 follow-ups recorded above, in the order the board's use surfaces
+them. Preserve the approved simple scope.
