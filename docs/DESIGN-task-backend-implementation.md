@@ -606,9 +606,12 @@ Valid, out of stage 1's scope, owned by the stage-2 service unless noted:
   admits only admin and writer credentials; show a drop-down of the projects
   the credential may read instead — either admit the list route for ordinary
   tokens (they may read tasks in every project already) or add a task-scoped
-  project list — and let an admin create a project from the page. Deleting
-  from the page is limited by design: a project holding any task refuses to
-  be dropped, so at most an empty project can go.
+  project list. Creating and deleting projects stays an admin action on the
+  console and its admin routes (the user's rule, 2026-09-14): the task page
+  offers it only to an admin credential, and never through the MCP task
+  tools or to an ordinary token. Deleting is limited by design anyway: a
+  project holding any task refuses to be dropped, so at most an empty
+  project can go.
 - **Format characters.** Storage rejects bidirectional overrides (U+202A–E,
   U+2066–9) and C0/C1 controls; other zero-width/format characters pass and
   are the renderer's concern.
@@ -623,11 +626,13 @@ Recorded by the stage-2 review (service), owned by stage 3 or later:
 - **OpenAPI `x-role` vocabulary** (public/writer/admin) cannot express the
   ordinary-user principal the task routes admit; the prose says it. Extend
   the vocabulary and the parity test together when the console consumes it.
-- **Task lookup cost.** `Registry.LocateTask` opens (and caches, migrating on
-  first open) every ordinary project per lookup; the derived ID-to-project
-  index is the deferred fix. Reads by any valid credential trigger it, so
-  the lowest-authority token drives an O(projects) amplification per miss:
-  cap the scan or add a small negative cache before the index lands.
+- **Task lookup cost.** Done (agent enablement, second PR): the registry
+  keeps in-memory location hints (`internal/store/taskloc.go`) — a create
+  records its task's project, a scan records what it found, a lookup checks
+  the hinted project first and falls back to the scan; a conclusive miss is
+  remembered for thirty seconds, an inconclusive one never. The partition
+  stays the authority. A persisted ID-to-project index remains the fix if
+  the hint maps' reset-past-cap behaviour ever shows in practice.
 - **Admin actor names collide by construction.** The socket operator is
   `admin/local`; a tokens.json admin entry named `local` shares its receipt
   namespace. Resolved with the stable admin ID above.
