@@ -15,6 +15,18 @@ currently 11); a binary refuses a database newer than it understands.
 
 ### Added
 
+- **Kanban board on the task page (stage 3, second increment).** The
+  `/tasks` page gains a list/board toggle (`/tasks?project=<id>&view=board`,
+  remembered in the browser): one column per state, the active tasks as
+  cards (archived excluded; the first 500, the list pages through the rest),
+  each card opening its task. Dropping a card on a column — or, from the
+  keyboard, its "move to" select — is the page's ordinary write: the task is
+  read fresh, its content replaced with the new state under that revision
+  and a retry key, leaving a terminal state un-archives; a revision conflict
+  refreshes the board and says nothing was overwritten. Cards drag only
+  when the credential may write in the project; everyone else gets a
+  read-only board. Also: a late comment submission no longer releases the
+  submit button while another view's submission is pending.
 - **Task page, stage 3 of the Kanban work (first increment).** `GET /tasks`
   serves a task list / detail / discussion page: static chrome like the
   console, holding no data, asking for a token in the browser. An

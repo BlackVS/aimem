@@ -110,6 +110,21 @@
   .conflict{border-color:var(--rust)}
   .acts{display:flex;gap:6px;flex-wrap:wrap}
   .acts button{padding:2px 8px;font-size:12px}
+  /* The board: one column per state, cards are the same rows in another
+     arrangement. A drop is the page's ordinary CAS state change. */
+  .board{display:grid;grid-template-columns:repeat(7,minmax(170px,1fr));gap:8px;align-items:start;overflow-x:auto;padding-bottom:6px}
+  .col{background:var(--panel);border:1px solid var(--edge);padding:6px;min-height:140px}
+  .col h3{font:700 11px/1 var(--mono);letter-spacing:.12em;text-transform:uppercase;margin:2px 0 8px;display:flex;justify-content:space-between}
+  .col h3 .n{color:var(--amber);font-weight:400}
+  .col.over{border-color:var(--moss);background:var(--well)}
+  .tcard{background:var(--well);border:1px solid var(--edge);padding:6px 8px;margin:0 0 6px}
+  .tcard[draggable="true"]{cursor:grab}
+  .tcard.moving{opacity:.45}
+  .tcard a{color:var(--bone);text-decoration:none;font:14px/1.35 var(--text);display:block}
+  .tcard a:hover{color:var(--moss)}
+  .tcard .meta{color:var(--dim);font-size:11px;margin-top:3px;display:flex;gap:6px;align-items:center;flex-wrap:wrap}
+  .tcard select{width:auto;font-size:11px;padding:0 4px;margin-left:auto}
+  .viewsw button{padding:2px 10px;font-size:12px}
   @media (max-width:700px){ .trow{flex-wrap:wrap} .trow .meta{width:100%} }
 </style>
 </head>
@@ -143,13 +158,16 @@
       <button class="act" id="newBtn" onclick="toggleNew()" hidden>＋ new task</button>
     </div>
     <div class="row" id="filters" hidden>
-      <span class="dim">state</span><span id="stateChips"></span>
-      <label class="dim" style="margin-left:auto"><input type="checkbox" id="archChk" style="width:auto" onchange="listTasks(true)"> archived</label>
+      <span class="viewsw"><button type="button" class="act" id="vwList" onclick="setView('list')">list</button><button type="button" class="act" id="vwBoard" onclick="setView('board')">board</button></span>
+      <span id="listOnly"><span class="dim" style="margin-left:8px">state</span><span id="stateChips"></span></span>
+      <label class="dim" style="margin-left:auto" id="archLbl"><input type="checkbox" id="archChk" style="width:auto" onchange="listTasks(true)"> archived</label>
     </div>
     <div id="newForm" class="card" hidden></div>
     <div id="list"></div>
-    <div class="row"><button class="act" id="moreBtn" hidden onclick="listTasks(false)">more</button>
+    <div class="row" id="listMore"><button class="act" id="moreBtn" hidden onclick="listTasks(false)">more</button>
       <span id="listNote" class="dim"></span></div>
+    <div id="board" class="board" hidden></div>
+    <div id="boardNote" class="dim" hidden></div>
   </section>
   <section id="v-task" hidden>
     <div class="row"><a href="/tasks" class="dim" onclick="return go(listURL())">← tasks</a><span id="taskCrumb" class="dim"></span></div>
@@ -191,7 +209,9 @@ let CAN_WRITE = false;              // for CUR's project, this credential, this 
 let HIST = {after:0}, CMT = {after:0};
 let KEYS = {};                      // idempotency keys per open form: retry-safe until success
 let NAV = 0;                        // navigation epoch: a load that outlives its view must not render
-let SEQ = {list:0, hist:0, cmt:0};  // per-pager request sequence: only the latest request renders
+let SEQ = {list:0, hist:0, cmt:0, board:0}; // per-loader request sequence: only the latest request renders
+let VIEW = localStorage.getItem("aimem_task_view")==="board" ? "board" : "list";
+let CMT_PENDING = 0;                // the comment submit that owns the button; a late completion of another does not release it
 let NEW_PROJ = "";                  // the project an open create form was opened for
 
 const $ = id => document.getElementById(id);
@@ -256,7 +276,7 @@ const stChip = s => `<span class="chip st st-${esc(s)}">${esc(s)}</span>`;
 const short = id => id.slice(0,8);
 
 /* ---------- Routing: the URL is the state, so links are copyable. ---------- */
-function listURL(){ return "/tasks"+(PROJ?"?project="+encodeURIComponent(PROJ):""); }
+function listURL(){ return "/tasks"+(PROJ?"?project="+encodeURIComponent(PROJ)+(VIEW==="board"?"&view=board":""):""); }
 function taskURL(id, c){ return "/tasks?task="+encodeURIComponent(id)+(c?"&comment="+encodeURIComponent(c):""); }
 function go(url){ history.pushState(null,"",url); route(); return false; }
 window.addEventListener("popstate", route);
@@ -264,8 +284,10 @@ function route(){
   const q = new URLSearchParams(location.search);
   if(q.get("task")){ showTask(q.get("task"), q.get("comment")||""); return; }
   if(q.get("project")){ PROJ = q.get("project"); localStorage.setItem("aimem_task_project", PROJ); }
+  if(q.has("view")){ VIEW = q.get("view")==="board" ? "board" : "list"; localStorage.setItem("aimem_task_view", VIEW); }
   showList();
 }
+function setView(v){ VIEW = v; localStorage.setItem("aimem_task_view", v); go(listURL()); }
 // The clipboard API exists only in secure contexts; a plain-HTTP hub gets
 // the legacy copy command, and if that is refused too the link is shown
 // selected so it can be copied by hand. Never a modal dialog.
@@ -337,7 +359,12 @@ function showList(){
   if(PROJ){ const asked = PROJ; canWrite(asked).then(ok => { if(PROJ===asked && CUR===null) $("newBtn").hidden = !ok; }); }
   $("stateChips").innerHTML = stateChipsHTML();
   $("archChk").checked = FILTER.archived;
-  if(PROJ) listTasks(true); else { $("list").innerHTML = '<div class="dim">Pick or enter a project.</div>'; $("moreBtn").hidden = true; }
+  const board = VIEW==="board";
+  $("vwList").classList.toggle("on", !board); $("vwBoard").classList.toggle("on", board);
+  $("listOnly").hidden = board; $("archLbl").hidden = board;
+  $("list").hidden = board; $("listMore").hidden = board; $("board").hidden = !board; $("boardNote").hidden = !board;
+  if(!PROJ){ $("list").innerHTML = '<div class="dim">Pick or enter a project.</div>'; $("moreBtn").hidden = true; $("board").innerHTML = ""; return; }
+  if(board) loadBoard(); else listTasks(true);
 }
 // Loaders never lock: every call issues its request, and only the latest
 // request for a pager (and the view it was made for) renders, so a
@@ -365,6 +392,71 @@ async function listTasks(reset){
     $("stateChips").innerHTML = stateChipsHTML();
   }catch(e){ if(e.auth) return boot(); if(my!==NAV || seq!==SEQ.list) return; $("listNote").textContent = e.message; if(reset) $("list").innerHTML = ""; }
   finally{ if(seq===SEQ.list) $("moreBtn").disabled = false; }
+}
+
+/* ---------- Board: the active tasks as one column per state. ---------- */
+const BOARD_MAX = 500;
+let BOARD_CAN = false;
+async function loadBoard(){
+  const my = NAV, seq = ++SEQ.board, project = PROJ;
+  $("board").innerHTML = STATES.map(st => `<div class="col" data-state="${st}" ondragover="dragOver(event)" ondragleave="this.classList.remove('over')" ondrop="dropCard(event,'${st}')">
+    <h3>${st.replace("_"," ")} <span class="n" id="n-${st}">0</span></h3><div class="cards" id="col-${st}"></div></div>`).join("");
+  $("boardNote").textContent = "loading…";
+  BOARD_CAN = await canWrite(project);
+  if(my!==NAV || seq!==SEQ.board) return;
+  let after = "", n = 0;
+  try{
+    do{
+      const q = new URLSearchParams({limit:"100"}); if(after) q.set("after", after);
+      const page = await api("/v1/projects/"+encodeURIComponent(PROJ)+"/tasks?"+q);
+      if(my!==NAV || seq!==SEQ.board) return;
+      for(const t of page.tasks){ placeCard(t); n++; }
+      after = page.next_cursor||"";
+    }while(after && n < BOARD_MAX);
+    $("boardNote").textContent = n===0 ? "no active tasks" : (after ? `showing the first ${n} tasks; the list view pages through the rest` : (BOARD_CAN ? "drag a card to change its state (an ordinary revision-checked update)" : "read-only: this credential cannot change tasks in this project"));
+  }catch(e){ if(e.auth) return boot(); if(my===NAV && seq===SEQ.board) $("boardNote").textContent = e.message; }
+}
+function countCol(st){ $("n-"+st).textContent = $("col-"+st).children.length; }
+// placeCard renders (or re-renders) one card into its state's column.
+function placeCard(t){
+  const old = document.getElementById("card-"+t.id);
+  const from = old ? old.closest(".col").dataset.state : "";
+  if(old) old.remove();
+  const html = `<div class="tcard" id="card-${esc(t.id)}" draggable="${BOARD_CAN}" ondragstart="dragStart(event,'${esc(t.id)}')" ondragend="this.classList.remove('moving')">
+    <a href="${taskURL(t.id)}" onclick="return go('${taskURL(t.id)}')">${esc(t.title)}</a>
+    <div class="meta"><span>r${t.revision}</span><span>${ago(t.updated_at)}</span>${t.assignee?`<span>${esc(t.assignee.kind)}/${esc(short(t.assignee.id))}</span>`:''}
+      ${BOARD_CAN?`<select aria-label="move to" onchange="moveTask('${esc(t.id)}', this.value)"><option value="">move to…</option>${STATES.filter(s=>s!==t.state).map(s=>`<option>${s}</option>`).join("")}</select>`:''}</div></div>`;
+  $("col-"+t.state).insertAdjacentHTML("beforeend", html);
+  countCol(t.state); if(from && from!==t.state) countCol(from);
+}
+function dragStart(ev, id){ ev.dataTransfer.setData("text/plain", id); ev.dataTransfer.effectAllowed = "move"; ev.target.classList.add("moving"); }
+function dragOver(ev){ if(!BOARD_CAN) return; ev.preventDefault(); ev.dataTransfer.dropEffect = "move"; ev.currentTarget.classList.add("over"); }
+function dropCard(ev, state){ ev.preventDefault(); ev.currentTarget.classList.remove("over"); const id = ev.dataTransfer.getData("text/plain"); if(id) moveTask(id, state); }
+// A move is the page's ordinary write: read the task fresh (the card's
+// revision may be stale), replace its content with the new state under
+// that revision and a retry key, and show a conflict rather than
+// overwrite: the board reloads and says why.
+async function moveTask(id, state){
+  if(!state) return;
+  const my = NAV, kname = "move:"+id+":"+state;
+  const card = document.getElementById("card-"+id); if(card) card.classList.add("moving");
+  try{
+    const t = await api("/v1/tasks/"+encodeURIComponent(id));
+    if(my!==NAV) return;
+    if(t.state===state){ placeCard(t); return; }
+    const c = contentOf(t); c.state = state;
+    if(state!=="DONE" && state!=="CANCELLED") c.archived = false;
+    const k = key(kname);
+    const saved = await api("/v1/tasks/"+encodeURIComponent(id), {method:"PUT", body:JSON.stringify(Object.assign({}, c, {expected_revision: t.revision}))}, k);
+    spentIf(kname, k);
+    if(my!==NAV) return;
+    placeCard(saved); toast(esc(short(id))+" → "+state+" (r"+saved.revision+")");
+  }catch(e){
+    if(e.auth) return boot();
+    if(my!==NAV) return;
+    toast(e.status===409 ? "changed by someone else meanwhile — board refreshed, nothing overwritten" : e.message);
+    loadBoard();
+  }
 }
 
 /* ---------- Content form: create and edit share it (the update is a full replacement). ---------- */
@@ -443,7 +535,7 @@ async function showTask(id, commentID){
   if(my!==NAV) return;
   CAN_WRITE = ok;
   renderTask();
-  $("cmtBtn").disabled = false; // the comment form is per view
+  CMT_PENDING++; $("cmtBtn").disabled = false; // the comment form is per view
   HIST = {after:0}; CMT = {after:0};
   await Promise.all([loadHistory(true), loadComments(true)]);
   if(my!==NAV) return;
@@ -498,8 +590,8 @@ function renderTask(){
     <div id="editBox"></div></div>`;
   $("cmtForm").hidden = !CAN_WRITE || t.archived;
 }
-function currentContent(){
-  const t = CUR;
+function currentContent(){ return contentOf(CUR); }
+function contentOf(t){
   const c = {title:t.title, state:t.state, objective:t.objective||"", acceptance_criteria:t.acceptance_criteria||"", non_goals:t.non_goals||"",
     next_action:t.next_action||"", blocker:t.blocker||"", dependencies:t.dependencies||[], candidate_refs:t.candidate_refs||[],
     evidence_refs:t.evidence_refs||[], archived:!!t.archived};
@@ -596,7 +688,7 @@ async function loadComments(reset){
 }
 async function addComment(){
   const body = $("cmtBody").value; if(!body.trim()) return;
-  const my = NAV, id = CUR.id, kname = "cmt:"+id, k = key(kname); $("cmtBtn").disabled = true;
+  const my = NAV, id = CUR.id, kname = "cmt:"+id, k = key(kname), pend = ++CMT_PENDING; $("cmtBtn").disabled = true;
   try{
     const c = await api("/v1/tasks/"+encodeURIComponent(id)+"/comments", {method:"POST", body:JSON.stringify({body})}, k);
     spentIf(kname, k);
@@ -604,7 +696,7 @@ async function addComment(){
     $("cmtBody").value=""; toast("comment #"+c.sequence+" added");
     await loadComments(true);
   }catch(e){ if(e.auth) return boot(); if(my===NAV) toast(e.message); }
-  finally{ $("cmtBtn").disabled = false; } // the button belongs to whichever view is current; a late answer only releases it
+  finally{ if(CMT_PENDING===pend) $("cmtBtn").disabled = false; } // only the submit that owns the button releases it
 }
 if(!TOK) $("gate").classList.remove("hide"); else boot();
 </script>

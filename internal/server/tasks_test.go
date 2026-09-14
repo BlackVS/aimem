@@ -620,6 +620,14 @@ func TestTasksPageIsPublicChrome(t *testing.T) {
 	if n := strings.Count(page, "fetch("); n != 1 {
 		t.Fatalf("api() must be the page's only egress: %d fetch( sites", n)
 	}
+	// The board is the same rows and the same write: it reads through the
+	// list route and moves through the task route (both already pinned),
+	// drags only when the credential may write, and shows a conflict.
+	for _, want := range []string{`view=board`, `function loadBoard()`, `async function moveTask(id, state)`, `draggable="${BOARD_CAN}"`, `e.status===409 ? "changed by someone else meanwhile`} {
+		if !strings.Contains(page, want) {
+			t.Fatalf("board: page lacks %q", want)
+		}
+	}
 	if !strings.Contains(page, "catch(_){ PROJECTS = null; }") {
 		t.Fatal("project listing must be optional for ordinary tokens")
 	}

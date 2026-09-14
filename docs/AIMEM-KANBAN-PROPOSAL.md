@@ -1,7 +1,7 @@
 # Aimem Kanban Proposal
 
-Status: **task storage (stage 1) and HTTP/MCP task service (stage 2) merged;
-task page (stage 3, list/detail/discussion) implemented; board pending**,
+Status: **task storage (stage 1), HTTP/MCP task service (stage 2) and the task
+page (stage 3) merged; the Kanban board implemented on the same page**,
 revised 2026-09-14; product contract revised 2026-09-13 against
 `dcc466f305c6a2d9ce5927a3e0c7770e1c3893fe`. The access foundation is merged in
 [PR #35](https://github.com/BlackVS/aimem/pull/35); task comments are part of the
