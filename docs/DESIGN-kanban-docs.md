@@ -237,12 +237,21 @@ snapshots, history and saved retry results — to `url` when it is a valid
 HTTP(S) URL and to `text` otherwise, preserving the exact text and never
 inferring a target; nothing is silently rewritten to a guessed identity.
 Old clients that send string arrays receive a 400 naming the new shape;
-old clients that only read receive the typed form. Retry receipts:
-because the digest already ignores zero-valued members and names its
-format, a request replayed across the upgrade with the same key and the
-same *typed* content replays; a legacy string-array request replayed
-after the upgrade is refused by validation before any digest is
-computed, so no receipt is consulted or written. The alternative — a
+old clients that only read receive the typed form. Retry receipts: a
+receipt's digest was computed over the request as it was sent, so a
+request committed before the upgrade with non-empty string references
+would not match its typed retry — the digest's zero-value pruning and
+format prefix do not equate a string with an object (the external review
+of this document found the gap). The migration therefore recomputes
+every stored receipt's digest from its saved result, which is possible
+because the result carries the full content and the revision: a create's
+input is the created task's content; an update's input is the updated
+task's content with `expected` = its revision minus one; a comment's
+input is the body and is unaffected. A retry with the same key and the
+typed form of the same content then replays; changed content still
+conflicts. A legacy string-array request replayed after the upgrade is
+refused by validation before any digest is computed, so no receipt is
+consulted or written. The alternative — a
 permanent v1/v2 contract with an edit adapter and ambiguity rules — was
 written out in an earlier revision and rejected as cost without a
 beneficiary; it is the right design the day a client outside this
@@ -385,7 +394,10 @@ the board's assignee labels — which is 3 at the latest.
   valid HTTP(S) string became `url` and any other string became `text`
   with its exact text, nothing was rewritten to an inferred target. A
   legacy string-array write is refused with a message naming the new
-  shape; a typed retry with the same key replays; changed typed input
+  shape. Upgrade fixture: a create and an update committed before the
+  upgrade with non-empty string references and a lost response — after
+  the migration, the retry with the same key and the typed form of the
+  same content replays the original result, and changed typed input
   conflicts. Ambiguous identities and unsafe clickable schemes are refused.
 - Start a first session with `session_facts` absent or zero and verify that
   an enabled project gets its complete process bootstrap. Exercise disabled,
