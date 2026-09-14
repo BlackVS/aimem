@@ -348,20 +348,21 @@ func (s *Server) taskHistory(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	after, err := queryInt(r, "after")
-	if err == nil {
-		var limit int64
-		limit, err = queryInt(r, "limit")
-		if err == nil {
-			var page store.TaskHistoryPage
-			if page, err = db.TaskHistory(r.PathValue("id"), after, int(limit)); err == nil {
-				s.ok(w, map[string]any{"project": project, "changes": page.Changes, "next_cursor": page.Next})
-				return
-			}
-			s.taskError(w, err)
-			return
-		}
+	if err != nil {
+		s.fail(w, http.StatusBadRequest, err)
+		return
 	}
-	s.fail(w, http.StatusBadRequest, err)
+	limit, err := queryInt(r, "limit")
+	if err != nil {
+		s.fail(w, http.StatusBadRequest, err)
+		return
+	}
+	page, err := db.TaskHistory(r.PathValue("id"), after, int(limit))
+	if err != nil {
+		s.taskError(w, err)
+		return
+	}
+	s.ok(w, map[string]any{"project": project, "changes": page.Changes, "next_cursor": page.Next})
 }
 
 func (s *Server) listTaskComments(w http.ResponseWriter, r *http.Request) {

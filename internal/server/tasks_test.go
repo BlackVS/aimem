@@ -2,7 +2,6 @@ package server
 
 import (
 	"encoding/json"
-	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -393,7 +392,8 @@ func TestMCPPrincipalDispatch(t *testing.T) {
 	if !ok {
 		t.Fatal("alice must authenticate")
 	}
-	r := httptest.NewRequest("POST", "/mcp", nil).WithContext(withIdentity(httptest.NewRequest("POST", "/mcp", nil).Context(), id))
+	r := httptest.NewRequest("POST", "/mcp", nil)
+	r = r.WithContext(withIdentity(r.Context(), id))
 	call, tasksOnly := f.s.MCPPrincipal(r)
 	if !tasksOnly {
 		t.Fatal("ordinary token must be tasks-only")
@@ -403,7 +403,9 @@ func TestMCPPrincipalDispatch(t *testing.T) {
 		t.Fatalf("dispatch create: %d %v %s", status, err, body)
 	}
 	var task taskResponse
-	json.Unmarshal(body, &task)
+	if json.Unmarshal(body, &task); task.Project != "alpha" || task.Revision != 1 {
+		t.Fatalf("dispatched task view: %+v", task)
+	}
 	status, body, _ = call(r.Context(), "POST", "/v1/projects/beta/tasks", map[string]string{"Idempotency-Key": "m2"}, []byte(taskBody))
 	if status != 403 {
 		t.Fatalf("dispatch is bound to alice's authority: %d %s", status, body)
@@ -421,5 +423,4 @@ func TestMCPPrincipalDispatch(t *testing.T) {
 	if _, only := f.s.MCPPrincipal(ar); only {
 		t.Fatal("admin must not be tasks-only")
 	}
-	_ = fmt.Sprint(task.ID)
 }
