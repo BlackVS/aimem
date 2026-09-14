@@ -13,6 +13,7 @@ package ident
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -63,7 +64,16 @@ func SessionFactsBudget(dir string) int {
 	return cfg.SessionFacts
 }
 
-func readConfig(dir string) (*projectConfig, error) {
+// ErrConfigUnreadable marks a .aimem.json that exists but cannot be
+// parsed. Plain config reads treat such a file as absent, with one
+// warning, so a checkpoint never blocks on a broken file (CHANGELOG
+// v0.1.77); a caller that would ROUTE data on the answer must not take
+// "absent" for "default hub", and reads through the strict variant.
+var ErrConfigUnreadable = errors.New(".aimem.json exists but cannot be parsed")
+
+// loadConfig reads and parses the config file: absent is an empty config,
+// unparseable is ErrConfigUnreadable.
+func loadConfig(dir string) (*projectConfig, error) {
 	raw, err := os.ReadFile(filepath.Join(dir, ".aimem.json"))
 	if os.IsNotExist(err) {
 		return &projectConfig{}, nil
@@ -72,17 +82,25 @@ func readConfig(dir string) (*projectConfig, error) {
 		return nil, err
 	}
 	// Windows editors and PowerShell's `-Encoding UTF8` prepend a UTF-8
-	// BOM, and encoding/json rejects one. An unparseable file is treated
-	// as "no config" (a malformed file must not block checkpoints,
-	// CHANGELOG v0.1.77), so a BOM would silently void the project's hub
-	// binding and groups and quietly send its data to the machine's
-	// default hub.
+	// BOM, and encoding/json rejects one; a BOM would otherwise void the
+	// project's hub binding and groups and quietly send its data to the
+	// machine's default hub.
 	raw = bytes.TrimPrefix(raw, []byte("\xef\xbb\xbf"))
 	var cfg projectConfig
 	if err := json.Unmarshal(raw, &cfg); err != nil {
-		// Fail-open, but never silently: losing the pin, hub binding and
-		// groups is exactly what the warning lets someone catch before
-		// data lands under a derived id on the default hub.
+		return nil, fmt.Errorf("%w: %v", ErrConfigUnreadable, err)
+	}
+	return &cfg, nil
+}
+
+// readConfig is the fail-open read every capture path uses: an
+// unparseable file is "no config", warned once, never a blocked checkpoint.
+func readConfig(dir string) (*projectConfig, error) {
+	cfg, err := loadConfig(dir)
+	if errors.Is(err, ErrConfigUnreadable) {
+		// Never silently: losing the pin, hub binding and groups is
+		// exactly what the warning lets someone catch before data lands
+		// under a derived id on the default hub.
 		warnBadConfig.Do(func() {
 			fmt.Fprintf(os.Stderr,
 				"aimem: %s unreadable (%v) — treated as absent; project pin, hub binding and groups are inactive until the file is fixed\n",
@@ -90,7 +108,7 @@ func readConfig(dir string) (*projectConfig, error) {
 		})
 		return &projectConfig{}, nil
 	}
-	return &cfg, nil
+	return cfg, err
 }
 
 // warnBadConfig keeps the malformed-config warning to one line per
@@ -126,6 +144,23 @@ func ProjectHubName(dir string) (string, error) {
 	if err != nil {
 		return "", err
 	}
+	return hubNameOf(cfg)
+}
+
+// ProjectHubNameStrict is ProjectHubName for a caller that routes data on
+// the answer: a config file that exists but cannot be parsed is
+// ErrConfigUnreadable, not "the default hub". The MCP task and document
+// tools use it — on the fail-open answer they would send a bound
+// project's traffic to the default hub, with that hub's credential.
+func ProjectHubNameStrict(dir string) (string, error) {
+	cfg, err := loadConfig(dir)
+	if err != nil {
+		return "", err
+	}
+	return hubNameOf(cfg)
+}
+
+func hubNameOf(cfg *projectConfig) (string, error) {
 	if cfg.Hub != "" && !groupNameRe.MatchString(cfg.Hub) {
 		return "", fmt.Errorf(".aimem.json: invalid hub name %q (want lowercase letters, digits, dashes)", cfg.Hub)
 	}

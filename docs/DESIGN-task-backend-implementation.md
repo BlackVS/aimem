@@ -601,20 +601,25 @@ Valid, out of stage 1's scope, owned by the stage-2 service unless noted:
   (f) A board move re-creates the card element, so keyboard focus is lost
   after each move and the "move to" select is not labelled with its task;
   update the card in place and label the select.
+  (g) Project selection on the task page (the user's note, 2026-09-14): an
+  ordinary token sees a free-text project field, because `GET /v1/projects`
+  admits only admin and writer credentials; show a drop-down of the projects
+  the credential may read instead — either admit the list route for ordinary
+  tokens (they may read tasks in every project already) or add a task-scoped
+  project list — and let an admin create a project from the page. Deleting
+  from the page is limited by design: a project holding any task refuses to
+  be dropped, so at most an empty project can go.
 - **Format characters.** Storage rejects bidirectional overrides (U+202A–E,
   U+2066–9) and C0/C1 controls; other zero-width/format characters pass and
   are the renderer's concern.
 
 Recorded by the stage-2 review (service), owned by stage 3 or later:
 
-- **Hub-name resolution fails open on an unreadable `.aimem.json`.**
-  `ident.readConfig` strips a BOM, but on any other parse failure it prints a
-  one-shot stderr warning (invisible to an MCP client) and returns an empty
-  config, so `ProjectHubName` yields "" (the default hub) and the stdio
-  facade's task tools would route to the default hub with that hub's task
-  credential. Boundary: `internal/ident` config reading. First increment: a
-  sentinel error for "present but unreadable" that `taskCallerFor` turns
-  into a refusal, with a malformed-JSON config test.
+- **Hub-name resolution fails open on an unreadable `.aimem.json`.** Done
+  (agent enablement, first PR): `ident.ErrConfigUnreadable` and
+  `ProjectHubNameStrict`; the stdio facade's task tools (`taskCallerIn`)
+  and document tools refuse with the parse error instead of routing to the
+  default hub. The fail-open read the capture paths use is unchanged.
 - **OpenAPI `x-role` vocabulary** (public/writer/admin) cannot express the
   ordinary-user principal the task routes admit; the prose says it. Extend
   the vocabulary and the parity test together when the console consumes it.

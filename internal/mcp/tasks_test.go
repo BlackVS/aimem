@@ -1,12 +1,16 @@
 package mcp
 
 import (
+	"aimem/internal/ident"
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"sync"
@@ -289,6 +293,39 @@ func TestTaskCallerForUsesHubTaskToken(t *testing.T) {
 	}
 	if len(seen) != 1 {
 		t.Fatalf("refusals must not call the hub: %q", seen)
+	}
+}
+
+// A project whose .aimem.json exists but cannot be parsed gets a refusal
+// from the task tools, not a silent trip to the default hub with that
+// hub's credential; the model sees why, and the fixed file works.
+func TestTaskCallerRefusesUnreadableConfig(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		t.Errorf("hub must not be called for an unreadable config: %s %s", r.Method, r.URL.Path)
+	}))
+	defer ts.Close()
+	root := t.TempDir()
+	if err := adapter.SaveHubs(root, map[string]*adapter.HubConfig{"home": {URL: ts.URL, Token: "checkpoint", TaskToken: "aimem_user_alice"}}, "home"); err != nil {
+		t.Fatal(err)
+	}
+	dir := t.TempDir()
+	cfg := filepath.Join(dir, ".aimem.json")
+	if err := os.WriteFile(cfg, []byte(`{"hub": "work",`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := taskCallerIn(dir, root); !errors.Is(err, ident.ErrConfigUnreadable) {
+		t.Fatalf("unreadable config: err=%v; want ErrConfigUnreadable", err)
+	}
+	s := &srv{project: "alpha", taskSetup: func() (TaskCallFunc, error) { return taskCallerIn(dir, root) }}
+	resp := s.handle(context.Background(), []byte(`{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"list_tasks","arguments":{}}}`))
+	if !strings.Contains(string(resp), "isError") || !strings.Contains(string(resp), "cannot be parsed") {
+		t.Fatalf("the model must see the refusal: %s", resp)
+	}
+	if err := os.WriteFile(cfg, []byte(`{"hub": "home"}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := taskCallerIn(dir, root); err != nil {
+		t.Fatalf("fixed config: %v", err)
 	}
 }
 
