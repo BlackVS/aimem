@@ -307,24 +307,27 @@ type toolParams struct {
 }
 
 func (s *srv) toolCall(ctx context.Context, req rpcRequest) []byte {
-	var p toolParams
-	if err := json.Unmarshal(req.Params, &p); err != nil {
+	var head struct {
+		Name      string          `json:"name"`
+		Arguments json.RawMessage `json:"arguments"`
+	}
+	if err := json.Unmarshal(req.Params, &head); err != nil {
 		return reply(req.ID, nil, &rpcError{Code: -32602, Message: err.Error()})
 	}
 	var text string
 	var err error
 	switch {
-	case isTaskTool(p.Name):
-		var raw struct {
-			Arguments json.RawMessage `json:"arguments"`
-		}
-		json.Unmarshal(req.Params, &raw)
-		text, err = s.taskTool(ctx, p.Name, raw.Arguments)
+	case isTaskTool(head.Name):
+		text, err = s.taskTool(ctx, head.Name, head.Arguments)
 	case s.tasksOnly:
 		// An ordinary token's hidden legacy tools stay hidden when called
 		// by name: they would run with the hub's own trusted local client.
-		err = fmt.Errorf("tool %q is not available to this credential (task tools only)", p.Name)
+		err = fmt.Errorf("tool %q is not available to this credential (task tools only)", head.Name)
 	default:
+		var p toolParams
+		if err := json.Unmarshal(req.Params, &p); err != nil {
+			return reply(req.ID, nil, &rpcError{Code: -32602, Message: err.Error()})
+		}
 		text, err = s.run(&p)
 	}
 	if err != nil {

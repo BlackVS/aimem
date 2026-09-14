@@ -279,7 +279,7 @@ func (r *Registry) LocateTask(id string) (string, *DB, error) {
 		if _, err := db.GetTask(id); err == nil {
 			return p, db, nil
 		} else if !errors.Is(err, ErrTaskNotFound) {
-			return "", nil, err
+			unreadable = fmt.Errorf("project %q could not be read: %w", p, err)
 		}
 	}
 	if unreadable != nil {

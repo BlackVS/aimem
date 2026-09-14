@@ -285,11 +285,7 @@ func serve() error {
 			os.Getenv("AIMEM_HTTP_TOKEN"),
 			os.Getenv("AIMEM_TLS_CERT"), os.Getenv("AIMEM_TLS_KEY"),
 			map[string]http.Handler{"/mcp": mcp.NewHTTPHandler(client(), func(r *http.Request) (mcp.TaskCallFunc, bool) {
-				call, only := srv.MCPPrincipal(r)
-				if call == nil {
-					return nil, only
-				}
-				return call, only
+				return srv.MCPPrincipal(r)
 			})})
 		if err != nil {
 			return err
@@ -2124,6 +2120,11 @@ func hubCmd(args []string) error {
 			if h.Insecure {
 				line += "  [insecure: self-signed]"
 			}
+			if h.TaskToken != "" {
+				line += "  task-credential:set"
+			} else {
+				line += "  task-credential:none"
+			}
 			fmt.Println(line)
 		}
 		if len(hubs) > 1 {
@@ -2184,7 +2185,7 @@ func hubCmd(args []string) error {
 		if hubs == nil {
 			hubs = map[string]*adapter.HubConfig{}
 		}
-		hubs[name] = &adapter.HubConfig{URL: strings.TrimRight(pos[1], "/"), Token: pos[2], Sync: *syncDest, Insecure: *insecure}
+		hubs[name] = (&adapter.HubConfig{URL: strings.TrimRight(pos[1], "/"), Token: pos[2], Sync: *syncDest, Insecure: *insecure}).Over(hubs[name])
 		if *makeDefault || def == "" {
 			def = name
 		}

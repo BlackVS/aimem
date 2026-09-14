@@ -132,7 +132,8 @@ func LoadHub(root string) *HubConfig {
 	return hubs[def]
 }
 
-// SaveHub sets/replaces the default hub, preserving other named entries
+// SaveHub sets/replaces the default hub's URL and checkpoint token,
+// preserving other named entries and the default entry's other settings
 // (legacy `aimem hub <url> <token>` path).
 func SaveHub(root string, c *HubConfig) error {
 	hubs, def := LoadHubs(root)
@@ -142,8 +143,28 @@ func SaveHub(root string, c *HubConfig) error {
 	if def == "" {
 		def = DefaultHubName
 	}
-	hubs[def] = c
+	hubs[def] = c.Over(hubs[def])
 	return SaveHubs(root, hubs, def)
+}
+
+// Over returns c with every setting c leaves empty taken from prev: a
+// re-run of `hub add`/`hub <url> <token>` rotates what it names and keeps
+// the sync destination, TLS choice and task credential it does not.
+func (c *HubConfig) Over(prev *HubConfig) *HubConfig {
+	out := *c
+	if prev == nil {
+		return &out
+	}
+	if out.Sync == "" {
+		out.Sync = prev.Sync
+	}
+	if out.TaskToken == "" {
+		out.TaskToken = prev.TaskToken
+	}
+	if !out.Insecure {
+		out.Insecure = prev.Insecure
+	}
+	return &out
 }
 
 // ResolveHub maps a project's hub binding to a configured hub: the named

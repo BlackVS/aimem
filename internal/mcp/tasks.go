@@ -18,6 +18,7 @@ import (
 	"net/http"
 	"net/url"
 	"strconv"
+	"strings"
 
 	"aimem/internal/adapter"
 	"aimem/internal/ident"
@@ -141,43 +142,68 @@ func isTaskTool(name string) bool { return taskToolNames[name] }
 
 // taskArgs are the task-tool arguments; content fields mirror the HTTP body.
 type taskArgs struct {
-	Project            string                     `json:"project"`
-	ID                 string                     `json:"id"`
-	TaskID             string                     `json:"task_id"`
-	CommentID          string                     `json:"comment_id"`
-	IdempotencyKey     string                     `json:"idempotency_key"`
-	ExpectedRevision   int64                      `json:"expected_revision"`
-	State              string                     `json:"state"`
-	Assignee           *struct{ Kind, ID string } `json:"assignee"`
-	IncludeArchived    bool                       `json:"include_archived"`
-	After              string                     `json:"after"`
-	AfterRevision      int64                      `json:"after_revision"`
-	AfterSequence      int64                      `json:"after_sequence"`
-	Limit              int                        `json:"limit"`
-	Title              string                     `json:"title"`
-	Objective          string                     `json:"objective"`
-	AcceptanceCriteria string                     `json:"acceptance_criteria"`
-	NonGoals           string                     `json:"non_goals"`
-	Blocker            string                     `json:"blocker"`
-	Dependencies       []string                   `json:"dependencies"`
-	CandidateRefs      []string                   `json:"candidate_refs"`
-	EvidenceRefs       []string                   `json:"evidence_refs"`
-	NextAction         string                     `json:"next_action"`
-	Archived           bool                       `json:"archived"`
-	Body               string                     `json:"body"`
+	Project            string          `json:"project"`
+	ID                 string          `json:"id"`
+	TaskID             string          `json:"task_id"`
+	CommentID          string          `json:"comment_id"`
+	IdempotencyKey     string          `json:"idempotency_key"`
+	ExpectedRevision   int64           `json:"expected_revision"`
+	State              string          `json:"state"`
+	Assignee           json.RawMessage `json:"assignee"` // "kind/id" (list filter) or {kind,id} (content)
+	IncludeArchived    bool            `json:"include_archived"`
+	After              string          `json:"after"`
+	AfterRevision      int64           `json:"after_revision"`
+	AfterSequence      int64           `json:"after_sequence"`
+	Limit              int             `json:"limit"`
+	Title              string          `json:"title"`
+	Objective          string          `json:"objective"`
+	AcceptanceCriteria string          `json:"acceptance_criteria"`
+	NonGoals           string          `json:"non_goals"`
+	Blocker            string          `json:"blocker"`
+	Dependencies       []string        `json:"dependencies"`
+	CandidateRefs      []string        `json:"candidate_refs"`
+	EvidenceRefs       []string        `json:"evidence_refs"`
+	NextAction         string          `json:"next_action"`
+	Archived           bool            `json:"archived"`
+	Body               string          `json:"body"`
 }
 
-func (a *taskArgs) content() map[string]any {
+// assignee accepts either form the schemas document: the filter string
+// "kind/id" or the content object {kind, id}; "" when absent.
+func (a *taskArgs) assignee() (kind, id string, err error) {
+	if len(a.Assignee) == 0 || string(a.Assignee) == "null" {
+		return "", "", nil
+	}
+	var str string
+	if json.Unmarshal(a.Assignee, &str) == nil {
+		k, i, ok := strings.Cut(str, "/")
+		if !ok {
+			return "", "", errors.New("assignee must be kind/id or {kind, id}")
+		}
+		return k, i, nil
+	}
+	var obj struct{ Kind, ID string }
+	if err := json.Unmarshal(a.Assignee, &obj); err != nil {
+		return "", "", errors.New("assignee must be kind/id or {kind, id}")
+	}
+	return obj.Kind, obj.ID, nil
+}
+
+func (a *taskArgs) content() (map[string]any, error) {
 	c := map[string]any{
 		"title": a.Title, "objective": a.Objective, "acceptance_criteria": a.AcceptanceCriteria,
 		"non_goals": a.NonGoals, "state": a.State, "blocker": a.Blocker,
 		"dependencies": a.Dependencies, "candidate_refs": a.CandidateRefs, "evidence_refs": a.EvidenceRefs,
 		"next_action": a.NextAction, "archived": a.Archived,
 	}
-	if a.Assignee != nil {
-		c["assignee"] = map[string]string{"kind": a.Assignee.Kind, "id": a.Assignee.ID}
+	kind, id, err := a.assignee()
+	if err != nil {
+		return nil, err
 	}
-	return c
+	if kind != "" || id != "" {
+		c["assignee"] = map[string]string{"kind": kind, "id": id}
+	}
+	return c, nil
 }
 
 // taskTool translates one task tool call into a task-API request made
@@ -213,7 +239,7 @@ func (s *srv) taskTool(ctx context.Context, name string, raw json.RawMessage) (s
 		if err != nil {
 			return "", err
 		}
-		if status >= 400 {
+		if status/100 != 2 {
 			var e struct {
 				Error   string          `json:"error"`
 				Current json.RawMessage `json:"current"`
@@ -222,7 +248,7 @@ func (s *srv) taskTool(ctx context.Context, name string, raw json.RawMessage) (s
 			if e.Error == "" {
 				e.Error = fmt.Sprintf("HTTP %d", status)
 			}
-			if status == http.StatusNotFound && !bytes.Contains(resp, []byte(`"error"`)) {
+			if (status == http.StatusNotFound || status/100 == 3) && !bytes.Contains(resp, []byte(`"error"`)) {
 				e.Error = "the hub does not serve task routes (upgrade the hub)"
 			}
 			if len(e.Current) > 0 {
@@ -268,8 +294,10 @@ func (s *srv) taskTool(ctx context.Context, name string, raw json.RawMessage) (s
 		if a.State != "" {
 			q.Set("state", a.State)
 		}
-		if a.Assignee != nil {
-			q.Set("assignee", a.Assignee.Kind+"/"+a.Assignee.ID)
+		if kind, id, err := a.assignee(); err != nil {
+			return "", err
+		} else if kind != "" || id != "" {
+			q.Set("assignee", kind+"/"+id)
 		}
 		if a.IncludeArchived {
 			q.Set("include_archived", "true")
@@ -300,7 +328,11 @@ func (s *srv) taskTool(ctx context.Context, name string, raw json.RawMessage) (s
 		if err != nil {
 			return "", err
 		}
-		return call("POST", "/v1/projects/"+p+"/tasks", a.content(), k)
+		body, err := a.content()
+		if err != nil {
+			return "", err
+		}
+		return call("POST", "/v1/projects/"+p+"/tasks", body, k)
 	case "update_task":
 		id, err := taskID(a.ID)
 		if err != nil {
@@ -310,7 +342,10 @@ func (s *srv) taskTool(ctx context.Context, name string, raw json.RawMessage) (s
 		if err != nil {
 			return "", err
 		}
-		body := a.content()
+		body, err := a.content()
+		if err != nil {
+			return "", err
+		}
 		body["expected_revision"] = a.ExpectedRevision
 		return call("PUT", "/v1/tasks/"+id, body, k)
 	case "get_task_history":
@@ -368,11 +403,19 @@ func localTaskCaller() (TaskCallFunc, error) {
 	if err != nil {
 		return nil, err
 	}
-	name, hub := adapter.ResolveHub(mcpStateRoot(), hubName)
-	if hub == nil {
+	return taskCallerFor(mcpStateRoot(), hubName)
+}
+
+// taskCallerFor resolves the hub a project is bound to (hubName "" means
+// the default hub) and requires its dedicated task credential.
+func taskCallerFor(root, hubName string) (TaskCallFunc, error) {
+	name, hub := adapter.ResolveHub(root, hubName)
+	switch {
+	case hub == nil && name != "":
+		return nil, fmt.Errorf("this project is bound to hub %q, which this machine has not configured: aimem hub add %s <url> <token>, then aimem hub task-token %s <ordinary-token>", name, name, name)
+	case hub == nil:
 		return nil, errors.New("no hub configured for this project: tasks live on the project's hub (aimem hub add <name> <url> <token>, then aimem hub task-token <name> <ordinary-token>)")
-	}
-	if hub.TaskToken == "" {
+	case hub.TaskToken == "":
 		return nil, fmt.Errorf("hub %q has no task credential: ask the hub admin for an ordinary token issued to your user for this project, then run `aimem hub task-token %s <token>`", name, name)
 	}
 	return hubCaller(hub.URL, hub.TaskToken, hub.HTTPClient()), nil

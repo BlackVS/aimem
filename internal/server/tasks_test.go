@@ -4,11 +4,14 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
 	"aimem/internal/store"
+	"aimem/internal/uuidv7"
 )
 
 // taskReq performs one request through the REAL bearer gate with an
@@ -116,8 +119,8 @@ func TestTaskRoutesAuthorization(t *testing.T) {
 		t.Fatalf("create without key: %d %s", w.Code, w.Body)
 	}
 	w = taskReq(t, h, "POST", "/v1/projects/alpha/tasks", f.alice, "k1", taskBody)
-	if w.Code != 201 {
-		t.Fatalf("alice create: %d %s", w.Code, w.Body)
+	if w.Code != 201 || w.Header().Get("Content-Type") != "application/json" {
+		t.Fatalf("alice create: %d %s %s", w.Code, w.Header().Get("Content-Type"), w.Body)
 	}
 	task := decodeTask(t, w)
 	if task.Project != "alpha" || task.Revision != 1 || task.Links.Self != "/v1/tasks/"+task.ID || task.Links.Comments != "/v1/tasks/"+task.ID+"/comments" {
@@ -177,20 +180,75 @@ func TestTaskRoutesAuthorization(t *testing.T) {
 		t.Fatalf("env admin updates: %d %s", w.Code, w.Body)
 	}
 	w = taskReq(t, h, "GET", "/v1/tasks/"+betaTask.ID+"/history", f.env, "", "")
-	json.Unmarshal(w.Body.Bytes(), &hist)
-	if len(hist.Changes) != 2 || hist.Changes[1].Actor.Kind != "admin" || hist.Changes[1].Actor.Name != "env" {
-		t.Fatalf("admin actor stamp: %+v", hist.Changes)
+	var betaHist struct {
+		Changes []store.TaskChange `json:"changes"`
+	}
+	json.Unmarshal(w.Body.Bytes(), &betaHist)
+	if len(betaHist.Changes) != 2 || betaHist.Changes[1].Actor.Kind != "admin" || betaHist.Changes[1].Actor.Name != "env" || betaHist.Changes[1].Actor.UserID != "" {
+		t.Fatalf("admin actor stamp: %+v", betaHist.Changes)
 	}
 
 	// Ordinary tokens stay out of the legacy surface.
 	if w := taskReq(t, h, "GET", "/v1/projects/alpha/docs", f.alice, "", ""); w.Code != 403 {
 		t.Fatalf("ordinary token on legacy route: %d", w.Code)
 	}
-	if w := taskReq(t, h, "GET", "/v1/projects/alpha/tasks/../docs", f.alice, "", ""); w.Code == 200 {
-		t.Fatalf("path games must not reach legacy routes: %d %s", w.Code, w.Body)
-	}
 	if w := taskReq(t, h, "GET", "/v1/access/identity?project=alpha", f.alice, "", ""); w.Code != 200 {
 		t.Fatalf("identity: %d", w.Code)
+	}
+}
+
+// The gate admits an ordinary token to exactly the ordinary routes: every
+// other route in the table answers 403, methods matter, and dot-segment
+// paths never reach a legacy handler in either direction.
+func TestOrdinaryTokenGateMatrix(t *testing.T) {
+	f := newTaskFixture(t)
+	mcpHits := 0
+	h := f.s.TCPHandler(f.env, map[string]http.Handler{"/mcp": http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { mcpHits++ })})
+	fill := strings.NewReplacer("{p}", "alpha", "{id}", uuidv7.New(), "{c}", uuidv7.New(), "{s}", "s1", "{key}", "about",
+		"{name}", "RUNBOOK", "{instance}", "x", "{kind}", "user", "{g}", "g", "{u}", "u", "{id...}", "x", "{$}", "")
+	public := map[string]bool{"/": true, "/admin": true, "/v1/status": true}
+	for _, rt := range f.s.Routes() {
+		path := fill.Replace(rt.Pattern)
+		if path == "" {
+			path = "/"
+		}
+		body := ""
+		if rt.Method != "GET" && rt.Method != "DELETE" {
+			body = "{}"
+		}
+		w := taskReq(t, h, rt.Method, path, f.alice, "", body)
+		switch {
+		case public[path] || (rt.Method == "GET" && path == "/v1/access/identity"):
+		case rt.Ordinary():
+			if w.Code == 401 || w.Code == 403 {
+				t.Errorf("%s %s: ordinary route refused at the gate: %d %s", rt.Method, rt.Pattern, w.Code, w.Body)
+			}
+		default:
+			if w.Code != 403 {
+				t.Errorf("%s %s: non-ordinary route reachable by an ordinary token: %d", rt.Method, rt.Pattern, w.Code)
+			}
+		}
+	}
+	if w := taskReq(t, h, "POST", "/mcp", f.alice, "", "{}"); w.Code == 403 || mcpHits != 1 {
+		t.Fatalf("POST /mcp must reach the dispatcher: %d hits=%d", w.Code, mcpHits)
+	}
+	if w := taskReq(t, h, "GET", "/mcp", f.alice, "", ""); w.Code != 403 || mcpHits != 1 {
+		t.Fatalf("GET /mcp: %d hits=%d", w.Code, mcpHits)
+	}
+	if w := taskReq(t, h, "PUT", "/v1/projects/alpha/tasks", f.alice, "", "{}"); w.Code != 403 {
+		t.Fatalf("PUT on the list route: %d", w.Code)
+	}
+	for _, p := range []string{"/v1/projects/alpha/tasks/../docs", "/v1/tasks/../projects/alpha/docs",
+		"/v1/tasks/x/../../projects/alpha/memories", "/v1/tasks/..%2Fprojects%2Falpha%2Fdocs", "/v1/tasks/%2e%2e/projects/alpha/docs"} {
+		w := taskReq(t, h, "GET", p, f.alice, "", "")
+		if w.Code == 200 || w.Code == 201 {
+			t.Fatalf("%s reached a handler: %d %s", p, w.Code, w.Body)
+		}
+		if loc := w.Header().Get("Location"); loc != "" {
+			if w2 := taskReq(t, h, "GET", loc, f.alice, "", ""); w2.Code != 403 {
+				t.Fatalf("%s -> %s: %d", p, loc, w2.Code)
+			}
+		}
 	}
 }
 
@@ -276,8 +334,8 @@ func TestTaskRoutesCASCommentsAndPermissionChanges(t *testing.T) {
 	if w := taskReq(t, h, "POST", "/v1/tasks/"+task.ID+"/comments", f.alice, "c1", `{"body":"first **note**"}`); w.Code != 201 {
 		t.Fatalf("replay after archive: %d %s", w.Code, w.Body)
 	}
-	if w := taskReq(t, h, "GET", "/v1/projects/alpha/tasks", f.bob, "", ""); strings.Contains(w.Body.String(), task.ID) {
-		t.Fatal("archived task listed by default")
+	if w := taskReq(t, h, "GET", "/v1/projects/alpha/tasks", f.bob, "", ""); w.Code != 200 || strings.Contains(w.Body.String(), task.ID) || !strings.Contains(w.Body.String(), other.ID) {
+		t.Fatalf("archived task listed by default, or listing broken: %d %s", w.Code, w.Body)
 	}
 	if w := taskReq(t, h, "GET", "/v1/projects/alpha/tasks?include_archived=true&state=DONE", f.bob, "", ""); !strings.Contains(w.Body.String(), task.ID) {
 		t.Fatalf("archived task with filter: %s", w.Body)
@@ -319,6 +377,43 @@ func TestTaskRoutesCASCommentsAndPermissionChanges(t *testing.T) {
 	}
 	if w := taskReq(t, h, "POST", "/v1/projects/alpha/tasks", f.alice, "k10", taskBody); w.Code != 401 {
 		t.Fatalf("revoked token: %d", w.Code)
+	}
+	// Expiry: a token issued for one second is refused once it has passed.
+	_, short, err := db.Issue("admin", f.aliceUser, "short", f.alphaInstance, time.Now().Add(time.Second))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if w := taskReq(t, h, "GET", "/v1/tasks/"+other.ID, short, "", ""); w.Code != 200 {
+		t.Fatalf("fresh short token: %d", w.Code)
+	}
+	time.Sleep(1200 * time.Millisecond)
+	if w := taskReq(t, h, "POST", "/v1/projects/alpha/tasks", short, "k11", taskBody); w.Code != 401 {
+		t.Fatalf("expired token: %d", w.Code)
+	}
+}
+
+// A storage fault is a 500 that names nothing internal, and a task in a
+// readable project is still found past an unreadable sibling.
+func TestTaskRoutesStorageFaultMapping(t *testing.T) {
+	f := newTaskFixture(t)
+	task := decodeTask(t, taskReq(t, f.h, "POST", "/v1/projects/alpha/tasks", f.alice, "k1", taskBody))
+	broken := filepath.Join(f.reg.Root(), "projects", "aaa-broken")
+	if err := os.MkdirAll(broken, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(broken, "journal.db"), []byte("not a database"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if w := taskReq(t, f.h, "GET", "/v1/tasks/"+task.ID, f.bob, "", ""); w.Code != 200 {
+		t.Fatalf("task past an unreadable sibling: %d %s", w.Code, w.Body)
+	}
+	w := taskReq(t, f.h, "GET", "/v1/tasks/"+uuidv7.New(), f.bob, "", "")
+	if w.Code != 500 {
+		t.Fatalf("inconclusive lookup must be a fault, not a miss: %d %s", w.Code, w.Body)
+	}
+	body := strings.ToLower(w.Body.String())
+	if strings.Contains(body, "aaa-broken") || strings.Contains(body, "sqlite") || strings.Contains(body, "journal.db") || strings.Contains(body, f.reg.Root()) {
+		t.Fatalf("500 body leaks internals: %s", w.Body)
 	}
 }
 
@@ -413,6 +508,13 @@ func TestMCPPrincipalDispatch(t *testing.T) {
 	if _, _, err := call(r.Context(), "GET", "/v1/projects/alpha/docs", nil, nil); err == nil {
 		t.Fatal("non-task route must not be dispatchable")
 	}
+	// The identity is bound by the principal, whatever context the
+	// dispatcher passes: a bare context still acts as alice, never as the
+	// local operator.
+	status, body, err = call(httptest.NewRequest("GET", "/", nil).Context(), "POST", "/v1/projects/beta/tasks", map[string]string{"Idempotency-Key": "m3"}, []byte(taskBody))
+	if err != nil || status != 403 {
+		t.Fatalf("bare context must still be alice: %d %v %s", status, err, body)
+	}
 	if _, _, err := call(r.Context(), "POST", "/mcp", nil, nil); err == nil {
 		t.Fatal("/mcp must not be re-entrant")
 	}
@@ -422,5 +524,8 @@ func TestMCPPrincipalDispatch(t *testing.T) {
 	ar = ar.WithContext(withIdentity(ar.Context(), adminID))
 	if _, only := f.s.MCPPrincipal(ar); only {
 		t.Fatal("admin must not be tasks-only")
+	}
+	if c, only := f.s.MCPPrincipal(httptest.NewRequest("POST", "/mcp", nil)); c != nil || only {
+		t.Fatal("no identity: no task caller, legacy tools untouched")
 	}
 }

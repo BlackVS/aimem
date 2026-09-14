@@ -3,7 +3,6 @@ package mcp
 import (
 	"context"
 	"encoding/json"
-	"fmt"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
@@ -23,6 +22,7 @@ import (
 type hubFixture struct {
 	h                  http.Handler
 	env, alice, reader string
+	aliceID            string
 }
 
 func newHub(t *testing.T) *hubFixture {
@@ -73,7 +73,7 @@ func newHub(t *testing.T) *hubFixture {
 		}
 		return call, only
 	})
-	return &hubFixture{h: srv.TCPHandler("env-secret", map[string]http.Handler{"/mcp": mcpHandler}), env: "env-secret", alice: aliceSecret, reader: readerSecret}
+	return &hubFixture{h: srv.TCPHandler("env-secret", map[string]http.Handler{"/mcp": mcpHandler}), env: "env-secret", alice: aliceSecret, reader: readerSecret, aliceID: alice.ID}
 }
 
 func (f *hubFixture) rpc(t *testing.T, token, method string, params any) map[string]any {
@@ -205,8 +205,18 @@ func TestRemoteMCPTaskToolsUseTheCallersAuthority(t *testing.T) {
 		t.Fatalf("list_tasks: %v %s", isErr, text)
 	}
 	text, isErr = toolText(f.rpc(t, f.reader, "tools/call", map[string]any{"name": "get_task_history", "arguments": map[string]any{"id": task.ID, "limit": 1}}))
-	if isErr || !strings.Contains(text, `"next_cursor": 1`) {
-		t.Fatalf("get_task_history paging: %v %s", isErr, text)
+	if isErr || !strings.Contains(text, `"next_cursor": 1`) || !strings.Contains(text, `"kind": "user"`) || !strings.Contains(text, `"user_id": "`+f.aliceID+`"`) {
+		t.Fatalf("get_task_history must page and carry alice's stamp: %v %s", isErr, text)
+	}
+	// The list filter takes the documented kind/id string; a numeric field
+	// sent as a string is a tool error, not a protocol error.
+	text, isErr = toolText(f.rpc(t, f.reader, "tools/call", map[string]any{"name": "list_tasks", "arguments": map[string]any{"project": "alpha", "assignee": "user/" + f.aliceID}}))
+	if isErr || !strings.Contains(text, `"tasks": []`) {
+		t.Fatalf("assignee filter as string: %v %s", isErr, text)
+	}
+	text, isErr = toolText(f.rpc(t, f.reader, "tools/call", map[string]any{"name": "list_tasks", "arguments": map[string]any{"project": "alpha", "limit": "20"}}))
+	if !isErr || !strings.Contains(text, "arguments") {
+		t.Fatalf("bad argument type must be a tool error: %v %s", isErr, text)
 	}
 	// Legacy tools still work for the admin path... except that their local
 	// client points nowhere here, which is exactly the point: task tools
@@ -217,16 +227,58 @@ func TestRemoteMCPTaskToolsUseTheCallersAuthority(t *testing.T) {
 	}
 }
 
-// The stdio facade reaches the hub over HTTP with the hub's task
-// credential; a missing credential is an actionable error, never a
-// fallback.
-func TestLocalTaskCallerUsesHubTaskToken(t *testing.T) {
+// The stdio facade resolves the project's hub from hub.json and presents
+// that hub's task credential — never its checkpoint token; a missing
+// hub or credential is an actionable error, never a fallback.
+func TestTaskCallerForUsesHubTaskToken(t *testing.T) {
+	var seen []string
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		seen = append(seen, r.Header.Get("Authorization"))
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte(`{"tasks":[]}`))
+	}))
+	defer ts.Close()
+	root := t.TempDir()
+	if err := adapter.SaveHubs(root, map[string]*adapter.HubConfig{
+		"home": {URL: ts.URL, Token: "checkpoint-secret", TaskToken: "aimem_user_alice"},
+		"bare": {URL: ts.URL, Token: "checkpoint-secret"},
+	}, "home"); err != nil {
+		t.Fatal(err)
+	}
+	call, err := taskCallerFor(root, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if status, _, err := call(context.Background(), "GET", "/v1/projects/alpha/tasks", nil, nil); err != nil || status != 200 {
+		t.Fatalf("call: %d %v", status, err)
+	}
+	if len(seen) != 1 || seen[0] != "Bearer aimem_user_alice" {
+		t.Fatalf("the hub must see the task credential, never the checkpoint token: %q", seen)
+	}
+	if _, err := taskCallerFor(root, "bare"); err == nil || !strings.Contains(err.Error(), "aimem hub task-token bare") {
+		t.Fatalf("hub without task credential: %v", err)
+	}
+	if _, err := taskCallerFor(root, "work"); err == nil || !strings.Contains(err.Error(), `"work"`) {
+		t.Fatalf("bound to an unconfigured hub: %v", err)
+	}
+	if _, err := taskCallerFor(t.TempDir(), ""); err == nil || !strings.Contains(err.Error(), "no hub configured") {
+		t.Fatalf("no hub at all: %v", err)
+	}
+	if len(seen) != 1 {
+		t.Fatalf("refusals must not call the hub: %q", seen)
+	}
+}
+
+// The stdio facade end to end against a real hub surface.
+func TestLocalTaskCallerAgainstHub(t *testing.T) {
 	f := newHub(t)
 	ts := httptest.NewServer(f.h)
 	defer ts.Close()
-	s := &srv{project: "alpha", taskSetup: func() (TaskCallFunc, error) {
-		return hubCaller(ts.URL, f.alice, ts.Client()), nil
-	}}
+	root := t.TempDir()
+	if err := adapter.SaveHubs(root, map[string]*adapter.HubConfig{"home": {URL: ts.URL, Token: "checkpoint", TaskToken: f.alice}}, "home"); err != nil {
+		t.Fatal(err)
+	}
+	s := &srv{project: "alpha", taskSetup: func() (TaskCallFunc, error) { return taskCallerFor(root, "") }}
 	resp := s.handle(context.Background(), []byte(`{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"create_task","arguments":{"title":"from stdio","idempotency_key":"s1"}}}`))
 	if !strings.Contains(string(resp), `\"project\": \"alpha\"`) || strings.Contains(string(resp), "isError") {
 		t.Fatalf("stdio create: %s", resp)
@@ -240,11 +292,13 @@ func TestLocalTaskCallerUsesHubTaskToken(t *testing.T) {
 		t.Fatalf("wrong credential: %s", resp)
 	}
 	// No credential configured: actionable, and the setup error is not cached as success.
-	s3 := &srv{project: "alpha", taskSetup: func() (TaskCallFunc, error) {
-		return nil, fmt.Errorf("hub %q has no task credential: run `aimem hub task-token %s <token>`", "home", "home")
-	}}
+	root2 := t.TempDir()
+	if err := adapter.SaveHubs(root2, map[string]*adapter.HubConfig{"home": {URL: ts.URL, Token: "checkpoint"}}, "home"); err != nil {
+		t.Fatal(err)
+	}
+	s3 := &srv{project: "alpha", taskSetup: func() (TaskCallFunc, error) { return taskCallerFor(root2, "") }}
 	resp = s3.handle(context.Background(), []byte(`{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"get_task","arguments":{"id":"x"}}}`))
-	if !strings.Contains(string(resp), "aimem hub task-token") {
+	if !strings.Contains(string(resp), "aimem hub task-token home") {
 		t.Fatalf("missing credential: %s", resp)
 	}
 	// A facade with no task route at all (unit default) says so.
@@ -256,16 +310,28 @@ func TestLocalTaskCallerUsesHubTaskToken(t *testing.T) {
 }
 
 func TestTaskToolDefsAreValidSchema(t *testing.T) {
+	raw, err := json.Marshal(taskToolDefs)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(raw), `"required":null`) {
+		t.Fatal("a null required list breaks strict MCP clients")
+	}
 	for _, d := range taskToolDefs {
 		schema, ok := d["inputSchema"].(map[string]any)
 		if !ok || schema["type"] != "object" {
 			t.Fatalf("%v: inputSchema must be an object schema", d["name"])
 		}
 		props := schema["properties"].(map[string]any)
-		required, _ := schema["required"].([]string)
-		for _, r := range required {
-			if _, ok := props[r]; !ok {
-				t.Fatalf("%v: required %q not in properties", d["name"], r)
+		if reqAny, present := schema["required"]; present {
+			required, ok := reqAny.([]string)
+			if !ok {
+				t.Fatalf("%v: required must be []string, got %T", d["name"], reqAny)
+			}
+			for _, r := range required {
+				if _, ok := props[r]; !ok {
+					t.Fatalf("%v: required %q not in properties", d["name"], r)
+				}
 			}
 		}
 	}

@@ -28,7 +28,9 @@ Decisions taken while implementing stage 2:
   other socket route (the socket already drops and renames projects). The
   stdio MCP facade never uses the socket for tasks (below).
 - **Ordinary tokens reach exactly:** their identity check, the task routes,
-  and `POST /mcp` (`ordinaryTaskRoute`). Every task write re-runs the
+  and `POST /mcp` — the patterns in `ordinaryRoutes`, matched by the mux's
+  own rules (never a prefix), shown by `Route.Ordinary()` and pinned by a
+  test that walks the whole route table. Every task write re-runs the
   authorization: token issued for this project's access instance AND the
   user holds a current grant (`CanWrite`), both read fresh; reads need only
   a valid credential. Legacy writer tokens read tasks, never write them.
@@ -410,6 +412,33 @@ Valid, out of stage 1's scope, owned by the stage-2 service unless noted:
 - **Format characters.** Storage rejects bidirectional overrides (U+202A–E,
   U+2066–9) and C0/C1 controls; other zero-width/format characters pass and
   are the renderer's concern.
+
+Recorded by the stage-2 review (service), owned by stage 3 or later:
+
+- **Hub-name resolution fails open on an unreadable `.aimem.json`.**
+  `ident.ProjectHubName` returns "" (the default hub) with no error when the
+  file exists but cannot be parsed (e.g. a BOM), so the stdio facade's task
+  tools would route to the default hub with that hub's task credential.
+  Boundary: `internal/ident` config reading. First increment: a sentinel
+  error for "present but unreadable" that `taskCallerFor` turns into a
+  refusal, with a BOM-prefixed config test.
+- **OpenAPI `x-role` vocabulary** (public/writer/admin) cannot express the
+  ordinary-user principal the task routes admit; the prose says it. Extend
+  the vocabulary and the parity test together when the console consumes it.
+- **Task lookup cost.** `Registry.LocateTask` opens (and caches, migrating on
+  first open) every ordinary project per lookup; the derived ID-to-project
+  index is the deferred fix. Reads by any valid credential trigger it.
+- **`hub.json` mode.** `SaveHubs` creates the file 0600 but does not tighten
+  a pre-existing looser mode and does not write atomically; the file now
+  holds a second credential. Mirror `SaveTokens` (tmp + rename, chmod).
+- **Two spellings of "may this user write this project".** The identity
+  endpoint uses `Authorize(secret, instance)`; the task routes use the
+  instance match plus `CanWrite`. Equivalent today; fold into one helper
+  before either is tightened.
+- **Admin token names reach the actor validator.** A tokens.json entry named
+  with more than 128 bytes or a control character makes every task write a
+  500 ("invalid actor name" is only in the log). Validate names in `aimem
+  token add`.
 
 ## Draft Review Checklist (resolved by stage 1)
 

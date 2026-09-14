@@ -46,6 +46,8 @@ type Server struct {
 	accessClosed bool
 	muxOnce      sync.Once
 	mux          http.Handler // route-table handler for in-process task dispatch
+	ordOnce      sync.Once
+	ord          *http.ServeMux // ordinary-token allow-list, built from ordinaryRoutes
 }
 
 func New(reg *store.Registry, log *slog.Logger) *Server {
@@ -88,6 +90,10 @@ type Route struct {
 	handler http.HandlerFunc
 	Admin   bool // admin-only over the authenticated TCP listener
 }
+
+// Ordinary reports whether an ordinary (scoped user) token may reach the
+// route: exactly the patterns in ordinaryRoutes (tasks.go).
+func (rt Route) Ordinary() bool { return ordinaryRoutes[rt.Method+" "+rt.Pattern] }
 
 // Routes enumerates the complete HTTP surface. Admin marks operator
 // actions (config, destructive project ops, logs); everything else is
@@ -455,9 +461,9 @@ func (s *Server) authWrapper(token string, next http.Handler) http.Handler {
 		}
 		// Ordinary tokens never get the legacy writer surface. They reach
 		// their identity check, the task routes (which authorize every
-		// write themselves) and /mcp (whose dispatcher hides every legacy
-		// tool from them) — see ordinaryTaskRoute.
-		if id.Role == "user" && !(r.Method == "GET" && r.URL.Path == "/v1/access/identity") && !ordinaryTaskRoute(r) {
+		// write themselves) and POST /mcp (whose dispatcher hides every
+		// legacy tool from them) — exactly the routes in ordinaryRoutes.
+		if id.Role == "user" && !(r.Method == "GET" && r.URL.Path == "/v1/access/identity") && !s.ordinaryAllowed(r) {
 			s.fail(w, http.StatusForbidden, fmt.Errorf("ordinary token is not authorized for this endpoint"))
 			return
 		}

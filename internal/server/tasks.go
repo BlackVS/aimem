@@ -14,7 +14,6 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"regexp"
 	"strconv"
 	"strings"
 
@@ -25,23 +24,41 @@ import (
 // 32 KiB, escaping and whitespace need headroom, nothing needs more.
 const maxTaskRequestBytes = 256 << 10
 
-var taskListPath = regexp.MustCompile(`^/v1/projects/[^/]+/tasks$`)
+// ordinaryRoutes is the exact surface an ordinary (scoped user) token may
+// reach besides its identity check: the task routes, whose handlers
+// authorize every write themselves, and POST /mcp, whose dispatcher hides
+// every legacy tool from such a caller. Matched by the mux's own rules
+// against these exact patterns — never by prefix — so a future route is
+// refused until it is listed here (and Route.Ordinary shows it).
+var ordinaryRoutes = map[string]bool{
+	"GET /v1/projects/{p}/tasks":      true,
+	"POST /v1/projects/{p}/tasks":     true,
+	"GET /v1/tasks/{id}":              true,
+	"PUT /v1/tasks/{id}":              true,
+	"GET /v1/tasks/{id}/history":      true,
+	"GET /v1/tasks/{id}/comments":     true,
+	"POST /v1/tasks/{id}/comments":    true,
+	"GET /v1/tasks/{id}/comments/{c}": true,
+	"POST /mcp":                       true,
+}
 
-// ordinaryTaskRoute is the exact surface an ordinary (scoped user) token
-// may reach besides its identity check: the task routes, whose handlers
-// authorize every write themselves, and /mcp, whose dispatcher hides every
-// legacy tool from such a caller. Nothing else under /v1 admits them.
-func ordinaryTaskRoute(r *http.Request) bool {
-	p := r.URL.Path
-	switch {
-	case r.Method == http.MethodPost && p == "/mcp":
-		return true
-	case strings.HasPrefix(p, "/v1/tasks/"):
-		return true
-	case taskListPath.MatchString(p):
-		return r.Method == http.MethodGet || r.Method == http.MethodPost
-	}
-	return false
+func (s *Server) ordinaryMux() *http.ServeMux {
+	s.ordOnce.Do(func() {
+		m := http.NewServeMux()
+		for pattern := range ordinaryRoutes {
+			m.HandleFunc(pattern, func(http.ResponseWriter, *http.Request) {})
+		}
+		s.ord = m
+	})
+	return s.ord
+}
+
+// ordinaryAllowed reports whether r matches one of ordinaryRoutes exactly.
+// A non-canonical path (dot segments) makes the mux answer with a redirect
+// target instead of a registered pattern, so it is refused here.
+func (s *Server) ordinaryAllowed(r *http.Request) bool {
+	_, pattern := s.ordinaryMux().Handler(r)
+	return ordinaryRoutes[pattern]
 }
 
 // taskActor is the trusted actor a mutation is stamped with. The unix
@@ -111,6 +128,7 @@ func (s *Server) taskProject(w http.ResponseWriter, r *http.Request) (string, *s
 	}
 	db, err := s.reg.OpenExisting(p)
 	if err != nil {
+		s.log.Warn("task project open", "project", p, "err", err)
 		s.fail(w, http.StatusNotFound, errors.New("unknown project"))
 		return "", nil
 	}
@@ -186,10 +204,23 @@ func (s *Server) decodeTaskBody(w http.ResponseWriter, r *http.Request, v any) b
 		return false
 	}
 	if _, err := dec.Token(); err != io.EOF {
+		var tooBig *http.MaxBytesError
+		if errors.As(err, &tooBig) {
+			s.fail(w, http.StatusRequestEntityTooLarge, fmt.Errorf("request body exceeds %d bytes", maxTaskRequestBytes))
+			return false
+		}
 		s.fail(w, http.StatusBadRequest, errors.New("request body must be a single JSON object"))
 		return false
 	}
 	return true
+}
+
+// created answers 201 with a JSON body; the content type must be set
+// before the status is written or net/http drops it.
+func (s *Server) created(w http.ResponseWriter, v any) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusCreated)
+	json.NewEncoder(w).Encode(v)
 }
 
 // idempotencyKey is the one transport for retry keys over HTTP.
@@ -295,8 +326,7 @@ func (s *Server) createTask(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.log.Info("task created", "project", project, "task", task.ID, "actor", taskActor(r).Name)
-	w.WriteHeader(http.StatusCreated)
-	s.ok(w, taskView(project, task))
+	s.created(w, taskView(project, task))
 }
 
 func (s *Server) getTask(w http.ResponseWriter, r *http.Request) {
@@ -416,8 +446,7 @@ func (s *Server) addTaskComment(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.log.Info("task comment added", "project", project, "task", c.TaskID, "comment", c.ID, "actor", taskActor(r).Name)
-	w.WriteHeader(http.StatusCreated)
-	s.ok(w, commentView(project, c))
+	s.created(w, commentView(project, c))
 }
 
 func (s *Server) getTaskComment(w http.ResponseWriter, r *http.Request) {
@@ -458,26 +487,24 @@ func (m *memResponse) Write(b []byte) (int, error) {
 func (m *memResponse) WriteHeader(code int) { m.status = code }
 
 // MCPPrincipal tells the hub's /mcp endpoint how one request's task tools
-// are served: in-process, against the task routes only, with the very
-// identity the bearer middleware authenticated for this request — never
-// through the trusted local-socket client the legacy tools use. An
-// ordinary token additionally sees task tools only. Unauthenticated
-// requests never reach here (the wrapper refuses them).
+// are served: in-process, against the task routes only, stamped with the
+// very identity the bearer middleware authenticated for this request (bound
+// here, whatever context the dispatcher passes) — never through the
+// trusted local-socket client the legacy tools use. An ordinary token
+// additionally sees task tools only. A request without identity (only the
+// unix socket, where /mcp is not mounted) gets no task caller at all.
 func (s *Server) MCPPrincipal(r *http.Request) (func(ctx context.Context, method, path string, headers map[string]string, body []byte) (int, []byte, error), bool) {
 	id, ok := IdentityFrom(r.Context())
 	if !ok {
-		return nil, true
+		return nil, false
 	}
 	call := func(ctx context.Context, method, path string, headers map[string]string, body []byte) (int, []byte, error) {
-		req, err := http.NewRequestWithContext(ctx, method, "http://aimem"+path, bytes.NewReader(body))
+		req, err := http.NewRequestWithContext(withIdentity(ctx, id), method, "http://aimem"+path, bytes.NewReader(body))
 		if err != nil {
 			return 0, nil, err
 		}
-		if !ordinaryTaskRoute(req) || req.URL.Path == "/mcp" {
+		if req.URL.Path == "/mcp" || !s.ordinaryAllowed(req) {
 			return 0, nil, errors.New("not a task route")
-		}
-		if _, ok := IdentityFrom(req.Context()); !ok {
-			return 0, nil, errors.New("task dispatch without an authenticated identity")
 		}
 		req.Header.Set("Content-Type", "application/json")
 		for k, v := range headers {
