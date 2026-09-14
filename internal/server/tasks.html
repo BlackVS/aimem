@@ -420,12 +420,15 @@ async function loadBoard(){
   }catch(e){ if(e.auth) return boot(); if(my===NAV && seq===SEQ.board) $("boardNote").textContent = e.message; }
 }
 function countCol(st){ $("n-"+st).textContent = $("col-"+st).children.length; }
-// placeCard renders (or re-renders) one card into its state's column.
+// placeCard renders (or re-renders) one card into its state's column. An
+// archived task has no card: a fresh read that shows one archived (another
+// client archived it meanwhile) takes it off the board instead.
 function placeCard(t){
   const old = document.getElementById("card-"+t.id);
   if(old && Number(old.dataset.rev) > t.revision) return; // a page requested before a move must not undo it
   const from = old ? old.closest(".col").dataset.state : "";
   if(old) old.remove();
+  if(t.archived){ if(from) countCol(from); return; }
   const html = `<div class="tcard" id="card-${esc(t.id)}" data-rev="${t.revision}" draggable="${BOARD_CAN}" ondragstart="dragStart(event,'${esc(t.id)}')" ondragend="this.classList.remove('moving')">
     <a href="${taskURL(t.id)}" onclick="return go('${taskURL(t.id)}')">${esc(t.title)}</a>
     <div class="meta"><span>r${t.revision}</span><span>${ago(t.updated_at)}</span>${t.assignee?`<span>${esc(t.assignee.kind)}/${esc(short(t.assignee.id))}</span>`:''}
@@ -462,7 +465,7 @@ async function moveTask(id, state){
     const saved = await api("/v1/tasks/"+encodeURIComponent(id), {method:"PUT", body:JSON.stringify(Object.assign({}, c, {expected_revision: t.revision}))}, k);
     spentIf(kname, k);
     if(my!==NAV) return;
-    placeCard(saved); toast(short(id)+" → "+state+" (r"+saved.revision+")");
+    placeCard(saved); toast(short(id)+" → "+state+(saved.archived ? ", archived meanwhile — off the board" : "")+" (r"+saved.revision+")");
   }catch(e){
     if(e.auth) return boot();
     if(my!==NAV) return;

@@ -636,7 +636,9 @@ func TestTasksPageIsPublicChrome(t *testing.T) {
 	if strings.Join(pageStates, ",") != strings.Join(store.TaskStates, ",") {
 		t.Fatalf("page STATES %v differ from store.TaskStates %v", pageStates, store.TaskStates)
 	}
-	for _, want := range []string{`view=board`, `ondrop=`} {
+	// An archived task has no card: a move that reads or returns one
+	// archived (by another client meanwhile) must take it off the board.
+	for _, want := range []string{`view=board`, `ondrop=`, `if(t.archived){ if(from) countCol(from); return; }`} {
 		if !strings.Contains(page, want) {
 			t.Fatalf("board: page lacks %q", want)
 		}
