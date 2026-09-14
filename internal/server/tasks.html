@@ -191,7 +191,8 @@ let CAN_WRITE = false;              // for CUR's project, this credential, this 
 let HIST = {after:0}, CMT = {after:0};
 let KEYS = {};                      // idempotency keys per open form: retry-safe until success
 let NAV = 0;                        // navigation epoch: a load that outlives its view must not render
-let BUSY = {};                      // in-flight pagers, so a double click cannot fetch a page twice
+let SEQ = {list:0, hist:0, cmt:0};  // per-pager request sequence: only the latest request renders
+let NEW_PROJ = "";                  // the project an open create form was opened for
 
 const $ = id => document.getElementById(id);
 const esc = s => String(s??"").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
@@ -329,15 +330,19 @@ function showList(){
   document.title = (PROJ? PROJ+" · " : "")+"aimem tasks";
   if(PROJECTS) $("projSel").value = PROJECTS.includes(PROJ)?PROJ:""; else $("projIn").value = PROJ;
   $("filters").hidden = !PROJ; $("newBtn").hidden = true;
+  if(!$("newForm").hidden && NEW_PROJ!==PROJ){ $("newForm").hidden = true; spent("new"); } // a form belongs to the project it opened for
   if(PROJ){ const asked = PROJ; canWrite(asked).then(ok => { if(PROJ===asked && CUR===null) $("newBtn").hidden = !ok; }); }
   $("stateChips").innerHTML = stateChipsHTML();
   $("archChk").checked = FILTER.archived;
   if(PROJ) listTasks(true); else { $("list").innerHTML = '<div class="dim">Pick or enter a project.</div>'; $("moreBtn").hidden = true; }
 }
+// Loaders never lock: every call issues its request, and only the latest
+// request for a pager (and the view it was made for) renders, so a
+// project or filter change always reloads and a double "more" cannot
+// append a page twice.
 async function listTasks(reset){
-  if(BUSY.list) return;
   if(reset){ CURSOR=""; $("list").innerHTML=""; FILTER.archived = $("archChk").checked; }
-  const my = NAV; BUSY.list = true; $("moreBtn").disabled = true;
+  const my = NAV, seq = ++SEQ.list; $("moreBtn").disabled = true;
   const q = new URLSearchParams();
   if(FILTER.state) q.set("state", FILTER.state);
   if(FILTER.archived) q.set("include_archived","true");
@@ -345,7 +350,7 @@ async function listTasks(reset){
   q.set("limit","50");
   try{
     const page = await api("/v1/projects/"+encodeURIComponent(PROJ)+"/tasks?"+q);
-    if(my!==NAV) return;
+    if(my!==NAV || seq!==SEQ.list) return;
     for(const t of page.tasks){
       $("list").insertAdjacentHTML("beforeend", `<a class="trow${t.archived?' archived':''}" href="${taskURL(t.id)}" onclick="return go('${taskURL(t.id)}')">
         <span class="title">${esc(t.title)}</span>${stChip(t.state)}
@@ -355,8 +360,8 @@ async function listTasks(reset){
     $("moreBtn").hidden = !CURSOR;
     $("listNote").textContent = $("list").children.length ? "" : "no tasks"+(FILTER.state?" in "+FILTER.state:"");
     $("stateChips").innerHTML = stateChipsHTML();
-  }catch(e){ if(e.auth) return boot(); if(my!==NAV) return; $("listNote").textContent = e.message; if(reset) $("list").innerHTML = ""; }
-  finally{ BUSY.list = false; $("moreBtn").disabled = false; }
+  }catch(e){ if(e.auth) return boot(); if(my!==NAV || seq!==SEQ.list) return; $("listNote").textContent = e.message; if(reset) $("list").innerHTML = ""; }
+  finally{ if(seq===SEQ.list) $("moreBtn").disabled = false; }
 }
 
 /* ---------- Content form: create and edit share it (the update is a full replacement). ---------- */
@@ -397,17 +402,21 @@ function toggleNew(){
   if(!f.hidden){ f.hidden = true; return; }
   f.hidden = false;
   spent("new"); // one key per OPEN form: a reopened form is a new create
+  NEW_PROJ = PROJ;
   f.innerHTML = `<h2 style="margin-top:0">new task in ${esc(PROJ)}</h2>`+contentForm(null,"new")+
     `<div class="row" style="margin-top:10px"><button class="act on" onclick="createTask()">create</button>
      <button class="act" onclick="toggleNew()">cancel</button><span class="dim">retry-safe: this form keeps one idempotency key until the create succeeds</span></div>`;
   key("new"); $("new-title").focus();
 }
 async function createTask(){
+  const my = NAV, project = NEW_PROJ; // the form's project, never the selector's
   try{
-    const t = await api("/v1/projects/"+encodeURIComponent(PROJ)+"/tasks", {method:"POST", body:JSON.stringify(readForm("new"))}, key("new"));
-    spent("new"); $("newForm").hidden = true; toast("created "+short(t.id));
+    const t = await api("/v1/projects/"+encodeURIComponent(project)+"/tasks", {method:"POST", body:JSON.stringify(readForm("new"))}, key("new"));
+    spent("new");
+    if(my!==NAV) return;
+    $("newForm").hidden = true; toast("created "+short(t.id));
     go(taskURL(t.id));
-  }catch(e){ if(e.auth) return boot(); toast(e.message); }
+  }catch(e){ if(e.auth) return boot(); if(my===NAV) toast(e.message); }
 }
 
 /* ---------- Task detail ---------- */
@@ -434,7 +443,21 @@ async function showTask(id, commentID){
   HIST = {after:0}; CMT = {after:0};
   await Promise.all([loadHistory(true), loadComments(true)]);
   if(my!==NAV) return;
-  if(commentID){ const el = document.getElementById("c-"+commentID); if(el){ el.classList.add("target"); el.scrollIntoView({block:"center"}); } }
+  if(commentID) await revealComment(commentID, my);
+}
+// A comment link may point past the first page: resolve the comment (a
+// wrong parent is "not found"), then follow the cursors until it is on
+// the page, then highlight it.
+async function revealComment(commentID, my){
+  let target;
+  try{ target = await api("/v1/tasks/"+encodeURIComponent(CUR.id)+"/comments/"+encodeURIComponent(commentID)); }
+  catch(e){ if(e.auth) return boot(); if(my===NAV) toast("comment: "+e.message); return; }
+  for(let pages = 0; my===NAV && !document.getElementById("c-"+commentID) && CMT.after && CMT.after < target.sequence && pages < 50; pages++){
+    await loadComments(false);
+  }
+  if(my!==NAV) return;
+  const el = document.getElementById("c-"+commentID);
+  if(el){ el.classList.add("target"); el.scrollIntoView({block:"center"}); }
 }
 function fieldHTML(k, label, md){
   const v = CUR[k]; if(!v) return "";
@@ -487,13 +510,21 @@ function editTask(){
      <button class="act" onclick="$('editBox').innerHTML=''">cancel</button></div>`;
   key("edit:"+CUR.id+":"+CUR.revision);
 }
+// A write belongs to the view it started in: if the user has navigated
+// away by the time the answer (success or conflict) arrives, the answer is
+// dropped — the write itself happened or did not on the server, and the
+// view that replaced this one must not be repainted with another task.
 async function saveTask(content, kname){
+  const my = NAV, id = CUR.id;
   const body = Object.assign({}, content, {expected_revision: CUR.revision});
   try{
-    CUR = await api("/v1/tasks/"+encodeURIComponent(CUR.id), {method:"PUT", body:JSON.stringify(body)}, key(kname));
-    spent(kname); toast("saved r"+CUR.revision); renderTask(); HIST = {after:0}; loadHistory(true);
+    const saved = await api("/v1/tasks/"+encodeURIComponent(id), {method:"PUT", body:JSON.stringify(body)}, key(kname));
+    spent(kname);
+    if(my!==NAV) return;
+    CUR = saved; toast("saved r"+CUR.revision); renderTask(); HIST = {after:0}; loadHistory(true);
   }catch(e){
     if(e.auth) return boot();
+    if(my!==NAV) return;
     if(e.status===409 && e.body && e.body.current){ showConflict(e.body.current, content, kname); return; }
     toast(e.message);
   }
@@ -523,28 +554,26 @@ function reapply(attempt){
 
 /* ---------- History and discussion ---------- */
 async function loadHistory(reset){
-  if(BUSY.hist) return;
   if(reset){ HIST = {after:0}; $("hist").innerHTML=""; }
-  const my = NAV; BUSY.hist = true; $("histMore").disabled = true;
+  const my = NAV, seq = ++SEQ.hist; $("histMore").disabled = true;
   try{
     const p = await api("/v1/tasks/"+encodeURIComponent(CUR.id)+"/history?limit=20&after="+HIST.after);
-    if(my!==NAV) return;
+    if(my!==NAV || seq!==SEQ.hist) return;
     for(const ch of p.changes){
       const a = ch.actor, t = ch.task;
       $("hist").insertAdjacentHTML("beforeend", `<div class="hrow"><span class="n">r${t.revision}</span>${stChip(t.state)}
         <span>${esc(t.title)}</span><span class="dim">${esc(a.kind)} <b>${esc(a.name)}</b> · ${ago(t.updated_at)}${t.archived?' · archived':''}</span></div>`);
     }
     HIST.after = p.next_cursor||0; $("histMore").hidden = !p.next_cursor;
-  }catch(e){ if(e.auth) return boot(); if(my===NAV) $("hist").innerHTML = `<span class="bad">${esc(e.message)}</span>`; }
-  finally{ BUSY.hist = false; $("histMore").disabled = false; }
+  }catch(e){ if(e.auth) return boot(); if(my===NAV && seq===SEQ.hist) $("hist").innerHTML = `<span class="bad">${esc(e.message)}</span>`; }
+  finally{ if(seq===SEQ.hist) $("histMore").disabled = false; }
 }
 async function loadComments(reset){
-  if(BUSY.cmt) return;
   if(reset){ CMT = {after:0}; $("comments").innerHTML=""; }
-  const my = NAV; BUSY.cmt = true; $("cmtMore").disabled = true;
+  const my = NAV, seq = ++SEQ.cmt; $("cmtMore").disabled = true;
   try{
     const p = await api("/v1/tasks/"+encodeURIComponent(CUR.id)+"/comments?limit=20&after="+CMT.after);
-    if(my!==NAV) return;
+    if(my!==NAV || seq!==SEQ.cmt) return;
     for(const c of p.comments){
       $("comments").insertAdjacentHTML("beforeend", `<div class="comment" id="c-${esc(c.id)}">
         <div class="who"><span>${esc(c.actor.kind)}</span><b>${esc(c.actor.name)}</b><span>${ago(c.created_at)}</span><span>#${c.sequence}</span>
@@ -553,18 +582,20 @@ async function loadComments(reset){
     }
     CMT.after = p.next_cursor||0; $("cmtMore").hidden = !p.next_cursor;
     if(!$("comments").children.length) $("comments").innerHTML = '<div class="dim">no discussion yet</div>';
-  }catch(e){ if(e.auth) return boot(); if(my===NAV) $("comments").innerHTML = `<span class="bad">${esc(e.message)}</span>`; }
-  finally{ BUSY.cmt = false; $("cmtMore").disabled = false; }
+  }catch(e){ if(e.auth) return boot(); if(my===NAV && seq===SEQ.cmt) $("comments").innerHTML = `<span class="bad">${esc(e.message)}</span>`; }
+  finally{ if(seq===SEQ.cmt) $("cmtMore").disabled = false; }
 }
 async function addComment(){
   const body = $("cmtBody").value; if(!body.trim()) return;
-  const kname = "cmt:"+CUR.id; $("cmtBtn").disabled = true;
+  const my = NAV, id = CUR.id, kname = "cmt:"+id; $("cmtBtn").disabled = true;
   try{
-    const c = await api("/v1/tasks/"+encodeURIComponent(CUR.id)+"/comments", {method:"POST", body:JSON.stringify({body})}, key(kname));
-    spent(kname); $("cmtBody").value=""; toast("comment #"+c.sequence+" added");
+    const c = await api("/v1/tasks/"+encodeURIComponent(id)+"/comments", {method:"POST", body:JSON.stringify({body})}, key(kname));
+    spent(kname);
+    if(my!==NAV) return;
+    $("cmtBody").value=""; toast("comment #"+c.sequence+" added");
     await loadComments(true);
-  }catch(e){ if(e.auth) return boot(); toast(e.message); }
-  finally{ $("cmtBtn").disabled = false; }
+  }catch(e){ if(e.auth) return boot(); if(my===NAV) toast(e.message); }
+  finally{ if(my===NAV) $("cmtBtn").disabled = false; }
 }
 if(!TOK) $("gate").classList.remove("hide"); else boot();
 </script>

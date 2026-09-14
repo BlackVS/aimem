@@ -597,13 +597,13 @@ func TestTasksPageIsPublicChrome(t *testing.T) {
 		`"/v1/access/identity?project="+encodeURIComponent(project)`: true,
 		`"/v1/access/identity"`: true,
 		`"/v1/projects"`:        true,
-		`"/v1/projects/"+encodeURIComponent(PROJ)+"/tasks?"+q`:                          true,
-		`"/v1/projects/"+encodeURIComponent(PROJ)+"/tasks"`:                             true,
-		`"/v1/tasks/"+encodeURIComponent(id)`:                                           true,
-		`"/v1/tasks/"+encodeURIComponent(CUR.id)`:                                       true,
-		`"/v1/tasks/"+encodeURIComponent(CUR.id)+"/history?limit=20&after="+HIST.after`: true,
-		`"/v1/tasks/"+encodeURIComponent(CUR.id)+"/comments?limit=20&after="+CMT.after`: true,
-		`"/v1/tasks/"+encodeURIComponent(CUR.id)+"/comments"`:                           true,
+		`"/v1/projects/"+encodeURIComponent(PROJ)+"/tasks?"+q`:                               true,
+		`"/v1/projects/"+encodeURIComponent(project)+"/tasks"`:                               true,
+		`"/v1/tasks/"+encodeURIComponent(id)`:                                                true,
+		`"/v1/tasks/"+encodeURIComponent(CUR.id)+"/history?limit=20&after="+HIST.after`:      true,
+		`"/v1/tasks/"+encodeURIComponent(CUR.id)+"/comments?limit=20&after="+CMT.after`:      true,
+		`"/v1/tasks/"+encodeURIComponent(CUR.id)+"/comments/"+encodeURIComponent(commentID)`: true,
+		`"/v1/tasks/"+encodeURIComponent(id)+"/comments"`:                                    true,
 	}
 	got := map[string]bool{}
 	for _, expr := range apiCallSites(page) {
