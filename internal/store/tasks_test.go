@@ -4,8 +4,10 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"io/fs"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 	"testing"
@@ -1005,6 +1007,42 @@ func TestLocateTask(t *testing.T) {
 	}
 	if _, _, err := r.LocateTask(uuidv7.New()); err == nil || errors.Is(err, ErrTaskNotFound) {
 		t.Fatalf("an unreadable project must make a miss inconclusive: %v", err)
+	}
+}
+
+// Only a genuinely absent path is "no such project"; any other stat
+// failure keeps its identity so a transport answers with a fault.
+func TestOpenExistingDistinguishesMissingFromInaccessible(t *testing.T) {
+	r := newTestRegistry(t)
+	if _, err := r.OpenExisting("proj-absent"); !errors.Is(err, ErrNoSuchProject) {
+		t.Fatalf("absent: %v", err)
+	}
+	if _, err := r.OpenExisting("Not A Valid Id"); !errors.Is(err, ErrNoSuchProject) {
+		t.Fatalf("invalid id: %v", err)
+	}
+	if err := classifyMissing("p", &fs.PathError{Op: "stat", Path: "p", Err: fs.ErrPermission}); errors.Is(err, ErrNoSuchProject) || !errors.Is(err, fs.ErrPermission) {
+		t.Fatalf("permission failure classified as absence: %v", err)
+	}
+	if err := classifyMissing("p", &fs.PathError{Op: "stat", Path: "p", Err: fs.ErrNotExist}); !errors.Is(err, ErrNoSuchProject) {
+		t.Fatalf("not-exist not classified as absence: %v", err)
+	}
+	// On POSIX, prove it end to end: revoke search permission on the
+	// projects directory and stat the existing project through it.
+	if runtime.GOOS == "windows" || os.Geteuid() == 0 {
+		t.Skip("directory permissions are not enforced here")
+	}
+	if _, err := r.Open("proj-a"); err != nil {
+		t.Fatal(err)
+	}
+	r.Close() // drop the cached handle so OpenExisting must stat
+	dir := filepath.Join(r.root, "projects")
+	if err := os.Chmod(dir, 0o000); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { os.Chmod(dir, 0o755) })
+	_, err := r.OpenExisting("proj-a")
+	if err == nil || errors.Is(err, ErrNoSuchProject) {
+		t.Fatalf("inaccessible existing project read as absent: %v", err)
 	}
 }
 

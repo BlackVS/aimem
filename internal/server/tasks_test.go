@@ -6,6 +6,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -492,6 +493,21 @@ func TestTaskRoutesStorageFaultMapping(t *testing.T) {
 		if b := strings.ToLower(w.Body.String()); strings.Contains(b, "sqlite") || strings.Contains(b, "journal.db") || strings.Contains(b, "migrat") {
 			t.Fatalf("%s %s leaks internals: %s", c.method, c.path, w.Body)
 		}
+	}
+	// A stat failure that is not "absent" (POSIX: no search permission on
+	// the projects directory) is a fault too, never a 404.
+	if runtime.GOOS != "windows" && os.Geteuid() != 0 {
+		f.reg.Close() // no cached handle: the route must stat the directory
+		dir := filepath.Join(f.reg.Root(), "projects")
+		if err := os.Chmod(dir, 0o000); err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { os.Chmod(dir, 0o755) })
+		w := taskReq(t, f.h, "GET", "/v1/projects/alpha/tasks", f.admin, "", "")
+		if w.Code != 500 || strings.Contains(strings.ToLower(w.Body.String()), "permission") {
+			t.Fatalf("inaccessible projects directory: %d %s", w.Code, w.Body)
+		}
+		os.Chmod(dir, 0o755)
 	}
 	body := strings.ToLower(w.Body.String())
 	rootHint := strings.ToLower(filepath.Base(filepath.Dir(f.reg.Root()))) // the temp dir's test-named parent
