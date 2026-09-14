@@ -390,6 +390,10 @@ function showList(){
   if(PROJ){ const asked = PROJ; canWrite(asked).then(ok => { if(PROJ===asked && CUR===null){ $("newBtn").hidden = !ok; $("tasksOff").textContent = TASKS_OFF_NOTE; $("tasksOff").hidden = !TASKS_OFF[asked]; } }); }
   $("stateChips").innerHTML = stateChipsHTML();
   $("archChk").checked = FILTER.archived;
+  // The epic filter belongs to the project the epics were loaded for:
+  // entering another project clears it BEFORE the task query is built,
+  // and loadEpics repopulates the select for the new project.
+  if(PROJ && PROJ!==EPICS_PROJ){ FILTER.epic = ""; }
   if(PROJ) loadEpics(PROJ);
   const board = VIEW==="board";
   $("vwList").classList.toggle("on", !board); $("vwBoard").classList.toggle("on", board);
@@ -524,7 +528,7 @@ function contentForm(t, prefix){
       <div class="row" style="margin:0"><select id="${prefix}-akind" class="inline"><option value="">none</option><option${a&&a.kind==='user'?' selected':''}>user</option><option${a&&a.kind==='group'?' selected':''}>group</option></select>
       <input id="${prefix}-aid" class="grow" placeholder="identity uuid" value="${a?esc(a.id):''}"></div></div>
       <div><label class="f">archived</label><input type="checkbox" id="${prefix}-arch" style="width:auto"${t&&t.archived?' checked':''}> <span class="dim">DONE/CANCELLED only</span></div></div>
-    <label class="f">epic</label><select id="${prefix}-epic"><option value="">none</option>${Object.values(EPICS).filter(e=>e.state==="OPEN"||(t&&t.epic===e.id)).map(e=>`<option value="${esc(e.id)}"${t&&t.epic===e.id?' selected':''}>${esc(e.title)}${e.state==="RETIRED"?" (retired)":""}</option>`).join("")}</select>
+    <label class="f">epic</label><select id="${prefix}-epic"><option value="">none</option>${Object.values(EPICS).filter(e=>e.state==="OPEN"||(t&&t.epic===e.id)).map(e=>`<option value="${esc(e.id)}"${t&&t.epic===e.id?' selected':''}>${esc(e.title)}${e.state==="RETIRED"?" (retired)":""}</option>`).join("")}${t&&t.epic&&!EPICS[t.epic]?`<option value="${esc(t.epic)}" selected>${esc(short(t.epic))} (epic kept)</option>`:''}</select>
     <label class="f">objective</label><textarea id="${prefix}-objective" rows="3">${v('objective')}</textarea>
     <label class="f">acceptance criteria</label><textarea id="${prefix}-acceptance_criteria" rows="3">${v('acceptance_criteria')}</textarea>
     <label class="f">non-goals</label><textarea id="${prefix}-non_goals" rows="2">${v('non_goals')}</textarea>
@@ -583,6 +587,7 @@ async function showTask(id, commentID){
   if(my!==NAV) return;
   CUR = task;
   PROJ = CUR.project; localStorage.setItem("aimem_task_project", PROJ);
+  loadEpics(CUR.project); // labels and the edit form's options; the form keeps the current epic regardless
   document.title = CUR.title+" · aimem tasks";
   $("taskCrumb").textContent = " · "+CUR.project+" · "+short(CUR.id);
   const ok = await canWrite(CUR.project);
