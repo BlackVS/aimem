@@ -292,7 +292,9 @@ func TestRunBoundedReturnsDespiteHeldPipes(t *testing.T) {
 	if err == nil {
 		t.Fatal("the deadline must end the command with an error")
 	}
-	if took > 500*time.Millisecond+PipeDrainDelay+3*time.Second {
+	// The point is that it returns at all — the grandchild would hold the
+	// pipes for 30 s — so the slack is generous for a slow CI runner.
+	if took > 500*time.Millisecond+PipeDrainDelay+10*time.Second {
 		t.Fatalf("runBounded held for %v despite the held pipes", took)
 	}
 }
