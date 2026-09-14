@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"runtime"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -202,12 +203,56 @@ func TestTaskRoutesAuthorization(t *testing.T) {
 // The gate admits an ordinary token to exactly the ordinary routes: every
 // other route in the table answers 403, methods matter, and dot-segment
 // paths never reach a legacy handler in either direction.
+// The project listing is within an ordinary token's view — it may read
+// tasks in every ordinary project — but the reserved stores are not: the
+// user memory DB and the knowledge groups never hold tasks. Legacy
+// credentials keep the unfiltered list.
+func TestProjectListForOrdinaryTokens(t *testing.T) {
+	f := newTaskFixture(t)
+	for _, p := range []string{store.UserScopeProject, "group-shared"} {
+		if _, err := f.reg.Open(p); err != nil {
+			t.Fatal(err)
+		}
+	}
+	list := func(token string) []string {
+		w := taskReq(t, f.h, "GET", "/v1/projects", token, "", "")
+		if w.Code != 200 {
+			t.Fatalf("GET /v1/projects: %d %s", w.Code, w.Body)
+		}
+		var out struct {
+			Projects []string `json:"projects"`
+		}
+		if err := json.Unmarshal(w.Body.Bytes(), &out); err != nil {
+			t.Fatal(err)
+		}
+		return out.Projects
+	}
+	for _, tok := range []string{f.alice, f.bob} { // scoped and read-only ordinary tokens alike
+		got := list(tok)
+		if !slices.Contains(got, "alpha") {
+			t.Fatalf("ordinary token must see the ordinary projects: %v", got)
+		}
+		for _, p := range got {
+			if store.IsReservedProject(p) {
+				t.Fatalf("ordinary token must not see reserved store %q: %v", p, got)
+			}
+		}
+	}
+	for _, tok := range []string{f.admin, f.writer, f.env} {
+		got := list(tok)
+		if !slices.Contains(got, store.UserScopeProject) || !slices.Contains(got, "group-shared") {
+			t.Fatalf("legacy credential's listing changed: %v", got)
+		}
+	}
+}
+
 func TestOrdinaryTokenGateMatrix(t *testing.T) {
 	f := newTaskFixture(t)
 	// The admitted set is pinned here, independently of the map the gate
 	// consults: widening it is a deliberate, reviewed change.
 	want := []string{"GET /v1/projects/{p}/tasks", "POST /v1/projects/{p}/tasks", "GET /v1/tasks/{id}", "PUT /v1/tasks/{id}",
-		"GET /v1/tasks/{id}/history", "GET /v1/tasks/{id}/comments", "POST /v1/tasks/{id}/comments", "GET /v1/tasks/{id}/comments/{c}", "POST /mcp"}
+		"GET /v1/tasks/{id}/history", "GET /v1/tasks/{id}/comments", "POST /v1/tasks/{id}/comments", "GET /v1/tasks/{id}/comments/{c}", "POST /mcp",
+		"GET /v1/projects"} // the listing, read only, reserved stores filtered (TestProjectListForOrdinaryTokens)
 	if len(ordinaryRoutes) != len(want) {
 		t.Fatalf("ordinary surface changed: %v", ordinaryRoutes)
 	}
@@ -592,8 +637,9 @@ func TestTasksPageIsPublicChrome(t *testing.T) {
 	// The page's call surface is pinned exactly: every api(...) call site's
 	// path expression is listed here, api() is the only egress (one fetch
 	// in the whole page), and each path is a task route, the identity
-	// check, or the optional project listing (refused for ordinary tokens
-	// and caught). A new call is a reviewed edit.
+	// check, or the project listing (every credential class may call it;
+	// the catch keeps the free-text fallback if it ever fails). A new call
+	// is a reviewed edit.
 	want := map[string]bool{
 		`"/v1/access/identity?project="+encodeURIComponent(project)`: true,
 		`"/v1/access/identity"`: true,
