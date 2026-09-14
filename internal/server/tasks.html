@@ -334,14 +334,18 @@ async function canWrite(project){
 // Epics of the current project: loaded once per project (RETIRED included,
 // so a task under a retired epic still shows its name), never trusted
 // over the hub — the filter and the labels are conveniences.
+// The epic filter belongs to the project the epics were loaded for, and
+// this loader is the one place a project change happens — from the list,
+// the board or a task opened directly — so it clears the filter
+// synchronously, before any query that follows can be built.
 async function loadEpics(project){
   if(EPICS_PROJ===project) return;
-  EPICS = {}; EPICS_PROJ = project;
+  EPICS = {}; EPICS_PROJ = project; FILTER.epic = "";
+  $("epicSel").innerHTML = '<option value="">all epics</option>';
   try{ const r = await api("/v1/projects/"+encodeURIComponent(project)+"/epics?include_retired=true"); for(const e of (r.epics||[])) EPICS[e.id] = e; }
   catch(_){ EPICS_PROJ = ""; }
-  const sel = $("epicSel"); const keep = FILTER.epic;
-  sel.innerHTML = '<option value="">all epics</option>' + Object.values(EPICS).map(e => `<option value="${esc(e.id)}"${e.id===keep?' selected':''}>${esc(e.title)}${e.state==="RETIRED"?" (retired)":""}</option>`).join("");
-  if(keep && !EPICS[keep]) FILTER.epic = "";
+  if(EPICS_PROJ!==project) return; // failed, or another project took over meanwhile
+  $("epicSel").innerHTML = '<option value="">all epics</option>' + Object.values(EPICS).map(e => `<option value="${esc(e.id)}"${e.id===FILTER.epic?' selected':''}>${esc(e.title)}${e.state==="RETIRED"?" (retired)":""}</option>`).join("");
 }
 function epicLabel(id){ const e = EPICS[id]; return e ? e.title : short(id); }
 function refreshView(){ if(VIEW==="board") loadBoard(); else listTasks(true); }
@@ -390,11 +394,7 @@ function showList(){
   if(PROJ){ const asked = PROJ; canWrite(asked).then(ok => { if(PROJ===asked && CUR===null){ $("newBtn").hidden = !ok; $("tasksOff").textContent = TASKS_OFF_NOTE; $("tasksOff").hidden = !TASKS_OFF[asked]; } }); }
   $("stateChips").innerHTML = stateChipsHTML();
   $("archChk").checked = FILTER.archived;
-  // The epic filter belongs to the project the epics were loaded for:
-  // entering another project clears it BEFORE the task query is built,
-  // and loadEpics repopulates the select for the new project.
-  if(PROJ && PROJ!==EPICS_PROJ){ FILTER.epic = ""; }
-  if(PROJ) loadEpics(PROJ);
+  if(PROJ) loadEpics(PROJ); // clears the epic filter synchronously on a project change
   const board = VIEW==="board";
   $("vwList").classList.toggle("on", !board); $("vwBoard").classList.toggle("on", board);
   $("listOnly").hidden = board; $("archLbl").hidden = board;

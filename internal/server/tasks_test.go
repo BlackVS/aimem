@@ -771,7 +771,7 @@ func TestTasksPageIsPublicChrome(t *testing.T) {
 	// epics are not loaded (a direct task link), and the epic filter is
 	// cleared before the first query of another project.
 	for _, want := range []string{`view=board`, `ondrop=`, `if(t.archived){ if(from) countCol(from); return; }`, `if(SEEN[t.id] > t.revision) return;`,
-		"${t&&t.epic&&!EPICS[t.epic]?`<option value=\"${esc(t.epic)}\" selected>", `if(PROJ && PROJ!==EPICS_PROJ){ FILTER.epic = ""; }`, `loadEpics(CUR.project);`,
+		"${t&&t.epic&&!EPICS[t.epic]?`<option value=\"${esc(t.epic)}\" selected>", `EPICS = {}; EPICS_PROJ = project; FILTER.epic = "";`, `loadEpics(CUR.project);`,
 		`let TOK_REMEMBERED = !!TOK;`, `TOK_REMEMBERED=false;`,
 		`TOK_REMEMBERED?"The token remembered in this browser from an earlier visit was rejected (invalid, expired, revoked, or the user is disabled) — paste a current one.":"That token was rejected (invalid, expired, revoked, or the user is disabled)."`} {
 		if !strings.Contains(page, want) {
