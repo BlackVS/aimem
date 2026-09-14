@@ -684,6 +684,8 @@ func TestTaskRoutesProjectsRenameAndReservedScopes(t *testing.T) {
 // for why that check exists) and it asks only the routes an ordinary
 // token may reach.
 func TestTasksPageIsPublicChrome(t *testing.T) {
+	// The page's kind list is the store's, in the store's order.
+	refKindsJS := `["` + strings.Join(store.TaskRefKinds, `","`) + `"]`
 	f := newTaskFixture(t)
 	w := taskReq(t, f.h, "GET", "/tasks", "", "", "")
 	if w.Code != 200 || !strings.HasPrefix(w.Header().Get("Content-Type"), "text/html") {
@@ -772,7 +774,7 @@ func TestTasksPageIsPublicChrome(t *testing.T) {
 	// cleared before the first query of another project.
 	for _, want := range []string{`view=board`, `ondrop=`, `if(t.archived){ if(from) countCol(from); return; }`, `if(SEEN[t.id] > t.revision) return;`,
 		"${t&&t.epic&&!EPICS[t.epic]?`<option value=\"${esc(t.epic)}\" selected>", `EPICS = {}; EPICS_PROJ = project; FILTER.epic = "";`, `const gen = ++EPICS_GEN;`,
-		`if(LINK_KINDS.has(r.kind) && /^https?:\/\//i.test(ref)) body =`, `function parseRefs(text){`, `const [refPart, notePart] = splitNote(rest);`, `if(rest[i] === "\\"){ i++; continue; }`, `candidate_refs:parseRefs(g("candidate_refs")), evidence_refs:parseRefs(g("evidence_refs")),`, `if(gen!==EPICS_GEN) return;`, `EPICS = got;`, `loadEpics(CUR.project);`,
+		`if(LINK_KINDS.has(r.kind) && /^https?:\/\//i.test(ref)) body =`, `function parseRefs(text){`, `const [refPart, notePart] = splitNote(rest);`, `const REF_KINDS = ` + refKindsJS + `;`, `if(rest[i] === "\\"){ i++; continue; }`, `candidate_refs:parseRefs(g("candidate_refs")), evidence_refs:parseRefs(g("evidence_refs")),`, `if(gen!==EPICS_GEN) return;`, `EPICS = got;`, `loadEpics(CUR.project);`,
 		`let TOK_REMEMBERED = !!TOK;`, `TOK_REMEMBERED=false;`,
 		`TOK_REMEMBERED?"The token remembered in this browser from an earlier visit was rejected (invalid, expired, revoked, or the user is disabled) — paste a current one.":"That token was rejected (invalid, expired, revoked, or the user is disabled)."`} {
 		if !strings.Contains(page, want) {
@@ -1041,5 +1043,21 @@ func TestTypedReferencesOverHTTP(t *testing.T) {
 	w = taskReq(t, f.h, "POST", "/v1/projects/alpha/tasks", f.alice, "r3", `{"title":"bad","evidence_refs":[{"kind":"pr","ref":"7"}]}`)
 	if w.Code != 400 || !strings.Contains(w.Body.String(), "http(s) URL") {
 		t.Fatalf("bare pr number must be refused: %d %s", w.Code, w.Body)
+	}
+	// The replace route shares the contract: strings refused, typed taken.
+	var created struct {
+		ID string `json:"id"`
+	}
+	w = taskReq(t, f.h, "POST", "/v1/projects/alpha/tasks", f.alice, "r1", `{"title":"typed","candidate_refs":[{"kind":"pr","ref":"https://example.com/org/repo/pull/7","note":"the candidate"}],"evidence_refs":[{"kind":"text","ref":"reviewed"}]}`)
+	if err := json.Unmarshal(w.Body.Bytes(), &created); err != nil || created.ID == "" {
+		t.Fatalf("replayed create: %d %s", w.Code, w.Body)
+	}
+	w = taskReq(t, f.h, "PUT", "/v1/tasks/"+created.ID, f.alice, "r4", `{"title":"typed","state":"BACKLOG","expected_revision":1,"candidate_refs":["https://example.com/pull/7"]}`)
+	if w.Code != 400 || !strings.Contains(w.Body.String(), "objects {kind, ref") {
+		t.Fatalf("legacy strings on PUT must be refused with the shape: %d %s", w.Code, w.Body)
+	}
+	w = taskReq(t, f.h, "PUT", "/v1/tasks/"+created.ID, f.alice, "r5", `{"title":"typed","state":"BACKLOG","expected_revision":1,"evidence_refs":[{"kind":"ci","ref":"https://example.com/org/repo/actions/runs/1","note":"green"}]}`)
+	if w.Code != 200 || !strings.Contains(w.Body.String(), `"kind":"ci"`) || strings.Contains(w.Body.String(), `"kind":"pr"`) {
+		t.Fatalf("typed replace: %d %s", w.Code, w.Body)
 	}
 }

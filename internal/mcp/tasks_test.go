@@ -526,6 +526,29 @@ func TestTaskToolDefsAreValidSchema(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	// The reference lists advertise the typed object with the kind enum,
+	// never the strings the decoder refuses.
+	wantKinds, _ := json.Marshal(store.TaskRefKinds)
+	seen := 0
+	for _, d := range taskToolDefs {
+		props := d["inputSchema"].(map[string]any)["properties"].(map[string]any)
+		for _, field := range []string{"candidate_refs", "evidence_refs"} {
+			list, ok := props[field].(map[string]any)
+			if !ok {
+				continue
+			}
+			seen++
+			items := list["items"].(map[string]any)
+			req, _ := json.Marshal(items["required"])
+			kinds, _ := json.Marshal(items["properties"].(map[string]any)["kind"].(map[string]any)["enum"])
+			if items["type"] != "object" || string(req) != `["kind","ref"]` || string(kinds) != string(wantKinds) {
+				t.Fatalf("%v.%s items: %v", d["name"], field, items)
+			}
+		}
+	}
+	if seen != 4 { // create_task and update_task, two lists each
+		t.Fatalf("reference lists in the tool schemas: %d", seen)
+	}
 	if strings.Contains(string(raw), `"required":null`) {
 		t.Fatal("a null required list breaks strict MCP clients")
 	}

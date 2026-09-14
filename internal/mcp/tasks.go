@@ -160,7 +160,7 @@ var taskToolDefs = []map[string]any{
 func taskRefProp() map[string]any {
 	return map[string]any{"type": "object", "description": "typed reference {kind, ref, note?, scope?}",
 		"properties": map[string]any{
-			"kind":  propEnum("what ref holds", "task", "doc", "record", "commit", "pr", "ci", "url", "text"),
+			"kind":  propEnum("what ref holds", store.TaskRefKinds...),
 			"ref":   prop("string", "task id | document name | <collection>/<record id> | http(s) URL | text"),
 			"note":  prop("string", "optional note (at most 512 bytes)"),
 			"scope": prop("string", "doc/record only: the project or group the target lives in (default: this project)"),

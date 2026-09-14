@@ -15,6 +15,9 @@ import (
 // Typed references (docs/DESIGN-kanban-docs.md, "Typed references"): a
 // task's candidate and evidence references name what they point at, so
 // the board can link and the agents can check, instead of parsing prose.
+// Rendering is the page's: it links only an http(s) URL of the external
+// kinds and a task id (internal/server/tasks.html, refHTML); validation
+// here guarantees those are the only values those kinds can hold.
 // The string form shipped in v0.4.0 is gone (a pre-1.0 break): schema 13
 // rewrites every stored string to a typed reference and recomputes the
 // retry receipts, and a write that still sends strings is refused with a
@@ -62,19 +65,6 @@ func httpURL(s string) bool {
 		return false
 	}
 	return true
-}
-
-// Linkable reports whether a reference may be rendered as a link: an
-// HTTP(S) URL for the external kinds, or a task id for the task kind.
-// Everything else is text.
-func (r TaskRef) Linkable() bool {
-	switch r.Kind {
-	case "commit", "pr", "ci", "url":
-		return httpURL(r.Ref)
-	case "task":
-		return taskIDRE.MatchString(r.Ref)
-	}
-	return false
 }
 
 func (r *TaskRef) validate(field string, i int) error {
@@ -255,15 +245,19 @@ func rewriteRefsIn(tx *sql.Tx, query, update string, convert func(map[string]any
 	for _, r := range all {
 		var m map[string]any
 		if err := json.Unmarshal([]byte(r.body), &m); err != nil {
-			return err
+			return fmt.Errorf("row %v: %w", r.key, err)
 		}
 		convert(m)
 		raw, err := json.Marshal(m)
 		if err != nil {
 			return err
 		}
-		if _, err := tx.Exec(update, string(raw), r.key); err != nil {
+		res, err := tx.Exec(update, string(raw), r.key)
+		if err != nil {
 			return err
+		}
+		if n, _ := res.RowsAffected(); n != 1 {
+			return fmt.Errorf("row %v: rewrite matched %d rows", r.key, n)
 		}
 	}
 	return nil
