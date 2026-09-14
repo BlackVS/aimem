@@ -7,7 +7,8 @@ became clear that the shared-documents feature predates the Kanban idea
 and was never asked what a process run by agents needs from it.
 
 Companion to [the Kanban proposal](AIMEM-KANBAN-PROPOSAL.md) (the product
-contract for tasks, which this does not change), [the implementation
+contract for tasks, extended here with project enablement and scoped
+process-asset access), [the implementation
 plan](DESIGN-task-backend-implementation.md), [shared documents]
 (DESIGN-shared-docs.md) and [structured collections]
 (DESIGN-structured-docs.md). Record corrections here, not silently.
@@ -37,15 +38,15 @@ so each document type gets exactly one home.
 
 ## The model
 
-**Tasks are opt-in per project.** `.aimem.json` gains `"tasks": true`.
-Without it the project has no task tools in the MCP facade (they are not
-listed, not merely refused), the task page shows the project as one that
-does not run tasks, and the service refuses task writes into it with a
-message naming the flag. The service mirrors the flag into the project's
-metadata on the hub so the console, the page and a peer hub read it
-without the file. Turning it off later archives nothing and deletes
-nothing; the tasks stay readable through their links and the flag can go
-back on.
+**Tasks are enabled per project by an admin on the owning hub.** The hub's
+project metadata is the sole authority; new projects default to disabled.
+An admin enables or disables Kanban through the console or an admin CLI
+command. There is no task-enable flag in `.aimem.json`: clients read the
+setting from the project's bound hub. Ordinary agents, task writes and
+sync cannot change it. Enabling activates task writes, the board and
+automatic process-context injection. Disabling refuses all task mutations,
+including comments, but preserves tasks and history with authorized reads
+through existing links. The project can be enabled again later.
 
 **One home per document kind.** The rule that decides placement:
 
@@ -55,16 +56,23 @@ back on.
 | Hub, live | Coordination state that changes during work and crosses machines: tasks, the handoff, iteration records, the project's own process notes | Concurrent writers, compare-and-swap, no merge ritual |
 | Local disk, distributed from git | Tool-loaded assets: installed skills, hooks, agent definitions | The agents can only load files; the installer keeps them current |
 
-The hub may carry a **read-only mirror** of a git-homed document when
-every machine and the console need to see the current version (the
-process handbook is the case). A mirror is published by the repository's
-CI or by the skills installer, never edited on the hub; the hub's
-compare-and-swap refuses a write that is not the publisher's, so a
-mirror cannot drift by hand.
+**The hub stores Git references, not process-document bodies.** An admin
+selects a repository URL, immutable commit hash and manifest path per
+project. The manifest identifies the handbook, checklists and templates at
+that commit. These may live in the existing skills/process repository;
+a separate repository is not required. Git review controls their contents.
+Changing or rolling back the selection requires admin authority and an
+expected metadata revision. Ordinary agents and sync cannot change it.
 
-**Injection follows the flag.** aimem's session-start hook already puts
+Clients fetch files from Git and keep a disposable local cache. There is
+no hub content publisher, duplicate process store or publisher credential.
+Private sources require the consuming machine's own Git access. The page
+links to the pinned source; serving process bodies from the hub is outside
+this design.
+
+**Injection follows server enablement.** aimem's session-start hook already puts
 the handoff and the session facts into a new session's context. When the
-project's flag is on, the same hook adds: a one-line signal ("this
+project is enabled, the same hook adds: a one-line signal ("this
 project runs the task process; the tools are `list_tasks` … and the
 rules are the handbook"), and the process handbook itself — the short
 document, not the skills. Skills and agent definitions arrive by the
@@ -72,27 +80,44 @@ installer as today, and the handbook names them by their installed
 names. For OpenCode the plugin does what the hook does. Nothing is
 written into the repository by injection.
 
-**Global and project document sets.** Global means "shared by every
-project that runs the process" and lives in one knowledge group, named
-for the dev process, that flagged projects join. Project means the
-project's own scope.
+**Global and project document sets.** Global means shared definitions in
+Git that multiple projects select. Project means the project's own scope.
+The hub stores the selected reference per project.
 
-Global, in the dev-process group:
+Global process definitions in Git:
 
-- *Process handbook* (mirror of the git-homed text): states and their
-  meaning, who moves a task and when, the evidence rules, the review
-  gates, the release rules, the retry-key convention per transition.
-- *Definition of Ready* and *Definition of Done* as collection records,
-  one per checklist item, keyed by the state they gate. READY is
-  claimable when the DoR items hold; DONE when the DoD items hold. The
-  handbook says so; the service does not enforce it (no forced
-  transition graph, by the product contract).
-- *Agent roster* as collection records: each agent identity the hub
-  knows, its machine, its model, what it may do. The task actor already
-  records who wrote; the roster says who that is.
-- *Task template* as a collection record: the field set a well-formed
-  task carries and what each field is for, so every agent creates the
-  same shape.
+- *Process handbook*: states, actors, evidence rules, review and release
+  gates, and retry-key conventions.
+- *Definition of Ready* and *Definition of Done*: structured checklists
+  alongside the handbook, with stable item IDs and the states they gate.
+  READY is claimable when DoR holds; DONE when DoD holds. The service does
+  not enforce these rules. Actual checklist results belong with task
+  evidence and identify the source commit and item assessed.
+- *Task templates*: the field set a well-formed task carries and what each
+  field is for. These are reviewed with the handbook, not duplicated as
+  hub collection records.
+
+The live *agent roster* remains on the hub, referencing access identities
+through a limited identity/capability directory. Effective permissions
+remain authoritative in the access system; roster entries grant no authority.
+
+The manifest and required files form a consistent version at the pinned
+commit. Validate the complete set before atomically promoting it into the
+local cache. Interrupted fetches must not replace a complete cache entry
+with partial content or mix files from different commits.
+
+Project-specific rules remain in reviewed project Git files, explicitly
+identifying additions or overrides to global defaults. Global rules must
+not silently replace them. Conflicts without declared precedence require
+resolution. Live notes record coordination and observations; normative
+changes go through Git review.
+
+Retain historical repository/commit/manifest references associated with
+project work on the hub, not copies of their contents. Selection changes
+do not erase these associations. Historical content retrieval depends on
+the Git commit remaining accessible or an exact local cache being present;
+otherwise report it unavailable. Source maintainers must preserve referenced
+commits for durable historical access.
 
 Project, in the project's scope:
 
@@ -101,7 +126,7 @@ Project, in the project's scope:
 - *Epics* (see the features below): the grouping above tasks that a
   release or a milestone maps to.
 - *Product brief and roadmap*: rarely changed, reviewed like design
-  docs, git-homed with an optional mirror.
+  docs, Git-homed with pinned references where needed.
 - *Iteration records* as collection records, only if the project runs a
   cadence: goal, dates, the task ids committed, what landed. Kanban
   alone needs none.
@@ -111,8 +136,32 @@ Project, in the project's scope:
 
 ## Mechanics
 
-Two features the Kanban needs from aimem; everything else in this
-proposal is convention and lives in the handbook and the skills.
+The implementation includes project enablement, scoped process-reference
+access, Git retrieval and local caching, context injection, task grouping
+and typed references. Process conventions live in Git and installed skills.
+
+**Process access.** Ordinary task credentials with read access to an enabled
+project may read its selected Git reference and limited identity directory.
+Only admins change selection; process content changes use Git review.
+Git fetches use the client's own Git access, never elevated hub credentials.
+Agents with task-write permission may create and update that enabled
+project's epics; epic reads follow task-read permission. Disabling refuses
+epic mutations and preserves existing records for authorized reads.
+
+Historical reference reads are independent of enablement. Current task
+readers may retrieve Git references associated with the project's recorded
+work after disablement or selection changes. Resolve them through retained
+project/version associations, not arbitrary caller-selected group paths.
+Losing project access denies further hub reads; it does not revoke separate
+Git permissions or erase content already downloaded by the client.
+
+Expose scoped process-reference, directory and epic APIs/MCP tools.
+Task credentials gain no general document or collection access. The hook
+reads the selection from the hub and fetches the pinned files from Git;
+the board reads epic names and links to process sources. Every hub request
+checks target-project authority. Boundary: route authorization, admin
+selection, process-reference/directory/epic handlers, HTTP/MCP schemas,
+OpenAPI, client Git retrieval/cache, hooks and page consumers.
 
 **Task grouping.** A task gains an optional `epic` reference; epics are a
 project-scoped collection (`epics/<id>`: title, objective, state, the
@@ -121,39 +170,154 @@ maps to the set of tasks under its epics; a task without an epic is
 allowed and shows as such. Storage: one nullable indexed column and one
 filter; the epic record is an ordinary collection record with no new
 storage kind. Boundary: `TaskContent`, the list filter, the page's filter
-control, the MCP `list_tasks` argument. Not in scope: nesting, roll-up
-state, automatic epic closure.
+control, the MCP `list_tasks` argument and the scoped epic interfaces
+described above.
+
+Epic IDs are stable within the owning project. Creates require an unused
+ID; updates and retirement require an expected revision, with stale writes
+returning a conflict rather than overwriting concurrent work. Setting a
+task's epic validates that it exists in the same project. Retire epics
+instead of deleting them: existing task links and history continue to
+resolve, and IDs are never reused. Retired epics cannot receive new task
+assignments, but an update retaining an existing assignment remains valid.
+Retirement is an explicit operation, not a roll-up of task states.
+
+Generic collection mutation routes must refuse writes and deletes to the
+reserved epic collection, including for callers that can edit ordinary
+collections; epic mutations go through the scoped service that enforces
+project enablement, permission, revision and lifecycle checks. The indexed
+task reference and task snapshot must agree. Not in scope: nesting,
+roll-up state, automatic epic closure or hard deletion of epics.
 
 **Typed references.** `candidate_refs` and `evidence_refs` are free
-strings today. Each becomes `{kind, ref, note}` with `kind` one of
-`task`, `doc`, `record`, `commit`, `pr`, `ci`, `url`, and `ref` validated
-per kind (a task id pattern, a document path, a collection record path,
-a commit hash, a PR number, a run id, a URL). The page renders each as a
-link where the kind allows; the tools accept and return the typed form;
-the existing string form is accepted on write as `kind: url` or `kind:
-text` for one release and re-served typed. Boundary: `TaskContent`
-validation, the page's renderer, the tool schemas, the OpenAPI document.
-Not in scope: dereferencing or freshness checks (the proposal's "start
-with explicit agent checks" stands).
+strings today. Introduce typed references with `kind`, `ref`, optional
+`note` and explicit scope where needed. Kinds are `task`, `doc`, `record`,
+`commit`, `pr`, `ci`, `url` and `text`. External targets use canonical URLs
+that identify the repository or service as well as the target; a bare PR
+number, commit hash or run id is insufficient. Internal targets identify
+the owning hub and project or knowledge-group scope as applicable, plus
+the task id, document name or collection and record id. A Git-homed
+document uses a repository-qualified reference rather than an ambiguous
+local path. References grant no access to their targets.
 
-**The flag.** `.aimem.json` `"tasks": true`; `ident` reads it beside the
-hub binding; the MCP facade lists the task tools only when it is on; the
-service stores it as project metadata (`tasks=on`) on the first write
-from a flagged project and on `aimem sync`, and refuses task writes into
-a project whose metadata lacks it with a message naming the flag; the
-page reads the metadata to label the project. Boundary: `ident`, the
-facade's tool listing, the task routes' project resolution, the page.
+Validation checks the shape appropriate to each kind. Link rendering
+allows only HTTP(S) URLs or application links constructed from validated
+internal identities; unsupported schemes are never clickable. `text`
+preserves unstructured references as escaped, non-clickable text. Legacy
+strings are classified as `url` only when they are valid HTTP(S) URLs;
+otherwise their exact text is preserved without guessing a target.
 
-**The hook.** The session-start hook's additional context gains, when the
-flag is on: the signal line, and the handbook body read from the
-dev-process group's mirror (bounded, with the same budget mechanism the
-session facts use). Boundary: the hook's context builder; the plugin's
-equivalent.
+Compatibility includes readers as well as writers. Existing API and MCP
+clients must continue receiving string arrays under their existing
+contract; accepting old writes while returning objects is insufficient.
+Typed references use an explicit v2 HTTP/MCP contract; v1 continues to
+serve string references with its compatibility guarantees. A
+versioned compatibility adapter preserves fields absent from the legacy
+schema, including `epic`, from the task at the expected revision. A stale
+revision still conflicts. Fields that the legacy schema does express keep
+their existing replace-all semantics; omission is not a general patch.
+
+An unchanged legacy string-list projection preserves its underlying typed
+references, including notes and scope. For an edited projection, define
+which transformations can be mapped unambiguously; reject ambiguous edits
+with an explicit compatibility error and a path to a typed-capable client.
+For example, two typed references sharing a URL but differing in note or
+kind cannot be distinguished by that string alone. Do not guess which
+reference the writer meant or silently discard typed details. The exact
+v2 HTTP routes, MCP exposure and mapping rules belong in the implementation
+plan; universally lossless legacy edits are not promised. No one-release
+automatic removal of legacy support is assumed; `text` remains supported.
+
+Storage decoding must support existing current-task snapshots, history
+and saved retry results. Historical evidence must remain readable and
+must not be silently rewritten to inferred targets. Define how reference
+normalization interacts with versioned retry digests: a previously
+accepted request replayed with the same credential and key must retain
+its retry behavior across the upgrade, and changed input must still
+conflict. An implementation plan must cover migration and mixed-version
+clients, not just the new request schema.
+
+Boundary: `TaskContent`, storage decoding and migration, retry receipts
+and digest compatibility, HTTP/MCP version negotiation and schemas, the
+page's renderer and the OpenAPI document. Not in scope: dereferencing,
+freshness checks or certifying evidence correctness (the proposal's
+"start with explicit agent checks" stands).
+
+**Server enablement.** Store the setting in project metadata on the owning
+hub, changed only through admin operations. The page reads it to label
+the project. Local stdio MCP lists task tools only when the current
+project is enabled at session startup; the list stays fixed until the next
+session restart. The hub MCP endpoint serves multiple projects and may
+expose task tools, enforcing each target project's setting on every call.
+Hidden local tools must not bypass the setting when called by name.
+All service mutations check current enablement as well as existing task
+authorization; a cached setting never authorizes a write.
+
+Upgrade migration enables projects that already contain tasks, including
+archived tasks. It runs once and must not undo a later admin disablement.
+New projects default to disabled. Migrated projects without a selected
+process reference report context unavailable until an admin selects one;
+their existing task work remains enabled.
+
+Normal hub interactions detect changes from session-start enablement and
+show one notice: "Kanban availability changed for this project. Restart the
+session to refresh its tools and process context." No background polling
+is required; detection waits for the next normal interaction. Server-side
+write restrictions still apply immediately.
+
+A failed or offline lookup means availability is unknown, not disabled.
+Clients report that state; a cached setting and handbook may support
+session context with their stale/offline status made explicit. Boundary:
+admin console and CLI, project metadata and its read interface, bound-hub
+lookup, MCP discovery and dispatch, task mutation handlers and the page.
+
+**Session bootstrap.** When the project is enabled, the session-start hook
+reads the selected Git reference through the scoped hub interface, then
+fetches a complete short process bootstrap from that pinned Git commit. It includes the enablement signal, owning project,
+process-set version and source commit, the short handbook, applicable
+DoR/DoD and how to obtain the matching templates and other process assets.
+It identifies project-specific rules and the installed skill/agent names
+the process requires. Hooks and the OpenCode plugin follow the same
+contract; injection does not install skills or write repository files.
+
+Process context has its own bounded budget, independent of `session_facts`
+and previous-session activity. A first session with no recalled facts
+must still receive it. The Git manifest defines a complete bounded bootstrap
+unit: do not silently truncate away a review gate or checklist item. If
+the required unit exceeds the budget, report it as unavailable with the
+reason and a retrieval path rather than presenting a partial policy as
+complete. Exact budget and network deadline are implementation choices
+that must be explicit and tested.
+
+Unavailable, stale and disabled are distinct states. Bounded hub and Git
+fetches must not prevent session startup. Missing files, denied access,
+absent credentials, commit mismatch or an offline service produce explicit
+availability notices. If Git is unavailable, use only a complete local cache
+matching the selected repository, commit and manifest, and warn: "Git is
+unavailable; using cached process documents at commit …". If that exact
+version is absent, report process context unavailable; do not substitute an
+older commit. A confirmed Git access denial is reported as denial, not
+disguised as an offline fallback.
+
+If the hub is offline, identify the selection as last observed, including
+its last-verification time; the cache must match that selection and the same
+hub/project/credential context. Do not mix versions or another project's
+assets. Confirmed hub disablement or access denial must not be masked by
+cached enablement. Cached context never authorizes task writes.
+
+Report missing required skills when detectable; otherwise identify their
+availability as unverified and direct the agent to check before the
+dependent step. Missing or incomplete process assets must not be treated
+as satisfied gates. Once context is available, agents retrieve referenced
+assets from Git at the same pinned commit using the manifest.
+Boundary: the hook's context builder, credential handling, process-set
+retrieval and cache, availability diagnostics and the plugin's equivalent.
 
 ## What this is not
 
-- Not a change to the product contract for tasks: states, the no-forced-
-  graph rule, the authorization model and the retry semantics stand.
+- Task states, the no-forced-graph rule, existing task permission checks
+  and retry semantics stand. Admin enablement adds a mutation gate;
+  scoped process/epic access extends the ordinary-token API surface.
 - Not a workflow engine: no automatic transitions, no enforcement of
   DoR/DoD by the service, no timers.
 - Not a second distribution channel for skills: the installer and the
@@ -161,35 +325,63 @@ equivalent.
 - Not project creation or deletion from the page or the tools: those
   stay admin actions on the console and its routes.
 
-## Open questions
+## Remaining implementation choices
 
-- Should the mirror be published by the skills installer (one machine
-  publishes on every install) or by the skills repository's CI (one
-  publisher, needs a hub credential in CI)? The CI route is cleaner; the
-  installer route needs no new secret.
-- Does the flag belong in `.aimem.json` only, or should the hub be able
-  to turn it on for a project that has no file (a project created from
-  the console)? The metadata mirror suggests both: the file is the
-  developer's switch, the console the admin's.
-- Epic state: derived from its tasks, or set by hand? The proposal says
-  by hand and not in scope to derive; real use may reverse that.
-- The typed references' `text` kind for legacy strings: keep it forever
-  or refuse it after one release?
+- Set concrete bootstrap size budgets and bounded hub/Git fetch deadlines.
+- Specify v2 HTTP routes and MCP exposure, the scoped-reference schema and
+  unambiguous v1 edit mapping rules. Version selection is explicit; v1
+  clients never silently receive v2 representations.
+
+## Acceptance checks for implementation
+
+- Exercise old and new HTTP/MCP clients against upgraded storage containing
+  tasks, historical snapshots and retry receipts. Old reads still decode;
+  title-only legacy edits preserve epic assignments and typed details;
+  stale updates conflict; ambiguous reference edits fail explicitly without
+  changing stored content. Identical retries replay and changed input
+  conflicts. Ambiguous identities and unsafe clickable schemes are refused.
+- Start a first session with `session_facts` absent or zero and verify that
+  an enabled project gets its complete process bootstrap. Exercise disabled,
+  offline, denied, missing, oversized and mixed-version process assets, plus
+  missing skills; each yields the specified complete context or explicit
+  availability notice without blocking session startup.
+- Verify that ordinary credentials cannot enable or disable projects, that
+  sync cannot overwrite enablement, and that disabling existing projects
+  refuses task/comment/epic mutations while preserving authorized reads.
+  Cross-project process reads must follow current task-read permissions;
+  arbitrary group assets remain inaccessible.
+- Reject non-admin selection changes and stale metadata revisions. Exercise
+  interrupted Git fetches, missing commits, mixed-version files, private
+  source access denial and exact-cache offline fallback with its warning.
+  No process bodies are stored on the hub. Historical references survive
+  selection changes and disablement; unavailable Git content is reported,
+  never replaced by a different version.
+- Verify migration enables existing task projects, including archived tasks,
+  leaves new projects disabled and does not undo later admin choices.
+  Sessions keep their tool list until restart, detect enablement changes
+  during normal hub interactions and emit one restart notice; disabled
+  writes fail immediately even before that notice.
+
+- Race epic updates and retirement; stale revisions conflict. Refuse
+  cross-project or missing epic assignments, new assignments to retired
+  epics, ID reuse and generic collection mutations. Existing assignments
+  and historical links still resolve after retirement; task snapshots and
+  indexed epic filters agree.
 
 ## Dogfood first: aimem itself
 
-The first flagged project is this repository. The dev-process group
-holds the mirror of the handbook (today's `AGENTS.md` review-gate text
-and the Kanban proposal's state table), a DoR and a DoD of five items
-each, a roster with the two agent identities that work here, and the
-task template. The follow-up lists in the implementation plan become
-tasks under three epics: agent enablement, the task page, the access
-section in the console. The release that ships the flag is the first
-one whose own work was run through the board.
+This repository is the first dogfood project, enabled by migration if it
+already contains tasks. An admin selects the Git repository, commit and
+manifest for its handbook, five-item DoR/DoD and task templates. These
+definitions are reviewed together in Git; the hub stores their reference
+only. The roster exposes the two agent identities that work here. The
+follow-up lists in the implementation plan become tasks under three epics:
+agent enablement, the task page and the console access section. The release
+that ships server enablement is the first whose own work ran through the board.
 
 ## Why this is worth building
 
-Without the flag, tasks are a hub-wide feature that most projects do not
+Without per-project enablement, tasks are a hub-wide feature that most projects do not
 want, and every agent on the hub sees tools it must not use. Without the
 placement rule, the process text will exist in three copies within a
 month. Without grouping and typed references, the board is a list of
