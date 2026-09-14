@@ -284,7 +284,9 @@ function route(){
   const q = new URLSearchParams(location.search);
   if(q.get("task")){ showTask(q.get("task"), q.get("comment")||""); return; }
   if(q.get("project")){ PROJ = q.get("project"); localStorage.setItem("aimem_task_project", PROJ); }
-  if(q.has("view")){ VIEW = q.get("view")==="board" ? "board" : "list"; localStorage.setItem("aimem_task_view", VIEW); }
+  // The URL is the state: a project link without ?view=board is the list;
+  // only a bare /tasks falls back to the view this browser remembers.
+  if(q.has("project") || q.has("view")){ VIEW = q.get("view")==="board" ? "board" : "list"; localStorage.setItem("aimem_task_view", VIEW); }
   showList();
 }
 function setView(v){ VIEW = v; localStorage.setItem("aimem_task_view", v); go(listURL()); }
@@ -363,7 +365,7 @@ function showList(){
   $("vwList").classList.toggle("on", !board); $("vwBoard").classList.toggle("on", board);
   $("listOnly").hidden = board; $("archLbl").hidden = board;
   $("list").hidden = board; $("listMore").hidden = board; $("board").hidden = !board; $("boardNote").hidden = !board;
-  if(!PROJ){ $("list").innerHTML = '<div class="dim">Pick or enter a project.</div>'; $("moreBtn").hidden = true; $("board").innerHTML = ""; return; }
+  if(!PROJ){ $("list").innerHTML = '<div class="dim">Pick or enter a project.</div>'; $("boardNote").textContent = "Pick or enter a project."; $("moreBtn").hidden = true; $("board").innerHTML = ""; return; }
   if(board) loadBoard(); else listTasks(true);
 }
 // Loaders never lock: every call issues its request, and only the latest
@@ -402,8 +404,9 @@ async function loadBoard(){
   $("board").innerHTML = STATES.map(st => `<div class="col" data-state="${st}" ondragover="dragOver(event)" ondragleave="this.classList.remove('over')" ondrop="dropCard(event,'${st}')">
     <h3>${st.replace("_"," ")} <span class="n" id="n-${st}">0</span></h3><div class="cards" id="col-${st}"></div></div>`).join("");
   $("boardNote").textContent = "loading…";
-  BOARD_CAN = await canWrite(project);
+  const can = await canWrite(project);
   if(my!==NAV || seq!==SEQ.board) return;
+  BOARD_CAN = can;
   let after = "", n = 0;
   try{
     do{
@@ -420,9 +423,10 @@ function countCol(st){ $("n-"+st).textContent = $("col-"+st).children.length; }
 // placeCard renders (or re-renders) one card into its state's column.
 function placeCard(t){
   const old = document.getElementById("card-"+t.id);
+  if(old && Number(old.dataset.rev) > t.revision) return; // a page requested before a move must not undo it
   const from = old ? old.closest(".col").dataset.state : "";
   if(old) old.remove();
-  const html = `<div class="tcard" id="card-${esc(t.id)}" draggable="${BOARD_CAN}" ondragstart="dragStart(event,'${esc(t.id)}')" ondragend="this.classList.remove('moving')">
+  const html = `<div class="tcard" id="card-${esc(t.id)}" data-rev="${t.revision}" draggable="${BOARD_CAN}" ondragstart="dragStart(event,'${esc(t.id)}')" ondragend="this.classList.remove('moving')">
     <a href="${taskURL(t.id)}" onclick="return go('${taskURL(t.id)}')">${esc(t.title)}</a>
     <div class="meta"><span>r${t.revision}</span><span>${ago(t.updated_at)}</span>${t.assignee?`<span>${esc(t.assignee.kind)}/${esc(short(t.assignee.id))}</span>`:''}
       ${BOARD_CAN?`<select aria-label="move to" onchange="moveTask('${esc(t.id)}', this.value)"><option value="">move to…</option>${STATES.filter(s=>s!==t.state).map(s=>`<option>${s}</option>`).join("")}</select>`:''}</div></div>`;
@@ -431,26 +435,34 @@ function placeCard(t){
 }
 function dragStart(ev, id){ ev.dataTransfer.setData("text/plain", id); ev.dataTransfer.effectAllowed = "move"; ev.target.classList.add("moving"); }
 function dragOver(ev){ if(!BOARD_CAN) return; ev.preventDefault(); ev.dataTransfer.dropEffect = "move"; ev.currentTarget.classList.add("over"); }
-function dropCard(ev, state){ ev.preventDefault(); ev.currentTarget.classList.remove("over"); const id = ev.dataTransfer.getData("text/plain"); if(id) moveTask(id, state); }
+function dropCard(ev, state){
+  ev.preventDefault(); ev.currentTarget.classList.remove("over");
+  const id = ev.dataTransfer.getData("text/plain"), card = id && document.getElementById("card-"+id);
+  if(!card){ return; } // only this board's cards are moved
+  if(card.closest(".col").dataset.state===state){ card.classList.remove("moving"); return; }
+  moveTask(id, state);
+}
 // A move is the page's ordinary write: read the task fresh (the card's
 // revision may be stale), replace its content with the new state under
 // that revision and a retry key, and show a conflict rather than
 // overwrite: the board reloads and says why.
 async function moveTask(id, state){
   if(!state) return;
-  const my = NAV, kname = "move:"+id+":"+state;
+  const my = NAV;
   const card = document.getElementById("card-"+id); if(card) card.classList.add("moving");
+  let kname = "";
   try{
     const t = await api("/v1/tasks/"+encodeURIComponent(id));
     if(my!==NAV) return;
     if(t.state===state){ placeCard(t); return; }
     const c = contentOf(t); c.state = state;
     if(state!=="DONE" && state!=="CANCELLED") c.archived = false;
+    kname = "move:"+id+":"+state+":"+t.revision; // one key per (card, target, revision): a later move is a new write
     const k = key(kname);
     const saved = await api("/v1/tasks/"+encodeURIComponent(id), {method:"PUT", body:JSON.stringify(Object.assign({}, c, {expected_revision: t.revision}))}, k);
     spentIf(kname, k);
     if(my!==NAV) return;
-    placeCard(saved); toast(esc(short(id))+" → "+state+" (r"+saved.revision+")");
+    placeCard(saved); toast(short(id)+" → "+state+" (r"+saved.revision+")");
   }catch(e){
     if(e.auth) return boot();
     if(my!==NAV) return;

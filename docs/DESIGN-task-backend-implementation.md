@@ -47,7 +47,10 @@ drag only when the credential may write in the project. Decisions:
   with `expected_revision`; a 409 shows the current task beside the attempt
   with "reload" and "reapply on the current revision" (the served current
   task replaces the stale one outright) — never a silent overwrite. A board
-  card drag is the same call: full content, `expected_revision`, a key.
+  card move is the same call (read fresh, full content, `expected_revision`,
+  a key per card, target and revision); its conflict handling is lighter:
+  the board reloads and says nothing was overwritten, since the card is not
+  an edit form with an attempt to reapply.
 - **Write permission is asked, not assumed** for ordinary tokens:
   `/v1/access/identity?project=` per project (the list's create button and
   the opened task's edit, state and comment controls); admin credentials

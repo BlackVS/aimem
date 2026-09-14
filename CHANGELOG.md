@@ -43,7 +43,7 @@ currently 11); a binary refuses a database newer than it understands.
   (`/tasks?task=<id>[&comment=<id>]`; `/admin?task=<id>` forwards in the
   browser). The console keeps its setup-and-maintenance role and merely
   links to the page. Both pages now also refuse framing, form posts and
-  base overrides in their CSP. The board follows on the same API.
+  base overrides in their CSP.
 - **Task service over HTTP and MCP, stage 2 of the Kanban work.** The
   storage from stage 1 is now reachable: `GET/POST /v1/projects/{p}/tasks`,
   `GET/PUT /v1/tasks/{id}`, `GET /v1/tasks/{id}/history`, `GET/POST
