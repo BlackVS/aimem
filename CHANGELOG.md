@@ -47,6 +47,15 @@ currently 13); a binary refuses a database newer than it understands.
   build is refused by older builds, and the rewrite of task bodies,
   history and receipts is in place and one-way: back up the database
   before upgrading.
+- **Ordinary tokens may list projects; the task page shows every
+  credential a project picker.** `GET /v1/projects` is now within an
+  ordinary token's surface, read only, returning the ordinary projects
+  only (the user memory store and the knowledge groups are filtered out
+  for it; legacy writer and admin credentials receive every id as
+  before). The `/tasks` page therefore offers the same drop-down to an
+  ordinary token that admins had, instead of a free-text project field;
+  the field stays as the fallback if the listing fails. Creating and
+  deleting projects remain admin actions on the console.
 
 ### Added
 
@@ -102,18 +111,6 @@ currently 13); a binary refuses a database newer than it understands.
   be asked, and says "Kanban availability changed for this project.
   Restart the session to refresh its tools and process context" once if
   the hub turns a session that started on away.
-
-### Changed
-
-- **Ordinary tokens may list projects; the task page shows every
-  credential a project picker.** `GET /v1/projects` is now within an
-  ordinary token's surface, read only, returning the ordinary projects
-  only (the user memory store and the knowledge groups are filtered out
-  for it; legacy writer and admin credentials receive every id as
-  before). The `/tasks` page therefore offers the same drop-down to an
-  ordinary token that admins had, instead of a free-text project field;
-  the field stays as the fallback if the listing fails. Creating and
-  deleting projects remain admin actions on the console.
 
 ### Fixed
 
