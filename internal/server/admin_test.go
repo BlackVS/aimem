@@ -184,14 +184,34 @@ func TestTCPAuthWrapper(t *testing.T) {
 	mux.Handle("/", s.Handler())
 	authed := s.authWrapper("sekrit", mux)
 
-	// The complete unauthenticated surface: three GETs.
-	for _, path := range []string{"/admin", "/", "/v1/status"} {
+	// The complete unauthenticated surface is publicGETs — pinned here
+	// independently, so widening it is a reviewed edit — and every entry
+	// is a registered GET route, public for GET and gated otherwise.
+	public := s.publicGETs()
+	want := map[string]bool{"/": true, "/admin": true, "/tasks": true, "/v1/status": true}
+	if len(public) != len(want) {
+		t.Fatalf("unauthenticated surface changed: %d entries", len(public))
+	}
+	registered := map[string]bool{}
+	for _, rt := range s.Routes() {
+		if rt.Method == "GET" {
+			p := rt.Pattern
+			if p == "/{$}" {
+				p = "/"
+			}
+			registered[p] = true
+		}
+	}
+	for path := range public {
+		if !want[path] {
+			t.Fatalf("unexpected public path %s", path)
+		}
+		if !registered[path] {
+			t.Fatalf("public path %s is not a registered GET route", path)
+		}
 		if w := req(t, authed, "GET", path, ""); w.Code != 200 {
 			t.Fatalf("GET %s should be public: %d", path, w.Code)
 		}
-	}
-	// The same paths are NOT public for other methods.
-	for _, path := range []string{"/admin", "/", "/v1/status"} {
 		if w := req(t, authed, "POST", path, ""); w.Code != 401 {
 			t.Fatalf("POST %s not gated: %d", path, w.Code)
 		}

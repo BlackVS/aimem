@@ -48,6 +48,8 @@ type Server struct {
 	mux          http.Handler // route-table handler for in-process task dispatch
 	ordOnce      sync.Once
 	ord          *http.ServeMux // ordinary-token allow-list, built from ordinaryRoutes
+	pubOnce      sync.Once
+	pub          map[string]http.HandlerFunc // publicGETs, built once
 }
 
 func New(reg *store.Registry, log *slog.Logger) *Server {
@@ -97,8 +99,8 @@ func (rt Route) Ordinary() bool { return ordinaryRoutes[rt.Method+" "+rt.Pattern
 
 // Routes enumerates the complete HTTP surface. Admin marks operator
 // actions (config, destructive project ops, logs); everything else is
-// available to writer tokens. The three public pages (/admin, /,
-// /v1/status) are exempted from auth in authWrapper, not here.
+// available to writer tokens. The unauthenticated pages are exempted
+// from auth in authWrapper via publicGETs, not here.
 func (s *Server) Routes() []Route {
 	return []Route{
 		{"GET", "/v1/access", s.getAccess, true},
@@ -179,6 +181,7 @@ func (s *Server) Routes() []Route {
 		{"POST", "/v1/projects/{p}/chapter-proposal/apply", s.applyChapters, true},
 		{"GET", "/v1/openapi.json", s.openAPI, false},
 		{"GET", "/admin", s.adminPage, false},
+		{"GET", "/tasks", s.tasksPage, false},
 		{"GET", "/v1/status", s.status, false},
 		{"GET", "/{$}", s.statusPage, false},
 	}
@@ -431,21 +434,13 @@ func (s *Server) ListenAndServe(root string) (*http.Server, net.Listener, error)
 // exercise the REAL gate rather than a re-implementation that can drift.
 func (s *Server) authWrapper(token string, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		// Three unauthenticated GETs, and only three. /admin is static
-		// chrome with zero data — it collects the hub token in the browser
-		// and calls the API with it. / and /v1/status are public by
-		// construction: liveness, build, uptime, nothing about what the
-		// hub holds. Everything else stays token-gated.
+		// The unauthenticated surface is exactly publicGETs: two pages of
+		// static chrome with zero data (they collect a token in the
+		// browser and call the API with it) and two liveness answers.
+		// Everything else stays token-gated.
 		if r.Method == http.MethodGet {
-			switch r.URL.Path {
-			case "/admin":
-				s.adminPage(w, r)
-				return
-			case "/":
-				s.statusPage(w, r)
-				return
-			case "/v1/status":
-				s.status(w, r)
+			if h := s.publicGETs()[r.URL.Path]; h != nil {
+				h(w, r)
 				return
 			}
 		}
@@ -469,6 +464,22 @@ func (s *Server) authWrapper(token string, next http.Handler) http.Handler {
 		}
 		next.ServeHTTP(w, r.WithContext(withIdentity(r.Context(), id)))
 	})
+}
+
+// publicGETs is the complete unauthenticated surface: the console and task
+// page shells (no data), the status page and the status JSON (liveness,
+// build, uptime — nothing about what the hub holds). The gate, the OpenAPI
+// parity test and the ordinary-token gate test all read this one map.
+func (s *Server) publicGETs() map[string]http.HandlerFunc {
+	s.pubOnce.Do(func() {
+		s.pub = map[string]http.HandlerFunc{
+			"/admin":     s.adminPage,
+			"/tasks":     s.tasksPage,
+			"/":          s.statusPage,
+			"/v1/status": s.status,
+		}
+	})
+	return s.pub
 }
 
 // TCPHandler is the complete hub-mode surface behind the bearer gate: the

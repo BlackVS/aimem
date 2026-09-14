@@ -1,8 +1,8 @@
 # Task Backend Implementation Plan
 
-Status: stages 1 and 2 implemented (storage merged in PR #38; the HTTP/MCP
-service on `feat/task-service`), 2026-09-14. Stage 3 (UI) is open. Original
-baseline: `4e7021533a1aefb2635e28a071953f2061f1df5b` on `master`.
+Status: stages 1 and 2 merged (PR #38, PR #39); stage 3's first increment
+(the task page) on `feat/task-ui`, 2026-09-14; the board is the next increment.
+Original baseline: `4e7021533a1aefb2635e28a071953f2061f1df5b` on `master`.
 Read this alongside [the Kanban proposal](AIMEM-KANBAN-PROPOSAL.md) and
 [access control](DESIGN-access-control.md). Those documents contain the approved
 product contract; this document gives the next agent an implementation sequence
@@ -15,12 +15,43 @@ Stage 1 (storage and integrity) is merged (PR #38): `internal/store/tasks.go`
 with schema 11 (`store.go`), lifecycle refusals in `Registry.Drop`/
 `MergeProject`, and `internal/store/tasks_test.go`.
 
-Stage 2 (authorized HTTP and MCP) is implemented on branch `feat/task-service`:
+Stage 2 (authorized HTTP and MCP) is merged (PR #39):
 `internal/server/tasks.go` (routes, actor, per-attempt authorization, strict
 decoding, status mapping, in-process MCP dispatch), `internal/mcp/tasks.go`
 (eight task tools, the hub principal, the local hub caller), `Registry.LocateTask`,
 `access.Store.CanWrite`, `Identity.Project`, `HubConfig.TaskToken` and the
-`aimem hub task-token` command. No UI yet (stage 3).
+`aimem hub task-token` command.
+
+Stage 3, first increment (task list/detail/discussion) is implemented on
+`feat/task-ui` as `internal/server/tasks.html`, served at `GET /tasks` (public
+chrome like `/admin`, holding no data). Decisions:
+
+- **A separate page, not a console tab.** The console boots on admin/writer
+  endpoints an ordinary token cannot reach; the task page calls only the
+  task routes and the identity check, so every credential class the design
+  names works with exactly the authority the service grants it. The console
+  links to it, and `/admin?task=<id>` forwards to `/tasks?task=<id>` in the
+  browser (a script in the console shell; not an HTTP redirect).
+- **The URL is the state.** `/tasks?project=<id>`, `/tasks?task=<id>`,
+  `/tasks?task=<id>&comment=<id>` are the copy-link targets; the JSON link
+  is the served `links.self`. Links never carry the token.
+- **Every write is the agent's write.** Every task write carries an
+  idempotency key (one per open form until success — create, comment, edit,
+  state); edit and the state selector additionally send the full content
+  with `expected_revision`; a 409 shows the current task beside the attempt
+  with "reload" and "reapply on the current revision" (the served current
+  task replaces the stale one outright) — never a silent overwrite. A board
+  card drag is the same call: full content, `expected_revision`, a key.
+- **Write permission is asked, not assumed** for ordinary tokens:
+  `/v1/access/identity?project=` per project (the list's create button and
+  the opened task's edit, state and comment controls); admin credentials
+  write everywhere and a legacy writer never writes tasks, by construction;
+  a refusal on the server still wins.
+- **Markdown renders safely:** escaped first, then paragraphs, headings,
+  lists, code, bold and bare http(s) links (`rel="noopener"`, never fetched).
+- **Project choice:** admin/writer credentials pick from `/v1/projects`; an
+  ordinary token types its project id (remembered in the browser), since
+  the listing route is not on its surface.
 
 Decisions taken while implementing stage 2:
 
@@ -427,6 +458,20 @@ Valid, out of stage 1's scope, owned by the stage-2 service unless noted:
 - **Replace-all updates over JSON.** Absent and empty optional fields encode
   identically; the transport must decide whether a partial body is an
   error (strict) or a clear, and document it.
+- **Task page (stage 3) follow-ups.** (a) A JavaScript check in CI: a Go
+  test that runs `node --check` on each page's extracted script when node
+  is present, plus a node step in the lint job; today only a string-literal
+  lexer guards the two inline scripts. (b) Unit tests for the page's
+  rendering helpers (`esc`, `inline`, `md2html`, the conflict card's
+  JSON-in-attribute round trip) and its state machine (routing, conflict →
+  reapply, one key per open form, the copy fallback) — browser-only today,
+  proven by a manual run per PR. (c) The console's own `esc()` does not
+  encode the apostrophe while it builds inline handlers with single-quoted
+  arguments from stored names; back-port the task page's escaper and add a
+  test. (d) The page spells `TaskContent` three times (form, reader,
+  projection); derive them from one field list and assert it against the
+  storage type's JSON tags, since a dropped field is silently erased by the
+  replace-all update.
 - **Format characters.** Storage rejects bidirectional overrides (U+202A–E,
   U+2066–9) and C0/C1 controls; other zero-width/format characters pass and
   are the renderer's concern.
@@ -487,6 +532,7 @@ open for the transport that surfaces warnings:
 7. Add meaningful migration, transaction-failure, concurrency and lifecycle tests
    before considering any draft code an implementation milestone.
 
-Stages 1 and 2 are done (see Resume State). Do not change the public version
-as part of this work. Resume with stage 3 (task list/detail/discussion UI, then
-the board) on the same service, and preserve the approved simple scope.
+Stages 1 and 2 are merged and the task page is on `feat/task-ui` (see Resume
+State). Do not change the public version as part of this work. Next: the
+Kanban board on the same service (a card drag is the page's existing CAS
+state change), then the stage-2 follow-ups. Preserve the approved simple scope.

@@ -206,6 +206,7 @@
   <button data-t="docs" onclick="tab('docs')">Docs</button>
   <button data-t="wiki" onclick="tab('wiki')">Wiki</button>
   <span style="display:inline-block;width:1px;align-self:stretch;background:var(--edge);margin:0 8px"></span>
+  <a href="/tasks" style="display:inline-flex;align-items:center;border:1px solid var(--edge);color:var(--dim);padding:6px 14px;text-decoration:none" title="task list, detail and discussion (works with ordinary tokens too)">Tasks ↗</a>
   <button data-t="search" onclick="tab('search')">Search</button>
   <button data-t="setup" onclick="tab('setup')">AI Setup</button>
   <button data-t="usage" onclick="tab('usage')">Usage</button>
@@ -352,6 +353,11 @@
 <div id="toast"></div>
 <script>
 "use strict";
+// The proposal's task-only view lives on its own page; a link written as
+// /admin?task=<id> still lands on it, and the console does not boot
+// (no API calls with the stored token) while the navigation commits.
+const FORWARDING = !!new URLSearchParams(location.search).get("task");
+if(FORWARDING){ location.replace("/tasks?"+location.search.slice(1)); }
 const THEME = localStorage.getItem("aimem_theme") || "";
 if(THEME){document.documentElement.dataset.theme = THEME;}
 document.getElementById("themeSel").value = THEME;
@@ -1436,7 +1442,7 @@ async function loadHealth(){
     </div>`;
 }
 
-if(TOK) boot(); else $("gate").classList.remove("hide");
+if(TOK && !FORWARDING) boot(); else $("gate").classList.remove("hide");
 
 /* ---------- Docs (shared documents) ---------- */
 // Whole authored files versioned on this hub with compare-and-swap

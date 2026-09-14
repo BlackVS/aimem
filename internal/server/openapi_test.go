@@ -20,9 +20,11 @@ func TestOpenAPIMatchesRouteTable(t *testing.T) {
 	if err := json.Unmarshal(openAPISpec, &spec); err != nil {
 		t.Fatalf("embedded spec is not valid JSON: %v", err)
 	}
-	public := map[string]bool{"/": true, "/admin": true, "/v1/status": true}
-
 	s, _ := testServer(t)
+	public := map[string]bool{}
+	for path := range s.publicGETs() {
+		public[path] = true
+	}
 	seen := map[string]string{} // "METHOD path" -> expected role
 	for _, rt := range s.Routes() {
 		path := rt.Pattern

@@ -219,7 +219,7 @@ func TestOrdinaryTokenGateMatrix(t *testing.T) {
 	h := f.s.TCPHandler(f.env, map[string]http.Handler{"/mcp": http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { mcpHits++ })})
 	fill := strings.NewReplacer("{p}", "alpha", "{id}", uuidv7.New(), "{c}", uuidv7.New(), "{s}", "s1", "{key}", "about",
 		"{name}", "RUNBOOK", "{instance}", "x", "{kind}", "user", "{g}", "g", "{u}", "u", "{id...}", "x", "{$}", "")
-	public := map[string]bool{"/": true, "/admin": true, "/v1/status": true}
+	public := f.s.publicGETs()
 	for _, rt := range f.s.Routes() {
 		path := fill.Replace(rt.Pattern)
 		if path == "" {
@@ -231,7 +231,7 @@ func TestOrdinaryTokenGateMatrix(t *testing.T) {
 		}
 		w := taskReq(t, h, rt.Method, path, f.alice, "", body)
 		switch {
-		case public[path] || (rt.Method == "GET" && path == "/v1/access/identity"):
+		case public[path] != nil || (rt.Method == "GET" && path == "/v1/access/identity"):
 		case rt.Ordinary():
 			if w.Code == 401 || w.Code == 403 {
 				t.Errorf("%s %s: ordinary route refused at the gate: %d %s", rt.Method, rt.Pattern, w.Code, w.Body)
@@ -553,6 +553,120 @@ func TestTaskRoutesProjectsRenameAndReservedScopes(t *testing.T) {
 	if w := taskReq(t, h, "POST", "/v1/projects/alpha/tasks", f.alice, "k2", taskBody); w.Code != 403 {
 		t.Fatalf("name reuse: %d %s", w.Code, w.Body)
 	}
+}
+
+// The task page is public chrome: served without a credential, under the
+// console's CSP, holding no data; its script parses (see adminjs_test.go
+// for why that check exists) and it asks only the routes an ordinary
+// token may reach.
+func TestTasksPageIsPublicChrome(t *testing.T) {
+	f := newTaskFixture(t)
+	w := taskReq(t, f.h, "GET", "/tasks", "", "", "")
+	if w.Code != 200 || !strings.HasPrefix(w.Header().Get("Content-Type"), "text/html") {
+		t.Fatalf("tasks page: %d %v", w.Code, w.Header())
+	}
+	// One policy for both pages, and it closes framing, form posts and
+	// base overrides on top of the subresource and connect restrictions.
+	csp := w.Header().Get("Content-Security-Policy")
+	admin := taskReq(t, f.h, "GET", "/admin", "", "", "")
+	if a := admin.Header().Get("Content-Security-Policy"); csp != a {
+		t.Fatalf("pages disagree on CSP:\n%s\n%s", csp, a)
+	}
+	if c := w.Header().Get("Cache-Control"); c != "no-cache" || c != admin.Header().Get("Cache-Control") {
+		t.Fatalf("pages must not be cached: %q vs %q", c, admin.Header().Get("Cache-Control"))
+	}
+	for _, d := range []string{"default-src 'none'", "connect-src 'self'", "frame-ancestors 'none'", "form-action 'none'", "base-uri 'none'"} {
+		if !strings.Contains(csp, d) {
+			t.Fatalf("CSP lacks %q: %s", d, csp)
+		}
+	}
+	page := string(tasksHTML)
+	open, closeAt := strings.Index(page, "<script>"), strings.LastIndex(page, "</script>")
+	if open < 0 || closeAt < open {
+		t.Fatal("tasks.html has no <script> block")
+	}
+	if bad := scanJSStrings(page[open+len("<script>") : closeAt]); len(bad) > 0 {
+		t.Fatalf("unterminated string literals at script lines %v", bad)
+	}
+	// The page's call surface is pinned exactly: every api(...) call site's
+	// path expression is listed here, api() is the only egress (one fetch
+	// in the whole page), and each path is a task route, the identity
+	// check, or the optional project listing (refused for ordinary tokens
+	// and caught). A new call is a reviewed edit.
+	want := map[string]bool{
+		`"/v1/access/identity?project="+encodeURIComponent(project)`: true,
+		`"/v1/access/identity"`: true,
+		`"/v1/projects"`:        true,
+		`"/v1/projects/"+encodeURIComponent(PROJ)+"/tasks?"+q`:                               true,
+		`"/v1/projects/"+encodeURIComponent(project)+"/tasks"`:                               true,
+		`"/v1/tasks/"+encodeURIComponent(id)`:                                                true,
+		`"/v1/tasks/"+encodeURIComponent(CUR.id)+"/history?limit=20&after="+HIST.after`:      true,
+		`"/v1/tasks/"+encodeURIComponent(CUR.id)+"/comments?limit=20&after="+CMT.after`:      true,
+		`"/v1/tasks/"+encodeURIComponent(CUR.id)+"/comments/"+encodeURIComponent(commentID)`: true,
+		`"/v1/tasks/"+encodeURIComponent(id)+"/comments"`:                                    true,
+	}
+	got := map[string]bool{}
+	for _, expr := range apiCallSites(page) {
+		if !want[expr] {
+			t.Fatalf("page calls api(%s), not in the pinned call surface", expr)
+		}
+		got[expr] = true
+	}
+	for expr := range want {
+		if !got[expr] {
+			t.Fatalf("page no longer calls api(%s)", expr)
+		}
+	}
+	if n := strings.Count(page, "fetch("); n != 1 {
+		t.Fatalf("api() must be the page's only egress: %d fetch( sites", n)
+	}
+	if !strings.Contains(page, "catch(_){ PROJECTS = null; }") {
+		t.Fatal("project listing must be optional for ordinary tokens")
+	}
+	// The write decision is the identity endpoint's task_write answer.
+	if !strings.Contains(page, "return !!r.task_write;") {
+		t.Fatal("page must decide writes from the identity endpoint's task_write")
+	}
+	// A deep link into the console's task view lands here, and the console
+	// does not boot while forwarding.
+	console := string(adminHTML)
+	if !strings.Contains(console, `location.replace("/tasks?"`) || !strings.Contains(console, "if(TOK && !FORWARDING) boot();") {
+		t.Fatal("console must forward /admin?task= to the task page without booting")
+	}
+}
+
+// apiCallSites returns the first-argument expression of every api(...)
+// call in the page (parentheses balanced, up to the first top-level comma).
+func apiCallSites(page string) []string {
+	var out []string
+	for i := 0; ; {
+		j := strings.Index(page[i:], "api(")
+		if j < 0 {
+			break
+		}
+		start := i + j + len("api(")
+		if strings.HasSuffix(page[:i+j], "function ") { // the definition itself
+			i = start
+			continue
+		}
+		depth, k := 0, start
+		for ; k < len(page); k++ {
+			c := page[k]
+			if c == '(' {
+				depth++
+			} else if c == ')' {
+				if depth == 0 {
+					break
+				}
+				depth--
+			} else if c == ',' && depth == 0 {
+				break
+			}
+		}
+		out = append(out, strings.TrimSpace(page[start:k]))
+		i = k
+	}
+	return out
 }
 
 // The local unix socket carries no identity: the operator's CLI works and

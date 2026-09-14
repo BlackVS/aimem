@@ -1,7 +1,8 @@
 # Aimem Kanban Proposal
 
-Status: **task storage (stage 1) merged; HTTP/MCP task service (stage 2)
-implemented; UI (stage 3) not implemented**, revised 2026-09-14; product contract revised 2026-09-13 against
+Status: **task storage (stage 1) and HTTP/MCP task service (stage 2) merged;
+task page (stage 3, list/detail/discussion) implemented; board pending**,
+revised 2026-09-14; product contract revised 2026-09-13 against
 `dcc466f305c6a2d9ce5927a3e0c7770e1c3893fe`. The access foundation is merged in
 [PR #35](https://github.com/BlackVS/aimem/pull/35); task comments are part of the
 initial task delivery below.
@@ -160,7 +161,7 @@ program or external agent without MCP can follow a normal web task reference and
 receive JSON. Both paths expose the same task ID, revision and current state;
 neither requires loading a dashboard or scraping a web page.
 
-Proposed resources, **not existing routes**:
+Resources (implemented in stages 2 and 3):
 
 | Resource | Purpose |
 | --- | --- |
@@ -170,7 +171,7 @@ Proposed resources, **not existing routes**:
 | `GET /v1/tasks/{id}/comments` | Paginated discussion |
 | `POST /v1/tasks/{id}/comments` | Append a comment with an idempotency key |
 | `GET /v1/tasks/{id}/comments/{comment_id}` | Permanent individual comment JSON |
-| `/admin?task={id}` | Small human-readable task-only view |
+| `/tasks?task={id}` | Small human-readable task-only view (`/admin?task={id}` forwards here) |
 
 A document can contain a direct link such as:
 
@@ -189,7 +190,7 @@ Comment JSON includes its own canonical URL and parent task URL. Individual
 comment references use the task and comment UUIDs, survive project rename and
 archival, and require the same authentication as task references. Looking up a
 comment under a different task ID returns not found. Comment routes above are
-proposed contracts; they do not exist in the merged access foundation.
+implemented in stage 2 (see the implementation plan).
 
 Task URLs use immutable IDs so title changes, state transitions, and archiving
 cannot break references. Resolve IDs from existing project partitions; any lookup
