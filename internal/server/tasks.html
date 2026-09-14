@@ -654,8 +654,9 @@ function refsHTML(k, label){
 // backslash escapes what a line cannot carry otherwise: "\n" is a
 // newline, "\r" a carriage return (a textarea would fold it into a line
 // break), "\|" a bar, "\\" a backslash, "\s" and "\t" a space or tab at
-// either end (the parser trims), so a text reference holding any of them
-// survives an unrelated edit unchanged.
+// either end, so a text reference holding any of them survives an
+// unrelated edit unchanged. The parser strips only that ASCII whitespace
+// (never Unicode spaces, which the codec does not protect).
 const ESC = {"\n": "\\n", "\r": "\\r", " ": "\\s", "\t": "\\t"}, UNESC = {n: "\n", r: "\r", s: " ", t: "\t"};
 const escRef = s => String(s).replace(/[\\|\n\r]/g, c => ESC[c] || "\\" + c).replace(/^[ \t]|[ \t]$/g, c => ESC[c]);
 const unescRef = s => s.replace(/\\(.)/g, (_, c) => UNESC[c] || c);
@@ -670,14 +671,15 @@ function splitNote(rest){ // at the first unescaped " | "
   }
   return [rest, null];
 }
+const strip = s => s.replace(/^[ \t\r]+|[ \t\r]+$/g, "");
 function parseRefs(text){
-  return text.split("\n").map(l=>l.trim()).filter(Boolean).map(line => {
+  return text.split("\n").map(strip).filter(Boolean).map(line => {
     let kind = "text", rest = line;
     const sp = line.indexOf(" ");
-    if(sp > 0 && REF_KINDS.includes(line.slice(0, sp))){ kind = line.slice(0, sp); rest = line.slice(sp+1).trim(); }
+    if(sp > 0 && REF_KINDS.includes(line.slice(0, sp))){ kind = line.slice(0, sp); rest = strip(line.slice(sp+1)); }
     const [refPart, notePart] = splitNote(rest);
-    const r = {kind, ref: unescRef(refPart.trim())};
-    if(notePart !== null) r.note = unescRef(notePart.trim());
+    const r = {kind, ref: unescRef(strip(refPart))};
+    if(notePart !== null) r.note = unescRef(strip(notePart));
     if((kind==="doc"||kind==="record") && r.ref.includes(":")){ const c = r.ref.indexOf(":"); r.scope = r.ref.slice(0,c); r.ref = r.ref.slice(c+1); }
     return r;
   });
