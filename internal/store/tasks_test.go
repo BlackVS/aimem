@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -1007,6 +1008,160 @@ func TestLocateTask(t *testing.T) {
 	}
 	if _, _, err := r.LocateTask(uuidv7.New()); err == nil || errors.Is(err, ErrTaskNotFound) {
 		t.Fatalf("an unreadable project must make a miss inconclusive: %v", err)
+	}
+}
+
+// Location hints spare the full scan: a create seeds one, a scan result
+// is remembered, a conclusive miss is remembered briefly, and none of it
+// is trusted over the partition — a stale hint costs one scan and is
+// corrected, an inconclusive miss is never remembered.
+func TestLocateTaskHints(t *testing.T) {
+	r := newTestRegistry(t)
+	a, _ := r.Open("proj-a")
+	if _, err := r.Open("proj-b"); err != nil {
+		t.Fatal(err)
+	}
+	ta := mustCreate(t, a, "in a", "k-a")
+	scans := func() int64 { return r.taskScans.Load() }
+	if p, _, err := r.LocateTask(ta.ID); err != nil || p != "proj-a" {
+		t.Fatalf("after create: %s %v", p, err)
+	}
+	if n := scans(); n != 0 {
+		t.Fatalf("a lookup right after a create scanned %d times", n)
+	}
+	// A miss scans once and is then remembered until it expires.
+	id := uuidv7.New()
+	for i := 0; i < 3; i++ {
+		if _, _, err := r.LocateTask(id); !errors.Is(err, ErrTaskNotFound) {
+			t.Fatalf("miss %d: %v", i, err)
+		}
+	}
+	if n := scans(); n != 1 {
+		t.Fatalf("repeated miss scanned %d times, want 1", n)
+	}
+	r.hints.now = func() time.Time { return time.Now().Add(taskMissTTL + time.Second) }
+	if _, _, err := r.LocateTask(id); !errors.Is(err, ErrTaskNotFound) {
+		t.Fatalf("expired miss: %v", err)
+	}
+	if n := scans(); n != 2 {
+		t.Fatalf("expired miss scanned %d times, want 2", n)
+	}
+	r.hints.now = time.Now
+	// A hint that names the wrong project (here: after a rename) costs one
+	// scan and is corrected; the next lookup is a hit again.
+	if err := r.Rename("proj-a", "proj-z"); err != nil {
+		t.Fatal(err)
+	}
+	if p, _, err := r.LocateTask(ta.ID); err != nil || p != "proj-z" {
+		t.Fatalf("after rename: %s %v", p, err)
+	}
+	if p, _, err := r.LocateTask(ta.ID); err != nil || p != "proj-z" {
+		t.Fatalf("after rename, again: %s %v", p, err)
+	}
+	if n := scans(); n != 3 {
+		t.Fatalf("rename cost %d scans, want 1 (3 total)", n-2)
+	}
+	// A hint naming an existing project that does not hold the task is
+	// corrected the same way.
+	r.hints.put(ta.ID, "proj-b")
+	if p, _, err := r.LocateTask(ta.ID); err != nil || p != "proj-z" {
+		t.Fatalf("wrong hint: %s %v", p, err)
+	}
+	// A create voids a remembered miss for its id.
+	r.hints.noteMiss("x")
+	r.hints.put("x", "proj-b")
+	if r.hints.missed("x") {
+		t.Fatal("a create must void the miss")
+	}
+	// An inconclusive miss (a project that cannot be opened) is reported
+	// every time, never remembered as "not found".
+	if err := os.MkdirAll(filepath.Join(r.root, "projects", "proj-bad"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(r.root, "projects", "proj-bad", "journal.db"), []byte("junk"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	before := scans()
+	other := uuidv7.New()
+	for i := 0; i < 2; i++ {
+		if _, _, err := r.LocateTask(other); err == nil || errors.Is(err, ErrTaskNotFound) {
+			t.Fatalf("inconclusive miss %d: %v", i, err)
+		}
+	}
+	if n := scans() - before; n != 2 {
+		t.Fatalf("inconclusive misses scanned %d times, want 2", n)
+	}
+	// The hinted task is still a hit with the bad sibling present.
+	if p, _, err := r.LocateTask(ta.ID); err != nil || p != "proj-z" {
+		t.Fatalf("hit beside a bad sibling: %s %v", p, err)
+	}
+}
+
+// A rename that lands between a scan's project listing and its reads can
+// make the scan miss a task that exists (the old name is gone or holds a
+// recreated empty project; the new name was not in the listing). Such a
+// scan must be repeated, and its miss must never be remembered — the
+// external review of this change found the interleaving.
+func TestLocateTaskScanOverlappingRename(t *testing.T) {
+	r := newTestRegistry(t)
+	a, _ := r.Open("proj-a")
+	ta := mustCreate(t, a, "moving", "k-m")
+	r.hints = newTaskHints() // as after a restart: no hint for ta
+	fired := 0
+	r.scanHook = func() {
+		if fired > 0 {
+			return
+		}
+		fired++
+		if err := r.Rename("proj-a", "proj-z"); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := r.Open("proj-a"); err != nil { // a checkpoint recreates the old name, empty
+			t.Fatal(err)
+		}
+	}
+	if p, _, err := r.LocateTask(ta.ID); err != nil || p != "proj-z" {
+		t.Fatalf("task moved during the scan: %s %v", p, err)
+	}
+	if fired != 1 || r.taskScans.Load() != 2 {
+		t.Fatalf("expected one overlapped scan and one retry: fired=%d scans=%d", fired, r.taskScans.Load())
+	}
+	// The retry's answer is remembered; the overlapped one was not.
+	r.scanHook = nil
+	if p, _, err := r.LocateTask(ta.ID); err != nil || p != "proj-z" {
+		t.Fatalf("after the race: %s %v", p, err)
+	}
+	if r.taskScans.Load() != 2 {
+		t.Fatalf("a hit after the retry scanned again: %d", r.taskScans.Load())
+	}
+	// A miss observed during a lifecycle change is not remembered either.
+	other := uuidv7.New()
+	r.scanHook = func() { r.lifecycleGen.Add(1) } // every scan overlaps a change
+	if _, _, err := r.LocateTask(other); !errors.Is(err, ErrTaskNotFound) {
+		t.Fatalf("miss under churn: %v", err)
+	}
+	if r.hints.missed(other) {
+		t.Fatal("a miss seen under lifecycle churn must not be remembered")
+	}
+}
+
+// The hint maps are bounded: past the cap they reset rather than grow.
+func TestTaskHintsBounded(t *testing.T) {
+	h := newTaskHints()
+	for i := 0; i < taskHintMax+10; i++ {
+		h.put(fmt.Sprintf("id-%d", i), "p")
+	}
+	if n := len(h.loc); n > taskHintMax {
+		t.Fatalf("positive entries grew to %d", n)
+	}
+	for i := 0; i < taskMissMax+10; i++ {
+		h.noteMiss(fmt.Sprintf("id-%d", i))
+	}
+	if n := len(h.miss); n > taskMissMax {
+		t.Fatalf("negative entries grew to %d", n)
+	}
+	if p, ok := h.get(fmt.Sprintf("id-%d", taskHintMax+9)); !ok || p != "p" {
+		t.Fatal("the latest entry must survive a reset")
 	}
 }
 

@@ -253,41 +253,6 @@ func (d *DB) taskScopeOK() error {
 	return nil
 }
 
-// LocateTask resolves a task ID to its owning project by scanning every
-// existing ordinary project: the partition is the authority, so a rename
-// shows on the next lookup and no second registry can drift. A project
-// that cannot be opened is skipped with its error retained: the task is
-// reported not found only when every project was readable.
-func (r *Registry) LocateTask(id string) (string, *DB, error) {
-	if !taskIDRE.MatchString(id) {
-		return "", nil, ErrTaskNotFound
-	}
-	projects, err := r.Projects()
-	if err != nil {
-		return "", nil, err
-	}
-	var unreadable error
-	for _, p := range projects {
-		if IsReservedProject(p) {
-			continue
-		}
-		db, err := r.OpenExisting(p)
-		if err != nil {
-			unreadable = fmt.Errorf("project %q could not be opened: %w", p, err)
-			continue
-		}
-		if _, err := db.GetTask(id); err == nil {
-			return p, db, nil
-		} else if !errors.Is(err, ErrTaskNotFound) {
-			unreadable = fmt.Errorf("project %q could not be read: %w", p, err)
-		}
-	}
-	if unreadable != nil {
-		return "", nil, fmt.Errorf("task lookup incomplete: %w", unreadable)
-	}
-	return "", nil, ErrTaskNotFound
-}
-
 // taskMutation runs fn inside one immediate transaction with a retry
 // receipt keyed by (actor, operation, scope, key). A replay with the same
 // canonical input returns the ORIGINAL result (a retried create yields the
@@ -361,11 +326,15 @@ func (d *DB) CreateTask(content TaskContent, actor TaskActor, key string) (Task,
 	if err := content.validate(); err != nil {
 		return Task{}, invalid(err)
 	}
-	return taskMutation(d, actor, "create", "", key, content, func(tx *sql.Tx) (Task, error) {
+	t, err := taskMutation(d, actor, "create", "", key, content, func(tx *sql.Tx) (Task, error) {
 		now := nowUTC()
 		t := Task{ID: uuidv7.New(), Revision: 1, TaskContent: content, CreatedAt: now, UpdatedAt: now}
 		return t, saveTask(tx, t, actor, true)
 	})
+	if err == nil && d.hints != nil {
+		d.hints.put(t.ID, d.projectID) // a lookup right after a create needs no scan
+	}
+	return t, err
 }
 
 // UpdateTask replaces every editable field under expected-revision CAS.

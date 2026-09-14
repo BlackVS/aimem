@@ -91,6 +91,14 @@ currently 11); a binary refuses a database newer than it understands.
 
 ### Fixed
 
+- **Task lookup no longer scans every project on every read.** Resolving a
+  task id to its project opened and queried every ordinary project per
+  lookup — for any valid credential, hit or miss. The hub now remembers
+  where a task was last found (from its create or an earlier lookup) and
+  checks that project first, falling back to the scan and correcting the
+  hint after a rename, merge or drop; a conclusive miss is remembered for
+  thirty seconds so a repeated unknown id costs one scan, and a miss that
+  could not be concluded (a project that would not open) is never cached.
 - **MCP task and document tools refuse an unreadable `.aimem.json`.** The
   config read every capture path uses treats a file that exists but cannot
   be parsed as absent (with one warning), so a checkpoint never blocks on a
