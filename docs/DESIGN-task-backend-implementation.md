@@ -577,6 +577,14 @@ Valid, out of stage 1's scope, owned by the stage-2 service unless noted:
   matching the replace-all contract; a receipt in an unknown format is a
   conflict, never a silent match. Landed before the first release with
   tasks, so no stored receipt predates the format.
+- **Receipt digest numeric precision.** The canonical form decodes the
+  input through `any`, so integers beyond 2^53 collapse to the same
+  float64 and two such values fingerprint alike (the external review of
+  the digest change). The only numeric input is `expected_revision`, which
+  counts up by one per accepted update, so no practical path reaches it.
+  Fix when touched: decode with `UseNumber` and a `json.Number` zero test,
+  a regression with adjacent large integers, and compare a stored receipt
+  under its own format number rather than bumping the format blindly.
 - **Retention.** Snapshots are stored three times (current, history,
   receipt) and nothing prunes them; receipts never expire. Accepted for
   stage 1 (bounded fields, human-paced writes); revisit with export.
