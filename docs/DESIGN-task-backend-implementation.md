@@ -469,7 +469,10 @@ one. The secret is shown once, with a copy control, and never stored.
 instance-to-project map), `POST /v1/access/users`, `PUT /v1/access/users/{id}`
 (name, disabled), `POST /v1/access/groups`, `PUT`/`DELETE
 /v1/access/groups/{g}/members/{u}`, `PUT`/`DELETE
-/v1/projects/{p}/access/{kind}/{id}`, `POST /v1/access/tokens` (user, label,
+/v1/projects/{p}/access/{kind}/{id}`, `DELETE
+/v1/access/grants/{instance}/{kind}/{id}` (a grant whose project was dropped
+or merged away keeps its old instance, which no project name reaches; this is
+the CLI's `grant-rm-instance`), `POST /v1/access/tokens` (user, label,
 project or none for read-only, expiry), `DELETE /v1/access/tokens/{id}`. All
 are admin-only already; the tab adds no authority and the service remains the
 authority. Admin tokens stay host-console only (`aimem token`): the tab does
@@ -490,12 +493,20 @@ not issue them, and says so where an operator would look for it.
   the response handler only, never into a table, `localStorage`, the URL or
   a link; the box closes on the next navigation within the console. The
   same rule the task page follows for its token.
-- **Names are untrusted.** User, group and label names go into text and
-  attribute contexts, and the console builds inline handlers with
-  single-quoted arguments; the console's own `esc()` does not encode the
-  apostrophe (stage-3 follow-up (c)). Back-porting the task page's escaper,
-  with a test, is the first commit of this stage, before any name reaches a
-  handler.
+- **Names never reach a handler argument.** User, group and label names are
+  untrusted, and an HTML escaper is no protection inside an inline handler:
+  the HTML parser decodes `&#39;` back to `'` before the JavaScript is
+  compiled, so `onclick="f('O&#39;Brien')"` runs as `f('O'Brien')` and a
+  statement-shaped name runs as code (the external review of the plan
+  established this against the console's existing handler pattern). The
+  tab's controls therefore carry only server-minted ids — in `data-`
+  attributes read by listeners, or as arguments only where the value is an
+  id the page has validated against the id pattern — and names appear only
+  as text or in ordinary attribute values through `esc()`. The task page
+  already follows this rule (every handler argument is a UUID). The console
+  escaper back-port (stage-3 follow-up (c)) still lands first, for the text
+  and attribute contexts, but it is not the control and the plan does not
+  claim it is.
 - **Same page policy.** The tab inherits the console's CSP; no new script
   source, no inline event handler that the escaper does not cover.
 
@@ -507,16 +518,20 @@ model; bulk import; audit views beyond what the snapshot shows.
 **Acceptance criteria.**
 
 1. With an admin token the tab lists users (name, enabled, groups, token
-   count), groups (members), grants per project (subject and kind) and
-   tokens (user, label, project or read-only, expiry, revoked); with a writer
-   token the tab is absent and the routes refuse.
+   count), groups (members), grants per project (subject and kind; a grant
+   whose instance no longer maps to a project is shown as stale and can be
+   removed) and tokens (user, label, project or read-only, expiry, revoked);
+   with a writer token the tab is absent and the routes refuse.
 2. Each mutation above completes through its existing route and the tab
    shows the re-read state, or shows the server's error at the control.
 3. Issuing a token shows the secret exactly once with a copy control; a
    re-read never shows it; the page test proves the secret is not written to
    storage or into any link.
-4. The console's escaper encodes the apostrophe and a test pins it; a name
-   containing `'` renders and its controls work.
+4. No handler argument is built from a name: the page test proves every
+   inline handler argument in the tab is an id, and a browser check with a
+   name containing `'` and a statement-shaped name shows the name rendered
+   as text and its controls doing only their own action. The console's
+   escaper encodes the apostrophe and a test pins it.
 5. The page test pins the tab's call surface to the routes listed above,
    the way the task page's test pins its calls.
 
@@ -524,9 +539,11 @@ model; bulk import; audit views beyond what the snapshot shows.
 
 1. Escaper back-port with its test; the read-only `access` tab over the
    snapshot; users and groups (create, rename, enable/disable, membership).
-2. Grants and tokens (issue with the one-time secret; revoke), and the
-   manual's operator section pointing at the tab as the ordinary path, with
-   `aimem access` kept for the socket-only case.
+2. Grants, including stale-instance removal proved by a dropped-and-recreated
+   project keeping the new instance's grants, and tokens (issue with the
+   one-time secret; revoke), and the manual's operator section pointing at
+   the tab as the ordinary path, with `aimem access` kept for the socket-only
+   case.
 
 ## Follow-Ups Recorded By The Stage-1 Review
 
