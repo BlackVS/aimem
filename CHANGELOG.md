@@ -11,7 +11,7 @@ this project does not yet promise semantic versioning. The on-disk schema
 version is tracked separately (`currentSchema` in `internal/store/store.go`,
 currently 11); a binary refuses a database newer than it understands.
 
-## [Unreleased]
+## [0.4.0] — 2026-09-14
 
 ### Added
 
@@ -88,6 +88,14 @@ currently 11); a binary refuses a database newer than it understands.
   copy into the target is idempotent). Rename keeps every task, comment,
   history row and receipt reachable. **Upgrade note:** as with every schema
   bump, a database opened by this build is refused by older builds.
+- **Project access foundation for the planned task subsystem.** Hub-local users,
+  access groups, direct/group project grants, and expiring/revocable ordinary
+  tokens, with transactional administration audit. Admin-only HTTP endpoints and
+  `aimem access` host CLI manage them; `/v1/access/identity` checks current identity
+  and project write eligibility. Host-console admin tokens keep full access.
+  New ordinary tokens cannot access legacy writer APIs or MCP until task-specific
+  permissions are wired in the next increment; existing credentials retain their
+  behavior. Project grants survive rename and are not inherited on name reuse.
 
 ### Fixed
 
@@ -121,17 +129,6 @@ currently 11); a binary refuses a database newer than it understands.
   when opening a current schema; permission checks still read current state.
   Administrators can remove stale project grants by stored instance ID using
   `aimem access grant-rm-instance`, including after project deletion or merge.
-
-### Added
-
-- **Project access foundation for the planned task subsystem.** Hub-local users,
-  access groups, direct/group project grants, and expiring/revocable ordinary
-  tokens, with transactional administration audit. Admin-only HTTP endpoints and
-  `aimem access` host CLI manage them; `/v1/access/identity` checks current identity
-  and project write eligibility. Host-console admin tokens keep full access.
-  New ordinary tokens cannot access legacy writer APIs or MCP until task-specific
-  permissions are wired in the next increment; existing credentials retain their
-  behavior. Project grants survive rename and are not inherited on name reuse.
 
 ## [0.3.31] — 2026-09-12
 
