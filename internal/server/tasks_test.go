@@ -637,8 +637,10 @@ func TestTasksPageIsPublicChrome(t *testing.T) {
 		t.Fatalf("page STATES %v differ from store.TaskStates %v", pageStates, store.TaskStates)
 	}
 	// An archived task has no card: a move that reads or returns one
-	// archived (by another client meanwhile) must take it off the board.
-	for _, want := range []string{`view=board`, `ondrop=`, `if(t.archived){ if(from) countCol(from); return; }`} {
+	// archived (by another client meanwhile) must take it off the board —
+	// and the newest revision seen must outlive the card, so a delayed
+	// older response cannot put it back.
+	for _, want := range []string{`view=board`, `ondrop=`, `if(t.archived){ if(from) countCol(from); return; }`, `if(SEEN[t.id] > t.revision) return;`} {
 		if !strings.Contains(page, want) {
 			t.Fatalf("board: page lacks %q", want)
 		}

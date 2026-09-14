@@ -399,6 +399,11 @@ async function listTasks(reset){
 /* ---------- Board: the active tasks as one column per state. ---------- */
 const BOARD_MAX = 500;
 let BOARD_CAN = false;
+// The newest revision the board has seen of each task, kept apart from the
+// DOM: a card removed as archived must still refuse an older snapshot that
+// arrives later (a delayed move response). Revisions only rise and ids are
+// unique across projects, so the map is never cleared.
+const SEEN = {};
 async function loadBoard(){
   const my = NAV, seq = ++SEQ.board, project = PROJ;
   $("board").innerHTML = STATES.map(st => `<div class="col" data-state="${st}" ondragover="dragOver(event)" ondragleave="this.classList.remove('over')" ondrop="dropCard(event,'${st}')">
@@ -424,12 +429,13 @@ function countCol(st){ $("n-"+st).textContent = $("col-"+st).children.length; }
 // archived task has no card: a fresh read that shows one archived (another
 // client archived it meanwhile) takes it off the board instead.
 function placeCard(t){
+  if(SEEN[t.id] > t.revision) return; // a page or response from before a later change must not undo it
+  SEEN[t.id] = t.revision;
   const old = document.getElementById("card-"+t.id);
-  if(old && Number(old.dataset.rev) > t.revision) return; // a page requested before a move must not undo it
   const from = old ? old.closest(".col").dataset.state : "";
   if(old) old.remove();
   if(t.archived){ if(from) countCol(from); return; }
-  const html = `<div class="tcard" id="card-${esc(t.id)}" data-rev="${t.revision}" draggable="${BOARD_CAN}" ondragstart="dragStart(event,'${esc(t.id)}')" ondragend="this.classList.remove('moving')">
+  const html = `<div class="tcard" id="card-${esc(t.id)}" draggable="${BOARD_CAN}" ondragstart="dragStart(event,'${esc(t.id)}')" ondragend="this.classList.remove('moving')">
     <a href="${taskURL(t.id)}" onclick="return go('${taskURL(t.id)}')">${esc(t.title)}</a>
     <div class="meta"><span>r${t.revision}</span><span>${ago(t.updated_at)}</span>${t.assignee?`<span>${esc(t.assignee.kind)}/${esc(short(t.assignee.id))}</span>`:''}
       ${BOARD_CAN?`<select aria-label="move to" onchange="moveTask('${esc(t.id)}', this.value)"><option value="">move to…</option>${STATES.filter(s=>s!==t.state).map(s=>`<option>${s}</option>`).join("")}</select>`:''}</div></div>`;
