@@ -1573,7 +1573,7 @@ func TestMigrateToSchema13RewritesRefsAndReceipts(t *testing.T) {
 		q    string
 		args []any
 	}{
-		{`INSERT INTO tasks(id, state, archived, assignee, epic, body) VALUES(?,?,?,?,?,?)`, []any{id, "BACKLOG", 0, "", "", mustJSON(snap2)}},
+		{`INSERT INTO tasks(id, state, archived, assignee, epic, body) VALUES(?,?,?,?,?,?)`, []any{id, "BACKLOG", 0, assignee.column(), "", mustJSON(snap2)}},
 		{`INSERT INTO task_history(task_id, revision, body) VALUES(?,?,?)`, []any{id, 1, mustJSON(map[string]any{"task": snap1, "actor": json.RawMessage(actor)})}},
 		{`INSERT INTO task_history(task_id, revision, body) VALUES(?,?,?)`, []any{id, 2, mustJSON(map[string]any{"task": snap2, "actor": json.RawMessage(actor)})}},
 		{`INSERT INTO task_requests(actor, operation, scope, key, digest, result) VALUES(?,?,?,?,?,?)`, []any{actorKey, "create", "", "k-old-create", d1, mustJSON(snap1)}},
@@ -1645,7 +1645,9 @@ func TestMigrateToSchema13RewritesRefsAndReceipts(t *testing.T) {
 	}
 	// The step run again over typed data (the version rewound) changes
 	// nothing: objects pass through, and the receipts still replay.
-	db2.sql.Exec(`UPDATE meta SET value='12' WHERE key='schema_version'`)
+	if _, err := db2.sql.Exec(`UPDATE meta SET value='12' WHERE key='schema_version'`); err != nil {
+		t.Fatalf("rewind: %v", err)
+	}
 	r2.Close()
 	r3, _ := NewRegistry(root)
 	t.Cleanup(r3.Close)

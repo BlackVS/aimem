@@ -652,10 +652,11 @@ function refsHTML(k, label){
 // The form edits references one per line as "kind ref | note"; a doc or
 // record reference in another project or group is "kind scope:ref". A
 // backslash escapes what a line cannot carry otherwise: "\n" is a
-// newline, "\|" a bar, "\\" a backslash, so a text reference holding a
-// newline or " | " survives an unrelated edit unchanged.
-const escRef = s => String(s).replace(/[\\|\n]/g, c => c === "\n" ? "\\n" : "\\" + c);
-const unescRef = s => s.replace(/\\(.)/g, (_, c) => c === "n" ? "\n" : c);
+// newline, "\r" a carriage return (a textarea would fold it into a line
+// break), "\|" a bar, "\\" a backslash, so a text reference holding any
+// of them survives an unrelated edit unchanged.
+const escRef = s => String(s).replace(/[\\|\n\r]/g, c => c === "\n" ? "\\n" : c === "\r" ? "\\r" : "\\" + c);
+const unescRef = s => s.replace(/\\(.)/g, (_, c) => c === "n" ? "\n" : c === "r" ? "\r" : c);
 function refLines(refs){
   return (refs||[]).map(r => typeof r === "string" ? "text "+escRef(r) : `${r.kind} ${r.scope?r.scope+":":""}${escRef(r.ref)}${r.note?" | "+escRef(r.note):""}`).join("\n");
 }
