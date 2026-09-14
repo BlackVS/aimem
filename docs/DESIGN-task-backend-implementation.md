@@ -601,6 +601,14 @@ Valid, out of stage 1's scope, owned by the stage-2 service unless noted:
   (f) A board move re-creates the card element, so keyboard focus is lost
   after each move and the "move to" select is not labelled with its task;
   update the card in place and label the select.
+  (g) Project selection on the task page (the user's note, 2026-09-14): an
+  ordinary token sees a free-text project field, because `GET /v1/projects`
+  admits only admin and writer credentials; show a drop-down of the projects
+  the credential may read instead — either admit the list route for ordinary
+  tokens (they may read tasks in every project already) or add a task-scoped
+  project list — and let an admin create a project from the page. Deleting
+  from the page is limited by design: a project holding any task refuses to
+  be dropped, so at most an empty project can go.
 - **Format characters.** Storage rejects bidirectional overrides (U+202A–E,
   U+2066–9) and C0/C1 controls; other zero-width/format characters pass and
   are the renderer's concern.
