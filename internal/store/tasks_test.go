@@ -670,6 +670,54 @@ func TestTaskReservedScopesRefused(t *testing.T) {
 	}
 }
 
+// The retry receipt's digest ignores zero-valued members, so a field added
+// to the content later (arriving empty from an older client or a replay)
+// does not turn a retry into a conflict, and an absent optional field is
+// the same as an empty one — the replace-all contract. A changed value is
+// still a conflict, and the stored digest names its format.
+func TestReceiptDigestSurvivesAddedFields(t *testing.T) {
+	r := newTestRegistry(t)
+	db, _ := r.Open("proj-a")
+	first, err := db.CreateTask(content("digest"), aliceActor, "k-digest")
+	if err != nil {
+		t.Fatal(err)
+	}
+	// The same create as an upgraded binary would send it: one more
+	// content field, empty, and the empty slices spelled differently.
+	upgraded := struct {
+		TaskContent
+		Later string `json:"later_field"`
+	}{TaskContent: content("digest")}
+	upgraded.Dependencies = []string{}
+	again, err := taskMutation(db, aliceActor, "create", "", "k-digest", upgraded, func(tx *sql.Tx) (Task, error) {
+		t.Fatal("a matching receipt must replay, not run")
+		return Task{}, nil
+	})
+	if err != nil || again.ID != first.ID {
+		t.Fatalf("replay across an added field: %+v %v", again, err)
+	}
+	// A value that differs is still a conflict, including in the new field.
+	upgraded.Later = "set"
+	if _, err := taskMutation(db, aliceActor, "create", "", "k-digest", upgraded, func(tx *sql.Tx) (Task, error) { return Task{}, nil }); !errors.Is(err, ErrTaskRetryConflict) {
+		t.Fatalf("changed new field: %v", err)
+	}
+	var stored string
+	if err := db.sql.QueryRow(`SELECT digest FROM task_requests WHERE key='k-digest'`).Scan(&stored); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.HasPrefix(stored, receiptDigestFormat+":") {
+		t.Fatalf("stored digest %q does not name its format", stored)
+	}
+	// Absent and zero are the same; a zero inside an array is not dropped.
+	d1, _ := receiptDigest(map[string]any{"a": "x", "b": ""})
+	d2, _ := receiptDigest(map[string]any{"a": "x"})
+	d3, _ := receiptDigest(map[string]any{"a": "x", "list": []any{"", "y"}})
+	d4, _ := receiptDigest(map[string]any{"a": "x", "list": []any{"y"}})
+	if d1 != d2 || d3 == d4 {
+		t.Fatalf("canonical form: %s %s / %s %s", d1, d2, d3, d4)
+	}
+}
+
 // Rename keeps tasks, comments, history and receipts reachable under the
 // new project id; the snapshot never carried the old name.
 func TestTaskRenamePreserves(t *testing.T) {

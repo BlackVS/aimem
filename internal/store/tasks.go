@@ -253,6 +253,78 @@ func (d *DB) taskScopeOK() error {
 	return nil
 }
 
+// receiptDigestFormat names the canonicalization a stored digest was made
+// with; it is the digest's prefix. A receipt whose format this binary does
+// not know is a conflict, never a silent match.
+const receiptDigestFormat = "1"
+
+// receiptDigest is the retry receipt's fingerprint of a mutation's input:
+// the input's JSON with every zero-valued member removed, keys sorted,
+// hashed. Dropping zero values is what makes a retry survive an upgrade —
+// a field added to TaskContent later arrives empty from an older client
+// and from a replay, so it must not change the digest — and it matches the
+// replace-all contract, where an absent optional field and an empty one
+// mean the same thing.
+func receiptDigest(input any) (string, error) {
+	raw, err := json.Marshal(input)
+	if err != nil {
+		return "", err
+	}
+	var v any
+	if err := json.Unmarshal(raw, &v); err != nil {
+		return "", err
+	}
+	canon, err := json.Marshal(pruneZero(v))
+	if err != nil {
+		return "", err
+	}
+	sum := sha256.Sum256(canon)
+	return receiptDigestFormat + ":" + hex.EncodeToString(sum[:]), nil
+}
+
+// pruneZero removes zero-valued members ("" , false, 0, null, and empty
+// arrays or objects after pruning) from every object in a decoded JSON
+// value. Array elements are pruned in place but never removed: position
+// carries meaning there.
+func pruneZero(v any) any {
+	switch x := v.(type) {
+	case map[string]any:
+		for k, m := range x {
+			m = pruneZero(m)
+			if isZero(m) {
+				delete(x, k)
+			} else {
+				x[k] = m
+			}
+		}
+		return x
+	case []any:
+		for i := range x {
+			x[i] = pruneZero(x[i])
+		}
+		return x
+	}
+	return v
+}
+
+func isZero(v any) bool {
+	switch x := v.(type) {
+	case nil:
+		return true
+	case string:
+		return x == ""
+	case bool:
+		return !x
+	case float64:
+		return x == 0
+	case []any:
+		return len(x) == 0
+	case map[string]any:
+		return len(x) == 0
+	}
+	return false
+}
+
 // taskMutation runs fn inside one immediate transaction with a retry
 // receipt keyed by (actor, operation, scope, key). A replay with the same
 // canonical input returns the ORIGINAL result (a retried create yields the
@@ -272,12 +344,10 @@ func taskMutation[T any](d *DB, actor TaskActor, op, scope, key string, input an
 	if err := taskText(key, MaxTaskKeyBytes, true); err != nil {
 		return zero, invalid(fmt.Errorf("idempotency key: %w", err))
 	}
-	canon, err := json.Marshal(input)
+	digest, err := receiptDigest(input)
 	if err != nil {
 		return zero, err
 	}
-	sum := sha256.Sum256(canon)
-	digest := hex.EncodeToString(sum[:])
 	tx, err := d.sql.Begin()
 	if err != nil {
 		return zero, err
