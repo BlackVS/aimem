@@ -34,7 +34,8 @@ func Serve(api *http.Client, projectID string, groups []string) error {
 	in := bufio.NewScanner(os.Stdin)
 	in.Buffer(make([]byte, 1024*1024), 16*1024*1024)
 	out := bufio.NewWriter(os.Stdout)
-	s := &srv{api: api, project: projectID, groups: groups, taskSetup: localTaskCaller}
+	s := &srv{api: api, project: projectID, groups: groups, taskSetup: localTaskCaller,
+		taskState: probeTaskState(".", mcpStateRoot(), projectID)}
 	for in.Scan() {
 		line := strings.TrimSpace(in.Text())
 		if line == "" {
@@ -59,6 +60,15 @@ type srv struct {
 	tasks     TaskCallFunc
 	taskSetup func() (TaskCallFunc, error)
 	tasksOnly bool
+	// taskState is the stdio facade's view of per-project enablement,
+	// taken once at session start from the hub: "enabled", "disabled" or
+	// "unknown" (hub unreachable, no credential, an older hub). Disabled
+	// hides the task tools and refuses them by name; enabled and unknown
+	// list them — the hub refuses writes to a disabled project regardless,
+	// and hiding the tools would make an offline start look like a
+	// disabled project. "" on the hub facade, which enforces per call.
+	taskState   string
+	noticeShown bool // the one restart notice after an availability change
 }
 
 type rpcRequest struct {
@@ -106,6 +116,9 @@ func (s *srv) handle(ctx context.Context, raw []byte) []byte {
 	case "tools/list":
 		if s.tasksOnly {
 			return reply(req.ID, map[string]any{"tools": taskToolDefs}, nil)
+		}
+		if s.taskState == taskStateDisabled {
+			return reply(req.ID, map[string]any{"tools": append([]map[string]any{}, toolDefs...)}, nil)
 		}
 		return reply(req.ID, map[string]any{"tools": append(append([]map[string]any{}, toolDefs...), taskToolDefs...)}, nil)
 	case "tools/call":
@@ -317,8 +330,16 @@ func (s *srv) toolCall(ctx context.Context, req rpcRequest) []byte {
 	var text string
 	var err error
 	switch {
+	case isTaskTool(head.Name) && s.taskState == taskStateDisabled:
+		// Hidden tools stay hidden when called by name.
+		err = errors.New("tasks are not enabled for this project (as of this session's start); an admin enables them on the hub, then restart the session")
 	case isTaskTool(head.Name):
 		text, err = s.taskTool(ctx, head.Name, head.Arguments)
+		if err != nil && s.taskState == taskStateEnabled && !s.noticeShown && strings.Contains(err.Error(), "not enabled for this project") {
+			// The hub says disabled now; this session started enabled.
+			s.noticeShown = true
+			err = fmt.Errorf("%w\nKanban availability changed for this project. Restart the session to refresh its tools and process context.", err)
+		}
 	case s.tasksOnly:
 		// An ordinary token's hidden legacy tools stay hidden when called
 		// by name: they would run with the hub's own trusted local client.

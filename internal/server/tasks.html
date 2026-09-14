@@ -163,6 +163,7 @@
       <label class="dim" style="margin-left:auto" id="archLbl"><input type="checkbox" id="archChk" style="width:auto" onchange="listTasks(true)"> archived</label>
     </div>
     <div id="newForm" class="card" hidden></div>
+    <div id="tasksOff" class="dim" hidden></div>
     <div id="list"></div>
     <div class="row" id="listMore"><button class="act" id="moreBtn" hidden onclick="listTasks(false)">more</button>
       <span id="listNote" class="dim"></span></div>
@@ -315,11 +316,17 @@ function copyFallback(text, what){
 // credential, asked now: admin credentials write everywhere, an ordinary
 // token only where it was issued and while its user holds a grant, a
 // legacy writer never writes tasks. A server refusal still wins.
+// TASKS_OFF remembers, per project, that the hub said tasks are not
+// enabled there: the page then explains instead of offering a create or
+// a drag that the hub would refuse. The hub is the authority either way.
+const TASKS_OFF = {};
+const TASKS_OFF_NOTE = "tasks are not enabled for this project — an admin switches them on (console, or `aimem tasks on` on the hub host)";
 async function canWrite(project){
   if(!ME) return false;
-  if(ME.role==="admin") return true;
-  if(ME.role!=="user") return false;
-  try{ const r = await api("/v1/access/identity?project="+encodeURIComponent(project)); return !!r.task_write; }catch(_){ return false; }
+  if(ME.role!=="user" && ME.role!=="admin") return false;
+  try{ const r = await api("/v1/access/identity?project="+encodeURIComponent(project)); TASKS_OFF[project] = r.tasks_enabled===false;
+    if(r.tasks_enabled===false) return false;
+    return ME.role==="admin" || !!r.task_write; }catch(_){ return false; }
 }
 function stateChipsHTML(){
   return ['',...STATES].map(s=>`<button type="button" class="chip click${FILTER.state===s?' on':''}" onclick="FILTER.state='${s}';listTasks(true)">${s||'all'}</button>`).join("");
@@ -359,9 +366,11 @@ function showList(){
   $("v-task").hidden = true; $("v-list").hidden = false; CUR = null;
   document.title = (PROJ? PROJ+" · " : "")+"aimem tasks";
   if(PROJECTS) $("projSel").value = PROJECTS.includes(PROJ)?PROJ:""; else $("projIn").value = PROJ;
-  $("filters").hidden = !PROJ; $("newBtn").hidden = true;
+  $("filters").hidden = !PROJ; $("newBtn").hidden = true; $("tasksOff").hidden = true; // the note belongs to the answer for this project
   if(!$("newForm").hidden && NEW_PROJ!==PROJ){ $("newForm").hidden = true; spent("new"); } // a form belongs to the project it opened for
-  if(PROJ){ const asked = PROJ; canWrite(asked).then(ok => { if(PROJ===asked && CUR===null) $("newBtn").hidden = !ok; }); }
+  // The enablement note has its own element: the list loader rewrites
+  // listNote on every page and filter, and must not erase it.
+  if(PROJ){ const asked = PROJ; canWrite(asked).then(ok => { if(PROJ===asked && CUR===null){ $("newBtn").hidden = !ok; $("tasksOff").textContent = TASKS_OFF_NOTE; $("tasksOff").hidden = !TASKS_OFF[asked]; } }); }
   $("stateChips").innerHTML = stateChipsHTML();
   $("archChk").checked = FILTER.archived;
   const board = VIEW==="board";
@@ -414,7 +423,7 @@ async function loadBoard(){
   $("boardNote").textContent = "loading…";
   const can = await canWrite(project);
   if(my!==NAV || seq!==SEQ.board) return;
-  BOARD_CAN = can;
+  BOARD_CAN = can; $("tasksOff").textContent = TASKS_OFF_NOTE; $("tasksOff").hidden = !TASKS_OFF[project];
   let after = "", n = 0;
   try{
     do{
@@ -424,7 +433,7 @@ async function loadBoard(){
       for(const t of page.tasks){ placeCard(t); n++; }
       after = page.next_cursor||"";
     }while(after && n < BOARD_MAX);
-    $("boardNote").textContent = n===0 ? "no active tasks" : (after ? `showing the first ${n} tasks; the list view pages through the rest` : (BOARD_CAN ? "drag a card to change its state (an ordinary revision-checked update)" : "read-only: this credential cannot change tasks in this project"));
+    $("boardNote").textContent = n===0 ? "no active tasks" : (after ? `showing the first ${n} tasks; the list view pages through the rest` : (BOARD_CAN ? "drag a card to change its state (an ordinary revision-checked update)" : (TASKS_OFF[project] ? TASKS_OFF_NOTE : "read-only: this credential cannot change tasks in this project")));
   }catch(e){ if(e.auth) return boot(); if(my===NAV && seq===SEQ.board) $("boardNote").textContent = e.message; }
 }
 function countCol(st){ $("n-"+st).textContent = $("col-"+st).children.length; }

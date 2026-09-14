@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
@@ -14,6 +15,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -40,7 +42,11 @@ func newHub(t *testing.T) *hubFixture {
 	}
 	t.Cleanup(func() { reg.Close() })
 	for _, p := range []string{"alpha", "beta"} {
-		if _, err := reg.Open(p); err != nil {
+		db, err := reg.Open(p)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := db.SetMeta(store.TasksMetaKey, "on"); err != nil { // the admin's decision, made here
 			t.Fatal(err)
 		}
 	}
@@ -293,6 +299,85 @@ func TestTaskCallerForUsesHubTaskToken(t *testing.T) {
 	}
 	if len(seen) != 1 {
 		t.Fatalf("refusals must not call the hub: %q", seen)
+	}
+}
+
+// The stdio facade's tool listing follows per-project enablement as seen
+// at session start: disabled hides the task tools and refuses them by
+// name; enabled and unknown list them (the hub is the authority for every
+// write). The probe returns unknown for anything short of a definite
+// answer, and a session that started enabled gets one restart notice when
+// the hub later says disabled.
+func TestFacadeTaskStateListing(t *testing.T) {
+	list := func(s *srv) string {
+		return string(s.handle(context.Background(), []byte(`{"jsonrpc":"2.0","id":1,"method":"tools/list","params":{}}`)))
+	}
+	for _, st := range []string{taskStateEnabled, taskStateUnknown, ""} {
+		if out := list(&srv{project: "alpha", taskState: st}); !strings.Contains(out, `"list_tasks"`) {
+			t.Fatalf("state %q must list the task tools: %s", st, out)
+		}
+	}
+	off := &srv{project: "alpha", taskState: taskStateDisabled}
+	if out := list(off); strings.Contains(out, `"list_tasks"`) || !strings.Contains(out, `"recall_memory"`) {
+		t.Fatalf("disabled must hide the task tools only: %s", out)
+	}
+	resp := off.handle(context.Background(), []byte(`{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"list_tasks","arguments":{}}}`))
+	if !strings.Contains(string(resp), "isError") || !strings.Contains(string(resp), "not enabled") {
+		t.Fatalf("hidden tool called by name: %s", resp)
+	}
+	// The probe against a hub.
+	var enabled atomic.Bool
+	var say atomic.Int32 // 0: answer with tasks_enabled; 1: omit it (older hub); 2: 500
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v1/access/identity" || r.URL.Query().Get("project") != "alpha" {
+			t.Errorf("unexpected probe: %s %s", r.Method, r.URL)
+		}
+		switch say.Load() {
+		case 1:
+			w.Write([]byte(`{"name":"x","role":"user"}`))
+		case 2:
+			w.WriteHeader(500)
+		default:
+			fmt.Fprintf(w, `{"name":"x","role":"user","tasks_enabled":%v}`, enabled.Load())
+		}
+	}))
+	defer ts.Close()
+	root := t.TempDir()
+	if err := adapter.SaveHubs(root, map[string]*adapter.HubConfig{"home": {URL: ts.URL, Token: "checkpoint", TaskToken: "aimem_user_alice"}}, "home"); err != nil {
+		t.Fatal(err)
+	}
+	dir := t.TempDir()
+	if got := probeTaskState(dir, root, "alpha"); got != taskStateDisabled {
+		t.Fatalf("disabled hub: %q", got)
+	}
+	enabled.Store(true)
+	if got := probeTaskState(dir, root, "alpha"); got != taskStateEnabled {
+		t.Fatalf("enabled hub: %q", got)
+	}
+	say.Store(1)
+	if got := probeTaskState(dir, root, "alpha"); got != taskStateUnknown {
+		t.Fatalf("older hub: %q", got)
+	}
+	say.Store(2)
+	if got := probeTaskState(dir, root, "alpha"); got != taskStateUnknown {
+		t.Fatalf("failing hub: %q", got)
+	}
+	if got := probeTaskState(dir, t.TempDir(), "alpha"); got != taskStateUnknown {
+		t.Fatalf("no credential: %q", got)
+	}
+	if got := probeTaskState(dir, root, ""); got != taskStateUnknown {
+		t.Fatalf("no project: %q", got)
+	}
+	// Started enabled; the hub now refuses as disabled: one notice, once.
+	refusing := hubCaller(httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(403)
+		w.Write([]byte(`{"error":"tasks are not enabled for this project; an admin enables them"}`))
+	})).URL, "aimem_user_alice", http.DefaultClient)
+	on := &srv{project: "alpha", taskState: taskStateEnabled, tasks: refusing}
+	first := string(on.handle(context.Background(), []byte(`{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"list_tasks","arguments":{}}}`)))
+	second := string(on.handle(context.Background(), []byte(`{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"list_tasks","arguments":{}}}`)))
+	if !strings.Contains(first, "Restart the session") || strings.Contains(second, "Restart the session") {
+		t.Fatalf("restart notice must appear exactly once:\n%s\n%s", first, second)
 	}
 }
 

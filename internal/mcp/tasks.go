@@ -18,6 +18,7 @@ import (
 	"net/http"
 	"net/url"
 	"strconv"
+	"time"
 
 	"aimem/internal/adapter"
 	"aimem/internal/ident"
@@ -425,6 +426,43 @@ func pageQuery(after int64, limit int) string {
 // configured is an actionable error, never a fallback to the local socket
 // or to the hub's shared checkpoint token.
 func localTaskCaller() (TaskCallFunc, error) { return taskCallerIn(".", mcpStateRoot()) }
+
+const (
+	taskStateEnabled  = "enabled"
+	taskStateDisabled = "disabled"
+	taskStateUnknown  = "unknown"
+)
+
+// probeTaskState asks the project's hub, with the task credential, whether
+// tasks are enabled for the project — once, at session start. Anything
+// short of a definite answer is unknown: no credential configured, the
+// hub unreachable, a non-200, or a hub too old to say. Bounded so a slow
+// hub cannot hold the session start.
+func probeTaskState(dir, root, project string) string {
+	if project == "" {
+		return taskStateUnknown
+	}
+	call, err := taskCallerIn(dir, root)
+	if err != nil {
+		return taskStateUnknown
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	status, body, err := call(ctx, "GET", "/v1/access/identity?project="+url.QueryEscape(project), nil, nil)
+	if err != nil || status != http.StatusOK {
+		return taskStateUnknown
+	}
+	var id struct {
+		TasksEnabled *bool `json:"tasks_enabled"`
+	}
+	if json.Unmarshal(body, &id) != nil || id.TasksEnabled == nil {
+		return taskStateUnknown
+	}
+	if *id.TasksEnabled {
+		return taskStateEnabled
+	}
+	return taskStateDisabled
+}
 
 // taskCallerIn resolves dir's hub binding strictly: a .aimem.json that
 // exists but cannot be parsed is a refusal, never a silent trip to the

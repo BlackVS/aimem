@@ -1,7 +1,7 @@
 # The documents an AI-driven Kanban needs
 
-Status: **proposal, draft for review** (2026-09-14). Nothing here is
-implemented. Written after the task backend (storage, service, page and
+Status: **accepted 2026-09-14; increment 1 (per-project enablement and
+tool listing) implemented** — the rest is not. Written after the task backend (storage, service, page and
 board; v0.4.0) shipped and the first agent-side fixes landed, when it
 became clear that the shared-documents feature predates the Kanban idea
 and was never asked what a process run by agents needs from it.
@@ -279,7 +279,10 @@ mutations check current enablement as well as existing task
 authorization; a cached setting never authorizes a write.
 
 Upgrade migration enables projects that already contain tasks, including
-archived tasks. It runs once and must not undo a later admin disablement.
+archived tasks. It must not undo a later admin disablement; the
+implementation runs it at every service start and only ever writes where
+the key is unset, which is the same as running it once and needs no
+"already ran" marker (correction recorded at increment 1).
 New projects default to disabled. Migrated projects without a selected
 process reference report context unavailable until an admin selects one;
 their existing task work remains enabled.

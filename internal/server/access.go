@@ -272,11 +272,36 @@ func (s *Server) accessIdentity(w http.ResponseWriter, r *http.Request) {
 		s.fail(w, 401, fmt.Errorf("bearer authentication required"))
 		return
 	}
+	project := r.URL.Query().Get("project")
+	// tasks_enabled is the per-project admin setting, answered to every
+	// credential that names a project: the task page labels the project
+	// by it and the stdio facade decides its tool listing by it.
+	tasksOn := false
+	if project != "" {
+		pdb, err := s.reg.OpenExisting(project)
+		if errors.Is(err, store.ErrNoSuchProject) {
+			s.fail(w, 404, fmt.Errorf("unknown project"))
+			return
+		}
+		if err != nil {
+			s.log.Error("read project for identity", "err", err)
+			s.fail(w, 500, fmt.Errorf("project unavailable"))
+			return
+		}
+		if tasksOn, err = pdb.TasksEnabled(); err != nil {
+			s.log.Error("read task enablement", "err", err)
+			s.fail(w, 500, fmt.Errorf("project unavailable"))
+			return
+		}
+	}
 	if id.Role != "user" {
-		s.ok(w, map[string]any{"name": id.Name, "role": id.Role})
+		out := map[string]any{"name": id.Name, "role": id.Role}
+		if project != "" {
+			out["project"], out["tasks_enabled"] = project, tasksOn
+		}
+		s.ok(w, out)
 		return
 	}
-	project := r.URL.Query().Get("project")
 	allowed := false
 	if project != "" {
 		instance, err := s.reg.ExistingProjectAccessID(project)
@@ -302,5 +327,5 @@ func (s *Server) accessIdentity(w http.ResponseWriter, r *http.Request) {
 			allowed = err == nil
 		}
 	}
-	s.ok(w, map[string]any{"user_id": id.UserID, "token_id": id.TokenID, "name": id.Name, "role": "user", "task_read": "all-projects", "project": project, "task_write": allowed})
+	s.ok(w, map[string]any{"user_id": id.UserID, "token_id": id.TokenID, "name": id.Name, "role": "user", "task_read": "all-projects", "project": project, "task_write": allowed, "tasks_enabled": tasksOn})
 }

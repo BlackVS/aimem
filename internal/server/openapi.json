@@ -94,7 +94,7 @@
     "/v1/access/identity": {
       "get": {
         "summary": "Inspect authenticated identity and current task-write permission for an optional project",
-        "description": "Also available to ordinary user tokens. Ordinary tokens may additionally use the task routes and /mcp task tools; they are refused on every other non-public endpoint. Legacy writer/admin credentials retain their existing rights.",
+        "description": "Also available to ordinary user tokens. Ordinary tokens may additionally use the task routes and /mcp task tools; they are refused on every other non-public endpoint. Legacy writer/admin credentials retain their existing rights. With ?project=<id>, every credential also receives tasks_enabled: whether an admin has switched tasks on for that project (task mutations are refused with 403 otherwise).",
         "x-role": "writer",
         "parameters": [
           {

@@ -137,6 +137,13 @@ aimem hub task-token home <aimem_user_...token>
 Without it the task tools answer with exactly this instruction; nothing
 falls back to the writer token or to the local service.
 
+The task tools appear only for a project whose tasks the hub admin has
+switched on (`aimem tasks on -p <project>` on the hub host, or the
+console). The facade asks the hub once when the session starts: off hides
+the tools; on lists them; a hub that cannot be reached lists them too,
+with the hub refusing writes if the project turns out to be off. A change
+of the setting takes a session restart to show.
+
 (`--sync <ssh-dest>` on `hub add` is only for hubs old enough to lack
 the sync API; current hubs sync over HTTPS with the same token. Hub
 NAMES are machine-local, but use the same names on every machine — a
