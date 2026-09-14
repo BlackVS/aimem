@@ -434,11 +434,15 @@ func TestMigrationV9ToV10(t *testing.T) {
 	if _, _, err := db.Remember("a fact with audit rows", "test", RememberOpts{Kind: "fact"}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := db.sql.Exec(`DROP INDEX idx_memory_audit_memory`); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := db.sql.Exec(`UPDATE meta SET value='9' WHERE key='schema_version'`); err != nil {
-		t.Fatal(err)
+	// Roll back to a genuine v9 file: no v10 index and no v11 task tables.
+	for _, stmt := range []string{
+		`DROP INDEX idx_memory_audit_memory`,
+		`DROP TABLE task_requests`, `DROP TABLE task_comments`, `DROP TABLE task_history`, `DROP TABLE tasks`,
+		`UPDATE meta SET value='9' WHERE key='schema_version'`,
+	} {
+		if _, err := db.sql.Exec(stmt); err != nil {
+			t.Fatal(err)
+		}
 	}
 	r.Close()
 
@@ -451,11 +455,20 @@ func TestMigrationV9ToV10(t *testing.T) {
 		if err != nil {
 			t.Fatalf("pass %d: reopen (migration) failed: %v", pass, err)
 		}
-		var v, idx string
+		var v, idx, tasks string
 		db2.sql.QueryRow(`SELECT value FROM meta WHERE key='schema_version'`).Scan(&v)
 		db2.sql.QueryRow(`SELECT name FROM sqlite_master WHERE type='index' AND name='idx_memory_audit_memory'`).Scan(&idx)
-		if v != "10" || idx == "" {
-			t.Fatalf("pass %d: schema_version=%q index=%q — v10 not applied", pass, v, idx)
+		db2.sql.QueryRow(`SELECT name FROM sqlite_master WHERE type='table' AND name='tasks'`).Scan(&tasks)
+		if v != "11" || idx == "" || tasks == "" {
+			t.Fatalf("pass %d: schema_version=%q index=%q tasks=%q — v10/v11 not applied", pass, v, idx, tasks)
+		}
+		if evs, _ := db2.RecentEvents(10); len(evs) != 1 {
+			t.Fatalf("pass %d: journal lost across v9→v11: %d events", pass, len(evs))
+		}
+		var audits int
+		db2.sql.QueryRow(`SELECT COUNT(*) FROM memory_audit`).Scan(&audits)
+		if audits == 0 {
+			t.Fatalf("pass %d: memory audit rows lost across v9→v11", pass)
 		}
 		r2.Close()
 	}
