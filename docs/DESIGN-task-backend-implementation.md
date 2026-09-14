@@ -2,7 +2,8 @@
 
 Status: stages 1, 2 and 3 merged (PR #38, PR #39, PR #40 task page, PR #41
 board), 2026-09-14. Stage 4 (the access section in the console) is planned
-below and not started.
+below and not started; the user's order is agent enablement first (the
+tools agents use, on the primary hub), the console section after.
 Original baseline: `4e7021533a1aefb2635e28a071953f2061f1df5b` on `master`.
 Read this alongside [the Kanban proposal](AIMEM-KANBAN-PROPOSAL.md) and
 [access control](DESIGN-access-control.md). Those documents contain the approved
@@ -154,9 +155,21 @@ Keep three serial delivery stages, each branched from the previous merged result
    using the same service. UI implementation is outside the first two stages.
 4. **Access section in the console.** Users, access groups, project grants and
    ordinary-token issue/revoke as a tab of `/admin`, over the access routes
-   that already exist. No new route, no new authority. Planned after stage 3
-   (see "Access Section In The Console"); the "small admin management UI"
-   the access design's first delivery names.
+   that already exist. No new route, no new authority. Planned (see "Access
+   Section In The Console"); the "small admin management UI" the access
+   design's first delivery names. Ordered after agent enablement below.
+
+**Agent enablement comes first** (the user's steer, 2026-09-14): the point of
+the backend is that coding agents run their work through it, so before more
+UI the agent path is made usable end to end. That is (a) the agent-side
+follow-ups already recorded — the hub-name fail-open refusal, the task-lookup
+scan cap, the retry-key digest versioning before any content field is added;
+(b) a release from master installed on the primary hub only, the peer hubs
+staying on the current stable release while other projects depend on them;
+(c) one user and ordinary token per agent machine, stored with `aimem hub
+task-token`, and this project's backlog entered as tasks there. Each code
+item is its own serial PR; the release and the install are separate acts
+the user authorizes explicitly.
 
 The user has authorized implementation, not release, deployment, automatic merge,
 or an unlimited redesign. v0.4.0 remains a proposed milestone. Follow the current
@@ -632,7 +645,8 @@ open for the transport that surfaces warnings:
    before considering any draft code an implementation milestone.
 
 Stages 1, 2 and 3 are merged (see Resume State). Do not change the public
-version as part of this work. Next: stage 4 (the access section in the
-console, which absorbs stage-3 follow-up (c)), then the remaining stage-2 and
-stage-3 follow-ups recorded above, in the order the board's use surfaces
-them. Preserve the approved simple scope.
+version as part of this work. Next: agent enablement (see "Scope And
+Delivery Boundaries"), then stage 4 (the access section in the console,
+which absorbs stage-3 follow-up (c)), then the remaining stage-2 and stage-3
+follow-ups recorded above, in the order the board's use surfaces them.
+Preserve the approved simple scope.
