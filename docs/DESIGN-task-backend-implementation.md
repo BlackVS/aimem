@@ -1,7 +1,7 @@
 # Task Backend Implementation Plan
 
-Status: stages 1 and 2 merged (PR #38, PR #39); stage 3's first increment
-(the task page) on `feat/task-ui`, 2026-09-14; the board is the next increment.
+Status: stages 1 and 2 merged (PR #38, PR #39); stage 3's task page merged
+(PR #40) and its board increment on `feat/task-board`, 2026-09-14.
 Original baseline: `4e7021533a1aefb2635e28a071953f2061f1df5b` on `master`.
 Read this alongside [the Kanban proposal](AIMEM-KANBAN-PROPOSAL.md) and
 [access control](DESIGN-access-control.md). Those documents contain the approved
@@ -22,9 +22,15 @@ decoding, status mapping, in-process MCP dispatch), `internal/mcp/tasks.go`
 `access.Store.CanWrite`, `Identity.Project`, `HubConfig.TaskToken` and the
 `aimem hub task-token` command.
 
-Stage 3, first increment (task list/detail/discussion) is implemented on
-`feat/task-ui` as `internal/server/tasks.html`, served at `GET /tasks` (public
-chrome like `/admin`, holding no data). Decisions:
+Stage 3, first increment (task list/detail/discussion) is merged (PR #40):
+`internal/server/tasks.html`, served at `GET /tasks` (public chrome like
+`/admin`, holding no data). The board (second increment, `feat/task-board`)
+is a view of the same page: one column per state fed by the same list route
+(active tasks, the first 500), cards that open the task, and a drop or a
+keyboard "move to" that is the page's ordinary write — read fresh, replace
+under `expected_revision` with a retry key, un-archive when leaving a
+terminal state — with a conflict refreshing the board and saying so. Cards
+drag only when the credential may write in the project. Decisions:
 
 - **A separate page, not a console tab.** The console boots on admin/writer
   endpoints an ordinary token cannot reach; the task page calls only the
@@ -41,7 +47,10 @@ chrome like `/admin`, holding no data). Decisions:
   with `expected_revision`; a 409 shows the current task beside the attempt
   with "reload" and "reapply on the current revision" (the served current
   task replaces the stale one outright) — never a silent overwrite. A board
-  card drag is the same call: full content, `expected_revision`, a key.
+  card move is the same call (read fresh, full content, `expected_revision`,
+  a key per card, target and revision); its conflict handling is lighter:
+  the board reloads and says nothing was overwritten, since the card is not
+  an edit form with an attempt to reapply.
 - **Write permission is asked, not assumed** for ordinary tokens:
   `/v1/access/identity?project=` per project (the list's create button and
   the opened task's edit, state and comment controls); admin credentials
@@ -471,7 +480,11 @@ Valid, out of stage 1's scope, owned by the stage-2 service unless noted:
   test. (d) The page spells `TaskContent` three times (form, reader,
   projection); derive them from one field list and assert it against the
   storage type's JSON tags, since a dropped field is silently erased by the
-  replace-all update.
+  replace-all update. (e) Board interactions (drop, move, an out-of-order
+  reload, the permission race) are browser-only behaviour; same harness.
+  (f) A board move re-creates the card element, so keyboard focus is lost
+  after each move and the "move to" select is not labelled with its task;
+  update the card in place and label the select.
 - **Format characters.** Storage rejects bidirectional overrides (U+202A–E,
   U+2066–9) and C0/C1 controls; other zero-width/format characters pass and
   are the renderer's concern.
@@ -532,7 +545,7 @@ open for the transport that surfaces warnings:
 7. Add meaningful migration, transaction-failure, concurrency and lifecycle tests
    before considering any draft code an implementation milestone.
 
-Stages 1 and 2 are merged and the task page is on `feat/task-ui` (see Resume
-State). Do not change the public version as part of this work. Next: the
-Kanban board on the same service (a card drag is the page's existing CAS
-state change), then the stage-2 follow-ups. Preserve the approved simple scope.
+Stages 1 and 2 and the task page are merged; the board is on `feat/task-board`
+(see Resume State). Do not change the public version as part of this work.
+Next: the stage-2 and stage-3 follow-ups recorded above, in the order the
+board's use surfaces them. Preserve the approved simple scope.

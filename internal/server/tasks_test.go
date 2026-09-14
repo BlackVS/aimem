@@ -6,6 +6,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"regexp"
 	"runtime"
 	"strings"
 	"testing"
@@ -619,6 +620,30 @@ func TestTasksPageIsPublicChrome(t *testing.T) {
 	}
 	if n := strings.Count(page, "fetch("); n != 1 {
 		t.Fatalf("api() must be the page's only egress: %d fetch( sites", n)
+	}
+	// The board is the same rows and the same write: it reads through the
+	// list route and moves through the task route (both already pinned).
+	// Its columns are the page's STATES, which must be the store's states
+	// exactly — a task in a state the page does not know has no column.
+	m := regexp.MustCompile(`const STATES = \[([^\]]*)\];`).FindStringSubmatch(page)
+	if m == nil {
+		t.Fatal("page has no STATES literal")
+	}
+	var pageStates []string
+	for _, q := range strings.Split(m[1], ",") {
+		pageStates = append(pageStates, strings.Trim(strings.TrimSpace(q), `"`))
+	}
+	if strings.Join(pageStates, ",") != strings.Join(store.TaskStates, ",") {
+		t.Fatalf("page STATES %v differ from store.TaskStates %v", pageStates, store.TaskStates)
+	}
+	// An archived task has no card: a move that reads or returns one
+	// archived (by another client meanwhile) must take it off the board —
+	// and the newest revision seen must outlive the card, so a delayed
+	// older response cannot put it back.
+	for _, want := range []string{`view=board`, `ondrop=`, `if(t.archived){ if(from) countCol(from); return; }`, `if(SEEN[t.id] > t.revision) return;`} {
+		if !strings.Contains(page, want) {
+			t.Fatalf("board: page lacks %q", want)
+		}
 	}
 	if !strings.Contains(page, "catch(_){ PROJECTS = null; }") {
 		t.Fatal("project listing must be optional for ordinary tokens")

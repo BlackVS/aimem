@@ -141,6 +141,26 @@ func (r *Registry) OpenExisting(projectID string) (*DB, error) {
 	return r.Open(projectID)
 }
 
+// closeAndDrain closes a cached handle and waits until every connection
+// it had lent out is back and closed. database/sql.Close refuses new work
+// but does not end a transaction already running — nor one whose
+// BEGIN IMMEDIATE is still in SQLite's busy loop behind another writer.
+// Such a writer would otherwise outlive the file check that follows and
+// commit into a directory that was just removed (seen on Linux, where an
+// unlinked file stays writable). The wait is bounded by the busy timeout
+// plus margin; a handle that will not drain refuses the operation.
+func closeAndDrain(sdb *sql.DB) error {
+	sdb.Close()
+	deadline := time.Now().Add(15 * time.Second)
+	for sdb.Stats().InUse > 0 {
+		if time.Now().After(deadline) {
+			return errors.New("a write on this project is still in flight")
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	return nil
+}
+
 // ErrNoSuchProject marks an OpenExisting miss (absent or invalid id), as
 // opposed to a project that exists but cannot be opened.
 var ErrNoSuchProject = errors.New("no such project")
@@ -177,8 +197,11 @@ func (r *Registry) Drop(projectID string) error {
 		} else if has {
 			return fmt.Errorf("project %q: %w", projectID, ErrProjectHasTasks)
 		}
-		db.sql.Close()
-		delete(r.dbs, projectID)
+		err := closeAndDrain(db.sql)
+		delete(r.dbs, projectID) // closed either way; the next Open reopens
+		if err != nil {
+			return fmt.Errorf("project %q not removed: %w", projectID, err)
+		}
 	}
 	dir := filepath.Join(r.root, "projects", projectID)
 	if _, err := os.Stat(dir); err != nil {
@@ -398,8 +421,11 @@ func (r *Registry) MergeProject(oldID, newID string) (events, mems, runs, cites 
 		} else if has {
 			return events, mems, runs, cites, kept(ErrProjectHasTasks)
 		}
-		db.sql.Close()
-		delete(r.dbs, oldID)
+		err := closeAndDrain(db.sql)
+		delete(r.dbs, oldID) // closed either way; the next Open reopens
+		if err != nil {
+			return events, mems, runs, cites, kept(err)
+		}
 	}
 	srcPath := filepath.Join(r.root, "projects", oldID, "journal.db")
 	if has, err := fileHasTasks(srcPath); err != nil {
