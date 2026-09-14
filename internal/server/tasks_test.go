@@ -219,7 +219,7 @@ func TestOrdinaryTokenGateMatrix(t *testing.T) {
 	h := f.s.TCPHandler(f.env, map[string]http.Handler{"/mcp": http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { mcpHits++ })})
 	fill := strings.NewReplacer("{p}", "alpha", "{id}", uuidv7.New(), "{c}", uuidv7.New(), "{s}", "s1", "{key}", "about",
 		"{name}", "RUNBOOK", "{instance}", "x", "{kind}", "user", "{g}", "g", "{u}", "u", "{id...}", "x", "{$}", "")
-	public := map[string]bool{"/": true, "/admin": true, "/v1/status": true}
+	public := map[string]bool{"/": true, "/admin": true, "/tasks": true, "/v1/status": true}
 	for _, rt := range f.s.Routes() {
 		path := fill.Replace(rt.Pattern)
 		if path == "" {
@@ -552,6 +552,41 @@ func TestTaskRoutesProjectsRenameAndReservedScopes(t *testing.T) {
 	}
 	if w := taskReq(t, h, "POST", "/v1/projects/alpha/tasks", f.alice, "k2", taskBody); w.Code != 403 {
 		t.Fatalf("name reuse: %d %s", w.Code, w.Body)
+	}
+}
+
+// The task page is public chrome: served without a credential, under the
+// console's CSP, holding no data; its script parses (see adminjs_test.go
+// for why that check exists) and it asks only the routes an ordinary
+// token may reach.
+func TestTasksPageIsPublicChrome(t *testing.T) {
+	f := newTaskFixture(t)
+	w := taskReq(t, f.h, "GET", "/tasks", "", "", "")
+	if w.Code != 200 || !strings.HasPrefix(w.Header().Get("Content-Type"), "text/html") || !strings.Contains(w.Header().Get("Content-Security-Policy"), "default-src 'none'") {
+		t.Fatalf("tasks page: %d %v", w.Code, w.Header())
+	}
+	page := string(tasksHTML)
+	i, j := strings.Index(page, "<script>"), strings.LastIndex(page, "</script>")
+	if bad := scanJSStrings(page[i:j]); len(bad) > 0 {
+		t.Fatalf("unterminated string literals at script lines %v", bad)
+	}
+	for _, path := range []string{`"/v1/projects/"+encodeURIComponent(PROJ)+"/tasks?"`, `"/v1/tasks/"+encodeURIComponent(`, `"/v1/access/identity"`} {
+		if !strings.Contains(page, path) {
+			t.Fatalf("page does not call %s", path)
+		}
+	}
+	// The write decision is the identity endpoint's task_write answer.
+	if !strings.Contains(page, "task_write") {
+		t.Fatal("page must read task_write from the identity endpoint")
+	}
+	// The one legacy call is the project listing, and it is optional: the
+	// page falls back to a typed project when the credential is refused.
+	if !strings.Contains(page, `catch(_){ PROJECTS = null; }`) {
+		t.Fatal("project listing must be optional for ordinary tokens")
+	}
+	// A deep link into the console's task view lands here.
+	if !strings.Contains(string(adminHTML), `location.replace("/tasks?"`) {
+		t.Fatal("console must forward /admin?task= to the task page")
 	}
 }
 

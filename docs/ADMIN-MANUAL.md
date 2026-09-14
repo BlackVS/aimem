@@ -81,6 +81,7 @@ the binary. Everything stateful lives outside the binary — config
 | `/` | none | Status card: liveness, build, hostname, uptime. Nothing about what the hub holds. |
 | `/v1/status` | none | The JSON behind that card. |
 | `/admin` | none to load | The console shell. Holds no data; it asks for the hub token once (browser localStorage) and calls the API with it. |
+| `/tasks` | none to load | The task page (list, detail, history, discussion). Holds no data; it asks for a token in the browser — an ordinary project token works, and sees exactly what the task service allows it. `/tasks?task=<id>` and `/tasks?task=<id>&comment=<id>` are the copyable links. |
 | everything else | `Authorization: Bearer $AIMEM_HTTP_TOKEN` | The whole API — projects, memories, usage, logs, config. |
 
 Those first three are the complete unauthenticated surface. Adding a

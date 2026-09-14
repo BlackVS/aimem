@@ -121,6 +121,7 @@ gated; the same file ships in the repo).
 | `/` | none | status card: liveness, build, hostname, uptime |
 | `/v1/status` | none | the JSON behind that card |
 | `/admin` | none to load | the console shell; it asks for the token in the browser |
+| `/tasks` | none to load | the task page; any token the task service admits (ordinary project tokens included) |
 | everything else | `Authorization: Bearer <token>` | the whole API |
 
 Those first three are the complete unauthenticated surface. A hub listens

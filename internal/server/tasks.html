@@ -1,0 +1,511 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>aimem tasks</title>
+<style>
+  /* The task page: the console's palette and chrome voice (see admin.html
+     for the rationale), but a separate page on purpose. The console needs
+     an admin or writer token to boot; this page works with ANY credential
+     the task service admits — an ordinary user token sees exactly what the
+     service lets it see, and every write here is the same CAS write an
+     agent makes. The variable contract is copied, not shared: both pages
+     are single embedded files behind a CSP that allows inline styles only. */
+  :root{
+    --ink:#0e1210; --panel:#141a15; --well:#0a0e0b; --edge:#26332a;
+    --bone:#d6ddd2; --dim:#8a9a8d;
+    --moss:#4fb477; --moss-deep:#062012;
+    --amber:#d9a441; --rust:#c96f52; --tide:#5fb3b3; --iris:#9a86c8;
+    --mono:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+    --text:system-ui,-apple-system,"Segoe UI",sans-serif;
+    font-size:15px;
+  }
+  :root[data-theme="slate"]{
+    --ink:#0d1117; --panel:#161d26; --well:#090c10; --edge:#2b3646;
+    --bone:#dfe7ef; --dim:#93a1b3; --moss:#6cb1f0; --moss-deep:#04101c;
+    --amber:#d9b23f; --rust:#d0705a; --tide:#5fb3b3; --iris:#a08fd0;
+  }
+  :root[data-theme="paper"]{
+    --ink:#f2efe7; --panel:#faf8f2; --well:#e7e2d5; --edge:#c9c2af;
+    --bone:#2e2b24; --dim:#6e6858; --moss:#33704e; --moss-deep:#f5f3ec;
+    --amber:#8a5f14; --rust:#9c4227; --tide:#1f6f6f; --iris:#5c4d96;
+  }
+  :root[data-theme="contrast"]{
+    --ink:#000000; --panel:#0d0d0d; --well:#000000; --edge:#4a4a4a;
+    --bone:#f5f5f5; --dim:#c9c9c9; --moss:#ffd75f; --moss-deep:#000000;
+    --amber:#ffb86b; --rust:#ff8a70; --tide:#7fd8d8; --iris:#c7b3f2;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--ink);color:var(--bone);font:14px/1.5 var(--mono)}
+  ::selection{background:var(--moss);color:var(--moss-deep)}
+  :focus-visible{outline:2px solid var(--moss);outline-offset:1px}
+  header{display:flex;align-items:center;gap:10px;padding:4px 14px;background:var(--panel);
+         color:var(--moss);font-weight:700;font-size:13px;line-height:1.6;border-bottom:1px solid var(--edge)}
+  header a{color:var(--moss);text-decoration:none}
+  header .sub{font-weight:400;opacity:.75;color:var(--dim)}
+  header .right{margin-left:auto;font-weight:400;display:flex;gap:8px;align-items:center;white-space:nowrap}
+  header .right select,header .right button{font-size:12px}
+  main{padding:14px 16px;max-width:1060px;margin:0 auto}
+  h2{font:700 12px/1 var(--mono);color:var(--dim);text-transform:uppercase;letter-spacing:.14em;margin:20px 0 8px}
+  .card{background:var(--panel);border:1px solid var(--edge);padding:10px 12px;margin:8px 0}
+  .chip{display:inline-block;background:var(--well);border:1px solid var(--edge);color:var(--dim);
+        padding:1px 8px;margin:1px 4px 1px 0;font-size:12px;cursor:default;white-space:nowrap}
+  .chip.on{color:var(--moss-deep);background:var(--moss);border-color:var(--moss)}
+  .chip.click{cursor:pointer}
+  .chip.click:hover{border-color:var(--moss);color:var(--bone)}
+  .dim{color:var(--dim)} .warn{color:var(--amber)} .bad{color:var(--rust)} .ok{color:var(--moss)}
+  input,textarea,select{background:var(--well);border:1px solid var(--edge);color:var(--bone);
+        font:inherit;padding:6px 8px;width:100%}
+  input:focus,textarea:focus,select:focus{border-color:var(--moss);outline:none}
+  input.inline,select.inline{width:auto}
+  textarea{resize:vertical;min-height:38px;font:14px/1.5 var(--text)}
+  button.act{background:var(--well);border:1px solid var(--edge);color:var(--bone);padding:5px 12px;cursor:pointer;font:inherit}
+  button.act:hover{border-color:var(--moss)}
+  button.act.danger:hover{border-color:var(--rust);color:var(--rust)}
+  button.act.on{color:var(--moss-deep);background:var(--moss);border-color:var(--moss);font-weight:700}
+  button.act:disabled{opacity:.45;cursor:not-allowed}
+  .row{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin:6px 0}
+  .grow{flex:1;min-width:120px}
+  label.f{display:block;margin:8px 0 2px;color:var(--dim);font-size:12px;text-transform:uppercase;letter-spacing:.08em}
+  #gate{position:fixed;inset:0;background:var(--ink);display:flex;align-items:center;justify-content:center;flex-direction:column;gap:12px;z-index:9}
+  #gate.hide,[hidden]{display:none!important}
+  #gate .box{width:min(480px,90vw)}
+  #toast{position:fixed;bottom:14px;right:14px;background:var(--well);border:1px solid var(--moss);
+         padding:8px 14px;opacity:0;transition:opacity .2s;max-width:60vw}
+  /* State colour: one hue per stage of life, chosen from the palette. */
+  .st{font-weight:700}
+  .st-BACKLOG{color:var(--dim)} .st-READY{color:var(--tide)} .st-IN_PROGRESS{color:var(--amber)}
+  .st-REVIEW{color:var(--iris)} .st-BLOCKED{color:var(--rust)} .st-DONE{color:var(--moss)} .st-CANCELLED{color:var(--dim);text-decoration:line-through}
+  /* Task rows: a list is for scanning — title first, state and time on the edge. */
+  .trow{display:flex;gap:10px;align-items:baseline;padding:7px 4px;border-bottom:1px solid var(--edge);cursor:pointer}
+  .trow:hover{background:var(--well)}
+  .trow .title{flex:1;font:15px/1.4 var(--text);min-width:0;overflow:hidden;text-overflow:ellipsis}
+  .trow .meta{color:var(--dim);font-size:12px;white-space:nowrap}
+  .trow.archived .title{opacity:.6}
+  /* Detail: fields are prose, metadata is chrome. */
+  .field{margin:10px 0}
+  .field .k{color:var(--dim);font-size:12px;text-transform:uppercase;letter-spacing:.08em;margin-bottom:2px}
+  .prose{font:15px/1.55 var(--text);max-width:76ch;white-space:normal}
+  .prose p{margin:0 0 8px} .prose ul{margin:0 0 8px 18px;padding:0}
+  .prose code{font:13px var(--mono);background:var(--well);padding:0 4px}
+  .prose pre{font:13px/1.4 var(--mono);background:var(--well);padding:8px 10px;overflow-x:auto;margin:0 0 8px}
+  .prose h1,.prose h2,.prose h3{font:700 15px/1.3 var(--text);margin:12px 0 4px;color:var(--bone);text-transform:none;letter-spacing:0}
+  .prose a{color:var(--tide)}
+  .refs div{font:13px var(--mono);word-break:break-all}
+  .comment{border-left:3px solid var(--edge);padding:6px 10px;margin:8px 0}
+  .comment.target{border-left-color:var(--moss)}
+  .comment .who{color:var(--dim);font-size:12px;display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+  .comment .who b{color:var(--bone)}
+  .hrow{display:flex;gap:10px;padding:3px 0;border-bottom:1px solid var(--edge);font-size:13px;flex-wrap:wrap}
+  .hrow .n{color:var(--amber);width:36px}
+  .conflict{border-color:var(--rust)}
+  .acts{display:flex;gap:6px;flex-wrap:wrap}
+  .acts button{padding:2px 8px;font-size:12px}
+  @media (max-width:700px){ .trow{flex-wrap:wrap} .trow .meta{width:100%} }
+</style>
+</head>
+<body>
+<div id="gate">
+  <div class="box card">
+    <div style="font-weight:700;margin-bottom:4px">aimem tasks</div>
+    <div class="dim" style="margin-bottom:10px">Paste your token: an ordinary project token, or the hub token. It stays in this browser.</div>
+    <div class="row"><input id="tok" type="password" placeholder="token" class="grow" aria-label="token">
+    <button class="act" onclick="saveTok()">Connect</button></div>
+    <div id="gateErr" class="bad"></div>
+  </div>
+</div>
+<header><a href="/tasks" onclick="return go('/tasks')">aimem tasks</a> <span class="sub" id="who"></span>
+  <span class="right"><a href="/admin" class="dim" id="consoleLink" hidden>console</a>
+  <select id="themeSel" onchange="setTheme(this.value)" aria-label="color scheme" style="padding:2px 6px">
+    <option value="">moss</option><option value="slate">slate</option>
+    <option value="paper">paper</option><option value="contrast">contrast</option>
+  </select>
+  <button class="act" onclick="logout()" style="padding:2px 10px">logout</button></span>
+</header>
+<main>
+  <section id="v-list">
+    <div class="row">
+      <span class="dim">project</span>
+      <select id="projSel" class="inline" onchange="setProject(this.value)" hidden></select>
+      <input id="projIn" class="inline grow" placeholder="project id (as in .aimem.json / aimem status)" hidden
+             onkeydown="if(event.key==='Enter')setProject(this.value)">
+      <button class="act" id="projGo" hidden onclick="setProject($('projIn').value)">open</button>
+      <span class="grow"></span>
+      <button class="act" id="newBtn" onclick="toggleNew()" hidden>＋ new task</button>
+    </div>
+    <div class="row" id="filters" hidden>
+      <span class="dim">state</span><span id="stateChips"></span>
+      <label class="dim" style="margin-left:auto"><input type="checkbox" id="archChk" style="width:auto" onchange="listTasks(true)"> archived</label>
+    </div>
+    <div id="newForm" class="card" hidden></div>
+    <div id="list"></div>
+    <div class="row"><button class="act" id="moreBtn" hidden onclick="listTasks(false)">more</button>
+      <span id="listNote" class="dim"></span></div>
+  </section>
+  <section id="v-task" hidden>
+    <div class="row"><a href="/tasks" class="dim" onclick="return go(listURL())">← tasks</a><span id="taskCrumb" class="dim"></span></div>
+    <div id="task"></div>
+    <h2>history</h2>
+    <div id="hist"></div>
+    <div class="row"><button class="act" id="histMore" hidden onclick="loadHistory(false)">more</button></div>
+    <h2>discussion</h2>
+    <div id="comments"></div>
+    <div class="row"><button class="act" id="cmtMore" hidden onclick="loadComments(false)">more</button></div>
+    <div class="card" id="cmtForm" hidden>
+      <textarea id="cmtBody" rows="4" placeholder="Markdown comment (rendered safely; no HTML)"></textarea>
+      <div class="row"><button class="act" id="cmtBtn" onclick="addComment()">add comment</button>
+        <span class="dim">appends only; the task revision is untouched</span></div>
+    </div>
+  </section>
+</main>
+<div id="toast"></div>
+<script>
+"use strict";
+const THEME = localStorage.getItem("aimem_theme") || "";
+if(THEME){document.documentElement.dataset.theme = THEME;}
+document.getElementById("themeSel").value = THEME;
+function setTheme(t){
+  if(t){document.documentElement.dataset.theme=t;localStorage.setItem("aimem_theme",t);}
+  else{delete document.documentElement.dataset.theme;localStorage.removeItem("aimem_theme");}
+}
+const STATES = ["BACKLOG","READY","IN_PROGRESS","REVIEW","BLOCKED","DONE","CANCELLED"];
+let TOK = localStorage.getItem("aimem_token") || "";
+let ME = null;                      // identity: {name, role, ...}
+let PROJ = localStorage.getItem("aimem_task_project") || "";
+let PROJECTS = null;                // dropdown source when the credential may list projects
+let FILTER = {state:"", archived:false};
+let CURSOR = "";                    // list paging
+let CUR = null;                     // open task (served view)
+let CAN_WRITE = false;              // for CUR's project, this credential, this attempt
+let HIST = {after:0}, CMT = {after:0};
+let KEYS = {};                      // idempotency keys per open form: retry-safe until success
+
+const $ = id => document.getElementById(id);
+const esc = s => String(s??"").replace(/[&<>"]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+function toast(m){const t=$("toast");t.textContent=m;t.style.opacity=1;setTimeout(()=>t.style.opacity=0,3200);}
+function ago(ts){if(!ts)return"-";const s=(Date.now()-Date.parse(ts))/1e3;
+  if(s<90)return Math.round(s)+"s ago";if(s<5400)return Math.round(s/60)+"m ago";
+  if(s<172800)return Math.round(s/3600)+"h ago";return Math.round(s/86400)+"d ago";}
+const newKey = () => (crypto.randomUUID ? crypto.randomUUID() : String(Date.now())+Math.random());
+function key(name){ if(!KEYS[name]) KEYS[name]=newKey(); return KEYS[name]; }
+function spent(name){ delete KEYS[name]; }
+
+// Every call carries the token; a write carries its retry key. A 409 is
+// surfaced with its body so a revision conflict can show the current task
+// instead of being overwritten.
+async function api(path, opt, k){
+  const headers = {Authorization:"Bearer "+TOK, "Content-Type":"application/json"};
+  if(k) headers["Idempotency-Key"] = k;
+  const r = await fetch(path, Object.assign({headers}, opt||{}));
+  if(r.status===401) throw {auth:true};
+  const text = await r.text();
+  let body = null; try{ body = JSON.parse(text); }catch(_){}
+  if(!r.ok){ const e = new Error((body&&body.error)||text||("HTTP "+r.status)); e.status=r.status; e.body=body; throw e; }
+  return body;
+}
+function saveTok(){TOK=$("tok").value.trim();localStorage.setItem("aimem_token",TOK);boot();}
+function logout(){localStorage.removeItem("aimem_token");TOK="";location.reload();}
+
+/* ---------- Markdown, rendered safely: escaped first, then a few shapes. ---------- */
+function md2html(md){
+  const lines = String(md??"").replace(/\r\n?/g,"\n").split("\n");
+  let out = "", para = [], list = [], code = null;
+  const flush = () => {
+    if(para.length){ out += "<p>"+inline(para.join("\n")).replace(/\n/g,"<br>")+"</p>"; para = []; }
+    if(list.length){ out += "<ul>"+list.map(l=>"<li>"+inline(l)+"</li>").join("")+"</ul>"; list = []; }
+  };
+  for(const raw of lines){
+    if(code !== null){ if(raw.startsWith("```")){ out += "<pre>"+esc(code.join("\n"))+"</pre>"; code = null; } else code.push(raw); continue; }
+    if(raw.startsWith("```")){ flush(); code = []; continue; }
+    const m = raw.match(/^(#{1,3})\s+(.*)$/);
+    if(m){ flush(); out += `<h${m[1].length}>${inline(m[2])}</h${m[1].length}>`; continue; }
+    if(/^\s*[-*]\s+/.test(raw)){ if(para.length) flush(); list.push(raw.replace(/^\s*[-*]\s+/,"")); continue; }
+    if(!raw.trim()){ flush(); continue; }
+    if(list.length) flush();
+    para.push(raw);
+  }
+  if(code !== null) out += "<pre>"+esc(code.join("\n"))+"</pre>";
+  flush();
+  return out;
+}
+// Inline: code spans, bold, and bare http(s) URLs as links that never carry
+// the token and never get fetched by this page.
+function inline(s){
+  return esc(s).replace(/`([^`]+)`/g,"<code>$1</code>")
+    .replace(/\*\*([^*]+)\*\*/g,"<b>$1</b>")
+    .replace(/(https?:\/\/[^\s<]+)/g,'<a href="$1" rel="noopener noreferrer" target="_blank">$1</a>');
+}
+const stChip = s => `<span class="chip st st-${esc(s)}">${esc(s)}</span>`;
+const short = id => id.slice(0,8);
+
+/* ---------- Routing: the URL is the state, so links are copyable. ---------- */
+function listURL(){ return "/tasks"+(PROJ?"?project="+encodeURIComponent(PROJ):""); }
+function taskURL(id, c){ return "/tasks?task="+encodeURIComponent(id)+(c?"&comment="+encodeURIComponent(c):""); }
+function go(url){ history.pushState(null,"",url); route(); return false; }
+window.addEventListener("popstate", route);
+function route(){
+  const q = new URLSearchParams(location.search);
+  if(q.get("task")){ showTask(q.get("task"), q.get("comment")||""); return; }
+  if(q.get("project")){ PROJ = q.get("project"); localStorage.setItem("aimem_task_project", PROJ); }
+  showList();
+}
+function copy(text, what){
+  navigator.clipboard.writeText(text).then(()=>toast(what+" copied"), ()=>{ prompt(what, text); });
+}
+
+async function boot(){
+  try{
+    ME = await api("/v1/access/identity");
+    $("gate").classList.add("hide");
+    $("who").textContent = "· "+ME.name+" ("+ME.role+")";
+    $("consoleLink").hidden = ME.role==="user";
+    // Only admin and legacy writer credentials may list projects; an
+    // ordinary token names its project (it is the one the token was
+    // issued for) — the field remembers it in this browser.
+    try{ const p = await api("/v1/projects"); PROJECTS = (p.projects||p||[]).map(x=>x.id||x).filter(id=>id!=="user"&&!String(id).startsWith("group-")).sort(); }
+    catch(_){ PROJECTS = null; }
+    if(PROJECTS){
+      const sel = $("projSel"); sel.hidden=false;
+      sel.innerHTML = '<option value="">— pick a project —</option>'+PROJECTS.map(id=>`<option value="${esc(id)}">${esc(id)}</option>`).join("");
+    }else{ $("projIn").hidden=false; $("projGo").hidden=false; $("projIn").value = PROJ; }
+    route();
+  }catch(e){
+    if(e.auth){$("gate").classList.remove("hide");
+      $("gateErr").textContent=TOK?"That token was rejected (invalid, expired, revoked, or the user is disabled).":"";}
+    else $("gateErr").textContent = String(e.message||e);
+  }
+}
+function setProject(id){
+  id = (id||"").trim(); if(!id) return;
+  go("/tasks?project="+encodeURIComponent(id));
+}
+
+/* ---------- List ---------- */
+function showList(){
+  $("v-task").hidden = true; $("v-list").hidden = false; CUR = null;
+  document.title = (PROJ? PROJ+" · " : "")+"aimem tasks";
+  if(PROJECTS) $("projSel").value = PROJECTS.includes(PROJ)?PROJ:""; else $("projIn").value = PROJ;
+  $("filters").hidden = !PROJ; $("newBtn").hidden = !PROJ;
+  $("stateChips").innerHTML = ['',...STATES].map(s=>`<span class="chip click${FILTER.state===s?' on':''}" onclick="FILTER.state='${s}';listTasks(true)">${s||'all'}</span>`).join("");
+  $("archChk").checked = FILTER.archived;
+  if(PROJ) listTasks(true); else { $("list").innerHTML = '<div class="dim">Pick or enter a project.</div>'; $("moreBtn").hidden = true; }
+}
+async function listTasks(reset){
+  if(reset){ CURSOR=""; $("list").innerHTML=""; FILTER.archived = $("archChk").checked; }
+  const q = new URLSearchParams();
+  if(FILTER.state) q.set("state", FILTER.state);
+  if(FILTER.archived) q.set("include_archived","true");
+  if(CURSOR) q.set("after", CURSOR);
+  q.set("limit","50");
+  try{
+    const page = await api("/v1/projects/"+encodeURIComponent(PROJ)+"/tasks?"+q);
+    for(const t of page.tasks){
+      $("list").insertAdjacentHTML("beforeend", `<div class="trow${t.archived?' archived':''}" onclick="go('${taskURL(t.id)}')">
+        <span class="title">${esc(t.title)}</span>${stChip(t.state)}
+        <span class="meta">r${t.revision} · ${ago(t.updated_at)}${t.assignee?' · '+esc(t.assignee.kind)+'/'+short(t.assignee.id):''}</span></div>`);
+    }
+    CURSOR = page.next_cursor||"";
+    $("moreBtn").hidden = !CURSOR;
+    $("listNote").textContent = $("list").children.length ? "" : "no tasks"+(FILTER.state?" in "+FILTER.state:"");
+    $("stateChips").innerHTML = ['',...STATES].map(s=>`<span class="chip click${FILTER.state===s?' on':''}" onclick="FILTER.state='${s}';listTasks(true)">${s||'all'}</span>`).join("");
+  }catch(e){ if(e.auth) return boot(); $("listNote").textContent = e.message; $("list").innerHTML = ""; }
+}
+
+/* ---------- Content form: create and edit share it (the update is a full replacement). ---------- */
+function contentForm(t, prefix){
+  const v = k => esc(t? t[k]: "");
+  const lines = k => esc(((t&&t[k])||[]).join("\n"));
+  const a = t && t.assignee;
+  return `
+    <label class="f">title</label><input id="${prefix}-title" value="${v('title')}" maxlength="256">
+    <div class="row"><div class="grow"><label class="f">state</label>
+      <select id="${prefix}-state">${STATES.map(s=>`<option${(t?t.state:'BACKLOG')===s?' selected':''}>${s}</option>`).join("")}</select></div>
+      <div class="grow"><label class="f">assignee (user/group + id)</label>
+      <div class="row" style="margin:0"><select id="${prefix}-akind" class="inline"><option value="">none</option><option${a&&a.kind==='user'?' selected':''}>user</option><option${a&&a.kind==='group'?' selected':''}>group</option></select>
+      <input id="${prefix}-aid" class="grow" placeholder="identity uuid" value="${a?esc(a.id):''}"></div></div>
+      <div><label class="f">archived</label><input type="checkbox" id="${prefix}-arch" style="width:auto"${t&&t.archived?' checked':''}> <span class="dim">DONE/CANCELLED only</span></div></div>
+    <label class="f">objective</label><textarea id="${prefix}-objective" rows="3">${v('objective')}</textarea>
+    <label class="f">acceptance criteria</label><textarea id="${prefix}-acceptance_criteria" rows="3">${v('acceptance_criteria')}</textarea>
+    <label class="f">non-goals</label><textarea id="${prefix}-non_goals" rows="2">${v('non_goals')}</textarea>
+    <label class="f">next action</label><textarea id="${prefix}-next_action" rows="2">${v('next_action')}</textarea>
+    <label class="f">blocker</label><textarea id="${prefix}-blocker" rows="2">${v('blocker')}</textarea>
+    <div class="row"><div class="grow"><label class="f">dependencies (task ids, one per line)</label><textarea id="${prefix}-dependencies" rows="2">${lines('dependencies')}</textarea></div>
+      <div class="grow"><label class="f">candidate refs (one per line)</label><textarea id="${prefix}-candidate_refs" rows="2">${lines('candidate_refs')}</textarea></div>
+      <div class="grow"><label class="f">evidence refs (one per line)</label><textarea id="${prefix}-evidence_refs" rows="2">${lines('evidence_refs')}</textarea></div></div>`;
+}
+function readForm(prefix){
+  const g = k => $(prefix+"-"+k).value;
+  const list = k => g(k).split("\n").map(s=>s.trim()).filter(Boolean);
+  const c = {title:g("title").trim(), state:g("state"), objective:g("objective"), acceptance_criteria:g("acceptance_criteria"),
+    non_goals:g("non_goals"), next_action:g("next_action"), blocker:g("blocker"),
+    dependencies:list("dependencies"), candidate_refs:list("candidate_refs"), evidence_refs:list("evidence_refs"),
+    archived:$(prefix+"-arch").checked};
+  const kind = $(prefix+"-akind").value, id = $(prefix+"-aid").value.trim();
+  if(kind && id) c.assignee = {kind, id};
+  return c;
+}
+function toggleNew(){
+  const f = $("newForm");
+  if(!f.hidden){ f.hidden = true; return; }
+  f.hidden = false;
+  f.innerHTML = `<h2 style="margin-top:0">new task in ${esc(PROJ)}</h2>`+contentForm(null,"new")+
+    `<div class="row" style="margin-top:10px"><button class="act on" onclick="createTask()">create</button>
+     <button class="act" onclick="toggleNew()">cancel</button><span class="dim">retry-safe: this form keeps one idempotency key until the create succeeds</span></div>`;
+  key("new"); $("new-title").focus();
+}
+async function createTask(){
+  try{
+    const t = await api("/v1/projects/"+encodeURIComponent(PROJ)+"/tasks", {method:"POST", body:JSON.stringify(readForm("new"))}, key("new"));
+    spent("new"); $("newForm").hidden = true; toast("created "+short(t.id));
+    go(taskURL(t.id));
+  }catch(e){ if(e.auth) return boot(); toast(e.message); }
+}
+
+/* ---------- Task detail ---------- */
+async function showTask(id, commentID){
+  $("v-list").hidden = true; $("v-task").hidden = false;
+  $("task").innerHTML = '<div class="dim">loading…</div>'; $("hist").innerHTML=""; $("comments").innerHTML="";
+  try{
+    CUR = await api("/v1/tasks/"+encodeURIComponent(id));
+  }catch(e){ if(e.auth) return boot(); $("task").innerHTML = `<div class="card bad">${esc(e.message)}</div>`; return; }
+  PROJ = CUR.project; localStorage.setItem("aimem_task_project", PROJ);
+  document.title = CUR.title+" · aimem tasks";
+  $("taskCrumb").textContent = " · "+CUR.project+" · "+short(CUR.id);
+  await checkWrite();
+  renderTask();
+  HIST = {after:0}; CMT = {after:0};
+  await Promise.all([loadHistory(true), loadComments(true)]);
+  if(commentID){ const el = document.getElementById("c-"+commentID); if(el){ el.classList.add("target"); el.scrollIntoView({block:"center"}); } }
+}
+// Write permission is the service's answer for THIS credential and THIS
+// project, asked now: an ordinary token writes only where it was issued and
+// while its user holds a grant; a legacy writer never writes tasks.
+async function checkWrite(){
+  CAN_WRITE = false;
+  if(!ME) return;
+  if(ME.role==="admin"){ CAN_WRITE = true; return; }
+  if(ME.role!=="user") return;
+  try{ const r = await api("/v1/access/identity?project="+encodeURIComponent(CUR.project)); CAN_WRITE = !!r.task_write; }catch(_){}
+}
+function fieldHTML(k, label, md){
+  const v = CUR[k]; if(!v) return "";
+  return `<div class="field"><div class="k">${label}</div><div class="prose">${md?md2html(v):esc(v)}</div></div>`;
+}
+function refsHTML(k, label){
+  const v = CUR[k]||[]; if(!v.length) return "";
+  return `<div class="field"><div class="k">${label}</div><div class="refs">${v.map(r=>`<div>${inline(r)}</div>`).join("")}</div></div>`;
+}
+function renderTask(){
+  const t = CUR;
+  const ro = CAN_WRITE ? "" : `<span class="chip warn" title="this credential cannot change tasks in this project">read-only</span>`;
+  $("task").innerHTML = `<div class="card">
+    <div class="row" style="margin-top:0"><span style="font:700 18px/1.3 var(--text);flex:1;min-width:200px">${esc(t.title)}</span>
+      ${stChip(t.state)}${t.archived?'<span class="chip">archived</span>':''}${ro}</div>
+    <div class="row dim" style="font-size:12px">r${t.revision} · updated ${ago(t.updated_at)} · created ${ago(t.created_at)}
+      ${t.assignee?` · assignee <span class="chip">${esc(t.assignee.kind)}/${esc(t.assignee.id)}</span>`:''}</div>
+    <div class="row acts">
+      <button class="act" onclick="copy(location.origin+taskURL(CUR.id),'task link')">copy link</button>
+      <button class="act" onclick="copy(location.origin+CUR.links.self,'JSON link')">copy JSON link</button>
+      <a class="act" style="text-decoration:none;padding:2px 8px;font-size:12px;border:1px solid var(--edge)" href="${esc(t.links.self)}" target="_blank" rel="noopener">open JSON</a>
+      ${CAN_WRITE?`<span class="dim" style="margin-left:8px">state</span><select id="quickState" class="inline" onchange="quickState(this.value)">${STATES.map(s=>`<option${t.state===s?' selected':''}>${s}</option>`).join("")}</select>
+      <button class="act" onclick="editTask()">edit</button>`:''}
+    </div>
+    ${fieldHTML("objective","objective",true)}${fieldHTML("acceptance_criteria","acceptance criteria",true)}
+    ${fieldHTML("non_goals","non-goals",true)}${fieldHTML("next_action","next action",true)}
+    ${t.blocker?`<div class="field"><div class="k bad">blocker</div><div class="prose">${md2html(t.blocker)}</div></div>`:''}
+    ${(t.dependencies||[]).length?`<div class="field"><div class="k">dependencies</div>${t.dependencies.map(d=>`<a href="${taskURL(d)}" onclick="return go('${taskURL(d)}')" class="chip click">${esc(short(d))}…</a>`).join("")}</div>`:''}
+    ${refsHTML("candidate_refs","candidate refs")}${refsHTML("evidence_refs","evidence refs")}
+    <div id="editBox"></div></div>`;
+  $("cmtForm").hidden = !CAN_WRITE || t.archived;
+}
+function currentContent(){
+  const t = CUR;
+  const c = {title:t.title, state:t.state, objective:t.objective||"", acceptance_criteria:t.acceptance_criteria||"", non_goals:t.non_goals||"",
+    next_action:t.next_action||"", blocker:t.blocker||"", dependencies:t.dependencies||[], candidate_refs:t.candidate_refs||[],
+    evidence_refs:t.evidence_refs||[], archived:!!t.archived};
+  if(t.assignee) c.assignee = t.assignee;
+  return c;
+}
+// A state change is an ordinary CAS update of the whole content: leaving a
+// terminal state also un-archives, since only DONE/CANCELLED may be archived.
+async function quickState(state){
+  const c = currentContent(); c.state = state;
+  if(state!=="DONE" && state!=="CANCELLED") c.archived = false;
+  await saveTask(c, "quick:"+CUR.id+":"+CUR.revision);
+}
+function editTask(){
+  $("editBox").innerHTML = `<h2>edit (replaces every field; revision ${CUR.revision})</h2>`+contentForm(CUR,"ed")+
+    `<div class="row" style="margin-top:10px"><button class="act on" onclick="saveTask(readForm('ed'),'edit:'+CUR.id+':'+CUR.revision)">save</button>
+     <button class="act" onclick="$('editBox').innerHTML=''">cancel</button></div>`;
+  key("edit:"+CUR.id+":"+CUR.revision);
+}
+async function saveTask(content, kname){
+  const body = Object.assign({}, content, {expected_revision: CUR.revision});
+  try{
+    CUR = await api("/v1/tasks/"+encodeURIComponent(CUR.id), {method:"PUT", body:JSON.stringify(body)}, key(kname));
+    spent(kname); toast("saved r"+CUR.revision); renderTask(); HIST = {after:0}; loadHistory(true);
+  }catch(e){
+    if(e.auth) return boot();
+    if(e.status===409 && e.body && e.body.current){ showConflict(e.body.current, content, kname); return; }
+    toast(e.message);
+  }
+}
+// Never overwrite silently: the current task is shown beside the attempt,
+// and the only ways out are to reload it or to reapply on top of it.
+function showConflict(current, attempt, kname){
+  spent(kname);
+  $("editBox").innerHTML = `<div class="card conflict"><b class="bad">revision conflict</b>: the task is at r${current.revision}
+    (${stChip(current.state)} <span class="prose">${esc(current.title)}</span>), you edited r${CUR.revision}.
+    <div class="row"><button class="act" onclick="showTask(CUR.id)">reload current (discard my change)</button>
+    <button class="act" onclick="reapply(${esc(JSON.stringify(current)).replace(/'/g,'&#39;')}, ${esc(JSON.stringify(attempt)).replace(/'/g,'&#39;')})">reapply my change on r${current.revision}</button></div></div>`;
+}
+function reapply(current, attempt){
+  CUR = Object.assign({}, CUR, current);
+  $("editBox").innerHTML = `<h2>reapply on revision ${CUR.revision}</h2>`+contentForm(Object.assign({}, attempt),"ed")+
+    `<div class="row" style="margin-top:10px"><button class="act on" onclick="saveTask(readForm('ed'),'edit:'+CUR.id+':'+CUR.revision)">save</button>
+     <button class="act" onclick="showTask(CUR.id)">cancel</button></div>`;
+  key("edit:"+CUR.id+":"+CUR.revision);
+}
+
+/* ---------- History and discussion ---------- */
+async function loadHistory(reset){
+  if(reset){ HIST = {after:0}; $("hist").innerHTML=""; }
+  try{
+    const p = await api("/v1/tasks/"+encodeURIComponent(CUR.id)+"/history?limit=20&after="+HIST.after);
+    for(const ch of p.changes){
+      const a = ch.actor, t = ch.task;
+      $("hist").insertAdjacentHTML("beforeend", `<div class="hrow"><span class="n">r${t.revision}</span>${stChip(t.state)}
+        <span>${esc(t.title)}</span><span class="dim">${esc(a.kind)} <b>${esc(a.name)}</b> · ${ago(t.updated_at)}${t.archived?' · archived':''}</span></div>`);
+    }
+    HIST.after = p.next_cursor||0; $("histMore").hidden = !p.next_cursor;
+  }catch(e){ if(e.auth) return boot(); $("hist").innerHTML = `<span class="bad">${esc(e.message)}</span>`; }
+}
+async function loadComments(reset){
+  if(reset){ CMT = {after:0}; $("comments").innerHTML=""; }
+  try{
+    const p = await api("/v1/tasks/"+encodeURIComponent(CUR.id)+"/comments?limit=20&after="+CMT.after);
+    for(const c of p.comments){
+      $("comments").insertAdjacentHTML("beforeend", `<div class="comment" id="c-${esc(c.id)}">
+        <div class="who"><span>${esc(c.actor.kind)}</span><b>${esc(c.actor.name)}</b><span>${ago(c.created_at)}</span><span>#${c.sequence}</span>
+          <button class="act" style="padding:0 6px;font-size:11px" onclick="copy(location.origin+taskURL(CUR.id,'${esc(c.id)}'),'comment link')">copy link</button></div>
+        <div class="prose">${md2html(c.body)}</div></div>`);
+    }
+    CMT.after = p.next_cursor||0; $("cmtMore").hidden = !p.next_cursor;
+    if(!$("comments").children.length) $("comments").innerHTML = '<div class="dim">no discussion yet</div>';
+  }catch(e){ if(e.auth) return boot(); $("comments").innerHTML = `<span class="bad">${esc(e.message)}</span>`; }
+}
+async function addComment(){
+  const body = $("cmtBody").value; if(!body.trim()) return;
+  const kname = "cmt:"+CUR.id; $("cmtBtn").disabled = true;
+  try{
+    const c = await api("/v1/tasks/"+encodeURIComponent(CUR.id)+"/comments", {method:"POST", body:JSON.stringify({body})}, key(kname));
+    spent(kname); $("cmtBody").value=""; toast("comment #"+c.sequence+" added");
+    await loadComments(true);
+  }catch(e){ if(e.auth) return boot(); toast(e.message); }
+  finally{ $("cmtBtn").disabled = false; }
+}
+if(!TOK) $("gate").classList.remove("hide"); else boot();
+</script>
+</body>
+</html>

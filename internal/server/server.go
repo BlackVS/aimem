@@ -179,6 +179,7 @@ func (s *Server) Routes() []Route {
 		{"POST", "/v1/projects/{p}/chapter-proposal/apply", s.applyChapters, true},
 		{"GET", "/v1/openapi.json", s.openAPI, false},
 		{"GET", "/admin", s.adminPage, false},
+		{"GET", "/tasks", s.tasksPage, false},
 		{"GET", "/v1/status", s.status, false},
 		{"GET", "/{$}", s.statusPage, false},
 	}
@@ -431,15 +432,18 @@ func (s *Server) ListenAndServe(root string) (*http.Server, net.Listener, error)
 // exercise the REAL gate rather than a re-implementation that can drift.
 func (s *Server) authWrapper(token string, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		// Three unauthenticated GETs, and only three. /admin is static
-		// chrome with zero data — it collects the hub token in the browser
-		// and calls the API with it. / and /v1/status are public by
+		// Four unauthenticated GETs, and only four. /admin and /tasks are
+		// static chrome with zero data — they collect a token in the
+		// browser and call the API with it. / and /v1/status are public by
 		// construction: liveness, build, uptime, nothing about what the
 		// hub holds. Everything else stays token-gated.
 		if r.Method == http.MethodGet {
 			switch r.URL.Path {
 			case "/admin":
 				s.adminPage(w, r)
+				return
+			case "/tasks":
+				s.tasksPage(w, r)
 				return
 			case "/":
 				s.statusPage(w, r)

@@ -1,7 +1,8 @@
 # Aimem Kanban Proposal
 
-Status: **task storage (stage 1) merged; HTTP/MCP task service (stage 2)
-implemented; UI (stage 3) not implemented**, revised 2026-09-14; product contract revised 2026-09-13 against
+Status: **task storage (stage 1) and HTTP/MCP task service (stage 2) merged;
+task page (stage 3, list/detail/discussion) implemented; board pending**,
+revised 2026-09-14; product contract revised 2026-09-13 against
 `dcc466f305c6a2d9ce5927a3e0c7770e1c3893fe`. The access foundation is merged in
 [PR #35](https://github.com/BlackVS/aimem/pull/35); task comments are part of the
 initial task delivery below.
@@ -170,7 +171,7 @@ Proposed resources, **not existing routes**:
 | `GET /v1/tasks/{id}/comments` | Paginated discussion |
 | `POST /v1/tasks/{id}/comments` | Append a comment with an idempotency key |
 | `GET /v1/tasks/{id}/comments/{comment_id}` | Permanent individual comment JSON |
-| `/admin?task={id}` | Small human-readable task-only view |
+| `/tasks?task={id}` | Small human-readable task-only view (`/admin?task={id}` forwards here) |
 
 A document can contain a direct link such as:
 

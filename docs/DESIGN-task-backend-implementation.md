@@ -1,8 +1,8 @@
 # Task Backend Implementation Plan
 
-Status: stages 1 and 2 implemented (storage merged in PR #38; the HTTP/MCP
-service on `feat/task-service`), 2026-09-14. Stage 3 (UI) is open. Original
-baseline: `4e7021533a1aefb2635e28a071953f2061f1df5b` on `master`.
+Status: stages 1 and 2 merged (PR #38, PR #39); stage 3's first increment
+(the task page) on `feat/task-ui`, 2026-09-14; the board is the next increment.
+Original baseline: `4e7021533a1aefb2635e28a071953f2061f1df5b` on `master`.
 Read this alongside [the Kanban proposal](AIMEM-KANBAN-PROPOSAL.md) and
 [access control](DESIGN-access-control.md). Those documents contain the approved
 product contract; this document gives the next agent an implementation sequence
@@ -21,6 +21,32 @@ decoding, status mapping, in-process MCP dispatch), `internal/mcp/tasks.go`
 (eight task tools, the hub principal, the local hub caller), `Registry.LocateTask`,
 `access.Store.CanWrite`, `Identity.Project`, `HubConfig.TaskToken` and the
 `aimem hub task-token` command. No UI yet (stage 3).
+
+Stage 3, first increment (task list/detail/discussion) is implemented on
+`feat/task-ui` as `internal/server/tasks.html`, served at `GET /tasks` (public
+chrome like `/admin`, holding no data). Decisions:
+
+- **A separate page, not a console tab.** The console boots on admin/writer
+  endpoints an ordinary token cannot reach; the task page calls only the
+  task routes and the identity check, so every credential class the design
+  names works with exactly the authority the service grants it. The console
+  links to it, and `/admin?task=<id>` forwards to `/tasks?task=<id>`.
+- **The URL is the state.** `/tasks?project=<id>`, `/tasks?task=<id>`,
+  `/tasks?task=<id>&comment=<id>` are the copy-link targets; the JSON link
+  is the served `links.self`. Links never carry the token.
+- **Every write is the agent's write.** Create and comment carry one
+  idempotency key per open form until success; edit and the state selector
+  send the full content with `expected_revision`; a 409 shows the current
+  task beside the attempt with "reload" and "reapply on the current
+  revision" — never a silent overwrite.
+- **Write permission is asked, not assumed:** `/v1/access/identity?project=`
+  per opened task decides whether the edit, state and comment controls show;
+  a refusal on the server still wins.
+- **Markdown renders safely:** escaped first, then paragraphs, headings,
+  lists, code, bold and bare http(s) links (`rel="noopener"`, never fetched).
+- **Project choice:** admin/writer credentials pick from `/v1/projects`; an
+  ordinary token types its project id (remembered in the browser), since
+  the listing route is not on its surface.
 
 Decisions taken while implementing stage 2:
 
@@ -487,6 +513,7 @@ open for the transport that surfaces warnings:
 7. Add meaningful migration, transaction-failure, concurrency and lifecycle tests
    before considering any draft code an implementation milestone.
 
-Stages 1 and 2 are done (see Resume State). Do not change the public version
-as part of this work. Resume with stage 3 (task list/detail/discussion UI, then
-the board) on the same service, and preserve the approved simple scope.
+Stages 1 and 2 are merged and the task page is on `feat/task-ui` (see Resume
+State). Do not change the public version as part of this work. Next: the
+Kanban board on the same service (a card drag is the page's existing CAS
+state change), then the stage-2 follow-ups. Preserve the approved simple scope.

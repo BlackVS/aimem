@@ -15,6 +15,21 @@ currently 11); a binary refuses a database newer than it understands.
 
 ### Added
 
+- **Task page, stage 3 of the Kanban work (first increment).** `GET /tasks`
+  serves a task list / detail / discussion page: static chrome like the
+  console, holding no data, asking for a token in the browser — an
+  ordinary project token works and sees exactly what the task service
+  allows it (admin and writer credentials pick a project from a list;
+  an ordinary token types its project id). List with state filter and
+  archived toggle, paged; detail with every field rendered as safe
+  Markdown, history and paged discussion; create, edit (full replacement
+  under expected revision) and a state selector that is the same CAS
+  update an agent makes — a revision conflict shows the current task
+  beside the attempt with "reload" or "reapply", never a silent
+  overwrite; retry-safe create and comment (one idempotency key per open
+  form); copy-link actions for the task, its JSON and each comment
+  (`/tasks?task=<id>[&comment=<id>]`, `/admin?task=<id>` forwards). The
+  console's navigation links to it. The board follows on the same API.
 - **Task service over HTTP and MCP, stage 2 of the Kanban work.** The
   storage from stage 1 is now reachable: `GET/POST /v1/projects/{p}/tasks`,
   `GET/PUT /v1/tasks/{id}`, `GET /v1/tasks/{id}/history`, `GET/POST

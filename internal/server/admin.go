@@ -20,6 +20,9 @@ import (
 //go:embed admin.html
 var adminHTML []byte
 
+//go:embed tasks.html
+var tasksHTML []byte
+
 func (s *Server) adminPage(w http.ResponseWriter, _ *http.Request) {
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.Header().Set("Content-Security-Policy",
@@ -28,6 +31,19 @@ func (s *Server) adminPage(w http.ResponseWriter, _ *http.Request) {
 	// newer API and confuses its operator.
 	w.Header().Set("Cache-Control", "no-cache")
 	w.Write(adminHTML)
+}
+
+// tasksPage is the task list/detail/discussion page: static chrome like
+// the console, holding no data, served to anyone; it asks for a token in
+// the browser and calls only the task routes and the identity check, so
+// an ordinary project token works here exactly as far as the service
+// lets it.
+func (s *Server) tasksPage(w http.ResponseWriter, _ *http.Request) {
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	w.Header().Set("Content-Security-Policy",
+		"default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; connect-src 'self'")
+	w.Header().Set("Cache-Control", "no-cache")
+	w.Write(tasksHTML)
 }
 
 // metaKeys the GUI may read/write; readOnlyMetaKeys are readable but only

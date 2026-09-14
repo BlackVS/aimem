@@ -890,6 +890,18 @@
         }
       }
     },
+    "/tasks": {
+      "get": {
+        "summary": "Task page shell (HTML, holds no data; asks for a token in the browser; works with ordinary project tokens)",
+        "x-role": "public",
+        "security": [],
+        "responses": {
+          "200": {
+            "description": "task page"
+          }
+        }
+      }
+    },
     "/v1/status": {
       "get": {
         "summary": "Public status JSON",
