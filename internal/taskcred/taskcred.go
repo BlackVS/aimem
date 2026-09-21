@@ -55,8 +55,14 @@ func config(dir string) (map[string]json.RawMessage, bool, error) {
 	if err != nil {
 		return nil, false, err
 	}
+	if fi.Mode()&os.ModeSymlink != 0 {
+		fi, err = os.Stat(path)
+		if err != nil {
+			return nil, false, err
+		}
+	}
 	if !fi.Mode().IsRegular() {
-		return nil, false, errors.New("task config must be a regular file, not a symlink")
+		return nil, false, errors.New("task config must resolve to a regular file")
 	}
 	raw, err := os.ReadFile(path)
 	if err != nil {

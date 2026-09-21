@@ -75,7 +75,9 @@ requirement and never substitutes a checkpoint token for a failed override.
 
 Configure each clone and worktree separately. A copied requirement marker
 has no accompanying secret and deliberately blocks fallback until you run
-`set` there. Moving the checkout or changing its project/hub binding also
+`set` there. Committing the marker makes local credential setup a requirement
+for every teammate who checks it out; each must run `set` or explicitly
+`clear` the requirement. Moving the checkout or changing its project/hub binding also
 requires setting the credential again. Start agents and run these commands
 from the configured project root.
 

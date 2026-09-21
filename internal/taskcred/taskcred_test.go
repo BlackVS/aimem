@@ -37,6 +37,50 @@ func fixture(t *testing.T) (string, string, *httptest.Server, *string) {
 
 func token(ch string) string { return "aimem_user_" + strings.Repeat(ch, 64) }
 
+func TestSymlinkedConfigSelection(t *testing.T) {
+	root, repo, _, _ := fixture(t)
+	configPath := filepath.Join(repo, ".aimem.json")
+	target := filepath.Join(t.TempDir(), "config.json")
+	if err := os.Rename(configPath, target); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(target, configPath); err != nil {
+		if runtime.GOOS == "windows" {
+			t.Skipf("symlink creation unavailable: %v", err)
+		}
+		t.Fatal(err)
+	}
+	s, err := Resolve(repo, root)
+	if err != nil || s.Source != "user-hub" || s.Token != "global" {
+		t.Fatalf("symlinked global config: %+v %v", s, err)
+	}
+	if local, err := LocalRequired(repo); err != nil || local {
+		t.Fatalf("global bootstrap: local=%v err=%v", local, err)
+	}
+	raw := []byte(`{"project":"alpha","hub":"hub","task_credential":"local"}`)
+	if err := os.WriteFile(target, raw, 0600); err != nil {
+		t.Fatal(err)
+	}
+	if local, err := LocalRequired(repo); err != nil || !local {
+		t.Fatalf("local bootstrap: local=%v err=%v", local, err)
+	}
+	if _, err := Resolve(repo, root); err == nil {
+		t.Fatal("symlinked local requirement fell back without a credential")
+	}
+	if err := Clear(repo, root); err == nil {
+		t.Fatal("clear replaced a symlinked config")
+	}
+	if got, err := os.ReadFile(target); err != nil || string(got) != string(raw) {
+		t.Fatal("clear changed the symlink target")
+	}
+	if err := os.Remove(target); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Resolve(repo, root); err == nil {
+		t.Fatal("broken config symlink fell back")
+	}
+}
+
 func TestLocalSelectionRotationAndClear(t *testing.T) {
 	root, repo, _, reply := fixture(t)
 	s, err := Resolve(repo, root)
