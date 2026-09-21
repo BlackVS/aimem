@@ -1,0 +1,117 @@
+# Roadmap
+
+Released baseline: v0.5.0 (PR #54), released 2026-09-14. Token-model
+implementation is merged through master `fdf1746` (PR #56-58); v0.6.0
+release and deployment verification are the current delivery gate.
+This file records delivery order and scope. The aimem task board owns live
+task state, dependencies and completion evidence; design documents own the
+contracts. Do not maintain a second checklist of task statuses here.
+
+## Delivered
+
+- Task storage, authorized HTTP/MCP service, task page and board: v0.4.0.
+- Per-project task enablement, pinned process references and session
+  bootstrap, epics and identity directory, typed references: v0.5.0,
+  PR #50-54. Schema 13 rewrites stored references; the release notes
+  describe backup and compatibility requirements.
+
+## Next delivery sequence
+
+Further project onboarding is on hold until the token model below is
+released and verified. This is the user's priority as of 2026-09-21.
+
+1. Merged in PR #56: explicit user-scoped, project-scoped and read-only tokens.
+   User-scoped writes follow current project grants; existing credentials
+   retain their restrictions. The access contract records the amendment.
+2. Merged in PR #57: repository-local project-token overrides above OS-user/per-hub
+   credentials. Keep secrets out of tracked configuration; a failed explicit
+   override must never fall back to a broader credential. No hub aliases
+   should be needed for concurrent projects.
+3. Current gate: verify the two-project workflow, compatibility and revocation,
+   update onboarding docs, then release v0.6.0 and verify the hub/client rollout before
+   lifting the onboarding hold.
+4. Select and verify the process bootstrap for this project. Reconcile
+   handbook, DoR/DoD, templates and review policy in the process repository;
+   pin the reviewed commit and verify complete context on participating
+   agent machines, including a first session with no recalled facts.
+5. Stage 4 increment 1: access snapshot, users and groups. Include the
+   tracked console escaper/handler correction and focused executable UI
+   regressions. Grants and tokens remain read-only in this increment.
+6. Stage 4 increment 2: grant management, stale-instance cleanup and
+   ordinary-token issue/revoke, including one-time secret handling and
+   operator documentation. Depend on increment 1.
+7. Pull maintenance work as observed failures or use justify it. The
+   remaining task-page harness is incremental work, not a prerequisite to
+   implement a new general browser-testing framework before stage 4.
+
+Stage 4 has no assigned release version yet. Keep its existing authority
+and route boundaries; no new identity system or admin-token web management.
+The acceptance criteria live in the implementation plan and board tasks.
+
+## Backlog triage
+
+The board groups work under agent enablement/task integrity, task page/board,
+and console access management epics. Epics group work; they do not rank it.
+Only promote a task to READY once its objective, acceptance criteria,
+non-goals and next action are concrete. Dependencies express agreed delivery
+order; they are advisory and must be checked by the agent.
+
+Agent pickup policy: honor an explicit user selection first, while checking
+readiness and dependencies; otherwise select an eligible READY task whose
+dependencies are DONE, following the delivery sequence above. Break ties
+by oldest task ID. The service lists by ID (approximately creation order),
+not priority, and has no automatic allocator. Read the full task, then
+replace its state with IN_PROGRESS under the revision just read, preserving
+all content and setting the acting assignee when a configured identity is
+available. A conflict requires re-reading and choosing again; never continue
+on a stale claim. An IN_PROGRESS task needs an explicit handoff before a
+different agent resumes it. This is a process convention, not a server-side
+lease or ownership restriction. If nothing is eligible, triage backlog with
+the user instead of treating its display order as authorization to start.
+
+Planned task metadata (BACKLOG `01a0c44a-5ce8-7000-8957-61ad2be4b836`):
+editable priority P0 urgent / P1 high / P2 normal / P3 low, and independent
+complexity XS / S / M / L / XL. The creating agent assesses both with a
+short rationale; authorized users and agents can revise them with history
+and revision checks. Legacy tasks remain unassessed until triaged. Once
+implemented, priority ranks eligible READY work within agreed release gates,
+before roadmap order and task ID. Complexity guides decomposition, not
+priority, and is not a time promise. This feature follows the active token
+work; it does not change the current pickup behavior described above.
+
+Dependent pickup-policy task `01a0c44b-4143-7000-8cdf-2e89214fd2c5`
+adds editable per-project modes: priority-first (default), complexity-first
+(smallest first), and combined (priority, then smallest complexity). A run
+may have an explicit policy override or complexity limit. All modes check
+readiness, dependencies and release gates before ranking; P0 urgent work
+is surfaced first, and unknown estimates need triage. Policy and selection
+reasons must be visible to agents and operators. This is planned behavior.
+
+Decomposition guidance belongs in agent creation/pickup docs, templates and
+applicable shipped skills/bootstrap context: prefer small, coherent tasks
+that an agent can finish and verify in a focused session. L tasks trigger a
+split assessment; XL or uncertain tasks need a concrete split proposal or
+a reason to stay whole before READY. Each increment has its own outcome,
+acceptance criteria, estimate and dependencies, with completion criteria
+for the original outcome. Use an investigation task when uncertainty is the
+main problem; avoid arbitrary file-sized fragments and duplicate children.
+
+Existing follow-ups remain BACKLOG: reference size/migration behavior,
+strict request decoding, task-page tests and accessibility, registry lock
+hold and unassigned filtering. Additional triage tasks cover stable admin
+receipt identities, credential-file persistence, actor-name validation,
+project lifecycle, authorization consistency and OpenAPI role metadata.
+These are investigations or bounded follow-ups, not new release blockers.
+
+Retention, listing projections, vector scans/indexing and synthesis limits
+require fresh measurements before scheduling; the scale proposal's dated
+counts are not current capacity evidence. The capacity task records the
+threshold decision. Rendering format characters and warning-tier secret
+feedback remain conditional design notes until a consumer and acceptance
+criteria are identified. Replace-all update semantics are already the
+documented contract, not a pending partial-update feature.
+
+Review gates follow AGENTS.md: medium before push; high with verification
+and the deployed external reviewer before merge. Max/ultra require an
+explicit request. Dependency maintenance follows its own release-age and
+review gates and does not imply a feature release or deployment.

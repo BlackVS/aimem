@@ -1,5 +1,8 @@
 # Quickstart
 
+For project task boards and agent task access, see the
+[Kanban quickstart](KANBAN-QUICKSTART.md).
+
 Fifteen minutes from nothing to a hub your agents share. Three stages,
 each useful on its own — stop after any of them.
 

@@ -56,28 +56,27 @@ STRICT: when a PR is ready for review-merge, perform a FULL fresh-eyes
 review of it with `oh-code-review` — complete format (taste rating,
 findings, risk assessment, verdict), run against the PR's final diff
 and its actual CI results, not a restatement of the pre-push gate's
-compressed review. Levels by diff:
-
-- **max** (per-file sub-agent fan-out + cross-file pass +
-  verification) is the STANDARD for code PRs. Single-reader passes
-  have twice approved real bugs that fan-out+verification then caught
-  (PR #9 boot.ps1 verify-guard; PR #17 unset cmd.WaitDelay).
-- **ultra** (max + whole-diff security, test-adequacy, and data-flow
-  specialist passes) when the diff touches the sync protocol, the
-  security surface (auth/tokens/redaction), the storage schema, or
-  the root-run installers.
-- **high** (single pass + verification, no fan-out) suffices for
-  docs-only PRs.
+compressed review. Use **high** (single pass plus verification, no
+fan-out) for code and docs-only PRs, including sensitive surfaces.
+Use **max** or **ultra** only when the person explicitly asks; no gate
+selects either automatically. Where the external reviewer is deployed,
+it carries the pre-merge weight and the local pass is the second reader
+from another model family.
 
 POST the review as a comment on the PR, so the record lives with the
-code and survives the session. Findings are fixed (or explicitly
-waived by the user) before merge; the merge click stays the user's.
+code and survives the session. Only BLOCKER findings return the PR to
+implementation; track follow-ups separately. Blockers are fixed or
+explicitly accepted by the user before merge; the merge click stays the user's.
 
 A review binds to the head it reviewed: a rebase, an "Update branch",
 or any new commit AFTER the posted review makes it stale — re-review
 before merge (a delta review of what changed since the reviewed head
 is enough when the base moved but the diff did not) and post the
-verdict again, naming the new head.
+verdict again, naming the new head. Re-review fixes at **high** on the
+delta and re-trigger the external reviewer. Never push while
+`hands-reviewing` is present; wait for the result before changing the head.
+Request external reviews with plain `review-this`; model selection belongs
+to the operator. Watch the result and read the comment for the reviewed head.
 
 ## One PR at a time
 
@@ -129,6 +128,10 @@ pinned to real routes by a parity test — update both together.
 <!-- Replace everything below with what an agent needs to know about THIS
      repository: what it is, the constraints that are not visible in the
      code, and where the authoritative design documents live. -->
+
+Delivery order and agent task-pickup policy live in `docs/ROADMAP.md`;
+the task board owns live state and evidence. Read the roadmap before
+selecting work; list order is not priority and dependencies are advisory.
 
 aimem itself: session resilience and shared memory for AI coding
 agents. Public repo; PolyForm Noncommercial from v0.2.0 (≤ v0.1.90

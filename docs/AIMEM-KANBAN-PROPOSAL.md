@@ -14,7 +14,8 @@ directory and epic routes. That document also adds epics, typed
 references (replacing the free-string evidence fields in a pre-1.0
 break) and the process-document model; the rest of this contract stands. The access foundation is merged in
 [PR #35](https://github.com/BlackVS/aimem/pull/35); task comments are part of the
-initial task delivery below.
+initial task delivery below. The four amendment increments shipped in v0.5.0
+(PR #50-54); see [Roadmap](ROADMAP.md) for the current delivery sequence.
 
 Continuation guide: [task backend implementation plan](DESIGN-task-backend-implementation.md)
 defines the staged storage/service/HTTP/MCP work and its verification requirements.

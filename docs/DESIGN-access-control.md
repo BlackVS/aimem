@@ -6,7 +6,9 @@ PR #39-41, released in v0.4.0; identity directory: PR #52, released in
 v0.5.0. Companion to
 [Kanban](AIMEM-KANBAN-PROPOSAL.md). Keep the first version small.
 
-The token-model amendment below precedes stage 4; its release version is not assigned.
+The token-model amendments below are merged in PR #56 and #57 and targeted
+for v0.6.0; deployment verification remains a separate rollout gate before
+further project onboarding. Stage 4 is still pending.
 Reuse aimem's built-in HTTPS
 listener and bearer-token validation. No authentication proxy, OAuth server,
 or separate login service is required. A reverse proxy is optional; if used,
@@ -46,9 +48,9 @@ write authority until granted. Project tokens still require a current grant
 at issuance. Renaming preserves project-instance grants; deletion/recreation
 does not inherit them. Existing clients can use user tokens through their
 per-hub task credential setting. Repository-local project-token overrides
-are a separate client increment; no secret belongs in tracked `.aimem.json`.
+are implemented in PR #57; no secret belongs in tracked `.aimem.json`.
 
-### Repository credential amendment (client increment)
+### Repository credential amendment (merged in PR #57)
 
 Run `aimem task-token set` from the configured project root, supplying the
 project-scoped token on stdin. The command verifies identity and current

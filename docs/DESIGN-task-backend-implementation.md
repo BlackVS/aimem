@@ -3,9 +3,13 @@
 Status: stages 1, 2 and 3 merged (PR #38, PR #39, PR #40 task page, PR #41
 board) and released as v0.4.0 on 2026-09-14; agent enablement done the
 same day (PR #43, #44, #45; the primary hub and one workstation upgraded;
-the backlog runs as tasks there). Next: the four increments of [the
-documents an AI-driven Kanban needs](DESIGN-kanban-docs.md), then stage 4
-(the access section in the console), then the remaining follow-ups.
+the backlog runs as tasks there). All four increments of [the documents
+an AI-driven Kanban needs](DESIGN-kanban-docs.md) shipped in v0.5.0
+(PR #50-54, master `1a35599`). Next: deliver and verify the revised token
+model before further project onboarding, then select and verify the process
+bootstrap, stage 4 (the access section in the console), and the
+remaining follow-ups. See [the current roadmap](ROADMAP.md) for sequencing;
+the task board owns live task state and completion evidence.
 Original baseline: `4e7021533a1aefb2635e28a071953f2061f1df5b` on `master`.
 Read this alongside [the Kanban proposal](AIMEM-KANBAN-PROPOSAL.md) and
 [access control](DESIGN-access-control.md). Those documents contain the approved
@@ -62,9 +66,9 @@ drag only when the credential may write in the project. Decisions:
   a refusal on the server still wins.
 - **Markdown renders safely:** escaped first, then paragraphs, headings,
   lists, code, bold and bare http(s) links (`rel="noopener"`, never fetched).
-- **Project choice:** admin/writer credentials pick from `/v1/projects`; an
-  ordinary token types its project id (remembered in the browser), since
-  the listing route is not on its surface.
+- **Project choice (updated by PR #48):** every credential gets a picker
+  from `/v1/projects`; ordinary tokens see ordinary projects only. A
+  free-text field remains the fallback if listing fails.
 
 Decisions taken while implementing stage 2:
 
@@ -72,12 +76,13 @@ Decisions taken while implementing stage 2:
   identity and act as the admin actor named `local`, consistent with every
   other socket route (the socket already drops and renames projects). The
   stdio MCP facade never uses the socket for tasks (below).
-- **Ordinary tokens reach exactly:** their identity check, the task routes,
-  and `POST /mcp` — the patterns in `ordinaryRoutes`, matched by the mux's
+- **Ordinary-token surface (extended after stage 2):** identity, project
+  listing, tasks, epics, the identity directory, scoped process-reference
+  reads, and `POST /mcp` — the patterns in `ordinaryRoutes`, matched by the mux's
   own rules (never a prefix), shown by `Route.Ordinary()` and pinned by a
   test that walks the whole route table. Every task write re-runs the
-  authorization: token issued for this project's access instance AND the
-  user holds a current grant (`CanWrite`), both read fresh; reads need only
+  authorization: the explicit token scope permits this project AND the
+  user holds a current grant (`CanWriteToken`), both read fresh; reads need only
   a valid credential. Legacy writer tokens read tasks, never write them.
 - **MCP on the hub** dispatches task tools in-process against the task
   routes with the request's own identity (`Server.MCPPrincipal`), never via
@@ -88,9 +93,13 @@ Decisions taken while implementing stage 2:
   `HubConfig.TaskToken` (`hub.json`, 0600, set by `aimem hub task-token`,
   must be an `aimem_user_…` token). Missing hub or credential is an
   actionable error; the checkpoint token is never used for tasks.
-- **Global task lookup** is a scan of existing ordinary projects
-  (`Registry.LocateTask`); an unreadable project makes a miss inconclusive
-  (error) rather than "not found". Links are origin-relative paths.
+  PR #57 adds required repository-local project credentials above that
+  per-hub setting; see [Task credentials](TASK-CREDENTIALS.md). A failing
+  local override never falls back to the per-hub credential.
+- **Global task lookup (updated by PR #44)** uses in-memory location hints
+  before a fallback scan (`Registry.LocateTask`); an unreadable project
+  makes a miss inconclusive (error) rather than "not found". Links are
+  origin-relative paths.
 - **Update body** is the full editable content plus `expected_revision`
   (strict decoding, so unknown fields are refused; omitted optional fields
   clear, as the storage contract says).
@@ -381,11 +390,12 @@ first implement a correct existing-project scan with explicit unavailable/error
 behavior and tests for rename. Never create a second authoritative task registry.
 
 Routes and schemas ship together with OpenAPI parity coverage. Ordinary
-tokens pass `authWrapper` for exactly: the identity route, the task
-routes, and `POST /mcp` (`ordinaryRoutes`, matched by pattern, pinned by a test
-that walks the route table); authorization is rechecked inside the task
-service. Nothing else under `/v1` admits them, and `/mcp` admits them only to
-the task tools.
+tokens pass `authWrapper` only for the patterns in `ordinaryRoutes`, pinned
+by a test that walks the route table. Since PR #48-53 this includes project
+listing, identity/directory, tasks, epics, scoped process-reference reads
+and `POST /mcp`; authorization is rechecked inside mutation handlers.
+The MCP ordinary surface includes task and epic tools, not legacy memory
+or administrative tools.
 
 ## MCP Integration And The Critical Trust Boundary
 
@@ -453,8 +463,10 @@ writes, remove a grant/revoke a credential and verify immediate enforcement. Use
 temporary state and synthetic secrets; no live accounts/tasks or deployment.
 
 For each code PR run the repository build/full tests/gofmt/staticcheck and review
-gates. Storage/authentication changes require the ultra pre-merge gate, actual CI
-and a posted exact-head review; medium review precedes every push. Use the current
+gates. High pre-merge review verifies findings against the final head and actual
+CI, and is posted on the PR; use the deployed external reviewer as well.
+Medium review precedes every push; max/ultra require an explicit request.
+Use the current
 delivery-first dispositions: only blockers reopen frozen implementation scope;
 follow-ups become separate work. The user authorizes merge separately.
 
@@ -545,10 +557,13 @@ model; bulk import; audit views beyond what the snapshot shows.
 5. The page test pins the tab's call surface to the routes listed above,
    the way the task page's test pins its calls.
 
-**Increments** (serial PRs, ultra review: this is the security surface):
+**Increments** (serial PRs; review gates follow `AGENTS.md`: medium before
+push, high plus the deployed external reviewer before merge; max/ultra
+only on explicit request):
 
-1. Escaper back-port with its test; the read-only `access` tab over the
-   snapshot; users and groups (create, rename, enable/disable, membership).
+1. Escaper back-port with its test; the `access` snapshot tab with user
+   and group controls (create, rename users, enable/disable users,
+   membership). Grants and tokens are read-only in this increment.
 2. Grants, including stale-instance removal proved by a dropped-and-recreated
    project keeping the new instance's grants, and tokens (issue with the
    one-time secret; revoke), and the manual's operator section pointing at
@@ -693,8 +708,13 @@ open for the transport that surfaces warnings:
    before considering any draft code an implementation milestone.
 
 Stages 1, 2 and 3 are merged and released; agent enablement is done (see
-Resume State and "Scope And Delivery Boundaries"). Next: the four
-Kanban-documents increments in their agreed order, then stage 4 (the
-access section in the console, which absorbs stage-3 follow-up (c)), then
-the remaining stage-2 and stage-3 follow-ups recorded above, in the order
-the board's use surfaces them. Preserve the approved simple scope.
+Resume State and "Scope And Delivery Boundaries"). The four Kanban-documents
+increments shipped in v0.5.0. The 2026-09-21 priority is the revised token
+model and verified rollout before further onboarding (see Roadmap).
+Then verify the selected process bootstrap,
+then stage 4 (the access section in the console, which absorbs stage-3
+follow-up (c)), then the remaining stage-2 and stage-3 follow-ups as the
+board's use surfaces them. Keep the escaper task as a tracked prerequisite
+within increment 1, not a second implementation of the same change.
+The board tracks actionable work; conditional design notes remain below
+their documented triggers. Preserve the approved simple scope.
