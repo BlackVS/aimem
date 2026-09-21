@@ -1,8 +1,8 @@
 # Roadmap
 
-Released baseline: v0.5.0 (PR #54), released 2026-09-14. Token-model
-implementation is merged through master `fdf1746` (PR #56-58); v0.6.0
-release and deployment verification are the current delivery gate.
+Released baseline: v0.6.0 (PR #56-59). Token rollout and the selected process
+bootstrap have been verified on participating hubs/clients. PR #60 and #62
+add the enabled-project picker and epic details on master, still unreleased.
 This file records delivery order and scope. The aimem task board owns live
 task state, dependencies and completion evidence; design documents own the
 contracts. Do not maintain a second checklist of task statuses here.
@@ -14,39 +14,42 @@ contracts. Do not maintain a second checklist of task statuses here.
   bootstrap, epics and identity directory, typed references: v0.5.0,
   PR #50-54. Schema 13 rewrites stored references; the release notes
   describe backup and compatibility requirements.
+- Explicit token scopes and repository-local credentials: v0.6.0. Multi-project
+  access, revocation and installed-client rollout verification lift the token
+  onboarding hold. Completion evidence lives on the board.
+- Reviewed process assets selected at a pinned commit, with complete bootstrap
+  and templates verified on participating clients. Selection is per project.
 
 ## Next delivery sequence
 
-Further project onboarding is on hold until the token model below is
-released and verified. This is the user's priority as of 2026-09-21.
+The owner brought team-coordination review/planning ahead of access-console
+implementation on 2026-09-21, to enable several coding agents to share the backlog.
 
-1. Merged in PR #56: explicit user-scoped, project-scoped and read-only tokens.
-   User-scoped writes follow current project grants; existing credentials
-   retain their restrictions. The access contract records the amendment.
-2. Merged in PR #57: repository-local project-token overrides above OS-user/per-hub
-   credentials. Keep secrets out of tracked configuration; a failed explicit
-   override must never fall back to a broader credential. No hub aliases
-   should be needed for concurrent projects.
-3. Current gate: verify the two-project workflow, compatibility and revocation,
-   update onboarding docs, then release v0.6.0 and verify the hub/client rollout before
-   lifting the onboarding hold.
-4. Select and verify the process bootstrap for this project. Reconcile
-   handbook, DoR/DoD, templates and review policy in the process repository;
-   pin the reviewed commit and verify complete context on participating
-   agent machines, including a first session with no recalled facts.
-5. Stage 4 increment 1: access snapshot, users and groups. Include the
+1. Review the [agent-team protocol and phased plan](DESIGN-agent-teams.md):
+   manual startup and MCP join, roles, structured bidirectional/direct messages,
+   atomic assignments, recovery, communication audit and serial integration.
+   Split implementation into bounded tasks; no terminal scraping or implicit
+   change to merge policy. Design approval/merge precedes coordination code.
+2. Deliver the agreed team foundation in small increments: membership/roster,
+   structured inbox, protected assignments, results/recovery and audit export.
+   A cross-platform pilot must verify client delivery and failure behavior
+   before unattended use is promised. Automatic pickup reuses the existing
+   priority/complexity tasks; it is not needed for explicit assignments.
+3. Stage 4 increment 1: access snapshot, users and groups. Include the
    tracked console escaper/handler correction and focused executable UI
    regressions. Grants and tokens remain read-only in this increment.
-6. Stage 4 increment 2: grant management, stale-instance cleanup and
+4. Stage 4 increment 2: grant management, stale-instance cleanup and
    ordinary-token issue/revoke, including one-time secret handling and
    operator documentation. Depend on increment 1.
-7. Pull maintenance work as observed failures or use justify it. The
+5. Pull maintenance work as observed failures or use justify it. The
    remaining task-page harness is incremental work, not a prerequisite to
    implement a new general browser-testing framework before stage 4.
 
 Stage 4 has no assigned release version yet. Keep its existing authority
 and route boundaries; no new identity system or admin-token web management.
 The acceptance criteria live in the implementation plan and board tasks.
+Batch minor changes into worthwhile releases; a merged PR does not request
+a release or deployment. Team planning does not block ordinary project onboarding.
 
 ## Backlog triage
 
@@ -69,6 +72,11 @@ different agent resumes it. This is a process convention, not a server-side
 lease or ownership restriction. If nothing is eligible, triage backlog with
 the user instead of treating its display order as authorization to start.
 
+This remains the standalone-agent workflow. Under the proposed team protocol,
+joined workers wait for addressed coordinator assignments and do not pick tasks
+independently. Standalone pickup excludes team-managed work. Communication and
+model-fit guidance do not silently change existing permissions on unmanaged tasks.
+
 Planned task metadata (BACKLOG `01a0c44a-5ce8-7000-8957-61ad2be4b836`):
 editable priority P0 urgent / P1 high / P2 normal / P3 low, and independent
 complexity XS / S / M / L / XL. The creating agent assesses both with a
@@ -76,8 +84,8 @@ short rationale; authorized users and agents can revise them with history
 and revision checks. Legacy tasks remain unassessed until triaged. Once
 implemented, priority ranks eligible READY work within agreed release gates,
 before roadmap order and task ID. Complexity guides decomposition, not
-priority, and is not a time promise. This feature follows the active token
-work; it does not change the current pickup behavior described above.
+priority, and is not a time promise. Explicit team assignment can precede this
+feature; it does not change the current pickup behavior described above.
 
 Dependent pickup-policy task `01a0c44b-4143-7000-8cdf-2e89214fd2c5`
 adds editable per-project modes: priority-first (default), complexity-first

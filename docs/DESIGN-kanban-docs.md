@@ -453,10 +453,11 @@ the board's assignee labels — which is 3 at the latest.
 This repository is the first dogfood project, enabled by migration if it
 already contains tasks. An admin selects the Git repository, commit and
 manifest for its handbook, five-item DoR/DoD and task templates. The
-repository is the private skills repository the installer already
-fetches from, so every agent machine holds read access to it today; the
-selection step confirms that access on each machine before the first
-bootstrap is trusted. These
+repository is the selected shared skills repository. Publication may be public
+or private; installer access does not establish access for every agent runtime.
+The selection step verifies fetching the pinned commit and complete bootstrap
+on each participating machine before trusting it. This corrects the original
+assumption that private-repository access was already universal. These
 definitions are reviewed together in Git; the hub stores their reference
 only. The roster exposes the two agent identities that work here. The
 follow-up lists in the implementation plan become tasks under three epics:
