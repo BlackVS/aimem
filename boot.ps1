@@ -14,7 +14,8 @@
 #   AIMEM_HUB_URL, AIMEM_HUB_TOKEN   register a hub for real-time push
 #   AIMEM_GROUPS=a,b                 pre-declare shared knowledge groups
 #   AIMEM_REINSTALL=1                refresh the binary and hooks even if
-#                                    aimem is already installed
+#                                    the installed aimem is already current
+#                                    (an older install is upgraded anyway)
 #   AIMEM_REPO=owner/name            install from a fork
 #   AIMEM_VERSION=vX.Y.Z             pin a release instead of the latest
 $ErrorActionPreference = 'Stop'
@@ -33,6 +34,8 @@ if (-not $tag) {
   } catch { $tag = $null }
 }
 if (-not $tag) { $tag = 'master' }   # no releases yet: install from the branch
+# Tell install.ps1 which release this is, so an older install gets upgraded.
+if ($tag -ne 'master') { $env:AIMEM_TARGET_VERSION = $tag }
 
 $dest = Join-Path ([IO.Path]::GetTempPath()) ("aimem-" + [Guid]::NewGuid().ToString('N'))
 New-Item -ItemType Directory -Force $dest | Out-Null

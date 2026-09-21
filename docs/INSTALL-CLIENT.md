@@ -71,7 +71,7 @@ Set these before running the one-liner:
 |---|---|
 | `AIMEM_HUB_URL` + `AIMEM_HUB_TOKEN` | register a hub, so checkpoints push in real time |
 | `AIMEM_GROUPS=a,b` | pre-declare shared knowledge groups in `.aimem.json` |
-| `AIMEM_REINSTALL=1` | refresh the binary and hooks even if aimem is installed |
+| `AIMEM_REINSTALL=1` | refresh the binary and hooks even if the installed aimem is already current (an older install is upgraded without it) |
 | `AIMEM_VERSION=vX.Y.Z` | pin a release instead of taking the latest |
 | `AIMEM_REPO=owner/name` | install from a fork |
 
