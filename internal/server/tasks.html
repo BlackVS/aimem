@@ -69,6 +69,8 @@
   button.act.on{color:var(--moss-deep);background:var(--moss);border-color:var(--moss);font-weight:700}
   button.act:disabled{opacity:.45;cursor:not-allowed}
   .row{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin:6px 0}
+  .epic-filter{display:flex;gap:10px;align-items:center;margin:6px 0}
+  #epicSel{width:32rem;max-width:100%;min-width:0;flex-shrink:1}
   .grow{flex:1;min-width:120px}
   label.f{display:block;margin:8px 0 2px;color:var(--dim);font-size:12px;text-transform:uppercase;letter-spacing:.08em}
   #gate{position:fixed;inset:0;background:var(--ink);display:flex;align-items:center;justify-content:center;flex-direction:column;gap:12px;z-index:9}
@@ -157,12 +159,21 @@
       <span class="grow"></span>
       <button class="act" id="newBtn" onclick="toggleNew()" hidden>＋ new task</button>
     </div>
-    <div class="row" id="filters" hidden>
+    <div id="filters" hidden>
+    <div class="row">
       <span class="viewsw"><button type="button" class="act" id="vwList" onclick="setView('list')">list</button><button type="button" class="act" id="vwBoard" onclick="setView('board')">board</button></span>
       <span id="listOnly"><span class="dim" style="margin-left:8px">state</span><span id="stateChips"></span></span>
-      <select id="epicSel" class="inline" aria-label="epic" onchange="FILTER.epic=this.value;refreshView()"><option value="">all epics</option></select>
       <label class="dim" style="margin-left:auto" id="archLbl"><input type="checkbox" id="archChk" style="width:auto" onchange="listTasks(true)"> archived</label>
     </div>
+    <div class="epic-filter">
+      <label for="epicSel" class="dim">epic</label>
+      <select id="epicSel" onchange="FILTER.epic=this.value;renderEpicDetails();refreshView()"><option value="">all epics</option></select>
+    </div>
+    </div>
+    <details id="epicDetails" class="card" hidden>
+      <summary>View epic</summary>
+      <div id="epicContent" class="prose"></div>
+    </details>
     <div id="newForm" class="card" hidden></div>
     <div id="tasksOff" class="dim" hidden></div>
     <div id="list"></div>
@@ -343,6 +354,7 @@ async function loadEpics(project){
   if(EPICS_PROJ===project) return;
   const gen = ++EPICS_GEN;
   EPICS = {}; EPICS_PROJ = project; FILTER.epic = "";
+  renderEpicDetails();
   $("epicSel").innerHTML = '<option value="">all epics</option>';
   // The response is collected locally; only the load that is still the
   // current one may publish it, so a late answer from a previous project
@@ -355,6 +367,16 @@ async function loadEpics(project){
   $("epicSel").innerHTML = '<option value="">all epics</option>' + Object.values(EPICS).map(e => `<option value="${esc(e.id)}"${e.id===FILTER.epic?' selected':''}>${esc(e.title)}${e.state==="RETIRED"?" (retired)":""}</option>`).join("");
 }
 function epicLabel(id){ const e = EPICS[id]; return e ? e.title : short(id); }
+function renderEpicDetails(){
+  const e = EPICS[FILTER.epic];
+  const panel = $("epicDetails");
+  panel.open = false;
+  panel.hidden = !e;
+  $("epicContent").innerHTML = e ? `<h2>${esc(e.title)}</h2>
+    <div class="meta">${esc(e.state)}${e.target?' · Target: '+esc(e.target):''}</div>
+    ${e.objective?md2html(e.objective):'<p class="dim">No objective provided.</p>'}
+    <p class="dim">Tasks below belong to this epic; the current state and archive filters still apply.</p>` : "";
+}
 function refreshView(){ if(VIEW==="board") loadBoard(); else listTasks(true); }
 function stateChipsHTML(){
   return ['',...STATES].map(s=>`<button type="button" class="chip click${FILTER.state===s?' on':''}" onclick="FILTER.state='${s}';listTasks(true)">${s||'all'}</button>`).join("");

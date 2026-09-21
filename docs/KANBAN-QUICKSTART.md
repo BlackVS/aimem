@@ -210,6 +210,9 @@ installed; merely editing `.aimem.json` does not register an MCP server.
 
 Open `https://hub.example.com:8440/tasks`, enter the ordinary token, and
 select the project. Ask the agent to list tasks for the same project.
+Selecting an epic filters the tasks. Expand **View epic** above the list or
+board to read its objective, status and release/milestone target, even when
+the epic has no tasks. State and archive filters still apply to its tasks.
 The tools include `list_tasks`, `get_task`, `create_task`, `update_task`,
 comments/history and epic tools. With an explicitly agreed test task,
 verify creation and read-back through the agent before assigning real work.
