@@ -25,6 +25,7 @@ import (
 	"aimem/internal/adapter"
 	"aimem/internal/ident"
 	"aimem/internal/process"
+	"aimem/internal/taskcred"
 )
 
 func processCmd(args []string) error {
@@ -150,18 +151,39 @@ func processBootstrap(dir, projectID string, full bool) (string, *process.Set) {
 	if hub == nil {
 		return "", nil // no hub: no tasks anywhere; nothing to say
 	}
+	hubClient := hub.HTTPClient()
+	local, err := taskcred.LocalRequired(dir)
+	if err != nil {
+		return "process context unavailable: " + err.Error(), nil
+	}
+	if local {
+		selected, err := taskcred.Resolve(dir, root)
+		if err != nil {
+			return "process context unavailable: " + err.Error(), nil
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), hubLookupTimeout)
+		err = selected.Validate(ctx)
+		cancel()
+		if err != nil {
+			return "process context unavailable: " + err.Error(), nil
+		}
+		copyHub := *hub
+		copyHub.Token = selected.Token
+		hub = &copyHub
+		hubClient = selected.Client()
+	}
 	lastPath := filepath.Join(root, "process", "last-"+id+".json")
 	// 1. Enablement and the selection, from the hub, bounded.
 	var identity struct {
 		TasksEnabled *bool `json:"tasks_enabled"`
 	}
-	ierr := hubGetJSON(hub, "/v1/access/identity?project="+url.QueryEscape(id), &identity)
+	ierr := hubGetJSONClient(hub, hubClient, "/v1/access/identity?project="+url.QueryEscape(id), &identity)
 	var sel struct {
 		Current *process.Ref `json:"current"`
 	}
 	var serr error
 	if ierr == nil {
-		serr = hubGetJSON(hub, "/v1/projects/"+url.PathEscape(id)+"/process", &sel)
+		serr = hubGetJSONClient(hub, hubClient, "/v1/projects/"+url.PathEscape(id)+"/process", &sel)
 	}
 	var ref *process.Ref
 	observed := ""
@@ -219,10 +241,9 @@ func processBootstrap(dir, projectID string, full bool) (string, *process.Set) {
 	return text, res.Set
 }
 
-// hubGetJSON performs one bounded, authenticated GET against a hub with
-// the checkpoint token (the identity route and the process reference read
-// admit every credential class).
-func hubGetJSON(hub *adapter.HubConfig, path string, into any) error {
+// hubGetJSONClient uses the selected credential and redirect policy for a
+// bounded identity/process read; both routes admit ordinary tokens.
+func hubGetJSONClient(hub *adapter.HubConfig, client *http.Client, path string, into any) error {
 	ctx, cancel := context.WithTimeout(context.Background(), hubLookupTimeout)
 	defer cancel()
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, strings.TrimRight(hub.URL, "/")+path, nil)
@@ -230,7 +251,7 @@ func hubGetJSON(hub *adapter.HubConfig, path string, into any) error {
 		return err
 	}
 	req.Header.Set("Authorization", "Bearer "+hub.Token)
-	resp, err := hub.HTTPClient().Do(req)
+	resp, err := client.Do(req)
 	if err != nil {
 		return fmt.Errorf("hub unreachable: %w", err)
 	}

@@ -20,9 +20,9 @@ import (
 	"strconv"
 	"time"
 
-	"aimem/internal/adapter"
 	"aimem/internal/ident"
 	"aimem/internal/store"
+	"aimem/internal/taskcred"
 )
 
 // TaskCallFunc performs one task-API request with the caller's own
@@ -581,26 +581,26 @@ func probeTaskState(dir, root, project string) string {
 // default hub with that hub's credential (the fail-open read the capture
 // paths use would answer "default hub" for a broken file).
 func taskCallerIn(dir, root string) (TaskCallFunc, error) {
-	hubName, err := ident.ProjectHubNameStrict(dir)
-	if err != nil {
+	if _, err := ident.ProjectHubNameStrict(dir); err != nil {
 		return nil, fmt.Errorf("task tools refused: %w — fix the file; nothing was sent to any hub", err)
 	}
-	return taskCallerFor(root, hubName)
-}
-
-// taskCallerFor resolves the hub a project is bound to (hubName "" means
-// the default hub) and requires its dedicated task credential.
-func taskCallerFor(root, hubName string) (TaskCallFunc, error) {
-	name, hub := adapter.ResolveHub(root, hubName)
-	switch {
-	case hub == nil && name != "":
-		return nil, fmt.Errorf("this project is bound to hub %q, which this machine has not configured: aimem hub add %s <url> <token>, then aimem hub task-token %s <ordinary-token>", name, name, name)
-	case hub == nil:
-		return nil, errors.New("no hub configured for this project: tasks live on the project's hub (aimem hub add <name> <url> <token>, then aimem hub task-token <name> <ordinary-token>)")
-	case hub.TaskToken == "":
-		return nil, fmt.Errorf("hub %q has no task credential: ask the hub admin for an ordinary token issued to your user for this project, then run `aimem hub task-token %s <token>`", name, name)
+	selected, err := taskcred.Resolve(dir, root)
+	if err != nil {
+		return nil, err
 	}
-	return hubCaller(hub.URL, hub.TaskToken, hub.HTTPClient()), nil
+	client := selected.Hub.HTTPClient()
+	if selected.Source == "project-local" {
+		client = selected.Client()
+	}
+	call := hubCaller(selected.Hub.URL, selected.Token, client)
+	return func(ctx context.Context, method, path string, headers map[string]string, body []byte) (int, []byte, error) {
+		checkCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+		defer cancel()
+		if err := selected.Validate(checkCtx); err != nil {
+			return 0, nil, err
+		}
+		return call(ctx, method, path, headers, body)
+	}, nil
 }
 
 // maxTaskResponseBytes bounds one hub response. The largest legal page is
