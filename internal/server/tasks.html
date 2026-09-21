@@ -366,11 +366,9 @@ async function boot(){
     $("gate").classList.add("hide");
     $("who").textContent = "· "+ME.name+" ("+ME.role+")";
     $("consoleLink").hidden = ME.role==="user";
-    // Every credential class may list the projects (an ordinary token
-    // gets the ordinary ones, filtered by the hub); the free-text field is
-    // the fallback if the listing fails, remembered in this browser.
-    // Reserved stores never hold tasks (mirrors store.IsReservedProject).
-    try{ const p = await api("/v1/projects"); PROJECTS = (p.projects||[]).filter(id=>id!=="user"&&!id.startsWith("group-")).sort(); }
+    // Include empty enabled boards so their first task can be created.
+    // Direct links still allow reading a disabled board's existing tasks.
+    try{ const p = await api("/v1/projects?tasks_enabled=true"); PROJECTS = (p.projects||[]).filter(id=>id!=="user"&&!id.startsWith("group-")).sort(); }
     catch(_){ PROJECTS = null; }
     if(PROJECTS){
       const sel = $("projSel"); sel.hidden=false;

@@ -636,6 +636,16 @@ func (s *Server) health(w http.ResponseWriter, _ *http.Request) {
 }
 
 func (s *Server) projects(w http.ResponseWriter, r *http.Request) {
+	filterTasks := r.URL.Query().Has("tasks_enabled")
+	var wantTasks bool
+	if filterTasks {
+		var err error
+		wantTasks, err = strconv.ParseBool(r.URL.Query().Get("tasks_enabled"))
+		if err != nil {
+			s.fail(w, http.StatusBadRequest, errors.New("tasks_enabled must be a boolean"))
+			return
+		}
+	}
 	ids, err := s.reg.Projects()
 	if err != nil {
 		s.fail(w, http.StatusInternalServerError, err)
@@ -646,6 +656,31 @@ func (s *Server) projects(w http.ResponseWriter, r *http.Request) {
 	// and are not within its view.
 	if id, ok := IdentityFrom(r.Context()); ok && id.Role == "user" {
 		ids = slices.DeleteFunc(slices.Clone(ids), store.IsReservedProject)
+	}
+	if filterTasks {
+		filtered := make([]string, 0, len(ids))
+		for _, project := range ids {
+			if store.IsReservedProject(project) {
+				continue
+			}
+			db, err := s.reg.OpenExisting(project)
+			if errors.Is(err, store.ErrNoSuchProject) {
+				continue // dropped since the directory listing; never recreate it
+			}
+			if err != nil {
+				s.fail(w, http.StatusInternalServerError, errors.New("project task enablement unavailable"))
+				return
+			}
+			enabled, err := db.TasksEnabled()
+			if err != nil {
+				s.fail(w, http.StatusInternalServerError, errors.New("project task enablement unavailable"))
+				return
+			}
+			if enabled == wantTasks {
+				filtered = append(filtered, project)
+			}
+		}
+		ids = filtered
 	}
 	if ids == nil {
 		ids = []string{}

@@ -73,6 +73,10 @@ on**. Enablement is per project; upgrading the hub does not enable new
 projects automatically. Existing task-bearing projects are enabled by the
 upgrade migration where no explicit setting exists.
 
+The task-page project picker shows Kanban-enabled projects, including empty
+boards. Disabling a board removes it from that picker; a direct task/project
+link can still read existing tasks.
+
 ## 3. Create a user, grant access, and issue a task token
 
 Still on the hub as the service user:
