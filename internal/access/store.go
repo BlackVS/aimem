@@ -23,6 +23,28 @@ import (
 
 var ErrDenied = errors.New("access denied")
 
+type TokenScope string
+
+const (
+	ScopeUser     TokenScope = "user"
+	ScopeProject  TokenScope = "project"
+	ScopeReadOnly TokenScope = "read-only"
+)
+
+// ResolveScope preserves the legacy issuance contract when scope is omitted.
+func ResolveScope(scope TokenScope, project string) (TokenScope, error) {
+	if scope == "" {
+		scope = ScopeReadOnly
+		if project != "" {
+			scope = ScopeProject
+		}
+	}
+	if (scope == ScopeProject && project != "") || ((scope == ScopeUser || scope == ScopeReadOnly) && project == "") {
+		return scope, nil
+	}
+	return "", fmt.Errorf("scope must be user or read-only without a project, or project with a project")
+}
+
 type Store struct{ db *sql.DB }
 
 // Open creates only the hub access store, never a project. The caller must own
@@ -85,11 +107,11 @@ func (s *Store) migrate() error {
 	if err := s.db.QueryRow("PRAGMA user_version").Scan(&current); err != nil {
 		return err
 	}
-	if current == 1 {
+	if current == 2 {
 		return nil
 	}
-	if current > 1 {
-		return fmt.Errorf("access schema %d is newer than supported schema 1", current)
+	if current > 2 {
+		return fmt.Errorf("access schema %d is newer than supported schema 2", current)
 	}
 	tx, err := s.db.Begin()
 	if err != nil {
@@ -100,8 +122,8 @@ func (s *Store) migrate() error {
 	if err := tx.QueryRow("PRAGMA user_version").Scan(&version); err != nil {
 		return err
 	}
-	if version > 1 {
-		return fmt.Errorf("access schema %d is newer than supported schema 1", version)
+	if version > 2 {
+		return fmt.Errorf("access schema %d is newer than supported schema 2", version)
 	}
 	if version == 0 {
 		_, err = tx.Exec(`
@@ -113,6 +135,14 @@ CREATE TABLE tokens(id TEXT PRIMARY KEY, user_id TEXT NOT NULL REFERENCES users(
 CREATE TABLE audit(id TEXT PRIMARY KEY, at TEXT NOT NULL, actor TEXT NOT NULL, action TEXT NOT NULL, subject TEXT NOT NULL);
 PRAGMA user_version=1;`)
 		if err != nil {
+			return err
+		}
+		version = 1
+	}
+	if version == 1 {
+		if _, err := tx.Exec(`ALTER TABLE tokens ADD COLUMN scope TEXT NOT NULL DEFAULT 'read-only' CHECK(scope IN ('user','project','read-only'));
+UPDATE tokens SET scope=CASE WHEN project='' THEN 'read-only' ELSE 'project' END;
+PRAGMA user_version=2;`); err != nil {
 			return err
 		}
 	}
@@ -138,12 +168,13 @@ type Grant struct {
 	Subject string `json:"subject"`
 }
 type Token struct {
-	ID        string    `json:"id"`
-	UserID    string    `json:"user_id"`
-	Label     string    `json:"label"`
-	Project   string    `json:"project_instance,omitempty"`
-	ExpiresAt time.Time `json:"expires_at"`
-	Revoked   bool      `json:"revoked"`
+	ID        string     `json:"id"`
+	UserID    string     `json:"user_id"`
+	Label     string     `json:"label"`
+	Scope     TokenScope `json:"scope"`
+	Project   string     `json:"project_instance,omitempty"`
+	ExpiresAt time.Time  `json:"expires_at"`
+	Revoked   bool       `json:"revoked"`
 }
 type Event struct {
 	ID      string `json:"id"`
@@ -310,6 +341,14 @@ SELECT 1 FROM grants g WHERE g.project=? AND ((g.kind='user' AND g.subject=u.id)
 // Issue never accepts a role or an admin capability. Its return value is the
 // only place the secret appears; snapshot/audit contain no digest or secret.
 func (s *Store) Issue(actor, user, label, project string, expires time.Time) (Token, string, error) {
+	return s.IssueScoped(actor, user, label, "", project, expires)
+}
+
+func (s *Store) IssueScoped(actor, user, label string, scope TokenScope, project string, expires time.Time) (Token, string, error) {
+	scope, err := ResolveScope(scope, project)
+	if err != nil {
+		return Token{}, "", err
+	}
 	if err := validName(label); err != nil {
 		return Token{}, "", err
 	}
@@ -322,8 +361,8 @@ func (s *Store) Issue(actor, user, label, project string, expires time.Time) (To
 	}
 	secret := "aimem_user_" + hex.EncodeToString(random[:])
 	sum := sha256.Sum256([]byte(secret))
-	t := Token{ID: uuidv7.New(), UserID: user, Label: label, Project: project, ExpiresAt: expires.UTC().Truncate(time.Second)}
-	err := s.change(actor, "token.issue", t.ID, func(tx *sql.Tx) error {
+	t := Token{ID: uuidv7.New(), UserID: user, Label: label, Scope: scope, Project: project, ExpiresAt: expires.UTC().Truncate(time.Second)}
+	err = s.change(actor, "token.issue", t.ID, func(tx *sql.Tx) error {
 		var disabled bool
 		if err := tx.QueryRow("SELECT disabled FROM users WHERE id=?", user).Scan(&disabled); err != nil {
 			return fmt.Errorf("unknown user: %w", err)
@@ -340,7 +379,7 @@ func (s *Store) Issue(actor, user, label, project string, expires time.Time) (To
 				return ErrDenied
 			}
 		}
-		_, err := tx.Exec("INSERT INTO tokens(id,user_id,label,project,digest,expires_at) VALUES(?,?,?,?,?,?)", t.ID, user, label, project, hex.EncodeToString(sum[:]), t.ExpiresAt.Unix())
+		_, err := tx.Exec("INSERT INTO tokens(id,user_id,label,project,digest,expires_at,scope) VALUES(?,?,?,?,?,?,?)", t.ID, user, label, project, hex.EncodeToString(sum[:]), t.ExpiresAt.Unix(), scope)
 		return err
 	})
 	if err != nil {
@@ -359,17 +398,18 @@ func (s *Store) Revoke(actor, id string) error {
 }
 
 type Identity struct {
-	UserID  string `json:"user_id"`
-	TokenID string `json:"token_id"`
-	Name    string `json:"name"`
-	Project string `json:"project_instance,omitempty"`
+	UserID  string     `json:"user_id"`
+	TokenID string     `json:"token_id"`
+	Name    string     `json:"name"`
+	Scope   TokenScope `json:"scope"`
+	Project string     `json:"project_instance,omitempty"`
 }
 
 func (s *Store) Authenticate(secret string) (Identity, error) {
 	sum := sha256.Sum256([]byte(secret))
 	var id Identity
-	err := s.db.QueryRow(`SELECT u.id,t.id,u.name,t.project FROM tokens t JOIN users u ON u.id=t.user_id
-WHERE t.digest=? AND t.revoked=0 AND t.expires_at>? AND u.disabled=0`, hex.EncodeToString(sum[:]), time.Now().Unix()).Scan(&id.UserID, &id.TokenID, &id.Name, &id.Project)
+	err := s.db.QueryRow(`SELECT u.id,t.id,u.name,t.project,t.scope FROM tokens t JOIN users u ON u.id=t.user_id
+WHERE t.digest=? AND t.revoked=0 AND t.expires_at>? AND u.disabled=0`, hex.EncodeToString(sum[:]), time.Now().Unix()).Scan(&id.UserID, &id.TokenID, &id.Name, &id.Project, &id.Scope)
 	if errors.Is(err, sql.ErrNoRows) {
 		return Identity{}, ErrDenied
 	}
@@ -384,10 +424,7 @@ func (s *Store) Authorize(secret, project string) (Identity, error) {
 		return Identity{}, err
 	}
 	if project != "" {
-		if id.Project != project {
-			return Identity{}, ErrDenied
-		}
-		ok, err := canWrite(s.db, id.UserID, project)
+		ok, err := s.CanWriteToken(id.UserID, id.TokenID, project)
 		if err != nil {
 			return Identity{}, err
 		}
@@ -396,6 +433,24 @@ func (s *Store) Authorize(secret, project string) (Identity, error) {
 		}
 	}
 	return id, nil
+}
+
+// CanWriteToken is the shared write check for identity hints and every task
+// mutation. IDs come from authentication, but token state/scope and grants
+// are read again here so an in-process MCP call cannot retain stale authority.
+func (s *Store) CanWriteToken(user, token, project string) (bool, error) {
+	if project == "" {
+		return false, nil
+	}
+	var n int
+	err := s.db.QueryRow(`SELECT count(*) FROM tokens t JOIN users u ON u.id=t.user_id
+WHERE t.id=? AND u.id=? AND u.disabled=0 AND t.revoked=0 AND t.expires_at>?
+AND ((t.scope='user' AND t.project='') OR (t.scope='project' AND t.project=?))
+AND EXISTS(SELECT 1 FROM grants g WHERE g.project=? AND
+((g.kind='user' AND g.subject=u.id) OR (g.kind='group' AND EXISTS
+(SELECT 1 FROM members m WHERE m.group_id=g.subject AND m.user_id=u.id))))`,
+		token, user, time.Now().Unix(), project, project).Scan(&n)
+	return n == 1, err
 }
 
 // Snapshot is an administrator-only view. Audit is bounded; credentials remain
@@ -430,10 +485,10 @@ func (s *Store) Snapshot() (Snapshot, error) {
 			out.Grants = append(out.Grants, v)
 			return err
 		}},
-		{"SELECT id,user_id,label,project,expires_at,revoked FROM tokens ORDER BY id", func(r *sql.Rows) error {
+		{"SELECT id,user_id,label,project,expires_at,revoked,scope FROM tokens ORDER BY id", func(r *sql.Rows) error {
 			var v Token
 			var expiry int64
-			err := r.Scan(&v.ID, &v.UserID, &v.Label, &v.Project, &expiry, &v.Revoked)
+			err := r.Scan(&v.ID, &v.UserID, &v.Label, &v.Project, &expiry, &v.Revoked, &v.Scope)
 			v.ExpiresAt = time.Unix(expiry, 0).UTC()
 			out.Tokens = append(out.Tokens, v)
 			return err

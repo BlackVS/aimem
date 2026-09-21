@@ -30,3 +30,31 @@ func TestAccessCommandContracts(t *testing.T) {
 		}
 	}
 }
+
+func TestTokenIssueScopes(t *testing.T) {
+	for _, tc := range []struct {
+		args           []string
+		scope, project string
+	}{
+		{[]string{"token-issue-user", "u", "token-laptop", "2027-01-01T00:00:00Z"}, "user", ""},
+		{[]string{"token-issue", "u", "token-project", "alpha", "2027-01-01T00:00:00Z"}, "", "alpha"},
+		{[]string{"token-issue", "u", "token-reader", "-", "2027-01-01T00:00:00Z"}, "", ""},
+	} {
+		method, path, body, err := accessRequest(tc.args)
+		if err != nil || method != "POST" || path != "/v1/access/tokens" {
+			t.Fatalf("request: %s %s %v", method, path, err)
+		}
+		b := body.(map[string]any)
+		if scope, _ := b["scope"].(string); scope != tc.scope {
+			t.Fatalf("scope %q", scope)
+		}
+		if project, _ := b["project"].(string); project != tc.project {
+			t.Fatalf("project %q", project)
+		}
+	}
+	for _, args := range [][]string{{"token-issue-user", "u", "label"}, {"token-issue-user", "u", "label", "bad"}, {"token-issue-user", "u", "label", "2027-01-01T00:00:00Z", "extra"}} {
+		if _, _, _, err := accessRequest(args); err == nil {
+			t.Fatalf("accepted %v", args)
+		}
+	}
+}

@@ -221,12 +221,18 @@ func (s *Server) setAccessGrant(w http.ResponseWriter, r *http.Request) {
 }
 func (s *Server) issueAccessToken(w http.ResponseWriter, r *http.Request) {
 	var req struct {
-		UserID    string    `json:"user_id"`
-		Label     string    `json:"label"`
-		Project   string    `json:"project"`
-		ExpiresAt time.Time `json:"expires_at"`
+		UserID    string            `json:"user_id"`
+		Label     string            `json:"label"`
+		Scope     access.TokenScope `json:"scope"`
+		Project   string            `json:"project"`
+		ExpiresAt time.Time         `json:"expires_at"`
 	}
 	if !s.decodeAccess(w, r, &req) {
+		return
+	}
+	scope, err := access.ResolveScope(req.Scope, req.Project)
+	if err != nil {
+		s.fail(w, http.StatusBadRequest, err)
 		return
 	}
 	project := ""
@@ -243,7 +249,7 @@ func (s *Server) issueAccessToken(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	token, secret, err := db.Issue(accessActor(r), req.UserID, req.Label, project, req.ExpiresAt)
+	token, secret, err := db.IssueScoped(accessActor(r), req.UserID, req.Label, scope, project, req.ExpiresAt)
 	if err != nil {
 		s.accessError(w, err)
 		return
@@ -263,9 +269,8 @@ func (s *Server) revokeAccessToken(w http.ResponseWriter, r *http.Request) {
 	s.ok(w, map[string]bool{"ok": true})
 }
 
-// accessIdentity exposes no broad legacy API authority. This first increment
-// lets clients verify their token and current task-write project before task
-// routes are added. Ordinary tokens are denied every other existing data route.
+// accessIdentity reports token scope and current grant eligibility separately
+// from project task enablement; it exposes no broad legacy API authority.
 func (s *Server) accessIdentity(w http.ResponseWriter, r *http.Request) {
 	id, ok := IdentityFrom(r.Context())
 	if !ok {
@@ -327,5 +332,5 @@ func (s *Server) accessIdentity(w http.ResponseWriter, r *http.Request) {
 			allowed = err == nil
 		}
 	}
-	s.ok(w, map[string]any{"user_id": id.UserID, "token_id": id.TokenID, "name": id.Name, "role": "user", "task_read": "all-projects", "project": project, "task_write": allowed, "tasks_enabled": tasksOn})
+	s.ok(w, map[string]any{"user_id": id.UserID, "token_id": id.TokenID, "name": id.Name, "role": "user", "scope": id.Scope, "task_read": "all-projects", "project": project, "task_write": allowed, "tasks_enabled": tasksOn})
 }

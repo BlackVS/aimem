@@ -13,6 +13,25 @@ currently 13); a binary refuses a database newer than it understands.
 
 ## [Unreleased]
 
+### Data integrity
+
+- **Access database schema 2:** ordinary tokens gain an explicit scope.
+  Existing project tokens stay project-scoped and existing read-only tokens
+  stay read-only; no migration broadens access. Older binaries refuse the
+  upgraded access database. Back up the hub state before upgrading;
+  project database schema remains 13.
+
+### Added
+
+- **User-scoped task tokens:** `aimem access token-issue-user <user-id>
+  <label> <expiry-RFC3339>` issues a token that follows the user's current
+  direct/group project grants. Grant changes take effect without reissuing
+  it. Existing `token-issue` syntax still issues project-scoped or read-only
+  tokens. The admin API accepts `scope: user|project|read-only`, preserving
+  legacy semantics when omitted. Identity and task/epic/comment writes use
+  one live authorization check, including in-process MCP mutations.
+  Repository-local credential overrides will follow in a separate increment.
+
 ## [0.5.0] — 2026-09-14
 
 ### Data integrity
