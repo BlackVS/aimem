@@ -9,9 +9,21 @@ upgrading a fleet.
 The format follows [Keep a Changelog](https://keepachangelog.com/1.1.0/);
 this project does not yet promise semantic versioning. The on-disk schema
 version is tracked separately (`currentSchema` in `internal/store/store.go`,
-currently 13); a binary refuses a database newer than it understands.
+currently 14); a binary refuses a database newer than it understands.
 
 ## [Unreleased]
+
+### Added
+
+- Administrator team setup: `aimem teams` and admin-only HTTP routes create,
+  inspect and replace project-bound team configuration and user enrollment.
+  Revision checks, retry receipts and atomic audit events preserve configuration
+  history. Team-bearing projects cannot be dropped or merged; rename preserves
+  their identity. Agent sessions and task assignments follow in later increments.
+- **Project schema 14:** additive team and audit tables. Back up full project
+  state, including access identities, before upgrading. Older binaries refuse
+  upgraded databases; rollback requires restoring the pre-upgrade state as well
+  as the old binary. No release or deployment is implied by this entry.
 
 ### Fixed
 
