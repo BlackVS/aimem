@@ -117,6 +117,8 @@ func main() {
 		err = metaCmd(args)
 	case "tasks":
 		err = tasksCmd(args)
+	case "task-token":
+		err = taskTokenCmd(args)
 	case "process":
 		err = processCmd(args)
 	case "group":
@@ -213,6 +215,8 @@ func usage() {
                              RRF-merged); needs AIMEM_EMBED_MODEL +
                              AIMEM_OPENAI_API_KEY
   project-id [dir]           compute stable project identity for a directory
+  task-token set|show-source|clear  manage this checkout's task credential;
+                             set reads a project-scoped token from stdin
   session-start [file]       SessionStart hook adapter (Claude Code and
                              Codex share the wire format): emit the handoff
                              (docs/SESSION-STATE.md) as hook JSON;

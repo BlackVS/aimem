@@ -276,7 +276,15 @@ func TestTaskCallerForUsesHubTaskToken(t *testing.T) {
 	}, "home"); err != nil {
 		t.Fatal(err)
 	}
-	call, err := taskCallerFor(root, "")
+	dir := t.TempDir()
+	callFor := func(name string) (TaskCallFunc, error) {
+		raw, _ := json.Marshal(map[string]string{"project": "alpha", "hub": name})
+		if err := os.WriteFile(filepath.Join(dir, ".aimem.json"), raw, 0600); err != nil {
+			t.Fatal(err)
+		}
+		return taskCallerIn(dir, root)
+	}
+	call, err := callFor("")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -288,13 +296,13 @@ func TestTaskCallerForUsesHubTaskToken(t *testing.T) {
 	if len(seen) != 1 || seen[0] != "Bearer aimem_user_alice" {
 		t.Fatalf("the hub must see the task credential, never the checkpoint token: %q", seen)
 	}
-	if _, err := taskCallerFor(root, "bare"); err == nil || !strings.Contains(err.Error(), "aimem hub task-token bare") {
+	if _, err := callFor("bare"); err == nil || !strings.Contains(err.Error(), "aimem hub task-token bare") {
 		t.Fatalf("hub without task credential: %v", err)
 	}
-	if _, err := taskCallerFor(root, "work"); err == nil || !strings.Contains(err.Error(), `"work"`) {
+	if _, err := callFor("work"); err == nil || !strings.Contains(err.Error(), `"work"`) {
 		t.Fatalf("bound to an unconfigured hub: %v", err)
 	}
-	if _, err := taskCallerFor(t.TempDir(), ""); err == nil || !strings.Contains(err.Error(), "no hub configured") {
+	if _, err := taskCallerIn(dir, t.TempDir()); err == nil || !strings.Contains(err.Error(), "no hub configured") {
 		t.Fatalf("no hub at all: %v", err)
 	}
 	if len(seen) != 1 {
@@ -437,7 +445,7 @@ func TestLocalTaskCallerLargePages(t *testing.T) {
 	if err := adapter.SaveHubs(root, map[string]*adapter.HubConfig{"home": {URL: ts.URL, Token: "checkpoint", TaskToken: f.alice}}, "home"); err != nil {
 		t.Fatal(err)
 	}
-	s := &srv{project: "alpha", taskSetup: func() (TaskCallFunc, error) { return taskCallerFor(root, "") }}
+	s := &srv{project: "alpha", taskSetup: func() (TaskCallFunc, error) { return taskCallerIn(root, root) }}
 	text, isErr := callTool(t, s, "create_task", map[string]any{"title": "big", "idempotency_key": "big"})
 	if isErr {
 		t.Fatal(text)
@@ -490,7 +498,7 @@ func TestLocalTaskCallerAgainstHub(t *testing.T) {
 	if err := adapter.SaveHubs(root, map[string]*adapter.HubConfig{"home": {URL: ts.URL, Token: "checkpoint", TaskToken: f.alice}}, "home"); err != nil {
 		t.Fatal(err)
 	}
-	s := &srv{project: "alpha", taskSetup: func() (TaskCallFunc, error) { return taskCallerFor(root, "") }}
+	s := &srv{project: "alpha", taskSetup: func() (TaskCallFunc, error) { return taskCallerIn(root, root) }}
 	resp := s.handle(context.Background(), []byte(`{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"create_task","arguments":{"title":"from stdio","idempotency_key":"s1"}}}`))
 	if !strings.Contains(string(resp), `\"project\": \"alpha\"`) || strings.Contains(string(resp), "isError") {
 		t.Fatalf("stdio create: %s", resp)
@@ -508,7 +516,7 @@ func TestLocalTaskCallerAgainstHub(t *testing.T) {
 	if err := adapter.SaveHubs(root2, map[string]*adapter.HubConfig{"home": {URL: ts.URL, Token: "checkpoint"}}, "home"); err != nil {
 		t.Fatal(err)
 	}
-	s3 := &srv{project: "alpha", taskSetup: func() (TaskCallFunc, error) { return taskCallerFor(root2, "") }}
+	s3 := &srv{project: "alpha", taskSetup: func() (TaskCallFunc, error) { return taskCallerIn(root2, root2) }}
 	resp = s3.handle(context.Background(), []byte(`{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"get_task","arguments":{"id":"x"}}}`))
 	if !strings.Contains(string(resp), "aimem hub task-token home") {
 		t.Fatalf("missing credential: %s", resp)

@@ -16,7 +16,7 @@ proxy configuration.
 
 ## Model
 
-### Token-model amendment (2026-09-21, implementation in progress)
+### Token-model amendment (2026-09-21, hub implementation merged in PR #56)
 
 This amendment supersedes the original project-only write-token contract
 below. Ordinary tokens have an explicit `scope`: `user`, `project`, or
@@ -47,6 +47,44 @@ at issuance. Renaming preserves project-instance grants; deletion/recreation
 does not inherit them. Existing clients can use user tokens through their
 per-hub task credential setting. Repository-local project-token overrides
 are a separate client increment; no secret belongs in tracked `.aimem.json`.
+
+### Repository credential amendment (client increment)
+
+Run `aimem task-token set` from the configured project root, supplying the
+project-scoped token on stdin. The command verifies identity and current
+write eligibility before storing it. `.aimem.json` receives only
+`"task_credential":"local"`; unknown configuration fields are preserved.
+The secret lives under the OS user's aimem state directory, keyed by the
+canonical checkout path and bound to project ID, hub name and exact hub URL.
+Unix files/directories require owner-only permissions; Windows secrets use
+current-user DPAPI encryption. Replacements use a temporary file and atomic
+rename. No secret is written into the checkout.
+
+`aimem task-token show-source` reports the selected source and binding without
+printing a secret. `aimem task-token clear` removes the local requirement
+and credential, explicitly restoring the existing per-hub task credential.
+Without the marker, existing per-hub credentials retain their behavior.
+With the marker, missing, unreadable, malformed, mismatched or rejected
+credentials are errors; there is never fallback to another credential.
+Before using a local override, the client verifies `scope=project` and
+`task_write=true` for the configured project. Missing scope on an older hub
+is a refusal. Revoked/expired tokens and removed grants therefore fail closed.
+Project task enablement remains independently enforced by the hub.
+
+Configure each clone/worktree separately. Moving a checkout, changing its
+project or hub binding, or copying the marker to another machine requires
+setting a credential there; the marker intentionally prevents fallback.
+Use these commands and start agent sessions at the configured project root,
+as with existing project configuration. Running processes resolve task
+credentials on each call; restart the session to refresh its tool listing.
+This protects against accidental credential routing, not a hostile process
+running as the same OS user. User-scoped tokens remain in the per-hub user
+configuration and should have a deliberate expiry appropriate to their
+access to all currently granted projects.
+Older clients ignore the new marker, so the rollout must upgrade every
+participating agent before relying on local selection. The marker is not
+an access-control boundary against older or hostile clients; hub token
+scope remains the server-enforced boundary.
 
 - **Users** identify people or the owners of agent credentials.
 - **Access groups** contain users and simplify assigning several users to projects.

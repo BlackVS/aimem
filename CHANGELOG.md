@@ -23,6 +23,14 @@ currently 13); a binary refuses a database newer than it understands.
 
 ### Added
 
+- **Repository-local task credentials:** `aimem task-token set` reads a
+  project token from stdin and adds only a nonsecret requirement marker to
+  `.aimem.json`. The credential stays in a protected per-user store, bound
+  to checkout/project/hub; it overrides the per-hub task token without
+  fallback on errors. `show-source` reveals no secret; `clear` explicitly
+  restores per-hub selection. MCP calls and process bootstrap honor the
+  requirement. See [Task credentials](docs/TASK-CREDENTIALS.md).
+
 - **User-scoped task tokens:** `aimem access token-issue-user <user-id>
   <label> <expiry-RFC3339>` issues a token that follows the user's current
   direct/group project grants. Grant changes take effect without reissuing
@@ -30,7 +38,6 @@ currently 13); a binary refuses a database newer than it understands.
   tokens. The admin API accepts `scope: user|project|read-only`, preserving
   legacy semantics when omitted. Identity and task/epic/comment writes use
   one live authorization check, including in-process MCP mutations.
-  Repository-local credential overrides will follow in a separate increment.
 
 ## [0.5.0] — 2026-09-14
 
