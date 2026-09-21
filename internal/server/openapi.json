@@ -1071,8 +1071,16 @@
     "/v1/projects": {
       "get": {
         "summary": "List project ids",
-        "description": "Also available to ordinary user tokens, which receive the ordinary projects only (the user memory store and the knowledge groups are filtered out); legacy writer and admin credentials receive every id.",
+        "description": "Also available to ordinary user tokens, which receive ordinary projects only; legacy writer and admin credentials receive every id when unfiltered. The optional tasks_enabled filter selects ordinary projects by Kanban enablement, regardless of task count, and excludes reserved stores for every credential. Unavailable project metadata fails the filtered request instead of silently omitting a project.",
         "x-role": "writer",
+        "parameters": [
+          {
+            "name": "tasks_enabled",
+            "in": "query",
+            "schema": {"type": "boolean"},
+            "description": "Filter ordinary projects by task enablement; true includes empty enabled boards. Omit for the existing general listing."
+          }
+        ],
         "responses": {
           "200": {
             "description": "project id list"

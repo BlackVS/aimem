@@ -13,6 +13,12 @@ currently 13); a binary refuses a database newer than it understands.
 
 ## [Unreleased]
 
+### Fixed
+
+- The task-page project picker lists only projects with Kanban enabled,
+  including empty boards ready for their first task. General project lists
+  and direct links to tasks in disabled projects remain available.
+
 ## [0.6.0] — 2026-09-21
 
 ### Data integrity

@@ -211,6 +211,63 @@ func TestTaskRoutesAuthorization(t *testing.T) {
 // tasks in every ordinary project — but the reserved stores are not: the
 // user memory DB and the knowledge groups never hold tasks. Legacy
 // credentials keep the unfiltered list.
+func TestProjectListTaskEnablementFilter(t *testing.T) {
+	f := newTaskFixture(t)
+	for _, project := range []string{"gamma", store.UserScopeProject, "group-shared"} {
+		if _, err := f.reg.Open(project); err != nil {
+			t.Fatal(err)
+		}
+	}
+	w := taskReq(t, f.h, "POST", "/v1/projects/alpha/tasks", f.alice, "picker-task", `{"title":"existing task"}`)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("create task: %d %s", w.Code, w.Body)
+	}
+	task := decodeTask(t, w)
+	alpha, err := f.reg.OpenExisting("alpha")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := alpha.SetMeta(store.TasksMetaKey, "off"); err != nil {
+		t.Fatal(err)
+	}
+	list := func(token, query string, want []string) {
+		t.Helper()
+		w := taskReq(t, f.h, "GET", "/v1/projects?tasks_enabled="+query, token, "", "")
+		var out struct {
+			Projects []string `json:"projects"`
+		}
+		if w.Code != http.StatusOK || json.Unmarshal(w.Body.Bytes(), &out) != nil || out.Projects == nil || !slices.Equal(out.Projects, want) {
+			t.Fatalf("filtered projects: %d %s; want %v", w.Code, w.Body, want)
+		}
+	}
+	for _, tok := range []string{f.alice, f.bob, f.admin, f.writer, f.env} {
+		list(tok, "true", []string{"beta"}) // empty enabled board stays visible
+		list(tok, "false", []string{"alpha", "gamma"})
+	}
+	if w := taskReq(t, f.h, "GET", "/v1/tasks/"+task.ID, f.bob, "", ""); w.Code != http.StatusOK {
+		t.Fatalf("disabled board task deep link: %d %s", w.Code, w.Body)
+	}
+	if err := alpha.SetMeta(store.TasksMetaKey, "on"); err != nil {
+		t.Fatal(err)
+	}
+	list(f.bob, "true", []string{"alpha", "beta"})
+	for _, p := range []string{"alpha", "beta"} {
+		db, err := f.reg.OpenExisting(p)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := db.SetMeta(store.TasksMetaKey, "off"); err != nil {
+			t.Fatal(err)
+		}
+	}
+	list(f.bob, "true", []string{})
+	for _, query := range []string{"", "bogus"} {
+		if w := taskReq(t, f.h, "GET", "/v1/projects?tasks_enabled="+query, f.bob, "", ""); w.Code != http.StatusBadRequest {
+			t.Fatalf("bad filter returned %d", w.Code)
+		}
+	}
+}
+
 func TestProjectListForOrdinaryTokens(t *testing.T) {
 	f := newTaskFixture(t)
 	for _, p := range []string{store.UserScopeProject, "group-shared"} {
@@ -722,8 +779,8 @@ func TestTasksPageIsPublicChrome(t *testing.T) {
 	// is a reviewed edit.
 	want := map[string]bool{
 		`"/v1/access/identity?project="+encodeURIComponent(project)`: true,
-		`"/v1/access/identity"`: true,
-		`"/v1/projects"`:        true,
+		`"/v1/access/identity"`:                                                              true,
+		`"/v1/projects?tasks_enabled=true"`:                                                  true,
 		`"/v1/projects/"+encodeURIComponent(PROJ)+"/tasks?"+q`:                               true,
 		`"/v1/projects/"+encodeURIComponent(project)+"/tasks"`:                               true,
 		`"/v1/projects/"+encodeURIComponent(project)+"/epics?include_retired=true"`:          true,
