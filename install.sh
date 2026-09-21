@@ -26,6 +26,24 @@ SUBMIT_CMD='command -v aimem >/dev/null 2>&1 && aimem submit-claude || true'
 CODEX_SUBMIT_CMD='aimem submit-codex'
 
 say() { printf '==> %s\n' "$*"; }
+
+# version_older A B: true when release A is older than release B. Both are
+# vX.Y.Z; a build suffix (v0.4.0-3-gabc-dirty) is ignored. An empty A means
+# a binary too old to answer `aimem version`, so it counts as older; an A
+# with no numeric part (dev) is unknown and never counts as older.
+version_older() {
+  local a=${1#v} b=${2#v} i x y
+  [ -n "$b" ] || return 1
+  [ -n "$a" ] || return 0
+  a=${a%%[!0-9.]*}; b=${b%%[!0-9.]*}
+  [ -n "$a" ] || return 1
+  IFS=. read -r -a x <<<"$a"; IFS=. read -r -a y <<<"$b"
+  for i in 0 1 2; do
+    [ "${x[$i]:-0}" -lt "${y[$i]:-0}" ] && return 0
+    [ "${x[$i]:-0}" -gt "${y[$i]:-0}" ] && return 1
+  done
+  return 1
+}
 need() { command -v "$1" >/dev/null 2>&1 || { echo "error: $1 is required" >&2; exit 1; }; }
 
 # Merge one checkpoint hook entry into a hooks config, keyed on the marker
@@ -397,10 +415,24 @@ EOF
 # current project.
 bootstrap() {
   local dir="${1:-$PWD}"
-  if command -v aimem >/dev/null 2>&1 && [ "${AIMEM_REINSTALL:-0}" != 1 ]; then
-    say "aimem already on PATH ($(command -v aimem)); skipping user install (AIMEM_REINSTALL=1 to force)"
+  # User-level install when aimem is missing, forced, or older than the
+  # release boot.sh is installing (AIMEM_TARGET_VERSION).
+  local have="" why=""
+  if ! command -v aimem >/dev/null 2>&1; then
+    why="not installed"
+  elif [ "${AIMEM_REINSTALL:-0}" = 1 ]; then
+    why="AIMEM_REINSTALL=1"
   else
+    have=$(aimem version 2>/dev/null | awk '{print $2}' || true)
+    if version_older "$have" "${AIMEM_TARGET_VERSION:-}"; then
+      why="installed ${have:-(no version)} is older than $AIMEM_TARGET_VERSION"
+    fi
+  fi
+  if [ -n "$why" ]; then
+    say "user install: $why"
     install_user
+  else
+    say "aimem ${have:-} already on PATH ($(command -v aimem))${AIMEM_TARGET_VERSION:+ and not older than $AIMEM_TARGET_VERSION}; skipping user install (AIMEM_REINSTALL=1 to force)"
   fi
   if [ -n "${AIMEM_HUB_URL:-}" ] && [ -n "${AIMEM_HUB_TOKEN:-}" ]; then
     "$BIN_DIR/aimem" hub "$AIMEM_HUB_URL" "$AIMEM_HUB_TOKEN" && say "hub push configured: $AIMEM_HUB_URL"
