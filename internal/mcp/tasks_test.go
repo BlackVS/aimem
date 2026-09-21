@@ -176,7 +176,7 @@ func TestRemoteMCPTaskToolsUseTheCallersAuthority(t *testing.T) {
 	}
 	text, isErr = toolText(f.rpc(t, f.alice, "tools/call", map[string]any{"name": "create_task", "arguments": map[string]any{
 		"project": "beta", "title": "foreign", "idempotency_key": "m2"}}))
-	if !isErr || !strings.Contains(text, "not issued for this project") {
+	if !isErr || !strings.Contains(text, "project has no access identity") {
 		t.Fatalf("alice on beta through MCP: %v %s", isErr, text)
 	}
 	text, isErr = toolText(f.rpc(t, f.alice, "tools/call", map[string]any{"name": "create_task", "arguments": map[string]any{

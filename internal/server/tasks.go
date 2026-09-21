@@ -112,8 +112,8 @@ func taskActor(r *http.Request) store.TaskActor {
 
 // authorizeTaskWrite decides, for this attempt, whether the caller may
 // mutate tasks in project. Admin credentials and the local operator may;
-// legacy writer tokens never do; an ordinary token only when it was issued
-// for this project's instance and its user holds a current grant. Both
+// legacy writer tokens never do; an ordinary token needs a scope that permits
+// this project's instance and its user's current grant. Both
 // are re-read every time — a grant removed a second ago is gone now.
 func (s *Server) authorizeTaskWrite(w http.ResponseWriter, r *http.Request, project string) bool {
 	if !s.tasksEnabledFor(w, project) {
@@ -124,7 +124,7 @@ func (s *Server) authorizeTaskWrite(w http.ResponseWriter, r *http.Request, proj
 		return true
 	}
 	if id.Role != "user" {
-		s.fail(w, http.StatusForbidden, fmt.Errorf("token %q has role %q; task writes need an ordinary project token or an admin token", id.Name, id.Role))
+		s.fail(w, http.StatusForbidden, fmt.Errorf("token %q has role %q; task writes need an ordinary write token or an admin token", id.Name, id.Role))
 		return false
 	}
 	instance, err := s.reg.ExistingProjectAccessID(project)
@@ -133,22 +133,22 @@ func (s *Server) authorizeTaskWrite(w http.ResponseWriter, r *http.Request, proj
 		s.fail(w, http.StatusInternalServerError, errors.New("project access identity unavailable"))
 		return false
 	}
-	if instance == "" || id.Project != instance {
-		s.fail(w, http.StatusForbidden, errors.New("token is not issued for this project"))
+	if instance == "" {
+		s.fail(w, http.StatusForbidden, errors.New("project has no access identity"))
 		return false
 	}
 	db, ok := s.accessStore(w)
 	if !ok {
 		return false
 	}
-	allowed, err := db.CanWrite(id.UserID, instance)
+	allowed, err := db.CanWriteToken(id.UserID, id.TokenID, instance)
 	if err != nil {
 		s.log.Error("task write authorization", "project", project, "err", err)
 		s.fail(w, http.StatusInternalServerError, errors.New("cannot check project access"))
 		return false
 	}
 	if !allowed {
-		s.fail(w, http.StatusForbidden, errors.New("no current write grant on this project"))
+		s.fail(w, http.StatusForbidden, errors.New("token scope or current grant does not permit writes to this project"))
 		return false
 	}
 	return true

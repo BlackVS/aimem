@@ -20,6 +20,8 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+
+	"aimem/internal/access"
 )
 
 // TokenEntry is one named token. Only the digest is ever on disk; the
@@ -89,6 +91,7 @@ type Identity struct {
 	Role    string // legacy "writer"/"admin", or scoped ordinary "user"
 	UserID  string
 	TokenID string
+	Scope   access.TokenScope
 	Project string // ordinary tokens: the access instance the token was issued for
 }
 
@@ -130,7 +133,7 @@ func (s *Server) authenticate(envToken, presented string) (Identity, bool) {
 		if err != nil {
 			return Identity{}, false
 		}
-		return Identity{Name: user.Name, Role: "user", UserID: user.UserID, TokenID: user.TokenID, Project: user.Project}, true
+		return Identity{Name: user.Name, Role: "user", UserID: user.UserID, TokenID: user.TokenID, Project: user.Project, Scope: user.Scope}, true
 	}
 	for _, t := range LoadTokens(s.reg.Root()) {
 		if len(t.SHA256) != sha256.Size*2 {

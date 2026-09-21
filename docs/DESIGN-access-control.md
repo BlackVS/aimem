@@ -1,10 +1,13 @@
 # Users, Groups, Project Access, And Tokens
 
-Status: **access foundation merged in PR #35; task/UI integration pending**,
-2026-09-13, source `dcc466f305c6a2d9ce5927a3e0c7770e1c3893fe`. Companion to
+Status: **access foundation and task integration released; console access
+management pending (stage 4)**. Foundation: PR #35; task service and page:
+PR #39-41, released in v0.4.0; identity directory: PR #52, released in
+v0.5.0. Companion to
 [Kanban](AIMEM-KANBAN-PROPOSAL.md). Keep the first version small.
 
-Proposed milestone: v0.4.0, alongside Kanban. Reuse aimem's built-in HTTPS
+The token-model amendment below precedes stage 4; its release version is not assigned.
+Reuse aimem's built-in HTTPS
 listener and bearer-token validation. No authentication proxy, OAuth server,
 or separate login service is required. A reverse proxy is optional; if used,
 it must preserve each client's Authorization header rather than substitute a
@@ -12,6 +15,38 @@ shared admin token. This describes the intended contract, not a verified live
 proxy configuration.
 
 ## Model
+
+### Token-model amendment (2026-09-21, implementation in progress)
+
+This amendment supersedes the original project-only write-token contract
+below. Ordinary tokens have an explicit `scope`: `user`, `project`, or
+`read-only`. User-scoped tokens follow the user's current direct/group
+grants on each write; adding a grant requires no token reissue. Project
+tokens additionally restrict writes to one project instance. Read-only
+tokens never write. All modes retain expiry/revocation, enabled-user and
+task-enablement checks; task-read visibility is unchanged.
+
+Access schema 2 adds token scope. Existing nonempty project tokens migrate
+to `project`; empty-project tokens migrate to `read-only`, never `user`.
+Project databases and legacy writer/admin tokens are unchanged. Older
+binaries refuse access schema 2; back up the state root before upgrading.
+
+HTTP issuance accepts optional `scope`; when omitted, the old project-or-
+read-only interpretation remains. Explicit `user` and `read-only` require
+an empty project, and `project` requires a project. Old hubs reject the new
+field, so clients cannot accidentally obtain a broader/different token.
+`aimem access token-issue-user <user-id> <label> <expiry>` issues a user token;
+the existing `token-issue <user-id> <label> <project|-> <expiry>` is unchanged.
+Issuance and identity/snapshot responses expose the scope, never secrets
+except the one-time issuance response. Identity and task/epic/comment writes
+share the same fresh token/grant authorization check, including MCP dispatch.
+
+User-scoped tokens may be issued before any grants exist; they gain no
+write authority until granted. Project tokens still require a current grant
+at issuance. Renaming preserves project-instance grants; deletion/recreation
+does not inherit them. Existing clients can use user tokens through their
+per-hub task credential setting. Repository-local project-token overrides
+are a separate client increment; no secret belongs in tracked `.aimem.json`.
 
 - **Users** identify people or the owners of agent credentials.
 - **Access groups** contain users and simplify assigning several users to projects.
