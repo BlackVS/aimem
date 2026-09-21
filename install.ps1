@@ -329,11 +329,30 @@ function Uninstall-User {
   Say 'user install removed (journal data left untouched)'
 }
 
+# Test-Older: is installed release $have older than $want? Build suffixes
+# are ignored; an empty $have (binary too old for `aimem version`) counts as
+# older; a $have with no numeric part (dev) is unknown and never does.
+function Test-Older($have, $want) {
+  if (-not $want) { return $false }
+  if (-not $have) { return $true }
+  $a = ($have -replace '^v', '') -replace '[^0-9.].*$', ''
+  $b = ($want -replace '^v', '') -replace '[^0-9.].*$', ''
+  if (-not $a) { return $false }
+  try { return ([Version]$a -lt [Version]$b) } catch { return $false }
+}
+
 if ($UninstallUser) { Uninstall-User; return }
+$have = ''
+if (Get-Command aimem -ErrorAction SilentlyContinue) {
+  try { $have = "$((& aimem version 2>$null) -split '\s+' | Select-Object -Index 1)" } catch { $have = '' }
+}
 if (-not (Get-Command aimem -ErrorAction SilentlyContinue) -or $env:AIMEM_REINSTALL -eq '1' -or $UserOnly) {
   Install-User
+} elseif (Test-Older $have $env:AIMEM_TARGET_VERSION) {
+  Say "installed aimem $have is older than $($env:AIMEM_TARGET_VERSION); upgrading"
+  Install-User
 } else {
-  Say "aimem already on PATH; skipping user install (set AIMEM_REINSTALL=1 to force)"
+  Say "aimem $have already on PATH and not older than the release; skipping user install (set AIMEM_REINSTALL=1 to force)"
 }
 if ($env:AIMEM_HUB_URL -and $env:AIMEM_HUB_TOKEN) {
   & $Exe hub $env:AIMEM_HUB_URL $env:AIMEM_HUB_TOKEN

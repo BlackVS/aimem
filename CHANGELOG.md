@@ -32,6 +32,13 @@ currently 13); a binary refuses a database newer than it understands.
   one live authorization check, including in-process MCP mutations.
   Repository-local credential overrides will follow in a separate increment.
 
+### Changed
+
+- **Installers upgrade stale installs:** `boot.sh` / `boot.ps1` now replace
+  an installed aimem that is older than the release being fetched. Same or
+  newer versions are still left alone; `AIMEM_REINSTALL=1` still forces a
+  refresh of a current install.
+
 ## [0.5.0] — 2026-09-14
 
 ### Data integrity

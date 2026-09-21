@@ -24,7 +24,8 @@ Environment knobs for the boot script:
 - `AIMEM_VERSION=vX.Y.Z` — pin a release instead of taking the latest.
 - `AIMEM_REPO=owner/name` — install from a fork.
 - `AIMEM_HUB_URL` / `AIMEM_HUB_TOKEN` — configure hub push at install time.
-- `AIMEM_REINSTALL=1` — force reinstall of the user-level binary.
+- `AIMEM_REINSTALL=1` — force reinstall of the user-level binary. Not needed
+  for upgrades: an installed aimem older than the release is replaced anyway.
 - `AIMEM_PREBUILT` — path to a prebuilt binary (skips download).
 - `AIMEM_GROUPS=oboro,ai-infra` — pre-declare shared knowledge groups in
   the generated `.aimem.json` (default: `{"groups":[]}` = isolated;
