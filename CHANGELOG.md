@@ -15,6 +15,9 @@ currently 13); a binary refuses a database newer than it understands.
 
 ### Fixed
 
+- The task page exposes the selected epic's objective, status and target
+  through an expandable View epic panel above its filtered list or board.
+  The epic selector has its own row so long titles do not change its position.
 - The task-page project picker lists only projects with Kanban enabled,
   including empty boards ready for their first task. General project lists
   and direct links to tasks in disabled projects remain available.
