@@ -247,7 +247,10 @@ upgrading a fleet. Windows support is best-effort: the service and the
 periodic sync run as logon scheduled tasks (sync rides the hub API, so
 no ssh is needed on any platform).
 
-Issues and pull requests welcome.
+Set up task boards and agent access with the
+[Kanban quickstart](docs/KANBAN-QUICKSTART.md).
+See the [roadmap](docs/ROADMAP.md) for delivered milestones and the next
+delivery sequence. Issues and pull requests welcome.
 
 ## License
 

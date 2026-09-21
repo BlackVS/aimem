@@ -4,7 +4,9 @@ Status: **accepted 2026-09-14; all four increments implemented** —
 per-project enablement and tool listing, process reference selection and
 the hook bootstrap, epics as a table in the task schema with the identity
 directory, and typed references (schema 13, the pre-1.0 break with its
-migration and receipt recomputation). Written after the task backend (storage, service, page and
+migration and receipt recomputation), released as v0.5.0 (PR #54).
+Current delivery order and backlog policy: [Roadmap](ROADMAP.md).
+Written after the task backend (storage, service, page and
 board; v0.4.0) shipped and the first agent-side fixes landed, when it
 became clear that the shared-documents feature predates the Kanban idea
 and was never asked what a process run by agents needs from it.
@@ -385,7 +387,7 @@ its own boundary and the acceptance checks below that apply to it:
    holding tasks, mutation refusals on disabled projects, the stdio
    facade's startup listing with the unknown-availability rule, the
    restart notice, the page label. Storage touched only by the metadata
-   key; ultra review (authorization gate).
+   key. Authorization-sensitive; current review gates follow `AGENTS.md`.
 2. **Reference selection and the hook bootstrap.** Admin selection of
    repository, commit and manifest with an expected metadata revision;
    the scoped process-reference route; the manifest and checklist format;
@@ -394,11 +396,12 @@ its own boundary and the acceptance checks below that apply to it:
    task-schema change.
 3. **Epics.** The `epics` table (schema bump), the receipt-backed
    mutations, retirement, the routes and tools, the task's `epic` column
-   and filter, the board's filter control. Ultra review (schema).
+   and filter, the board's filter control. Schema-sensitive; current review
+   gates follow `AGENTS.md`.
 4. **Typed references.** The typed shape per kind, validation, the
    migration of stored strings, the renderer, the tool schemas and the
-   OpenAPI document; the pre-1.0 break. Ultra review (schema and the
-   retry receipts).
+   OpenAPI document; the pre-1.0 break. Schema and receipt-sensitive;
+   current review gates follow `AGENTS.md`.
 
 The identity directory ships with the first increment that needs it —
 the board's assignee labels — which is 3 at the latest.

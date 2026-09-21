@@ -13,6 +13,8 @@ currently 13); a binary refuses a database newer than it understands.
 
 ## [Unreleased]
 
+## [0.6.0] — 2026-09-21
+
 ### Data integrity
 
 - **Access database schema 2:** ordinary tokens gain an explicit scope.
@@ -20,6 +22,10 @@ currently 13); a binary refuses a database newer than it understands.
   stay read-only; no migration broadens access. Older binaries refuse the
   upgraded access database. Back up the hub state before upgrading;
   project database schema remains 13.
+- **Upgrade every participating agent client** before relying on local
+  task-token overrides: older clients ignore the nonsecret marker and
+  continue using the per-hub credential. Each clone/worktree needs its own
+  local credential setup. Hub authorization remains authoritative.
 
 ### Added
 
@@ -40,6 +46,12 @@ currently 13); a binary refuses a database newer than it understands.
   one live authorization check, including in-process MCP mutations.
 
 ### Changed
+
+- **Kanban onboarding documentation:** a full quickstart covers Debian
+  service-user setup, project enablement, user and project token issuance,
+  per-hub credentials, checkout-local overrides and process selection.
+  The roadmap separates merged implementation from release/rollout gates
+  and describes current task pickup plus planned priority/complexity work.
 
 - **Installers upgrade stale installs:** `boot.sh` / `boot.ps1` now replace
   an installed aimem that is older than the release being fetched. Same or

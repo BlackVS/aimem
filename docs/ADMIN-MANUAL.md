@@ -332,6 +332,9 @@ Unset env = BM25-only recall — everything still works.
 
 ### Enabling tasks for a project
 
+For the complete enablement, user/grant/token and agent setup sequence,
+see the [Kanban quickstart](KANBAN-QUICKSTART.md).
+
 Tasks (the Kanban work: the `/tasks` page, the task routes, the MCP task
 tools) are off for a project until an admin switches them on. Most
 projects on a hub are journals and memories and never need them.
