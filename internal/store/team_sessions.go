@@ -161,23 +161,33 @@ ON CONFLICT(team_id) DO UPDATE SET coordinator_generation=coordinator_generation
 	return n, err
 }
 
-func saveTeamSession(tx *sql.Tx, t Team, s TeamSession, previous int64, operation string, audit TeamAuditContext) error {
+// putTeamSession writes the row that the coordinator uniqueness index reads;
+// role and state must follow the snapshot so a handoff cannot leave two active
+// coordinator rows or a stale role column behind.
+func putTeamSession(tx *sql.Tx, s TeamSession) error {
 	body, err := json.Marshal(s)
 	if err != nil {
 		return err
 	}
 	_, err = tx.Exec(`INSERT INTO team_sessions(id,team_id,role,state,body) VALUES(?,?,?,?,?)
-ON CONFLICT(id) DO UPDATE SET state=excluded.state,body=excluded.body`, s.ID, s.TeamID, s.Role, s.State, string(body))
-	if err != nil {
-		return err
-	}
-	e := TeamEvent{ID: uuidv7.New(), ProtocolVersion: 1, Operation: operation, At: nowUTC(), TeamAuditContext: audit, Team: t, Session: &s, PreviousGeneration: previous}
-	body, err = json.Marshal(e)
-	if err != nil {
-		return err
-	}
-	_, err = tx.Exec(`INSERT INTO team_events(team_id,body) VALUES(?,?)`, t.ID, string(body))
+ON CONFLICT(id) DO UPDATE SET role=excluded.role,state=excluded.state,body=excluded.body`, s.ID, s.TeamID, s.Role, s.State, string(body))
 	return err
+}
+
+func putTeamEvent(tx *sql.Tx, teamID string, e TeamEvent) error {
+	body, err := json.Marshal(e)
+	if err != nil {
+		return err
+	}
+	_, err = tx.Exec(`INSERT INTO team_events(team_id,body) VALUES(?,?)`, teamID, string(body))
+	return err
+}
+
+func saveTeamSession(tx *sql.Tx, t Team, s TeamSession, previous int64, operation string, audit TeamAuditContext) error {
+	if err := putTeamSession(tx, s); err != nil {
+		return err
+	}
+	return putTeamEvent(tx, t.ID, TeamEvent{ID: uuidv7.New(), ProtocolVersion: 1, Operation: operation, At: nowUTC(), TeamAuditContext: audit, Team: t, Session: &s, PreviousGeneration: previous})
 }
 
 // JoinTeam takes a stable team ID. Transport resolves readable names first.

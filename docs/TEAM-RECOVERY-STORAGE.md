@@ -1,9 +1,10 @@
 # Operator recovery storage
 
 `RecoverTeamAssignment` provides an internal forced-close operation after an
-operator reconciles abandoned execution. HTTP, CLI and MCP recovery commands,
-token rebinding and coordinator handoff remain separate increments. The complete
-team workflow still advertises `workflow_ready: false`.
+operator reconciles abandoned execution. HTTP, CLI and MCP recovery commands and
+token rebinding remain separate increments; a lost coordinator is handled by
+[coordinator handoff](TEAM-COORDINATOR-HANDOFF-STORAGE.md). The complete team
+workflow still advertises `workflow_ready: false`.
 
 ## Reconciliation before closure
 

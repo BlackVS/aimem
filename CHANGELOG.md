@@ -15,6 +15,12 @@ currently 17); a binary refuses a database newer than it understands.
 
 ### Added
 
+- Coordinator handoff storage: the current coordinator, or an admin with
+  recorded reconciliation after a loss, transfers the slot to an active
+  designated session with no reserved attempt in one transaction; the old
+  handle is stale, existing attempts survive, and one audit event records the
+  transfer. Public handoff commands and token replacement remain deferred.
+
 - Worker session rebinding storage: a worker resume carries its reserved
   attempt to the new session generation in one transaction, with bounded rebind
   history, a correlated audit event and a reserved-attempt read. Offers, leave

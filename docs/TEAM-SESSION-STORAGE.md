@@ -17,10 +17,11 @@ this increment; retries of accepted joins work at the limit. The limit is
 operator-configurable through JoinTeamLimit and the transport.
 
 Only one active coordinator can exist, enforced both by the transaction and a
-unique SQLite index. Its generation increases on acquisition and resume, and
-survives clean leave and subsequent acquisition. Revoking enrollment or
-coordinator eligibility blocks further use without freeing its slot. Operator
-recovery remains a later operation; re-enrollment permits explicit reconciliation.
+unique SQLite index. Its generation increases on acquisition, resume and
+[handoff](TEAM-COORDINATOR-HANDOFF-STORAGE.md), and survives clean leave and
+subsequent acquisition. Revoking enrollment or coordinator eligibility blocks
+further use without freeing its slot; a lost coordinator's slot is transferred
+by an admin handoff with recorded reconciliation, never by a timeout.
 
 `ChangeTeamSession` implements profile replacement with an expected profile
 revision, heartbeat with availability, resume, and clean leave. Every new effect
