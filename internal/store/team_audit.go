@@ -4,16 +4,24 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"math"
 	"regexp"
 	"strings"
 	"time"
 )
 
+// TeamAuditLatest as an upper bound reads up to the newest record. Any other
+// bound is a snapshot sequence; zero reads nothing.
+const TeamAuditLatest int64 = math.MaxInt64
+
 // TeamAuditFilter narrows a timeline or export read. IDs are exact; the
 // operation is an exact name or a prefix ending in '.'; since/until are
 // RFC3339 timestamps compared against the server timestamp of each record as
-// a half-open range [since, until). Normalized to UTC seconds on validation
-// because stored timestamps are RFC3339 UTC and compare lexicographically.
+// a half-open range [since, until). Stored timestamps are RFC3339 UTC whole
+// seconds and compare lexicographically, so normalization moves each bound to
+// UTC and rounds a fractional bound UP to the next whole second: a record at
+// whole second T satisfies at >= s exactly when at >= ceil(s), and at < u
+// exactly when at < ceil(u). The requested instants decide validity.
 type TeamAuditFilter struct {
 	SessionID string `json:"session_id,omitempty"`
 	TaskID    string `json:"task_id,omitempty"`
@@ -35,10 +43,12 @@ func (f TeamAuditFilter) Normalize() (TeamAuditFilter, error) {
 	if f.Operation != "" && (len(f.Operation) > 128 || !auditOperationRE.MatchString(f.Operation)) {
 		return f, invalid(errors.New("operation must be a dotted name or a prefix ending in '.'"))
 	}
+	var since, until time.Time
 	for _, ts := range []struct {
-		name  string
-		value *string
-	}{{"since", &f.Since}, {"until", &f.Until}} {
+		name    string
+		value   *string
+		instant *time.Time
+	}{{"since", &f.Since, &since}, {"until", &f.Until, &until}} {
 		if *ts.value == "" {
 			continue
 		}
@@ -46,9 +56,13 @@ func (f TeamAuditFilter) Normalize() (TeamAuditFilter, error) {
 		if err != nil {
 			return f, invalid(errors.New(ts.name + " must be an RFC3339 timestamp"))
 		}
+		*ts.instant = parsed.UTC()
+		if whole := parsed.Truncate(time.Second); !whole.Equal(parsed) {
+			parsed = whole.Add(time.Second)
+		}
 		*ts.value = parsed.UTC().Format(time.RFC3339)
 	}
-	if f.Since != "" && f.Until != "" && f.Until <= f.Since {
+	if f.Since != "" && f.Until != "" && !until.After(since) {
 		return f, invalid(errors.New("until must be after since"))
 	}
 	return f, nil
@@ -136,7 +150,8 @@ func auditPage(after, upTo int64, limit int) error {
 }
 
 // TeamTimeline reads accepted audit events in sequence order with sequence
-// in (after, upTo] (upTo zero: unbounded) that match the filter. A session
+// in (after, upTo] that match the filter; upTo is a snapshot sequence or
+// TeamAuditLatest, and zero reads nothing. A session
 // matches the event session, the assignment worker or either handoff side;
 // a task matches the assignment or managed task; an attempt matches the
 // assignment or managed attempt. A sparse filter scans the team's events in
@@ -152,12 +167,8 @@ func (d *DB) TeamTimeline(teamID string, f TeamAuditFilter, after, upTo int64, l
 	if err != nil {
 		return nil, err
 	}
-	query := `SELECT sequence,body FROM team_events WHERE team_id=? AND sequence>?`
-	args := []any{teamID, after}
-	if upTo > 0 {
-		query += ` AND sequence<=?`
-		args = append(args, upTo)
-	}
+	query := `SELECT sequence,body FROM team_events WHERE team_id=? AND sequence>? AND sequence<=?`
+	args := []any{teamID, after, upTo}
 	if f.SessionID != "" {
 		query += ` AND (json_extract(body,'$.session.id')=? OR json_extract(body,'$.assignment.worker.session_id')=? OR json_extract(body,'$.handoff.from.session_id')=? OR json_extract(body,'$.handoff.to.session_id')=?)`
 		args = append(args, f.SessionID, f.SessionID, f.SessionID, f.SessionID)
@@ -208,7 +219,8 @@ func (d *DB) TeamTimeline(teamID string, f TeamAuditFilter, after, upTo int64, l
 }
 
 // TeamMessageAudit reads message metadata in sequence order with sequence in
-// (after, upTo] (upTo zero: unbounded) that match the filter, with one
+// (after, upTo] (a snapshot sequence or TeamAuditLatest; zero reads nothing)
+// that match the filter, with one
 // delivery record per recipient session. A session matches the sender or a
 // recipient; the operation applies to the lifecycle record, so an operation
 // filter yields lifecycle messages only. Payloads are included only on
@@ -224,12 +236,8 @@ func (d *DB) TeamMessageAudit(teamID string, f TeamAuditFilter, after, upTo int6
 	if err != nil {
 		return nil, err
 	}
-	query := `SELECT body FROM team_messages WHERE team_id=? AND sequence>?`
-	args := []any{teamID, after}
-	if upTo > 0 {
-		query += ` AND sequence<=?`
-		args = append(args, upTo)
-	}
+	query := `SELECT body FROM team_messages WHERE team_id=? AND sequence>? AND sequence<=?`
+	args := []any{teamID, after, upTo}
 	if f.SessionID != "" {
 		query += ` AND (json_extract(body,'$.sender_id')=? OR EXISTS(SELECT 1 FROM team_deliveries d WHERE d.message_id=team_messages.id AND d.session_id=?))`
 		args = append(args, f.SessionID, f.SessionID)

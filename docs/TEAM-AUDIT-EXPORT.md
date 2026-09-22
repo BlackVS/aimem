@@ -34,12 +34,18 @@ bodies are excluded by default and included only on request.
 
 `TeamAuditFilter` narrows a read: `session_id`, `task_id`, `attempt_id`,
 `operation` (an exact name such as `team.assignment.offer`, or a prefix ending
-in a dot such as `team.assignment.`), and `since`/`until` (RFC3339, normalized
-to UTC, half-open on the record's server timestamp). Filters intersect.
+in a dot such as `team.assignment.`), and `since`/`until` (RFC3339, half-open
+on the record's server timestamp). Stored timestamps are whole UTC seconds, so
+a bound is normalized to UTC and a fractional bound rounds up to the next whole
+second, which preserves the half-open meaning for every stored record; the
+requested instants decide whether the range is valid (`until` after `since`),
+and an empty effective range simply matches nothing. Filters intersect.
 
 `TeamAuditSnapshot` returns the team's current upper event and message
 sequences with the server time. `TeamTimeline` returns sequence-ordered events
-with sequence in `(after, up_to]` that match the filter: a session matches the
+with sequence in `(after, up_to]` that match the filter, where `up_to` is a
+snapshot sequence or `TeamAuditLatest` and a zero bound (an empty snapshot)
+reads nothing: a session matches the
 event session, the assignment worker or either handoff side; a task matches the
 assignment or managed task; an attempt matches the assignment or managed
 attempt. `TeamMessageAudit` returns sequence-ordered message records in the

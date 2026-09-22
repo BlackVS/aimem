@@ -12,11 +12,28 @@ import (
 
 func timeline(t *testing.T, d *DB, team Team, f TeamAuditFilter) []TeamEvent {
 	t.Helper()
-	out, err := d.TeamTimeline(team.ID, f, 0, 0, 101)
+	out, err := d.TeamTimeline(team.ID, f, 0, TeamAuditLatest, 101)
 	if err != nil {
 		t.Fatal(err)
 	}
 	return out
+}
+
+// window is the true half-open semantics on the requested instants, used to
+// check that the whole-second normalization never changes the answer.
+func window(t *testing.T, at []string, since, until time.Time) int {
+	t.Helper()
+	n := 0
+	for _, s := range at {
+		parsed, err := time.Parse(time.RFC3339, s)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !parsed.Before(since) && parsed.Before(until) {
+			n++
+		}
+	}
+	return n
 }
 
 func mentionsSession(e TeamEvent, id string) bool {
@@ -94,9 +111,26 @@ func TestTeamAuditTimelineFilters(t *testing.T) {
 	if got := timeline(t, d, team, TeamAuditFilter{Since: "2000-01-01T02:00:00.5+02:00", Until: future}); len(got) != len(all) {
 		t.Fatal("window", len(got), len(all))
 	}
-	f, err := TeamAuditFilter{Since: "2000-01-01T02:00:00.5+02:00"}.Normalize()
-	if err != nil || f.Since != "2000-01-01T00:00:00Z" {
-		t.Fatal(f, err)
+	f, err := TeamAuditFilter{Since: "2000-01-01T02:00:00.5+02:00", Until: "2000-01-01T00:00:00.9Z"}.Normalize()
+	if err != nil || f.Since != "2000-01-01T00:00:01Z" || f.Until != "2000-01-01T00:00:01Z" {
+		t.Fatal("fractional bounds round up; validity uses the instants", f, err)
+	}
+	// Fractional bounds around a stored whole second keep the half-open meaning.
+	at := []string{}
+	for _, e := range all {
+		at = append(at, e.At)
+	}
+	first, err := time.Parse(time.RFC3339, all[0].At)
+	if err != nil {
+		t.Fatal(err)
+	}
+	far := first.Add(time.Hour)
+	for _, w := range [][2]time.Time{{first.Add(500 * time.Millisecond), far}, {first.Add(-time.Hour), first.Add(500 * time.Millisecond)}, {first.Add(-500 * time.Millisecond), first.Add(500 * time.Millisecond)},
+		{first.Add(100 * time.Millisecond), first.Add(900 * time.Millisecond)}, {first, first.Add(time.Second)}, {first.Add(time.Second), far}, {first.Add(-time.Hour), first.Add(time.Second)}} {
+		got := timeline(t, d, team, TeamAuditFilter{Since: w[0].Format(time.RFC3339Nano), Until: w[1].Format(time.RFC3339Nano)})
+		if len(got) != window(t, at, w[0], w[1]) {
+			t.Fatalf("window [%s, %s): %d events, want %d", w[0].Format(time.RFC3339Nano), w[1].Format(time.RFC3339Nano), len(got), window(t, at, w[0], w[1]))
+		}
 	}
 	// Combined filters intersect.
 	if got := timeline(t, d, team, TeamAuditFilter{SessionID: c.Worker.SessionID, Operation: "team.join"}); len(got) != 1 || got[0].Operation != "team.join" {
@@ -114,6 +148,13 @@ func TestTeamAuditTimelineFilters(t *testing.T) {
 	if err != nil || len(bounded) != len(all) {
 		t.Fatal(len(bounded), err)
 	}
+	// A zero bound is an empty snapshot, never an unbounded read.
+	if none, err := d.TeamTimeline(team.ID, TeamAuditFilter{}, 0, 0, 101); err != nil || len(none) != 0 {
+		t.Fatal("zero bound", none, err)
+	}
+	if none, err := d.TeamMessageAudit(team.ID, TeamAuditFilter{}, 0, 0, 101, false); err != nil || len(none) != 0 {
+		t.Fatal("zero message bound", none, err)
+	}
 	if got := timeline(t, d, team, TeamAuditFilter{}); len(got) <= len(all) {
 		t.Fatal("unbounded read misses the new event")
 	}
@@ -127,11 +168,11 @@ func TestTeamAuditTimelineFilters(t *testing.T) {
 func TestTeamAuditRefusals(t *testing.T) {
 	_, d, team, _, _, _, _ := runningResultFixture(t)
 	for _, f := range []TeamAuditFilter{{SessionID: "x"}, {TaskID: "../x"}, {AttemptID: " "}, {Operation: "Team.X"}, {Operation: "a..b"}, {Operation: "team assignment"}, {Operation: strings.Repeat("a", 129)},
-		{Since: "yesterday"}, {Until: "2026-09-22"}, {Since: "2026-09-22T10:00:00Z", Until: "2026-09-22T10:00:00Z"}} {
-		if _, err := d.TeamTimeline(team.ID, f, 0, 0, 10); !errors.Is(err, ErrTaskInvalid) {
+		{Since: "yesterday"}, {Until: "2026-09-22"}, {Since: "2026-09-22T10:00:00Z", Until: "2026-09-22T10:00:00Z"}, {Since: "2026-09-22T10:00:00.5Z", Until: "2026-09-22T10:00:00.5Z"}} {
+		if _, err := d.TeamTimeline(team.ID, f, 0, TeamAuditLatest, 10); !errors.Is(err, ErrTaskInvalid) {
 			t.Fatalf("%+v: %v", f, err)
 		}
-		if _, err := d.TeamMessageAudit(team.ID, f, 0, 0, 10, false); !errors.Is(err, ErrTaskInvalid) {
+		if _, err := d.TeamMessageAudit(team.ID, f, 0, TeamAuditLatest, 10, false); !errors.Is(err, ErrTaskInvalid) {
 			t.Fatalf("messages %+v: %v", f, err)
 		}
 	}
@@ -144,10 +185,10 @@ func TestTeamAuditRefusals(t *testing.T) {
 		}
 	}
 	unknown := uuidv7.New()
-	if _, err := d.TeamTimeline(unknown, TeamAuditFilter{}, 0, 0, 10); !errors.Is(err, ErrTeamNotFound) {
+	if _, err := d.TeamTimeline(unknown, TeamAuditFilter{}, 0, TeamAuditLatest, 10); !errors.Is(err, ErrTeamNotFound) {
 		t.Fatal(err)
 	}
-	if _, err := d.TeamMessageAudit(unknown, TeamAuditFilter{}, 0, 0, 10, false); !errors.Is(err, ErrTeamNotFound) {
+	if _, err := d.TeamMessageAudit(unknown, TeamAuditFilter{}, 0, TeamAuditLatest, 10, false); !errors.Is(err, ErrTeamNotFound) {
 		t.Fatal(err)
 	}
 	if _, err := d.TeamAuditSnapshot(unknown); !errors.Is(err, ErrTeamNotFound) {
@@ -156,10 +197,10 @@ func TestTeamAuditRefusals(t *testing.T) {
 	if err := d.SetMeta(TasksMetaKey, "off"); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := d.TeamTimeline(team.ID, TeamAuditFilter{}, 0, 0, 10); !errors.Is(err, ErrTeamSessionDenied) {
+	if _, err := d.TeamTimeline(team.ID, TeamAuditFilter{}, 0, TeamAuditLatest, 10); !errors.Is(err, ErrTeamSessionDenied) {
 		t.Fatal(err)
 	}
-	if _, err := d.TeamMessageAudit(team.ID, TeamAuditFilter{}, 0, 0, 10, false); !errors.Is(err, ErrTeamSessionDenied) {
+	if _, err := d.TeamMessageAudit(team.ID, TeamAuditFilter{}, 0, TeamAuditLatest, 10, false); !errors.Is(err, ErrTeamSessionDenied) {
 		t.Fatal(err)
 	}
 	if _, err := d.TeamAuditSnapshot(team.ID); !errors.Is(err, ErrTeamSessionDenied) {
@@ -169,7 +210,7 @@ func TestTeamAuditRefusals(t *testing.T) {
 
 func messageAuditOf(t *testing.T, d *DB, team Team, f TeamAuditFilter, bodies bool) []TeamMessageAudit {
 	t.Helper()
-	out, err := d.TeamMessageAudit(team.ID, f, 0, 0, 101, bodies)
+	out, err := d.TeamMessageAudit(team.ID, f, 0, TeamAuditLatest, 101, bodies)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -291,9 +332,22 @@ func TestTeamAuditMessagesMetadataAndDeliveries(t *testing.T) {
 	if got := messageAuditOf(t, d, team, TeamAuditFilter{Operation: "team.assignment.offer"}, false); len(got) != 1 || got[0].Lifecycle.Operation != "team.assignment.offer" {
 		t.Fatal("exact operation", got)
 	}
-	// Time range and snapshot bound.
+	// Time range and snapshot bound; fractional bounds keep the half-open meaning.
 	if got := messageAuditOf(t, d, team, TeamAuditFilter{Until: all[0].CreatedAt}, false); len(got) != 0 {
 		t.Fatal("until", len(got))
+	}
+	created := []string{}
+	for _, m := range all {
+		created = append(created, m.CreatedAt)
+	}
+	first, err := time.Parse(time.RFC3339, all[0].CreatedAt)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, w := range [][2]time.Time{{first.Add(500 * time.Millisecond), first.Add(time.Hour)}, {first.Add(-time.Hour), first.Add(500 * time.Millisecond)}, {first.Add(100 * time.Millisecond), first.Add(900 * time.Millisecond)}} {
+		if got := messageAuditOf(t, d, team, TeamAuditFilter{Since: w[0].Format(time.RFC3339Nano), Until: w[1].Format(time.RFC3339Nano)}, false); len(got) != window(t, created, w[0], w[1]) {
+			t.Fatalf("message window [%s, %s): %d, want %d", w[0], w[1], len(got), window(t, created, w[0], w[1]))
+		}
 	}
 	snapshot, err := d.TeamAuditSnapshot(team.ID)
 	if err != nil || snapshot.MessageSequence != all[len(all)-1].Sequence {

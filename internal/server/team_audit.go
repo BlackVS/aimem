@@ -74,7 +74,7 @@ func (s *Server) teamEvents(w http.ResponseWriter, r *http.Request) {
 		s.fail(w, 400, errors.New("after must be a nonnegative sequence"))
 		return
 	}
-	es, err := db.TeamTimeline(r.PathValue("team"), auditFilter(q), after, 0, limit+1)
+	es, err := db.TeamTimeline(r.PathValue("team"), auditFilter(q), after, store.TeamAuditLatest, limit+1)
 	if err != nil {
 		s.teamError(w, r, err)
 		return
@@ -98,7 +98,8 @@ type teamExportCursor struct {
 // limit events, up to limit messages (metadata unless include_bodies), and an
 // end record with the cursor for the next page. The first page takes the
 // snapshot; later pages pass it back so records accepted meanwhile never
-// appear, and every page runs the admin gate again. The page is read fully
+// appear (a stream whose snapshot is zero yields nothing on any page), and
+// every page runs the admin gate again. The page is read fully
 // before anything is written, so a storage failure is a normal error response.
 func (s *Server) teamExport(w http.ResponseWriter, r *http.Request) {
 	p, db := s.adminTeamProject(w, r)
