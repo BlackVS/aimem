@@ -56,10 +56,13 @@ may be needed. Credentials and audit context are never configuration fields.
 
 The HTTP surface is `/v1/projects/{p}/teams` (GET/POST),
 `/v1/projects/{p}/teams/{team}` (GET/PUT), and
-`/v1/projects/{p}/teams/{team}/events` (GET). Writes carry `Idempotency-Key`.
+`/v1/projects/{p}/teams/{team}/events` (GET) and
+`/v1/projects/{p}/teams/{team}/export` (GET). Writes carry `Idempotency-Key`.
 Lists default to 50 records; `limit` accepts 1-100 and `after` continues from
-`next_cursor` (team ID for lists, sequence for events). CLI list/events currently
-print one page; use HTTP for further pages. A zero/empty cursor ends pagination.
+`next_cursor` (team ID for lists, sequence for events). Events accept the audit
+filters and the export streams JSONL pages of events and message metadata; see
+[TEAM-AUDIT-EXPORT.md](TEAM-AUDIT-EXPORT.md). CLI list/events print one page;
+`aimem teams export` follows all pages. A zero/empty cursor ends pagination.
 Responses identify protocol version 1 and the list advertises only implemented
 administrative operations.
 
@@ -69,8 +72,8 @@ configuration, request ID, protocol/server version and selected process commit
 when present. Request diagnostics include status, duration and correlation ID,
 including failed authentication or malformed JSON, without request bodies,
 credentials or retry keys. They use the existing service log sink and its
-retention; they are not a durable delivery log. Rich audit export/analysis is a
-later increment.
+retention; they are not a durable delivery log and are not part of the audit
+export. Analysis over the export is a later increment.
 
 Project schema 14 adds administration, 15 sessions and 16 durable messages.
 See TEAM-AGENT-QUICKSTART.md for agent HTTP/CLI/MCP operations. Back up the

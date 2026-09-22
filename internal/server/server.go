@@ -136,6 +136,7 @@ func (s *Server) Routes() []Route {
 		{"GET", "/v1/projects/{p}/teams/{team}", s.getTeam, true},
 		{"PUT", "/v1/projects/{p}/teams/{team}", s.configureTeam, true},
 		{"GET", "/v1/projects/{p}/teams/{team}/events", s.teamEvents, true},
+		{"GET", "/v1/projects/{p}/teams/{team}/export", s.teamExport, true},
 		{"POST", "/v1/projects/{p}/teams/{team}/join", s.joinTeam, false},
 		{"GET", "/v1/projects/{p}/teams/{team}/members", s.teamMembers, false},
 		{"POST", "/v1/projects/{p}/teams/{team}/heartbeat", s.changeTeamSession, false},

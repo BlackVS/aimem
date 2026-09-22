@@ -502,7 +502,13 @@ Offers, submitted results and terminal attempts cannot use this path. The
 [token replacement](TEAM-SESSION-STORAGE.md#token-replacement) operation moves a
 session to a replacement credential of the same user after recorded
 reconciliation, carrying a reserved attempt as on resume; receipts recorded under
-the old credential never replay for the new one.
+the old credential never replay for the new one. The
+[audit timeline and export](TEAM-AUDIT-EXPORT.md) increment delivers the core
+communication-audit slice: filtered admin reads of accepted events and a paged
+JSONL export of events plus message metadata (bodies opt-in) at one snapshot,
+with a schema header, applied filters and a completion marker; delivery and
+acknowledgement records are exported as observed and never inferred. Analysis
+and diagnostics correlation build on it separately.
 
 The [session rebinding](TEAM-ASSIGNMENT-STORAGE.md#session-rebinding) increment
 implements the resume rule above for workers: a worker resume carries its reserved
