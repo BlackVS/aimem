@@ -184,14 +184,36 @@ func (r *rehearsalHub) tool(token, name string, args map[string]any) map[string]
 	return out
 }
 
-func (r *rehearsalHub) refuse(token, name string, args map[string]any) string {
+// refuse expects the hub to refuse the call for the named reason: an
+// unrelated error is not a passed negative scenario, and a refusal may not
+// carry a binding any more than a success may.
+func (r *rehearsalHub) refuse(token, name string, args map[string]any, want string) {
 	r.t.Helper()
 	raw, bad := toolText(r.rpc(token, "tools/call", map[string]any{"name": name, "arguments": args}))
-	if !bad {
-		r.t.Fatalf("%s accepted: %s", name, raw)
+	if err := checkRefusal(raw, bad, want); err != nil {
+		r.t.Fatalf("%s: %v", name, err)
 	}
-	return raw
 }
+
+// checkRefusal is the rule behind refuse, kept pure so the rule itself is
+// tested: refused, for the expected reason, without a user or token id.
+func checkRefusal(raw string, bad bool, want string) error {
+	switch {
+	case !bad:
+		return fmt.Errorf("accepted: %s", raw)
+	case !strings.Contains(raw, want):
+		return fmt.Errorf("refused for another reason than %q: %s", want, raw)
+	case strings.Contains(raw, "token_id") || strings.Contains(raw, "user_id"):
+		return fmt.Errorf("refusal leaked bindings: %s", raw)
+	}
+	return nil
+}
+
+const (
+	refusedConflict = "HTTP 409: assignment state, task readiness or worker capacity conflict"
+	refusedStale    = "HTTP 409: team session is closed or generation is stale"
+	refusedScope    = "HTTP 403: token scope or current grant does not permit writes to this project"
+)
 
 func (r *rehearsalHub) createTask(key string) (string, int64) {
 	r.t.Helper()
@@ -267,9 +289,9 @@ func TestTeamRehearsal(t *testing.T) {
 		return merge(handle, map[string]any{"coordinator_generation": gen, "task_id": task, "expected_revision": rev, "worker": map[string]any{"session_id": worker["session_id"], "generation": worker["generation"]}, "suitability_rationale": "S task; declared capability fits", "cost_rationale": "least costly suitable available member", "idempotency_key": key})
 	}
 	attemptA := assignmentOf(r.tool(alice, "team_offer", offer(alice, co, 1, taskA, revA, wb, "offer-a")))["id"].(string)
-	r.refuse(alice, "team_offer", offer(alice, co, 1, taskA, r.revision(taskA), wc, "offer-a-collision"))
+	r.refuse(alice, "team_offer", offer(alice, co, 1, taskA, r.revision(taskA), wc, "offer-a-collision"), refusedConflict)
 	taskB, revB := r.createTask("task-b")
-	r.refuse(alice, "team_offer", offer(alice, co, 1, taskB, revB, wb, "offer-b-busy"))
+	r.refuse(alice, "team_offer", offer(alice, co, 1, taskB, revB, wb, "offer-b-busy"), refusedConflict)
 	r.note("3 collision: second offer for a reserved task refused; offer to a worker holding an attempt refused")
 
 	// 4. The complete loop on task A.
@@ -301,7 +323,7 @@ func TestTeamRehearsal(t *testing.T) {
 	if got := assignmentOf(r.tool(bob, "team_reserved", wb)); got["id"] != attemptB || got["worker"].(map[string]any)["generation"].(float64) != 2 {
 		t.Fatal(got)
 	}
-	r.refuse(bob, "team_block", merge(wbOld, map[string]any{"attempt": attemptB, "expected_revision": r.revision(taskB), "reason": "stale", "idempotency_key": "stale-block"}))
+	r.refuse(bob, "team_block", merge(wbOld, map[string]any{"attempt": attemptB, "expected_revision": r.revision(taskB), "reason": "stale", "idempotency_key": "stale-block"}), refusedStale)
 	r.note("5 restart: resume moved bob to generation 2, the reserved attempt followed, the old handle was refused")
 
 	// 6. Duplicate commands and results: a replayed key returns the original
@@ -312,7 +334,7 @@ func TestTeamRehearsal(t *testing.T) {
 	if first["result"].(map[string]any)["id"] != replay["result"].(map[string]any)["id"] {
 		t.Fatal("replay produced a second result")
 	}
-	r.refuse(bob, "team_submit", merge(submitB, map[string]any{"idempotency_key": "submit-b-again"}))
+	r.refuse(bob, "team_submit", merge(submitB, map[string]any{"idempotency_key": "submit-b-again"}), refusedConflict)
 	resultB := first["result"].(map[string]any)["id"].(string)
 	r.note("6 duplicates: replayed submit returned the same result; a re-issued submit was refused")
 
@@ -322,7 +344,7 @@ func TestTeamRehearsal(t *testing.T) {
 	if got := r.mustHTTP("POST", base+"/handoff", r.admin, "admin-handoff", handoff, 200)["session"].(map[string]any); got["role"] != "coordinator" || got["coordinator_generation"].(float64) != 2 {
 		t.Fatal(got)
 	}
-	r.refuse(alice, "team_review", merge(co, map[string]any{"attempt": attemptB, "coordinator_generation": 1, "expected_revision": r.revision(taskB), "result_id": resultB, "decision": "accept", "reason": "stale coordinator", "idempotency_key": "stale-review"}))
+	r.refuse(alice, "team_review", merge(co, map[string]any{"attempt": attemptB, "coordinator_generation": 1, "expected_revision": r.revision(taskB), "result_id": resultB, "decision": "accept", "reason": "stale coordinator", "idempotency_key": "stale-review"}), refusedStale)
 	newCo := wc
 	if got := assignmentOf(r.tool(carol, "team_review", merge(newCo, map[string]any{"attempt": attemptB, "coordinator_generation": 2, "expected_revision": r.revision(taskB), "result_id": resultB, "decision": "accept", "reason": "evidence checked by the successor", "idempotency_key": "review-b"}))); got["state"] != "ACCEPTED" {
 		t.Fatal(got)
@@ -334,7 +356,7 @@ func TestTeamRehearsal(t *testing.T) {
 	attemptC := assignmentOf(r.tool(carol, "team_offer", offer(carol, newCo, 2, taskC, revC, wb, "offer-c")))["id"].(string)
 	r.tool(bob, "team_accept", merge(wb, map[string]any{"attempt": attemptC, "idempotency_key": "accept-c"}))
 	r.mustHTTP("DELETE", "/v1/access/tokens/"+r.tokenIDs["bob-1"], r.admin, "", nil, 200)
-	r.refuse(bob, "team_reserved", wb)
+	r.refuse(bob, "team_reserved", wb, "HTTP 401")
 	bob2 := r.issue("bob", "bob-2")
 	rebind := map[string]any{"session_id": wb["session_id"], "expected_generation": 2, "token_id": r.tokenIDs["bob-2"], "reconciliation": map[string]any{"old_credential_stopped": true, "reason": "credential revoked after a leak report", "runtime_check": "old client stopped; no command in flight", "evidence_refs": []map[string]any{{"kind": "text", "ref": "operator checked the host"}}}}
 	if got := r.mustHTTP("POST", base+"/sessions/"+wb["session_id"].(string)+"/rebind-token", r.admin, "rebind-bob", rebind, 200)["session"].(map[string]any); got["generation"].(float64) != 3 {
@@ -359,8 +381,8 @@ func TestTeamRehearsal(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	r.refuse(betaSecret, "team_join", map[string]any{"project": "alpha", "team": "Builders", "role": "worker", "profile": map[string]any{"label": "intruder", "platform": "fixture", "platform_version": "1"}, "idempotency_key": "join-beta"})
-	r.refuse(betaSecret, "team_members", newCo)
+	r.refuse(betaSecret, "team_join", map[string]any{"project": "alpha", "team": "Builders", "role": "worker", "profile": map[string]any{"label": "intruder", "platform": "fixture", "platform_version": "1"}, "idempotency_key": "join-beta"}, refusedScope)
+	r.refuse(betaSecret, "team_members", newCo, refusedScope)
 	r.note("9 cross-project: a token scoped to project beta cannot join or read the alpha team")
 
 	// 10. Legacy mutation on a managed task is refused for every credential.
@@ -469,5 +491,27 @@ func (r *rehearsalHub) export(base, dir string) (int, int, map[string]bool, map[
 		}
 		next := end["next"].(map[string]any)
 		path = fmt.Sprintf("%s/export?limit=20&after_events=%d&after_messages=%d&snapshot_events=%d&snapshot_messages=%d", base, int64(next["after_events"].(float64)), int64(next["after_messages"].(float64)), int64(next["snapshot_events"].(float64)), int64(next["snapshot_messages"].(float64)))
+	}
+}
+
+// The refusal rule itself: an unrelated error, an accepted call or a refusal
+// that carries a binding must not count as a passed negative scenario.
+func TestRehearsalRefusalRule(t *testing.T) {
+	for _, tc := range []struct {
+		raw  string
+		bad  bool
+		want string
+		ok   bool
+	}{
+		{"error: team request " + refusedConflict, true, refusedConflict, true},
+		{"HTTP 401: ", true, "HTTP 401", true},
+		{"HTTP 500: storage failure", true, refusedConflict, false},
+		{"error: invalid arguments: attempt required", true, refusedConflict, false},
+		{`{"protocol_version": 1, "assignment": {}}`, false, refusedConflict, false},
+		{"error: team request " + refusedConflict + ` for user_id 0123`, true, refusedConflict, false},
+	} {
+		if err := checkRefusal(tc.raw, tc.bad, tc.want); (err == nil) != tc.ok {
+			t.Fatalf("%q bad=%v want=%q: %v", tc.raw, tc.bad, tc.want, err)
+		}
 	}
 }
