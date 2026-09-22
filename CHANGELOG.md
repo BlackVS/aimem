@@ -15,6 +15,11 @@ currently 17); a binary refuses a database newer than it understands.
 
 ### Added
 
+- Team result storage: immutable repository candidates, coordinator acceptance
+  or return for a new offer, and transactional task/history/audit/retry updates.
+  Submission retains reservations; acceptance leaves the task in REVIEW for
+  delivery gates. HTTP/CLI/MCP result operations and recovery remain deferred.
+
 - Team assignment HTTP primitives: offer/read/accept/decline/withdraw with live
   coordinator and worker authorization. These expose the schema 17 foundation;
   result/recovery operations and the full MCP/CLI execution workflow are deferred.
