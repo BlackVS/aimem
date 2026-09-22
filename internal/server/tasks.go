@@ -29,6 +29,10 @@ const maxTaskRequestBytes = 256 << 10
 // taskRoutes are the task routes: what the in-process MCP dispatcher may
 // call, and (with POST /mcp) the exact surface an ordinary token may reach.
 var taskRoutes = map[string]bool{
+	"POST /v1/projects/{p}/teams/{team}/messages":  true,
+	"GET /v1/projects/{p}/teams/{team}/messages":   true,
+	"GET /v1/projects/{p}/teams/{team}/inbox":      true,
+	"POST /v1/projects/{p}/teams/{team}/ack":       true,
 	"POST /v1/projects/{p}/teams/{team}/join":      true,
 	"GET /v1/projects/{p}/teams/{team}/members":    true,
 	"POST /v1/projects/{p}/teams/{team}/heartbeat": true,

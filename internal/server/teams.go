@@ -74,14 +74,14 @@ func (s *Server) teamError(w http.ResponseWriter, r *http.Request, err error) {
 	switch {
 	case errors.Is(err, store.ErrTeamSessionDenied):
 		status, message = 403, "current team enrollment and bound ordinary write session required"
-	case errors.Is(err, store.ErrTeamSessionStale), errors.Is(err, store.ErrTeamCoordinatorOccupied), errors.Is(err, store.ErrTeamSessionQuota):
+	case errors.Is(err, store.ErrTeamSessionStale), errors.Is(err, store.ErrTeamCoordinatorOccupied), errors.Is(err, store.ErrTeamSessionQuota), errors.Is(err, store.ErrTeamMessageQuota), errors.Is(err, store.ErrTeamMessageUndelivered):
 		status, message = 409, err.Error()
 	case errors.As(err, &conflict):
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusConflict)
 		json.NewEncoder(w).Encode(map[string]any{"error": "team revision conflict", "current": teamView(conflict.Current)})
 		return
-	case errors.Is(err, store.ErrTeamNotFound), errors.Is(err, store.ErrNoSuchProject):
+	case errors.Is(err, store.ErrTeamNotFound), errors.Is(err, store.ErrNoSuchProject), errors.Is(err, store.ErrTeamMessageNotFound), errors.Is(err, store.ErrTaskNotFound):
 		status, message = 404, "team or project not found"
 	case errors.Is(err, store.ErrTeamNameTaken), errors.Is(err, store.ErrTaskRetryConflict):
 		status, message = 409, err.Error()

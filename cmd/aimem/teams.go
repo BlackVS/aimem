@@ -29,14 +29,14 @@ it. Save/reuse an explicit idempotency key to retry an uncertain write. list/eve
 print one page with next_cursor; use the HTTP API to page further.
 
 Agent commands (from a configured checkout, using its task credential):
-  aimem teams <join|members|heartbeat|resume|leave|profile> PROJECT TEAM request.json [KEY]
+  aimem teams <join|members|heartbeat|resume|leave|profile|send|messages|inbox|ack> PROJECT TEAM request.json [KEY]
 KEY is required for writes. join accepts a team name or ID; other commands use
 the returned ID. See docs/TEAM-SETUP.md. Task assignment is not available yet.`
 
 func teamsCmd(args []string) error {
 	if len(args) > 0 {
 		switch args[0] {
-		case "join", "members", "heartbeat", "resume", "leave", "profile":
+		case "join", "members", "heartbeat", "resume", "leave", "profile", "send", "messages", "inbox", "ack":
 			return teamSessionCmd(args)
 		}
 	}
@@ -73,9 +73,9 @@ func teamsCmd(args []string) error {
 }
 
 func teamSessionCmd(args []string) error {
-	writes := len(args) > 0 && args[0] != "members"
+	writes := len(args) > 0 && args[0] != "members" && args[0] != "messages" && args[0] != "inbox"
 	if len(args) != 4 && !writes || writes && len(args) != 5 {
-		return errors.New("usage: aimem teams <join|members|heartbeat|resume|leave|profile> PROJECT TEAM request.json [idempotency-key (required for writes)]")
+		return errors.New("usage: aimem teams <join|members|heartbeat|resume|leave|profile|send|messages|inbox|ack> PROJECT TEAM request.json [idempotency-key (required for writes)]")
 	}
 	f, err := os.Open(args[3])
 	if err != nil {
@@ -104,7 +104,7 @@ func teamSessionCmd(args []string) error {
 		body["idempotency_key"], _ = json.Marshal(args[4])
 	}
 	raw, _ = json.Marshal(body)
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 35*time.Second)
 	defer cancel()
 	out, err := mcp.RunTeamTool(ctx, "team_"+args[0], raw)
 	if err != nil {

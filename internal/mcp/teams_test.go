@@ -50,6 +50,37 @@ func TestTeamMCPThroughRealHub(t *testing.T) {
 	if raw, bad = call(f.alice, "team_members", handle); bad || !strings.Contains(raw, out.Session.ID) {
 		t.Fatal(raw)
 	}
+	// Exercise message schemas and routing through MCP's authenticated dispatcher.
+	send := map[string]any{"project": "alpha", "team": out.Session.Team, "session_id": out.Session.ID, "generation": 1,
+		"recipient": map[string]any{"kind": "team"}, "kind": "note", "payload": map[string]any{"text": "fixture message"}, "idempotency_key": "send"}
+	raw, bad = call(f.alice, "team_send", send)
+	if bad {
+		t.Fatal(raw)
+	}
+	var sent struct {
+		Message struct {
+			ID string `json:"id"`
+		} `json:"message"`
+	}
+	if err := json.Unmarshal([]byte(raw), &sent); err != nil || sent.Message.ID == "" {
+		t.Fatal(err, raw)
+	}
+	for _, name := range []string{"team_messages", "team_inbox"} {
+		if raw, bad = call(f.alice, name, handle); bad || !strings.Contains(raw, sent.Message.ID) {
+			t.Fatal(name, raw)
+		}
+	}
+	ack := map[string]any{"project": "alpha", "team": out.Session.Team, "session_id": out.Session.ID, "generation": 1, "message_ids": []string{sent.Message.ID}, "idempotency_key": "ack"}
+	if raw, bad = call(f.alice, "team_ack", ack); bad {
+		t.Fatal(raw)
+	}
+	if raw, bad = call(f.alice, "team_inbox", handle); bad || strings.Contains(raw, sent.Message.ID) {
+		t.Fatal(raw)
+	}
+	send["sender_id"] = "forged"
+	if raw, bad = call(f.alice, "team_send", send); !bad {
+		t.Fatal("forged sender accepted", raw)
+	}
 	handle["idempotency_key"] = "resume"
 	if raw, bad = call(f.alice, "team_resume", handle); bad || !strings.Contains(raw, `"generation": 2`) {
 		t.Fatal(raw)
@@ -62,6 +93,33 @@ func TestTeamMCPThroughRealHub(t *testing.T) {
 	handle["idempotency_key"] = "leave"
 	if raw, bad = call(f.alice, "team_leave", handle); bad || !strings.Contains(raw, `"state": "left"`) {
 		t.Fatal(raw)
+	}
+}
+
+func TestTeamMessageWireContract(t *testing.T) {
+	for _, tc := range []struct{ name, args, method, suffix string }{
+		{"team_inbox", `"after":42,"limit":10,"wait_seconds":25`, "GET", "/inbox?after=42&generation=1&limit=10&session_id=s&wait_seconds=25"},
+		{"team_messages", `"after":0`, "GET", "/messages?after=0&generation=1&session_id=s"},
+		{"team_send", `"recipient":{"kind":"team"},"kind":"note","payload":{"text":"hi"},"idempotency_key":"k"`, "POST", "/messages"},
+		{"team_ack", `"message_ids":["m"],"idempotency_key":"k"`, "POST", "/ack"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			called := false
+			call := func(_ context.Context, method, path string, headers map[string]string, body []byte) (int, []byte, error) {
+				called = true
+				if method != tc.method || path != "/v1/projects/alpha/teams/t"+tc.suffix {
+					t.Fatal(method, path)
+				}
+				if method == "POST" && (headers["Idempotency-Key"] != "k" || strings.Contains(string(body), "idempotency_key") || strings.Contains(string(body), `"project"`)) {
+					t.Fatal(headers, string(body))
+				}
+				return 200, []byte(`{"protocol_version":1}`), nil
+			}
+			raw := `{"project":"alpha","team":"t","session_id":"s","generation":1,` + tc.args + `}`
+			if _, err := callTeamTool(context.Background(), call, "", tc.name, json.RawMessage(raw)); err != nil || !called {
+				t.Fatal(err)
+			}
+		})
 	}
 }
 

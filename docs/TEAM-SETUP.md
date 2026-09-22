@@ -1,8 +1,9 @@
 # Team setup for administrators
 
 This is the first implementation slice of [agent teams](DESIGN-agent-teams.md).
-It stores team configuration and enrollment. Agent join, roster, messaging and
-assignment are not available yet. Standalone task workflows are unchanged.
+It stores team configuration and enrollment. Agent join, roster and messaging
+are described in [TEAM-AGENT-QUICKSTART.md](TEAM-AGENT-QUICKSTART.md).
+Execution assignment is not available yet. Standalone task workflows are unchanged.
 
 Run the commands on the hub host as its service user, with the local service
 running. Team routes require administrator authority; ordinary agent tokens
@@ -67,11 +68,10 @@ credentials or retry keys. They use the existing service log sink and its
 retention; they are not a durable delivery log. Rich audit export/analysis is a
 later increment.
 
-Project schema 14 adds the administration tables; schema 15 adds internal session
-storage. See TEAM-AGENT-QUICKSTART.md for agent HTTP/CLI/MCP operations. Back up the
+Project schema 14 adds administration, 15 sessions and 16 durable messages.
+See TEAM-AGENT-QUICKSTART.md for agent HTTP/CLI/MCP operations. Back up the
 full state before upgrading and restore it with the previous binary if rolling
-back: old binaries refuse schema
-15. Renaming a project preserves its team IDs and access identity. Drop and merge
+back: old binaries refuse schema 16. Renaming a project preserves its team IDs and access identity. Drop and merge
 refuse projects containing team state, including empty teams; no deletion or
 retention workflow is provided in this slice. Teams are excluded from memory
 curation and synchronization and belong to one authoritative hub.

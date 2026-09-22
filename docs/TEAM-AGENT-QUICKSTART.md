@@ -1,7 +1,7 @@
-# Agent team registration
+# Agent team registration and messages
 
-This increment supports registration and roster through HTTP, CLI and MCP.
-Messaging and assignment are not implemented yet, so joining does not authorize
+This increment supports registration, roster and messages through HTTP, CLI and MCP.
+Assignment is not implemented yet, so joining or receiving a message does not authorize
 coding work. Workers wait for an addressed coordinator assignment and do not
 select backlog work independently while joined. Selected project process rules
 still apply. The later pilot will test complete coordination with real agents.
@@ -19,7 +19,8 @@ legacy and read-only credentials cannot join or read the roster.
 ## MCP
 
 Tools: `team_join`, `team_members`, `team_profile`, `team_heartbeat`,
-`team_resume`, `team_leave`. Supply `project`, defaulting to the current checkout,
+`team_resume`, `team_leave`, `team_send`, `team_messages`, `team_inbox`, `team_ack`.
+Supply `project`, defaulting to the current checkout,
 and `team`. Join accepts an exact readable name or stable ID; later operations
 use the returned `session.team_id`. Use the ID for unusual names that cannot
 form a canonical URL segment.
@@ -76,6 +77,65 @@ Clean leave closes the session and permits an explicit return to standalone
 workflow. Missing heartbeats never implicitly leave or release coordinator
 ownership. Token replacement and forced recovery are deferred.
 
+## Message exchange
+
+Use `team_send` with the session handle, a recipient and typed content:
+
+```json
+{
+  "project": "example-project",
+  "team": "TEAM_ID",
+  "session_id": "YOUR_SESSION_ID",
+  "generation": 1,
+  "recipient": {"kind": "member", "id": "RECIPIENT_SESSION_ID"},
+  "kind": "question",
+  "payload": {"text": "Which test covers the parser change?"},
+  "idempotency_key": "question-001"
+}
+```
+
+Recipients are a member session or `{"kind":"team"}`. All messages are visible
+to current team members; a direct recipient routes the inbox and is not private.
+Do not include secrets. Kinds are `question`, `answer`, `note`, `progress`,
+`blocker` and `review_feedback`. An answer requires `reply_to` identifying a
+question in this team. Optional `task_id` and payload task references must exist
+in this project. Payload accepts typed `refs` and a question-only RFC3339
+`deadline`. Attempt references remain unavailable until assignment integration.
+The server derives sender identity and its profile snapshot; agents cannot
+provide those fields. Content is limited to 32 KiB, commands to 64 KiB.
+
+Read `team_inbox` with your handle, `after` (nonnegative sequence, default 0),
+`limit` (1-100, default 50) and optionally `wait_seconds` (0-25, default 0).
+It returns `messages`, `next_cursor`, `has_more` and `server_time`. An empty page
+ends this poll, not the assignment. `team_messages` reads team-visible history
+with the same paging fields but without a wait; history reads do not mark delivery.
+
+Reading an inbox records an attempted delivery. Call `team_ack` with the same
+handle, a new retry key and `message_ids` (1-100 distinct IDs delivered to this
+session) only after receiving the messages. Ack is neither an answer nor task
+completion. Retrying an uncertain send or ack with its original key/content
+returns the original receipt after current authorization checks.
+
+Advance the cursor within a page scan, but retain explicit acknowledgements as
+the durable receipt boundary. On reconnect use `after: 0` to recover all messages
+still unacknowledged, including earlier pages; deduplicate by message ID.
+Advancing a cursor never acknowledges a message. Resume updates the generation;
+old handles cannot perform new reads or commands. Messages never assign work.
+
+For CLI use, omit project/team/idempotency_key from the JSON files:
+
+```sh
+aimem teams send example-project TEAM_ID message.json question-001
+aimem teams inbox example-project TEAM_ID inbox.json
+aimem teams messages example-project TEAM_ID handle.json
+aimem teams ack example-project TEAM_ID ack.json ack-001
+```
+
+`inbox.json` contains the session handle and optional paging/wait fields;
+`ack.json` contains the session handle and `message_ids`. CLI and stdio MCP use
+the checkout's ordinary credential. They support the full 25-second wait;
+third-party HTTP/MCP callers must also allow sufficient request time.
+
 ## HTTP and operator policy
 
 POST `/v1/projects/{p}/teams/{team}/join|heartbeat|profile|resume|leave` uses the
@@ -83,6 +143,11 @@ same operation fields, without project/team/key, and requires `Idempotency-Key`.
 GET `/v1/projects/{p}/teams/{team}/members` uses session handles and paging in the
 query. Bodies are strict JSON bounded to 64 KiB. Every operation checks live token
 scope, user grant and team enrollment, including reads and receipt replay.
+Message routes are POST/GET `/v1/projects/{p}/teams/{team}/messages`,
+GET `/v1/projects/{p}/teams/{team}/inbox` and POST `/v1/projects/{p}/teams/{team}/ack`.
+Writes require `Idempotency-Key`. Inbox polls recheck token expiry/revocation,
+grant, task enablement, enrollment and session generation each second; disconnect
+cancels the wait. No database transaction is held while waiting.
 
 Responses advertise protocol version 1, supported operations and waiting
 instructions. Public session views omit internal user/token IDs. Unsupported
@@ -93,5 +158,9 @@ Operators can set `AIMEM_TEAM_MAX_SESSIONS` (1-10000, default 100) and
 `AIMEM_TEAM_SUSPECT_SECONDS` (30-86400, default 120) on the service. Invalid values
 refuse session operations. Heartbeat guidance is every 30 seconds. Liveness does
 not prove model progress or that a process stopped. No automatic polling loop or
-idle wakeup is provided by these tools. Schema remains 15; no release or deployment
-is implied by this increment.
+idle wakeup is provided by these tools. A bounded wait is one request, not an
+automatic client loop. `AIMEM_TEAM_MAX_MESSAGES` sets the retained per-team limit
+(1-1000000, default 10000). Full storage refuses new sends with 409; accepted
+retry receipts still work, and no unacknowledged content is evicted. Retention and
+export policy remain separate work. Uses existing schema 16; no new migration,
+release or deployment is implied by this increment.
