@@ -1,8 +1,9 @@
 # Assignment storage foundation
 
 Schema 17 adds durable offers and execution reservations. This increment exposes
-Go storage methods and a read-only task projection. It does not expose HTTP
-assignment commands or a usable CLI/MCP execution workflow. Do not start a worker
+Go storage methods and a read-only task projection. The subsequent
+[HTTP increment](TEAM-ASSIGNMENT-HTTP.md) exposes these primitives; a usable
+CLI/MCP execution workflow is still deferred. Do not start a worker
 pilot from these primitives; results, cancellation and recovery still need their
 dependent increments.
 

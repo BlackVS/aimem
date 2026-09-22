@@ -3,7 +3,9 @@
 This is the first implementation slice of [agent teams](DESIGN-agent-teams.md).
 It stores team configuration and enrollment. Agent join, roster and messaging
 are described in [TEAM-AGENT-QUICKSTART.md](TEAM-AGENT-QUICKSTART.md).
-Execution assignment is not available yet. The schema 17
+The full execution workflow is not available yet; the
+[HTTP assignment primitives](TEAM-ASSIGNMENT-HTTP.md) are for protocol validation.
+The schema 17
 [storage foundation](TEAM-ASSIGNMENT-STORAGE.md) protects managed tasks;
 standalone workflows for unmanaged tasks are unchanged.
 

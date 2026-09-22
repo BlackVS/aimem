@@ -15,6 +15,10 @@ currently 17); a binary refuses a database newer than it understands.
 
 ### Added
 
+- Team assignment HTTP primitives: offer/read/accept/decline/withdraw with live
+  coordinator and worker authorization. These expose the schema 17 foundation;
+  result/recovery operations and the full MCP/CLI execution workflow are deferred.
+
 - **Project schema 17:** internal exclusive team offers, worker acceptance,
   decline/withdraw and persistent managed-task protection. Task reads expose
   derived coordination; generic edits/archive cannot bypass ownership, including
