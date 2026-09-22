@@ -2,8 +2,8 @@
 
 `RecoverTeamAssignment` provides an internal forced-close operation after an
 operator reconciles abandoned execution. The admin-only recover route in the
-[management routes](TEAM-MANAGEMENT-HTTP.md) exposes it over HTTP; CLI and MCP
-recovery commands and token rebinding remain separate increments; a lost
+[management routes](TEAM-MANAGEMENT-HTTP.md) exposes it over HTTP and the operator CLI (`aimem teams recover`); there is no
+MCP recovery tool, and token rebinding remains a separate increment; a lost
 coordinator is handled by [coordinator handoff](TEAM-COORDINATOR-HANDOFF-STORAGE.md).
 The complete team workflow still advertises `workflow_ready: false`.
 

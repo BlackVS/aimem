@@ -9,9 +9,10 @@ and [session rebinding](TEAM-ASSIGNMENT-STORAGE.md#session-rebinding), and
 follow the [assignment HTTP primitives](TEAM-ASSIGNMENT-HTTP.md) in every
 authorization and encoding rule. Handoff, managed edit/finalize, operator
 recovery and unmanage are the [management routes](TEAM-MANAGEMENT-HTTP.md).
-Responses still say `workflow_ready:false`: the CLI/MCP execution tools and
-inbox lifecycle delivery are a separate increment. Do not start a worker pilot
-on these routes alone.
+The CLI and MCP tools in the [quickstart](TEAM-AGENT-QUICKSTART.md) bridge to
+these routes. Responses still say `workflow_ready:false`: inbox lifecycle
+delivery is a separate increment. Do not start a worker pilot on these routes
+alone.
 
 All paths below begin with `/v1/projects/PROJECT/teams/TEAM_ID`. Each request
 requires the caller's ordinary write token for this project, current grant and

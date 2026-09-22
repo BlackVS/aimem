@@ -554,7 +554,7 @@ func TestTaskToolDefsAreValidSchema(t *testing.T) {
 			}
 		}
 	}
-	if seen != 4 { // create_task and update_task, two lists each
+	if seen != 5 { // create_task and update_task, two lists each; team_submit evidence_refs
 		t.Fatalf("reference lists in the tool schemas: %d", seen)
 	}
 	if strings.Contains(string(raw), `"required":null`) {

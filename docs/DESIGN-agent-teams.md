@@ -532,8 +532,10 @@ generation and revision check so later transports refuse identically. The
 [management routes](TEAM-MANAGEMENT-HTTP.md) add handoff (coordinator or admin
 with reconciliation, dispatched on the authenticated role), managed edit and
 finalize for the coordinator, and admin-only recover and unmanage behind the
-bearer gate. CLI/MCP execution tools and inbox lifecycle delivery follow as the
-remaining increment; `workflow_ready` stays false until then.
+bearer gate. The CLI and stdio MCP bridge every agent operation to those routes
+with the checkout credential (`team_offer` through `team_finalize`), and the
+operator CLI reaches recover and unmanage; inbox lifecycle delivery is the
+remaining increment and `workflow_ready` stays false until then.
 
 For managed tasks generic PUT/archive is refused with `409 managed_task` and a
 pointer to coordination operations, including for admins; explicit audited admin

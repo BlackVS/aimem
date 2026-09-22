@@ -1,9 +1,10 @@
-# Agent team registration and messages
+# Agent team registration, messages and work
 
-This increment supports registration, roster and messages through HTTP, CLI and MCP.
-The [assignment HTTP primitives](TEAM-ASSIGNMENT-HTTP.md) are available, but the
-full execution/result/recovery workflow is not ready. Joining or receiving a
-message does not authorize coding work. Workers wait for an addressed coordinator assignment and do not
+Registration, roster, messages, assignments, execution and coordinator
+management are available through HTTP, CLI and MCP. Lifecycle events are not
+yet delivered to the inbox, so responses still say `workflow_ready:false` and
+the pilot waits for that increment. Joining or receiving a message does not
+authorize coding work. Workers wait for an addressed coordinator assignment and do not
 select backlog work independently while joined. Selected project process rules
 still apply. The later pilot will test complete coordination with real agents.
 
@@ -20,7 +21,15 @@ legacy and read-only credentials cannot join or read the roster.
 ## MCP
 
 Tools: `team_join`, `team_members`, `team_profile`, `team_heartbeat`,
-`team_resume`, `team_leave`, `team_send`, `team_messages`, `team_inbox`, `team_ack`.
+`team_resume`, `team_leave`, `team_send`, `team_messages`, `team_inbox`, `team_ack`;
+assignment and execution: `team_offer`, `team_assignment`, `team_reserved`,
+`team_accept`, `team_decline`, `team_withdraw`, `team_block`, `team_resume_work`,
+`team_cancel`, `team_stopped`, `team_close_stop`, `team_submit`, `team_review`;
+coordinator management: `team_handoff`, `team_edit`, `team_finalize`. Each work
+tool takes the same fields as its [execution](TEAM-EXECUTION-HTTP.md) or
+[management](TEAM-MANAGEMENT-HTTP.md) route, plus `attempt` or `task` where the
+route needs one; the hub decides authority and generations, so refusals match
+HTTP. Admin recover and unmanage are never MCP tools.
 Supply `project`, defaulting to the current checkout,
 and `team`. Join accepts an exact readable name or stable ID; later operations
 use the returned `session.team_id`. Use the ID for unusual names that cannot
@@ -135,8 +144,13 @@ aimem teams ack example-project TEAM_ID ack.json ack-001
 ```
 
 `inbox.json` contains the session handle and optional paging/wait fields;
-`ack.json` contains the session handle and `message_ids`. CLI and stdio MCP use
-the checkout's ordinary credential. They support the full 25-second wait;
+`ack.json` contains the session handle and `message_ids`. Work commands use the
+same shape, for example `aimem teams accept example-project TEAM_ID accept.json accept-001`
+with `session_id`, `generation` and `attempt` in the file; `assignment` and
+`reserved` are reads without a key. Operators run
+`aimem teams recover PROJECT TEAM ATTEMPT reconciliation.json` and
+`aimem teams unmanage PROJECT TEAM TASK request.json` on the hub host.
+CLI and stdio MCP use the checkout's ordinary credential. They support the full 25-second wait;
 third-party HTTP/MCP callers must also allow sufficient request time.
 
 ## HTTP and operator policy

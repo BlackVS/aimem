@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"strings"
 	"time"
 
 	"aimem/internal/mcp"
@@ -21,8 +22,11 @@ const teamsUsage = `usage: aimem teams list <project>
        aimem teams events <project> <team-id>
        aimem teams create <project> <config.json> [idempotency-key]
        aimem teams configure <project> <team-id> <config.json> [idempotency-key]
+       aimem teams recover <project> <team-id> <attempt-id> <reconciliation.json> [idempotency-key]
+       aimem teams unmanage <project> <team-id> <task-id> <request.json> [idempotency-key]
 
-Run on the hub host as its local operator. Configuration JSON contains name,
+Run on the hub host as its local operator. recover closes an abandoned attempt
+after recorded reconciliation; unmanage releases a task this team manages. Configuration JSON contains name,
 description and enrollment [{user_id,coordinator}]. configure also requires
 expected_revision. Configuration replaces all fields; omitted enrollment clears
 it. Save/reuse an explicit idempotency key to retry an uncertain write. list/events
@@ -30,15 +34,15 @@ print one page with next_cursor; use the HTTP API to page further.
 
 Agent commands (from a configured checkout, using its task credential):
   aimem teams <join|members|heartbeat|resume|leave|profile|send|messages|inbox|ack> PROJECT TEAM request.json [KEY]
+  aimem teams <offer|assignment|reserved|accept|decline|withdraw|block|resume-work|cancel|stopped|close-stop|submit|review|handoff|edit|finalize> PROJECT TEAM request.json [KEY]
 KEY is required for writes. join accepts a team name or ID; other commands use
-the returned ID. See docs/TEAM-SETUP.md. Task assignment is not available yet.`
+the returned ID. request.json carries the operation fields, including attempt or
+task where the operation needs one. See docs/TEAM-AGENT-QUICKSTART.md. The hub
+reports workflow_ready:false until lifecycle events reach the inbox.`
 
 func teamsCmd(args []string) error {
-	if len(args) > 0 {
-		switch args[0] {
-		case "join", "members", "heartbeat", "resume", "leave", "profile", "send", "messages", "inbox", "ack":
-			return teamSessionCmd(args)
-		}
+	if len(args) > 0 && teamAgentOps[args[0]] {
+		return teamSessionCmd(args)
 	}
 	method, path, raw, key, err := teamsRequest(args)
 	if err != nil {
@@ -72,10 +76,17 @@ func teamsCmd(args []string) error {
 	return nil
 }
 
+// teamAgentOps are the checkout-credential commands, each bridged to the
+// MCP tool of the same name (hyphens become underscores).
+var teamAgentOps = map[string]bool{"join": true, "members": true, "heartbeat": true, "resume": true, "leave": true, "profile": true, "send": true, "messages": true, "inbox": true, "ack": true,
+	"offer": true, "assignment": true, "reserved": true, "accept": true, "decline": true, "withdraw": true, "block": true, "resume-work": true, "cancel": true, "stopped": true, "close-stop": true, "submit": true, "review": true, "handoff": true, "edit": true, "finalize": true}
+
+var teamReadOps = map[string]bool{"members": true, "messages": true, "inbox": true, "assignment": true, "reserved": true}
+
 func teamSessionCmd(args []string) error {
-	writes := len(args) > 0 && args[0] != "members" && args[0] != "messages" && args[0] != "inbox"
+	writes := len(args) > 0 && !teamReadOps[args[0]]
 	if len(args) != 4 && !writes || writes && len(args) != 5 {
-		return errors.New("usage: aimem teams <join|members|heartbeat|resume|leave|profile|send|messages|inbox|ack> PROJECT TEAM request.json [idempotency-key (required for writes)]")
+		return errors.New("usage: aimem teams <operation> PROJECT TEAM request.json [idempotency-key (required for writes)]")
 	}
 	f, err := os.Open(args[3])
 	if err != nil {
@@ -106,7 +117,7 @@ func teamSessionCmd(args []string) error {
 	raw, _ = json.Marshal(body)
 	ctx, cancel := context.WithTimeout(context.Background(), 35*time.Second)
 	defer cancel()
-	out, err := mcp.RunTeamTool(ctx, "team_"+args[0], raw)
+	out, err := mcp.RunTeamTool(ctx, "team_"+strings.ReplaceAll(args[0], "-", "_"), raw)
 	if err != nil {
 		return err
 	}
@@ -135,16 +146,28 @@ func teamsRequest(args []string) (method, path string, raw []byte, key string, e
 			path += "/events"
 		}
 		return "GET", path, nil, "", nil
-	case "create", "configure":
+	case "create", "configure", "recover", "unmanage":
 		fileIndex := 2
 		method = "POST"
-		if args[0] == "configure" {
+		switch args[0] {
+		case "configure":
 			fileIndex = 3
 			method = "PUT"
 			if len(args) < 4 {
 				return bad()
 			}
 			path += "/" + url.PathEscape(args[2])
+		case "recover", "unmanage":
+			// Operator routes: the admin authority is the local socket itself.
+			fileIndex = 4
+			if len(args) < 5 {
+				return bad()
+			}
+			if args[0] == "recover" {
+				path += "/" + url.PathEscape(args[2]) + "/assignments/" + url.PathEscape(args[3]) + "/recover"
+			} else {
+				path += "/" + url.PathEscape(args[2]) + "/tasks/" + url.PathEscape(args[3]) + "/unmanage"
+			}
 		}
 		if len(args) < fileIndex+1 || len(args) > fileIndex+2 {
 			return bad()

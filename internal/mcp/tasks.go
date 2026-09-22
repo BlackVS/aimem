@@ -152,7 +152,7 @@ var taskToolDefs = append([]map[string]any{
 			"idempotency_key": prop("string", "your unique key for this comment (retry-safe)"),
 		}, "id", "body", "idempotency_key"),
 	},
-}, teamToolDefs...)
+}, append(teamToolDefs, teamWorkToolDefs...)...)
 
 // taskRefProp is the typed reference: kind says what ref holds — task: a
 // task id; doc: a document name; record: <collection>/<record id>;

@@ -68,7 +68,7 @@ var teamToolDefs = func() []map[string]any {
 			props["message_ids"] = map[string]any{"type": "array", "items": prop("string", "delivered message ID"), "minItems": 1, "maxItems": 100}
 			required = append(required, "message_ids")
 		}
-		defs = append(defs, map[string]any{"name": "team_" + op, "description": "Team " + op + " using your project task credential. All messages are team-visible; recipient means inbox routing. Reading is a delivery attempt; explicit ack records receipt, not answer or completion. Use inbox reads/bounded waits; notifications do not prove model receipt. Workers wait for coordinator assignments; never pick backlog tasks independently while joined. Assignments are not available yet, and messages cannot assign work. Resume fences old handles but cannot stop local commands; reconcile old execution first. A retry returns its original result, which may have an old generation.", "inputSchema": objSchema(props, required...)})
+		defs = append(defs, map[string]any{"name": "team_" + op, "description": "Team " + op + " using your project task credential. All messages are team-visible; recipient means inbox routing. Reading is a delivery attempt; explicit ack records receipt, not answer or completion. Use inbox reads/bounded waits; notifications do not prove model receipt. Workers wait for coordinator assignments; never pick backlog tasks independently while joined. Assignment, execution and management tools exist (team_offer through team_finalize), but the hub reports workflow_ready:false until lifecycle events reach the inbox; messages cannot assign work. Resume fences old handles but cannot stop local commands; reconcile old execution first. A retry returns its original result, which may have an old generation.", "inputSchema": objSchema(props, required...)})
 	}
 	return defs
 }()
@@ -86,6 +86,9 @@ func RunTeamTool(ctx context.Context, name string, raw json.RawMessage) (string,
 }
 
 func callTeamTool(ctx context.Context, call TaskCallFunc, defaultProject, name string, raw json.RawMessage) (string, error) {
+	if tool, ok := teamWorkToolByName(name); ok {
+		return callTeamWorkTool(ctx, call, defaultProject, tool, raw)
+	}
 	var schema map[string]any
 	for _, d := range teamToolDefs {
 		if d["name"] == name {
@@ -195,26 +198,5 @@ func callTeamTool(ctx context.Context, call TaskCallFunc, defaultProject, name s
 			body, _ = json.Marshal(store.TeamSessionCommand{SessionID: a.SessionID, Generation: a.Generation, Profile: a.Profile, ExpectedProfileRevision: a.ExpectedProfileRevision, Availability: a.Availability})
 		}
 	}
-	status, resp, err := call(ctx, method, path, headers, body)
-	if err != nil {
-		return "", err
-	}
-	var result struct {
-		Version int    `json:"protocol_version"`
-		Error   string `json:"error"`
-	}
-	if json.Unmarshal(resp, &result) != nil {
-		return "", errors.New("hub team protocol unavailable or malformed; upgrade hub, do not emulate with task writes")
-	}
-	if status/100 != 2 {
-		return "", fmt.Errorf("team request HTTP %d: %s", status, result.Error)
-	}
-	if result.Version != 1 {
-		return "", errors.New("unsupported team protocol; upgrade compatible client/hub, do not emulate with task writes")
-	}
-	var pretty bytes.Buffer
-	if err := json.Indent(&pretty, resp, "", "  "); err != nil {
-		return "", err
-	}
-	return pretty.String(), nil
+	return forwardTeamRequest(ctx, call, method, path, headers, body)
 }

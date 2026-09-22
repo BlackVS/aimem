@@ -6,8 +6,8 @@ They are not a complete execution workflow: responses include `workflow_ready:fa
 The [execution routes](TEAM-EXECUTION-HTTP.md) add the reserved-attempt read,
 block/resume, stop request/acknowledgement/closure, submission and review; the
 [management routes](TEAM-MANAGEMENT-HTTP.md) add handoff, managed edit/finalize,
-recovery and unmanage. The MCP/CLI execution tools and inbox lifecycle delivery
-are still deferred. Do not start a worker pilot yet.
+recovery and unmanage. The CLI and MCP tools bridge to all of them; inbox lifecycle delivery is still
+deferred. Do not start a worker pilot yet.
 
 All paths below begin with `/v1/projects/PROJECT/teams/TEAM_ID`. Use the team ID
 returned by join. Each request requires `Authorization: Bearer TOKEN` with the

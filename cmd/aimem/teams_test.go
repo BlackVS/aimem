@@ -14,7 +14,9 @@ func TestTeamsRequest(t *testing.T) {
 	for _, tc := range []struct {
 		args         []string
 		method, path string
-	}{{[]string{"list", "alpha"}, "GET", "/v1/projects/alpha/teams"}, {[]string{"show", "alpha", "id"}, "GET", "/v1/projects/alpha/teams/id"}, {[]string{"events", "alpha", "id"}, "GET", "/v1/projects/alpha/teams/id/events"}, {[]string{"create", "alpha", f, "retry"}, "POST", "/v1/projects/alpha/teams"}, {[]string{"configure", "alpha", "id", f, "retry"}, "PUT", "/v1/projects/alpha/teams/id"}} {
+	}{{[]string{"list", "alpha"}, "GET", "/v1/projects/alpha/teams"}, {[]string{"show", "alpha", "id"}, "GET", "/v1/projects/alpha/teams/id"}, {[]string{"events", "alpha", "id"}, "GET", "/v1/projects/alpha/teams/id/events"}, {[]string{"create", "alpha", f, "retry"}, "POST", "/v1/projects/alpha/teams"}, {[]string{"configure", "alpha", "id", f, "retry"}, "PUT", "/v1/projects/alpha/teams/id"},
+		{[]string{"recover", "alpha", "id", "att", f, "retry"}, "POST", "/v1/projects/alpha/teams/id/assignments/att/recover"},
+		{[]string{"unmanage", "alpha", "id", "task", f, "retry"}, "POST", "/v1/projects/alpha/teams/id/tasks/task/unmanage"}} {
 		m, p, _, k, e := teamsRequest(tc.args)
 		if e != nil || m != tc.method || p != tc.path {
 			t.Fatalf("%v: %s %s %v", tc.args, m, p, e)
@@ -23,7 +25,7 @@ func TestTeamsRequest(t *testing.T) {
 			t.Fatalf("lost key %s", k)
 		}
 	}
-	for _, args := range [][]string{nil, {"create", "alpha"}, {"configure", "alpha", "id"}, {"list", "alpha", "extra"}} {
+	for _, args := range [][]string{nil, {"create", "alpha"}, {"configure", "alpha", "id"}, {"list", "alpha", "extra"}, {"recover", "alpha", "id", "att"}, {"unmanage", "alpha", "id"}} {
 		if _, _, _, _, err := teamsRequest(args); err == nil {
 			t.Fatalf("accepted %v", args)
 		}

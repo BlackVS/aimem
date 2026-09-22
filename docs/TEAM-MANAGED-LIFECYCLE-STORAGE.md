@@ -3,7 +3,8 @@
 Schema 18 adds the three managed-task operations the team design reserves for
 the coordinator and the operator: `EditManagedTask`, `FinalizeManagedTask` and
 `UnmanageTask`. The [management routes](TEAM-MANAGEMENT-HTTP.md) expose them
-over HTTP; CLI and MCP commands remain a separate increment. The complete team
+over HTTP, edit and finalize also over CLI and MCP, and unmanage over the
+operator CLI. The complete team
 workflow still advertises `workflow_ready: false`.
 
 ## Coordinator edit
