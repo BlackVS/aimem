@@ -15,6 +15,11 @@ currently 17); a binary refuses a database newer than it understands.
 
 ### Added
 
+- Cooperative team work-control storage: worker block/resume, coordinator stop
+  request, worker acknowledgement and coordinator closure. Reservations remain
+  held through STOPPED; only closure requeues the managed task. Public commands,
+  forced recovery and process control remain deferred.
+
 - Team result storage: immutable repository candidates, coordinator acceptance
   or return for a new offer, and transactional task/history/audit/retry updates.
   Submission retains reservations; acceptance leaves the task in REVIEW for

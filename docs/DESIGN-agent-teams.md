@@ -479,9 +479,13 @@ the task to READY and requires a new offer/accept. A blocked worker retains its
 attempt; task BLOCKED and structured blocker event commit together, with explicit
 resume back to IN_PROGRESS.
 
-Cancellation of RUNNING work is `STOP_REQUESTED`, still reserved until the worker
-acknowledges it has stopped. Coordinator may then close the attempt and requeue the
-task. Suspect sessions never expire ownership automatically. Forced recovery needs
+The [cooperative work-control storage](TEAM-WORK-CONTROL-STORAGE.md) increment
+makes the intermediate states explicit: blocked work has attempt BLOCKED, and
+cancellation of RUNNING or BLOCKED work enters STOP_REQUESTED. Worker acknowledgement
+enters STOPPED, still reserved; the current coordinator's `close-stop` command then
+closes the attempt as CANCELLED and requeues the managed task to READY. This
+clarifies the earlier two-phase description without granting process-control or
+forced-recovery authority. Suspect sessions never expire ownership automatically. Forced recovery needs
 admin authority, expected attempt/coordinator generations and recorded reconciliation
 evidence; closing the old attempt fences future writes. It cannot undo external
 commands. A delayed old result is rejected as stale and may be attached only as
@@ -518,7 +522,7 @@ Session handle travels in command body or validated read query, never as authori
 
 `/teams/{team}/assignments` creates offers; `/assignments/{attempt}/accept`,
 `/decline`, `/withdraw`, `/progress`, `/block`, `/resume-work`, `/submit`, `/review`,
-`/cancel`, `/stopped`, and `/recover` define typed transitions. `/handoff` transfers
+`/cancel`, `/stopped`, `/close-stop`, and `/recover` define typed transitions. `/handoff` transfers
 coordinator ownership (current coordinator to an eligible designated session, or
 admin with evidence after loss). The target has no active worker attempt; handoff
 changes its role and coordinator generation atomically. Existing worker attempts
