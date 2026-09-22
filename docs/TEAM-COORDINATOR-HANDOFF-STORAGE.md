@@ -1,9 +1,10 @@
 # Coordinator handoff storage
 
 `HandoffTeamCoordinator` transfers a team's single coordinator slot in one
-transaction. HTTP, CLI and MCP handoff commands, token replacement and
-managed-task lifecycle operations remain separate increments. The complete
-team workflow still advertises `workflow_ready: false`.
+transaction. The [management routes](TEAM-MANAGEMENT-HTTP.md) expose it over
+HTTP for both authorities; CLI and MCP handoff commands and token replacement
+remain separate increments. The complete team workflow still advertises
+`workflow_ready: false`.
 
 ## Transfer
 

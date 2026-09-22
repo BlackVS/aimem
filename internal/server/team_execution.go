@@ -3,6 +3,7 @@ package server
 import (
 	"errors"
 	"net/http"
+	"net/url"
 	"strconv"
 	"strings"
 
@@ -13,7 +14,11 @@ import (
 // read accepts. Handles are concurrency keys, never authority: the caller's
 // token was already authenticated as an ordinary project writer.
 func (s *Server) sessionHandleQuery(w http.ResponseWriter, r *http.Request) (store.TeamSessionHandle, bool) {
-	q := r.URL.Query()
+	q, err := url.ParseQuery(r.URL.RawQuery)
+	if err != nil {
+		s.fail(w, 400, errors.New("invalid assignment query"))
+		return store.TeamSessionHandle{}, false
+	}
 	for k, values := range q {
 		if len(values) != 1 || (k != "session_id" && k != "generation") {
 			s.fail(w, 400, errors.New("invalid assignment query"))

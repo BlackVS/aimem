@@ -34,8 +34,9 @@ func (f *assignmentFixture) taskState(t *testing.T) store.Task {
 
 func (f *assignmentFixture) running(t *testing.T) store.TeamAssignment {
 	t.Helper()
-	offer := assignmentResult(t, f.offerRequest(t, "offer"), 201)
-	return assignmentResult(t, f.command(t, offer.ID, "accept", f.peer, "accept", store.TeamAssignmentCommand{TeamSessionHandle: f.recipient}), 200)
+	// Keys carry the expected revision so a test may drive several attempts.
+	offer := assignmentResult(t, f.offerRequest(t, fmt.Sprint("offer-", f.offer.ExpectedRevision)), 201)
+	return assignmentResult(t, f.command(t, offer.ID, "accept", f.peer, fmt.Sprint("accept-", f.offer.ExpectedRevision), store.TeamAssignmentCommand{TeamSessionHandle: f.recipient}), 200)
 }
 
 func workBody(h store.TeamSessionHandle, coordinatorGeneration, revision int64, reason string) store.TeamWorkCommand {
