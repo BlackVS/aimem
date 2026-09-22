@@ -19,7 +19,8 @@ import (
 
 const teamsUsage = `usage: aimem teams list <project>
        aimem teams show <project> <team-id>
-       aimem teams events <project> <team-id>
+       aimem teams events <project> <team-id> [key=value ...]
+       aimem teams export <project> <team-id> [key=value ...]
        aimem teams create <project> <config.json> [idempotency-key]
        aimem teams configure <project> <team-id> <config.json> [idempotency-key]
        aimem teams recover <project> <team-id> <attempt-id> <reconciliation.json> [idempotency-key]
@@ -33,7 +34,11 @@ recorded reconciliation. Configuration JSON contains name,
 description and enrollment [{user_id,coordinator}]. configure also requires
 expected_revision. Configuration replaces all fields; omitted enrollment clears
 it. Save/reuse an explicit idempotency key to retry an uncertain write. list/events
-print one page with next_cursor; use the HTTP API to page further.
+print one page with next_cursor; use the HTTP API to page further. export writes
+the whole JSONL audit export (header, events, message metadata, end) to stdout,
+following pages at one snapshot. Filters for events/export: session_id, task_id,
+attempt_id, operation (exact or prefix ending in '.'), since, until (RFC3339);
+export also takes limit (page size) and include_bodies=true.
 
 Agent commands (from a configured checkout, using its task credential):
   aimem teams <join|members|heartbeat|resume|leave|profile|send|messages|inbox|ack> PROJECT TEAM request.json [KEY]
@@ -50,6 +55,9 @@ func teamsCmd(args []string) error {
 	method, path, raw, key, err := teamsRequest(args)
 	if err != nil {
 		return err
+	}
+	if args[0] == "export" {
+		return exportPages(func(path string) ([]byte, error) { return operatorGet(client(), path) }, path, os.Stdout)
 	}
 	req, err := http.NewRequest(method, "http://aimem"+path, bytes.NewReader(raw))
 	if err != nil {
@@ -77,6 +85,116 @@ func teamsCmd(args []string) error {
 	}
 	fmt.Println(pretty.String())
 	return nil
+}
+
+var auditQueryKeys = map[string]map[string]bool{
+	"events": {"session_id": true, "task_id": true, "attempt_id": true, "operation": true, "since": true, "until": true, "after": true, "limit": true},
+	"export": {"session_id": true, "task_id": true, "attempt_id": true, "operation": true, "since": true, "until": true, "limit": true, "include_bodies": true},
+}
+
+// auditQuery turns key=value arguments into the query string of an audit
+// read; the hub validates values, the CLI only refuses keys it cannot pass.
+func auditQuery(op string, args []string) (string, error) {
+	q := url.Values{}
+	for _, arg := range args {
+		k, v, ok := strings.Cut(arg, "=")
+		if !ok || !auditQueryKeys[op][k] || v == "" || q.Has(k) {
+			return "", fmt.Errorf("%s takes key=value filters with distinct keys from: session_id task_id attempt_id operation since until %s", op, map[string]string{"events": "after limit", "export": "limit include_bodies"}[op])
+		}
+		q.Set(k, v)
+	}
+	if len(q) == 0 {
+		return "", nil
+	}
+	return "?" + q.Encode(), nil
+}
+
+func operatorGet(c *http.Client, path string) ([]byte, error) {
+	resp, err := c.Get("http://aimem" + path)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	body, err := io.ReadAll(io.LimitReader(resp.Body, 64<<20))
+	if err != nil {
+		return nil, err
+	}
+	if resp.StatusCode != 200 {
+		return nil, fmt.Errorf("HTTP %d: %s", resp.StatusCode, body)
+	}
+	return body, nil
+}
+
+// exportPages follows an audit export from its first page to the end record
+// marked complete, at the snapshot the first page took, and writes one header,
+// every event and message record, and the final end record.
+func exportPages(get func(path string) ([]byte, error), path string, out io.Writer) error {
+	base, err := url.Parse(path)
+	if err != nil {
+		return err
+	}
+	for page := 0; ; page++ {
+		if page > 100000 {
+			return errors.New("export did not complete")
+		}
+		body, err := get(base.String())
+		if err != nil {
+			return err
+		}
+		var end struct {
+			Complete bool             `json:"complete"`
+			Next     map[string]int64 `json:"next"`
+		}
+		sawEnd := false
+		for _, line := range strings.Split(strings.TrimSpace(string(body)), "\n") {
+			var record struct {
+				Record string `json:"record"`
+			}
+			if err := json.Unmarshal([]byte(line), &record); err != nil {
+				return fmt.Errorf("export page %d: %w", page, err)
+			}
+			switch record.Record {
+			case "header":
+				if page > 0 {
+					continue
+				}
+			case "end":
+				if err := json.Unmarshal([]byte(line), &end); err != nil {
+					return err
+				}
+				sawEnd = true
+				if !end.Complete {
+					continue
+				}
+			case "event", "message":
+			default:
+				return fmt.Errorf("export page %d: unknown record %q", page, record.Record)
+			}
+			if _, err := fmt.Fprintln(out, line); err != nil {
+				return err
+			}
+		}
+		if !sawEnd {
+			return fmt.Errorf("export page %d: no end record", page)
+		}
+		if end.Complete {
+			return nil
+		}
+		q := base.Query()
+		moved := false
+		for _, k := range []string{"after_events", "after_messages", "snapshot_events", "snapshot_messages"} {
+			v, ok := end.Next[k]
+			if !ok {
+				return fmt.Errorf("export page %d: end record lacks %s", page, k)
+			}
+			moved = moved || q.Get(k) != fmt.Sprint(v)
+			q.Set(k, fmt.Sprint(v))
+		}
+		if !moved {
+			return fmt.Errorf("export page %d: cursor did not advance", page)
+		}
+		base.RawQuery = q.Encode()
+	}
 }
 
 // teamAgentOps are the checkout-credential commands, each bridged to the
@@ -140,15 +258,20 @@ func teamsRequest(args []string) (method, path string, raw []byte, key string, e
 			return bad()
 		}
 		return "GET", path, nil, "", nil
-	case "show", "events":
+	case "show":
 		if len(args) != 3 {
 			return bad()
 		}
-		path += "/" + url.PathEscape(args[2])
-		if args[0] == "events" {
-			path += "/events"
+		return "GET", path + "/" + url.PathEscape(args[2]), nil, "", nil
+	case "events", "export":
+		if len(args) < 3 {
+			return bad()
 		}
-		return "GET", path, nil, "", nil
+		query, err := auditQuery(args[0], args[3:])
+		if err != nil {
+			return "", "", nil, "", err
+		}
+		return "GET", path + "/" + url.PathEscape(args[2]) + "/" + args[0] + query, nil, "", nil
 	case "create", "configure", "recover", "unmanage", "rebind-token":
 		fileIndex := 2
 		method = "POST"

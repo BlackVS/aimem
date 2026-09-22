@@ -163,37 +163,6 @@ func (s *Server) getTeam(w http.ResponseWriter, r *http.Request) {
 	s.ok(w, teamView(t))
 }
 
-func (s *Server) teamEvents(w http.ResponseWriter, r *http.Request) {
-	_, db := s.adminTeamProject(w, r)
-	if db == nil {
-		return
-	}
-	limit, err := teamPageLimit(r)
-	if err != nil {
-		s.fail(w, 400, err)
-		return
-	}
-	var after int64
-	if r.URL.Query().Has("after") {
-		after, err = strconv.ParseInt(r.URL.Query().Get("after"), 10, 64)
-		if err != nil || after < 0 {
-			s.fail(w, 400, errors.New("after must be a nonnegative sequence"))
-			return
-		}
-	}
-	es, err := db.TeamEvents(r.PathValue("team"), after, limit+1)
-	if err != nil {
-		s.teamError(w, r, err)
-		return
-	}
-	var next int64
-	if len(es) > limit {
-		es = es[:limit]
-		next = es[len(es)-1].Sequence
-	}
-	s.ok(w, map[string]any{"protocol_version": 1, "events": es, "next_cursor": next})
-}
-
 func (s *Server) configureTeam(w http.ResponseWriter, r *http.Request) {
 	p, db := s.adminTeamProject(w, r)
 	if db == nil {

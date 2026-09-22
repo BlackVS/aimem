@@ -15,6 +15,13 @@ currently 18); a binary refuses a database newer than it understands.
 
 ### Added
 
+- Team audit timeline and export: the admin events page accepts session, task,
+  attempt, operation and time-range filters, and a new admin export route
+  streams JSONL pages of accepted events and message metadata (delivery and
+  acknowledgement per recipient; bodies opt-in) at one snapshot with a schema
+  header and completion marker; `aimem teams export` follows the pages.
+  Unknown query parameters on the audit routes are now refused.
+
 - Team token replacement: an admin route and operator CLI command rebind a
   session to a replacement token of the same user after recorded
   reconciliation; the generation advances, a reserved attempt follows as on

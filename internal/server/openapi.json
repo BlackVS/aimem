@@ -2094,7 +2094,43 @@
     "/v1/projects/{p}/teams/{team}/events": {
       "get": {
         "summary": "Administrator team configuration and audit",
-        "description": "Existing ordinary project with tasks enabled. No agent session or assignment tools yet. POST/PUT require Idempotency-Key. PUT replaces name, description and enrollment under expected_revision; omitted enrollment clears it. GET list/events return next_cursor; use after and limit (1-100).",
+        "description": "Admin audit page over an existing ordinary project with tasks enabled: accepted team events in sequence order after the cursor, with next_cursor; after (nonnegative sequence) and limit (1-100, default 50). Optional filters narrow the page: session_id (the event session, the assignment worker or either handoff side), task_id (assignment or managed task), attempt_id (assignment or managed attempt), operation (exact name or a prefix ending in a dot), since/until (RFC3339, half-open on the server timestamp; a fractional bound rounds up to the next whole second because stored timestamps are whole seconds, which keeps the half-open meaning). Unknown or repeated query parameters are refused. Records carry actor identity IDs (never token values), request ID, server and process versions; see /export for JSONL pages with messages.",
+        "x-role": "admin",
+        "responses": {
+          "200": {
+            "description": "Team configuration or paginated list/audit"
+          },
+          "400": {
+            "description": "Invalid request"
+          },
+          "403": {
+            "description": "Admin required or tasks disabled"
+          },
+          "404": {
+            "description": "Unknown project/team"
+          },
+          "409": {
+            "description": "Name, revision or retry conflict"
+          }
+        },
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/p"
+          },
+          {
+            "name": "team",
+            "in": "path",
+            "schema": {
+              "type": "string"
+            },
+            "required": true
+          }
+        ]
+      }
+    },    "/v1/projects/{p}/teams/{team}/export": {
+      "get": {
+        "summary": "Administrator team audit export (JSONL pages)",
+        "description": "Admin JSONL export page (application/x-ndjson) of a team's accepted events and message metadata for post-analysis; every page runs the admin gate again. Lines: one header record (schema_version 1, protocol_version, project, team_id, normalized filters, include_bodies, limit, snapshot {event_sequence, message_sequence, taken_at}, first_page, exported_at, server_version, request_id), then up to limit event records, then up to limit message records, then one end record (events, messages, complete, next {after_events, after_messages, snapshot_events, snapshot_messages}). The first page takes the snapshot; a continued page passes all four next values back so records accepted after the snapshot never appear; complete:true marks the last page. Message records are metadata by default: id, sequence, sender session and generation, reported profile as stored, created_at, recipient, kind, task/attempt/reply references, lifecycle record and one delivery record per recipient (delivered_at means an inbox response was served, acked_at is the client's explicit report); include_bodies=true adds the payload. Filters as on /events; an operation filter selects lifecycle messages by their operation. A stream whose snapshot sequence is zero yields nothing on any page. limit 1-100 (default 50). Nothing here infers model identity or cost; rotated server diagnostics are not part of the export.",
         "x-role": "admin",
         "responses": {
           "200": {
