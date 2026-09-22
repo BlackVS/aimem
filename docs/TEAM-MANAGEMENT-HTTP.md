@@ -6,9 +6,10 @@ recovery and release operations over HTTP, on top of the
 [managed-task lifecycle](TEAM-MANAGED-LIFECYCLE-STORAGE.md) and
 [operator recovery](TEAM-RECOVERY-STORAGE.md) storage contracts. Together with
 the [assignment](TEAM-ASSIGNMENT-HTTP.md) and [execution](TEAM-EXECUTION-HTTP.md)
-routes this is the complete lifecycle over HTTP; CLI/MCP execution tools and
-inbox lifecycle delivery are the remaining increment, so responses still say
-`workflow_ready:false` and a worker pilot must wait for them.
+routes this is the complete lifecycle over HTTP, and the CLI and MCP tools
+bridge the coordinator operations; recover and unmanage are CLI-only for the
+operator. Inbox lifecycle delivery is the remaining increment, so responses
+still say `workflow_ready:false` and a worker pilot must wait for it.
 
 All paths below begin with `/v1/projects/PROJECT/teams/TEAM_ID`. Every command
 requires `Idempotency-Key` and one strict JSON body of at most 64 KiB; unknown

@@ -2,8 +2,8 @@
 
 This increment adds Go storage methods for result submission and coordinator
 disposition on top of [assignment storage](TEAM-ASSIGNMENT-STORAGE.md). The
-[execution routes](TEAM-EXECUTION-HTTP.md) expose submit/review over HTTP; CLI
-and MCP remain deferred. Responses continue to advertise `workflow_ready: false`;
+[execution routes](TEAM-EXECUTION-HTTP.md) expose submit/review over HTTP, CLI
+and MCP. Responses continue to advertise `workflow_ready: false`;
 a worker pilot still needs the remaining lifecycle routes and client operations.
 
 ## Submission and disposition
