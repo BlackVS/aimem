@@ -27,6 +27,7 @@ refusals as the execution routes; a revision conflict carries the current task.
 | `POST /tasks/TASK_ID/finalize` | Current coordinator: records DONE for a REVIEW task whose named attempt was accepted, with merge/delivery evidence |
 | `POST /assignments/ATTEMPT_ID/recover` | Admin token only: closes an abandoned RUNNING/BLOCKED/STOP_REQUESTED/STOPPED attempt as RECOVERED with recorded reconciliation; task READY |
 | `POST /tasks/TASK_ID/unmanage` | Admin token only: releases a task this team manages with no reserved attempt; generic writes return |
+| `POST /sessions/SESSION_ID/rebind-token` | Admin token only: moves a session to a replacement token of the same user after recorded reconciliation; a reserved attempt follows; responds with the session view |
 
 Handoff carries the outgoing `session_id`/`generation`, `coordinator_generation`
 as observed, `target` `{session_id, generation}` and a nonempty `reason`. An
@@ -56,6 +57,11 @@ and `reconciliation` with `execution_stopped:true`, `reason`, `runtime_check`,
 `reason`; the team in the URL is checked inside the storage transaction and
 bound into the retry receipt, so a task another team manages is refused with
 409 under this team's prefix and a retry replays only through the same prefix.
-Both are recorded operator assessments: nothing here stops a process,
-verifies evidence or proves a coordinator or worker is gone. Merging this
+Rebind-token carries `expected_generation`, `token_id` of the replacement
+(verified against the access database as live, the session's own user, with
+write scope for this project) and `reconciliation` with
+`old_credential_stopped:true`, `reason`, `runtime_check` and `evidence_refs`;
+the old credential can use no handle afterwards and its receipts never replay
+for the replacement. All three are recorded operator assessments: nothing here
+stops a process, verifies evidence or proves a coordinator or worker is gone. Merging this
 increment does not request a release, deployment or pilot.

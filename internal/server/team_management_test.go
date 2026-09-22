@@ -6,6 +6,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"aimem/internal/store"
 )
@@ -208,6 +209,52 @@ func TestManagementHTTPEditAndFinalize(t *testing.T) {
 		t.Fatal(done)
 	}
 	if replay := managedTaskResult(t, taskReq(t, f.h, "POST", f.base+"/tasks/"+task.ID+"/finalize", f.alice, "finalize", assignmentJSON(t, finalize))); replay.Revision != done.Revision {
+		t.Fatal("replay", replay)
+	}
+}
+
+func TestManagementHTTPRebindToken(t *testing.T) {
+	f := newAssignmentFixture(t)
+	run := f.running(t)
+	acc, err := f.s.openAccess(false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	replacement, replacementSecret, err := acc.Issue("admin", f.bobUser, "replacement", f.alphaInstance, time.Now().Add(time.Hour))
+	if err != nil {
+		t.Fatal(err)
+	}
+	body := func(tokenID string) string {
+		return assignmentJSON(t, store.TeamTokenRebindCommand{ExpectedGeneration: 1, TokenID: tokenID,
+			Reconciliation: store.TeamTokenRebindEvidence{OldCredentialStopped: true, Reason: "credential rotated", RuntimeCheck: "old client stopped", EvidenceRefs: []store.TaskRef{{Kind: "text", Ref: "operator checked the host"}}}})
+	}
+	path := f.base + "/sessions/" + f.recipient.SessionID + "/rebind-token"
+	// Ordinary tokens never reach the route; another user's token is refused by the access check.
+	if w := taskReq(t, f.h, "POST", path, f.alice, "ordinary", body(replacement.ID)); w.Code != 403 {
+		t.Fatal(w.Code, w.Body)
+	}
+	if w := taskReq(t, f.h, "POST", path, f.admin, "wrong-user", body(f.aliceTokenID)); w.Code != 403 {
+		t.Fatal(w.Code, w.Body)
+	}
+	if w := taskReq(t, f.h, "POST", path, f.admin, "mismatch", `{"session_id":"other","expected_generation":1,"token_id":"x","reconciliation":{"old_credential_stopped":true,"reason":"r","runtime_check":"c","evidence_refs":[{"kind":"text","ref":"e"}]}}`); w.Code != 400 {
+		t.Fatal(w.Code, w.Body)
+	}
+	view := sessionView(t, taskReq(t, f.h, "POST", path, f.admin, "rebind", body(replacement.ID)))
+	if view.ID != f.recipient.SessionID || view.Generation != 2 || view.Role != "worker" {
+		t.Fatalf("rebind: %+v", view)
+	}
+	current := store.TeamSessionHandle{SessionID: view.ID, Generation: 2}
+	// The old credential can use no handle; the replacement commands the same attempt.
+	if w := taskReq(t, f.h, "GET", f.reservedURL(current), f.peer, "", ""); w.Code != 403 {
+		t.Fatal("old credential read the attempt", w.Code, w.Body)
+	}
+	if got := assignmentResult(t, taskReq(t, f.h, "GET", f.reservedURL(current), replacementSecret, "", ""), 200); got.ID != run.ID || got.Worker != current {
+		t.Fatal(got)
+	}
+	if got := assignmentResult(t, f.execute(t, run.ID, "block", replacementSecret, "block", workBody(current, 0, 2, "waiting")), 200); got.State != "BLOCKED" {
+		t.Fatal(got)
+	}
+	if replay := sessionView(t, taskReq(t, f.h, "POST", path, f.admin, "rebind", body(replacement.ID))); replay.Generation != 2 {
 		t.Fatal("replay", replay)
 	}
 }

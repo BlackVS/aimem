@@ -149,8 +149,9 @@ aimem teams ack example-project TEAM_ID ack.json ack-001
 same shape, for example `aimem teams accept example-project TEAM_ID accept.json accept-001`
 with `session_id`, `generation` and `attempt` in the file; `assignment` and
 `reserved` are reads without a key. Operators run
-`aimem teams recover PROJECT TEAM ATTEMPT reconciliation.json` and
-`aimem teams unmanage PROJECT TEAM TASK request.json` on the hub host.
+`aimem teams recover PROJECT TEAM ATTEMPT reconciliation.json`,
+`aimem teams unmanage PROJECT TEAM TASK request.json` and
+`aimem teams rebind-token PROJECT TEAM SESSION request.json` on the hub host.
 CLI and stdio MCP use the checkout's ordinary credential. They support the full 25-second wait;
 third-party HTTP/MCP callers must also allow sufficient request time.
 

@@ -164,6 +164,7 @@ func (s *Server) Routes() []Route {
 		{"POST", "/v1/projects/{p}/teams/{team}/tasks/{task}/finalize", s.changeManagedTask, false},
 		{"POST", "/v1/projects/{p}/teams/{team}/assignments/{attempt}/recover", s.recoverTeamAssignment, true},
 		{"POST", "/v1/projects/{p}/teams/{team}/tasks/{task}/unmanage", s.unmanageTask, true},
+		{"POST", "/v1/projects/{p}/teams/{team}/sessions/{session}/rebind-token", s.rebindTeamSessionToken, true},
 		{"GET", "/v1/health", s.health, false},
 		{"POST", "/v1/events", s.append, false},
 		{"GET", "/v1/projects", s.projects, false},

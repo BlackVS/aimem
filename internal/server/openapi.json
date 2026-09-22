@@ -3025,7 +3025,7 @@
       "post": {
         "x-role": "writer",
         "summary": "Withdraw a team assignment",
-        "description": "Requires a live ordinary project write token, enabled project, current enrollment and a session bound to this token. Admin/local/legacy/read-only credentials are refused. Team ID and session_id/generation are handles, not credentials. Returns protocol_version:1, assignment and workflow_ready:true; every transition also delivers a lifecycle message to the counterpart's inbox, and readiness describes the protocol loop, not a pilot approval. Idempotency-Key required. One JSON body <=64 KiB; unknown fields and trailing values rejected. The caller is reauthorized even on retries; identical accepted commands return their original receipt. Body: current coordinator session_id/generation, coordinator_generation and nonempty reason <=4096 UTF-8 bytes. Closes only OFFERED attempts, including when the worker lost access. RUNNING work stays reserved; cancellation/recovery/unmanage are unavailable.",
+        "description": "Requires a live ordinary project write token, enabled project, current enrollment and a session bound to this token. Admin/local/legacy/read-only credentials are refused. Team ID and session_id/generation are handles, not credentials. Returns protocol_version:1, assignment and workflow_ready:true; every transition also delivers a lifecycle message to the counterpart's inbox, and readiness describes the protocol loop, not a pilot approval. Idempotency-Key required. One JSON body <=64 KiB; unknown fields and trailing values rejected. The caller is reauthorized even on retries; identical accepted commands return their original receipt. Body: current coordinator session_id/generation, coordinator_generation and nonempty reason <=4096 UTF-8 bytes. Closes only OFFERED attempts, including when the worker lost access. RUNNING work stays reserved: the current coordinator requests a stop with cancel, an admin closes abandoned work with recover, and unmanage needs a task with no reserved attempt.",
         "parameters": [
           {
             "name": "p",
@@ -3768,7 +3768,7 @@
       "post": {
         "x-role": "writer",
         "summary": "Edit a managed task's content",
-        "description": "Requires a live ordinary project write token, enabled project, current enrollment and a session bound to this token; storage checks the current coordinator generation. Idempotency-Key required. One JSON body <=64 KiB; unknown fields and trailing values rejected. The caller is reauthorized even on retries; identical accepted commands return their original receipt. Handoff, edit and finalize are coordinator operations, also bridged by CLI and MCP; workflow_ready is true and every transition delivers a lifecycle message to the counterpart's inbox. Body: coordinator session_id/generation, coordinator_generation, expected_revision, content (the full task content; state must equal the current state and archived must be false) and nonempty reason. Allowed only for a task this team manages with no reserved attempt. Commits task, history, audit event and receipt; responds with protocol_version:1, task and workflow_ready:true.",
+        "description": "Requires a live ordinary project write token, enabled project, current enrollment and a session bound to this token; storage checks the current coordinator generation. Idempotency-Key required. One JSON body <=64 KiB; unknown fields and trailing values rejected. The caller is reauthorized even on retries; identical accepted commands return their original receipt. Handoff, edit and finalize are coordinator operations, also bridged by CLI and MCP; workflow_ready is true; edit and finalize are task-level operations and deliver no lifecycle message. Body: coordinator session_id/generation, coordinator_generation, expected_revision, content (the full task content; state must equal the current state and archived must be false) and nonempty reason. Allowed only for a task this team manages with no reserved attempt. Commits task, history, audit event and receipt; responds with protocol_version:1, task and workflow_ready:true.",
         "parameters": [
           {
             "name": "p",
@@ -3844,7 +3844,7 @@
       "post": {
         "x-role": "writer",
         "summary": "Finalize a managed task as DONE",
-        "description": "Requires a live ordinary project write token, enabled project, current enrollment and a session bound to this token; storage checks the current coordinator generation. Idempotency-Key required. One JSON body <=64 KiB; unknown fields and trailing values rejected. The caller is reauthorized even on retries; identical accepted commands return their original receipt. Handoff, edit and finalize are coordinator operations, also bridged by CLI and MCP; workflow_ready is true and every transition delivers a lifecycle message to the counterpart's inbox. Body: coordinator session_id/generation, coordinator_generation, expected_revision, attempt_id of the ACCEPTED attempt, nonempty reason and evidence (typed references, at least one) for the merge/delivery. Allowed only for a REVIEW task this team manages with no reserved attempt. Appends the evidence to the task, records DONE, history and audit; the task stays managed. The hub does not verify the evidence.",
+        "description": "Requires a live ordinary project write token, enabled project, current enrollment and a session bound to this token; storage checks the current coordinator generation. Idempotency-Key required. One JSON body <=64 KiB; unknown fields and trailing values rejected. The caller is reauthorized even on retries; identical accepted commands return their original receipt. Handoff, edit and finalize are coordinator operations, also bridged by CLI and MCP; workflow_ready is true; edit and finalize are task-level operations and deliver no lifecycle message. Body: coordinator session_id/generation, coordinator_generation, expected_revision, attempt_id of the ACCEPTED attempt, nonempty reason and evidence (typed references, at least one) for the merge/delivery. Allowed only for a REVIEW task this team manages with no reserved attempt. Appends the evidence to the task, records DONE, history and audit; the task stays managed. The hub does not verify the evidence.",
         "parameters": [
           {
             "name": "p",
@@ -4049,6 +4049,82 @@
           },
           "409": {
             "description": "Stale generation, revision/state/management conflict, reserved attempt, occupied or missing designation, invalid transition or retry mismatch. Task revision conflicts include current task and project."
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/projects/{p}/teams/{team}/sessions/{session}/rebind-token": {
+      "post": {
+        "x-role": "admin",
+        "summary": "Rebind a team session to a replacement token (admin)",
+        "description": "Admin route: the bearer gate refuses ordinary tokens and storage refuses any non-admin actor. Enabled project required. Idempotency-Key required. One JSON body <=64 KiB; unknown fields and trailing values rejected; identical retries return the original receipt. Body: expected_generation as observed, token_id of the replacement token (issued to the session's user, live, with write scope for this project; verified against the access database) and reconciliation {old_credential_stopped:true, reason, runtime_check, evidence_refs}. Effect in one transaction: the session binds to the replacement token, its generation advances (and the coordinator generation for a coordinator), a reserved non-offer attempt follows the new generation as on resume with its lifecycle message, and an audit event records the transfer. The old credential can use no handle afterwards; receipts recorded under it never replay for the replacement, so an uncertain old command is re-read, not retried. A recorded operator assessment: nothing here stops a process. Responds with the session view like resume.",
+        "parameters": [
+          {
+            "name": "p",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "team",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "session",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Protocol-v1 session view of the rebound session"
+          },
+          "400": {
+            "description": "Invalid body/query or missing retry key"
+          },
+          "401": {
+            "description": "Invalid, expired, revoked or disabled caller credential"
+          },
+          "403": {
+            "description": "Caller lacks the authority this route requires (ordinary bound coordinator session, or admin token), or session binding/enrollment denied"
+          },
+          "404": {
+            "description": "Project, team or session not found"
+          },
+          "409": {
+            "description": "Stale generation, closed session, missing enrollment or designation, or retry mismatch"
           }
         },
         "security": [

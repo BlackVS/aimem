@@ -63,6 +63,7 @@ type TeamEvent struct {
 	Assignment         *TeamAssignment         `json:"assignment,omitempty"`
 	Handoff            *TeamCoordinatorHandoff `json:"handoff,omitempty"`
 	Managed            *TeamManagedChange      `json:"managed,omitempty"`
+	TokenRebind        *TeamTokenRebind        `json:"token_rebind,omitempty"`
 }
 
 func (c *TeamContent) validate() error {
