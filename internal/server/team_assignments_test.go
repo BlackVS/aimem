@@ -52,7 +52,7 @@ func assignmentResult(t *testing.T, w *httptest.ResponseRecorder, status int) st
 		Assignment store.TeamAssignment `json:"assignment"`
 		Ready      *bool                `json:"workflow_ready"`
 	}
-	if err := json.Unmarshal(w.Body.Bytes(), &out); err != nil || out.Version != 1 || out.Ready == nil || *out.Ready || out.Assignment.ID == "" {
+	if err := json.Unmarshal(w.Body.Bytes(), &out); err != nil || out.Version != 1 || out.Ready == nil || !*out.Ready || out.Assignment.ID == "" {
 		t.Fatal(w.Body, err)
 	}
 	if w.Header().Get("Cache-Control") != "no-store" || w.Header().Get("X-Request-ID") == "" {

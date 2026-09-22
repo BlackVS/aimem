@@ -534,8 +534,13 @@ with reconciliation, dispatched on the authenticated role), managed edit and
 finalize for the coordinator, and admin-only recover and unmanage behind the
 bearer gate. The CLI and stdio MCP bridge every agent operation to those routes
 with the checkout credential (`team_offer` through `team_finalize`), and the
-operator CLI reaches recover and unmanage; inbox lifecycle delivery is the
-remaining increment and `workflow_ready` stays false until then.
+operator CLI reaches recover and unmanage. The
+[lifecycle messages](TEAM-MESSAGE-STORAGE.md#lifecycle-messages) increment
+completes the loop: every attempt transition and handoff is written into the
+shared inbox in the same transaction, for the counterpart sessions, with the
+existing delivery and acknowledgement semantics, and responses advertise
+`workflow_ready` true. Readiness describes the protocol, not a pilot approval:
+the rehearsal and a separately approved deployment remain.
 
 For managed tasks generic PUT/archive is refused with `409 managed_task` and a
 pointer to coordination operations, including for admins; explicit audited admin

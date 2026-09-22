@@ -3,8 +3,9 @@
 `HandoffTeamCoordinator` transfers a team's single coordinator slot in one
 transaction. The [management routes](TEAM-MANAGEMENT-HTTP.md) expose it over
 HTTP for both authorities and the coordinator path over CLI and MCP; token
-replacement remains a separate increment. The complete team workflow still advertises
-`workflow_ready: false`.
+replacement remains a separate increment. A handoff also broadcasts a
+[lifecycle message](TEAM-MESSAGE-STORAGE.md#lifecycle-messages) to every
+remaining member.
 
 ## Transfer
 

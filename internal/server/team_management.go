@@ -13,7 +13,7 @@ func managedTaskResponse(project string, t store.Task) any {
 		Version       int          `json:"protocol_version"`
 		Task          taskResponse `json:"task"`
 		WorkflowReady bool         `json:"workflow_ready"`
-	}{1, taskView(project, t), false}
+	}{1, taskView(project, t), true}
 }
 
 // handoffTeamCoordinator serves both authorities the design names: the

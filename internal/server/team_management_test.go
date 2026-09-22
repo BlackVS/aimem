@@ -69,7 +69,7 @@ func managedTaskResult(t *testing.T, w *httptest.ResponseRecorder) store.Task {
 		Task    store.Task `json:"task"`
 		Ready   *bool      `json:"workflow_ready"`
 	}
-	if err := json.Unmarshal(w.Body.Bytes(), &out); err != nil || out.Version != 1 || out.Ready == nil || *out.Ready || out.Task.ID == "" {
+	if err := json.Unmarshal(w.Body.Bytes(), &out); err != nil || out.Version != 1 || out.Ready == nil || !*out.Ready || out.Task.ID == "" {
 		t.Fatal(w.Body, err)
 	}
 	if w.Header().Get("Cache-Control") != "no-store" {

@@ -8,8 +8,10 @@ recovery and release operations over HTTP, on top of the
 the [assignment](TEAM-ASSIGNMENT-HTTP.md) and [execution](TEAM-EXECUTION-HTTP.md)
 routes this is the complete lifecycle over HTTP, and the CLI and MCP tools
 bridge the coordinator operations; recover and unmanage are CLI-only for the
-operator. Inbox lifecycle delivery is the remaining increment, so responses
-still say `workflow_ready:false` and a worker pilot must wait for it.
+operator. Handoffs and recoveries also deliver
+[lifecycle messages](TEAM-MESSAGE-STORAGE.md#lifecycle-messages) to the affected
+inboxes, and responses say `workflow_ready:true`. Readiness is not a pilot
+approval: the rehearsal and a separately approved deployment come first.
 
 All paths below begin with `/v1/projects/PROJECT/teams/TEAM_ID`. Every command
 requires `Idempotency-Key` and one strict JSON body of at most 64 KiB; unknown
@@ -42,7 +44,7 @@ the full `content` (with `state` equal to the current state and `archived` false
 and a `reason`. Finalize carries the handle, `coordinator_generation`,
 `expected_revision`, `attempt_id` of the ACCEPTED attempt, a `reason` and
 `evidence` (typed references, at least one). Both answer `protocol_version:1`,
-`task` (the task view with links) and `workflow_ready:false`; an admin token is
+`task` (the task view with links) and `workflow_ready:true`; an admin token is
 refused with 403 because these are session-bound coordinator operations.
 
 Recover and unmanage are admin routes: the bearer gate refuses ordinary tokens

@@ -15,12 +15,17 @@ currently 18); a binary refuses a database newer than it understands.
 
 ### Added
 
+- Team lifecycle inbox delivery: every assignment transition and coordinator
+  handoff writes a hub-authored `lifecycle` message into the counterpart
+  sessions' inbox in the same transaction, with the existing delivery and
+  acknowledgement semantics; clients cannot forge one. Responses now
+  advertise `workflow_ready:true`; that describes the protocol, not a pilot.
+
 - Team CLI and MCP parity: `team_offer`, `team_assignment`, `team_reserved`,
   accept/decline/withdraw, block/resume-work/cancel/stopped/close-stop,
   submit/review, handoff, edit and finalize as MCP tools and `aimem teams`
   agent commands bridging to the HTTP routes with the checkout credential;
-  operator `aimem teams recover` and `aimem teams unmanage`. Responses still
-  advertise `workflow_ready:false` until inbox lifecycle delivery.
+  operator `aimem teams recover` and `aimem teams unmanage`.
 
 - Team management HTTP routes: coordinator handoff (current coordinator, or
   admin with reconciliation), managed-task edit and finalize for the

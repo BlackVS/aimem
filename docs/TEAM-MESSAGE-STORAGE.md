@@ -1,9 +1,9 @@
 # Team message storage contract
 
 This implements the storage portion of [agent teams](DESIGN-agent-teams.md).
-Messaging HTTP, CLI and MCP operations are not exposed yet. The following
-transport increment must enforce live ordinary write-token scope and project
-grants on every call, including retries and reads, as the session transport does.
+The messaging transports (HTTP, CLI and MCP) enforce live ordinary write-token
+scope and project grants on every call, including retries and reads, as the
+session transport does.
 The access database is separate; these project transactions do not provide
 cross-database authorization atomicity.
 
@@ -20,8 +20,9 @@ RFC3339 timestamps, not timers. Answers must reference an existing same-team
 question; other replies must also stay within the team. Task IDs and typed task
 references must exist in the same project. Other typed references use the task
 reference format; they are descriptive links, not verified external resources.
-Attempt references are refused until assignment storage exists. No message kind
-or text creates an assignment or changes task ownership.
+Client messages cannot carry attempt references, the kind `lifecycle` or the
+recipient kind `participants`: those belong to hub-authored lifecycle messages
+(below). No message kind or text creates an assignment or changes task ownership.
 
 A member recipient identifies a session, not a user. A broadcast snapshots all
 active, enrolled sessions at send time, including the sender. Sessions that lost
@@ -53,6 +54,31 @@ history retains the accepted sender profile. The default maximum is 10,000
 messages per team; the internal API accepts a trusted limit from 1 to 1,000,000.
 New sends at capacity fail while exact retries remain available. There is no
 automatic pruning or archival in this increment.
+
+## Lifecycle messages
+
+The hub writes one message of kind `lifecycle` in the same transaction as every
+assignment transition (offer, accept, decline, withdraw, block, resume-work,
+cancel, stopped, close-stop, submit, review, recover and the rebind on worker
+resume) and every coordinator handoff. It has no sender session or profile,
+carries `lifecycle` (operation, task, attempt, attempt state, task state, actor
+kind, the acting session handle when a user acted, and the new coordinator
+generation for a handoff), a readable text, the task and attempt references and
+a task typed reference. Attempt transitions use recipient kind `participants`:
+the attempt's worker session and the current active coordinator session, both
+filtered to active and enrolled, minus the session that acted, so an actor never
+receives its own transition and operator recovery reaches both parties. Handoff
+uses recipient kind `team`: every active enrolled member, the outgoing session
+already being closed. The audit event of the transition names the message ID.
+
+Lifecycle messages bypass the client send quota, because a transition must not
+fail for lack of inbox capacity; they count toward the retained total. They are
+delivered, paged and acknowledged exactly like other messages: an inbox read
+records a delivery attempt, an explicit ack records receipt, and neither is
+acceptance or completion. A departed counterpart gets no delivery, but the
+message remains in team history. A failed message or delivery write rolls the
+whole transition back. Lifecycle messages inform; the assignment row remains
+the authority on ownership, and only an accepted offer authorizes work.
 
 Schema 16 adds message and delivery tables to schema 15. These tables are
 hub-local and excluded from memory synchronization. Existing team project

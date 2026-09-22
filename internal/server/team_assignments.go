@@ -38,7 +38,7 @@ func assignmentResponse(a store.TeamAssignment) any {
 		Version       int                  `json:"protocol_version"`
 		Assignment    store.TeamAssignment `json:"assignment"`
 		WorkflowReady bool                 `json:"workflow_ready"`
-	}{1, a, false}
+	}{1, a, true}
 }
 
 func (s *Server) offerTeamAssignment(w http.ResponseWriter, r *http.Request) {

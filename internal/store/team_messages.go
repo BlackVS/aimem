@@ -39,15 +39,33 @@ type TeamMessageContent struct {
 	ReplyTo   string             `json:"reply_to,omitempty"`
 	Payload   TeamMessagePayload `json:"payload"`
 }
+
+// TeamLifecycle is the hub-authored record inside a lifecycle message: which
+// transition happened, to which attempt and task, and who caused it. It is
+// informational; the assignment row remains the authority on ownership.
+type TeamLifecycle struct {
+	Operation             string             `json:"operation"`
+	TaskID                string             `json:"task_id,omitempty"`
+	AttemptID             string             `json:"attempt_id,omitempty"`
+	State                 string             `json:"state,omitempty"`
+	TaskState             string             `json:"task_state,omitempty"`
+	ActorKind             string             `json:"actor_kind"`
+	Session               *TeamSessionHandle `json:"session,omitempty"`
+	CoordinatorGeneration int64              `json:"coordinator_generation,omitempty"`
+}
+
+// A hub-authored message (kind lifecycle) has no sender session or profile
+// and carries Lifecycle; client sends never set these.
 type TeamMessage struct {
-	ID               string      `json:"id"`
-	Sequence         int64       `json:"sequence"`
-	TeamID           string      `json:"team_id"`
-	SenderID         string      `json:"sender_id"`
-	SenderGeneration int64       `json:"sender_generation"`
-	ProfileRevision  int64       `json:"profile_revision"`
-	Profile          TeamProfile `json:"profile"`
-	CreatedAt        string      `json:"created_at"`
+	ID               string         `json:"id"`
+	Sequence         int64          `json:"sequence"`
+	TeamID           string         `json:"team_id"`
+	SenderID         string         `json:"sender_id"`
+	SenderGeneration int64          `json:"sender_generation"`
+	ProfileRevision  int64          `json:"profile_revision"`
+	Profile          TeamProfile    `json:"profile"`
+	CreatedAt        string         `json:"created_at"`
+	Lifecycle        *TeamLifecycle `json:"lifecycle,omitempty"`
 	TeamMessageContent
 }
 
@@ -177,6 +195,76 @@ func messageRecipients(tx *sql.Tx, t Team, r TeamRecipient) ([]string, error) {
 		return nil, ErrTeamSessionDenied
 	}
 	return ids, nil
+}
+
+// lifecycleRecipients keeps the given session IDs that are active and still
+// enrolled (coordinators must still be designated), dropping duplicates,
+// blanks and the excluded session. A departed counterpart simply receives no
+// delivery; the message stays readable in team history.
+func lifecycleRecipients(tx *sql.Tx, t Team, exclude string, ids ...string) ([]string, error) {
+	enrolled := map[string]bool{}
+	coordinators := map[string]bool{}
+	for _, e := range t.Enrollment {
+		enrolled[e.UserID] = true
+		coordinators[e.UserID] = e.Coordinator
+	}
+	seen := map[string]bool{}
+	out := []string{}
+	for _, id := range ids {
+		if id == "" || id == exclude || seen[id] {
+			continue
+		}
+		seen[id] = true
+		s, err := readTeamSession(tx, t.ID, id)
+		if errors.Is(err, ErrTeamSessionDenied) {
+			continue
+		}
+		if err != nil {
+			return nil, err
+		}
+		if s.State != "active" || !enrolled[s.UserID] || s.Role == "coordinator" && !coordinators[s.UserID] {
+			continue
+		}
+		out = append(out, id)
+	}
+	return out, nil
+}
+
+func activeCoordinatorID(tx *sql.Tx, teamID string) (string, error) {
+	var id string
+	err := tx.QueryRow(`SELECT id FROM team_sessions WHERE team_id=? AND role='coordinator' AND state='active'`, teamID).Scan(&id)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", nil
+	}
+	return id, err
+}
+
+// lifecycleMessage writes a hub-authored message and its deliveries inside
+// the caller's transaction. It bypasses the client send quota: a transition
+// must never fail for lack of inbox capacity. The caller records the returned
+// ID on its audit event.
+func lifecycleMessage(tx *sql.Tx, teamID string, recipient TeamRecipient, recipients []string, l TeamLifecycle, text string, refs []TaskRef) (string, error) {
+	if refs == nil {
+		refs = []TaskRef{}
+	}
+	m := TeamMessage{ID: uuidv7.New(), TeamID: teamID, Profile: TeamProfile{Capabilities: []string{}}, CreatedAt: nowUTC(), Lifecycle: &l,
+		TeamMessageContent: TeamMessageContent{Recipient: recipient, Kind: "lifecycle", TaskID: l.TaskID, AttemptID: l.AttemptID, Payload: TeamMessagePayload{Text: text, Refs: refs}}}
+	if err := tx.QueryRow(`INSERT INTO team_messages(id,team_id,body) VALUES(?,?,'') RETURNING sequence`, m.ID, teamID).Scan(&m.Sequence); err != nil {
+		return "", err
+	}
+	body, err := json.Marshal(m)
+	if err != nil {
+		return "", err
+	}
+	if _, err = tx.Exec(`UPDATE team_messages SET body=? WHERE id=?`, string(body), m.ID); err != nil {
+		return "", err
+	}
+	for _, id := range recipients {
+		if _, err = tx.Exec(`INSERT INTO team_deliveries(message_id,session_id) VALUES(?,?)`, m.ID, id); err != nil {
+			return "", err
+		}
+	}
+	return m.ID, nil
 }
 
 // SendTeamMessage persists content once; audit references its ID. Live token and

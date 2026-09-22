@@ -1,10 +1,11 @@
 # Agent team registration, messages and work
 
 Registration, roster, messages, assignments, execution and coordinator
-management are available through HTTP, CLI and MCP. Lifecycle events are not
-yet delivered to the inbox, so responses still say `workflow_ready:false` and
-the pilot waits for that increment. Joining or receiving a message does not
-authorize coding work. Workers wait for an addressed coordinator assignment and do not
+management are available through HTTP, CLI and MCP, and every transition
+delivers a lifecycle message to the counterpart's inbox, so responses say
+`workflow_ready:true`. That states the protocol loop is complete; a pilot still
+needs the rehearsal and a separately approved deployment. Joining or receiving a
+message does not authorize coding work; only an accepted offer does. Workers wait for an addressed coordinator assignment and do not
 select backlog work independently while joined. Selected project process rules
 still apply. The later pilot will test complete coordination with real agents.
 
@@ -152,6 +153,21 @@ with `session_id`, `generation` and `attempt` in the file; `assignment` and
 `aimem teams unmanage PROJECT TEAM TASK request.json` on the hub host.
 CLI and stdio MCP use the checkout's ordinary credential. They support the full 25-second wait;
 third-party HTTP/MCP callers must also allow sufficient request time.
+
+## The complete loop
+
+A worker joins, then polls its inbox with bounded waits. An offer arrives as a
+`lifecycle` message from the hub (no sender session) naming the attempt; the
+worker reads the assignment, accepts or declines, and acknowledges the message.
+While working it blocks and resumes as needed; a coordinator stop request
+arrives the same way and is acknowledged with `stopped`. The worker submits a
+result with commits and evidence, then waits: the coordinator's accept or rework
+arrives as a lifecycle message, and rework means a new offer will follow. The
+coordinator, in turn, sees acceptance, blocking, acknowledgement and submission
+in its own inbox. A handoff is broadcast to every remaining member with the new
+coordinator generation; an operator recovery is delivered to both parties.
+Acknowledging a lifecycle message records receipt only; the assignment row
+remains the authority, and nothing in the inbox authorizes work by itself.
 
 ## HTTP and operator policy
 

@@ -259,6 +259,11 @@ func (d *DB) ChangeTeamAssignment(teamID, id, op string, c TeamAssignmentCommand
 	})
 }
 
+// saveTeamAssignment writes the attempt row, a hub-authored lifecycle message
+// for the counterpart sessions (the attempt's worker and the current
+// coordinator, minus the session that acted) and one audit event naming the
+// message, all in the caller's transaction. Session s is the acting session
+// for user commands and the affected worker for operator recovery.
 func saveTeamAssignment(tx *sql.Tx, t Team, s TeamSession, out TeamAssignment, op string, a TeamAuditContext) error {
 	b, err := json.Marshal(out)
 	if err != nil {
@@ -270,7 +275,33 @@ ON CONFLICT(id) DO UPDATE SET state=excluded.state,reserved=excluded.reserved,bo
 	if err != nil {
 		return err
 	}
-	e := TeamEvent{ID: uuidv7.New(), ProtocolVersion: 1, Operation: op, At: nowUTC(), TeamAuditContext: a, Team: t, Session: &s, Assignment: &out}
+	task, err := readTask(tx, out.TaskID)
+	if err != nil {
+		return err
+	}
+	coordinator, err := activeCoordinatorID(tx, t.ID)
+	if err != nil {
+		return err
+	}
+	exclude := ""
+	l := TeamLifecycle{Operation: op, TaskID: out.TaskID, AttemptID: out.ID, State: out.State, TaskState: task.State, ActorKind: a.Actor.Kind}
+	if a.Actor.Kind == "user" {
+		exclude = s.ID
+		l.Session = &TeamSessionHandle{SessionID: s.ID, Generation: s.Generation}
+	}
+	recipients, err := lifecycleRecipients(tx, t, exclude, out.Worker.SessionID, coordinator)
+	if err != nil {
+		return err
+	}
+	text := op + ": attempt " + out.ID + " is " + out.State + "; task " + out.TaskID + " is " + task.State
+	if out.Reason != "" {
+		text += "; reason: " + out.Reason
+	}
+	msg, err := lifecycleMessage(tx, t.ID, TeamRecipient{Kind: "participants"}, recipients, l, text, []TaskRef{{Kind: "task", Ref: out.TaskID}})
+	if err != nil {
+		return err
+	}
+	e := TeamEvent{ID: uuidv7.New(), ProtocolVersion: 1, Operation: op, At: nowUTC(), TeamAuditContext: a, Team: t, Session: &s, Assignment: &out, MessageIDs: []string{msg}}
 	b, err = json.Marshal(e)
 	if err != nil {
 		return err
