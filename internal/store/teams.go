@@ -55,8 +55,10 @@ type TeamEvent struct {
 	Operation       string `json:"operation"`
 	At              string `json:"at"`
 	TeamAuditContext
-	PreviousRevision int64 `json:"previous_revision"`
-	Team             Team  `json:"team"`
+	PreviousRevision   int64        `json:"previous_revision"`
+	Team               Team         `json:"team"`
+	Session            *TeamSession `json:"session,omitempty"`
+	PreviousGeneration int64        `json:"previous_generation,omitempty"`
 }
 
 func (c *TeamContent) validate() error {

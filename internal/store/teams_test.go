@@ -182,7 +182,7 @@ func TestTeamLifecycleAndBackup(t *testing.T) {
 
 func TestTeamMigrationAndValidation(t *testing.T) {
 	r, d, a := teamFixture(t)
-	for _, q := range []string{`DROP TABLE team_events`, `DROP TABLE teams`, `UPDATE meta SET value='13' WHERE key='schema_version'`} {
+	for _, q := range []string{`DROP TABLE team_sessions`, `DROP TABLE team_session_control`, `DROP TABLE team_events`, `DROP TABLE teams`, `UPDATE meta SET value='13' WHERE key='schema_version'`} {
 		if _, err := d.sql.Exec(q); err != nil {
 			t.Fatal(err)
 		}
@@ -206,7 +206,7 @@ func TestTeamMigrationAndValidation(t *testing.T) {
 	if _, err := r.ConfigureTeam("alpha", "", 0, TeamContent{Name: "ok"}, a, "ok"); err != nil {
 		t.Fatal(err)
 	}
-	if v, _ := d.GetMeta("schema_version"); v != "14" {
+	if v, _ := d.GetMeta("schema_version"); v != fmt.Sprint(currentSchema) {
 		t.Fatalf("version %s", v)
 	}
 }

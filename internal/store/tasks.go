@@ -337,6 +337,13 @@ func isZero(v any) bool {
 // together, so a failure anywhere leaves no trace and does not consume the
 // key.
 func taskMutation[T any](d *DB, actor TaskActor, op, scope, key string, input any, fn func(*sql.Tx) (T, error)) (T, error) {
+	return checkedTaskMutation(d, actor, op, scope, key, input, nil, fn)
+}
+
+// checkedTaskMutation checks current authorization inside the transaction even
+// on receipt replay. Generation checks for NEW effects belong in fn: a retry of
+// an accepted resume/leave must still return its original result.
+func checkedTaskMutation[T any](d *DB, actor TaskActor, op, scope, key string, input any, check func(*sql.Tx) error, fn func(*sql.Tx) (T, error)) (T, error) {
 	var zero T
 	if err := d.taskScopeOK(); err != nil {
 		return zero, err
@@ -357,6 +364,11 @@ func taskMutation[T any](d *DB, actor TaskActor, op, scope, key string, input an
 		return zero, err
 	}
 	defer tx.Rollback()
+	if check != nil {
+		if err := check(tx); err != nil {
+			return zero, err
+		}
+	}
 	var savedDigest, saved string
 	err = tx.QueryRow(`SELECT digest, result FROM task_requests WHERE actor=? AND operation=? AND scope=? AND key=?`,
 		actorKey, op, scope, key).Scan(&savedDigest, &saved)
