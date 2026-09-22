@@ -9,11 +9,16 @@ upgrading a fleet.
 The format follows [Keep a Changelog](https://keepachangelog.com/1.1.0/);
 this project does not yet promise semantic versioning. The on-disk schema
 version is tracked separately (`currentSchema` in `internal/store/store.go`,
-currently 16); a binary refuses a database newer than it understands.
+currently 17); a binary refuses a database newer than it understands.
 
 ## [Unreleased]
 
 ### Added
+
+- **Project schema 17:** internal exclusive team offers, worker acceptance,
+  decline/withdraw and persistent managed-task protection. Task reads expose
+  derived coordination; generic edits/archive cannot bypass ownership, including
+  as admin. HTTP assignment commands and the full agent workflow remain deferred.
 
 - Team messaging through HTTP, CLI and MCP: typed messages, team-visible history,
   routed inboxes with bounded waits, explicit acknowledgements and retry receipts.

@@ -3,7 +3,9 @@
 This is the first implementation slice of [agent teams](DESIGN-agent-teams.md).
 It stores team configuration and enrollment. Agent join, roster and messaging
 are described in [TEAM-AGENT-QUICKSTART.md](TEAM-AGENT-QUICKSTART.md).
-Execution assignment is not available yet. Standalone task workflows are unchanged.
+Execution assignment is not available yet. The schema 17
+[storage foundation](TEAM-ASSIGNMENT-STORAGE.md) protects managed tasks;
+standalone workflows for unmanaged tasks are unchanged.
 
 Run the commands on the hub host as its service user, with the local service
 running. Team routes require administrator authority; ordinary agent tokens

@@ -226,7 +226,7 @@
     "/v1/projects/{p}/tasks": {
       "get": {
         "summary": "List task summaries of a project",
-        "description": "Archived tasks are excluded unless include_archived=true. Pages default 20, max 100; pass next_cursor as after. Ordinary user tokens may call this route; writes are authorized per attempt against the task's owning project (user-scoped token or token issued for that project instance, plus a current grant), legacy writer tokens read only, admin tokens do everything.",
+        "description": "Archived tasks are excluded unless include_archived=true. Pages default 20, max 100; pass next_cursor as after. Managed rows include a read-only coordination object with team_id and optional active attempt_id/state; standalone clients must skip them. Ordinary user tokens may call this route; writes are authorized per attempt against the task's owning project (user-scoped token or token issued for that project instance, plus a current grant), legacy writer tokens read only, admin tokens do everything.",
         "x-role": "writer",
         "parameters": [
           {
@@ -361,7 +361,7 @@
     "/v1/tasks/{id}": {
       "get": {
         "summary": "Read one task",
-        "description": "Current content, revision, owning project (resolved at read time, so a rename is reflected) and origin-relative links. Ordinary user tokens may call this route; writes are authorized per attempt against the task's owning project (user-scoped token or token issued for that project instance, plus a current grant), legacy writer tokens read only, admin tokens do everything.",
+        "description": "Current content, revision, owning project (resolved at read time, so a rename is reflected) and origin-relative links. An optional read-only coordination object contains team_id and, when reserved, attempt_id/state; standalone clients must skip managed tasks even between attempts. Ordinary user tokens may call this route; writes are authorized per attempt against the task's owning project (user-scoped token or token issued for that project instance, plus a current grant), legacy writer tokens read only, admin tokens do everything.",
         "x-role": "writer",
         "parameters": [
           {
@@ -390,7 +390,7 @@
       },
       "put": {
         "summary": "Replace a task's editable fields under expected-revision CAS",
-        "description": "Body is the full editable content plus expected_revision; omitted optional fields clear (candidate_refs and evidence_refs are typed references {kind, ref, note?, scope?} \u2014 a bare string is refused with 400 since schema 13). A stale revision answers 409 with the current task. Ordinary user tokens may call this route; writes are authorized per attempt against the task's owning project (user-scoped token or token issued for that project instance, plus a current grant), legacy writer tokens read only, admin tokens do everything. Retry keys travel in the Idempotency-Key header.",
+        "description": "Body is the full editable content plus expected_revision; omitted optional fields clear (candidate_refs and evidence_refs are typed references {kind, ref, note?, scope?} \u2014 a bare string is refused with 400 since schema 13). A stale revision answers 409 with the current task. Ordinary user tokens may call this route; writes are authorized per attempt against the task's owning project (user-scoped token or token issued for that project instance, plus a current grant), legacy writer tokens read only, admin tokens may update unmanaged tasks. Retry keys travel in the Idempotency-Key header. Managed tasks refuse generic update/archive with 409 managed_task, including admins and old update receipts; use dedicated coordination operations when available. The coordination projection is not editable content.",
         "x-role": "writer",
         "parameters": [
           {
@@ -437,7 +437,7 @@
             "description": "Unknown project, task or comment"
           },
           "409": {
-            "description": "Revision conflict (body carries `current` in the same shape as a read), idempotency key reused with different input, or archived task"
+            "description": "Revision conflict (body carries `current` in the same shape as a read), idempotency key reused with different input, archived task, or managed_task (use coordination operations)"
           },
           "413": {
             "description": "Request body larger than 256 KiB"

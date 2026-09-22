@@ -492,7 +492,7 @@ func (r *Registry) Close() {
 	r.dbs = map[string]*DB{}
 }
 
-const currentSchema = 16
+const currentSchema = 17
 
 // SetMeta / GetMeta store small key-value project metadata (e.g. the
 // project's declared knowledge groups, stamped from event pushes so the
@@ -956,6 +956,17 @@ CREATE INDEX idx_team_messages_team ON team_messages(team_id,sequence);
 CREATE TABLE team_deliveries(message_id TEXT NOT NULL REFERENCES team_messages(id),session_id TEXT NOT NULL REFERENCES team_sessions(id),delivered_at TEXT NOT NULL DEFAULT '',delivery_count INTEGER NOT NULL DEFAULT 0,acked_at TEXT NOT NULL DEFAULT '',PRIMARY KEY(message_id,session_id));
 CREATE INDEX idx_team_deliveries_inbox ON team_deliveries(session_id,acked_at,message_id);
 UPDATE meta SET value='16' WHERE key='schema_version';`); err != nil {
+			return err
+		}
+	}
+	if v < 17 {
+		if err := d.step(`
+CREATE TABLE team_managed_tasks(task_id TEXT PRIMARY KEY REFERENCES tasks(id),team_id TEXT NOT NULL REFERENCES teams(id));
+CREATE TABLE team_assignments(id TEXT PRIMARY KEY,team_id TEXT NOT NULL REFERENCES teams(id),task_id TEXT NOT NULL REFERENCES team_managed_tasks(task_id),worker_id TEXT NOT NULL REFERENCES team_sessions(id),state TEXT NOT NULL,reserved INTEGER NOT NULL CHECK(reserved IN (0,1)),body TEXT NOT NULL);
+CREATE UNIQUE INDEX idx_team_assignment_task ON team_assignments(task_id) WHERE reserved=1;
+CREATE UNIQUE INDEX idx_team_assignment_worker ON team_assignments(worker_id) WHERE reserved=1;
+CREATE INDEX idx_team_assignment_team ON team_assignments(team_id,id);
+UPDATE meta SET value='17' WHERE key='schema_version';`); err != nil {
 			return err
 		}
 	}

@@ -78,7 +78,7 @@ func TestMigrationV10ToV11(t *testing.T) {
 		`DROP TABLE epic_history`, `DROP TABLE epics`,
 		`DROP TABLE task_requests`, `DROP TABLE task_comments`, `DROP TABLE task_history`, `DROP TABLE tasks`,
 		`UPDATE meta SET value='10' WHERE key='schema_version'`,
-		`DROP TABLE team_deliveries`, `DROP TABLE team_messages`, `DROP TABLE team_sessions`, `DROP TABLE team_session_control`, `DROP TABLE team_events`, `DROP TABLE teams`,
+		`DROP TABLE team_assignments`, `DROP TABLE team_managed_tasks`, `DROP TABLE team_deliveries`, `DROP TABLE team_messages`, `DROP TABLE team_sessions`, `DROP TABLE team_session_control`, `DROP TABLE team_events`, `DROP TABLE teams`,
 	} {
 		if _, err := db.sql.Exec(stmt); err != nil {
 			t.Fatal(err)
@@ -883,7 +883,7 @@ func TestDropChecksTasksOnUnopenedFiles(t *testing.T) {
 	for _, stmt := range []string{
 		`DROP TABLE task_requests`, `DROP TABLE task_comments`, `DROP TABLE task_history`, `DROP TABLE tasks`,
 		`UPDATE meta SET value='10' WHERE key='schema_version'`,
-		`DROP TABLE team_deliveries`, `DROP TABLE team_messages`, `DROP TABLE team_sessions`, `DROP TABLE team_session_control`, `DROP TABLE team_events`, `DROP TABLE teams`,
+		`DROP TABLE team_assignments`, `DROP TABLE team_managed_tasks`, `DROP TABLE team_deliveries`, `DROP TABLE team_messages`, `DROP TABLE team_sessions`, `DROP TABLE team_session_control`, `DROP TABLE team_events`, `DROP TABLE teams`,
 	} {
 		if _, err := legacy.sql.Exec(stmt); err != nil {
 			t.Fatal(err)
@@ -1446,7 +1446,7 @@ func TestMigrateToSchema12(t *testing.T) {
 		`DROP INDEX idx_tasks_epic`, `ALTER TABLE tasks DROP COLUMN epic`,
 		`DROP TABLE epic_history`, `DROP INDEX idx_epics_state`, `DROP TABLE epics`,
 		`UPDATE meta SET value='11' WHERE key='schema_version'`,
-		`DROP TABLE team_deliveries`, `DROP TABLE team_messages`, `DROP TABLE team_sessions`, `DROP TABLE team_session_control`, `DROP TABLE team_events`, `DROP TABLE teams`,
+		`DROP TABLE team_assignments`, `DROP TABLE team_managed_tasks`, `DROP TABLE team_deliveries`, `DROP TABLE team_messages`, `DROP TABLE team_sessions`, `DROP TABLE team_session_control`, `DROP TABLE team_events`, `DROP TABLE teams`,
 	} {
 		if _, err := db.sql.Exec(q); err != nil {
 			t.Fatalf("%s: %v", q, err)
@@ -1600,7 +1600,7 @@ func TestMigrateToSchema13RewritesRefsAndReceipts(t *testing.T) {
 		{`INSERT INTO task_requests(actor, operation, scope, key, digest, result) VALUES(?,?,?,?,?,?)`, []any{actorKey, "comment", id, "k-old-comment", "1:comment-digest", `{"id":"c1","body":"a comment, not a task"}`}},
 		{`INSERT INTO task_requests(actor, operation, scope, key, digest, result) VALUES(?,?,?,?,?,?)`, []any{actorKey, "epic-create", "", "k-old-epic", "1:epic-digest", `{"id":"e1","title":"an epic, not a task","revision":1}`}},
 		{`UPDATE meta SET value='12' WHERE key='schema_version'`, nil},
-		{`DROP TABLE team_deliveries`, nil}, {`DROP TABLE team_messages`, nil}, {`DROP TABLE team_sessions`, nil}, {`DROP TABLE team_session_control`, nil}, {`DROP TABLE team_events`, nil}, {`DROP TABLE teams`, nil},
+		{`DROP TABLE team_assignments`, nil}, {`DROP TABLE team_managed_tasks`, nil}, {`DROP TABLE team_deliveries`, nil}, {`DROP TABLE team_messages`, nil}, {`DROP TABLE team_sessions`, nil}, {`DROP TABLE team_session_control`, nil}, {`DROP TABLE team_events`, nil}, {`DROP TABLE teams`, nil},
 	} {
 		if _, err := db.sql.Exec(stmt.q, stmt.args...); err != nil {
 			t.Fatalf("%s: %v", stmt.q, err)
@@ -1671,7 +1671,7 @@ func TestMigrateToSchema13RewritesRefsAndReceipts(t *testing.T) {
 	}
 	// The step run again over typed data (the version rewound) changes
 	// nothing: objects pass through, and the receipts still replay.
-	for _, q := range []string{`DROP TABLE team_deliveries`, `DROP TABLE team_messages`, `DROP TABLE team_sessions`, `DROP TABLE team_session_control`, `DROP TABLE team_events`, `DROP TABLE teams`} {
+	for _, q := range []string{`DROP TABLE team_assignments`, `DROP TABLE team_managed_tasks`, `DROP TABLE team_deliveries`, `DROP TABLE team_messages`, `DROP TABLE team_sessions`, `DROP TABLE team_session_control`, `DROP TABLE team_events`, `DROP TABLE teams`} {
 		if _, err := db2.sql.Exec(q); err != nil {
 			t.Fatal(err)
 		}
