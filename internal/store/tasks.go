@@ -759,6 +759,10 @@ func (d *DB) HasTasks() (bool, error) {
 // schema 11 cannot hold tasks; anything else that cannot be read is
 // reported, not treated as empty: refusing is the safe direction.
 func fileHasTasks(path string) (bool, error) {
+	return fileHasRows(path, 11, `SELECT EXISTS(SELECT 1 FROM tasks)`)
+}
+
+func fileHasRows(path string, minimumVersion int, query string) (bool, error) {
 	if _, err := os.Stat(path); os.IsNotExist(err) {
 		return false, nil // no database (interrupted first open): nothing to keep
 	}
@@ -776,11 +780,11 @@ func fileHasTasks(path string) (bool, error) {
 	if err := tx.QueryRow(`SELECT value FROM meta WHERE key='schema_version'`).Scan(&v); err != nil {
 		return false, err
 	}
-	if v < 11 {
+	if v < minimumVersion {
 		return false, nil
 	}
 	var exists bool
-	err = tx.QueryRow(`SELECT EXISTS(SELECT 1 FROM tasks)`).Scan(&exists)
+	err = tx.QueryRow(query).Scan(&exists)
 	return exists, err
 }
 

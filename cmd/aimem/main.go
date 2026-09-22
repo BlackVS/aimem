@@ -117,6 +117,8 @@ func main() {
 		err = metaCmd(args)
 	case "tasks":
 		err = tasksCmd(args)
+	case "teams":
+		err = teamsCmd(args)
 	case "task-token":
 		err = taskTokenCmd(args)
 	case "process":
@@ -228,6 +230,7 @@ func usage() {
   tui                        interactive dashboard (q quits)
   meta       [-p] <key>      print a project meta value
   tasks      on|off [-p]     enable or disable tasks for a project (admin; on the hub host)
+  teams      list|show|create|configure|events  team setup (admin; on the hub host)
   process    select|clear|show  the project's process reference (Git repo, commit, manifest); show prints the session bootstrap
   dedup      [-p|--all] [--sim 0.90] [--dry-run]
                              fold near-identical memories onto one survivor

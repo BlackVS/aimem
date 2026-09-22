@@ -1923,6 +1923,210 @@
           }
         }
       }
+    },
+    "/v1/projects/{p}/teams": {
+      "post": {
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/p"
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "schema": {
+              "type": "string"
+            },
+            "required": true
+          }
+        ],
+        "summary": "Administrator team configuration and audit",
+        "responses": {
+          "200": {
+            "description": "Team configuration or paginated list/audit"
+          },
+          "201": {
+            "description": "Created team"
+          },
+          "400": {
+            "description": "Invalid request"
+          },
+          "403": {
+            "description": "Admin required or tasks disabled"
+          },
+          "404": {
+            "description": "Unknown project/team"
+          },
+          "409": {
+            "description": "Name, revision or retry conflict"
+          }
+        },
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "description": "Existing ordinary project with tasks enabled. No agent session or assignment tools yet. POST/PUT require Idempotency-Key. PUT replaces name, description and enrollment under expected_revision; omitted enrollment clears it. GET list/events return next_cursor; use after and limit (1-100).",
+        "x-role": "admin"
+      },
+      "get": {
+        "summary": "Administrator team configuration and audit",
+        "description": "Existing ordinary project with tasks enabled. No agent session or assignment tools yet. POST/PUT require Idempotency-Key. PUT replaces name, description and enrollment under expected_revision; omitted enrollment clears it. GET list/events return next_cursor; use after and limit (1-100).",
+        "x-role": "admin",
+        "responses": {
+          "200": {
+            "description": "Team configuration or paginated list/audit"
+          },
+          "400": {
+            "description": "Invalid request"
+          },
+          "403": {
+            "description": "Admin required or tasks disabled"
+          },
+          "404": {
+            "description": "Unknown project/team"
+          },
+          "409": {
+            "description": "Name, revision or retry conflict"
+          }
+        },
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/p"
+          }
+        ]
+      }
+    },
+    "/v1/projects/{p}/teams/{team}": {
+      "get": {
+        "summary": "Administrator team configuration and audit",
+        "description": "Existing ordinary project with tasks enabled. No agent session or assignment tools yet. POST/PUT require Idempotency-Key. PUT replaces name, description and enrollment under expected_revision; omitted enrollment clears it. GET list/events return next_cursor; use after and limit (1-100).",
+        "x-role": "admin",
+        "responses": {
+          "200": {
+            "description": "Team configuration or paginated list/audit"
+          },
+          "400": {
+            "description": "Invalid request"
+          },
+          "403": {
+            "description": "Admin required or tasks disabled"
+          },
+          "404": {
+            "description": "Unknown project/team"
+          },
+          "409": {
+            "description": "Name, revision or retry conflict"
+          }
+        },
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/p"
+          },
+          {
+            "name": "team",
+            "in": "path",
+            "schema": {
+              "type": "string"
+            },
+            "required": true
+          }
+        ]
+      },
+      "put": {
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/p"
+          },
+          {
+            "name": "team",
+            "in": "path",
+            "schema": {
+              "type": "string"
+            },
+            "required": true
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "schema": {
+              "type": "string"
+            },
+            "required": true
+          }
+        ],
+        "summary": "Administrator team configuration and audit",
+        "responses": {
+          "200": {
+            "description": "Team configuration or paginated list/audit"
+          },
+          "400": {
+            "description": "Invalid request"
+          },
+          "403": {
+            "description": "Admin required or tasks disabled"
+          },
+          "404": {
+            "description": "Unknown project/team"
+          },
+          "409": {
+            "description": "Name, revision or retry conflict"
+          }
+        },
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "description": "Existing ordinary project with tasks enabled. No agent session or assignment tools yet. POST/PUT require Idempotency-Key. PUT replaces name, description and enrollment under expected_revision; omitted enrollment clears it. GET list/events return next_cursor; use after and limit (1-100).",
+        "x-role": "admin"
+      }
+    },
+    "/v1/projects/{p}/teams/{team}/events": {
+      "get": {
+        "summary": "Administrator team configuration and audit",
+        "description": "Existing ordinary project with tasks enabled. No agent session or assignment tools yet. POST/PUT require Idempotency-Key. PUT replaces name, description and enrollment under expected_revision; omitted enrollment clears it. GET list/events return next_cursor; use after and limit (1-100).",
+        "x-role": "admin",
+        "responses": {
+          "200": {
+            "description": "Team configuration or paginated list/audit"
+          },
+          "400": {
+            "description": "Invalid request"
+          },
+          "403": {
+            "description": "Admin required or tasks disabled"
+          },
+          "404": {
+            "description": "Unknown project/team"
+          },
+          "409": {
+            "description": "Name, revision or retry conflict"
+          }
+        },
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/p"
+          },
+          {
+            "name": "team",
+            "in": "path",
+            "schema": {
+              "type": "string"
+            },
+            "required": true
+          }
+        ]
+      }
     }
   }
 }

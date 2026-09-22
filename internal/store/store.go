@@ -29,6 +29,7 @@ import (
 type Registry struct {
 	root      string
 	mu        sync.Mutex
+	teamMu    sync.RWMutex // team configuration versus project lifecycle; acquire before mu
 	dbs       map[string]*DB
 	hints     *taskHints   // where tasks were last seen; see taskloc.go
 	taskScans atomic.Int64 // full project scans by LocateTask (observability, tests)
@@ -190,6 +191,8 @@ func classifyMissing(projectID string, err error) error {
 // path-derived id after pinning); the caller is responsible for having
 // migrated anything worth keeping.
 func (r *Registry) Drop(projectID string) error {
+	r.teamMu.Lock()
+	defer r.teamMu.Unlock()
 	if !schema.ValidProjectID(projectID) {
 		return fmt.Errorf("invalid project id %q", projectID)
 	}
@@ -201,6 +204,11 @@ func (r *Registry) Drop(projectID string) error {
 	r.lifecycleGen.Add(1)
 	defer r.lifecycleGen.Add(1)
 	if db, ok := r.dbs[projectID]; ok {
+		if has, err := db.HasTeams(); err != nil {
+			return err
+		} else if has {
+			return ErrProjectHasTeams
+		}
 		// Through the live handle first, so a refusal leaves the handle
 		// other callers still hold usable. The read waits for the single
 		// connection, so a write in flight commits before we look.
@@ -229,6 +237,11 @@ func (r *Registry) Drop(projectID string) error {
 	} else if has {
 		return fmt.Errorf("project %q: %w", projectID, ErrProjectHasTasks)
 	}
+	if has, err := fileHasRows(filepath.Join(dir, "journal.db"), 14, `SELECT EXISTS(SELECT 1 FROM teams)`); err != nil {
+		return err
+	} else if has {
+		return ErrProjectHasTeams
+	}
 	return os.RemoveAll(dir)
 }
 
@@ -243,6 +256,8 @@ func (r *Registry) Drop(projectID string) error {
 // durable fix on that machine is a {"project": "<new id>"} pin in
 // .aimem.json. Callers should say so.
 func (r *Registry) Rename(oldID, newID string) error {
+	r.teamMu.Lock()
+	defer r.teamMu.Unlock()
 	for _, id := range []string{oldID, newID} {
 		if !schema.ValidProjectID(id) {
 			return fmt.Errorf("invalid project id %q", id)
@@ -346,6 +361,8 @@ func (r *Registry) renameSources(oldID, newID string) int {
 // group facts (dropped before this operation existed) degrades to a
 // pure citation relabel; zero citations then means a typo and refuses.
 func (r *Registry) MergeProject(oldID, newID string) (events, mems, runs, cites int, err error) {
+	r.teamMu.Lock()
+	defer r.teamMu.Unlock()
 	for _, id := range []string{oldID, newID} {
 		if !schema.ValidProjectID(id) {
 			return 0, 0, 0, 0, fmt.Errorf("invalid project id %q", id)
@@ -363,6 +380,11 @@ func (r *Registry) MergeProject(oldID, newID string) (events, mems, runs, cites 
 	if err != nil {
 		return 0, 0, 0, 0, fmt.Errorf("no such target project %q — a missing target makes this a rename, not a merge", newID)
 	}
+	if has, err := dst.HasTeams(); err != nil {
+		return 0, 0, 0, 0, err
+	} else if has {
+		return 0, 0, 0, 0, ErrProjectHasTeams
+	}
 	src, err := r.OpenExisting(oldID)
 	if err != nil {
 		// Orphaned-origin case: nothing to copy, only labels to fix.
@@ -373,6 +395,11 @@ func (r *Registry) MergeProject(oldID, newID string) (events, mems, runs, cites 
 	}
 	if docs, _ := src.ListDocs(); len(docs) > 0 {
 		return 0, 0, 0, 0, fmt.Errorf("source %q holds %d shared document(s); migrate or retire them first — doc names could collide silently", oldID, len(docs))
+	}
+	if has, err := src.HasTeams(); err != nil {
+		return 0, 0, 0, 0, err
+	} else if has {
+		return 0, 0, 0, 0, ErrProjectHasTeams
 	}
 	if cols, _ := src.ListCollections(); len(cols) > 0 {
 		return 0, 0, 0, 0, fmt.Errorf("source %q holds %d collection(s); migrate them first — record ids could collide silently", oldID, len(cols))
@@ -465,7 +492,7 @@ func (r *Registry) Close() {
 	r.dbs = map[string]*DB{}
 }
 
-const currentSchema = 13
+const currentSchema = 14
 
 // SetMeta / GetMeta store small key-value project metadata (e.g. the
 // project's declared knowledge groups, stamped from event pushes so the
@@ -900,6 +927,15 @@ UPDATE meta SET value='12' WHERE key='schema_version';`); err != nil {
 		// string references and a recomputation of the task receipts,
 		// in Go, one transaction with the version bump. No DDL.
 		if err := d.migrateTypedRefs(); err != nil {
+			return err
+		}
+	}
+	if v < 14 {
+		if err := d.step(`
+CREATE TABLE teams(id TEXT PRIMARY KEY, name TEXT NOT NULL UNIQUE, body TEXT NOT NULL);
+CREATE TABLE team_events(sequence INTEGER PRIMARY KEY AUTOINCREMENT, team_id TEXT NOT NULL REFERENCES teams(id), body TEXT NOT NULL);
+CREATE INDEX idx_team_events_team ON team_events(team_id,sequence);
+UPDATE meta SET value='14' WHERE key='schema_version';`); err != nil {
 			return err
 		}
 	}

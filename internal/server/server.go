@@ -131,6 +131,11 @@ func (s *Server) Routes() []Route {
 		{"PUT", "/v1/projects/{p}/epics/{e}", s.updateEpic, false},
 		{"GET", "/v1/access/directory", s.accessDirectory, false},
 		{"PUT", "/v1/projects/{p}/process", s.putProcessRef, true},
+		{"GET", "/v1/projects/{p}/teams", s.listTeams, true},
+		{"POST", "/v1/projects/{p}/teams", s.configureTeam, true},
+		{"GET", "/v1/projects/{p}/teams/{team}", s.getTeam, true},
+		{"PUT", "/v1/projects/{p}/teams/{team}", s.configureTeam, true},
+		{"GET", "/v1/projects/{p}/teams/{team}/events", s.teamEvents, true},
 		{"GET", "/v1/health", s.health, false},
 		{"POST", "/v1/events", s.append, false},
 		{"GET", "/v1/projects", s.projects, false},
@@ -205,7 +210,7 @@ func (s *Server) Handler() http.Handler {
 		}
 		mux.HandleFunc(rt.Method+" "+rt.Pattern, h)
 	}
-	return mux
+	return s.observeTeamRequests(mux)
 }
 
 type memoryRequest struct {
@@ -500,7 +505,7 @@ func (s *Server) TCPHandler(token string, extra map[string]http.Handler) http.Ha
 	for pattern, h := range extra {
 		mux.Handle(pattern, h)
 	}
-	return s.authWrapper(token, mux)
+	return s.observeTeamRequests(s.authWrapper(token, mux))
 }
 
 // ListenTCP starts the optional authenticated TCP listener (hub mode):
