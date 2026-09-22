@@ -3,7 +3,6 @@ package server
 import (
 	"errors"
 	"net/http"
-	"strconv"
 	"strings"
 
 	"aimem/internal/store"
@@ -115,19 +114,11 @@ func (s *Server) getTeamAssignment(w http.ResponseWriter, r *http.Request) {
 	if db == nil {
 		return
 	}
-	q := r.URL.Query()
-	for k, values := range q {
-		if len(values) != 1 || (k != "session_id" && k != "generation") {
-			s.fail(w, 400, errors.New("invalid assignment query"))
-			return
-		}
-	}
-	generation, err := strconv.ParseInt(q.Get("generation"), 10, 64)
-	if err != nil || generation < 1 || q.Get("session_id") == "" {
-		s.fail(w, 400, errors.New("session_id and positive generation required"))
+	h, ok := s.sessionHandleQuery(w, r)
+	if !ok {
 		return
 	}
-	out, err := db.GetTeamAssignment(r.PathValue("team"), r.PathValue("attempt"), store.TeamSessionHandle{SessionID: q.Get("session_id"), Generation: generation}, taskActor(r))
+	out, err := db.GetTeamAssignment(r.PathValue("team"), r.PathValue("attempt"), h, taskActor(r))
 	if err != nil {
 		s.teamError(w, r, err)
 		return

@@ -1,11 +1,11 @@
 # Cooperative work-control storage
 
 `ChangeTeamWork` extends the assignment/result storage foundation with five
-internal commands. It does not expose new HTTP, CLI or MCP operations, and the
-full workflow remains unavailable (`workflow_ready: false`). Operator recovery has a
-[separate storage method](TEAM-RECOVERY-STORAGE.md);
-session/token rebinding, coordinator handoff and shared-inbox lifecycle delivery
-remain separate increments.
+internal commands, exposed over HTTP by the [execution routes](TEAM-EXECUTION-HTTP.md);
+CLI and MCP remain deferred and the full workflow remains unavailable
+(`workflow_ready: false`). Operator recovery has a
+[separate storage method](TEAM-RECOVERY-STORAGE.md); token rebinding and
+shared-inbox lifecycle delivery remain separate increments.
 
 ## State and authority
 

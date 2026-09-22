@@ -15,6 +15,12 @@ currently 18); a binary refuses a database newer than it understands.
 
 ### Added
 
+- Team execution HTTP routes: reserved-attempt read, block/resume-work,
+  cancel/stopped/close-stop, submit and review under the assignment routes'
+  ordinary-token authority, pinned in OpenAPI. Handoff, edit, finalize,
+  recovery and unmanage routes, CLI/MCP execution tools and inbox lifecycle
+  delivery remain deferred; responses still advertise `workflow_ready:false`.
+
 - **Project schema 18:** managed-task lifecycle storage. The coordinator edits
   managed task content under revision checks between attempts and finalizes an
   accepted attempt's task to DONE only with recorded merge/delivery evidence;

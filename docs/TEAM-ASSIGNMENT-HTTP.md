@@ -2,10 +2,11 @@
 
 The hub supports offering, reading, accepting, declining and withdrawing team
 assignments over HTTP. These use the [schema 17 storage contract](TEAM-ASSIGNMENT-STORAGE.md).
-They are not a complete execution workflow: responses include `workflow_ready:false`,
-and result submission, review, cancellation, recovery and MCP/CLI assignment tools
-are still deferred. Do not start a worker pilot yet. In particular, a RUNNING
-attempt cannot be closed through these five routes.
+They are not a complete execution workflow: responses include `workflow_ready:false`.
+The [execution routes](TEAM-EXECUTION-HTTP.md) add the reserved-attempt read,
+block/resume, stop request/acknowledgement/closure, submission and review;
+handoff, managed edit/finalize, recovery, unmanage and the MCP/CLI execution
+tools are still deferred. Do not start a worker pilot yet.
 
 All paths below begin with `/v1/projects/PROJECT/teams/TEAM_ID`. Use the team ID
 returned by join. Each request requires `Authorization: Bearer TOKEN` with the
