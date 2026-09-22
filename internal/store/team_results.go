@@ -84,9 +84,9 @@ func (c TeamResultContent) validate() error {
 	return nil
 }
 
-// resultTask fences the task side of a transition as well as the attempt side.
+// assignmentTask fences the task side of a transition as well as the attempt side.
 // It must run in the same transaction that saves the task and assignment.
-func resultTask(tx *sql.Tx, out TeamAssignment, revision int64, state string) (Task, error) {
+func assignmentTask(tx *sql.Tx, out TeamAssignment, revision int64, state string) (Task, error) {
 	t, err := readTask(tx, out.TaskID)
 	if err != nil {
 		return t, err
@@ -126,7 +126,7 @@ func (d *DB) SubmitTeamResult(teamID, id string, c TeamResultSubmission, a TeamA
 		if out.State != "RUNNING" || out.Result != nil {
 			return out, ErrTeamAssignmentConflict
 		}
-		t, err := resultTask(tx, out, c.ExpectedRevision, "IN_PROGRESS")
+		t, err := assignmentTask(tx, out, c.ExpectedRevision, "IN_PROGRESS")
 		if err != nil {
 			return out, err
 		}
@@ -165,7 +165,7 @@ func (d *DB) ReviewTeamResult(teamID, id string, c TeamResultDecision, a TeamAud
 		if out.State != "SUBMITTED" || out.Result == nil || out.Result.ID != c.ResultID || out.Review != nil {
 			return out, ErrTeamAssignmentConflict
 		}
-		t, err := resultTask(tx, out, c.ExpectedRevision, "REVIEW")
+		t, err := assignmentTask(tx, out, c.ExpectedRevision, "REVIEW")
 		if err != nil {
 			return out, err
 		}

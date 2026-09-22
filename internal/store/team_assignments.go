@@ -247,7 +247,7 @@ func saveTeamAssignment(tx *sql.Tx, t Team, s TeamSession, out TeamAssignment, o
 	if err != nil {
 		return err
 	}
-	reserved := out.State == "OFFERED" || out.State == "RUNNING" || out.State == "SUBMITTED"
+	reserved := out.State == "OFFERED" || out.State == "RUNNING" || out.State == "SUBMITTED" || out.State == "BLOCKED" || out.State == "STOP_REQUESTED" || out.State == "STOPPED"
 	_, err = tx.Exec(`INSERT INTO team_assignments(id,team_id,task_id,worker_id,state,reserved,body) VALUES(?,?,?,?,?,?,?)
 ON CONFLICT(id) DO UPDATE SET state=excluded.state,reserved=excluded.reserved,body=excluded.body`, out.ID, out.TeamID, out.TaskID, out.Worker.SessionID, out.State, boolInt(reserved), string(b))
 	if err != nil {

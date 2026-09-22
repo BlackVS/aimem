@@ -5,8 +5,9 @@ Go storage methods and a read-only task projection. The subsequent
 [HTTP increment](TEAM-ASSIGNMENT-HTTP.md) exposes these primitives; a usable
 CLI/MCP execution workflow is still deferred. Do not start a worker
 pilot from these primitives. [Result storage](TEAM-RESULT-STORAGE.md) adds internal
-submission and disposition methods; client exposure, cancellation and recovery
-still need their dependent increments.
+submission and disposition methods. [Cooperative work control](TEAM-WORK-CONTROL-STORAGE.md)
+adds internal block/resume and acknowledged stopping; client exposure and forced
+recovery still need their dependent increments.
 
 `OfferTeamAssignment` requires the current coordinator's session and coordinator
 generation, a READY task at the expected revision, same-project DONE dependencies,
@@ -55,10 +56,9 @@ tasks with no current attempt. Dedicated board rendering is deferred.
 Heartbeat age never releases a reservation. Resume or leave does not release
 RUNNING work; closing or fencing a future recovery attempt cannot stop a local
 process. A resumed worker cannot accept an old-generation offer: the coordinator
-must withdraw and issue a new offer. RUNNING cancellation/recovery and coordinator
-handoff will arrive with explicit reconciliation contracts. Until then a running
-attempt cannot be cancelled by these methods. Result submission and disposition
-have their own storage methods; they do not perform recovery or stop a process.
+must withdraw and issue a new offer. Result submission/disposition and cooperative
+stopping have their own storage methods. Forced recovery and coordinator handoff
+remain deferred; no storage method can stop a local process.
 
 Migration from schema 16 adds coordination tables without rewriting tasks or
 receipts. Older binaries refuse schema 17. Before a later deployment, back up
