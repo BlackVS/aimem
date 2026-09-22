@@ -13,6 +13,31 @@ currently 18); a binary refuses a database newer than it understands.
 
 ## [Unreleased]
 
+## [0.7.0] — 2026-09-22
+
+The agent-team coordination protocol for a manual pilot: registration and
+roster, durable messaging, fenced assignments, execution and results,
+coordinator handoff, operator recovery and token replacement, lifecycle
+inbox delivery, audit export, playbooks with validated templates, and a
+scripted rehearsal of the pilot scenarios. The entries below are in the
+order they landed; where an earlier entry says a capability "remains
+deferred", a later entry in this same release delivers it.
+
+### Data integrity
+
+- **Five project schema bumps since 0.6.0: 14 (team and audit tables), 15
+  (team sessions), 16 (durable team messages and inboxes), 17 (exclusive
+  assignments and managed-task protection) and 18 (managed-task lifecycle
+  flag).** Each step adds tables, indexes or one column and rewrites no
+  existing rows, but a database opened by this build is refused by older
+  builds. Back up the hub's state directory before upgrading and keep the
+  previous binary for a rollback from that backup. The access database
+  schema stays at 2.
+- **Upgrade the hub before any agent client** that will join a team: the
+  team, message, assignment and audit routes exist only on this build, and
+  clients refuse to emulate them through generic task writes. A session must
+  restart to see the new MCP team tools.
+
 ### Added
 
 - Team protocol rehearsal: a scripted fixture drives a coordinator and two

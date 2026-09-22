@@ -1,8 +1,9 @@
 # Roadmap
 
-Released baseline: v0.6.0 (PR #56-59). Token rollout and the selected process
-bootstrap have been verified on participating hubs/clients. PR #60 and #62
-add the enabled-project picker and epic details on master, still unreleased.
+Released baseline: v0.7.0 (PR #60-89): the enabled-project picker and epic
+details, and the agent-team coordination protocol through the scripted
+rehearsal, with the process set 1.15.1 selected for this project. The manual
+cross-platform pilot and any deployment are separate owner decisions.
 This file records delivery order and scope. The aimem task board owns live
 task state, dependencies and completion evidence; design documents own the
 contracts. Do not maintain a second checklist of task statuses here.
