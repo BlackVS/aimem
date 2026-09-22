@@ -20,6 +20,9 @@ currently 18); a binary refuses a database newer than it understands.
   sessions' inbox in the same transaction, with the existing delivery and
   acknowledgement semantics; clients cannot forge one. Responses now
   advertise `workflow_ready:true`; that describes the protocol, not a pilot.
+  Handoff lifecycle messages name the acting session and the successor
+  separately, and the OpenAPI team route descriptions state the same
+  readiness contract.
 
 - Team CLI and MCP parity: `team_offer`, `team_assignment`, `team_reserved`,
   accept/decline/withdraw, block/resume-work/cancel/stopped/close-stop,

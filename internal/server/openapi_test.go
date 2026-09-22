@@ -66,6 +66,37 @@ func TestOpenAPIMatchesRouteTable(t *testing.T) {
 	}
 }
 
+// Team route descriptions state the current readiness contract; stale
+// "not ready" wording would contradict the responses.
+func TestOpenAPITeamDescriptionsStateReadiness(t *testing.T) {
+	var spec struct {
+		Paths map[string]map[string]struct {
+			Description string `json:"description"`
+		} `json:"paths"`
+	}
+	if err := json.Unmarshal(openAPISpec, &spec); err != nil {
+		t.Fatal(err)
+	}
+	stale := []string{"workflow_ready:false", "workflow_ready is false", "workflow_ready stays false", "MCP assignment tools yet", "are still deferred"}
+	teamRoutes := 0
+	for path, ops := range spec.Paths {
+		if !strings.Contains(path, "/teams/") {
+			continue
+		}
+		for method, op := range ops {
+			teamRoutes++
+			for _, phrase := range stale {
+				if strings.Contains(op.Description, phrase) {
+					t.Errorf("%s %s still says %q", method, path, phrase)
+				}
+			}
+		}
+	}
+	if teamRoutes < 30 {
+		t.Fatalf("team routes in the spec: %d", teamRoutes)
+	}
+}
+
 // The two task write routes describe the typed reference shape (the
 // bodies themselves are deliberately loose objects, so the description
 // is the contract the spec carries).
