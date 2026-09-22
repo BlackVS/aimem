@@ -117,6 +117,16 @@ func TestAuditHTTPFilteredEventsAndExport(t *testing.T) {
 	if got := eventsPage(t, taskReq(t, f.h, "GET", events+"?until=2000-01-01T00:00:00Z", f.admin, "", "")); len(got) != 0 {
 		t.Fatal("until", len(got))
 	}
+	// A valid sub-second window is empty, not invalid, on both routes: the
+	// header shows the rounded bounds while validation used the instants.
+	subsecond := "?since=" + all[0].At[:19] + ".1Z&until=" + all[0].At[:19] + ".9Z"
+	if got := eventsPage(t, taskReq(t, f.h, "GET", events+subsecond, f.admin, "", "")); len(got) != 0 {
+		t.Fatal("sub-second events window", len(got))
+	}
+	empty := parseExport(t, taskReq(t, f.h, "GET", export+subsecond, f.admin, "", ""))
+	if len(empty.events) != 0 || len(empty.messages) != 0 || empty.end["complete"] != true || empty.header["filters"].(map[string]any)["since"] != empty.header["filters"].(map[string]any)["until"] {
+		t.Fatalf("sub-second export %d %d %+v %+v", len(empty.events), len(empty.messages), empty.end, empty.header["filters"])
+	}
 	// First export page takes the snapshot; a later write must not leak in.
 	first := parseExport(t, taskReq(t, f.h, "GET", export+"?limit=1", f.admin, "", ""))
 	snapshot := first.header["snapshot"].(map[string]any)

@@ -133,7 +133,12 @@ func (s *Server) teamExport(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	filter, err := auditFilter(q).Normalize()
+	// Storage validates the requested instants and rounds the bounds itself;
+	// the normalized copy only documents the effective filter in the header.
+	// Passing the rounded copy back would make a valid sub-second window fail
+	// its own validation.
+	raw := auditFilter(q)
+	filter, err := raw.Normalize()
 	if err != nil {
 		s.teamError(w, r, err)
 		return
@@ -151,12 +156,12 @@ func (s *Server) teamExport(w http.ResponseWriter, r *http.Request) {
 		s.fail(w, 400, errors.New("a continued export needs both snapshot sequences and cursors within them"))
 		return
 	}
-	events, err := db.TeamTimeline(team, filter, cursor.AfterEvents, cursor.SnapshotEvents, limit+1)
+	events, err := db.TeamTimeline(team, raw, cursor.AfterEvents, cursor.SnapshotEvents, limit+1)
 	if err != nil {
 		s.teamError(w, r, err)
 		return
 	}
-	messages, err := db.TeamMessageAudit(team, filter, cursor.AfterMessages, cursor.SnapshotMessages, limit+1, includeBodies)
+	messages, err := db.TeamMessageAudit(team, raw, cursor.AfterMessages, cursor.SnapshotMessages, limit+1, includeBodies)
 	if err != nil {
 		s.teamError(w, r, err)
 		return
