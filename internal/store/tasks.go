@@ -124,8 +124,9 @@ type TaskContent struct {
 // snapshot: it is the partition the row lives in, resolved at read time,
 // so a project rename never rewrites task data.
 type Task struct {
-	ID       string `json:"id"`
-	Revision int64  `json:"revision"`
+	ID           string            `json:"id"`
+	Revision     int64             `json:"revision"`
+	Coordination *TaskCoordination `json:"coordination,omitempty"`
 	TaskContent
 	CreatedAt string `json:"created_at"`
 	UpdatedAt string `json:"updated_at"`
@@ -441,7 +442,17 @@ func (d *DB) UpdateTask(id string, content TaskContent, expected int64, actor Ta
 		Content  TaskContent `json:"content"`
 		Expected int64       `json:"expected"`
 	}{content, expected}
-	return taskMutation(d, actor, "update", id, key, input, func(tx *sql.Tx) (Task, error) {
+	check := func(tx *sql.Tx) error {
+		var managed bool
+		if err := tx.QueryRow(`SELECT EXISTS(SELECT 1 FROM team_managed_tasks WHERE task_id=?)`, id).Scan(&managed); err != nil {
+			return err
+		}
+		if managed {
+			return ErrManagedTask
+		}
+		return nil
+	}
+	return checkedTaskMutation(d, actor, "update", id, key, input, check, func(tx *sql.Tx) (Task, error) {
 		t, err := readTask(tx, id)
 		if err != nil {
 			return Task{}, err
@@ -463,6 +474,7 @@ func (d *DB) UpdateTask(id string, content TaskContent, expected int64, actor Ta
 // the matching history row in the caller's transaction; a test proves the
 // columns and the snapshot agree.
 func saveTask(tx *sql.Tx, t Task, actor TaskActor, create bool) error {
+	t.Coordination = nil // current projection is never persisted into task history
 	body, err := json.Marshal(t)
 	if err != nil {
 		return err
@@ -489,9 +501,14 @@ type rowQuerier interface {
 	QueryRow(query string, args ...any) *sql.Row
 }
 
-func readTask(q rowQuerier, id string) (Task, error) {
+const taskReadQuery = `SELECT tasks.body,COALESCE(m.team_id,''),COALESCE(a.id,''),COALESCE(a.state,'') FROM tasks
+LEFT JOIN team_managed_tasks m ON m.task_id=tasks.id
+LEFT JOIN team_assignments a ON a.task_id=tasks.id AND a.reserved=1`
+
+func scanCurrentTask(row interface{ Scan(...any) error }) (Task, error) {
 	var body string
-	if err := q.QueryRow(`SELECT body FROM tasks WHERE id=?`, id).Scan(&body); err != nil {
+	var c TaskCoordination
+	if err := row.Scan(&body, &c.TeamID, &c.AttemptID, &c.State); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return Task{}, ErrTaskNotFound
 		}
@@ -501,7 +518,14 @@ func readTask(q rowQuerier, id string) (Task, error) {
 	if err := json.Unmarshal([]byte(body), &t); err != nil {
 		return Task{}, err
 	}
+	if c.TeamID != "" {
+		t.Coordination = &c
+	}
 	return t, nil
+}
+
+func readTask(q rowQuerier, id string) (Task, error) {
+	return scanCurrentTask(q.QueryRow(taskReadQuery+` WHERE tasks.id=?`, id))
 }
 
 // GetTask returns the current task.
@@ -596,14 +620,15 @@ type TaskFilter struct {
 
 // TaskSummary is the bounded list row: never the discussion or history.
 type TaskSummary struct {
-	ID        string        `json:"id"`
-	Title     string        `json:"title"`
-	State     string        `json:"state"`
-	Assignee  *TaskAssignee `json:"assignee,omitempty"`
-	Epic      string        `json:"epic,omitempty"`
-	Archived  bool          `json:"archived"`
-	Revision  int64         `json:"revision"`
-	UpdatedAt string        `json:"updated_at"`
+	Coordination *TaskCoordination `json:"coordination,omitempty"`
+	ID           string            `json:"id"`
+	Title        string            `json:"title"`
+	State        string            `json:"state"`
+	Assignee     *TaskAssignee     `json:"assignee,omitempty"`
+	Epic         string            `json:"epic,omitempty"`
+	Archived     bool              `json:"archived"`
+	Revision     int64             `json:"revision"`
+	UpdatedAt    string            `json:"updated_at"`
 }
 
 type TaskPage struct {
@@ -630,13 +655,13 @@ func (d *DB) ListTasks(f TaskFilter) (TaskPage, error) {
 	if f.Epic != "" && !taskIDRE.MatchString(f.Epic) {
 		return out, invalid(errors.New("invalid epic filter"))
 	}
-	query := `SELECT body FROM tasks WHERE id > ?`
+	query := taskReadQuery + ` WHERE tasks.id > ?`
 	args := []any{f.After}
 	if !f.IncludeArchived {
 		query += ` AND archived = 0`
 	}
 	if f.State != "" {
-		query += ` AND state = ?`
+		query += ` AND tasks.state = ?`
 		args = append(args, f.State)
 	}
 	if f.Assignee != nil {
@@ -647,7 +672,7 @@ func (d *DB) ListTasks(f TaskFilter) (TaskPage, error) {
 		query += ` AND epic = ?`
 		args = append(args, f.Epic)
 	}
-	query += ` ORDER BY id LIMIT ?`
+	query += ` ORDER BY tasks.id LIMIT ?`
 	args = append(args, limit+1)
 	rows, err := d.sql.Query(query, args...)
 	if err != nil {
@@ -655,20 +680,16 @@ func (d *DB) ListTasks(f TaskFilter) (TaskPage, error) {
 	}
 	defer rows.Close()
 	for rows.Next() {
-		var body string
-		if err := rows.Scan(&body); err != nil {
-			return out, err
-		}
 		if len(out.Tasks) == limit {
 			out.Next = out.Tasks[limit-1].ID
 			break
 		}
-		var t Task
-		if err := json.Unmarshal([]byte(body), &t); err != nil {
+		t, err := scanCurrentTask(rows)
+		if err != nil {
 			return out, err
 		}
 		out.Tasks = append(out.Tasks, TaskSummary{ID: t.ID, Title: t.Title, State: t.State, Assignee: t.Assignee, Epic: t.Epic,
-			Archived: t.Archived, Revision: t.Revision, UpdatedAt: t.UpdatedAt})
+			Archived: t.Archived, Revision: t.Revision, UpdatedAt: t.UpdatedAt, Coordination: t.Coordination})
 	}
 	return out, rows.Err()
 }

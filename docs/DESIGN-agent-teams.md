@@ -446,6 +446,11 @@ through ordinary review and process-version selection.
 
 ### Assignment state machine and compatibility
 
+The schema 17 [storage foundation](TEAM-ASSIGNMENT-STORAGE.md) implements offers,
+acceptance, decline/withdraw and managed-task protection first. Assignment HTTP
+commands and the remaining lifecycle follow in separate increments; the storage
+foundation alone does not make the agent execution workflow available.
+
 `OFFERED -> RUNNING -> SUBMITTED -> ACCEPTED` is the normal attempt path.
 OFFERED reserves the task before the worker accepts. Worker decline or coordinator
 withdrawal before acceptance closes the offer. Only the intended current worker

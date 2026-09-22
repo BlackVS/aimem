@@ -440,7 +440,7 @@ func TestMigrationV9ToV10(t *testing.T) {
 		`DROP TABLE epic_history`, `DROP TABLE epics`,
 		`DROP TABLE task_requests`, `DROP TABLE task_comments`, `DROP TABLE task_history`, `DROP TABLE tasks`,
 		`UPDATE meta SET value='9' WHERE key='schema_version'`,
-		`DROP TABLE team_deliveries`, `DROP TABLE team_messages`, `DROP TABLE team_sessions`, `DROP TABLE team_session_control`, `DROP TABLE team_events`, `DROP TABLE teams`,
+		`DROP TABLE team_assignments`, `DROP TABLE team_managed_tasks`, `DROP TABLE team_deliveries`, `DROP TABLE team_messages`, `DROP TABLE team_sessions`, `DROP TABLE team_session_control`, `DROP TABLE team_events`, `DROP TABLE teams`,
 	} {
 		if _, err := db.sql.Exec(stmt); err != nil {
 			t.Fatal(err)
