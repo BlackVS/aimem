@@ -139,6 +139,52 @@ func (s *Server) recoverTeamAssignment(w http.ResponseWriter, r *http.Request) {
 	s.ok(w, assignmentResponse(out))
 }
 
+// rebindTeamSessionToken is an admin route: it moves a session to a
+// replacement token of the same user after recorded reconciliation. The
+// access-store callback proves the replacement token is live, belongs to the
+// session's user and may write to this project; storage owns everything else.
+func (s *Server) rebindTeamSessionToken(w http.ResponseWriter, r *http.Request) {
+	_, db := s.adminTeamProject(w, r)
+	if db == nil {
+		return
+	}
+	key, ok := s.idempotencyKey(w, r)
+	if !ok {
+		return
+	}
+	var req store.TeamTokenRebindCommand
+	if err := decodeSessionBody(w, r, &req); err != nil {
+		s.fail(w, 400, err)
+		return
+	}
+	if req.SessionID != "" && req.SessionID != r.PathValue("session") {
+		s.fail(w, 400, errors.New("session_id must match the path"))
+		return
+	}
+	req.SessionID = r.PathValue("session")
+	authorize := s.assignmentAuthority(w, r)
+	if authorize == nil {
+		return
+	}
+	_, timeout, err := sessionPolicy()
+	if err != nil {
+		s.teamError(w, r, err)
+		return
+	}
+	audit, err := sessionAudit(w, r, db)
+	if err != nil {
+		s.teamError(w, r, err)
+		return
+	}
+	out, err := db.RebindTeamSessionToken(r.PathValue("team"), req, audit, key, authorize)
+	if err != nil {
+		s.teamError(w, r, err)
+		return
+	}
+	w.Header().Set("Cache-Control", "no-store")
+	s.sessionResult(w, r, out, timeout, false)
+}
+
 // unmanageTask is an admin route. The URL names the managing team; storage
 // checks it inside the transaction and binds it into the receipt scope, so a
 // task another team took over is refused and a retry replays only through

@@ -498,8 +498,11 @@ worker handle, separately observed current worker-session generation, current
 coordinator-slot generation and task revision. An admin records an explicit stopped
 affirmation, runtime/process and worktree reconciliation, reason and evidence refs.
 The hub validates and preserves this assessment; it does not prove execution stopped.
-Offers, submitted results and terminal attempts cannot use this path. Token
-rebinding and recovery client operations remain deferred.
+Offers, submitted results and terminal attempts cannot use this path. The
+[token replacement](TEAM-SESSION-STORAGE.md#token-replacement) operation moves a
+session to a replacement credential of the same user after recorded
+reconciliation, carrying a reserved attempt as on resume; receipts recorded under
+the old credential never replay for the new one.
 
 The [session rebinding](TEAM-ASSIGNMENT-STORAGE.md#session-rebinding) increment
 implements the resume rule above for workers: a worker resume carries its reserved

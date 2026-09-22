@@ -15,6 +15,12 @@ currently 18); a binary refuses a database newer than it understands.
 
 ### Added
 
+- Team token replacement: an admin route and operator CLI command rebind a
+  session to a replacement token of the same user after recorded
+  reconciliation; the generation advances, a reserved attempt follows as on
+  resume, the old credential can use no handle and its receipts never replay.
+  OpenAPI wording no longer promises inbox delivery for edit and finalize.
+
 - Team lifecycle inbox delivery: every assignment transition and coordinator
   handoff writes a hub-authored `lifecycle` message into the counterpart
   sessions' inbox in the same transaction, with the existing delivery and

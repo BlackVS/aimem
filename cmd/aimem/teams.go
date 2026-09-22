@@ -24,9 +24,12 @@ const teamsUsage = `usage: aimem teams list <project>
        aimem teams configure <project> <team-id> <config.json> [idempotency-key]
        aimem teams recover <project> <team-id> <attempt-id> <reconciliation.json> [idempotency-key]
        aimem teams unmanage <project> <team-id> <task-id> <request.json> [idempotency-key]
+       aimem teams rebind-token <project> <team-id> <session-id> <request.json> [idempotency-key]
 
 Run on the hub host as its local operator. recover closes an abandoned attempt
-after recorded reconciliation; unmanage releases a task this team manages. Configuration JSON contains name,
+after recorded reconciliation; unmanage releases a task this team manages;
+rebind-token moves a session to a replacement token of the same user after
+recorded reconciliation. Configuration JSON contains name,
 description and enrollment [{user_id,coordinator}]. configure also requires
 expected_revision. Configuration replaces all fields; omitted enrollment clears
 it. Save/reuse an explicit idempotency key to retry an uncertain write. list/events
@@ -146,7 +149,7 @@ func teamsRequest(args []string) (method, path string, raw []byte, key string, e
 			path += "/events"
 		}
 		return "GET", path, nil, "", nil
-	case "create", "configure", "recover", "unmanage":
+	case "create", "configure", "recover", "unmanage", "rebind-token":
 		fileIndex := 2
 		method = "POST"
 		switch args[0] {
@@ -157,16 +160,19 @@ func teamsRequest(args []string) (method, path string, raw []byte, key string, e
 				return bad()
 			}
 			path += "/" + url.PathEscape(args[2])
-		case "recover", "unmanage":
+		case "recover", "unmanage", "rebind-token":
 			// Operator routes: the admin authority is the local socket itself.
 			fileIndex = 4
 			if len(args) < 5 {
 				return bad()
 			}
-			if args[0] == "recover" {
+			switch args[0] {
+			case "recover":
 				path += "/" + url.PathEscape(args[2]) + "/assignments/" + url.PathEscape(args[3]) + "/recover"
-			} else {
+			case "unmanage":
 				path += "/" + url.PathEscape(args[2]) + "/tasks/" + url.PathEscape(args[3]) + "/unmanage"
+			default:
+				path += "/" + url.PathEscape(args[2]) + "/sessions/" + url.PathEscape(args[3]) + "/rebind-token"
 			}
 		}
 		if len(args) < fileIndex+1 || len(args) > fileIndex+2 {

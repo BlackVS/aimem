@@ -49,6 +49,32 @@ The `Suspect` helper takes hub time and a policy timeout (design default 120s);
 suspect is a liveness observation, not a persisted ownership transition. Heartbeat
 does not prove model progress. No timeout frees a coordinator slot.
 
+## Token replacement
+
+`RebindTeamSessionToken` is an operator recovery for a lost or revoked
+credential. A trusted admin actor names the session as observed (ID and
+expected generation), the replacement token of the same user and bounded
+reconciliation: an explicit `old_credential_stopped` affirmation, a reason, a
+runtime check and at least one evidence reference. Inside the transaction the
+session must be active at that generation, the replacement must differ from the
+bound token, the user must still be enrolled (and designated for a coordinator),
+and a required transport callback must accept the rebound session, checking in
+the access database that the replacement token is live, belongs to the session's
+user and may write to the project. The binding then changes, the session
+generation advances (and the coordinator generation for a coordinator), a
+reserved non-offer attempt follows the new generation exactly as on resume
+including its lifecycle message, and one `team.session.rebind_token` audit event
+records the previous generation, both token IDs and the reconciliation.
+
+The old credential can use no handle afterwards. Retry receipts are keyed to
+the credential that recorded them, so nothing recorded under the old token
+replays for the replacement: a command whose outcome is uncertain under the old
+credential is re-read from the hub, never retried under the new one. Identical
+admin retries replay; a rolled-back transfer does not consume its key; races
+with resume, leave and submission have one consistent outcome. This is a
+recorded operator assessment, not proof that the old client stopped, and it
+never crosses users: a session stays the same principal.
+
 Session snapshot, audit event and retry receipt commit together. Audit contains
 the accepted profile and its revision, actor, generations, operation and server
 context. Existing admin event reads preserve session snapshots. Rejected-command

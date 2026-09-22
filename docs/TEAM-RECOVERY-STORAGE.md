@@ -3,8 +3,9 @@
 `RecoverTeamAssignment` provides an internal forced-close operation after an
 operator reconciles abandoned execution. The admin-only recover route in the
 [management routes](TEAM-MANAGEMENT-HTTP.md) exposes it over HTTP and the operator CLI (`aimem teams recover`); there is no
-MCP recovery tool, and token rebinding remains a separate increment; a lost
-coordinator is handled by [coordinator handoff](TEAM-COORDINATOR-HANDOFF-STORAGE.md).
+MCP recovery tool. A lost or revoked credential is handled by
+[token replacement](TEAM-SESSION-STORAGE.md#token-replacement) and a lost
+coordinator by [coordinator handoff](TEAM-COORDINATOR-HANDOFF-STORAGE.md).
 A recovery delivers a [lifecycle message](TEAM-MESSAGE-STORAGE.md#lifecycle-messages)
 to both the affected worker (if still active) and the current coordinator.
 

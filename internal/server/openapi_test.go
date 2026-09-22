@@ -95,6 +95,16 @@ func TestOpenAPITeamDescriptionsStateReadiness(t *testing.T) {
 	if teamRoutes < 30 {
 		t.Fatalf("team routes in the spec: %d", teamRoutes)
 	}
+	// Delivery is promised only where the hub produces it; withdraw points at the
+	// operations that do handle running work.
+	for _, path := range []string{"/v1/projects/{p}/teams/{team}/tasks/{task}/edit", "/v1/projects/{p}/teams/{team}/tasks/{task}/finalize"} {
+		if d := spec.Paths[path]["post"].Description; strings.Contains(d, "delivers a lifecycle message") || !strings.Contains(d, "deliver no lifecycle message") {
+			t.Errorf("%s over-promises delivery: %q", path, d)
+		}
+	}
+	if d := spec.Paths["/v1/projects/{p}/teams/{team}/assignments/{attempt}/withdraw"]["post"].Description; strings.Contains(d, "are unavailable") || !strings.Contains(d, "cancel") || !strings.Contains(d, "recover") {
+		t.Errorf("withdraw description: %q", d)
+	}
 }
 
 // The two task write routes describe the typed reference shape (the
