@@ -156,6 +156,10 @@ arbitrary existing CLI session. Start with one backend, then a second to establi
 interoperability. If attachment is unsupported, report the limit; do not silently
 replace a user's session or fall back to terminal input.
 
+The [initial capability probe](AGENT-CAPABILITY-PROBE.md) records measured Windows
+Codex/OpenCode transport behavior and its untested boundaries. It introduces no
+production adapter or delegation.
+
 1. Review this authority/identity amendment and run the early capability probe.
 2. Complete core messaging, fenced assignments, results/recovery and audit. Add
    coordinator question/escalation guidance through the normal process reviews.
