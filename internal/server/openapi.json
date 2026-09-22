@@ -2127,6 +2127,288 @@
           }
         ]
       }
+    },
+    "/v1/projects/{p}/teams/{team}/join": {
+      "post": {
+        "x-role": "writer",
+        "summary": "Team session join",
+        "description": "Requires a live ordinary project write token and current team enrollment, including roster reads and retry replay. Admin/local/legacy/read-only credentials are refused. Protocol version 1. Join accepts exact team name or ID and role/profile; other operations require stable team ID, session_id and generation. Profile replacement also needs expected_profile_revision. Writes require Idempotency-Key and strict JSON at most 64 KiB. Roster uses session_id, generation, after and limit (1-100). Responses exclude internal user/token bindings. Workers wait for explicit assignment; messaging and assignments are unavailable.",
+        "parameters": [
+          {
+            "name": "p",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "team",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Protocol-v1 session or roster"
+          },
+          "201": {
+            "description": "Joined session"
+          },
+          "400": {
+            "description": "Invalid request"
+          },
+          "403": {
+            "description": "Current ordinary write authority/enrollment required"
+          },
+          "409": {
+            "description": "Stale handle, occupied coordinator, quota or retry conflict"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      }
+    },
+    "/v1/projects/{p}/teams/{team}/members": {
+      "get": {
+        "x-role": "writer",
+        "summary": "Team session members",
+        "description": "Requires a live ordinary project write token and current team enrollment, including roster reads and retry replay. Admin/local/legacy/read-only credentials are refused. Protocol version 1. Join accepts exact team name or ID and role/profile; other operations require stable team ID, session_id and generation. Profile replacement also needs expected_profile_revision. Writes require Idempotency-Key and strict JSON at most 64 KiB. Roster uses session_id, generation, after and limit (1-100). Responses exclude internal user/token bindings. Workers wait for explicit assignment; messaging and assignments are unavailable.",
+        "parameters": [
+          {
+            "name": "p",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "team",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Protocol-v1 session or roster"
+          },
+          "201": {
+            "description": "Joined session"
+          },
+          "400": {
+            "description": "Invalid request"
+          },
+          "403": {
+            "description": "Current ordinary write authority/enrollment required"
+          },
+          "409": {
+            "description": "Stale handle, occupied coordinator, quota or retry conflict"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      }
+    },
+    "/v1/projects/{p}/teams/{team}/heartbeat": {
+      "post": {
+        "x-role": "writer",
+        "summary": "Team session heartbeat",
+        "description": "Requires a live ordinary project write token and current team enrollment, including roster reads and retry replay. Admin/local/legacy/read-only credentials are refused. Protocol version 1. Join accepts exact team name or ID and role/profile; other operations require stable team ID, session_id and generation. Profile replacement also needs expected_profile_revision. Writes require Idempotency-Key and strict JSON at most 64 KiB. Roster uses session_id, generation, after and limit (1-100). Responses exclude internal user/token bindings. Workers wait for explicit assignment; messaging and assignments are unavailable.",
+        "parameters": [
+          {
+            "name": "p",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "team",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Protocol-v1 session or roster"
+          },
+          "201": {
+            "description": "Joined session"
+          },
+          "400": {
+            "description": "Invalid request"
+          },
+          "403": {
+            "description": "Current ordinary write authority/enrollment required"
+          },
+          "409": {
+            "description": "Stale handle, occupied coordinator, quota or retry conflict"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      }
+    },
+    "/v1/projects/{p}/teams/{team}/resume": {
+      "post": {
+        "x-role": "writer",
+        "summary": "Team session resume",
+        "description": "Requires a live ordinary project write token and current team enrollment, including roster reads and retry replay. Admin/local/legacy/read-only credentials are refused. Protocol version 1. Join accepts exact team name or ID and role/profile; other operations require stable team ID, session_id and generation. Profile replacement also needs expected_profile_revision. Writes require Idempotency-Key and strict JSON at most 64 KiB. Roster uses session_id, generation, after and limit (1-100). Responses exclude internal user/token bindings. Workers wait for explicit assignment; messaging and assignments are unavailable.",
+        "parameters": [
+          {
+            "name": "p",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "team",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Protocol-v1 session or roster"
+          },
+          "201": {
+            "description": "Joined session"
+          },
+          "400": {
+            "description": "Invalid request"
+          },
+          "403": {
+            "description": "Current ordinary write authority/enrollment required"
+          },
+          "409": {
+            "description": "Stale handle, occupied coordinator, quota or retry conflict"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      }
+    },
+    "/v1/projects/{p}/teams/{team}/leave": {
+      "post": {
+        "x-role": "writer",
+        "summary": "Team session leave",
+        "description": "Requires a live ordinary project write token and current team enrollment, including roster reads and retry replay. Admin/local/legacy/read-only credentials are refused. Protocol version 1. Join accepts exact team name or ID and role/profile; other operations require stable team ID, session_id and generation. Profile replacement also needs expected_profile_revision. Writes require Idempotency-Key and strict JSON at most 64 KiB. Roster uses session_id, generation, after and limit (1-100). Responses exclude internal user/token bindings. Workers wait for explicit assignment; messaging and assignments are unavailable.",
+        "parameters": [
+          {
+            "name": "p",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "team",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Protocol-v1 session or roster"
+          },
+          "201": {
+            "description": "Joined session"
+          },
+          "400": {
+            "description": "Invalid request"
+          },
+          "403": {
+            "description": "Current ordinary write authority/enrollment required"
+          },
+          "409": {
+            "description": "Stale handle, occupied coordinator, quota or retry conflict"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      }
+    },
+    "/v1/projects/{p}/teams/{team}/profile": {
+      "post": {
+        "x-role": "writer",
+        "summary": "Team session profile",
+        "description": "Requires a live ordinary project write token and current team enrollment, including roster reads and retry replay. Admin/local/legacy/read-only credentials are refused. Protocol version 1. Join accepts exact team name or ID and role/profile; other operations require stable team ID, session_id and generation. Profile replacement also needs expected_profile_revision. Writes require Idempotency-Key and strict JSON at most 64 KiB. Roster uses session_id, generation, after and limit (1-100). Responses exclude internal user/token bindings. Workers wait for explicit assignment; messaging and assignments are unavailable.",
+        "parameters": [
+          {
+            "name": "p",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "team",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Protocol-v1 session or roster"
+          },
+          "201": {
+            "description": "Joined session"
+          },
+          "400": {
+            "description": "Invalid request"
+          },
+          "403": {
+            "description": "Current ordinary write authority/enrollment required"
+          },
+          "409": {
+            "description": "Stale handle, occupied coordinator, quota or retry conflict"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      }
     }
   }
 }

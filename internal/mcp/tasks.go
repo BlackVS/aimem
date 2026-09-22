@@ -18,6 +18,7 @@ import (
 	"net/http"
 	"net/url"
 	"strconv"
+	"strings"
 	"time"
 
 	"aimem/internal/ident"
@@ -33,7 +34,7 @@ type TaskCallFunc func(ctx context.Context, method, path string, headers map[str
 // the caller is an ordinary token that may use task tools only.
 type PrincipalFunc func(r *http.Request) (tasks TaskCallFunc, tasksOnly bool)
 
-var taskToolDefs = []map[string]any{
+var taskToolDefs = append([]map[string]any{
 	{
 		"name": "list_tasks",
 		"description": "List task summaries of a project (archived excluded unless asked). " +
@@ -151,7 +152,7 @@ var taskToolDefs = []map[string]any{
 			"idempotency_key": prop("string", "your unique key for this comment (retry-safe)"),
 		}, "id", "body", "idempotency_key"),
 	},
-}
+}, teamToolDefs...)
 
 // taskRefProp is the typed reference: kind says what ref holds — task: a
 // task id; doc: a document name; record: <collection>/<record id>;
@@ -300,6 +301,9 @@ func (s *srv) taskTool(ctx context.Context, name string, raw json.RawMessage) (s
 	}
 	if tasks == nil {
 		return "", errors.New("task tools are not available on this server")
+	}
+	if strings.HasPrefix(name, "team_") {
+		return callTeamTool(ctx, tasks, s.project, name, raw)
 	}
 	a, err := decodeTaskArgs(raw)
 	if err != nil {

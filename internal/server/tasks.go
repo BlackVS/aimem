@@ -29,18 +29,24 @@ const maxTaskRequestBytes = 256 << 10
 // taskRoutes are the task routes: what the in-process MCP dispatcher may
 // call, and (with POST /mcp) the exact surface an ordinary token may reach.
 var taskRoutes = map[string]bool{
-	"GET /v1/projects/{p}/tasks":      true,
-	"POST /v1/projects/{p}/tasks":     true,
-	"GET /v1/tasks/{id}":              true,
-	"PUT /v1/tasks/{id}":              true,
-	"GET /v1/tasks/{id}/history":      true,
-	"GET /v1/tasks/{id}/comments":     true,
-	"POST /v1/tasks/{id}/comments":    true,
-	"GET /v1/tasks/{id}/comments/{c}": true,
-	"GET /v1/projects/{p}/epics":      true,
-	"POST /v1/projects/{p}/epics":     true,
-	"GET /v1/projects/{p}/epics/{e}":  true,
-	"PUT /v1/projects/{p}/epics/{e}":  true,
+	"POST /v1/projects/{p}/teams/{team}/join":      true,
+	"GET /v1/projects/{p}/teams/{team}/members":    true,
+	"POST /v1/projects/{p}/teams/{team}/heartbeat": true,
+	"POST /v1/projects/{p}/teams/{team}/resume":    true,
+	"POST /v1/projects/{p}/teams/{team}/leave":     true,
+	"POST /v1/projects/{p}/teams/{team}/profile":   true,
+	"GET /v1/projects/{p}/tasks":                   true,
+	"POST /v1/projects/{p}/tasks":                  true,
+	"GET /v1/tasks/{id}":                           true,
+	"PUT /v1/tasks/{id}":                           true,
+	"GET /v1/tasks/{id}/history":                   true,
+	"GET /v1/tasks/{id}/comments":                  true,
+	"POST /v1/tasks/{id}/comments":                 true,
+	"GET /v1/tasks/{id}/comments/{c}":              true,
+	"GET /v1/projects/{p}/epics":                   true,
+	"POST /v1/projects/{p}/epics":                  true,
+	"GET /v1/projects/{p}/epics/{e}":               true,
+	"PUT /v1/projects/{p}/epics/{e}":               true,
 }
 
 // ordinaryRoutes is the exact surface an ordinary (scoped user) token may

@@ -201,6 +201,22 @@ func (d *DB) GetTeam(id string) (Team, error) {
 	return readTeam(d.sql, id)
 }
 
+// ResolveTeam accepts a stable ID first, or the exact project-local name.
+func (d *DB) ResolveTeam(name string) (Team, error) {
+	t, err := d.GetTeam(name)
+	if !errors.Is(err, ErrTeamNotFound) {
+		return t, err
+	}
+	var id string
+	if err = d.sql.QueryRow(`SELECT id FROM teams WHERE name=?`, name).Scan(&id); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return Team{}, ErrTeamNotFound
+		}
+		return Team{}, err
+	}
+	return d.GetTeam(id)
+}
+
 func (d *DB) ListTeams(after string, limit int) ([]Team, error) {
 	if err := d.taskScopeOK(); err != nil {
 		return nil, err

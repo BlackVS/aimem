@@ -68,7 +68,7 @@ retention; they are not a durable delivery log. Rich audit export/analysis is a
 later increment.
 
 Project schema 14 adds the administration tables; schema 15 adds internal session
-storage. Agent session HTTP/CLI/MCP operations are not exposed yet. Back up the
+storage. See TEAM-AGENT-QUICKSTART.md for agent HTTP/CLI/MCP operations. Back up the
 full state before upgrading and restore it with the previous binary if rolling
 back: old binaries refuse schema
 15. Renaming a project preserves its team IDs and access identity. Drop and merge
