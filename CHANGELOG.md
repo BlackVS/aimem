@@ -15,6 +15,14 @@ currently 18); a binary refuses a database newer than it understands.
 
 ### Added
 
+- Team protocol rehearsal: a scripted fixture drives a coordinator and two
+  workers as three principals through the pilot scenarios (collision, restart,
+  admin handoff, token revocation and replacement, duplicate commands,
+  cross-project denial, legacy mutation, integration-base change, operator
+  recovery) over the real MCP wire and admin routes on an isolated hub and
+  checks the audit export; `docs/TEAM-REHEARSAL.md` records what it proves
+  and what the manual pilot must still cover.
+
 - Team playbooks: coordinator and worker guidance for joining, waiting,
   assignment choice with recorded rationale, evidence-backed asynchronous
   question resolution, human escalation, results and review
