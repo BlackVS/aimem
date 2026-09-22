@@ -196,7 +196,8 @@ func TestLifecycleMessagesHandoffAndDeparture(t *testing.T) {
 		t.Fatal(err)
 	}
 	got := lifecycleOnly(inboxOf(t, d, team, a, TeamSessionHandle{SessionID: to.ID, Generation: to.Generation}))
-	if len(got) < 1 || got[len(got)-1].Lifecycle.Operation != "team.coordinator.handoff" || got[len(got)-1].Lifecycle.CoordinatorGeneration != 2 || got[len(got)-1].Recipient.Kind != "team" || got[len(got)-1].Lifecycle.Session == nil || got[len(got)-1].Lifecycle.Session.SessionID != successor.SessionID {
+	last := got[len(got)-1]
+	if len(got) < 1 || last.Lifecycle.Operation != "team.coordinator.handoff" || last.Lifecycle.CoordinatorGeneration != 2 || last.Recipient.Kind != "team" || last.Lifecycle.ActorKind != "user" || last.Lifecycle.Session == nil || *last.Lifecycle.Session != coordinator || last.Lifecycle.Successor == nil || *last.Lifecycle.Successor != successor {
 		t.Fatalf("handoff lifecycle (had %d before): %+v", before, got)
 	}
 	var outgoing int
@@ -244,5 +245,19 @@ func TestLifecycleMessageRollback(t *testing.T) {
 				t.Fatal("rollback consumed key", err)
 			}
 		})
+	}
+}
+
+// An admin transfer names no acting session; the successor is still carried.
+func TestLifecycleMessagesAdminHandoffActor(t *testing.T) {
+	_, d, team, a, admin, c, _, successor := handoffFixture(t)
+	to, err := d.HandoffTeamCoordinator(team.ID, adminHandoff(handoffCommand(c, successor)), admin, "admin-handoff")
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := lifecycleOnly(inboxOf(t, d, team, a, TeamSessionHandle{SessionID: to.ID, Generation: to.Generation}))
+	last := got[len(got)-1]
+	if len(got) < 1 || last.Lifecycle.Operation != "team.coordinator.handoff" || last.Lifecycle.ActorKind != "admin" || last.Lifecycle.Session != nil || last.Lifecycle.Successor == nil || *last.Lifecycle.Successor != successor || last.Lifecycle.CoordinatorGeneration != 2 {
+		t.Fatalf("admin handoff lifecycle: %+v", got)
 	}
 }

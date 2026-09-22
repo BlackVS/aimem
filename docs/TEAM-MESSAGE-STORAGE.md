@@ -62,8 +62,9 @@ assignment transition (offer, accept, decline, withdraw, block, resume-work,
 cancel, stopped, close-stop, submit, review, recover and the rebind on worker
 resume) and every coordinator handoff. It has no sender session or profile,
 carries `lifecycle` (operation, task, attempt, attempt state, task state, actor
-kind, the acting session handle when a user acted, and the new coordinator
-generation for a handoff), a readable text, the task and attempt references and
+kind, the acting session handle when a user acted, and for a handoff the
+successor handle and the new coordinator generation), a readable text, the
+task and attempt references and
 a task typed reference. Attempt transitions use recipient kind `participants`:
 the attempt's worker session and the current active coordinator session, both
 filtered to active and enrolled, minus the session that acted, so an actor never

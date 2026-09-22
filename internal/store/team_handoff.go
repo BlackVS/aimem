@@ -155,7 +155,10 @@ func (d *DB) HandoffTeamCoordinator(teamID string, c TeamHandoffCommand, a TeamA
 		if err != nil {
 			return TeamSession{}, err
 		}
-		l := TeamLifecycle{Operation: "team.coordinator.handoff", State: "coordinator", ActorKind: a.Actor.Kind, Session: &c.Target, CoordinatorGeneration: next}
+		l := TeamLifecycle{Operation: "team.coordinator.handoff", State: "coordinator", ActorKind: a.Actor.Kind, Successor: &c.Target, CoordinatorGeneration: next}
+		if !admin {
+			l.Session = &c.TeamSessionHandle
+		}
 		msg, err := lifecycleMessage(tx, teamID, TeamRecipient{Kind: "team"}, recipients, l, "team.coordinator.handoff: session "+to.ID+" is coordinator at generation "+strconv.FormatInt(next, 10)+"; reason: "+c.Reason, nil)
 		if err != nil {
 			return TeamSession{}, err

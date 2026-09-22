@@ -50,7 +50,8 @@ type TeamLifecycle struct {
 	State                 string             `json:"state,omitempty"`
 	TaskState             string             `json:"task_state,omitempty"`
 	ActorKind             string             `json:"actor_kind"`
-	Session               *TeamSessionHandle `json:"session,omitempty"`
+	Session               *TeamSessionHandle `json:"session,omitempty"`   // the acting session when a user acted
+	Successor             *TeamSessionHandle `json:"successor,omitempty"` // the new coordinator after a handoff
 	CoordinatorGeneration int64              `json:"coordinator_generation,omitempty"`
 }
 
