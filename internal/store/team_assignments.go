@@ -34,24 +34,25 @@ type TeamOffer struct {
 // The requirements and profile are immutable snapshots of the accepted offer.
 // Profile declarations and the coordinator's rationale do not grant authority.
 type TeamAssignment struct {
-	ID                    string            `json:"id"`
-	TeamID                string            `json:"team_id"`
-	TaskID                string            `json:"task_id"`
-	State                 string            `json:"state"`
-	Coordinator           TeamSessionHandle `json:"coordinator"`
-	CoordinatorGeneration int64             `json:"coordinator_generation"`
-	Worker                TeamSessionHandle `json:"worker"`
-	ProfileRevision       int64             `json:"profile_revision"`
-	Profile               TeamProfile       `json:"profile"`
-	TaskRevision          int64             `json:"task_revision"`
-	Requirements          TaskContent       `json:"requirements"`
-	SuitabilityRationale  string            `json:"suitability_rationale"`
-	CostRationale         string            `json:"cost_rationale"`
-	Reason                string            `json:"reason,omitempty"`
-	CreatedAt             string            `json:"created_at"`
-	UpdatedAt             string            `json:"updated_at"`
-	Result                *TeamResult       `json:"result,omitempty"`
-	Review                *TeamResultReview `json:"review,omitempty"`
+	ID                    string                  `json:"id"`
+	TeamID                string                  `json:"team_id"`
+	TaskID                string                  `json:"task_id"`
+	State                 string                  `json:"state"`
+	Coordinator           TeamSessionHandle       `json:"coordinator"`
+	CoordinatorGeneration int64                   `json:"coordinator_generation"`
+	Worker                TeamSessionHandle       `json:"worker"`
+	ProfileRevision       int64                   `json:"profile_revision"`
+	Profile               TeamProfile             `json:"profile"`
+	TaskRevision          int64                   `json:"task_revision"`
+	Requirements          TaskContent             `json:"requirements"`
+	SuitabilityRationale  string                  `json:"suitability_rationale"`
+	CostRationale         string                  `json:"cost_rationale"`
+	Reason                string                  `json:"reason,omitempty"`
+	CreatedAt             string                  `json:"created_at"`
+	UpdatedAt             string                  `json:"updated_at"`
+	Result                *TeamResult             `json:"result,omitempty"`
+	Review                *TeamResultReview       `json:"review,omitempty"`
+	Recovery              *TeamAssignmentRecovery `json:"recovery,omitempty"`
 }
 
 type TeamAssignmentCommand struct {
