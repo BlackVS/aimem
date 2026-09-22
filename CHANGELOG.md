@@ -15,10 +15,14 @@ currently 15); a binary refuses a database newer than it understands.
 
 ### Added
 
+- Agent team registration through HTTP, CLI and MCP: join by exact name or ID,
+  inspect the roster, update declared profiles, heartbeat, resume and leave.
+  Every operation checks current ordinary write-token scope, grants and team
+  enrollment. Public session views omit access identity bindings. Workers get
+  waiting instructions; messaging and assignments remain unavailable.
 - **Project schema 15:** durable team-session storage with coordinator exclusion,
   generation fencing, profile revisions, liveness observations and atomic audit.
-  This internal foundation does not yet expose agent join through HTTP, CLI or
-  MCP. Session transport and live access checks are the next increment.
+  This is the storage foundation for the session interfaces above.
 - Administrator team setup: `aimem teams` and admin-only HTTP routes create,
   inspect and replace project-bound team configuration and user enrollment.
   Revision checks, retry receipts and atomic audit events preserve configuration

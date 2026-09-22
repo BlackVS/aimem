@@ -72,6 +72,10 @@ func (s *Server) teamError(w http.ResponseWriter, r *http.Request, err error) {
 	status, message := http.StatusInternalServerError, "team storage failure"
 	var conflict *store.TeamConflict
 	switch {
+	case errors.Is(err, store.ErrTeamSessionDenied):
+		status, message = 403, "current team enrollment and bound ordinary write session required"
+	case errors.Is(err, store.ErrTeamSessionStale), errors.Is(err, store.ErrTeamCoordinatorOccupied), errors.Is(err, store.ErrTeamSessionQuota):
+		status, message = 409, err.Error()
 	case errors.As(err, &conflict):
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusConflict)

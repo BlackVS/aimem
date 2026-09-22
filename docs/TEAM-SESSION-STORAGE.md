@@ -1,7 +1,7 @@
 # Team session storage contract
 
-This is the internal storage increment of the agent-team design. It does not
-enable agent session tools or routes. The next transport increment must enforce
+This is the internal storage contract of the agent-team design. See
+TEAM-AGENT-QUICKSTART.md for HTTP/CLI/MCP. The transport enforces
 live ordinary write-token and project-grant checks before every store operation,
 including retries and roster reads. Trusted local/admin credentials cannot join
 through these methods. User/token IDs come from the authenticated actor, not
@@ -9,12 +9,12 @@ model-controlled profile fields. Access records live in a different database;
 this increment does not pretend to provide a cross-database transaction.
 
 `JoinTeam` receives a stable team ID, requested role, declared profile and retry
-key. The transport will resolve readable names. Current enrollment, coordinator
+key. The transport resolves readable names. Current enrollment, coordinator
 eligibility and tasks enablement are checked inside the project transaction
 before reading a receipt. A distinct join key creates a distinct session, even
 for the same credential. At most 100 active sessions are allowed per team in
-this increment; retries of accepted joins work at the limit. The limit becomes
-operator-configurable in the transport/policy increment.
+this increment; retries of accepted joins work at the limit. The limit is
+operator-configurable through JoinTeamLimit and the transport.
 
 Only one active coordinator can exist, enforced both by the transaction and a
 unique SQLite index. Its generation increases on acquisition and resume, and
@@ -40,8 +40,8 @@ observation time are declarations, not an attestation. A missing observation tim
 is filled with hub acceptance time. These declarations grant no authority.
 
 Roster reads require a current bound session and return bounded ID-ordered pages,
-including closed sessions for reconciliation. The transport must construct its
-public projection rather than serialize internal user/token bindings blindly.
+including closed sessions for reconciliation. The transport constructs its
+public projection without internal user/token bindings.
 The `Suspect` helper takes hub time and a policy timeout (design default 120s);
 suspect is a liveness observation, not a persisted ownership transition. Heartbeat
 does not prove model progress. No timeout frees a coordinator slot.
@@ -49,8 +49,8 @@ does not prove model progress. No timeout frees a coordinator slot.
 Session snapshot, audit event and retry receipt commit together. Audit contains
 the accepted profile and its revision, actor, generations, operation and server
 context. Existing admin event reads preserve session snapshots. Rejected-command
-diagnostics, HTTP/CLI/MCP parity and ordinary-token authorization tests belong to
-the transport increment. Messaging, assignments and process waiting instructions
+diagnostics, HTTP/CLI/MCP parity and ordinary-token authorization tests are in
+the transport increment. Messaging and assignments
 remain unadvertised until their corresponding workflows exist.
 
 Schema 15 is additive to schema 14. Back up the complete state and prior binary

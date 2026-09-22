@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -9,7 +10,9 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"time"
 
+	"aimem/internal/mcp"
 	"aimem/internal/uuidv7"
 )
 
@@ -23,10 +26,20 @@ Run on the hub host as its local operator. Configuration JSON contains name,
 description and enrollment [{user_id,coordinator}]. configure also requires
 expected_revision. Configuration replaces all fields; omitted enrollment clears
 it. Save/reuse an explicit idempotency key to retry an uncertain write. list/events
-print one page with next_cursor; use the HTTP API to page further. Agent sessions
-and task assignment are not available in this increment.`
+print one page with next_cursor; use the HTTP API to page further.
+
+Agent commands (from a configured checkout, using its task credential):
+  aimem teams <join|members|heartbeat|resume|leave|profile> PROJECT TEAM request.json [KEY]
+KEY is required for writes. join accepts a team name or ID; other commands use
+the returned ID. See docs/TEAM-SETUP.md. Task assignment is not available yet.`
 
 func teamsCmd(args []string) error {
+	if len(args) > 0 {
+		switch args[0] {
+		case "join", "members", "heartbeat", "resume", "leave", "profile":
+			return teamSessionCmd(args)
+		}
+	}
 	method, path, raw, key, err := teamsRequest(args)
 	if err != nil {
 		return err
@@ -56,6 +69,48 @@ func teamsCmd(args []string) error {
 		return err
 	}
 	fmt.Println(pretty.String())
+	return nil
+}
+
+func teamSessionCmd(args []string) error {
+	writes := len(args) > 0 && args[0] != "members"
+	if len(args) != 4 && !writes || writes && len(args) != 5 {
+		return errors.New("usage: aimem teams <join|members|heartbeat|resume|leave|profile> PROJECT TEAM request.json [idempotency-key (required for writes)]")
+	}
+	f, err := os.Open(args[3])
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+	raw, err := io.ReadAll(io.LimitReader(f, (64<<10)+1))
+	if err != nil {
+		return err
+	}
+	if len(raw) > 64<<10 {
+		return errors.New("session request exceeds 64 KiB")
+	}
+	var body map[string]json.RawMessage
+	if json.Unmarshal(raw, &body) != nil || body == nil {
+		return errors.New("session request must be a JSON object")
+	}
+	for _, k := range []string{"project", "team", "idempotency_key"} {
+		if _, ok := body[k]; ok {
+			return fmt.Errorf("%s comes from CLI arguments, not request file", k)
+		}
+	}
+	body["project"], _ = json.Marshal(args[1])
+	body["team"], _ = json.Marshal(args[2])
+	if writes {
+		body["idempotency_key"], _ = json.Marshal(args[4])
+	}
+	raw, _ = json.Marshal(body)
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	out, err := mcp.RunTeamTool(ctx, "team_"+args[0], raw)
+	if err != nil {
+		return err
+	}
+	fmt.Println(out)
 	return nil
 }
 

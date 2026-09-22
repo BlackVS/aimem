@@ -184,6 +184,14 @@ ON CONFLICT(id) DO UPDATE SET state=excluded.state,body=excluded.body`, s.ID, s.
 // A distinct retry key intentionally creates a distinct session, even for the
 // same credential. No task or execution ownership is created here.
 func (d *DB) JoinTeam(teamID, role string, profile TeamProfile, audit TeamAuditContext, key string) (TeamSession, error) {
+	return d.JoinTeamLimit(teamID, role, profile, audit, key, MaxTeamSessions)
+}
+
+// JoinTeamLimit accepts a trusted operator policy, not a client field.
+func (d *DB) JoinTeamLimit(teamID, role string, profile TeamProfile, audit TeamAuditContext, key string, limit int) (TeamSession, error) {
+	if limit < 1 || limit > 10000 {
+		return TeamSession{}, invalid(errors.New("invalid team session limit"))
+	}
 	if err := profile.validate(); err != nil {
 		return TeamSession{}, err
 	}
@@ -204,7 +212,7 @@ func (d *DB) JoinTeam(teamID, role string, profile TeamProfile, audit TeamAuditC
 		if err := tx.QueryRow(`SELECT count(*) FROM team_sessions WHERE team_id=? AND state='active'`, teamID).Scan(&count); err != nil {
 			return TeamSession{}, err
 		}
-		if count >= MaxTeamSessions {
+		if count >= limit {
 			return TeamSession{}, ErrTeamSessionQuota
 		}
 		now := nowUTC()
