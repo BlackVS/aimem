@@ -15,6 +15,11 @@ currently 16); a binary refuses a database newer than it understands.
 
 ### Added
 
+- Team messaging through HTTP, CLI and MCP: typed messages, team-visible history,
+  routed inboxes with bounded waits, explicit acknowledgements and retry receipts.
+  Current access and session generation are checked while waiting. Messages do
+  not assign work; execution assignments remain a later increment.
+
 - **Project schema 16:** internal durable team messages, snapshotted recipient
   inboxes and explicit acknowledgements. Retry receipts, generation checks and
   audit events commit atomically. This storage foundation does not yet expose

@@ -386,6 +386,8 @@ func TestOrdinaryTokenGateMatrix(t *testing.T) {
 		"POST /v1/projects/{p}/teams/{team}/join", "GET /v1/projects/{p}/teams/{team}/members",
 		"POST /v1/projects/{p}/teams/{team}/heartbeat", "POST /v1/projects/{p}/teams/{team}/resume",
 		"POST /v1/projects/{p}/teams/{team}/leave", "POST /v1/projects/{p}/teams/{team}/profile",
+		"POST /v1/projects/{p}/teams/{team}/messages", "GET /v1/projects/{p}/teams/{team}/messages",
+		"GET /v1/projects/{p}/teams/{team}/inbox", "POST /v1/projects/{p}/teams/{team}/ack",
 		"GET /v1/tasks/{id}/history", "GET /v1/tasks/{id}/comments", "POST /v1/tasks/{id}/comments", "GET /v1/tasks/{id}/comments/{c}", "POST /mcp",
 		"GET /v1/projects",                                                                                                              // the listing, read only, reserved stores filtered (TestProjectListForOrdinaryTokens)
 		"GET /v1/projects/{p}/process",                                                                                                  // the selected process reference (TestProcessReferenceSelection)

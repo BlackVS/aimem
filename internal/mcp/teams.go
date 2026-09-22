@@ -20,10 +20,10 @@ func teamProfileSchema() map[string]any {
 
 var teamToolDefs = func() []map[string]any {
 	defs := []map[string]any{}
-	for _, op := range []string{"join", "members", "heartbeat", "resume", "leave", "profile"} {
+	for _, op := range []string{"join", "members", "heartbeat", "resume", "leave", "profile", "send", "messages", "inbox", "ack"} {
 		props := map[string]any{"project": prop("string", "project, default current checkout"), "team": prop("string", "team ID; join also accepts exact readable name")}
 		required := []string{"team"}
-		if op != "members" {
+		if !teamReadOperation(op) {
 			props["idempotency_key"] = prop("string", "unique retry key; reuse only for identical request")
 			required = append(required, "idempotency_key")
 		}
@@ -49,10 +49,31 @@ var teamToolDefs = func() []map[string]any {
 			props["after"] = prop("string", "next_cursor from previous page")
 			props["limit"] = prop("integer", "page size 1-100")
 		}
-		defs = append(defs, map[string]any{"name": "team_" + op, "description": "Team " + op + " using your project task credential. Workers wait for coordinator assignments; never pick backlog tasks independently while joined. Messaging and assignments are not available yet. Resume fences old handles but cannot stop local commands; reconcile old execution first. A retry returns its original result, which may have an old generation.", "inputSchema": objSchema(props, required...)})
+		if op == "messages" || op == "inbox" {
+			props["after"] = prop("integer", "nonnegative next_cursor; use 0 on inbox reconnect to redeliver all unacknowledged messages")
+			props["limit"] = prop("integer", "page size 1-100, default 50")
+		}
+		if op == "inbox" {
+			props["wait_seconds"] = prop("integer", "bounded wait 0-25 seconds, default 0; an empty inbox does not complete work")
+		}
+		if op == "send" {
+			props["recipient"] = objSchema(map[string]any{"kind": propEnum("inbox routing, not privacy", "member", "team"), "id": prop("string", "recipient session ID for member; absent for team")}, "kind")
+			props["kind"] = propEnum("typed message, never an execution assignment", "question", "answer", "note", "progress", "blocker", "review_feedback")
+			props["payload"] = objSchema(map[string]any{"text": prop("string", "message text; total content at most 32 KiB, do not send secrets"), "refs": map[string]any{"type": "array", "items": taskRefProp()}, "deadline": prop("string", "optional question-only RFC3339 deadline")}, "text")
+			props["task_id"] = prop("string", "optional task in this project")
+			props["reply_to"] = prop("string", "message ID in this team; answers require a question")
+			required = append(required, "recipient", "kind", "payload")
+		}
+		if op == "ack" {
+			props["message_ids"] = map[string]any{"type": "array", "items": prop("string", "delivered message ID"), "minItems": 1, "maxItems": 100}
+			required = append(required, "message_ids")
+		}
+		defs = append(defs, map[string]any{"name": "team_" + op, "description": "Team " + op + " using your project task credential. All messages are team-visible; recipient means inbox routing. Reading is a delivery attempt; explicit ack records receipt, not answer or completion. Use inbox reads/bounded waits; notifications do not prove model receipt. Workers wait for coordinator assignments; never pick backlog tasks independently while joined. Assignments are not available yet, and messages cannot assign work. Resume fences old handles but cannot stop local commands; reconcile old execution first. A retry returns its original result, which may have an old generation.", "inputSchema": objSchema(props, required...)})
 	}
 	return defs
 }()
+
+func teamReadOperation(op string) bool { return op == "members" || op == "messages" || op == "inbox" }
 
 // RunTeamTool is the CLI entry point; it uses the same checkout credential
 // resolution as stdio MCP and never the trusted operator socket.
@@ -100,8 +121,11 @@ func callTeamTool(ctx context.Context, call TaskCallFunc, defaultProject, name s
 		Generation              int64              `json:"generation"`
 		ExpectedProfileRevision int64              `json:"expected_profile_revision"`
 		Availability            string             `json:"availability"`
-		After                   string             `json:"after"`
+		After                   json.RawMessage    `json:"after"`
 		Limit                   int                `json:"limit"`
+		WaitSeconds             int                `json:"wait_seconds"`
+		MessageIDs              []string           `json:"message_ids"`
+		store.TeamMessageContent
 	}
 	dec := json.NewDecoder(bytes.NewReader(raw))
 	dec.DisallowUnknownFields()
@@ -120,16 +144,34 @@ func callTeamTool(ctx context.Context, call TaskCallFunc, defaultProject, name s
 	op := name[len("team_"):]
 	method := "POST"
 	path := "/v1/projects/" + url.PathEscape(a.Project) + "/teams/" + url.PathEscape(a.Team) + "/" + op
+	if op == "send" {
+		path = "/v1/projects/" + url.PathEscape(a.Project) + "/teams/" + url.PathEscape(a.Team) + "/messages"
+	}
 	headers := map[string]string{}
 	var body []byte
-	if op == "members" {
+	if teamReadOperation(op) {
 		method = "GET"
 		q := url.Values{"session_id": {a.SessionID}, "generation": {strconv.FormatInt(a.Generation, 10)}}
-		if a.After != "" {
-			q.Set("after", a.After)
+		if len(a.After) != 0 {
+			if op == "members" {
+				var after string
+				if err := json.Unmarshal(a.After, &after); err != nil {
+					return "", err
+				}
+				q.Set("after", after)
+			} else {
+				var after int64
+				if err := json.Unmarshal(a.After, &after); err != nil {
+					return "", err
+				}
+				q.Set("after", strconv.FormatInt(after, 10))
+			}
 		}
-		if a.Limit != 0 {
+		if _, present := fields["limit"]; present {
 			q.Set("limit", strconv.Itoa(a.Limit))
+		}
+		if op == "inbox" {
+			q.Set("wait_seconds", strconv.Itoa(a.WaitSeconds))
 		}
 		path += "?" + q.Encode()
 	} else {
@@ -137,7 +179,17 @@ func callTeamTool(ctx context.Context, call TaskCallFunc, defaultProject, name s
 			return "", errors.New("idempotency_key required")
 		}
 		headers["Idempotency-Key"] = a.Key
-		if op == "join" {
+		if op == "send" {
+			body, _ = json.Marshal(struct {
+				store.TeamSessionHandle
+				store.TeamMessageContent
+			}{store.TeamSessionHandle{SessionID: a.SessionID, Generation: a.Generation}, a.TeamMessageContent})
+		} else if op == "ack" {
+			body, _ = json.Marshal(struct {
+				store.TeamSessionHandle
+				MessageIDs []string `json:"message_ids"`
+			}{store.TeamSessionHandle{SessionID: a.SessionID, Generation: a.Generation}, a.MessageIDs})
+		} else if op == "join" {
 			body, _ = json.Marshal(map[string]any{"role": a.Role, "profile": a.Profile})
 		} else {
 			body, _ = json.Marshal(store.TeamSessionCommand{SessionID: a.SessionID, Generation: a.Generation, Profile: a.Profile, ExpectedProfileRevision: a.ExpectedProfileRevision, Availability: a.Availability})

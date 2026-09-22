@@ -2132,7 +2132,7 @@
       "post": {
         "x-role": "writer",
         "summary": "Team session join",
-        "description": "Requires a live ordinary project write token and current team enrollment, including roster reads and retry replay. Admin/local/legacy/read-only credentials are refused. Protocol version 1. Join accepts exact team name or ID and role/profile; other operations require stable team ID, session_id and generation. Profile replacement also needs expected_profile_revision. Writes require Idempotency-Key and strict JSON at most 64 KiB. Roster uses session_id, generation, after and limit (1-100). Responses exclude internal user/token bindings. Workers wait for explicit assignment; messaging and assignments are unavailable.",
+        "description": "Requires a live ordinary project write token and current team enrollment, including roster reads and retry replay. Admin/local/legacy/read-only credentials are refused. Protocol version 1. Join accepts exact team name or ID and role/profile; other operations require stable team ID, session_id and generation. Profile replacement also needs expected_profile_revision. Writes require Idempotency-Key and strict JSON at most 64 KiB. Roster uses session_id, generation, after and limit (1-100). Responses exclude internal user/token bindings. Workers wait for explicit assignment; messaging supports send/history/inbox/ack; assignments are unavailable.",
         "parameters": [
           {
             "name": "p",
@@ -2179,7 +2179,7 @@
       "get": {
         "x-role": "writer",
         "summary": "Team session members",
-        "description": "Requires a live ordinary project write token and current team enrollment, including roster reads and retry replay. Admin/local/legacy/read-only credentials are refused. Protocol version 1. Join accepts exact team name or ID and role/profile; other operations require stable team ID, session_id and generation. Profile replacement also needs expected_profile_revision. Writes require Idempotency-Key and strict JSON at most 64 KiB. Roster uses session_id, generation, after and limit (1-100). Responses exclude internal user/token bindings. Workers wait for explicit assignment; messaging and assignments are unavailable.",
+        "description": "Requires a live ordinary project write token and current team enrollment, including roster reads and retry replay. Admin/local/legacy/read-only credentials are refused. Protocol version 1. Join accepts exact team name or ID and role/profile; other operations require stable team ID, session_id and generation. Profile replacement also needs expected_profile_revision. Writes require Idempotency-Key and strict JSON at most 64 KiB. Roster uses session_id, generation, after and limit (1-100). Responses exclude internal user/token bindings. Workers wait for explicit assignment; messaging supports send/history/inbox/ack; assignments are unavailable.",
         "parameters": [
           {
             "name": "p",
@@ -2226,7 +2226,7 @@
       "post": {
         "x-role": "writer",
         "summary": "Team session heartbeat",
-        "description": "Requires a live ordinary project write token and current team enrollment, including roster reads and retry replay. Admin/local/legacy/read-only credentials are refused. Protocol version 1. Join accepts exact team name or ID and role/profile; other operations require stable team ID, session_id and generation. Profile replacement also needs expected_profile_revision. Writes require Idempotency-Key and strict JSON at most 64 KiB. Roster uses session_id, generation, after and limit (1-100). Responses exclude internal user/token bindings. Workers wait for explicit assignment; messaging and assignments are unavailable.",
+        "description": "Requires a live ordinary project write token and current team enrollment, including roster reads and retry replay. Admin/local/legacy/read-only credentials are refused. Protocol version 1. Join accepts exact team name or ID and role/profile; other operations require stable team ID, session_id and generation. Profile replacement also needs expected_profile_revision. Writes require Idempotency-Key and strict JSON at most 64 KiB. Roster uses session_id, generation, after and limit (1-100). Responses exclude internal user/token bindings. Workers wait for explicit assignment; messaging supports send/history/inbox/ack; assignments are unavailable.",
         "parameters": [
           {
             "name": "p",
@@ -2273,7 +2273,7 @@
       "post": {
         "x-role": "writer",
         "summary": "Team session resume",
-        "description": "Requires a live ordinary project write token and current team enrollment, including roster reads and retry replay. Admin/local/legacy/read-only credentials are refused. Protocol version 1. Join accepts exact team name or ID and role/profile; other operations require stable team ID, session_id and generation. Profile replacement also needs expected_profile_revision. Writes require Idempotency-Key and strict JSON at most 64 KiB. Roster uses session_id, generation, after and limit (1-100). Responses exclude internal user/token bindings. Workers wait for explicit assignment; messaging and assignments are unavailable.",
+        "description": "Requires a live ordinary project write token and current team enrollment, including roster reads and retry replay. Admin/local/legacy/read-only credentials are refused. Protocol version 1. Join accepts exact team name or ID and role/profile; other operations require stable team ID, session_id and generation. Profile replacement also needs expected_profile_revision. Writes require Idempotency-Key and strict JSON at most 64 KiB. Roster uses session_id, generation, after and limit (1-100). Responses exclude internal user/token bindings. Workers wait for explicit assignment; messaging supports send/history/inbox/ack; assignments are unavailable.",
         "parameters": [
           {
             "name": "p",
@@ -2320,7 +2320,7 @@
       "post": {
         "x-role": "writer",
         "summary": "Team session leave",
-        "description": "Requires a live ordinary project write token and current team enrollment, including roster reads and retry replay. Admin/local/legacy/read-only credentials are refused. Protocol version 1. Join accepts exact team name or ID and role/profile; other operations require stable team ID, session_id and generation. Profile replacement also needs expected_profile_revision. Writes require Idempotency-Key and strict JSON at most 64 KiB. Roster uses session_id, generation, after and limit (1-100). Responses exclude internal user/token bindings. Workers wait for explicit assignment; messaging and assignments are unavailable.",
+        "description": "Requires a live ordinary project write token and current team enrollment, including roster reads and retry replay. Admin/local/legacy/read-only credentials are refused. Protocol version 1. Join accepts exact team name or ID and role/profile; other operations require stable team ID, session_id and generation. Profile replacement also needs expected_profile_revision. Writes require Idempotency-Key and strict JSON at most 64 KiB. Roster uses session_id, generation, after and limit (1-100). Responses exclude internal user/token bindings. Workers wait for explicit assignment; messaging supports send/history/inbox/ack; assignments are unavailable.",
         "parameters": [
           {
             "name": "p",
@@ -2367,7 +2367,7 @@
       "post": {
         "x-role": "writer",
         "summary": "Team session profile",
-        "description": "Requires a live ordinary project write token and current team enrollment, including roster reads and retry replay. Admin/local/legacy/read-only credentials are refused. Protocol version 1. Join accepts exact team name or ID and role/profile; other operations require stable team ID, session_id and generation. Profile replacement also needs expected_profile_revision. Writes require Idempotency-Key and strict JSON at most 64 KiB. Roster uses session_id, generation, after and limit (1-100). Responses exclude internal user/token bindings. Workers wait for explicit assignment; messaging and assignments are unavailable.",
+        "description": "Requires a live ordinary project write token and current team enrollment, including roster reads and retry replay. Admin/local/legacy/read-only credentials are refused. Protocol version 1. Join accepts exact team name or ID and role/profile; other operations require stable team ID, session_id and generation. Profile replacement also needs expected_profile_revision. Writes require Idempotency-Key and strict JSON at most 64 KiB. Roster uses session_id, generation, after and limit (1-100). Responses exclude internal user/token bindings. Workers wait for explicit assignment; messaging supports send/history/inbox/ack; assignments are unavailable.",
         "parameters": [
           {
             "name": "p",
@@ -2408,6 +2408,322 @@
             "bearer": []
           }
         ]
+      }
+    },
+    "/v1/projects/{p}/teams/{team}/messages": {
+      "get": {
+        "x-role": "writer",
+        "summary": "Team messages get",
+        "description": "Requires a live ordinary project write token, enabled project, current enrollment and a session bound to this token. Admin/local/legacy/read-only credentials are refused. Team ID, session_id and current generation required. Protocol version 1. Messages are team-visible; a direct recipient controls inbox routing, not privacy. Sending never assigns work. Query: session_id, generation, after (nonnegative sequence, default 0), limit (1-100, default 50). Returns messages, next_cursor, has_more and server_time. History includes all team-visible messages and does not mark delivery. wait_seconds is not accepted.",
+        "parameters": [
+          {
+            "name": "p",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "team",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "session_id",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "generation",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "minimum": 1
+            }
+          },
+          {
+            "name": "after",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "minimum": 0,
+              "default": 0
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100,
+              "default": 50
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Protocol-v1 message, page or acknowledgement"
+          },
+          "400": {
+            "description": "Invalid request"
+          },
+          "401": {
+            "description": "Invalid credential"
+          },
+          "403": {
+            "description": "Current ordinary write authority/session enrollment required"
+          },
+          "404": {
+            "description": "Team/project/message/task not found"
+          },
+          "409": {
+            "description": "Stale handle, quota, retry conflict or unseen acknowledgement"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      },
+      "post": {
+        "x-role": "writer",
+        "summary": "Team messages post",
+        "description": "Requires a live ordinary project write token, enabled project, current enrollment and a session bound to this token. Admin/local/legacy/read-only credentials are refused. Team ID, session_id and current generation required. Protocol version 1. Messages are team-visible; a direct recipient controls inbox routing, not privacy. Sending never assigns work. Idempotency-Key required; strict JSON <=64 KiB with session_id, generation, recipient {kind: member|team, id?}, kind (question|answer|note|progress|blocker|review_feedback), payload {text, refs?, deadline?}, task_id?, reply_to?. Total message content <=32 KiB. Answer requires a question reply_to. task_id and task refs must exist in this project; reply_to must exist in this team. Attempt references remain unavailable. Sender/profile/audit derived by server. Quota defaults to 10000/team (AIMEM_TEAM_MAX_MESSAGES 1-1000000); new sends refuse at capacity, accepted retries survive quota.",
+        "parameters": [
+          {
+            "name": "p",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "team",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "201": {
+            "description": "Protocol-v1 message, page or acknowledgement"
+          },
+          "400": {
+            "description": "Invalid request"
+          },
+          "401": {
+            "description": "Invalid credential"
+          },
+          "403": {
+            "description": "Current ordinary write authority/session enrollment required"
+          },
+          "404": {
+            "description": "Team/project/message/task not found"
+          },
+          "409": {
+            "description": "Stale handle, quota, retry conflict or unseen acknowledgement"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/projects/{p}/teams/{team}/inbox": {
+      "get": {
+        "x-role": "writer",
+        "summary": "Team inbox get",
+        "description": "Requires a live ordinary project write token, enabled project, current enrollment and a session bound to this token. Admin/local/legacy/read-only credentials are refused. Team ID, session_id and current generation required. Protocol version 1. Messages are team-visible; a direct recipient controls inbox routing, not privacy. Sending never assigns work. Query: session_id, generation, after (nonnegative sequence, default 0), limit (1-100, default 50). Returns messages, next_cursor, has_more and server_time. Inbox includes unacknowledged routed messages and records a delivery attempt, not model receipt. wait_seconds is 0-25 (default 0); polls recheck live access/session state and honor cancellation. Reset after=0 on reconnect to recover every unacknowledged message; cursor advance alone is not ack.",
+        "parameters": [
+          {
+            "name": "p",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "team",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "session_id",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "generation",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "minimum": 1
+            }
+          },
+          {
+            "name": "after",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "minimum": 0,
+              "default": 0
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100,
+              "default": 50
+            }
+          },
+          {
+            "name": "wait_seconds",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 25,
+              "default": 0
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Protocol-v1 message, page or acknowledgement"
+          },
+          "400": {
+            "description": "Invalid request"
+          },
+          "401": {
+            "description": "Invalid credential"
+          },
+          "403": {
+            "description": "Current ordinary write authority/session enrollment required"
+          },
+          "404": {
+            "description": "Team/project/message/task not found"
+          },
+          "409": {
+            "description": "Stale handle, quota, retry conflict or unseen acknowledgement"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      }
+    },
+    "/v1/projects/{p}/teams/{team}/ack": {
+      "post": {
+        "x-role": "writer",
+        "summary": "Team ack post",
+        "description": "Requires a live ordinary project write token, enabled project, current enrollment and a session bound to this token. Admin/local/legacy/read-only credentials are refused. Team ID, session_id and current generation required. Protocol version 1. Messages are team-visible; a direct recipient controls inbox routing, not privacy. Sending never assigns work. Idempotency-Key required; strict JSON <=64 KiB with session_id, generation, message_ids (1-100 distinct IDs previously delivered to this session). Explicit ack records receipt, not answer or completion; returns message_ids. No cursor-range ack. Retry returns the original receipt after live authorization checks.",
+        "parameters": [
+          {
+            "name": "p",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "team",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Protocol-v1 message, page or acknowledgement"
+          },
+          "400": {
+            "description": "Invalid request"
+          },
+          "401": {
+            "description": "Invalid credential"
+          },
+          "403": {
+            "description": "Current ordinary write authority/session enrollment required"
+          },
+          "404": {
+            "description": "Team/project/message/task not found"
+          },
+          "409": {
+            "description": "Stale handle, quota, retry conflict or unseen acknowledgement"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object"
+              }
+            }
+          }
+        }
       }
     }
   }

@@ -13,9 +13,9 @@ import (
 	"aimem/internal/store"
 )
 
-var teamSessionOperations = []string{"join", "members", "profile", "heartbeat", "resume", "leave"}
+var teamSessionOperations = []string{"join", "members", "profile", "heartbeat", "resume", "leave", "send", "messages", "inbox", "ack"}
 
-const teamWaitingInstructions = "Team workers wait for an explicit coordinator assignment; do not pick backlog work independently. Messaging and task assignment are not implemented on this hub yet. Do not execute work on the basis of join or a role. Resume requires reconciliation of any old local execution; a changed generation cannot stop local processes. Explicit leave returns to standalone mode."
+const teamWaitingInstructions = "Team workers wait for an explicit coordinator assignment; do not pick backlog work independently. Use inbox reads or bounded waits for messages; all messages are team-visible and a message never assigns work. Explicit ack records receipt, not task completion. Task assignment is not implemented on this hub yet. Do not execute work on the basis of join or a role. Resume requires reconciliation of any old local execution; a changed generation cannot stop local processes. Explicit leave returns to standalone mode."
 
 // Explicit projection: session handles and declared profiles are public to
 // members; internal access user/token bindings never leave the store here.
