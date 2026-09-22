@@ -2,7 +2,8 @@
 
 `ChangeTeamWork` extends the assignment/result storage foundation with five
 internal commands. It does not expose new HTTP, CLI or MCP operations, and the
-full workflow remains unavailable (`workflow_ready: false`). Forced recovery,
+full workflow remains unavailable (`workflow_ready: false`). Operator recovery has a
+[separate storage method](TEAM-RECOVERY-STORAGE.md);
 session/token rebinding, coordinator handoff and shared-inbox lifecycle delivery
 remain separate increments.
 
@@ -54,7 +55,7 @@ transport reconnects and supervisor restarts do not perform these transitions.
 Session resume/leave also retain reservations. A resumed worker cannot use a new
 handle to take over its old-generation attempt. If it cannot acknowledge a stop
 with the original current handle, explicit operator recovery with reconciliation
-is needed; that capability is not implemented here. Do not bypass this with
+is needed; see [operator recovery storage](TEAM-RECOVERY-STORAGE.md). Do not bypass this with
 generic task edits or reassign the same task outside aimem.
 
 ## Boundaries and retries

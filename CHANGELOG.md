@@ -15,6 +15,10 @@ currently 17); a binary refuses a database newer than it understands.
 
 ### Added
 
+- Operator recovery storage: reconciled forced closure of abandoned execution,
+  guarded by task and session/coordinator generations, with immutable evidence
+  and atomic requeue. Public recovery commands and process control remain deferred.
+
 - Cooperative team work-control storage: worker block/resume, coordinator stop
   request, worker acknowledgement and coordinator closure. Reservations remain
   held through STOPPED; only closure requeues the managed task. Public commands,

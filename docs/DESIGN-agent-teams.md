@@ -491,6 +491,16 @@ evidence; closing the old attempt fences future writes. It cannot undo external
 commands. A delayed old result is rejected as stale and may be attached only as
 non-authoritative evidence by the coordinator.
 
+The [operator recovery storage](TEAM-RECOVERY-STORAGE.md) increment makes forced
+closure explicit: RUNNING, BLOCKED, STOP_REQUESTED or STOPPED becomes terminal
+RECOVERED and the managed task returns to READY. It requires the original assigned
+worker handle, separately observed current worker-session generation, current
+coordinator-slot generation and task revision. An admin records an explicit stopped
+affirmation, runtime/process and worktree reconciliation, reason and evidence refs.
+The hub validates and preserves this assessment; it does not prove execution stopped.
+Offers, submitted results and terminal attempts cannot use this path. Session/token
+rebinding, coordinator handoff and recovery client operations remain deferred.
+
 For managed tasks generic PUT/archive is refused with `409 managed_task` and a
 pointer to coordination operations, including for admins; explicit audited admin
 override is a separate operation. Comments remain available under existing write
