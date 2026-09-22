@@ -4,8 +4,8 @@ Observed on Windows on 2026-09-22, after the
 [supervisor design amendment](DESIGN-agent-supervisor.md). This is discovery
 evidence for a future adapter, not a shipped supervisor or a live team pilot.
 
-The real Codex and OpenCode clients executed MCP calls against a disposable
-fixture. A local scripted Responses provider selected the calls and supplied
+The real Codex, OpenCode and Claude CLI clients executed MCP calls against a disposable
+fixture. A local scripted Responses/Messages provider selected the calls and supplied
 fixed text. No paid model was called. Consequently these results establish
 client transport behavior, not model understanding, judgement, model identity,
 task completion or reliable unattended coordination.
@@ -19,11 +19,14 @@ task completion or reliable unattended coordination.
 | OpenCode executable / HTTP server | 1.18.3 |
 | OpenCode MCP initialize request | 2025-11-25 |
 | OpenCode published `/doc` | OpenAPI 3.1.0 |
+| Claude CLI | 2.1.278 |
+| Claude MCP initialize request | 2025-11-25 |
+| Node runtime | 24.11.1 |
 
 The MCP fixture echoes the requested protocol version. This records negotiation
 for the tools/logging subset exercised here; it is not full conformance testing.
-The runner checks the two exact client versions and refuses other versions.
-Linux and Claude remain untested by this fixture.
+The runner checks the three exact client versions and refuses other versions.
+Linux remains untested by this fixture.
 
 **Observed** means the executable check passed. **Not observed** gives the
 specific negative observation and its bounds. **Untested** means no capability
@@ -44,7 +47,24 @@ conclusion is justified; it must not be advertised as unsupported.
 | Structured event stream | Observed: correlated turn-completed events | Observed: SSE session-created event identifies the fixture session |
 | Event replay / lossless reconnect | Untested; resume does not prove replay or gap detection | Untested; session read does not prove SSE replay |
 
-Both clients passed the sequence `join -> inbox(0) -> inbox(0) -> reply -> ack ->
+Claude was added after the first two-client pass, using its native JSON stream
+and request-ID-correlated control messages. No Agent SDK package was installed.
+
+| Capability | Claude CLI 2.1.278 |
+| --- | --- |
+| Spawn an owned structured backend | Observed: `--print --input-format stream-json --output-format stream-json`, initialize control reply and a stable session ID across turns |
+| Attach to an arbitrary already-running CLI | Untested; print mode starts its own process |
+| Join, question/answer, inbox retry/cursor/ack | Observed: the same six real MCP calls and typed fixture results as the other clients |
+| Bounded tool wait | Observed: the same 100 ms inbox delay; long-running polling limits untested |
+| Idle wakeup from MCP log notification | Not observed: zero additional provider requests in 2 seconds after fixture emission |
+| Delivery while busy | Provider request observed in progress; concurrent user-input/queue semantics untested |
+| Input and permission request correlation | Untested at runtime; no pending input or permission request was answered |
+| Interrupt | Observed: correlated control response succeeds, then a result with `is_error: true` and subtype `error_during_execution`; this is not task completion or proof of child-command termination |
+| Restart and reconnect | Observed: restart only the fixture-owned process with `--resume`, complete another scripted turn and recover the same session ID |
+| Structured event stream | Observed: JSON result messages and request-ID-correlated initialize/interrupt control replies |
+| Event replay / lossless reconnect | Untested; resume does not establish replay, delivery deduplication or gap detection |
+
+All three clients passed the sequence `join -> inbox(0) -> inbox(0) -> reply -> ack ->
 inbox(1)`. The fixture stores only synthetic data. Its answer is correlated with
 `fixture-message`; a tool result or transport receipt never becomes an aimem
 member acknowledgement. Real aimem access checks, generations, message transport
@@ -66,10 +86,10 @@ only the launcher is stopped. The discovery runner does not install clients or
 download dependencies.
 
 ```powershell
-node scripts/agent-probe/run.cjs $CodexExe $OpenCodeExe
+node scripts/agent-probe/run.cjs $CodexExe $OpenCodeExe $ClaudeExe
 ```
 
-`$CodexExe` and `$OpenCodeExe` are operator-provided paths. Success exits zero and
+`$CodexExe`, `$OpenCodeExe` and `$ClaudeExe` are operator-provided paths. Success exits zero and
 prints `pass: true`, the client/protocol versions and the observations above.
 Failure exits nonzero and records `error` or `cleanup_error`. Output includes a
 new temporary evidence directory containing `result.json`, synthetic MCP state,
@@ -85,7 +105,9 @@ fixture. It allows only the named disposable MCP tools in the generated client
 configuration, uses no terminal automation and does not contact an aimem hub.
 These configuration measures are not an OS sandbox or proof of zero incidental
 client network activity. Run trusted installed executables on a trusted local
-host. No production approval policy is changed.
+host. Claude uses bare print mode, an isolated configuration directory, disabled
+built-in tools, strict fixture-only MCP configuration, and explicit permission
+for the four fixture tools. No production approval policy is changed.
 
 Only child processes created by this run are stopped. A protocol abort is tested
 against a held provider response, never a real shell command or live user session.
@@ -106,7 +128,7 @@ justifies changing aimem production code.
 
 Start the optional adapter with an explicitly spawned Codex app-server bound to a
 disposable workspace: exact turn steering and interruption were measured there.
-Keep OpenCode as the second interoperability target. This is a recommendation for
+OpenCode and Claude also have measured structured transports. This is a recommendation for
 the later adapter task, not authorization to replace a user's existing session.
 
 First finish core message transport, fenced assignments, lifecycle/results and
@@ -119,5 +141,9 @@ own reviewed increments; this probe grants neither.
 
 Upstream interface references: [Codex app-server](https://learn.chatgpt.com/docs/app-server),
 [Codex MCP configuration](https://learn.chatgpt.com/docs/extend/mcp?surface=cli),
-and [OpenCode server](https://opencode.ai/docs/server/). The capability conclusions
+and [OpenCode server](https://opencode.ai/docs/server/). Claude's stream envelopes
+were checked against the [official Agent SDK control implementation](https://github.com/anthropics/claude-agent-sdk-python/blob/main/src/claude_agent_sdk/_internal/query.py)
+and its installed CLI help; the scripted provider follows the
+[Messages streaming format](https://platform.claude.com/docs/en/build-with-claude/streaming).
+The capability conclusions
 above come from the executable fixture, not extrapolation from documentation.

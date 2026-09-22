@@ -157,7 +157,7 @@ interoperability. If attachment is unsupported, report the limit; do not silentl
 replace a user's session or fall back to terminal input.
 
 The [initial capability probe](AGENT-CAPABILITY-PROBE.md) records measured Windows
-Codex/OpenCode transport behavior and its untested boundaries. It introduces no
+Codex/OpenCode/Claude transport behavior and its untested boundaries. It introduces no
 production adapter or delegation.
 
 1. Review this authority/identity amendment and run the early capability probe.

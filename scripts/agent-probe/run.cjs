@@ -1,4 +1,4 @@
-// Usage: node scripts/agent-probe/run.cjs ABSOLUTE_CODEX_EXE ABSOLUTE_OPENCODE_EXE
+// Usage: node scripts/agent-probe/run.cjs ABSOLUTE_CODEX_EXE ABSOLUTE_OPENCODE_EXE ABSOLUTE_CLAUDE_EXE
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
@@ -233,16 +233,86 @@ async function opencode(exe) {
     await stop(restarted);
   } finally { controller.abort(); await pump; }
 }
+async function claude(exe) {
+  const configDir = path.join(root, 'claude-config');
+  fs.mkdirSync(configDir);
+  const mcp = JSON.stringify({ mcpServers: { fixture: { type: 'stdio', command: process.execPath,
+    args: [path.join(__dirname, 'mcp.cjs'), fixtureFile('claude')] } } });
+  const args = ['--bare', '--print', '--verbose', '--input-format', 'stream-json',
+    '--output-format', 'stream-json', '--strict-mcp-config', '--mcp-config', mcp,
+    '--tools', '', '--allowedTools', ...['join', 'inbox', 'reply', 'ack'].map(n => 'mcp__fixture__probe_' + n),
+    '--permission-mode', 'dontAsk', '--permission-prompts', 'none', '--model', 'claude-fable-5'];
+  const extra = { CLAUDE_CONFIG_DIR: configDir, ANTHROPIC_BASE_URL: provider.base.replace(/\/v1$/, ''),
+    ANTHROPIC_API_KEY: 'disposable-not-a-secret', CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: '1',
+    DISABLE_AUTOUPDATER: '1' };
+  function launch(resume) {
+    const p = child(exe, resume ? [...args, '--resume', resume] : args, extra);
+    const events = [];
+    readline.createInterface({ input: p.stdout }).on('line', line => {
+      try { events.push(JSON.parse(line)); } catch { /* Non-JSON diagnostics are not protocol events. */ }
+    });
+    const send = value => p.stdin.write(JSON.stringify(value) + '\n');
+    async function control(subtype) {
+      const id = crypto.randomUUID();
+      send({ type: 'control_request', request_id: id, request: { subtype } });
+      const response = await until(() => events.find(e => e.type === 'control_response'
+        && e.response.request_id === id), 'Claude ' + subtype);
+      assert.equal(response.response.subtype, 'success', JSON.stringify(response.response));
+    }
+    return { p, events, control, user(text) {
+      send({ type: 'user', session_id: resume || '', parent_tool_use_id: null,
+        message: { role: 'user', content: text } });
+    } };
+  }
+  const c = launch();
+  await c.control('initialize');
+  let sessionID;
+  for (const [phase, cursor] of [['join'], ['inbox'], ['inbox'], ['reply'], ['ack'], ['inbox', 1]]) {
+    provider.set(phase, cursor);
+    const offset = c.events.length;
+    c.user('Disposable fixture ' + phase);
+    const done = await until(() => c.events.slice(offset).find(e => e.type === 'result'), 'Claude turn');
+    assert.equal(done.is_error, false, JSON.stringify(done));
+    assert.equal(done.subtype, 'success');
+    if (sessionID) assert.equal(done.session_id, sessionID);
+    sessionID = done.session_id;
+  }
+  assert(sessionID);
+  observe('claude', 'spawn_initialize_stream', { pass: true, stable_session_id: true });
+  checkFixture('claude');
+  await idleNotification('claude');
+  provider.set('hold');
+  const before = provider.log.length, offset = c.events.length;
+  c.user('Disposable busy fixture');
+  await until(() => provider.log.slice(before).some(e => e.phase === 'hold'), 'Claude provider busy');
+  await c.control('interrupt');
+  const interrupted = await until(() => c.events.slice(offset).find(e => e.type === 'result'), 'Claude interrupted result');
+  observe('claude', 'busy_interrupt', { control_accepted: true,
+    result_subtype: interrupted.subtype, is_error: interrupted.is_error });
+  await stop(c.p);
+  const resumed = launch(sessionID);
+  await resumed.control('initialize');
+  provider.set('complete');
+  resumed.user('Disposable resume check');
+  const done = await until(() => resumed.events.find(e => e.type === 'result'), 'Claude resumed result');
+  assert.equal(done.is_error, false, JSON.stringify(done));
+  assert.equal(done.session_id, sessionID);
+  observe('claude', 'owned_process_restart_resume', { same_id: true });
+  await stop(resumed.p);
+}
 async function main() {
   assert.equal(process.platform, 'win32', 'This discovery fixture has only been qualified on Windows');
-  const [codexExe, opencodeExe] = process.argv.slice(2);
+  const [codexExe, opencodeExe, claudeExe] = process.argv.slice(2);
   report.codex = await version(codexExe);
   report.opencode = await version(opencodeExe);
+  report.claude = await version(claudeExe);
   assert.equal(report.codex, 'codex-cli 0.154.0', 'Unqualified Codex version');
   assert.equal(report.opencode, '1.18.3', 'Unqualified OpenCode version');
+  assert.equal(report.claude, '2.1.278 (Claude Code)', 'Unqualified Claude version');
   provider = await require('./provider.cjs')();
   await codex(codexExe);
   await opencode(opencodeExe);
+  await claude(claudeExe);
   report.pass = true;
 }
 main().catch(error => { report.error = error.message; process.exitCode = 1; }).finally(async () => {
