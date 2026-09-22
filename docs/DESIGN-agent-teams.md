@@ -525,6 +525,13 @@ released by flagging the row, never by deleting attempt history; a released task
 returns to ordinary writes and can be offered afresh. Client commands for these
 operations remain deferred.
 
+The [execution HTTP routes](TEAM-EXECUTION-HTTP.md) expose the reserved-attempt
+read, block/resume-work, cancel/stopped/close-stop, submit and review under the
+assignment routes' ordinary-token authority, with storage deciding every role,
+generation and revision check so later transports refuse identically. Handoff,
+edit, finalize, recover and unmanage routes, CLI/MCP execution tools and inbox
+lifecycle delivery follow as separate increments; `workflow_ready` stays false.
+
 For managed tasks generic PUT/archive is refused with `409 managed_task` and a
 pointer to coordination operations, including for admins; explicit audited admin
 override is a separate operation. Comments remain available under existing write
