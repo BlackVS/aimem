@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http/httptest"
+	"os"
 	"strings"
 	"testing"
 )
@@ -18,6 +19,10 @@ func TestTeamWorkWireContract(t *testing.T) {
 		{"team_assignment", `"attempt":"a1"`, "GET", "/assignments/a1?generation=1&session_id=s", nil},
 		{"team_offer", `"coordinator_generation":1,"task_id":"t1","expected_revision":1,"worker":{"session_id":"w","generation":1},"suitability_rationale":"S","cost_rationale":"C","idempotency_key":"k"`, "POST", "/assignments", []string{`"task_id":"t1"`, `"worker":{"session_id":"w","generation":1}`}},
 		{"team_accept", `"attempt":"a1","idempotency_key":"k"`, "POST", "/assignments/a1/accept", []string{`"session_id":"s"`}},
+		{"team_decline", `"attempt":"a1","reason":"r","idempotency_key":"k"`, "POST", "/assignments/a1/decline", []string{`"reason":"r"`}},
+		{"team_block", `"attempt":"a1","expected_revision":2,"reason":"r","idempotency_key":"k"`, "POST", "/assignments/a1/block", []string{`"expected_revision":2`, `"reason":"r"`}},
+		{"team_cancel", `"attempt":"a1","coordinator_generation":1,"expected_revision":2,"reason":"r","idempotency_key":"k"`, "POST", "/assignments/a1/cancel", []string{`"coordinator_generation":1`, `"reason":"r"`}},
+		{"team_stopped", `"attempt":"a1","expected_revision":3,"reason":"r","idempotency_key":"k"`, "POST", "/assignments/a1/stopped", []string{`"expected_revision":3`}},
 		{"team_withdraw", `"attempt":"a1","coordinator_generation":1,"reason":"r","idempotency_key":"k"`, "POST", "/assignments/a1/withdraw", []string{`"reason":"r"`}},
 		{"team_resume_work", `"attempt":"a1","expected_revision":2,"reason":"r","idempotency_key":"k"`, "POST", "/assignments/a1/resume-work", []string{`"expected_revision":2`}},
 		{"team_close_stop", `"attempt":"a1","coordinator_generation":1,"expected_revision":4,"reason":"r","idempotency_key":"k"`, "POST", "/assignments/a1/close-stop", []string{`"coordinator_generation":1`}},
@@ -84,6 +89,19 @@ func TestTeamWorkWireContract(t *testing.T) {
 	}
 	if len(teamWorkToolDefs) != 16 {
 		t.Fatal("tool table changed", len(teamWorkToolDefs))
+	}
+}
+
+// Every bridged tool has a wire-contract case above.
+func TestTeamWorkWireMatrixCoversEveryTool(t *testing.T) {
+	src, err := os.ReadFile("team_work_test.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, tool := range teamWorkTools {
+		if !strings.Contains(string(src), `{"`+tool.name+`", `) {
+			t.Fatal("no wire-contract case for", tool.name)
+		}
 	}
 }
 
@@ -183,6 +201,11 @@ func TestTeamWorkThroughRealHub(t *testing.T) {
 	attempt := offer["id"].(string)
 	if offer["state"] != "OFFERED" {
 		t.Fatal(offer)
+	}
+	// The offer reached the worker's inbox as a lifecycle message before acceptance.
+	inbox := call(f.alice, "team_inbox", workerHandle)["messages"].([]any)
+	if len(inbox) != 1 || inbox[0].(map[string]any)["kind"] != "lifecycle" || inbox[0].(map[string]any)["lifecycle"].(map[string]any)["attempt_id"] != attempt {
+		t.Fatalf("worker inbox: %v", inbox)
 	}
 	if got := call(f.alice, "team_accept", with(workerHandle, map[string]any{"attempt": attempt, "idempotency_key": "accept"}))["assignment"].(map[string]any); got["state"] != "RUNNING" {
 		t.Fatal(got)

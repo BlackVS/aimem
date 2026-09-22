@@ -10,9 +10,10 @@ follow the [assignment HTTP primitives](TEAM-ASSIGNMENT-HTTP.md) in every
 authorization and encoding rule. Handoff, managed edit/finalize, operator
 recovery and unmanage are the [management routes](TEAM-MANAGEMENT-HTTP.md).
 The CLI and MCP tools in the [quickstart](TEAM-AGENT-QUICKSTART.md) bridge to
-these routes. Responses still say `workflow_ready:false`: inbox lifecycle
-delivery is a separate increment. Do not start a worker pilot on these routes
-alone.
+these routes. Every transition also delivers a
+[lifecycle message](TEAM-MESSAGE-STORAGE.md#lifecycle-messages) to the
+counterpart's inbox, and responses say `workflow_ready:true`. Readiness is not a
+pilot approval: the rehearsal and a separately approved deployment come first.
 
 All paths below begin with `/v1/projects/PROJECT/teams/TEAM_ID`. Each request
 requires the caller's ordinary write token for this project, current grant and
@@ -41,7 +42,7 @@ handle, `expected_revision`, `base_commit` and `commit` as full Git object IDs,
 carries the coordinator handle, `coordinator_generation`, `expected_revision`,
 `result_id`, `decision` (`accept` or `rework`) and `reason`. Use revisions and
 generations the hub actually returned. Successful operations respond 200 with
-`protocol_version:1`, `assignment` and `workflow_ready:false`; responses expose
+`protocol_version:1`, `assignment` and `workflow_ready:true`; responses expose
 session handles and snapshots, never token or access-user bindings.
 
 Refusals follow the assignment routes: 400 invalid input or missing retry key,

@@ -2,12 +2,14 @@
 
 The hub supports offering, reading, accepting, declining and withdrawing team
 assignments over HTTP. These use the [schema 17 storage contract](TEAM-ASSIGNMENT-STORAGE.md).
-They are not a complete execution workflow: responses include `workflow_ready:false`.
+Responses include `workflow_ready:true`: the complete loop exists, and every
+transition also delivers a [lifecycle message](TEAM-MESSAGE-STORAGE.md#lifecycle-messages)
+to the counterpart's inbox.
 The [execution routes](TEAM-EXECUTION-HTTP.md) add the reserved-attempt read,
 block/resume, stop request/acknowledgement/closure, submission and review; the
 [management routes](TEAM-MANAGEMENT-HTTP.md) add handoff, managed edit/finalize,
-recovery and unmanage. The CLI and MCP tools bridge to all of them; inbox lifecycle delivery is still
-deferred. Do not start a worker pilot yet.
+recovery and unmanage. The CLI and MCP tools bridge to all of them. Readiness of the protocol is not a
+pilot approval: the rehearsal and a separately approved deployment come first.
 
 All paths below begin with `/v1/projects/PROJECT/teams/TEAM_ID`. Use the team ID
 returned by join. Each request requires `Authorization: Bearer TOKEN` with the
@@ -28,7 +30,7 @@ Commands require `Idempotency-Key: UNIQUE_COMMAND_KEY` and one JSON body of at
 most 64 KiB. Reuse the key only for the identical command. Unknown fields and
 trailing JSON values are rejected. Reads take only the two shown query parameters,
 each once. Offer responds 201; other successful operations respond 200. All return
-`protocol_version:1`, `assignment` and `workflow_ready:false`. Responses expose
+`protocol_version:1`, `assignment` and `workflow_ready:true`. Responses expose
 session handles and profile/task snapshots, not token or access-user bindings.
 
 Offer body:

@@ -90,7 +90,7 @@ var teamWorkTools = func() []teamWorkTool {
 	return tools
 }()
 
-const teamWorkNote = " Uses your project task credential; the hub checks authority, generations, ownership and revision exactly as over HTTP. Responses report workflow_ready:false until lifecycle events reach the inbox; do not start a pilot on these tools alone. A retry returns its original result. Nothing here stops a local process."
+const teamWorkNote = " Uses your project task credential; the hub checks authority, generations, ownership and revision exactly as over HTTP. Each transition also delivers a lifecycle message to the counterpart's inbox; read the inbox for offers, cancellations, reviews and recoveries and ack what you have read. A retry returns its original result. Nothing here stops a local process."
 
 var teamWorkToolDefs = func() []map[string]any {
 	defs := []map[string]any{}

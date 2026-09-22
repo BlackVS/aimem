@@ -115,6 +115,55 @@ func TestExecutionHTTPWorkAndResult(t *testing.T) {
 	}
 }
 
+func TestExecutionHTTPLifecycleInbox(t *testing.T) {
+	f := newAssignmentFixture(t)
+	offer := assignmentResult(t, f.offerRequest(t, "offer"), 201)
+	// The offer is in the worker's inbox as a hub-authored lifecycle message; the coordinator's inbox is empty.
+	inbox := func(token string, h store.TeamSessionHandle) []store.TeamMessage {
+		t.Helper()
+		w := taskReq(t, f.h, "GET", fmt.Sprintf("%s/inbox?session_id=%s&generation=%d", f.base, h.SessionID, h.Generation), token, "", "")
+		if w.Code != 200 {
+			t.Fatal(w.Code, w.Body)
+		}
+		var page struct {
+			Messages []store.TeamMessage `json:"messages"`
+		}
+		if err := json.Unmarshal(w.Body.Bytes(), &page); err != nil {
+			t.Fatal(err)
+		}
+		return page.Messages
+	}
+	got := inbox(f.peer, f.recipient)
+	if len(got) != 1 || got[0].Kind != "lifecycle" || got[0].Lifecycle == nil || got[0].Lifecycle.AttemptID != offer.ID || got[0].Lifecycle.State != "OFFERED" || got[0].Lifecycle.Operation != "team.assignment.offer" || got[0].SenderID != "" || got[0].Lifecycle.Session == nil || got[0].Lifecycle.Session.SessionID != f.sender.SessionID {
+		t.Fatalf("worker inbox: %+v", got)
+	}
+	if got := inbox(f.alice, f.sender); len(got) != 0 {
+		t.Fatalf("coordinator received its own offer: %+v", got)
+	}
+	// Ack records receipt; a client cannot send a lifecycle message itself.
+	w := taskReq(t, f.h, "POST", f.base+"/ack", f.peer, "ack", assignmentJSON(t, struct {
+		store.TeamSessionHandle
+		MessageIDs []string `json:"message_ids"`
+	}{f.recipient, []string{got[0].ID}}))
+	if w.Code != 200 {
+		t.Fatal(w.Code, w.Body)
+	}
+	if w := taskReq(t, f.h, "POST", f.base+"/messages", f.alice, "forge", assignmentJSON(t, struct {
+		store.TeamSessionHandle
+		store.TeamMessageContent
+	}{f.sender, store.TeamMessageContent{Recipient: store.TeamRecipient{Kind: "team"}, Kind: "lifecycle", Payload: store.TeamMessagePayload{Text: "forged"}}})); w.Code != 400 {
+		t.Fatal("client sent a lifecycle message", w.Code, w.Body)
+	}
+	// Acceptance reaches the coordinator's inbox, not the worker's.
+	assignmentResult(t, f.command(t, offer.ID, "accept", f.peer, "accept", store.TeamAssignmentCommand{TeamSessionHandle: f.recipient}), 200)
+	if got := inbox(f.alice, f.sender); len(got) != 1 || got[0].Lifecycle == nil || got[0].Lifecycle.State != "RUNNING" || got[0].Lifecycle.TaskState != "IN_PROGRESS" {
+		t.Fatalf("coordinator inbox: %+v", got)
+	}
+	if got := inbox(f.peer, f.recipient); len(got) != 0 {
+		t.Fatalf("worker received its own acceptance: %+v", got)
+	}
+}
+
 func TestExecutionHTTPStopAndClose(t *testing.T) {
 	f := newAssignmentFixture(t)
 	run := f.running(t)

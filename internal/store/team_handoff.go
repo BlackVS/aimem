@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"strconv"
 
 	"aimem/internal/uuidv7"
 )
@@ -148,7 +149,18 @@ func (d *DB) HandoffTeamCoordinator(teamID string, c TeamHandoffCommand, a TeamA
 		}
 		now := nowUTC()
 		h := &TeamCoordinatorHandoff{From: c.TeamSessionHandle, To: c.Target, PreviousCoordinatorGeneration: c.CoordinatorGeneration, CoordinatorGeneration: next, Reason: c.Reason, CreatedAt: now, Reconciliation: c.Reconciliation}
-		return to, putTeamEvent(tx, teamID, TeamEvent{ID: uuidv7.New(), ProtocolVersion: 1, Operation: "team.coordinator.handoff", At: now, TeamAuditContext: a, Team: tm, Session: &to, Handoff: h})
+		// Every remaining member learns the new coordinator generation from its
+		// inbox; the outgoing session is already closed and receives nothing.
+		recipients, err := messageRecipients(tx, tm, TeamRecipient{Kind: "team"})
+		if err != nil {
+			return TeamSession{}, err
+		}
+		l := TeamLifecycle{Operation: "team.coordinator.handoff", State: "coordinator", ActorKind: a.Actor.Kind, Session: &c.Target, CoordinatorGeneration: next}
+		msg, err := lifecycleMessage(tx, teamID, TeamRecipient{Kind: "team"}, recipients, l, "team.coordinator.handoff: session "+to.ID+" is coordinator at generation "+strconv.FormatInt(next, 10)+"; reason: "+c.Reason, nil)
+		if err != nil {
+			return TeamSession{}, err
+		}
+		return to, putTeamEvent(tx, teamID, TeamEvent{ID: uuidv7.New(), ProtocolVersion: 1, Operation: "team.coordinator.handoff", At: now, TeamAuditContext: a, Team: tm, Session: &to, Handoff: h, MessageIDs: []string{msg}})
 	})
 }
 
