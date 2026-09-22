@@ -2,8 +2,9 @@
 
 Schema 18 adds the three managed-task operations the team design reserves for
 the coordinator and the operator: `EditManagedTask`, `FinalizeManagedTask` and
-`UnmanageTask`. HTTP, CLI and MCP commands for them remain a separate
-increment. The complete team workflow still advertises `workflow_ready: false`.
+`UnmanageTask`. The [management routes](TEAM-MANAGEMENT-HTTP.md) expose them
+over HTTP; CLI and MCP commands remain a separate increment. The complete team
+workflow still advertises `workflow_ready: false`.
 
 ## Coordinator edit
 
@@ -32,8 +33,12 @@ managed after DONE, so generic writes stay refused and no new offer is possible.
 
 ## Operator unmanage
 
-A trusted admin actor releases a task from team management with the expected
-revision and a reason, only while no attempt is reserved. The management row
+A trusted admin actor releases a task from the named team's management with
+the expected revision and a reason, only while no attempt is reserved. The team
+is checked inside the transaction and bound into the receipt scope: a task
+another team took over (offers and withdrawals do not advance the task
+revision) is refused, and a retry replays only through the same team. The
+management row
 keeps its history reference (assignments point at it under enforced foreign
 keys) and is flagged released: the task's coordination projection disappears,
 generic update and archive work again, and coordinator operations refuse the

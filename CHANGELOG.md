@@ -15,6 +15,13 @@ currently 18); a binary refuses a database newer than it understands.
 
 ### Added
 
+- Team management HTTP routes: coordinator handoff (current coordinator, or
+  admin with reconciliation), managed-task edit and finalize for the
+  coordinator, and admin-only recover and unmanage, pinned in OpenAPI with
+  their roles. Session-scoped assignment reads now refuse malformed query
+  encodings. CLI/MCP execution tools and inbox lifecycle delivery remain
+  deferred; responses still advertise `workflow_ready:false`.
+
 - Team execution HTTP routes: reserved-attempt read, block/resume-work,
   cancel/stopped/close-stop, submit and review under the assignment routes'
   ordinary-token authority, pinned in OpenAPI. Handoff, edit, finalize,

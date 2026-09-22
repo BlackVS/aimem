@@ -7,10 +7,11 @@ recording its disposition. They use the merged storage contracts for
 [results](TEAM-RESULT-STORAGE.md), [cooperative work control](TEAM-WORK-CONTROL-STORAGE.md)
 and [session rebinding](TEAM-ASSIGNMENT-STORAGE.md#session-rebinding), and
 follow the [assignment HTTP primitives](TEAM-ASSIGNMENT-HTTP.md) in every
-authorization and encoding rule. Responses still say `workflow_ready:false`:
-handoff, managed edit/finalize, operator recovery and unmanage have no routes
-yet, and the CLI/MCP execution tools and inbox lifecycle delivery are separate
-increments. Do not start a worker pilot on these routes alone.
+authorization and encoding rule. Handoff, managed edit/finalize, operator
+recovery and unmanage are the [management routes](TEAM-MANAGEMENT-HTTP.md).
+Responses still say `workflow_ready:false`: the CLI/MCP execution tools and
+inbox lifecycle delivery are a separate increment. Do not start a worker pilot
+on these routes alone.
 
 All paths below begin with `/v1/projects/PROJECT/teams/TEAM_ID`. Each request
 requires the caller's ordinary write token for this project, current grant and
@@ -46,10 +47,11 @@ Refusals follow the assignment routes: 400 invalid input or missing retry key,
 401 invalid caller credential, 403 authority/enrollment/binding denial, 404
 missing scoped resource or no reserved attempt, 409 stale generation, revision
 conflict (with the current task), invalid transition or retry mismatch. Re-read
-before choosing a new command. After a session resume the previous handle is
-stale for its attempt and the returned handle commands it; read the reserved
-attempt first and reconcile any surviving local command, because no route here
-stops a process. Acceptance never marks DONE: finalization, forced recovery and
-unmanage stay with their later routes. Storage fixtures and these HTTP tests do
+before choosing a new command. A query string with a malformed percent-encoding
+is refused with 400. After a session resume the previous handle is stale for its
+attempt and the returned handle commands it; read the reserved attempt first and
+reconcile any surviving local command, because no route here stops a process.
+Acceptance never marks DONE: finalization, forced recovery and unmanage are the
+management routes. Storage fixtures and these HTTP tests do
 not demonstrate real client behavior; merging this increment does not request a
 release, deployment or pilot.

@@ -149,7 +149,9 @@ scope, user grant and team enrollment, including reads and receipt replay.
 Message routes are POST/GET `/v1/projects/{p}/teams/{team}/messages`,
 GET `/v1/projects/{p}/teams/{team}/inbox` and POST `/v1/projects/{p}/teams/{team}/ack`.
 Assignment and execution routes live under `/v1/projects/{p}/teams/{team}/assignments`;
-see [assignment](TEAM-ASSIGNMENT-HTTP.md) and [execution](TEAM-EXECUTION-HTTP.md) routes.
+see [assignment](TEAM-ASSIGNMENT-HTTP.md), [execution](TEAM-EXECUTION-HTTP.md) and
+[management](TEAM-MANAGEMENT-HTTP.md) routes (handoff, managed edit/finalize, and the
+admin-only recover and unmanage).
 Writes require `Idempotency-Key`. Inbox polls recheck token expiry/revocation,
 grant, task enablement, enrollment and session generation each second; disconnect
 cancels the wait. No database transaction is held while waiting.

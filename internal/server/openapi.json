@@ -3695,6 +3695,378 @@
           }
         }
       }
+    },
+    "/v1/projects/{p}/teams/{team}/handoff": {
+      "post": {
+        "x-role": "writer",
+        "summary": "Hand off the coordinator slot",
+        "description": "Requires a live ordinary project write token, enabled project, current enrollment and a session bound to this token; Idempotency-Key required. One JSON body <=64 KiB; unknown fields and trailing values rejected. The caller is reauthorized even on retries; identical accepted commands return their original receipt. Handoff, edit and finalize are coordinator operations; CLI/MCP tools and inbox delivery are still deferred and workflow_ready stays false. Body: outgoing coordinator session_id/generation, coordinator_generation as observed, target {session_id, generation}, nonempty reason; an admin token instead names a lost coordinator's exact handle and current slot generation and must add reconciliation {coordinator_stopped:true, liveness_check, evidence_refs}, which an ordinary coordinator must omit. Target: active non-coordinator session of this team, designated coordinator, at its expected generation, holding no reserved attempt. Atomically closes the outgoing session, gives the successor the role under the next coordinator generation, records one audit event; existing attempts survive. Responds with the successor's public session view like resume.",
+        "parameters": [
+          {
+            "name": "p",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "team",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Protocol-v1 result; workflow_ready is false where an assignment is returned"
+          },
+          "400": {
+            "description": "Invalid body/query or missing retry key"
+          },
+          "401": {
+            "description": "Invalid, expired, revoked or disabled caller credential"
+          },
+          "403": {
+            "description": "Caller lacks the authority this route requires (ordinary bound coordinator session, or admin token), or session binding/enrollment denied"
+          },
+          "404": {
+            "description": "Project, team, task, attempt or successor session not found"
+          },
+          "409": {
+            "description": "Stale generation, revision/state/management conflict, reserved attempt, occupied or missing designation, invalid transition or retry mismatch. Task revision conflicts include current task and project."
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/projects/{p}/teams/{team}/tasks/{task}/edit": {
+      "post": {
+        "x-role": "writer",
+        "summary": "Edit a managed task's content",
+        "description": "Requires a live ordinary project write token, enabled project, current enrollment and a session bound to this token; storage checks the current coordinator generation. Idempotency-Key required. One JSON body <=64 KiB; unknown fields and trailing values rejected. The caller is reauthorized even on retries; identical accepted commands return their original receipt. Handoff, edit and finalize are coordinator operations; CLI/MCP tools and inbox delivery are still deferred and workflow_ready stays false. Body: coordinator session_id/generation, coordinator_generation, expected_revision, content (the full task content; state must equal the current state and archived must be false) and nonempty reason. Allowed only for a task this team manages with no reserved attempt. Commits task, history, audit event and receipt; responds with protocol_version:1, task and workflow_ready:false.",
+        "parameters": [
+          {
+            "name": "p",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "team",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "task",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Protocol-v1 result; workflow_ready is false where an assignment is returned"
+          },
+          "400": {
+            "description": "Invalid body/query or missing retry key"
+          },
+          "401": {
+            "description": "Invalid, expired, revoked or disabled caller credential"
+          },
+          "403": {
+            "description": "Caller lacks the authority this route requires (ordinary bound coordinator session, or admin token), or session binding/enrollment denied"
+          },
+          "404": {
+            "description": "Project, team, task, attempt or successor session not found"
+          },
+          "409": {
+            "description": "Stale generation, revision/state/management conflict, reserved attempt, occupied or missing designation, invalid transition or retry mismatch. Task revision conflicts include current task and project."
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/projects/{p}/teams/{team}/tasks/{task}/finalize": {
+      "post": {
+        "x-role": "writer",
+        "summary": "Finalize a managed task as DONE",
+        "description": "Requires a live ordinary project write token, enabled project, current enrollment and a session bound to this token; storage checks the current coordinator generation. Idempotency-Key required. One JSON body <=64 KiB; unknown fields and trailing values rejected. The caller is reauthorized even on retries; identical accepted commands return their original receipt. Handoff, edit and finalize are coordinator operations; CLI/MCP tools and inbox delivery are still deferred and workflow_ready stays false. Body: coordinator session_id/generation, coordinator_generation, expected_revision, attempt_id of the ACCEPTED attempt, nonempty reason and evidence (typed references, at least one) for the merge/delivery. Allowed only for a REVIEW task this team manages with no reserved attempt. Appends the evidence to the task, records DONE, history and audit; the task stays managed. The hub does not verify the evidence.",
+        "parameters": [
+          {
+            "name": "p",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "team",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "task",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Protocol-v1 result; workflow_ready is false where an assignment is returned"
+          },
+          "400": {
+            "description": "Invalid body/query or missing retry key"
+          },
+          "401": {
+            "description": "Invalid, expired, revoked or disabled caller credential"
+          },
+          "403": {
+            "description": "Caller lacks the authority this route requires (ordinary bound coordinator session, or admin token), or session binding/enrollment denied"
+          },
+          "404": {
+            "description": "Project, team, task, attempt or successor session not found"
+          },
+          "409": {
+            "description": "Stale generation, revision/state/management conflict, reserved attempt, occupied or missing designation, invalid transition or retry mismatch. Task revision conflicts include current task and project."
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/projects/{p}/teams/{team}/assignments/{attempt}/recover": {
+      "post": {
+        "x-role": "admin",
+        "summary": "Recover an abandoned team attempt (admin)",
+        "description": "Admin route: the bearer gate refuses ordinary tokens and storage refuses any non-admin actor. Enabled project required. Idempotency-Key required. One JSON body <=64 KiB; unknown fields and trailing values rejected; identical retries return the original receipt. This is a recorded operator action, not proof observed by the hub; it never stops a process. Body: expected_revision, expected_worker {session_id, generation} exactly as assigned, expected_session_generation as observed, expected_coordinator_generation as observed, reconciliation {execution_stopped:true, reason, runtime_check, worktree_check, evidence_refs}. Closes a RUNNING/BLOCKED/STOP_REQUESTED/STOPPED attempt as RECOVERED and requeues the task READY with the blocker cleared; offers, submitted results and terminal attempts are refused. Responds with protocol_version:1, assignment and workflow_ready:false.",
+        "parameters": [
+          {
+            "name": "p",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "team",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "attempt",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Protocol-v1 result; workflow_ready is false where an assignment is returned"
+          },
+          "400": {
+            "description": "Invalid body/query or missing retry key"
+          },
+          "401": {
+            "description": "Invalid, expired, revoked or disabled caller credential"
+          },
+          "403": {
+            "description": "Caller lacks the authority this route requires (ordinary bound coordinator session, or admin token), or session binding/enrollment denied"
+          },
+          "404": {
+            "description": "Project, team, task, attempt or successor session not found"
+          },
+          "409": {
+            "description": "Stale generation, revision/state/management conflict, reserved attempt, occupied or missing designation, invalid transition or retry mismatch. Task revision conflicts include current task and project."
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/projects/{p}/teams/{team}/tasks/{task}/unmanage": {
+      "post": {
+        "x-role": "admin",
+        "summary": "Release a task from team management (admin)",
+        "description": "Admin route: the bearer gate refuses ordinary tokens and storage refuses any non-admin actor. Enabled project required. Idempotency-Key required. One JSON body <=64 KiB; unknown fields and trailing values rejected; identical retries return the original receipt. This is a recorded operator action, not proof observed by the hub; it never stops a process. Body: expected_revision and nonempty reason. Allowed only for a task this team manages with no reserved attempt; a task another team manages is refused with 409. The coordination projection disappears, generic update/archive work again, the revision advances, historical attempts stay readable and a later offer manages the task afresh. Responds with protocol_version:1, task and workflow_ready:false.",
+        "parameters": [
+          {
+            "name": "p",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "team",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "task",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Protocol-v1 result; workflow_ready is false where an assignment is returned"
+          },
+          "400": {
+            "description": "Invalid body/query or missing retry key"
+          },
+          "401": {
+            "description": "Invalid, expired, revoked or disabled caller credential"
+          },
+          "403": {
+            "description": "Caller lacks the authority this route requires (ordinary bound coordinator session, or admin token), or session binding/enrollment denied"
+          },
+          "404": {
+            "description": "Project, team, task, attempt or successor session not found"
+          },
+          "409": {
+            "description": "Stale generation, revision/state/management conflict, reserved attempt, occupied or missing designation, invalid transition or retry mismatch. Task revision conflicts include current task and project."
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object"
+              }
+            }
+          }
+        }
+      }
     }
   }
 }
