@@ -514,7 +514,12 @@ this phase: coordinator and worker playbooks, the three question classes with
 evidence-backed asynchronous resolution and bounded delegation, the human
 escalation template, and request templates that a test drives through the real
 validators; team-specific process checklist items follow through the process
-repository's own review.
+repository's own review. The [protocol rehearsal](TEAM-REHEARSAL.md) increment
+runs the fixture this section asks for first: the pilot scenarios below
+(collision, restart, handoff, revocation, duplicates, cross-project denial,
+legacy mutation, base change, recovery) over the real MCP wire and admin routes
+on an isolated hub, with the audit export as evidence; the manual cross-platform
+pilot with real clients remains a separate, owner-approved step.
 
 The [session rebinding](TEAM-ASSIGNMENT-STORAGE.md#session-rebinding) increment
 implements the resume rule above for workers: a worker resume carries its reserved
