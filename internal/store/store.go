@@ -492,7 +492,7 @@ func (r *Registry) Close() {
 	r.dbs = map[string]*DB{}
 }
 
-const currentSchema = 17
+const currentSchema = 18
 
 // SetMeta / GetMeta store small key-value project metadata (e.g. the
 // project's declared knowledge groups, stamped from event pushes so the
@@ -967,6 +967,16 @@ CREATE UNIQUE INDEX idx_team_assignment_task ON team_assignments(task_id) WHERE 
 CREATE UNIQUE INDEX idx_team_assignment_worker ON team_assignments(worker_id) WHERE reserved=1;
 CREATE INDEX idx_team_assignment_team ON team_assignments(team_id,id);
 UPDATE meta SET value='17' WHERE key='schema_version';`); err != nil {
+			return err
+		}
+	}
+	if v < 18 {
+		// Assignments reference the management row under enforced foreign keys,
+		// so releasing a task from team management flips a flag instead of
+		// deleting the row; historical attempts keep their reference.
+		if err := d.step(`
+ALTER TABLE team_managed_tasks ADD COLUMN managed INTEGER NOT NULL DEFAULT 1 CHECK(managed IN (0,1));
+UPDATE meta SET value='18' WHERE key='schema_version';`); err != nil {
 			return err
 		}
 	}

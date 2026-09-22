@@ -58,8 +58,9 @@ acting. Changed input under the same key conflicts; a rolled-back attempt does n
 consume its key. Concurrent submission, cancellation or recovery has one winner.
 Session resume may occur after recovery, but cannot reopen the closed attempt.
 
-The task stays permanently managed, so generic edits/archive remain denied even
-for admins. This adds optional assignment JSON in existing schema 17, without a
-migration or public route. Tests cover stale observations, departure, receipts,
+The task stays managed, so generic edits/archive remain denied even for admins
+until an operator [unmanages](TEAM-MANAGED-LIFECYCLE-STORAGE.md) it. This adds
+optional assignment JSON in existing schema 17, without a migration or public
+route. Tests cover stale observations, departure, receipts,
 independent SQLite races and rollback at every write boundary. Storage fixtures
 do not demonstrate real process reconciliation or authorize a release or pilot.

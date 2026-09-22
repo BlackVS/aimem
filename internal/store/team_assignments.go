@@ -174,7 +174,9 @@ func (d *DB) OfferTeamAssignment(teamID string, c TeamOffer, a TeamAuditContext,
 		}
 		now := nowUTC()
 		out := TeamAssignment{ID: uuidv7.New(), TeamID: teamID, TaskID: t.ID, State: "OFFERED", Coordinator: c.TeamSessionHandle, CoordinatorGeneration: c.CoordinatorGeneration, Worker: c.Worker, ProfileRevision: worker.ProfileRevision, Profile: worker.TeamProfile, TaskRevision: t.Revision, Requirements: t.TaskContent, SuitabilityRationale: c.SuitabilityRationale, CostRationale: c.CostRationale, CreatedAt: now, UpdatedAt: now}
-		if _, err := tx.Exec(`INSERT INTO team_managed_tasks(task_id,team_id) VALUES(?,?) ON CONFLICT(task_id) DO NOTHING`, t.ID, teamID); err != nil {
+		// A released task (managed=0) is taken over by the offering team; the
+		// projection check above already refused a task another team still manages.
+		if _, err := tx.Exec(`INSERT INTO team_managed_tasks(task_id,team_id,managed) VALUES(?,?,1) ON CONFLICT(task_id) DO UPDATE SET team_id=excluded.team_id,managed=1`, t.ID, teamID); err != nil {
 			return out, err
 		}
 		return out, saveTeamAssignment(tx, tm, coordinator, out, "team.assignment.offer", a)

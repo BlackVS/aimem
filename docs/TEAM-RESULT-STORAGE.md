@@ -65,8 +65,10 @@ releases work.
 First-offer management persists after acceptance or return. Generic task update
 and archive remain refused, including for admins; standalone agents still skip
 the managed task even when its active-attempt projection is empty. Task content
-and references are preserved by these transitions. Dedicated edit/finalize and
-operator unmanage are separate work.
+and references are preserved by these transitions. Coordinator edit/finalize
+and operator unmanage are the [managed-task lifecycle storage](TEAM-MANAGED-LIFECYCLE-STORAGE.md)
+operations; finalize is the only path from REVIEW to DONE and needs recorded
+delivery evidence.
 
 The result and review are optional additive fields in schema 17 assignment JSON,
 including assignment audit snapshots. No table or migration is needed. Existing
