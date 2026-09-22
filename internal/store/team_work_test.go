@@ -216,9 +216,14 @@ func TestTeamWorkCurrentCoordinatorAndResumedWorker(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	// Resume rebinds the reserved attempt: the old handle is stale and the
+	// returned handle commands the same attempt.
+	if _, err := d.ChangeTeamWork(team.ID, out.ID, "resume-work", cmd, a, "stale-resume-work"); !errors.Is(err, ErrTeamSessionStale) {
+		t.Fatal("old handle survived resume", err)
+	}
 	cmd.Generation = w.Generation
-	if _, err := d.ChangeTeamWork(team.ID, out.ID, "resume-work", cmd, a, "resume-work"); !errors.Is(err, ErrTeamSessionDenied) {
-		t.Fatal("new handle took old-generation ownership", err)
+	if got, err := d.ChangeTeamWork(team.ID, out.ID, "resume-work", cmd, a, "resume-work"); err != nil || got.State != "RUNNING" || got.Worker.Generation != w.Generation {
+		t.Fatal("rebound handle could not continue its own work", got, err)
 	}
 }
 

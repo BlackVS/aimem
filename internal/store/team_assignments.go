@@ -53,7 +53,21 @@ type TeamAssignment struct {
 	Result                *TeamResult             `json:"result,omitempty"`
 	Review                *TeamResultReview       `json:"review,omitempty"`
 	Recovery              *TeamAssignmentRecovery `json:"recovery,omitempty"`
+	Rebinds               []TeamAssignmentRebind  `json:"rebinds,omitempty"`
+	RebindCount           int64                   `json:"rebind_count,omitempty"`
 }
+
+// TeamAssignmentRebind records one worker session resume that moved the
+// attempt's worker handle to the new session generation. The worker identity,
+// offer and result snapshots never change. The assignment keeps the most recent
+// MaxTeamRebinds records; every rebind also has its own audit event.
+type TeamAssignmentRebind struct {
+	PreviousGeneration int64  `json:"previous_generation"`
+	Generation         int64  `json:"generation"`
+	CreatedAt          string `json:"created_at"`
+}
+
+const MaxTeamRebinds = 32
 
 type TeamAssignmentCommand struct {
 	TeamSessionHandle
@@ -278,4 +292,60 @@ func (d *DB) GetTeamAssignment(teamID, id string, h TeamSessionHandle, actor Tas
 		return TeamAssignment{}, err
 	}
 	return readTeamAssignment(tx, teamID, id)
+}
+
+// ReservedTeamAssignment returns the attempt currently reserved for the calling
+// session, validated in the same snapshot: the outstanding-work view a resumed
+// worker reads before reconciling local state. It grants nothing, releases
+// nothing and reports not-found when the session holds no reservation.
+// Live caller token/project authority is the service's responsibility.
+func (d *DB) ReservedTeamAssignment(teamID string, h TeamSessionHandle, actor TaskActor) (TeamAssignment, error) {
+	if err := d.taskScopeOK(); err != nil {
+		return TeamAssignment{}, err
+	}
+	tx, err := d.sql.Begin()
+	if err != nil {
+		return TeamAssignment{}, err
+	}
+	defer tx.Rollback()
+	if _, _, err := currentMessageSession(tx, teamID, h, actor); err != nil {
+		return TeamAssignment{}, err
+	}
+	var id string
+	if err := tx.QueryRow(`SELECT id FROM team_assignments WHERE team_id=? AND worker_id=? AND reserved=1`, teamID, h.SessionID).Scan(&id); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return TeamAssignment{}, ErrTeamAssignmentNotFound
+		}
+		return TeamAssignment{}, err
+	}
+	return readTeamAssignment(tx, teamID, id)
+}
+
+// rebindReservedAssignment moves a resumed worker's reserved attempt to the new
+// session generation inside the resume transaction, so the returning client
+// commands its own work with the handle resume returned. An OFFERED attempt is
+// left bound to the generation that received it: the coordinator withdraws and
+// offers again. Rebinding changes no task content, result or process state and
+// does not release the reservation; it cannot stop a surviving local command.
+func rebindReservedAssignment(tx *sql.Tx, t Team, s TeamSession, audit TeamAuditContext) error {
+	var id string
+	err := tx.QueryRow(`SELECT id FROM team_assignments WHERE team_id=? AND worker_id=? AND reserved=1 AND state<>'OFFERED'`, t.ID, s.ID).Scan(&id)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	out, err := readTeamAssignment(tx, t.ID, id)
+	if err != nil {
+		return err
+	}
+	now := nowUTC()
+	out.Rebinds = append(out.Rebinds, TeamAssignmentRebind{PreviousGeneration: out.Worker.Generation, Generation: s.Generation, CreatedAt: now})
+	if len(out.Rebinds) > MaxTeamRebinds {
+		out.Rebinds = out.Rebinds[len(out.Rebinds)-MaxTeamRebinds:]
+	}
+	out.RebindCount++
+	out.Worker.Generation, out.UpdatedAt = s.Generation, now
+	return saveTeamAssignment(tx, t, s, out, "team.assignment.rebind", audit)
 }

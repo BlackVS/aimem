@@ -72,4 +72,6 @@ capacity, invalid transitions or mismatched retries. A revision conflict include
 the current task response. Re-read before choosing a new command; never emulate
 assignment by generic PUT. Managed-task edits/archive remain refused even for
 admins, including between attempts. Missing heartbeat and session resume/leave
-never release ownership. A later recovery operation will require reconciliation.
+never release ownership; a worker resume rebinds its accepted attempt to the new
+generation, while an open offer stays with the generation that received it.
+A later recovery operation will require reconciliation.

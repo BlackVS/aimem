@@ -60,6 +60,32 @@ must withdraw and issue a new offer. Result submission/disposition and cooperati
 stopping and operator recovery have their own storage methods. Coordinator handoff
 remains deferred; no storage method can stop a local process.
 
+## Session rebinding
+
+A worker `resume` carries the session's reserved RUNNING, BLOCKED,
+STOP_REQUESTED, STOPPED or SUBMITTED attempt to the new session generation in
+the same transaction as the session change: the assignment's worker handle
+becomes the handle resume returned, a rebind record (previous generation, new
+generation, time) is appended, `rebind_count` increases and a correlated
+`team.assignment.rebind` audit event commits with the session event and retry
+receipt. The worker identity, offer, profile and result snapshots, task content,
+task revision and history do not change; the reservation is neither released nor
+re-executed. An OFFERED attempt stays bound to the generation that received it.
+Coordinator resume, heartbeat, profile and leave never rebind; a departed
+worker's attempt keeps its last handle for operator recovery, which must name
+that handle and the separately observed session generation.
+
+After rebinding, the pre-resume handle is stale for work commands, submission
+and reads; the returned handle commands the same attempt. Rebinding records
+hub-side ownership only: the returning client must still reconcile any command
+that survived locally before continuing. `ReservedTeamAssignment` returns the
+reserved attempt bound to the calling current session in the same snapshot, or
+not-found when none, so a resumed worker can read its outstanding work without
+keeping the attempt ID. The assignment keeps the most recent 32 rebind records;
+the audit stream keeps every one. Rebinding is an additive optional field in
+existing schema 17 assignment JSON; old accept receipts replay in their original
+shape. Public exposure of the outstanding-work read is a later transport increment.
+
 Migration from schema 16 adds coordination tables without rewriting tasks or
 receipts. Older binaries refuse schema 17. Before a later deployment, back up
 full state and the previous binary; rollback requires restoring matching state.

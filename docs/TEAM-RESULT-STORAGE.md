@@ -57,8 +57,10 @@ or current coordinator.
 Identical, authorized retries return the original snapshot without repeating
 effects, including after a later transition or session resume. A reused key with
 different content conflicts. A new command from a stale handle fails. Worker
-resume does not yet transfer a running attempt to the new generation; that needs
-the separate reconciled recovery increment. Missing heartbeat never releases work.
+resume rebinds a reserved attempt to the new generation in the same transaction
+(see [session rebinding](TEAM-ASSIGNMENT-STORAGE.md#session-rebinding)); a
+submitted result keeps the handle that submitted it. Missing heartbeat never
+releases work.
 
 First-offer management persists after acceptance or return. Generic task update
 and archive remain refused, including for admins; standalone agents still skip

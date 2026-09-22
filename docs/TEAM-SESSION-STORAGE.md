@@ -26,12 +26,14 @@ recovery remains a later operation; re-enrollment permits explicit reconciliatio
 revision, heartbeat with availability, resume, and clean leave. Every new effect
 requires the current active session generation and the same user/token. Resume
 increments the session generation and, for a coordinator, coordinator generation.
-Leave closes the session and increments its generation. No attempts exist yet:
-the assignment increment MUST extend resume and leave transactionally before it
-can advertise execution ownership. This storage API makes no claim to stop local
-commands. A retry returns the original result without repeating effects, even
-after the session advanced or left; it never makes the old returned handle valid
-again. Current enrollment and credential binding are still required for replay.
+Leave closes the session and increments its generation. A worker resume also
+rebinds the session's reserved attempt to the new generation in the same
+transaction (see [session rebinding](TEAM-ASSIGNMENT-STORAGE.md#session-rebinding));
+leave keeps the reservation on the closed handle for operator recovery. This
+storage API makes no claim to stop local commands. A retry returns the original
+result without repeating effects, even after the session advanced or left; it
+never makes the old returned handle valid again. Current enrollment and
+credential binding are still required for replay.
 
 Profiles record readable label, platform/version, reported provider/model/version,
 source, observation time and bounded capabilities. Missing model fields normalize
