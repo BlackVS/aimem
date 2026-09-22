@@ -67,9 +67,11 @@ credentials or retry keys. They use the existing service log sink and its
 retention; they are not a durable delivery log. Rich audit export/analysis is a
 later increment.
 
-Project schema 14 adds the tables. Back up the full state before upgrading and
-restore it with the previous binary if rolling back: old binaries refuse schema
-14. Renaming a project preserves its team IDs and access identity. Drop and merge
+Project schema 14 adds the administration tables; schema 15 adds internal session
+storage. Agent session HTTP/CLI/MCP operations are not exposed yet. Back up the
+full state before upgrading and restore it with the previous binary if rolling
+back: old binaries refuse schema
+15. Renaming a project preserves its team IDs and access identity. Drop and merge
 refuse projects containing team state, including empty teams; no deletion or
 retention workflow is provided in this slice. Teams are excluded from memory
 curation and synchronization and belong to one authoritative hub.

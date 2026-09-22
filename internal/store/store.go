@@ -492,7 +492,7 @@ func (r *Registry) Close() {
 	r.dbs = map[string]*DB{}
 }
 
-const currentSchema = 14
+const currentSchema = 15
 
 // SetMeta / GetMeta store small key-value project metadata (e.g. the
 // project's declared knowledge groups, stamped from event pushes so the
@@ -936,6 +936,16 @@ CREATE TABLE teams(id TEXT PRIMARY KEY, name TEXT NOT NULL UNIQUE, body TEXT NOT
 CREATE TABLE team_events(sequence INTEGER PRIMARY KEY AUTOINCREMENT, team_id TEXT NOT NULL REFERENCES teams(id), body TEXT NOT NULL);
 CREATE INDEX idx_team_events_team ON team_events(team_id,sequence);
 UPDATE meta SET value='14' WHERE key='schema_version';`); err != nil {
+			return err
+		}
+	}
+	if v < 15 {
+		if err := d.step(`
+CREATE TABLE team_sessions(id TEXT PRIMARY KEY, team_id TEXT NOT NULL REFERENCES teams(id), role TEXT NOT NULL, state TEXT NOT NULL, body TEXT NOT NULL);
+CREATE INDEX idx_team_sessions_team ON team_sessions(team_id,id);
+CREATE UNIQUE INDEX idx_team_coordinator ON team_sessions(team_id) WHERE role='coordinator' AND state='active';
+CREATE TABLE team_session_control(team_id TEXT PRIMARY KEY REFERENCES teams(id), coordinator_generation INTEGER NOT NULL DEFAULT 0);
+UPDATE meta SET value='15' WHERE key='schema_version';`); err != nil {
 			return err
 		}
 	}

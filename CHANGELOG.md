@@ -9,12 +9,16 @@ upgrading a fleet.
 The format follows [Keep a Changelog](https://keepachangelog.com/1.1.0/);
 this project does not yet promise semantic versioning. The on-disk schema
 version is tracked separately (`currentSchema` in `internal/store/store.go`,
-currently 14); a binary refuses a database newer than it understands.
+currently 15); a binary refuses a database newer than it understands.
 
 ## [Unreleased]
 
 ### Added
 
+- **Project schema 15:** durable team-session storage with coordinator exclusion,
+  generation fencing, profile revisions, liveness observations and atomic audit.
+  This internal foundation does not yet expose agent join through HTTP, CLI or
+  MCP. Session transport and live access checks are the next increment.
 - Administrator team setup: `aimem teams` and admin-only HTTP routes create,
   inspect and replace project-bound team configuration and user enrollment.
   Revision checks, retry receipts and atomic audit events preserve configuration
