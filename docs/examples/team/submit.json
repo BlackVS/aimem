@@ -1,0 +1,15 @@
+{
+  "session_id": "{{worker}}",
+  "generation": 1,
+  "attempt": "{{attempt}}",
+  "expected_revision": 4,
+  "base_commit": "d1229767d8d96d55e8b9b0f5e3f4a1a591674aa7",
+  "commit": "b098abbd4a455d6f67fa595e545ebd2f8c2efdca",
+  "summary": "Filtered audit timeline and JSONL export: storage readers, admin routes, CLI page follower, OpenAPI and docs. Metadata-only default with include_bodies opt-in per the recorded decision.",
+  "validation": "CGO-disabled build OK; go test ./... all packages ok; gofmt empty; staticcheck clean; oh-code-review medium inline with no findings. Not run: the manual cross-platform pilot.",
+  "evidence_refs": [
+    {"kind": "pr", "ref": "https://github.com/example/repo/pull/85", "note": "candidate PR at the commit above"},
+    {"kind": "ci", "ref": "https://github.com/example/repo/actions/runs/1", "note": "lint, build, tests on three platforms"},
+    {"kind": "text", "ref": "go test ./... on the candidate commit: all packages ok (Windows, CGO disabled)"}
+  ]
+}

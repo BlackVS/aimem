@@ -1,0 +1,6 @@
+{
+  "session_id": "{{worker}}",
+  "generation": 1,
+  "attempt": "{{attempt}}",
+  "reason": "Declined: the acceptance criteria require browser validation of the board page and this session has no browser capability; a browser-capable member or a split that separates the storage change is needed."
+}

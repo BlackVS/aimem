@@ -10,7 +10,10 @@ select backlog work independently while joined. Selected project process rules
 still apply. The later pilot will test complete coordination with real agents.
 
 An administrator first creates a team and enrolls users as described in
-[TEAM-SETUP.md](TEAM-SETUP.md). A requesting coordinator must be eligible and the
+[TEAM-SETUP.md](TEAM-SETUP.md). What to do at each step, how to resolve
+questions with evidence and how to escalate to a human are in the
+[team playbooks](TEAM-PLAYBOOKS.md), with validated request templates under
+[docs/examples/team](examples/team/). A requesting coordinator must be eligible and the
 coordinator slot must be vacant. Agents cannot self-enroll or administer teams.
 
 Run from a configured checkout using its ordinary task credential. User-scoped

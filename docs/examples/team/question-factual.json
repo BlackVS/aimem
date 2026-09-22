@@ -1,0 +1,13 @@
+{
+  "recipient": {"kind": "member", "id": "{{coordinator}}"},
+  "kind": "question",
+  "task_id": "{{task}}",
+  "payload": {
+    "text": "Factual question: which existing test pins the ordinary-token route allowlist, so the new route is added to the same pin rather than a second list? Checked so far: the task record (no test named), internal/server/tasks_test.go at the base commit (TestOrdinaryTokenGateMatrix looks like it, unconfirmed). Waiting with bounded inbox reads; continuing on the storage part meanwhile.",
+    "refs": [
+      {"kind": "task", "ref": "{{task}}", "note": "the assignment's task"},
+      {"kind": "text", "ref": "internal/server/tasks_test.go TestOrdinaryTokenGateMatrix at the recorded base commit", "note": "candidate source, unconfirmed"}
+    ],
+    "deadline": "2030-01-01T12:00:00Z"
+  }
+}

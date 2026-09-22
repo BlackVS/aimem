@@ -1,0 +1,10 @@
+{
+  "session_id": "{{coordinator}}",
+  "generation": 1,
+  "coordinator_generation": 1,
+  "attempt": "{{attempt}}",
+  "expected_revision": 5,
+  "result_id": "{{result}}",
+  "decision": "accept",
+  "reason": "Reviewed at the candidate commit: every acceptance criterion has recorded evidence (CI run, review comments, test output); the metadata-only default matches the recorded decision. Accepted for the project's review gates and human merge; this acceptance is not a merge."
+}

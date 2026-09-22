@@ -1,0 +1,13 @@
+{
+  "recipient": {"kind": "team"},
+  "kind": "blocker",
+  "task_id": "{{task}}",
+  "payload": {
+    "text": "Escalation to the owner.\n1. Question: may the audit export include message bodies by default, or must bodies stay opt-in?\n2. Task: the export task ({{task}}), attempt {{attempt}}, blocked at the header contract.\n3. Attempted resolution: task record (silent on the default); design document section 'Communication logs and improvement evidence' (metadata-only default); PR 82 review comment (asks for bodies by default for analysis). Peer and coordinator have no further evidence.\n4. Evidence: refs below.\n5. Options: (a) keep metadata-only default per the design, add include_bodies opt-in: no design change, analysis passes the flag; (b) bodies by default: contradicts the design and widens exposure of message text in every export.\n6. Impact: the export header contract and its test wait; the attempt stays BLOCKED; if undecided by the next working day the attempt is declined and the task returns to READY with this note.\n7. Exact pending request: owner decision between (a) and (b); (a) recommended.",
+    "refs": [
+      {"kind": "task", "ref": "{{task}}", "note": "blocked task"},
+      {"kind": "text", "ref": "docs/DESIGN-agent-teams.md 'Communication logs and improvement evidence' at the recorded base commit: message content is opt-in, metadata-only exports are the default", "note": "design"},
+      {"kind": "url", "ref": "https://github.com/example/repo/pull/82#issuecomment-1", "note": "review comment asking for bodies by default"}
+    ]
+  }
+}

@@ -1,0 +1,5 @@
+{
+  "session_id": "{{worker}}",
+  "generation": 1,
+  "attempt": "{{attempt}}"
+}

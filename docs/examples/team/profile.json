@@ -1,0 +1,15 @@
+{
+  "role": "worker",
+  "profile": {
+    "label": "go-worker-2",
+    "platform": "your-agent-client",
+    "platform_version": "unknown",
+    "model": {
+      "provider": "unknown",
+      "id": "unknown",
+      "version": "unknown",
+      "source": "unknown"
+    },
+    "capabilities": ["go", "unit-tests", "sqlite"]
+  }
+}

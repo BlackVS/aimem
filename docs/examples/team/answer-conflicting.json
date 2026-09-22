@@ -1,0 +1,14 @@
+{
+  "recipient": {"kind": "member", "id": "{{worker}}"},
+  "kind": "answer",
+  "task_id": "{{task}}",
+  "reply_to": "{{question}}",
+  "payload": {
+    "text": "Conflicting evidence, no decision. Source A (the design document, section on route allowlists, observed 2026-09-22T16:42:00Z) says new team routes are admitted by default for ordinary tokens. Source B (TestOrdinaryTokenGateMatrix at the base commit, observed 2026-09-22T16:42:00Z) requires each pattern to be listed explicitly and fails otherwise. Both are quoted below; neither is chosen here. Escalated to the owner as a project decision; until it is decided, implement against source B because it is the executable check, and record the open decision in the task's next action.",
+    "refs": [
+      {"kind": "text", "ref": "docs/DESIGN-agent-teams.md route allowlist paragraph at the recorded base commit: 'admitted by default'", "note": "source A"},
+      {"kind": "text", "ref": "internal/server/tasks_test.go TestOrdinaryTokenGateMatrix at the recorded base commit: explicit list", "note": "source B"},
+      {"kind": "task", "ref": "{{task}}", "note": "open decision recorded here"}
+    ]
+  }
+}

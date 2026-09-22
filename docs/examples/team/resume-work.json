@@ -1,0 +1,7 @@
+{
+  "session_id": "{{worker}}",
+  "generation": 1,
+  "attempt": "{{attempt}}",
+  "expected_revision": 3,
+  "reason": "Resuming: the owner decided option (a), metadata-only default with include_bodies opt-in (recorded on the task); implementing the header contract accordingly."
+}

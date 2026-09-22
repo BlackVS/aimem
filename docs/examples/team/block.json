@@ -1,0 +1,7 @@
+{
+  "session_id": "{{worker}}",
+  "generation": 1,
+  "attempt": "{{attempt}}",
+  "expected_revision": 2,
+  "reason": "Blocked on a project decision: the export body default (question sent to the coordinator, escalation posted to the team). Evidence: design says metadata-only, PR review asks for bodies. Work done so far: storage readers and tests complete in the worktree at the base commit; the header contract waits for the decision."
+}
