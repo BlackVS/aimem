@@ -2132,7 +2132,7 @@
       "post": {
         "x-role": "writer",
         "summary": "Team session join",
-        "description": "Requires a live ordinary project write token and current team enrollment, including roster reads and retry replay. Admin/local/legacy/read-only credentials are refused. Protocol version 1. Join accepts exact team name or ID and role/profile; other operations require stable team ID, session_id and generation. Profile replacement also needs expected_profile_revision. Writes require Idempotency-Key and strict JSON at most 64 KiB. Roster uses session_id, generation, after and limit (1-100). Responses exclude internal user/token bindings. Workers wait for explicit assignment; messaging supports send/history/inbox/ack; assignments are unavailable.",
+        "description": "Requires a live ordinary project write token and current team enrollment, including roster reads and retry replay. Admin/local/legacy/read-only credentials are refused. Protocol version 1. Join accepts exact team name or ID and role/profile; other operations require stable team ID, session_id and generation. Profile replacement also needs expected_profile_revision. Writes require Idempotency-Key and strict JSON at most 64 KiB. Roster uses session_id, generation, after and limit (1-100). Responses exclude internal user/token bindings. Workers wait for explicit assignment; messaging supports send/history/inbox/ack; assignment HTTP primitives exist, but the full execution/result/recovery workflow is not ready.",
         "parameters": [
           {
             "name": "p",
@@ -2179,7 +2179,7 @@
       "get": {
         "x-role": "writer",
         "summary": "Team session members",
-        "description": "Requires a live ordinary project write token and current team enrollment, including roster reads and retry replay. Admin/local/legacy/read-only credentials are refused. Protocol version 1. Join accepts exact team name or ID and role/profile; other operations require stable team ID, session_id and generation. Profile replacement also needs expected_profile_revision. Writes require Idempotency-Key and strict JSON at most 64 KiB. Roster uses session_id, generation, after and limit (1-100). Responses exclude internal user/token bindings. Workers wait for explicit assignment; messaging supports send/history/inbox/ack; assignments are unavailable.",
+        "description": "Requires a live ordinary project write token and current team enrollment, including roster reads and retry replay. Admin/local/legacy/read-only credentials are refused. Protocol version 1. Join accepts exact team name or ID and role/profile; other operations require stable team ID, session_id and generation. Profile replacement also needs expected_profile_revision. Writes require Idempotency-Key and strict JSON at most 64 KiB. Roster uses session_id, generation, after and limit (1-100). Responses exclude internal user/token bindings. Workers wait for explicit assignment; messaging supports send/history/inbox/ack; assignment HTTP primitives exist, but the full execution/result/recovery workflow is not ready.",
         "parameters": [
           {
             "name": "p",
@@ -2226,7 +2226,7 @@
       "post": {
         "x-role": "writer",
         "summary": "Team session heartbeat",
-        "description": "Requires a live ordinary project write token and current team enrollment, including roster reads and retry replay. Admin/local/legacy/read-only credentials are refused. Protocol version 1. Join accepts exact team name or ID and role/profile; other operations require stable team ID, session_id and generation. Profile replacement also needs expected_profile_revision. Writes require Idempotency-Key and strict JSON at most 64 KiB. Roster uses session_id, generation, after and limit (1-100). Responses exclude internal user/token bindings. Workers wait for explicit assignment; messaging supports send/history/inbox/ack; assignments are unavailable.",
+        "description": "Requires a live ordinary project write token and current team enrollment, including roster reads and retry replay. Admin/local/legacy/read-only credentials are refused. Protocol version 1. Join accepts exact team name or ID and role/profile; other operations require stable team ID, session_id and generation. Profile replacement also needs expected_profile_revision. Writes require Idempotency-Key and strict JSON at most 64 KiB. Roster uses session_id, generation, after and limit (1-100). Responses exclude internal user/token bindings. Workers wait for explicit assignment; messaging supports send/history/inbox/ack; assignment HTTP primitives exist, but the full execution/result/recovery workflow is not ready.",
         "parameters": [
           {
             "name": "p",
@@ -2273,7 +2273,7 @@
       "post": {
         "x-role": "writer",
         "summary": "Team session resume",
-        "description": "Requires a live ordinary project write token and current team enrollment, including roster reads and retry replay. Admin/local/legacy/read-only credentials are refused. Protocol version 1. Join accepts exact team name or ID and role/profile; other operations require stable team ID, session_id and generation. Profile replacement also needs expected_profile_revision. Writes require Idempotency-Key and strict JSON at most 64 KiB. Roster uses session_id, generation, after and limit (1-100). Responses exclude internal user/token bindings. Workers wait for explicit assignment; messaging supports send/history/inbox/ack; assignments are unavailable.",
+        "description": "Requires a live ordinary project write token and current team enrollment, including roster reads and retry replay. Admin/local/legacy/read-only credentials are refused. Protocol version 1. Join accepts exact team name or ID and role/profile; other operations require stable team ID, session_id and generation. Profile replacement also needs expected_profile_revision. Writes require Idempotency-Key and strict JSON at most 64 KiB. Roster uses session_id, generation, after and limit (1-100). Responses exclude internal user/token bindings. Workers wait for explicit assignment; messaging supports send/history/inbox/ack; assignment HTTP primitives exist, but the full execution/result/recovery workflow is not ready.",
         "parameters": [
           {
             "name": "p",
@@ -2320,7 +2320,7 @@
       "post": {
         "x-role": "writer",
         "summary": "Team session leave",
-        "description": "Requires a live ordinary project write token and current team enrollment, including roster reads and retry replay. Admin/local/legacy/read-only credentials are refused. Protocol version 1. Join accepts exact team name or ID and role/profile; other operations require stable team ID, session_id and generation. Profile replacement also needs expected_profile_revision. Writes require Idempotency-Key and strict JSON at most 64 KiB. Roster uses session_id, generation, after and limit (1-100). Responses exclude internal user/token bindings. Workers wait for explicit assignment; messaging supports send/history/inbox/ack; assignments are unavailable.",
+        "description": "Requires a live ordinary project write token and current team enrollment, including roster reads and retry replay. Admin/local/legacy/read-only credentials are refused. Protocol version 1. Join accepts exact team name or ID and role/profile; other operations require stable team ID, session_id and generation. Profile replacement also needs expected_profile_revision. Writes require Idempotency-Key and strict JSON at most 64 KiB. Roster uses session_id, generation, after and limit (1-100). Responses exclude internal user/token bindings. Workers wait for explicit assignment; messaging supports send/history/inbox/ack; assignment HTTP primitives exist, but the full execution/result/recovery workflow is not ready.",
         "parameters": [
           {
             "name": "p",
@@ -2367,7 +2367,7 @@
       "post": {
         "x-role": "writer",
         "summary": "Team session profile",
-        "description": "Requires a live ordinary project write token and current team enrollment, including roster reads and retry replay. Admin/local/legacy/read-only credentials are refused. Protocol version 1. Join accepts exact team name or ID and role/profile; other operations require stable team ID, session_id and generation. Profile replacement also needs expected_profile_revision. Writes require Idempotency-Key and strict JSON at most 64 KiB. Roster uses session_id, generation, after and limit (1-100). Responses exclude internal user/token bindings. Workers wait for explicit assignment; messaging supports send/history/inbox/ack; assignments are unavailable.",
+        "description": "Requires a live ordinary project write token and current team enrollment, including roster reads and retry replay. Admin/local/legacy/read-only credentials are refused. Protocol version 1. Join accepts exact team name or ID and role/profile; other operations require stable team ID, session_id and generation. Profile replacement also needs expected_profile_revision. Writes require Idempotency-Key and strict JSON at most 64 KiB. Roster uses session_id, generation, after and limit (1-100). Responses exclude internal user/token bindings. Workers wait for explicit assignment; messaging supports send/history/inbox/ack; assignment HTTP primitives exist, but the full execution/result/recovery workflow is not ready.",
         "parameters": [
           {
             "name": "p",
@@ -2707,6 +2707,377 @@
           },
           "409": {
             "description": "Stale handle, quota, retry conflict or unseen acknowledgement"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/projects/{p}/teams/{team}/assignments": {
+      "post": {
+        "x-role": "writer",
+        "summary": "Offer a team assignment",
+        "description": "Requires a live ordinary project write token, enabled project, current enrollment and a session bound to this token. Admin/local/legacy/read-only credentials are refused. Team ID and session_id/generation are handles, not credentials. Returns protocol_version:1, assignment and workflow_ready:false; no full execution/result/recovery workflow or MCP assignment tools yet. Idempotency-Key required. One JSON body <=64 KiB; unknown fields and trailing values rejected. The caller is reauthorized even on retries; identical accepted commands return their original receipt. Body: coordinator session_id/generation, coordinator_generation, task_id, expected_revision, worker:{session_id,generation}, suitability_rationale and cost_rationale (nonempty, each <=4096 UTF-8 bytes). Only the current coordinator can offer READY tasks with the expected revision and same-project DONE dependencies. Checks intended worker availability/enrollment and live token/user/scope/grants from persisted session bindings. One reservation per task across teams and per worker session. Snapshots task/profile/model/source/rationale; declarations grant no authority.",
+        "parameters": [
+          {
+            "name": "p",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "team",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "201": {
+            "description": "Protocol-v1 assignment; workflow_ready is false"
+          },
+          "400": {
+            "description": "Invalid body/query or missing retry key"
+          },
+          "401": {
+            "description": "Invalid, expired, revoked or disabled caller credential"
+          },
+          "403": {
+            "description": "Caller or intended worker lacks current ordinary project write authority/enrollment, or session binding denied"
+          },
+          "404": {
+            "description": "Project, team, assignment or task/dependency not found"
+          },
+          "409": {
+            "description": "Stale generation, task revision/readiness/dependency conflict, occupied task/worker, invalid transition or retry mismatch. Task revision conflicts include current task and project."
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/projects/{p}/teams/{team}/assignments/{attempt}": {
+      "get": {
+        "x-role": "writer",
+        "summary": "Read a team assignment",
+        "description": "Requires a live ordinary project write token, enabled project, current enrollment and a session bound to this token. Admin/local/legacy/read-only credentials are refused. Team ID and session_id/generation are handles, not credentials. Returns protocol_version:1, assignment and workflow_ready:false; no full execution/result/recovery workflow or MCP assignment tools yet. Read the current assignment, visible to current team members. Query only session_id and positive generation (each once); no retry key. No token/user bindings in the response.",
+        "parameters": [
+          {
+            "name": "p",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "team",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "attempt",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "session_id",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "generation",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "minimum": 1
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Protocol-v1 assignment; workflow_ready is false"
+          },
+          "400": {
+            "description": "Invalid body/query or missing retry key"
+          },
+          "401": {
+            "description": "Invalid, expired, revoked or disabled caller credential"
+          },
+          "403": {
+            "description": "Caller or intended worker lacks current ordinary project write authority/enrollment, or session binding denied"
+          },
+          "404": {
+            "description": "Project, team, assignment or task/dependency not found"
+          },
+          "409": {
+            "description": "Stale generation, task revision/readiness/dependency conflict, occupied task/worker, invalid transition or retry mismatch. Task revision conflicts include current task and project."
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      }
+    },
+    "/v1/projects/{p}/teams/{team}/assignments/{attempt}/accept": {
+      "post": {
+        "x-role": "writer",
+        "summary": "Accept a team assignment",
+        "description": "Requires a live ordinary project write token, enabled project, current enrollment and a session bound to this token. Admin/local/legacy/read-only credentials are refused. Team ID and session_id/generation are handles, not credentials. Returns protocol_version:1, assignment and workflow_ready:false; no full execution/result/recovery workflow or MCP assignment tools yet. Idempotency-Key required. One JSON body <=64 KiB; unknown fields and trailing values rejected. The caller is reauthorized even on retries; identical accepted commands return their original receipt. Body only session_id/generation of the intended worker. Rechecks READY/revision/dependencies, worker availability/enrollment and live token/user/scope/grants before a new acceptance. Atomically records RUNNING, task IN_PROGRESS, history, audit and retry receipt.",
+        "parameters": [
+          {
+            "name": "p",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "team",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "attempt",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Protocol-v1 assignment; workflow_ready is false"
+          },
+          "400": {
+            "description": "Invalid body/query or missing retry key"
+          },
+          "401": {
+            "description": "Invalid, expired, revoked or disabled caller credential"
+          },
+          "403": {
+            "description": "Caller or intended worker lacks current ordinary project write authority/enrollment, or session binding denied"
+          },
+          "404": {
+            "description": "Project, team, assignment or task/dependency not found"
+          },
+          "409": {
+            "description": "Stale generation, task revision/readiness/dependency conflict, occupied task/worker, invalid transition or retry mismatch. Task revision conflicts include current task and project."
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/projects/{p}/teams/{team}/assignments/{attempt}/decline": {
+      "post": {
+        "x-role": "writer",
+        "summary": "Decline a team assignment",
+        "description": "Requires a live ordinary project write token, enabled project, current enrollment and a session bound to this token. Admin/local/legacy/read-only credentials are refused. Team ID and session_id/generation are handles, not credentials. Returns protocol_version:1, assignment and workflow_ready:false; no full execution/result/recovery workflow or MCP assignment tools yet. Idempotency-Key required. One JSON body <=64 KiB; unknown fields and trailing values rejected. The caller is reauthorized even on retries; identical accepted commands return their original receipt. Body: intended worker session_id/generation and nonempty reason <=4096 UTF-8 bytes. Closes only OFFERED attempts. Cannot substitute another task; task remains managed.",
+        "parameters": [
+          {
+            "name": "p",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "team",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "attempt",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Protocol-v1 assignment; workflow_ready is false"
+          },
+          "400": {
+            "description": "Invalid body/query or missing retry key"
+          },
+          "401": {
+            "description": "Invalid, expired, revoked or disabled caller credential"
+          },
+          "403": {
+            "description": "Caller or intended worker lacks current ordinary project write authority/enrollment, or session binding denied"
+          },
+          "404": {
+            "description": "Project, team, assignment or task/dependency not found"
+          },
+          "409": {
+            "description": "Stale generation, task revision/readiness/dependency conflict, occupied task/worker, invalid transition or retry mismatch. Task revision conflicts include current task and project."
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/projects/{p}/teams/{team}/assignments/{attempt}/withdraw": {
+      "post": {
+        "x-role": "writer",
+        "summary": "Withdraw a team assignment",
+        "description": "Requires a live ordinary project write token, enabled project, current enrollment and a session bound to this token. Admin/local/legacy/read-only credentials are refused. Team ID and session_id/generation are handles, not credentials. Returns protocol_version:1, assignment and workflow_ready:false; no full execution/result/recovery workflow or MCP assignment tools yet. Idempotency-Key required. One JSON body <=64 KiB; unknown fields and trailing values rejected. The caller is reauthorized even on retries; identical accepted commands return their original receipt. Body: current coordinator session_id/generation, coordinator_generation and nonempty reason <=4096 UTF-8 bytes. Closes only OFFERED attempts, including when the worker lost access. RUNNING work stays reserved; cancellation/recovery/unmanage are unavailable.",
+        "parameters": [
+          {
+            "name": "p",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "team",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "attempt",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Protocol-v1 assignment; workflow_ready is false"
+          },
+          "400": {
+            "description": "Invalid body/query or missing retry key"
+          },
+          "401": {
+            "description": "Invalid, expired, revoked or disabled caller credential"
+          },
+          "403": {
+            "description": "Caller or intended worker lacks current ordinary project write authority/enrollment, or session binding denied"
+          },
+          "404": {
+            "description": "Project, team, assignment or task/dependency not found"
+          },
+          "409": {
+            "description": "Stale generation, task revision/readiness/dependency conflict, occupied task/worker, invalid transition or retry mismatch. Task revision conflicts include current task and project."
           }
         },
         "security": [

@@ -71,9 +71,19 @@ func (s *Server) observeTeamRequests(next http.Handler) http.Handler {
 func (s *Server) teamError(w http.ResponseWriter, r *http.Request, err error) {
 	status, message := http.StatusInternalServerError, "team storage failure"
 	var conflict *store.TeamConflict
+	var taskConflict *store.TaskConflict
 	switch {
 	case errors.Is(err, store.ErrTeamSessionDenied):
 		status, message = 403, "current team enrollment and bound ordinary write session required"
+	case errors.Is(err, store.ErrTeamAssignmentConflict):
+		status, message = 409, err.Error()
+	case errors.Is(err, store.ErrTeamAssignmentNotFound):
+		status, message = 404, "team assignment not found"
+	case errors.As(err, &taskConflict):
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusConflict)
+		json.NewEncoder(w).Encode(map[string]any{"error": "task revision conflict", "current": taskView(r.PathValue("p"), taskConflict.Current)})
+		return
 	case errors.Is(err, store.ErrTeamSessionStale), errors.Is(err, store.ErrTeamCoordinatorOccupied), errors.Is(err, store.ErrTeamSessionQuota), errors.Is(err, store.ErrTeamMessageQuota), errors.Is(err, store.ErrTeamMessageUndelivered):
 		status, message = 409, err.Error()
 	case errors.As(err, &conflict):

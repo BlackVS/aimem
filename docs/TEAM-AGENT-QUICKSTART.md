@@ -1,8 +1,9 @@
 # Agent team registration and messages
 
 This increment supports registration, roster and messages through HTTP, CLI and MCP.
-Assignment is not implemented yet, so joining or receiving a message does not authorize
-coding work. Workers wait for an addressed coordinator assignment and do not
+The [assignment HTTP primitives](TEAM-ASSIGNMENT-HTTP.md) are available, but the
+full execution/result/recovery workflow is not ready. Joining or receiving a
+message does not authorize coding work. Workers wait for an addressed coordinator assignment and do not
 select backlog work independently while joined. Selected project process rules
 still apply. The later pilot will test complete coordination with real agents.
 
