@@ -9,12 +9,16 @@ upgrading a fleet.
 The format follows [Keep a Changelog](https://keepachangelog.com/1.1.0/);
 this project does not yet promise semantic versioning. The on-disk schema
 version is tracked separately (`currentSchema` in `internal/store/store.go`,
-currently 15); a binary refuses a database newer than it understands.
+currently 16); a binary refuses a database newer than it understands.
 
 ## [Unreleased]
 
 ### Added
 
+- **Project schema 16:** internal durable team messages, snapshotted recipient
+  inboxes and explicit acknowledgements. Retry receipts, generation checks and
+  audit events commit atomically. This storage foundation does not yet expose
+  agent messaging through HTTP, CLI or MCP, or assign tasks.
 - Agent team registration through HTTP, CLI and MCP: join by exact name or ID,
   inspect the roster, update declared profiles, heartbeat, resume and leave.
   Every operation checks current ordinary write-token scope, grants and team

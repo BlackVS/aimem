@@ -59,6 +59,7 @@ type TeamEvent struct {
 	Team               Team         `json:"team"`
 	Session            *TeamSession `json:"session,omitempty"`
 	PreviousGeneration int64        `json:"previous_generation,omitempty"`
+	MessageIDs         []string     `json:"message_ids,omitempty"`
 }
 
 func (c *TeamContent) validate() error {

@@ -209,7 +209,7 @@ func TestTeamSessionRollbackAndQuota(t *testing.T) {
 
 func TestTeamSessionMigrationAndReopen(t *testing.T) {
 	r, d, team, a, _ := sessionFixture(t)
-	for _, q := range []string{`DROP TABLE team_sessions`, `DROP TABLE team_session_control`, `UPDATE meta SET value='14' WHERE key='schema_version'`} {
+	for _, q := range []string{`DROP TABLE team_deliveries`, `DROP TABLE team_messages`, `DROP TABLE team_sessions`, `DROP TABLE team_session_control`, `UPDATE meta SET value='14' WHERE key='schema_version'`} {
 		if _, err := d.sql.Exec(q); err != nil {
 			t.Fatal(err)
 		}
