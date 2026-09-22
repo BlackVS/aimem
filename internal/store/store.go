@@ -492,7 +492,7 @@ func (r *Registry) Close() {
 	r.dbs = map[string]*DB{}
 }
 
-const currentSchema = 15
+const currentSchema = 16
 
 // SetMeta / GetMeta store small key-value project metadata (e.g. the
 // project's declared knowledge groups, stamped from event pushes so the
@@ -946,6 +946,16 @@ CREATE INDEX idx_team_sessions_team ON team_sessions(team_id,id);
 CREATE UNIQUE INDEX idx_team_coordinator ON team_sessions(team_id) WHERE role='coordinator' AND state='active';
 CREATE TABLE team_session_control(team_id TEXT PRIMARY KEY REFERENCES teams(id), coordinator_generation INTEGER NOT NULL DEFAULT 0);
 UPDATE meta SET value='15' WHERE key='schema_version';`); err != nil {
+			return err
+		}
+	}
+	if v < 16 {
+		if err := d.step(`
+CREATE TABLE team_messages(sequence INTEGER PRIMARY KEY AUTOINCREMENT,id TEXT NOT NULL UNIQUE,team_id TEXT NOT NULL REFERENCES teams(id),body TEXT NOT NULL);
+CREATE INDEX idx_team_messages_team ON team_messages(team_id,sequence);
+CREATE TABLE team_deliveries(message_id TEXT NOT NULL REFERENCES team_messages(id),session_id TEXT NOT NULL REFERENCES team_sessions(id),delivered_at TEXT NOT NULL DEFAULT '',delivery_count INTEGER NOT NULL DEFAULT 0,acked_at TEXT NOT NULL DEFAULT '',PRIMARY KEY(message_id,session_id));
+CREATE INDEX idx_team_deliveries_inbox ON team_deliveries(session_id,acked_at,message_id);
+UPDATE meta SET value='16' WHERE key='schema_version';`); err != nil {
 			return err
 		}
 	}
