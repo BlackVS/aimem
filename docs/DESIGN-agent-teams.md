@@ -172,6 +172,11 @@ or wakeup. Protocol access alone is not an execution supervisor.
 
 ## Parallel work and integration
 
+The optional supervisor boundary is specified in
+[DESIGN-agent-supervisor.md](DESIGN-agent-supervisor.md). It adds runtime
+observations and supported adapter control without replacing aimem ownership.
+Manually started members and the core coordination pilot remain independent of it.
+
 Each coding attempt uses a separate worktree or clone and a recorded base commit.
 The coordinator selects tasks with independent outcomes, dependencies and likely
 overlap made explicit. Shared generated outputs, migrations and common files are
@@ -198,13 +203,17 @@ increments, not READY implementation tasks or estimates of elapsed time.
 | --- | --- | --- | --- |
 | 1 | Freeze protocol/state machine and compatibility decisions | Reviewed schemas, permission matrix, failure cases and bounded pilot contract | M |
 | 2 | Team/session registration and roster | Two sessions under one principal distinguishable; role escalation and cross-project reads denied; restart/expiry visible | M |
+| 2a | Supervisor authority and identity design | Reviewed observation, delegation and recovery boundaries; no runtime changes | M |
+| 2b | Early client capability probe | One backend measured first, then a second; attach, idle/busy delivery, pending requests and reconnect limitations recorded | M |
 | 3 | Structured messages and durable inbox | Coordinator/member and member/member request/reply survive retries and reconnects with correct routing | M |
 | 4a | Protected task assignment through storage/HTTP | Concurrent claims yield one owner; generic update bypass denied; disconnect never silently releases ownership | M |
 | 4b | Result/recovery operations and MCP workflow | Stale results/coordinator rejected; correction cycle, safe manual recovery and MCP parity pass | M |
 | 4c | Communication audit export and analysis | Complete task/team timelines, delivery latency, retry/failure accounting and redaction checks | M |
 | 5 | Process guidance and interoperability pilot | One coordinator and two workers on different platforms finish independent tasks with isolated worktrees and serial integration | M |
 | 6 | Priority/complexity-aware pickup | Reuse existing metadata/pickup backlog tasks; explicit assignments take precedence and selection reason is recorded | Reassess existing tasks |
-| 7 | Optional host supervision and richer team UI | Separate platform-specific proposals justified by pilot limitations | Separate investigation |
+| 7a | Runtime observations and one structured adapter | Sourced waiting reasons and exact-request delivery in a supported manually started session | Separate M slices |
+| 7b | Supervisor recovery and permission policy | Reconciliation before retries; scoped decisions with independent security review | Separate M slices |
+| 8 | Richer team UI and additional adapters | Separate proposals justified by measured pilot limitations | Separate investigation |
 
 The access-console work is not a prerequisite: existing access administration
 can provision pilot credentials. Structured priorities are useful for automatic
@@ -216,7 +225,8 @@ Do not build a generic scheduler, broker or remote shell in the first version.
 These are proposed implementation contracts, not descriptions of shipped routes.
 Use manually started agents, explicit coordinator assignment, one coordinator per
 team, manual recovery of uncertain work and serial integration. Platform capability
-probes belong to the pilot; no particular client's background behavior is assumed.
+probes start before adapter implementation and inform the pilot; no particular
+client's background behavior is assumed.
 
 ### Permission matrix and session lifecycle
 
