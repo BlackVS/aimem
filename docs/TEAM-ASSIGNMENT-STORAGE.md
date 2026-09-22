@@ -56,9 +56,11 @@ tasks with no current attempt. Dedicated board rendering is deferred.
 Heartbeat age never releases a reservation. Resume or leave does not release
 RUNNING work; closing or fencing a recovery attempt cannot stop a local
 process. A resumed worker cannot accept an old-generation offer: the coordinator
-must withdraw and issue a new offer. Result submission/disposition and cooperative
-stopping and operator recovery have their own storage methods. Coordinator handoff
-remains deferred; no storage method can stop a local process.
+must withdraw and issue a new offer. Result submission/disposition, cooperative
+stopping, operator recovery and [coordinator handoff](TEAM-COORDINATOR-HANDOFF-STORAGE.md)
+have their own storage methods; a handoff leaves every attempt in place and the
+successor commands it with the new coordinator generation. No storage method
+can stop a local process.
 
 ## Session rebinding
 

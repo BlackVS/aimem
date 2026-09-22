@@ -499,7 +499,7 @@ coordinator-slot generation and task revision. An admin records an explicit stop
 affirmation, runtime/process and worktree reconciliation, reason and evidence refs.
 The hub validates and preserves this assessment; it does not prove execution stopped.
 Offers, submitted results and terminal attempts cannot use this path. Token
-rebinding, coordinator handoff and recovery client operations remain deferred.
+rebinding and recovery client operations remain deferred.
 
 The [session rebinding](TEAM-ASSIGNMENT-STORAGE.md#session-rebinding) increment
 implements the resume rule above for workers: a worker resume carries its reserved
@@ -509,6 +509,14 @@ work with the returned handle. Offers stay bound to the generation that received
 them, leave keeps the reservation for operator recovery, and a storage read
 returns the calling session's reserved attempt as the outstanding-work snapshot.
 Rebinding never releases work or proves a local command stopped.
+
+The [coordinator handoff storage](TEAM-COORDINATOR-HANDOFF-STORAGE.md) increment
+implements the compare-and-swap replacement above: the current coordinator, or an
+admin with recorded reconciliation after a loss, transfers the slot to an active
+designated session that holds no reserved attempt. The outgoing session closes,
+the successor takes the role under the next coordinator generation, existing
+attempts survive with their issuing generation as audit data, and old handles
+are stale. Handoff client operations remain deferred.
 
 For managed tasks generic PUT/archive is refused with `409 managed_task` and a
 pointer to coordination operations, including for admins; explicit audited admin
