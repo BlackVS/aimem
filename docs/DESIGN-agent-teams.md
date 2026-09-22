@@ -518,6 +518,13 @@ the successor takes the role under the next coordinator generation, existing
 attempts survive with their issuing generation as audit data, and old handles
 are stale. Handoff client operations remain deferred.
 
+The [managed-task lifecycle storage](TEAM-MANAGED-LIFECYCLE-STORAGE.md)
+increment (schema 18) implements the coordinator edit, the finalize with recorded
+merge/delivery evidence and the operator unmanage described below. Management is
+released by flagging the row, never by deleting attempt history; a released task
+returns to ordinary writes and can be offered afresh. Client commands for these
+operations remain deferred.
+
 For managed tasks generic PUT/archive is refused with `409 managed_task` and a
 pointer to coordination operations, including for admins; explicit audited admin
 override is a separate operation. Comments remain available under existing write

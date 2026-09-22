@@ -40,12 +40,13 @@ withdraw races have one winner. Retrying an accepted command with the same key
 and content returns its original result after current caller authorization; it
 does not execute again. A different request under that key conflicts.
 
-First offer permanently marks the task as managed, even between attempts.
-Generic task PUT/archive returns `409` with `managed_task` in the error and a
-pointer to coordination operations, including for admins and old update receipts.
-Comments remain discussion under their existing authorization. Dedicated edit,
-override and unmanage operations are deferred; there is no generic-write escape.
-Unmanaged tasks retain their existing behavior.
+First offer marks the task as managed, including between attempts, until an
+operator releases it. Generic task PUT/archive returns `409` with `managed_task`
+in the error and a pointer to coordination operations, including for admins and
+old update receipts. Comments remain discussion under their existing
+authorization. Coordinator edit and finalize and operator unmanage are the
+[managed-task lifecycle storage](TEAM-MANAGED-LIFECYCLE-STORAGE.md) operations;
+there is no generic-write escape. Unmanaged tasks retain their existing behavior.
 
 Task GET and list responses derive an optional `coordination` object from current
 coordination rows: `team_id`, plus `attempt_id` and `state` when reserved. These

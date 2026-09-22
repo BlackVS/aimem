@@ -9,11 +9,19 @@ upgrading a fleet.
 The format follows [Keep a Changelog](https://keepachangelog.com/1.1.0/);
 this project does not yet promise semantic versioning. The on-disk schema
 version is tracked separately (`currentSchema` in `internal/store/store.go`,
-currently 17); a binary refuses a database newer than it understands.
+currently 18); a binary refuses a database newer than it understands.
 
 ## [Unreleased]
 
 ### Added
+
+- **Project schema 18:** managed-task lifecycle storage. The coordinator edits
+  managed task content under revision checks between attempts and finalizes an
+  accepted attempt's task to DONE only with recorded merge/delivery evidence;
+  an operator releases a task from team management with an audited unmanage,
+  after which generic writes work again and a later offer manages it afresh.
+  The migration adds one flag column; older binaries refuse schema 18. Public
+  edit/finalize/unmanage commands remain deferred.
 
 - Coordinator handoff storage: the current coordinator, or an admin with
   recorded reconciliation after a loss, transfers the slot to an active

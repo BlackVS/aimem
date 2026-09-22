@@ -444,7 +444,7 @@ func (d *DB) UpdateTask(id string, content TaskContent, expected int64, actor Ta
 	}{content, expected}
 	check := func(tx *sql.Tx) error {
 		var managed bool
-		if err := tx.QueryRow(`SELECT EXISTS(SELECT 1 FROM team_managed_tasks WHERE task_id=?)`, id).Scan(&managed); err != nil {
+		if err := tx.QueryRow(`SELECT EXISTS(SELECT 1 FROM team_managed_tasks WHERE task_id=? AND managed=1)`, id).Scan(&managed); err != nil {
 			return err
 		}
 		if managed {
@@ -502,7 +502,7 @@ type rowQuerier interface {
 }
 
 const taskReadQuery = `SELECT tasks.body,COALESCE(m.team_id,''),COALESCE(a.id,''),COALESCE(a.state,'') FROM tasks
-LEFT JOIN team_managed_tasks m ON m.task_id=tasks.id
+LEFT JOIN team_managed_tasks m ON m.task_id=tasks.id AND m.managed=1
 LEFT JOIN team_assignments a ON a.task_id=tasks.id AND a.reserved=1`
 
 func scanCurrentTask(row interface{ Scan(...any) error }) (Task, error) {
