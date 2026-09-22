@@ -20,6 +20,8 @@ currently 18); a binary refuses a database newer than it understands.
   question resolution, human escalation, results and review
   (`docs/TEAM-PLAYBOOKS.md`), with request templates under
   `docs/examples/team` that a test drives through the hub's validators.
+  The escalation expiry fallback names the hub's release sequence for
+  accepted work (cancel, stopped, close-stop); decline stays for offers.
 
 - Team audit timeline and export: the admin events page accepts session, task,
   attempt, operation and time-range filters, and a new admin export route

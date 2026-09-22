@@ -180,8 +180,12 @@ this order:
    and from whom.
 
 Keep it to what a human needs to decide in one reading. An escalation is
-resolved by a recorded answer or decision, not by silence; if it expires, say
-so in the task's next action and either block or decline the attempt.
+resolved by a recorded answer or decision, not by silence. If it expires, say
+so in the task's next action and release the work the way the hub allows:
+an unaccepted offer is declined by the worker; accepted work (RUNNING or
+BLOCKED) is released by the coordinator's `cancel` with the reason, the
+worker's `stopped` acknowledgement and the coordinator's `close-stop`, which
+returns the task to READY with the note. Decline is refused for accepted work.
 
 ## Where the process rules live
 
