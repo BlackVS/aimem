@@ -50,6 +50,8 @@ type TeamAssignment struct {
 	Reason                string            `json:"reason,omitempty"`
 	CreatedAt             string            `json:"created_at"`
 	UpdatedAt             string            `json:"updated_at"`
+	Result                *TeamResult       `json:"result,omitempty"`
+	Review                *TeamResultReview `json:"review,omitempty"`
 }
 
 type TeamAssignmentCommand struct {
@@ -245,7 +247,7 @@ func saveTeamAssignment(tx *sql.Tx, t Team, s TeamSession, out TeamAssignment, o
 	if err != nil {
 		return err
 	}
-	reserved := out.State == "OFFERED" || out.State == "RUNNING"
+	reserved := out.State == "OFFERED" || out.State == "RUNNING" || out.State == "SUBMITTED"
 	_, err = tx.Exec(`INSERT INTO team_assignments(id,team_id,task_id,worker_id,state,reserved,body) VALUES(?,?,?,?,?,?,?)
 ON CONFLICT(id) DO UPDATE SET state=excluded.state,reserved=excluded.reserved,body=excluded.body`, out.ID, out.TeamID, out.TaskID, out.Worker.SessionID, out.State, boolInt(reserved), string(b))
 	if err != nil {

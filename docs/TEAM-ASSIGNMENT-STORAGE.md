@@ -4,8 +4,9 @@ Schema 17 adds durable offers and execution reservations. This increment exposes
 Go storage methods and a read-only task projection. The subsequent
 [HTTP increment](TEAM-ASSIGNMENT-HTTP.md) exposes these primitives; a usable
 CLI/MCP execution workflow is still deferred. Do not start a worker
-pilot from these primitives; results, cancellation and recovery still need their
-dependent increments.
+pilot from these primitives. [Result storage](TEAM-RESULT-STORAGE.md) adds internal
+submission and disposition methods; client exposure, cancellation and recovery
+still need their dependent increments.
 
 `OfferTeamAssignment` requires the current coordinator's session and coordinator
 generation, a READY task at the expected revision, same-project DONE dependencies,
@@ -56,7 +57,8 @@ RUNNING work; closing or fencing a future recovery attempt cannot stop a local
 process. A resumed worker cannot accept an old-generation offer: the coordinator
 must withdraw and issue a new offer. RUNNING cancellation/recovery and coordinator
 handoff will arrive with explicit reconciliation contracts. Until then a running
-attempt cannot be closed by these methods.
+attempt cannot be cancelled by these methods. Result submission and disposition
+have their own storage methods; they do not perform recovery or stop a process.
 
 Migration from schema 16 adds coordination tables without rewriting tasks or
 receipts. Older binaries refuse schema 17. Before a later deployment, back up

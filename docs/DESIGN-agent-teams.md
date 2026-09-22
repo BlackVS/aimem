@@ -449,8 +449,10 @@ through ordinary review and process-version selection.
 The schema 17 [storage foundation](TEAM-ASSIGNMENT-STORAGE.md) implements offers,
 acceptance, decline/withdraw and managed-task protection first. The subsequent
 [HTTP primitives](TEAM-ASSIGNMENT-HTTP.md) expose those operations. The remaining
-lifecycle follows separately; these primitives do not make the full agent
-execution workflow available.
+lifecycle follows separately. The [result storage](TEAM-RESULT-STORAGE.md) increment
+implements internal submission and accept/return disposition, including the
+terminal RETURNED attempt state for corrections. These primitives do not make
+the full agent execution workflow available.
 
 `OFFERED -> RUNNING -> SUBMITTED -> ACCEPTED` is the normal attempt path.
 OFFERED reserves the task before the worker accepts. Worker decline or coordinator
