@@ -310,7 +310,17 @@ func (d *DB) ChangeTeamSession(teamID, operation string, command TeamSessionComm
 			s.State, s.Availability = "left", "unavailable"
 			s.Generation++
 		}
-		return s, saveTeamSession(tx, t, s, command.Generation, "team."+operation, audit)
+		if err := saveTeamSession(tx, t, s, command.Generation, "team."+operation, audit); err != nil {
+			return TeamSession{}, err
+		}
+		// Only a worker resume carries its reserved attempt forward. Leave keeps
+		// the reservation on the closed handle for operator recovery.
+		if operation == "resume" && s.Role == "worker" {
+			if err := rebindReservedAssignment(tx, t, s, audit); err != nil {
+				return TeamSession{}, err
+			}
+		}
+		return s, nil
 	})
 }
 

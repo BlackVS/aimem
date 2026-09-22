@@ -73,7 +73,9 @@ Each distinct write needs a new key. Retry an uncertain write using its original
 key and identical content. A retry returns its original snapshot, which can now
 be stale; it does not restore old authority or refresh liveness again.
 Resume needs the same user/token and increments generation. Update the saved
-handle afterward. It cannot stop old local commands; reconcile those first.
+handle afterward; a reserved attempt other than an open offer follows the new
+generation, and the old handle is stale for it. Resume cannot stop old local
+commands; reconcile those first.
 Clean leave closes the session and permits an explicit return to standalone
 workflow. Missing heartbeats never implicitly leave or release coordinator
 ownership. Token replacement and forced recovery are deferred.

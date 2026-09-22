@@ -37,9 +37,10 @@ need authority to let an operator close abandoned execution.
 
 Every new effect checks the exact assignment worker handle, expected task
 revision, observed current worker-session generation and latest coordinator-slot
-generation. The assignment's original handle and the separately observed session
-generation may differ after resume or leave. A changed observation requires
-re-reading and reconciling before another command. The coordinator-slot generation
+generation. A worker resume rebinds the assignment handle to the new generation;
+leave advances the session without rebinding, so the assignment handle and the
+separately observed session generation may differ after a departure. A changed
+observation requires re-reading and reconciling before another command. The coordinator-slot generation
 is checked even when the slot is vacant. Task management, current reservation and
 task state must still match the attempt.
 

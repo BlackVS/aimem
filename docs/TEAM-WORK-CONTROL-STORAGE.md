@@ -52,10 +52,13 @@ session/generation snapshots remain in their immutable correlated audit events.
 
 Missing heartbeats, unavailable profiles, model IDLE/DEAD/STALLED observations,
 transport reconnects and supervisor restarts do not perform these transitions.
-Session resume/leave also retain reservations. A resumed worker cannot use a new
-handle to take over its old-generation attempt. If it cannot acknowledge a stop
-with the original current handle, explicit operator recovery with reconciliation
-is needed; see [operator recovery storage](TEAM-RECOVERY-STORAGE.md). Do not bypass this with
+Session resume/leave also retain reservations. A worker resume rebinds its
+reserved attempt to the new generation, so the returned handle can block, resume
+work or acknowledge a stop; the pre-resume handle is stale (see
+[session rebinding](TEAM-ASSIGNMENT-STORAGE.md#session-rebinding)). Resume does
+not prove the old local command stopped. If no current handle can acknowledge a
+stop, explicit operator recovery with reconciliation is needed; see
+[operator recovery storage](TEAM-RECOVERY-STORAGE.md). Do not bypass this with
 generic task edits or reassign the same task outside aimem.
 
 ## Boundaries and retries

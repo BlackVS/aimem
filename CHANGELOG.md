@@ -15,6 +15,11 @@ currently 17); a binary refuses a database newer than it understands.
 
 ### Added
 
+- Worker session rebinding storage: a worker resume carries its reserved
+  attempt to the new session generation in one transaction, with bounded rebind
+  history, a correlated audit event and a reserved-attempt read. Offers, leave
+  and coordinator resume are unchanged; public exposure of the read is deferred.
+
 - Operator recovery storage: reconciled forced closure of abandoned execution,
   guarded by task and session/coordinator generations, with immutable evidence
   and atomic requeue. Public recovery commands and process control remain deferred.

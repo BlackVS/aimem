@@ -498,8 +498,17 @@ worker handle, separately observed current worker-session generation, current
 coordinator-slot generation and task revision. An admin records an explicit stopped
 affirmation, runtime/process and worktree reconciliation, reason and evidence refs.
 The hub validates and preserves this assessment; it does not prove execution stopped.
-Offers, submitted results and terminal attempts cannot use this path. Session/token
+Offers, submitted results and terminal attempts cannot use this path. Token
 rebinding, coordinator handoff and recovery client operations remain deferred.
+
+The [session rebinding](TEAM-ASSIGNMENT-STORAGE.md#session-rebinding) increment
+implements the resume rule above for workers: a worker resume carries its reserved
+non-offer attempt to the new session generation in the same transaction, with an
+immutable rebind record and audit event, so a restarted client commands its own
+work with the returned handle. Offers stay bound to the generation that received
+them, leave keeps the reservation for operator recovery, and a storage read
+returns the calling session's reserved attempt as the outstanding-work snapshot.
+Rebinding never releases work or proves a local command stopped.
 
 For managed tasks generic PUT/archive is refused with `409 managed_task` and a
 pointer to coordination operations, including for admins; explicit audited admin
