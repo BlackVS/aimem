@@ -15,6 +15,12 @@ currently 18); a binary refuses a database newer than it understands.
 
 ### Added
 
+- Team playbooks: coordinator and worker guidance for joining, waiting,
+  assignment choice with recorded rationale, evidence-backed asynchronous
+  question resolution, human escalation, results and review
+  (`docs/TEAM-PLAYBOOKS.md`), with request templates under
+  `docs/examples/team` that a test drives through the hub's validators.
+
 - Team audit timeline and export: the admin events page accepts session, task,
   attempt, operation and time-range filters, and a new admin export route
   streams JSONL pages of accepted events and message metadata (delivery and

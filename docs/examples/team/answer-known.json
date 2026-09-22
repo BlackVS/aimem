@@ -1,0 +1,13 @@
+{
+  "recipient": {"kind": "member", "id": "{{worker}}"},
+  "kind": "answer",
+  "task_id": "{{task}}",
+  "reply_to": "{{question}}",
+  "payload": {
+    "text": "Known. TestOrdinaryTokenGateMatrix in internal/server/tasks_test.go pins the admitted set as a literal list; add the exact pattern there and the route table entry, nothing else. Source: the test file at the recorded base commit, observed 2026-09-22T16:40:00Z; the AGENTS.md convention note says the same.",
+    "refs": [
+      {"kind": "text", "ref": "internal/server/tasks_test.go TestOrdinaryTokenGateMatrix at the recorded base commit, observed 2026-09-22T16:40:00Z"},
+      {"kind": "text", "ref": "AGENTS.md, 'Conventions that bite', observed 2026-09-22T16:40:00Z"}
+    ]
+  }
+}

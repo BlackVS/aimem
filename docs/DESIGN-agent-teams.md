@@ -508,7 +508,13 @@ communication-audit slice: filtered admin reads of accepted events and a paged
 JSONL export of events plus message metadata (bodies opt-in) at one snapshot,
 with a schema header, applied filters and a completion marker; delivery and
 acknowledgement records are exported as observed and never inferred. Analysis
-and diagnostics correlation build on it separately.
+and diagnostics correlation build on it separately. The
+[team playbooks](TEAM-PLAYBOOKS.md) increment ships the process guidance for
+this phase: coordinator and worker playbooks, the three question classes with
+evidence-backed asynchronous resolution and bounded delegation, the human
+escalation template, and request templates that a test drives through the real
+validators; team-specific process checklist items follow through the process
+repository's own review.
 
 The [session rebinding](TEAM-ASSIGNMENT-STORAGE.md#session-rebinding) increment
 implements the resume rule above for workers: a worker resume carries its reserved

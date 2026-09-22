@@ -1,0 +1,10 @@
+{
+  "session_id": "{{coordinator}}",
+  "generation": 1,
+  "coordinator_generation": 1,
+  "task_id": "{{task}}",
+  "expected_revision": 1,
+  "worker": {"session_id": "{{worker}}", "generation": 1},
+  "suitability_rationale": "S task: one Go package, unit tests only, no browser or migration; the worker declares go, unit-tests and sqlite and has two accepted results on this package.",
+  "cost_rationale": "Least costly suitable available member; the other available member reports a larger model and is reserved for the L review task per project policy."
+}

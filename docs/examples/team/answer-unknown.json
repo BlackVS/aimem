@@ -1,0 +1,13 @@
+{
+  "recipient": {"kind": "member", "id": "{{worker}}"},
+  "kind": "answer",
+  "task_id": "{{task}}",
+  "reply_to": "{{question}}",
+  "payload": {
+    "text": "Unknown, no source. Checked the task record, the repository at the base commit and the project documents; none states which test pins the allowlist. This is not an authorization to add a second list. If the answer matters for the acceptance criteria, block the attempt and I will issue an investigation assignment or escalate.",
+    "refs": [
+      {"kind": "task", "ref": "{{task}}", "note": "task record checked, no answer"},
+      {"kind": "text", "ref": "repository search at the recorded base commit for 'ordinaryRoutes' in test files: no match, observed 2026-09-22T16:41:00Z"}
+    ]
+  }
+}

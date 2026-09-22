@@ -1,0 +1,12 @@
+{
+  "recipient": {"kind": "member", "id": "{{worker}}"},
+  "kind": "answer",
+  "task_id": "{{task}}",
+  "reply_to": "{{question}}",
+  "payload": {
+    "text": "Expired. This answer arrives after the question's deadline and its evidence predates your recorded base commit (the allowlist test was last observed at 2026-09-20T09:00:00Z, before the base commit). Treat it as stale: re-check TestOrdinaryTokenGateMatrix at your base commit before relying on it, and re-ask if it differs.",
+    "refs": [
+      {"kind": "text", "ref": "internal/server/tasks_test.go TestOrdinaryTokenGateMatrix observed 2026-09-20T09:00:00Z, older than the recorded base commit", "note": "stale evidence"}
+    ]
+  }
+}
