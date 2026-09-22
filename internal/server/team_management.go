@@ -139,10 +139,10 @@ func (s *Server) recoverTeamAssignment(w http.ResponseWriter, r *http.Request) {
 	s.ok(w, assignmentResponse(out))
 }
 
-// unmanageTask is an admin route. The URL names the managing team so an
-// operator cannot release a task through another team's prefix; a task no
-// longer managed falls through to storage, which replays an earlier receipt
-// or refuses.
+// unmanageTask is an admin route. The URL names the managing team; storage
+// checks it inside the transaction and binds it into the receipt scope, so a
+// task another team took over is refused and a retry replays only through
+// the same team prefix.
 func (s *Server) unmanageTask(w http.ResponseWriter, r *http.Request) {
 	p, db := s.adminTeamProject(w, r)
 	if db == nil {
@@ -157,21 +157,12 @@ func (s *Server) unmanageTask(w http.ResponseWriter, r *http.Request) {
 		s.fail(w, 400, err)
 		return
 	}
-	current, err := db.GetTask(r.PathValue("task"))
-	if err != nil {
-		s.teamError(w, r, err)
-		return
-	}
-	if current.Coordination != nil && current.Coordination.TeamID != r.PathValue("team") {
-		s.teamError(w, r, store.ErrTeamAssignmentConflict)
-		return
-	}
 	audit, err := sessionAudit(w, r, db)
 	if err != nil {
 		s.teamError(w, r, err)
 		return
 	}
-	out, err := db.UnmanageTask(r.PathValue("task"), req, audit, key)
+	out, err := db.UnmanageTask(r.PathValue("team"), r.PathValue("task"), req, audit, key)
 	if err != nil {
 		s.teamError(w, r, err)
 		return

@@ -45,6 +45,20 @@ func sessionView(t *testing.T, w *httptest.ResponseRecorder) teamMemberView {
 	return out.Session
 }
 
+func joinedSession(t *testing.T, w *httptest.ResponseRecorder) teamMemberView {
+	t.Helper()
+	if w.Code != 201 {
+		t.Fatal(w.Code, w.Body)
+	}
+	var out struct {
+		Session teamMemberView `json:"session"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &out); err != nil || out.Session.ID == "" {
+		t.Fatal(w.Body, err)
+	}
+	return out.Session
+}
+
 func managedTaskResult(t *testing.T, w *httptest.ResponseRecorder) store.Task {
 	t.Helper()
 	if w.Code != 200 {
@@ -222,7 +236,7 @@ func TestManagementHTTPAdminRecoverAndUnmanage(t *testing.T) {
 		t.Fatal(w.Code, w.Body)
 	}
 	// Unmanage: another team's prefix is refused; ordinary tokens never reach it.
-	w := taskReq(t, f.h, "POST", "/v1/projects/alpha/teams", f.admin, "other-team", fmt.Sprintf(`{"name":"Other","enrollment":[{"user_id":%q,"coordinator":true}]}`, f.aliceUser))
+	w := taskReq(t, f.h, "POST", "/v1/projects/alpha/teams", f.admin, "other-team", fmt.Sprintf(`{"name":"Other","enrollment":[{"user_id":%q,"coordinator":true},{"user_id":%q}]}`, f.aliceUser, f.bobUser))
 	if w.Code != 201 {
 		t.Fatal(w.Code, w.Body)
 	}
@@ -251,6 +265,29 @@ func TestManagementHTTPAdminRecoverAndUnmanage(t *testing.T) {
 	}{released.TaskContent, released.Revision})
 	if w := taskReq(t, f.h, "PUT", "/v1/tasks/"+task.ID, f.alice, "generic", body); w.Code != 200 {
 		t.Fatal(w.Code, w.Body)
+	}
+	// The other team takes the task over (offer and withdraw leave the revision
+	// unchanged). The first team's retry still replays its own receipt; a fresh
+	// release through the first team is refused; the managing team may release.
+	otherBase := "/v1/projects/alpha/teams/" + other.ID
+	otherCo := joinedSession(t, taskReq(t, f.h, "POST", otherBase+"/join", f.alice, "other-co", `{"role":"coordinator","profile":{"label":"agent","platform":"fixture","platform_version":"1"}}`))
+	otherWorker := joinedSession(t, taskReq(t, f.h, "POST", otherBase+"/join", f.peer, "other-worker", `{"role":"worker","profile":{"label":"agent","platform":"fixture","platform_version":"1"}}`))
+	current := f.taskState(t)
+	takeover := store.TeamOffer{TeamSessionHandle: store.TeamSessionHandle{SessionID: otherCo.ID, Generation: otherCo.Generation}, CoordinatorGeneration: otherCo.CoordinatorGeneration, TaskID: task.ID, ExpectedRevision: current.Revision, Worker: store.TeamSessionHandle{SessionID: otherWorker.ID, Generation: otherWorker.Generation}, SuitabilityRationale: "S task; fit confirmed", CostRationale: "Least costly suitable member"}
+	taken := assignmentResult(t, taskReq(t, f.h, "POST", otherBase+"/assignments", f.alice, "take-over", assignmentJSON(t, takeover)), 201)
+	assignmentResult(t, taskReq(t, f.h, "POST", otherBase+"/assignments/"+taken.ID+"/withdraw", f.alice, "take-back", assignmentJSON(t, store.TeamAssignmentCommand{TeamSessionHandle: takeover.TeamSessionHandle, CoordinatorGeneration: takeover.CoordinatorGeneration, Reason: "reassess"})), 200)
+	if again := f.taskState(t); again.Revision != current.Revision || again.Coordination == nil || again.Coordination.TeamID != other.ID {
+		t.Fatal("takeover fixture", again)
+	}
+	if replay := managedTaskResult(t, taskReq(t, f.h, "POST", f.base+"/tasks/"+task.ID+"/unmanage", f.admin, "unmanage", assignmentJSON(t, unmanage))); replay.Revision != released.Revision {
+		t.Fatal("replay after takeover", replay)
+	}
+	fresh := store.TeamUnmanageCommand{ExpectedRevision: current.Revision, Reason: "again"}
+	if w := taskReq(t, f.h, "POST", f.base+"/tasks/"+task.ID+"/unmanage", f.admin, "fresh", assignmentJSON(t, fresh)); w.Code != 409 {
+		t.Fatal("released another team's task", w.Code, w.Body)
+	}
+	if got := managedTaskResult(t, taskReq(t, f.h, "POST", otherBase+"/tasks/"+task.ID+"/unmanage", f.admin, "other-release", assignmentJSON(t, fresh))); got.Coordination != nil || got.Revision != current.Revision+1 {
+		t.Fatal(got)
 	}
 	// Malformed query encodings are refused on session-scoped reads.
 	if w := taskReq(t, f.h, "GET", f.reservedURL(f.recipient)+"&extra=%ZZ", f.peer, "", ""); w.Code != 400 {

@@ -50,7 +50,9 @@ carries `expected_revision`, `expected_worker` exactly as assigned,
 `expected_session_generation` and `expected_coordinator_generation` as observed,
 and `reconciliation` with `execution_stopped:true`, `reason`, `runtime_check`,
 `worktree_check` and `evidence_refs`. Unmanage carries `expected_revision` and a
-`reason`; a task managed by another team is refused with 409 under this team's
-prefix. Both are recorded operator assessments: nothing here stops a process,
+`reason`; the team in the URL is checked inside the storage transaction and
+bound into the retry receipt, so a task another team manages is refused with
+409 under this team's prefix and a retry replays only through the same prefix.
+Both are recorded operator assessments: nothing here stops a process,
 verifies evidence or proves a coordinator or worker is gone. Merging this
 increment does not request a release, deployment or pilot.

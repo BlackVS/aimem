@@ -178,12 +178,14 @@ func (d *DB) FinalizeManagedTask(teamID, taskID string, c TeamFinalizeCommand, a
 	})
 }
 
-// UnmanageTask releases a task from team management so ordinary writes apply
-// again. It needs a trusted admin actor, no reserved attempt and a reason; the
-// service MUST authenticate live admin authority on every call, including
-// receipt replay. Historical attempts stay readable, and a later offer manages
-// the task afresh.
-func (d *DB) UnmanageTask(taskID string, c TeamUnmanageCommand, a TeamAuditContext, key string) (Task, error) {
+// UnmanageTask releases a task from the named team's management so ordinary
+// writes apply again. It needs a trusted admin actor, the managing team, no
+// reserved attempt and a reason; the service MUST authenticate live admin
+// authority on every call, including receipt replay. The team is checked
+// inside the transaction and bound into the receipt scope, so a task another
+// team took over is refused and a retry replays only through the same team.
+// Historical attempts stay readable, and a later offer manages the task afresh.
+func (d *DB) UnmanageTask(teamID, taskID string, c TeamUnmanageCommand, a TeamAuditContext, key string) (Task, error) {
 	if a.Actor.Kind != "admin" {
 		return Task{}, ErrTeamSessionDenied
 	}
@@ -196,6 +198,7 @@ func (d *DB) UnmanageTask(taskID string, c TeamUnmanageCommand, a TeamAuditConte
 	if err := taskText(c.Reason, 4096, true); err != nil {
 		return Task{}, invalid(err)
 	}
+	var tm Team
 	check := func(tx *sql.Tx) error {
 		var enabled string
 		if err := tx.QueryRow(`SELECT COALESCE((SELECT value FROM meta WHERE key=?),'')`, TasksMetaKey).Scan(&enabled); err != nil {
@@ -204,25 +207,21 @@ func (d *DB) UnmanageTask(taskID string, c TeamUnmanageCommand, a TeamAuditConte
 		if enabled != "on" {
 			return ErrTeamSessionDenied
 		}
-		return nil
+		var err error
+		tm, err = readTeam(tx, teamID)
+		return err
 	}
-	return checkedTaskMutation(d, a.Actor, "team.task.unmanage", taskID, key, c, check, func(tx *sql.Tx) (Task, error) {
-		t, err := readTask(tx, taskID)
+	return checkedTaskMutation(d, a.Actor, "team.task.unmanage", teamID+"/"+taskID, key, c, check, func(tx *sql.Tx) (Task, error) {
+		t, err := managedTask(tx, teamID, taskID, c.ExpectedRevision)
 		if err != nil {
 			return Task{}, err
 		}
-		if t.Revision != c.ExpectedRevision {
-			return Task{}, &TaskConflict{Current: t}
+		res, err := tx.Exec(`UPDATE team_managed_tasks SET managed=0 WHERE task_id=? AND team_id=? AND managed=1`, taskID, teamID)
+		if err != nil {
+			return Task{}, err
 		}
-		if t.Coordination == nil || t.Coordination.AttemptID != "" {
+		if n, err := res.RowsAffected(); err != nil || n != 1 {
 			return Task{}, ErrTeamAssignmentConflict
-		}
-		tm, err := readTeam(tx, t.Coordination.TeamID)
-		if err != nil {
-			return Task{}, err
-		}
-		if _, err := tx.Exec(`UPDATE team_managed_tasks SET managed=0 WHERE task_id=?`, taskID); err != nil {
-			return Task{}, err
 		}
 		change := TeamManagedChange{TaskID: t.ID, PreviousRevision: t.Revision, PreviousState: t.State, State: t.State, Reason: c.Reason}
 		// The revision advances so a concurrent coordinator command at the old

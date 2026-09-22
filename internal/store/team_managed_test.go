@@ -351,7 +351,7 @@ func TestManagedTaskUnmanage(t *testing.T) {
 		t.Fatal(err)
 	}
 	cmd := TeamUnmanageCommand{ExpectedRevision: task.Revision, Reason: "Owner takes the task back to the ordinary backlog"}
-	got, err := d.UnmanageTask(task.ID, cmd, admin, "unmanage")
+	got, err := d.UnmanageTask(team.ID, task.ID, cmd, admin, "unmanage")
 	if err != nil || got.Coordination != nil || got.Revision != task.Revision+1 || got.State != task.State {
 		t.Fatalf("unmanage: %+v %v", got, err)
 	}
@@ -378,10 +378,10 @@ func TestManagedTaskUnmanage(t *testing.T) {
 	if _, err := d.FinalizeManagedTask(team.ID, task.ID, finalizeCommand(c, updated, accepted.ID), a, "late-finalize"); !errors.Is(err, ErrTeamAssignmentConflict) {
 		t.Fatal(err)
 	}
-	if _, err := d.UnmanageTask(task.ID, TeamUnmanageCommand{ExpectedRevision: updated.Revision, Reason: "twice"}, admin, "twice"); !errors.Is(err, ErrTeamAssignmentConflict) {
+	if _, err := d.UnmanageTask(team.ID, task.ID, TeamUnmanageCommand{ExpectedRevision: updated.Revision, Reason: "twice"}, admin, "twice"); !errors.Is(err, ErrTeamAssignmentConflict) {
 		t.Fatal(err)
 	}
-	if replay, err := d.UnmanageTask(task.ID, cmd, admin, "unmanage"); err != nil || !reflect.DeepEqual(replay, got) {
+	if replay, err := d.UnmanageTask(team.ID, task.ID, cmd, admin, "unmanage"); err != nil || !reflect.DeepEqual(replay, got) {
 		t.Fatal(replay, err)
 	}
 	// A fresh offer manages it again with a new attempt; the old one is intact.
@@ -406,9 +406,9 @@ func TestManagedTaskUnmanage(t *testing.T) {
 }
 
 func TestManagedTaskUnmanageFences(t *testing.T) {
-	for _, scenario := range []string{"ordinary", "forged-admin", "not-managed", "revision", "disabled", "empty-reason", "missing-task"} {
+	for _, scenario := range []string{"ordinary", "forged-admin", "not-managed", "revision", "disabled", "empty-reason", "missing-task", "other-team", "unknown-team"} {
 		t.Run(scenario, func(t *testing.T) {
-			_, d, _, a, admin, c, _ := acceptedFixture(t)
+			r, d, team, a, admin, c, _ := acceptedFixture(t)
 			task, err := d.GetTask(c.TaskID)
 			if err != nil {
 				t.Fatal(err)
@@ -435,9 +435,17 @@ func TestManagedTaskUnmanageFences(t *testing.T) {
 				cmd.Reason, wantInvalid = "", true
 			case "missing-task":
 				id = uuidv7.New()
+			case "other-team":
+				other, err := r.ConfigureTeam("alpha", "", 0, TeamContent{Name: "other", Enrollment: []TeamEnrollment{{UserID: a.Actor.UserID, Coordinator: true}}}, admin, "other")
+				if err != nil {
+					t.Fatal(err)
+				}
+				team.ID = other.ID
+			case "unknown-team":
+				team.ID = uuidv7.New()
 			}
 			counts := assignmentCounts(t, d)
-			_, err = d.UnmanageTask(id, cmd, actor, "unmanage")
+			_, err = d.UnmanageTask(team.ID, id, cmd, actor, "unmanage")
 			if err == nil || !reflect.DeepEqual(counts, assignmentCounts(t, d)) {
 				t.Fatal("invalid unmanage accepted", err)
 			}
@@ -455,21 +463,21 @@ func TestManagedTaskUnmanageReservedStates(t *testing.T) {
 	for _, state := range []string{"OFFERED", "RUNNING", "BLOCKED", "STOP_REQUESTED", "STOPPED", "SUBMITTED"} {
 		t.Run(state, func(t *testing.T) {
 			var d *DB
+			var team Team
 			var admin TeamAuditContext
 			var c TeamOffer
 			if state == "OFFERED" {
-				var team Team
 				var a TeamAuditContext
 				_, d, team, a, admin, c = assignmentFixture(t)
 				mustOffer(t, d, team, a, c, "offer")
 			} else {
-				_, d, _, _, admin, c, _, _ = rebindFixture(t, state)
+				_, d, team, _, admin, c, _, _ = rebindFixture(t, state)
 			}
 			task, err := d.GetTask(c.TaskID)
 			if err != nil || task.Coordination.AttemptID == "" {
 				t.Fatal(task, err)
 			}
-			if _, err := d.UnmanageTask(task.ID, TeamUnmanageCommand{ExpectedRevision: task.Revision, Reason: "release"}, admin, "unmanage"); !errors.Is(err, ErrTeamAssignmentConflict) {
+			if _, err := d.UnmanageTask(team.ID, task.ID, TeamUnmanageCommand{ExpectedRevision: task.Revision, Reason: "release"}, admin, "unmanage"); !errors.Is(err, ErrTeamAssignmentConflict) {
 				t.Fatal(state, err)
 			}
 		})
@@ -508,7 +516,7 @@ func TestManagedTaskRollback(t *testing.T) {
 					case "finalize":
 						_, err = d.FinalizeManagedTask(team.ID, task.ID, finalizeCommand(c, task, accepted.ID), a, key)
 					case "unmanage":
-						_, err = d.UnmanageTask(task.ID, TeamUnmanageCommand{ExpectedRevision: task.Revision, Reason: "release"}, admin, key)
+						_, err = d.UnmanageTask(team.ID, task.ID, TeamUnmanageCommand{ExpectedRevision: task.Revision, Reason: "release"}, admin, key)
 					}
 					return err
 				}
@@ -591,12 +599,12 @@ func TestManagedTaskRaces(t *testing.T) {
 					return err
 				}
 				second = func() error {
-					_, err := d2.UnmanageTask(task.ID, TeamUnmanageCommand{ExpectedRevision: task.Revision, Reason: "release"}, admin, "unmanage")
+					_, err := d2.UnmanageTask(team.ID, task.ID, TeamUnmanageCommand{ExpectedRevision: task.Revision, Reason: "release"}, admin, "unmanage")
 					return err
 				}
 			case "unmanage-offer":
 				first = func() error {
-					_, err := d.UnmanageTask(task.ID, TeamUnmanageCommand{ExpectedRevision: task.Revision, Reason: "release"}, admin, "unmanage")
+					_, err := d.UnmanageTask(team.ID, task.ID, TeamUnmanageCommand{ExpectedRevision: task.Revision, Reason: "release"}, admin, "unmanage")
 					return err
 				}
 				second = func() error {
@@ -680,7 +688,7 @@ func TestManagedTaskMigrationAndReopen(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	released, err := d.UnmanageTask(task.ID, TeamUnmanageCommand{ExpectedRevision: done.Revision, Reason: "release"}, admin, "unmanage")
+	released, err := d.UnmanageTask(team.ID, task.ID, TeamUnmanageCommand{ExpectedRevision: done.Revision, Reason: "release"}, admin, "unmanage")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -699,7 +707,7 @@ func TestManagedTaskMigrationAndReopen(t *testing.T) {
 	if err != nil || got.Coordination != nil || got.State != "DONE" || got.Revision != released.Revision {
 		t.Fatal(got, err)
 	}
-	if replay, err := d2.UnmanageTask(task.ID, TeamUnmanageCommand{ExpectedRevision: done.Revision, Reason: "release"}, admin, "unmanage"); err != nil || !reflect.DeepEqual(replay, released) {
+	if replay, err := d2.UnmanageTask(team.ID, task.ID, TeamUnmanageCommand{ExpectedRevision: done.Revision, Reason: "release"}, admin, "unmanage"); err != nil || !reflect.DeepEqual(replay, released) {
 		t.Fatal(replay, err)
 	}
 	if events := managedEvents(t, d2, team.ID, "team.task.unmanage"); len(events) != 1 {
@@ -707,5 +715,60 @@ func TestManagedTaskMigrationAndReopen(t *testing.T) {
 	}
 	if _, err := d2.UpdateTask(task.ID, got.TaskContent, got.Revision, a.Actor, "generic"); err != nil {
 		t.Fatal("generic write after reopen", err)
+	}
+}
+
+// After a release, another team may take the task over without advancing the
+// task revision (offer and withdraw do not touch it). The first team's retry
+// must replay its own receipt, and a new release through the first team must
+// refuse the task the second team now manages.
+func TestManagedTaskUnmanageTakeover(t *testing.T) {
+	r, d, team, a, admin, c, _ := acceptedFixture(t)
+	task, err := d.GetTask(c.TaskID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	released, err := d.UnmanageTask(team.ID, task.ID, TeamUnmanageCommand{ExpectedRevision: task.Revision, Reason: "release"}, admin, "release")
+	if err != nil {
+		t.Fatal(err)
+	}
+	other, err := r.ConfigureTeam("alpha", "", 0, TeamContent{Name: "other", Enrollment: []TeamEnrollment{{UserID: a.Actor.UserID, Coordinator: true}}}, admin, "other")
+	if err != nil {
+		t.Fatal(err)
+	}
+	co, err := d.JoinTeam(other.ID, "coordinator", testProfile(), a, "other-co")
+	if err != nil {
+		t.Fatal(err)
+	}
+	content := released.TaskContent
+	content.State = "READY"
+	ready, err := d.UpdateTask(task.ID, content, released.Revision, a.Actor, "ready")
+	if err != nil {
+		t.Fatal(err)
+	}
+	offer := c
+	offer.TeamSessionHandle, offer.CoordinatorGeneration, offer.ExpectedRevision = TeamSessionHandle{co.ID, co.Generation}, co.CoordinatorGeneration, ready.Revision
+	offer.Worker = messageMember(t, d, other, a, "other-worker")
+	taken := mustOffer(t, d, other, a, offer, "take-over")
+	if _, err := d.ChangeTeamAssignment(other.ID, taken.ID, "withdraw", TeamAssignmentCommand{TeamSessionHandle: offer.TeamSessionHandle, CoordinatorGeneration: offer.CoordinatorGeneration, Reason: "reassess"}, a, "withdraw", nil); err != nil {
+		t.Fatal(err)
+	}
+	now, err := d.GetTask(task.ID)
+	if err != nil || now.Revision != ready.Revision || now.Coordination == nil || now.Coordination.TeamID != other.ID || now.Coordination.AttemptID != "" {
+		t.Fatal("takeover fixture", now, err)
+	}
+	// The first team's retry replays its own receipt; a fresh release through it is refused.
+	if replay, err := d.UnmanageTask(team.ID, task.ID, TeamUnmanageCommand{ExpectedRevision: task.Revision, Reason: "release"}, admin, "release"); err != nil || !reflect.DeepEqual(replay, released) {
+		t.Fatal("replay after takeover", replay, err)
+	}
+	if _, err := d.UnmanageTask(team.ID, task.ID, TeamUnmanageCommand{ExpectedRevision: now.Revision, Reason: "again"}, admin, "wrong-team"); !errors.Is(err, ErrTeamAssignmentConflict) {
+		t.Fatal("released another team's task", err)
+	}
+	if again, err := d.GetTask(task.ID); err != nil || again.Coordination == nil || again.Coordination.TeamID != other.ID {
+		t.Fatal("wrong-team release changed management", again, err)
+	}
+	// The managing team releases it, and the earlier team's key is a different scope.
+	if got, err := d.UnmanageTask(other.ID, task.ID, TeamUnmanageCommand{ExpectedRevision: now.Revision, Reason: "release"}, admin, "release"); err != nil || got.Coordination != nil || got.Revision != now.Revision+1 {
+		t.Fatal(got, err)
 	}
 }
