@@ -166,6 +166,26 @@ installs the binary, hooks, plugin and background service; every run wires
 the project you are standing in. Prebuilt static binaries come from the
 latest release, so no Go toolchain is needed.
 
+The one-liner needs the raw script to arrive intact. If the Windows form
+fails with `Cannot bind argument to parameter 'Command' because it is an
+empty string`, the download returned an empty body (a transient CDN or
+network-filter hiccup, not a broken script): retry, or run the installer
+from a checkout instead. That path skips the download and the `irm | iex`
+chain entirely, and is the natural way to wire further projects once
+aimem is already installed. (With no aimem installed yet it builds the
+binary from the checkout's source, which needs Go.)
+
+```sh
+# Linux / macOS, from the checkout
+bash ./install.sh user                       # first install only
+bash ./install.sh project /path/to/project   # wire one project
+```
+
+```powershell
+# Windows, from the checkout
+powershell -NoProfile -ExecutionPolicy Bypass -File .\install.ps1 -Target C:\path\to\project
+```
+
 **Hub** (optional) — on a fresh Debian or Ubuntu host, as root:
 
 ```sh

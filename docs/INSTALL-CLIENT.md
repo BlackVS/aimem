@@ -32,6 +32,12 @@ Then **restart any running Claude Code, OpenCode, or Codex session** —
 hooks and plugins are read at startup. Codex additionally asks once, in
 its own UI, to review-and-trust the new hooks before running them.
 
+If the Windows one-liner fails with `Cannot bind argument to parameter
+'Command' because it is an empty string`, `irm` returned an empty body:
+the raw-script download was cut short by the CDN or a network filter,
+and `iex` had nothing to run. Retry, or install from a checkout (section
+5), which never touches the network for the script itself.
+
 ### What the user-level install puts on the machine
 
 | Path | What |
@@ -182,7 +188,7 @@ leg that PULLS curated knowledge down to this machine. It rides the
 hub's HTTPS API with the same token as everything else:
 
 ```sh
-./install.sh enable-sync          # Linux: systemd timer, every ~10 min
+bash ./install.sh enable-sync          # Linux: systemd timer, every ~10 min
 ```
 
 On Windows the installer registers an `aimem-sync` scheduled task
@@ -192,13 +198,31 @@ for hubs that predate the sync API.
 
 ## 5. Manual install and other modes
 
+`install.sh` is committed without the executable bit (`boot.sh` invokes
+it through `bash` for the same reason), so call it via `bash`:
+
 ```sh
-./install.sh user                 # user-level only (builds from source)
-./install.sh project [dir]        # wire one project
-./install.sh bootstrap [dir]      # what the one-liner runs
-./install.sh enable-sync <ssh>    # periodic anti-entropy sync timer
-./install.sh uninstall-user       # remove everything `user` installed
+bash ./install.sh user                 # user-level only (builds from source)
+bash ./install.sh project [dir]        # wire one project
+bash ./install.sh bootstrap [dir]      # what the one-liner runs
+bash ./install.sh enable-sync <ssh>    # periodic anti-entropy sync timer
+bash ./install.sh uninstall-user       # remove everything `user` installed
 ```
+
+The Windows installer has the same shape, run from a checkout with the
+process-scoped policy bypass the one-liner also uses:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File .\install.ps1 -Target C:\path\to\project   # user install if needed + wire project
+powershell -NoProfile -ExecutionPolicy Bypass -File .\install.ps1 -UserOnly                        # user-level only
+powershell -NoProfile -ExecutionPolicy Bypass -File .\install.ps1 -UninstallUser
+```
+
+Run this way, `install.ps1` leaves an aimem that is already on `PATH`
+alone (only the one-liner knows the release version to compare against)
+and just wires the project; `AIMEM_REINSTALL=1` forces a user-level
+refresh, which builds from the checkout's source and therefore needs Go.
+`install.sh project` never touches the user-level install at all.
 
 Building from source needs Go 1.25+. The release binaries are static
 (`CGO_ENABLED=0`), so a machine that installs from a release needs no
@@ -218,7 +242,7 @@ Windows support is best-effort and tested less than Linux.
 ## 7. Uninstall
 
 ```sh
-./install.sh uninstall-user       # binary, hooks, plugin, service
+bash ./install.sh uninstall-user       # binary, hooks, plugin, service
 ```
 
 Journals and memories under `~/.local/state/aimem/` are left alone —

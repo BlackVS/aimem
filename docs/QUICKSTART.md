@@ -120,7 +120,7 @@ Drop `--insecure` once you install a real certificate. Checkpoints now
 push to the hub as they happen; if it is unreachable they spool locally
 and flush on the next contact, so capture never depends on the network.
 Periodic sync — the leg that pulls curated knowledge back down — rides
-the same token (`./install.sh enable-sync` on Linux; Windows gets a
+the same token (`bash ./install.sh enable-sync` on Linux; Windows gets a
 scheduled task automatically).
 
 Repeat — one minted token per machine — for every machine you code
