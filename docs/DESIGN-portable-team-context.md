@@ -156,8 +156,9 @@ evidence, the same typed references it already uses.
 
 ### 4. Missing context stops work, not membership
 
-- Readiness is computed after the membership reconciliation and never
-  changes it. Missing context never leads to `new_session`, a second join or
+- Readiness never changes the membership reconciliation: the context parts
+  are evaluated beside it and the membership part is read from its outcome.
+  Missing context never leads to `new_session`, a second join or
   a leave; a re-run of `team_setup` or `team_continue` verifies the saved
   session exactly as today and re-evaluates readiness.
 - A worker that is not ready heartbeats `unavailable` instead of
@@ -165,7 +166,12 @@ evidence, the same typed references it already uses.
   worker that is not `available` (`assignmentWorker`,
   `internal/store/team_assignments.go:130`, called at `:164` and `:239`), so
   the gate is enforced by the existing server check with no schema change;
-  a pending offer can still be declined. The agent's own periodic
+  a pending offer can still be declined. The hub creates every session
+  `available` (`internal/store/team_sessions.go:229`), so readiness is
+  computed before the join and the setup core sends the `unavailable`
+  heartbeat in the same call, right after it, where it heartbeats
+  `available` today. An offer that lands in that one round trip is declined
+  with the readiness reason; it is never accepted. The agent's own periodic
   heartbeats must also carry `unavailable` until a later `team_continue`
   reports it ready; the report's next steps and the role context say so. It
   is a client declaration, not an authority: an old client, or an agent that
