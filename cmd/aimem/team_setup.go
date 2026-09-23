@@ -878,7 +878,10 @@ func (s *teamSetup) readReserved(me *teamSetupSession) bool {
 	if res.Assignment != nil {
 		r = *res.Assignment
 	}
-	if status, body, err = s.teamCall("team_assignment", map[string]any{"team": me.TeamID, "session_id": me.ID, "generation": me.Generation, "attempt": r.ID}); err == nil && status == http.StatusOK {
+	status, body, err = s.teamCall("team_assignment", map[string]any{"team": me.TeamID, "session_id": me.ID, "generation": me.Generation, "attempt": r.ID})
+	if err != nil || status != http.StatusOK {
+		s.check("assignment", "warn", "assignment "+r.ID+" not read: "+hubOutcome(status, body, err)+"; the reserved state above stands, read it with team_assignment before acting", "")
+	} else {
 		var full struct {
 			Assignment struct {
 				State        string `json:"state"`
