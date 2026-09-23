@@ -230,7 +230,9 @@ func usage() {
   tui                        interactive dashboard (q quits)
   meta       [-p] <key>      print a project meta value
   tasks      on|off [-p]     enable or disable tasks for a project (admin; on the hub host)
-  teams      list|show|create|configure|events  team setup (admin; on the hub host)
+  teams      list|show|create|configure|events  team administration (on the hub host)
+  teams      setup TEAM <worker|coordinator>  verified team onboarding from a checkout
+                             (checks, join or reconcile, role entry; aimem teams setup for flags)
   process    select|clear|show  the project's process reference (Git repo, commit, manifest); show prints the session bootstrap
   dedup      [-p|--all] [--sim 0.90] [--dry-run]
                              fold near-identical memories onto one survivor

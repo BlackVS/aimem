@@ -85,10 +85,46 @@ func RunTeamTool(ctx context.Context, name string, raw json.RawMessage) (string,
 	return callTeamTool(ctx, call, "", name, raw)
 }
 
+// TeamRequestIn performs one session operation (team_join, team_members,
+// team_heartbeat, team_resume, team_inbox, ...) for the checkout at dir
+// with that checkout's ordinary credential, exactly as RunTeamTool does,
+// but returns the hub's status and raw body instead of a rendered result:
+// the setup command maps refusals to next steps itself. Never the operator
+// socket, never the checkpoint token.
+func TeamRequestIn(ctx context.Context, dir, root, name string, raw json.RawMessage) (int, []byte, error) {
+	call, err := taskCallerIn(dir, root)
+	if err != nil {
+		return 0, nil, err
+	}
+	var method, path string
+	var headers map[string]string
+	var body []byte
+	if tool, ok := teamWorkToolByName(name); ok {
+		method, path, headers, body, err = buildTeamWorkRequest("", tool, raw)
+	} else {
+		method, path, headers, body, err = buildTeamRequest("", name, raw)
+	}
+	if err != nil {
+		return 0, nil, err
+	}
+	return call(ctx, method, path, headers, body)
+}
+
 func callTeamTool(ctx context.Context, call TaskCallFunc, defaultProject, name string, raw json.RawMessage) (string, error) {
 	if tool, ok := teamWorkToolByName(name); ok {
 		return callTeamWorkTool(ctx, call, defaultProject, tool, raw)
 	}
+	method, path, headers, body, err := buildTeamRequest(defaultProject, name, raw)
+	if err != nil {
+		return "", err
+	}
+	return forwardTeamRequest(ctx, call, method, path, headers, body)
+}
+
+// buildTeamRequest validates one session-tool argument object against its
+// schema and renders the hub request.
+func buildTeamRequest(defaultProject, name string, raw json.RawMessage) (method, path string, headers map[string]string, body []byte, err error) {
+	fail := func(e error) (string, string, map[string]string, []byte, error) { return "", "", nil, nil, e }
 	var schema map[string]any
 	for _, d := range teamToolDefs {
 		if d["name"] == name {
@@ -97,21 +133,21 @@ func callTeamTool(ctx context.Context, call TaskCallFunc, defaultProject, name s
 		}
 	}
 	if schema == nil {
-		return "", errors.New("unknown team tool")
+		return fail(errors.New("unknown team tool"))
 	}
 	var fields map[string]json.RawMessage
 	if len(raw) > 64<<10 || json.Unmarshal(raw, &fields) != nil || fields == nil {
-		return "", errors.New("team arguments must be a JSON object at most 64 KiB")
+		return fail(errors.New("team arguments must be a JSON object at most 64 KiB"))
 	}
 	props := schema["properties"].(map[string]any)
 	for k := range fields {
 		if _, ok := props[k]; !ok {
-			return "", fmt.Errorf("unknown team argument %q", k)
+			return fail(fmt.Errorf("unknown team argument %q", k))
 		}
 	}
 	for _, k := range schema["required"].([]string) {
 		if len(fields[k]) == 0 || string(fields[k]) == "null" {
-			return "", fmt.Errorf("%s required", k)
+			return fail(fmt.Errorf("%s required", k))
 		}
 	}
 	var a struct {
@@ -133,25 +169,24 @@ func callTeamTool(ctx context.Context, call TaskCallFunc, defaultProject, name s
 	dec := json.NewDecoder(bytes.NewReader(raw))
 	dec.DisallowUnknownFields()
 	if err := dec.Decode(&a); err != nil {
-		return "", err
+		return fail(err)
 	}
 	if dec.Decode(&struct{}{}) != io.EOF {
-		return "", errors.New("expected one JSON object")
+		return fail(errors.New("expected one JSON object"))
 	}
 	if a.Project == "" {
 		a.Project = defaultProject
 	}
 	if a.Project == "" || a.Team == "" {
-		return "", errors.New("project and team are required")
+		return fail(errors.New("project and team are required"))
 	}
 	op := name[len("team_"):]
-	method := "POST"
-	path := "/v1/projects/" + url.PathEscape(a.Project) + "/teams/" + url.PathEscape(a.Team) + "/" + op
+	method = "POST"
+	path = "/v1/projects/" + url.PathEscape(a.Project) + "/teams/" + url.PathEscape(a.Team) + "/" + op
 	if op == "send" {
 		path = "/v1/projects/" + url.PathEscape(a.Project) + "/teams/" + url.PathEscape(a.Team) + "/messages"
 	}
-	headers := map[string]string{}
-	var body []byte
+	headers = map[string]string{}
 	if teamReadOperation(op) {
 		method = "GET"
 		q := url.Values{"session_id": {a.SessionID}, "generation": {strconv.FormatInt(a.Generation, 10)}}
@@ -159,13 +194,13 @@ func callTeamTool(ctx context.Context, call TaskCallFunc, defaultProject, name s
 			if op == "members" {
 				var after string
 				if err := json.Unmarshal(a.After, &after); err != nil {
-					return "", err
+					return fail(err)
 				}
 				q.Set("after", after)
 			} else {
 				var after int64
 				if err := json.Unmarshal(a.After, &after); err != nil {
-					return "", err
+					return fail(err)
 				}
 				q.Set("after", strconv.FormatInt(after, 10))
 			}
@@ -179,7 +214,7 @@ func callTeamTool(ctx context.Context, call TaskCallFunc, defaultProject, name s
 		path += "?" + q.Encode()
 	} else {
 		if a.Key == "" {
-			return "", errors.New("idempotency_key required")
+			return fail(errors.New("idempotency_key required"))
 		}
 		headers["Idempotency-Key"] = a.Key
 		if op == "send" {
@@ -198,5 +233,5 @@ func callTeamTool(ctx context.Context, call TaskCallFunc, defaultProject, name s
 			body, _ = json.Marshal(store.TeamSessionCommand{SessionID: a.SessionID, Generation: a.Generation, Profile: a.Profile, ExpectedProfileRevision: a.ExpectedProfileRevision, Availability: a.Availability})
 		}
 	}
-	return forwardTeamRequest(ctx, call, method, path, headers, body)
+	return method, path, headers, body, nil
 }

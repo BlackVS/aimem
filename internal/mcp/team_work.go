@@ -113,18 +113,30 @@ func teamWorkToolByName(name string) (teamWorkTool, bool) {
 // forwards the operation fields unchanged as the HTTP body (or query for
 // reads). The hub's strict decoder is the contract; nothing is reshaped.
 func callTeamWorkTool(ctx context.Context, call TaskCallFunc, defaultProject string, tool teamWorkTool, raw json.RawMessage) (string, error) {
+	method, path, headers, body, err := buildTeamWorkRequest(defaultProject, tool, raw)
+	if err != nil {
+		return "", err
+	}
+	return forwardTeamRequest(ctx, call, method, path, headers, body)
+}
+
+// buildTeamWorkRequest validates the arguments against the tool schema and
+// renders the hub request: the operation fields go unchanged as the HTTP
+// body (or query for reads).
+func buildTeamWorkRequest(defaultProject string, tool teamWorkTool, raw json.RawMessage) (method, path string, headers map[string]string, body []byte, err error) {
+	fail := func(e error) (string, string, map[string]string, []byte, error) { return "", "", nil, nil, e }
 	var fields map[string]json.RawMessage
 	if len(raw) > 64<<10 || json.Unmarshal(raw, &fields) != nil || fields == nil {
-		return "", errors.New("team arguments must be a JSON object at most 64 KiB")
+		return fail(errors.New("team arguments must be a JSON object at most 64 KiB"))
 	}
 	for k := range fields {
 		if _, ok := tool.props[k]; !ok {
-			return "", fmt.Errorf("unknown team argument %q", k)
+			return fail(fmt.Errorf("unknown team argument %q", k))
 		}
 	}
 	for _, k := range tool.required {
 		if len(fields[k]) == 0 || string(fields[k]) == "null" {
-			return "", fmt.Errorf("%s required", k)
+			return fail(fmt.Errorf("%s required", k))
 		}
 	}
 	text := func(k string) (string, error) {
@@ -139,63 +151,62 @@ func callTeamWorkTool(ctx context.Context, call TaskCallFunc, defaultProject str
 	}
 	project, err := text("project")
 	if err != nil {
-		return "", err
+		return fail(err)
 	}
 	if project == "" {
 		project = defaultProject
 	}
 	team, err := text("team")
 	if err != nil {
-		return "", err
+		return fail(err)
 	}
 	if project == "" || team == "" {
-		return "", errors.New("project and team are required")
+		return fail(errors.New("project and team are required"))
 	}
-	path := "/v1/projects/" + url.PathEscape(project) + "/teams/" + url.PathEscape(team) + tool.path
+	path = "/v1/projects/" + url.PathEscape(project) + "/teams/" + url.PathEscape(team) + tool.path
 	for _, seg := range []string{"attempt", "task"} {
 		if !strings.Contains(tool.path, "{"+seg+"}") {
 			continue
 		}
 		v, err := text(seg)
 		if err != nil {
-			return "", err
+			return fail(err)
 		}
 		if v == "" {
-			return "", fmt.Errorf("%s required", seg)
+			return fail(fmt.Errorf("%s required", seg))
 		}
 		path = strings.Replace(path, "{"+seg+"}", url.PathEscape(v), 1)
 		delete(fields, seg)
 	}
 	key, err := text("idempotency_key")
 	if err != nil {
-		return "", err
+		return fail(err)
 	}
 	delete(fields, "project")
 	delete(fields, "team")
 	delete(fields, "idempotency_key")
-	headers := map[string]string{}
-	var body []byte
+	headers = map[string]string{}
 	if tool.method == "GET" {
 		session, err := text("session_id")
 		if err != nil {
-			return "", err
+			return fail(err)
 		}
 		var generation int64
 		if err := json.Unmarshal(fields["generation"], &generation); err != nil {
-			return "", errors.New("generation must be an integer")
+			return fail(errors.New("generation must be an integer"))
 		}
 		path += "?" + url.Values{"session_id": {session}, "generation": {strconv.FormatInt(generation, 10)}}.Encode()
 	} else {
 		if key == "" {
-			return "", errors.New("idempotency_key required")
+			return fail(errors.New("idempotency_key required"))
 		}
 		headers["Idempotency-Key"] = key
 		body, err = json.Marshal(fields)
 		if err != nil {
-			return "", err
+			return fail(err)
 		}
 	}
-	return forwardTeamRequest(ctx, call, tool.method, path, headers, body)
+	return tool.method, path, headers, body, nil
 }
 
 // forwardTeamRequest sends one team request and returns the hub's pretty
