@@ -177,8 +177,8 @@ binary from the checkout's source, which needs Go.)
 
 ```sh
 # Linux / macOS, from the checkout
-./install.sh user                       # first install only
-./install.sh project /path/to/project   # wire one project
+bash ./install.sh user                       # first install only
+bash ./install.sh project /path/to/project   # wire one project
 ```
 
 ```powershell
