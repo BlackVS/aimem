@@ -32,6 +32,12 @@ Then **restart any running Claude Code, OpenCode, or Codex session** —
 hooks and plugins are read at startup. Codex additionally asks once, in
 its own UI, to review-and-trust the new hooks before running them.
 
+If the Windows one-liner fails with `Cannot bind argument to parameter
+'Command' because it is an empty string`, `irm` returned an empty body:
+the raw-script download was cut short by the CDN or a network filter,
+and `iex` had nothing to run. Retry, or install from a checkout (section
+5), which never touches the network for the script itself.
+
 ### What the user-level install puts on the machine
 
 | Path | What |
@@ -199,6 +205,21 @@ for hubs that predate the sync API.
 ./install.sh enable-sync <ssh>    # periodic anti-entropy sync timer
 ./install.sh uninstall-user       # remove everything `user` installed
 ```
+
+The Windows installer has the same shape, run from a checkout with the
+process-scoped policy bypass the one-liner also uses:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File .\install.ps1 -Target C:\path\to\project   # user install if needed + wire project
+powershell -NoProfile -ExecutionPolicy Bypass -File .\install.ps1 -UserOnly                        # user-level only
+powershell -NoProfile -ExecutionPolicy Bypass -File .\install.ps1 -UninstallUser
+```
+
+Run this way, `install.ps1` leaves an aimem that is already on `PATH`
+alone (only the one-liner knows the release version to compare against)
+and just wires the project; `AIMEM_REINSTALL=1` forces a user-level
+refresh, which builds from the checkout's source and therefore needs Go.
+`install.sh project` never touches the user-level install at all.
 
 Building from source needs Go 1.25+. The release binaries are static
 (`CGO_ENABLED=0`), so a machine that installs from a release needs no

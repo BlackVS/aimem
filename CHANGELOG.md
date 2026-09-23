@@ -61,6 +61,13 @@ currently 18); a binary refuses a database newer than it understands.
   (`mcp.TeamRequestIn` exposes the same credential path with raw hub
   responses; the request builders were split from the MCP forwarders.)
 
+### Docs
+
+- README and INSTALL-CLIENT: explain the empty-body failure of the Windows
+  one-liner (`irm` returning an empty string) and document running
+  `install.ps1` / `install.sh project` from a checkout, the path that
+  skips the download and wires further projects once aimem is installed.
+
 ## [0.7.0] — 2026-09-22
 
 The agent-team coordination protocol for a manual pilot: registration and
