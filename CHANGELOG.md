@@ -13,6 +13,26 @@ currently 18); a binary refuses a database newer than it understands.
 
 ## [Unreleased]
 
+## [0.7.1] — 2026-09-23
+
+One-command team onboarding for the pilot clients: `aimem teams setup`
+verifies a checkout and joins or reconciles a team session, `/join_team`
+and `/resume_team` entry points for Claude Code, OpenCode and Codex are
+rendered from one source, members list their own teams before joining,
+`aimem teams continue` restores a member's duties after a restart, and
+`aimem teams provision` creates a team and its members on the hub host
+without hand-written JSON.
+
+### Data integrity
+
+- **No schema change.** The project schema stays at 18 and the access
+  database at 2; a hub or client on 0.7.0 opens the same databases. Upgrade
+  the hub before the agent clients: `GET /v1/projects/{p}/teams/mine` is a
+  new route, and a 0.7.1 client on a 0.7.0 hub reports the enrollment check
+  as unavailable and lets the join decide as before. Restart agent sessions
+  after upgrading a client: a running `aimem mcp` keeps the old binary and
+  does not show `team_list` until it restarts.
+
 ### Added
 
 - `aimem teams provision create PROJECT --team NAME --coordinator USER

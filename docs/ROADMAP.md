@@ -1,9 +1,11 @@
 # Roadmap
 
-Released baseline: v0.7.0 (PR #60-89): the enabled-project picker and epic
-details, and the agent-team coordination protocol through the scripted
-rehearsal, with the process set 1.15.1 selected for this project. The manual
-cross-platform pilot and any deployment are separate owner decisions.
+Released baseline: v0.7.1 (PR #60-97): the enabled-project picker and epic
+details, the agent-team coordination protocol through the scripted
+rehearsal, and one-command team onboarding (`aimem teams setup`, the
+`/join_team` and `/resume_team` entry points, team listing, guided
+provisioning), with the process set 1.15.1 selected for this project. The
+manual cross-platform pilot and any deployment are separate owner decisions.
 This file records delivery order and scope. The aimem task board owns live
 task state, dependencies and completion evidence; design documents own the
 contracts. Do not maintain a second checklist of task statuses here.
