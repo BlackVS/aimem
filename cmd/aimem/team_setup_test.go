@@ -35,6 +35,12 @@ type fakeTeamHub struct {
 	inboxN   int
 	reserved map[string]any // nil means 404
 	requests []string
+
+	rosterFails   int               // roster replies to refuse with 500 before serving
+	rosterPages   int               // >0: serve this many filler pages before the real roster
+	heartbeat     int               // 0 means 200
+	resumeGarbage int               // resume replies to send as unreadable 200s
+	resumeKeys    map[string]string // idempotency key -> session id already resumed
 }
 
 type fakeSession struct {
@@ -45,7 +51,7 @@ type fakeSession struct {
 }
 
 func newFakeTeamHub(t *testing.T) (*fakeTeamHub, *httptest.Server) {
-	h := &fakeTeamHub{secret: "aimem_user_" + strings.Repeat("e", 64), sessions: map[string]*fakeSession{}}
+	h := &fakeTeamHub{secret: "aimem_user_" + strings.Repeat("e", 64), sessions: map[string]*fakeSession{}, resumeKeys: map[string]string{}}
 	h.identity = map[string]any{"user_id": "u-1", "token_id": "t-1", "name": "pilot-a", "role": "user", "scope": "project", "task_read": "all-projects", "project": "alpha", "task_write": true, "tasks_enabled": true}
 	ts := httptest.NewServer(http.HandlerFunc(h.serve))
 	t.Cleanup(ts.Close)
@@ -138,12 +144,30 @@ func (h *fakeTeamHub) serve(w http.ResponseWriter, r *http.Request) {
 			write(409, map[string]any{"error": "team session is closed or generation is stale"})
 			return
 		}
+		if h.rosterFails > 0 {
+			h.rosterFails--
+			write(500, map[string]any{"error": "team storage failure"})
+			return
+		}
+		if h.rosterPages > 0 {
+			// Filler pages of historical sessions that are not ours.
+			h.rosterPages--
+			filler := []map[string]any{h.view(&fakeSession{id: "old-" + r.URL.Query().Get("after"), role: "worker", state: "left", generation: 1, profile: json.RawMessage(`{"label":"old"}`)})}
+			write(200, map[string]any{"protocol_version": 1, "members": filler, "next_cursor": fmt.Sprintf("c%d", h.rosterPages), "server_time": "2026-09-23T04:00:02Z"})
+			return
+		}
 		var members []map[string]any
 		for _, m := range h.sessions {
 			members = append(members, h.view(m))
 		}
 		write(200, map[string]any{"protocol_version": 1, "members": members, "next_cursor": "", "server_time": "2026-09-23T04:00:02Z"})
 	case strings.HasSuffix(r.URL.Path, "/resume"):
+		key := r.Header.Get("Idempotency-Key")
+		if id, seen := h.resumeKeys[key]; seen {
+			// Replay: the original result, whatever the generation is now.
+			write(200, map[string]any{"protocol_version": 1, "session": h.view(h.sessions[id]), "server_time": "2026-09-23T04:00:03Z"})
+			return
+		}
 		var body struct {
 			SessionID  string `json:"session_id"`
 			Generation int64  `json:"generation"`
@@ -157,8 +181,19 @@ func (h *fakeTeamHub) serve(w http.ResponseWriter, r *http.Request) {
 		h.resumes++
 		s.generation++
 		s.suspect = false
+		h.resumeKeys[key] = s.id
+		if h.resumeGarbage > 0 {
+			h.resumeGarbage--
+			w.WriteHeader(200)
+			w.Write([]byte("not json"))
+			return
+		}
 		write(200, map[string]any{"protocol_version": 1, "session": h.view(s), "server_time": "2026-09-23T04:00:03Z"})
 	case strings.HasSuffix(r.URL.Path, "/heartbeat"):
+		if h.heartbeat != 0 {
+			write(h.heartbeat, map[string]any{"error": "current team enrollment and bound ordinary write session required"})
+			return
+		}
 		write(200, map[string]any{"protocol_version": 1, "session": map[string]any{"id": "x"}})
 	case strings.HasSuffix(r.URL.Path, "/assignments/reserved"):
 		if h.reserved == nil {
@@ -472,6 +507,114 @@ func TestTeamSetupIgnoresForeignState(t *testing.T) {
 	before := len(h.requests)
 	out, err = runSetup(t, repo, root, "Pilot", "worker")
 	if err == nil || !strings.Contains(out, "aimem task-token set") || len(h.requests) != before {
+		t.Fatalf("%v\n%s", err, out)
+	}
+}
+
+func TestTeamSetupUncertainResumeReplaysBeforeAnyRead(t *testing.T) {
+	h, ts := newFakeTeamHub(t)
+	repo, root := setupCheckout(t, h, ts)
+	if out, err := runSetup(t, repo, root, "Pilot", "worker"); err != nil {
+		t.Fatal(err, out)
+	}
+	// The resume commits generation 2 on the hub, but its reply is unreadable.
+	h.sessions["sess-1"].suspect = true
+	h.resumeGarbage = 1
+	out, err := runSetup(t, repo, root, "Pilot", "worker")
+	if err == nil || !strings.Contains(out, "not team protocol 1") {
+		t.Fatalf("%v\n%s", err, out)
+	}
+	st := readState(t, root, repo)
+	if st == nil || st.ResumeKey == "" || st.Generation != 1 {
+		t.Fatalf("pending resume not recorded: %+v", st)
+	}
+	// Next run: the pending resume is replayed with its key before any roster
+	// read with the stale handle; no fresh join, no second resume.
+	out, err = runSetup(t, repo, root, "Pilot", "worker")
+	if err != nil || !strings.Contains(out, "resumed session sess-1 (replaying an unconfirmed resume): generation 2") {
+		t.Fatalf("%v\n%s", err, out)
+	}
+	if st := readState(t, root, repo); st.Generation != 2 || st.ResumeKey != "" {
+		t.Fatalf("state after replay %+v", st)
+	}
+	if h.resumes != 1 || h.count("/join") != 1 || len(h.resumeKeys) != 1 {
+		t.Fatalf("resumes %d joins %d keys %d", h.resumes, h.count("/join"), len(h.resumeKeys))
+	}
+}
+
+func TestTeamSetupPendingJoinKeepsTeamAndRole(t *testing.T) {
+	h, ts := newFakeTeamHub(t)
+	h.garbage = 1
+	repo, root := setupCheckout(t, h, ts)
+	if out, err := runSetup(t, repo, root, "Pilot", "coordinator"); err == nil {
+		t.Fatal("unreadable join reply accepted", out)
+	}
+	// A different role or team does not replay the key with new content and
+	// does not join afresh either.
+	for _, args := range [][]string{{"Pilot", "worker"}, {"Other", "coordinator"}} {
+		out, err := runSetup(t, repo, root, args...)
+		if err == nil || !strings.Contains(out, "has an unconfirmed coordinator join pending") || h.count("/join") != 1 {
+			t.Fatalf("%v: %v joins %d\n%s", args, err, h.count("/join"), out)
+		}
+	}
+	// The original request replays and finds the one session the hub created.
+	out, err := runSetup(t, repo, root, "Pilot", "coordinator")
+	if err != nil || !strings.Contains(out, "joined as coordinator: session sess-1") || len(h.sessions) != 1 {
+		t.Fatalf("%v sessions %d\n%s", err, len(h.sessions), out)
+	}
+}
+
+func TestTeamSetupRoleEntryRefusalsAreFailures(t *testing.T) {
+	h, ts := newFakeTeamHub(t)
+	repo, root := setupCheckout(t, h, ts)
+	// A coordinator whose roster read fails right after the join: the
+	// membership is kept and the run is not reported as complete.
+	h.rosterFails = 1
+	out, err := runSetup(t, repo, root, "Pilot", "coordinator")
+	if err == nil || !strings.Contains(out, "roster not read after the session was recorded: HTTP 500") || !strings.Contains(out, "Status: blocked") {
+		t.Fatalf("%v\n%s", err, out)
+	}
+	if st := readState(t, root, repo); st == nil || st.SessionID != "sess-1" {
+		t.Fatalf("membership lost: %+v", st)
+	}
+	out, err = runSetup(t, repo, root, "Pilot", "coordinator")
+	if err != nil || !strings.Contains(out, "already joined as coordinator: session sess-1") || h.count("/join") != 1 {
+		t.Fatalf("%v\n%s", err, out)
+	}
+	// A worker whose heartbeat is refused (enrollment revoked between join
+	// and entry) is not "announced available".
+	h2, ts2 := newFakeTeamHub(t)
+	h2.heartbeat = 403
+	repo2, root2 := setupCheckout(t, h2, ts2)
+	out, err = runSetup(t, repo2, root2, "Pilot", "worker")
+	if err == nil || !strings.Contains(out, "heartbeat refused: HTTP 403") || strings.Contains(out, "announced available") {
+		t.Fatalf("%v\n%s", err, out)
+	}
+	if st := readState(t, root2, repo2); st == nil || st.SessionID != "sess-1" {
+		t.Fatalf("membership lost: %+v", st)
+	}
+}
+
+func TestTeamSetupIncompleteRosterNeverJoinsAgain(t *testing.T) {
+	h, ts := newFakeTeamHub(t)
+	repo, root := setupCheckout(t, h, ts)
+	if out, err := runSetup(t, repo, root, "Pilot", "worker"); err != nil {
+		t.Fatal(err, out)
+	}
+	// More historical pages than the command reads: our row is never
+	// reached, and that is an incomplete read, not a missing membership.
+	h.rosterPages = 40
+	out, err := runSetup(t, repo, root, "Pilot", "worker")
+	if err == nil || !strings.Contains(out, "roster read incomplete") || h.count("/join") != 1 {
+		t.Fatalf("%v joins %d\n%s", err, h.count("/join"), out)
+	}
+	if st := readState(t, root, repo); st == nil || st.SessionID != "sess-1" {
+		t.Fatalf("membership lost: %+v", st)
+	}
+	// Two pages that do include our row verify normally.
+	h.rosterPages = 2
+	out, err = runSetup(t, repo, root, "Pilot", "worker")
+	if err != nil || !strings.Contains(out, "already joined as worker: session sess-1") {
 		t.Fatalf("%v\n%s", err, out)
 	}
 }

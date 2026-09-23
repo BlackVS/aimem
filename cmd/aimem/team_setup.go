@@ -461,27 +461,45 @@ func (s *teamSetup) reconcile() bool {
 		s.opts.profile, s.opts.platformSet = saved.Profile, saved.Profile.Platform != "unknown"
 	}
 	if saved != nil && s.opts.newSession {
-		s.check("session", "ok", fmt.Sprintf("discarding saved session %s at your request (--new-session); it stays open on the hub until it leaves", saved.SessionID), "")
+		what := "saved session " + saved.SessionID
+		if saved.SessionID == "" {
+			what = "the unconfirmed join (if it landed, that session stays open on the hub until an operator recovers it)"
+		}
+		s.check("session", "ok", fmt.Sprintf("discarding %s at your request (--new-session)", what), "")
 		saved = nil
 	}
-	if saved != nil && saved.SessionID != "" {
+	if saved != nil {
+		// The saved record, confirmed or pending, binds this checkout to one
+		// team and role; a different request is a separate decision, never a
+		// silent second membership.
+		held := "already holds a " + saved.Role + " session (" + saved.SessionID + ")"
+		if saved.SessionID == "" {
+			held = "has an unconfirmed " + saved.Role + " join pending"
+		}
 		if saved.Role != s.opts.role {
-			return s.fail("session", fmt.Sprintf("this checkout already holds a %s session (%s) and a role cannot change in place", saved.Role, saved.SessionID), "leave that session first (aimem teams leave / team_leave with the saved handle), or re-run with --new-session for a separate "+s.opts.role+" session")
+			return s.fail("session", fmt.Sprintf("this checkout %s and a role cannot change in place", held), "re-run with the saved role to verify or replay it, leave that session first (aimem teams leave / team_leave with the saved handle), or re-run with --new-session for a separate "+s.opts.role+" session")
 		}
 		if saved.Team != s.opts.team && saved.TeamID != s.opts.team {
-			return s.fail("session", fmt.Sprintf("this checkout already holds a session in team %q (%s)", saved.Team, saved.SessionID), "leave that session first, or re-run with --new-session")
+			return s.fail("session", fmt.Sprintf("this checkout %s in team %q", held, saved.Team), "re-run with that team, leave that session first, or re-run with --new-session")
 		}
 		s.state = saved
-		return s.verifySaved()
+		switch {
+		case saved.SessionID != "" && saved.ResumeKey != "":
+			// A resume was sent and its result never landed here. The hub
+			// replays the original result for the original key even after
+			// the generation moved, so it must run before any read with the
+			// old handle.
+			return s.resume("replaying an unconfirmed resume")
+		case saved.SessionID != "":
+			return s.verifySaved()
+		case saved.JoinKey != "":
+			// A join was sent and its result never landed here: the identical
+			// request (key, team, role, profile) replays instead of creating
+			// a second session.
+			return s.join(saved.JoinKey, saved.Team, saved.Profile)
+		}
 	}
-	if saved != nil && saved.JoinKey != "" {
-		// A join was sent and its result never landed here: retry with the
-		// original key and content so an uncertain write replays instead of
-		// creating a second session.
-		s.state = saved
-		return s.join(saved.JoinKey, saved.Profile)
-	}
-	return s.join("", s.opts.profile)
+	return s.join("", s.opts.team, s.opts.profile)
 }
 
 // verifySaved reads the roster with the saved handle: the only
@@ -491,9 +509,9 @@ func (s *teamSetup) reconcile() bool {
 // that over without --resume.
 func (s *teamSetup) verifySaved() bool {
 	st := s.state
-	me, roster, status, body, err := s.roster(st.TeamID, st.SessionID, st.Generation)
+	me, _, status, body, err := s.roster(st.TeamID, st.SessionID, st.Generation)
 	if err != nil {
-		return s.fail("session", "hub unreachable while verifying the saved session: "+err.Error(), "retry when the hub is reachable")
+		return s.fail("session", "could not verify the saved session: "+err.Error(), "retry; the saved handle is kept")
 	}
 	switch {
 	case status == http.StatusOK && me != nil && me.State == "active":
@@ -513,15 +531,16 @@ func (s *teamSetup) verifySaved() bool {
 		s.check("session", "ok", fmt.Sprintf("already joined as %s: session %s, generation %d, last seen %s (no second join; --resume would fence this live handle)", me.Role, me.ID, me.Generation, me.LastSeenAt), "")
 		st.VerifiedAt = time.Now().UTC().Format(time.RFC3339)
 		s.saveState()
-		return s.enterRole(me, roster)
+		return s.enterRole(me)
 	case status == http.StatusOK && me != nil:
 		s.check("session", "ok", fmt.Sprintf("saved session %s has %s; joining afresh", me.ID, me.State), "")
 		s.state = nil
-		return s.join("", s.opts.profile)
+		return s.join("", s.opts.team, s.opts.profile)
 	case status == http.StatusOK:
-		s.check("session", "warn", fmt.Sprintf("saved session %s is not on the roster; joining afresh", st.SessionID), "")
-		s.state = nil
-		return s.join("", s.opts.profile)
+		// The hub serves the roster only to a bound active session, so a
+		// successful read without our row means the read was incomplete,
+		// never that the membership is gone.
+		return s.fail("session", fmt.Sprintf("saved session %s was not found in the roster pages read; the membership is kept and nothing was joined", st.SessionID), "retry; if this persists, read the roster with the MCP handle from the state file")
 	case status == http.StatusConflict:
 		// The hub refuses every command on a closed session and on a stale
 		// generation alike, so the saved handle cannot tell an explicit leave
@@ -532,7 +551,7 @@ func (s *teamSetup) verifySaved() bool {
 		if st.Role == "coordinator" {
 			s.check("session", "warn", fmt.Sprintf("saved handle (session %s, generation %d) is closed or was advanced by another process; joining afresh, which the hub refuses while that session holds the slot", st.SessionID, st.Generation), "")
 			s.state = nil
-			return s.join("", s.opts.profile)
+			return s.join("", s.opts.team, s.opts.profile)
 		}
 		return s.fail("session", fmt.Sprintf("saved handle (session %s, generation %d) is closed or was advanced by another process: %s", st.SessionID, st.Generation, hubErrorText(body)), "if that process is gone (or you left explicitly outside this command), re-run with --new-session for a separate worker session; nothing was taken over")
 	case status == http.StatusForbidden:
@@ -551,7 +570,10 @@ func (s *teamSetup) resume(why string) bool {
 	// with the same key and replays its original result.
 	if st.ResumeKey == "" {
 		st.ResumeKey = uuidv7.New()
-		s.saveState()
+		if err := s.saveState(); err != nil {
+			st.ResumeKey = ""
+			return s.fail("session", "cannot record the resume key before sending it: "+err.Error(), "make the state root writable (aimem state-root) and re-run; nothing was sent")
+		}
 	}
 	status, body, err := s.teamCall("team_resume", map[string]any{"team": st.TeamID, "session_id": st.SessionID, "generation": st.Generation, "idempotency_key": st.ResumeKey})
 	if err != nil {
@@ -564,19 +586,18 @@ func (s *teamSetup) resume(why string) bool {
 	}
 	me, ok := s.sessionOf(body)
 	if !ok {
-		return false
+		return false // the key stays recorded; the next run replays it
 	}
 	st.ResumeKey = ""
 	s.recordSession(me)
 	s.check("session", "ok", fmt.Sprintf("resumed session %s (%s): generation %d; the old handle is fenced. Reconcile before retrying anything: which commands the old process acknowledged, which files changed, whether a child process still runs", me.ID, why, me.Generation), "")
-	_, roster, _, _, _ := s.roster(me.TeamID, me.ID, me.Generation)
-	return s.enterRole(me, roster)
+	return s.enterRole(me)
 }
 
 // join creates the session. The idempotency key is saved before the
 // request so an uncertain result is retried with the same key, which
 // replays the original session instead of creating a second one.
-func (s *teamSetup) join(key string, profile store.TeamProfile) bool {
+func (s *teamSetup) join(key, team string, profile store.TeamProfile) bool {
 	if !s.opts.platformSet && profile.Platform == "unknown" {
 		s.check("profile", "warn", "platform not given; declared as unknown (pass --platform from the entry point that knows the client)", "")
 	}
@@ -584,22 +605,26 @@ func (s *teamSetup) join(key string, profile store.TeamProfile) bool {
 	if key == "" {
 		key = uuidv7.New()
 	}
-	s.state = &teamSetupState{Version: 1, Repo: s.sel.Repo, Project: s.sel.Project, HubName: s.sel.HubName, HubURL: s.sel.Hub.URL, TokenID: s.identity.TokenID, User: s.identity.Name, Team: s.opts.team, Role: s.opts.role, Profile: profile, JoinKey: key}
+	s.state = &teamSetupState{Version: 1, Repo: s.sel.Repo, Project: s.sel.Project, HubName: s.sel.HubName, HubURL: s.sel.Hub.URL, TokenID: s.identity.TokenID, User: s.identity.Name, Team: team, Role: s.opts.role, Profile: profile, JoinKey: key}
 	if err := s.saveState(); err != nil {
-		return s.fail("session", "cannot write the session state file: "+err.Error(), "make the state root writable (aimem state-root) and re-run")
+		return s.fail("session", "cannot record the join key before sending it: "+err.Error(), "make the state root writable (aimem state-root) and re-run; nothing was sent")
 	}
-	status, body, err := s.teamCall("team_join", map[string]any{"team": s.opts.team, "role": s.opts.role, "profile": profile, "idempotency_key": key})
+	status, body, err := s.teamCall("team_join", map[string]any{"team": team, "role": s.opts.role, "profile": profile, "idempotency_key": key})
 	if err != nil {
 		return s.fail("session", "join not confirmed (hub unreachable): "+err.Error(), "re-run when the hub is reachable; the same join is retried with its original key")
 	}
 	if status != http.StatusCreated && status != http.StatusOK {
+		msg := hubErrorText(body)
+		if status == http.StatusConflict && retry && strings.Contains(msg, "idempotency key") {
+			// The replay was built from the saved request, so this means the
+			// record no longer matches what the hub holds for that key. The
+			// original session, if it exists, must not be shadowed by a new one.
+			return s.fail("session", "the unconfirmed join could not be replayed: "+msg, "an operator can find the session for this credential in the team audit (aimem teams events); re-run with --new-session only to abandon it")
+		}
 		// A definite refusal: the hub created nothing, so the pending key is
 		// dropped and the next run sends a fresh join with current flags.
-		msg := hubErrorText(body)
 		s.forgetJoin()
 		switch {
-		case status == http.StatusConflict && retry && strings.Contains(msg, "idempotency key"):
-			return s.join("", s.opts.profile)
 		case status == http.StatusConflict && strings.Contains(msg, "coordinator slot"):
 			return s.fail("session", "the coordinator slot is occupied: "+msg, "the current coordinator must leave or hand off (its own live handle, or an admin handoff with reconciliation on the hub host); a slot is never freed by a timeout. If another checkout on this machine holds that session, run setup there with --resume and leave from it")
 		case status == http.StatusForbidden && strings.Contains(msg, "enrollment"):
@@ -620,16 +645,22 @@ func (s *teamSetup) join(key string, profile store.TeamProfile) bool {
 	s.state.JoinedAt = time.Now().UTC().Format(time.RFC3339)
 	s.recordSession(me)
 	s.check("session", "ok", fmt.Sprintf("joined as %s: session %s, generation %d", me.Role, me.ID, me.Generation), "")
-	_, roster, _, _, _ := s.roster(me.TeamID, me.ID, me.Generation)
-	return s.enterRole(me, roster)
+	return s.enterRole(me)
 }
 
 // enterRole is the last step: the coordinator reads the roster, the worker
-// announces availability and reads its inbox once, bounded.
-func (s *teamSetup) enterRole(me *teamSetupSession, roster []teamSetupSession) bool {
+// announces availability, reads its reserved attempt and its inbox once,
+// bounded. Every request here is checked: the membership is already
+// recorded, so a refusal is reported as the failure it is and the next run
+// verifies the saved handle instead of claiming an entry that did not happen.
+func (s *teamSetup) enterRole(me *teamSetupSession) bool {
 	s.report.Session = me
-	s.report.Roster = roster
 	handle := fmt.Sprintf("team_id %s, session_id %s, generation %d", me.TeamID, me.ID, me.Generation)
+	_, roster, status, body, err := s.roster(me.TeamID, me.ID, me.Generation)
+	if err != nil || status != http.StatusOK {
+		return s.fail("roster", "roster not read after the session was recorded: "+hubOutcome(status, body, err), "membership is saved; re-run to verify it (enrollment or grant changes show up here as a refusal)")
+	}
+	s.report.Roster = roster
 	if me.Role == "coordinator" {
 		s.report.Next = append(s.report.Next,
 			"coordinator playbook (docs/TEAM-PLAYBOOKS.md) step 2: select work the process allows; offer one attempt per task with suitability and cost rationale",
@@ -638,14 +669,14 @@ func (s *teamSetup) enterRole(me *teamSetupSession, roster []teamSetupSession) b
 			"MCP handle: "+handle)
 		return true
 	}
-	if _, _, err := s.teamCall("team_heartbeat", map[string]any{"team": me.TeamID, "session_id": me.ID, "generation": me.Generation, "availability": "available", "idempotency_key": uuidv7.New()}); err != nil {
-		s.check("availability", "warn", "heartbeat not confirmed: "+err.Error(), "")
-	} else {
-		s.check("availability", "ok", "announced available", "")
+	status, body, err = s.teamCall("team_heartbeat", map[string]any{"team": me.TeamID, "session_id": me.ID, "generation": me.Generation, "availability": "available", "idempotency_key": uuidv7.New()})
+	if err != nil || status != http.StatusOK {
+		return s.fail("availability", "heartbeat refused: "+hubOutcome(status, body, err), "membership is saved; re-run to verify it")
 	}
+	s.check("availability", "ok", "announced available", "")
 	// The reserved attempt is the authoritative ownership record; an old
 	// receipt or a saved note is not. Read it before any local work.
-	status, body, err := s.teamCall("team_reserved", map[string]any{"team": me.TeamID, "session_id": me.ID, "generation": me.Generation})
+	status, body, err = s.teamCall("team_reserved", map[string]any{"team": me.TeamID, "session_id": me.ID, "generation": me.Generation})
 	switch {
 	case err == nil && status == http.StatusOK:
 		var res struct {
@@ -663,22 +694,21 @@ func (s *teamSetup) enterRole(me *teamSetupSession, roster []teamSetupSession) b
 	case err == nil && status == http.StatusNotFound:
 		s.check("reserved", "ok", "no attempt reserved for this session", "")
 	default:
-		s.check("reserved", "warn", "reserved attempt not read (HTTP "+fmt.Sprint(status)+"): "+hubErrorText(body), "")
+		return s.fail("reserved", "reserved attempt not read: "+hubOutcome(status, body, err), "membership is saved; re-run to verify it")
 	}
 	status, body, err = s.teamCall("team_inbox", map[string]any{"team": me.TeamID, "session_id": me.ID, "generation": me.Generation, "after": 0, "wait_seconds": 0})
-	inbox := &teamSetupInbox{Note: "one bounded read; nothing wakes an idle member. Poll team_inbox with wait_seconds up to 25 and ack what you read"}
-	if err == nil && status == http.StatusOK {
-		var page struct {
-			Messages   []json.RawMessage `json:"messages"`
-			NextCursor int64             `json:"next_cursor"`
-			HasMore    bool              `json:"has_more"`
-		}
-		json.Unmarshal(body, &page)
-		inbox.Unacknowledged, inbox.NextCursor, inbox.HasMore = len(page.Messages), page.NextCursor, page.HasMore
-		s.check("inbox", "ok", fmt.Sprintf("%d unacknowledged message(s) waiting", len(page.Messages)), "")
-	} else {
-		s.check("inbox", "warn", "inbox read not confirmed", "")
+	if err != nil || status != http.StatusOK {
+		return s.fail("inbox", "inbox not read: "+hubOutcome(status, body, err), "membership is saved; re-run to verify it")
 	}
+	inbox := &teamSetupInbox{Note: "one bounded read; nothing wakes an idle member. Poll team_inbox with wait_seconds up to 25 and ack what you read"}
+	var page struct {
+		Messages   []json.RawMessage `json:"messages"`
+		NextCursor int64             `json:"next_cursor"`
+		HasMore    bool              `json:"has_more"`
+	}
+	json.Unmarshal(body, &page)
+	inbox.Unacknowledged, inbox.NextCursor, inbox.HasMore = len(page.Messages), page.NextCursor, page.HasMore
+	s.check("inbox", "ok", fmt.Sprintf("%d unacknowledged message(s) waiting", len(page.Messages)), "")
 	s.report.Inbox = inbox
 	s.report.Next = append(s.report.Next,
 		"worker playbook (docs/TEAM-PLAYBOOKS.md) step 2: wait for an addressed offer; never select, claim or edit backlog tasks while joined, even while the coordinator is disconnected",
@@ -722,11 +752,22 @@ func (s *teamSetup) roster(teamID, sessionID string, generation int64) (*teamSet
 		}
 		all = append(all, res.Members...)
 		if res.NextCursor == "" || len(res.Members) == 0 {
-			break
+			return me, all, http.StatusOK, nil, nil
 		}
 		after = res.NextCursor
 	}
-	return me, all, http.StatusOK, nil, nil
+	// A cursor is still open: the read is incomplete, and nothing may be
+	// decided from a roster that has not shown every row.
+	return nil, nil, 0, nil, errors.New("roster read incomplete: more pages than this command reads; nothing was decided from it")
+}
+
+// hubOutcome renders a team request's result for a failure line: the
+// transport error, or the status with the hub's message.
+func hubOutcome(status int, body []byte, err error) string {
+	if err != nil {
+		return err.Error()
+	}
+	return fmt.Sprintf("HTTP %d: %s", status, hubErrorText(body))
 }
 
 func (s *teamSetup) sessionOf(body []byte) (*teamSetupSession, bool) {

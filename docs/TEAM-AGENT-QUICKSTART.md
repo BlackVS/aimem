@@ -108,8 +108,16 @@ frees the slot), success means it had left. A worker's fresh join is never
 refused, so a duplicate would be silent: the command stops and
 `--new-session` makes that choice explicit. `aimem teams leave` through the
 CLI clears the saved handle, so the next setup joins afresh without the
-question. An unconfirmed join or resume keeps its retry key and is replayed
-on the next run.
+question. An unconfirmed join or resume (the reply was lost or unreadable)
+keeps its retry key and the exact request it sent, and the next run replays
+that request first, before any read with the old handle; while such a replay
+is pending, a different team or role is refused rather than sent under the
+old key or joined afresh, and `--new-session` is the only way to abandon it.
+The role entry (roster, heartbeat, reserved attempt, inbox) is checked as
+well: a refusal there is reported as blocked with the membership kept, never
+as a completed entry. A roster read that runs out of pages before showing
+the command's own row is incomplete, not a missing membership, and never
+leads to a second join.
 A model is declared only with `--model-id` and a `--model-source` naming who
 stated it; without them it stays `unknown`. A re-run without profile flags
 keeps the declaration the first run saved. Client integration repair and
