@@ -149,7 +149,32 @@ skill is a directory holding `SKILL.md` in a location that client reads
 Installing skills and the user-level pieces (binary, checkpoint hooks, the
 OpenCode plugin) stay with the installers.
 
-### The `/join_team` entry points
+### Continuing after a restart
+
+`aimem teams continue [TEAM] [--fence] [--json]` is the restart command: it
+verifies the binding, the credential and the hub, then the saved session (a
+live one is verified as is, a suspect one is resumed with a persisted retry
+key, a refused handle is reported), and then reports the duties the hub
+holds for it: the reserved attempt with its assignment title and state
+mapped to the next protocol step (OFFERED: accept or decline; RUNNING:
+continue; BLOCKED: resume-work when the need is met; STOP_REQUESTED:
+stopped; STOPPED: wait for close-stop; SUBMITTED: wait for the review), a
+reconciliation line (HEAD against the base commit recorded at the last
+verification, uncommitted changes, the reminder that a child process of the
+old session is yours to check and that an uncertain command is retried only
+with its original key), the unacknowledged inbox listed at cursor 0 (kind,
+sender or hub lifecycle operation, attempt, task, excerpt) with the next
+cursor and nothing acknowledged, and the roster. It never joins: a
+membership that ended, whether by an explicit leave (a leave through the
+CLI or the stdio MCP tool clears the saved state) or by a closed or advanced
+handle, is reported, and `/join_team` is the only way back in. `--fence`
+resumes a session that is still heartbeating, for the case where the old
+process of your own is known to be gone. A repeated run against a live
+session changes nothing on the hub. Nothing here wakes an idle agent: the
+command reads once, bounded, and the agent polls `team_inbox` itself
+afterwards.
+
+### The `/join_team` and `/resume_team` entry points
 
 Each client gets a short native entry point that wraps the command, so a
 member session starts with `/join_team TEAM [worker|coordinator]` and no
@@ -162,10 +187,17 @@ teams setup` repeats it on every run:
 
 | Client | Path | Invocation |
 |---|---|---|
-| Claude Code | `.claude/skills/join_team/SKILL.md` | `/join_team TEAM [ROLE]`; also `claude -p "/join_team TEAM ROLE"` |
-| OpenCode | `.opencode/commands/join_team.md` | `/join_team TEAM [ROLE]`; also `opencode run --command join_team "TEAM ROLE"` |
-| Codex (project) | `.agents/skills/join-team/SKILL.md` | mention `$join-team TEAM [ROLE]` (or `/skills`); also in a `codex exec` prompt |
-| Codex (user) | `~/.codex/prompts/join_team.md`, written only when `~/.codex` exists | `/prompts:join_team TEAM [ROLE]` (Codex custom prompts live only in the Codex home, not in repositories) |
+| Claude Code | `.claude/skills/join_team/SKILL.md`, `.claude/skills/resume_team/SKILL.md` | `/join_team TEAM [ROLE]`, `/resume_team [TEAM]`; also `claude -p "/join_team TEAM ROLE"` |
+| OpenCode | `.opencode/commands/join_team.md`, `.opencode/commands/resume_team.md` | `/join_team TEAM [ROLE]`, `/resume_team [TEAM]`; also `opencode run --command join_team "TEAM ROLE"` |
+| Codex (project) | `.agents/skills/join-team/SKILL.md`, `.agents/skills/resume-team/SKILL.md` | mention `$join-team TEAM [ROLE]` or `$resume-team [TEAM]` (or `/skills`); also in a `codex exec` prompt |
+| Codex (user) | `~/.codex/prompts/join_team.md`, `~/.codex/prompts/resume_team.md`, written only when `~/.codex` exists | `/prompts:join_team TEAM [ROLE]`, `/prompts:resume_team [TEAM]` (Codex custom prompts live only in the Codex home, not in repositories) |
+
+`/resume_team` wraps `aimem teams continue`: it tells the agent to run it with
+`--json`, reconcile before retrying anything, and take up the reported
+duties in order (the reserved attempt per its state, then the unacknowledged
+messages with `team_ack` only for the consumed ones, then the role's
+waiting or coordinating loop). It states that the command is the explicit
+step: client startup alone and an idle model do not poll or wake.
 
 The text tells the agent to declare its platform and only a
 runtime-reported model, run `aimem teams setup` with `--json`, read the

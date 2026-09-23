@@ -20,8 +20,17 @@ func TestInstallCommandsWritesRefreshesAndRespectsForeignFiles(t *testing.T) {
 			written++
 		}
 	}
-	if written != 3 {
+	if written != 6 { // two entry points, three checkout targets each
 		t.Fatalf("written %d: %+v", written, out)
+	}
+	resume := read(t, filepath.Join(dir, ".claude", "skills", "resume_team", "SKILL.md"))
+	for _, want := range []string{"name: resume_team", "argument-hint: [TEAM]", "aimem teams continue [TEAM] --json", "never joins", "Bash(aimem teams continue *)", "STOP_REQUESTED: stop safely"} {
+		if !strings.Contains(resume, want) {
+			t.Fatalf("resume skill missing %q:\n%s", want, resume)
+		}
+	}
+	if !strings.Contains(read(t, filepath.Join(dir, ".agents", "skills", "resume-team", "SKILL.md")), "name: resume-team") {
+		t.Fatal("codex resume skill")
 	}
 	if _, err := os.Stat(filepath.Join(home, ".codex", "prompts", "join_team.md")); err == nil {
 		t.Fatal("prompt written without a Codex home")
@@ -76,6 +85,9 @@ func TestInstallCommandsWritesRefreshesAndRespectsForeignFiles(t *testing.T) {
 	prompt := read(t, filepath.Join(home, ".codex", "prompts", "join_team.md"))
 	if !strings.Contains(prompt, "argument-hint: TEAM [worker|coordinator]") || !strings.Contains(prompt, "--platform codex") {
 		t.Fatalf("codex prompt:\n%s", prompt)
+	}
+	if _, err := os.Stat(filepath.Join(home, ".codex", "prompts", "resume_team.md")); err != nil {
+		t.Fatal("codex resume prompt not written with a Codex home")
 	}
 }
 

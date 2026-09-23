@@ -8,12 +8,15 @@ import (
 	"strings"
 )
 
-// The /join_team entry point is one body, rendered once per client with
-// that client's frontmatter and names. The body lives in the binary so
-// every checkout gets the same text and an upgrade refreshes it.
+// Each entry point is one body, rendered once per client with that
+// client's frontmatter and names. The bodies live in the binary so every
+// checkout gets the same text and an upgrade refreshes it.
 //
 //go:embed assets/join_team.md
 var joinTeamBody string
+
+//go:embed assets/resume_team.md
+var resumeTeamBody string
 
 // managedMarker heads every generated asset; a file carrying it is owned
 // by aimem and is rewritten whenever the rendered content changes.
@@ -30,23 +33,39 @@ type commandAsset struct {
 	Content string
 }
 
-func renderJoinTeam(frontmatter, platform, versionCmd string) string {
-	body := strings.ReplaceAll(joinTeamBody, "{{PLATFORM}}", platform)
+const resumeTeamDescription = "Continue the aimem team membership this checkout already holds after a client restart or compaction (aimem teams continue): verify or resume the session and take up the reserved attempt and unacknowledged inbox. Use only when the user asks to resume, continue or pick up team work; it never joins."
+
+func render(body, frontmatter, platform, versionCmd string) string {
+	body = strings.ReplaceAll(body, "{{PLATFORM}}", platform)
 	body = strings.ReplaceAll(body, "{{VERSION_CMD}}", versionCmd)
 	return frontmatter + "\n" + managedMarker + "\n\n" + body
 }
 
-func commandAssets() []commandAsset {
-	claude := "---\nname: join_team\ndescription: " + joinTeamDescription + "\nargument-hint: TEAM [worker|coordinator]\nallowed-tools: Bash(aimem teams setup *) Bash(claude --version)\ndisable-model-invocation: true\n---\n"
-	opencode := "---\ndescription: " + joinTeamDescription + "\n---\n"
-	codexSkill := "---\nname: join-team\ndescription: " + joinTeamDescription + " Invoked as $join-team TEAM [worker|coordinator].\n---\n"
-	codexPrompt := "---\ndescription: " + joinTeamDescription + "\nargument-hint: TEAM [worker|coordinator]\n---\n"
+// entryPoint describes one command in every client's terms.
+type entryPoint struct {
+	body                            string
+	claudeName, codexName, fileName string // join_team / join-team / join_team
+	description, argumentHint       string
+	allowedTools                    string
+}
+
+func (e entryPoint) assets() []commandAsset {
+	claude := "---\nname: " + e.claudeName + "\ndescription: " + e.description + "\nargument-hint: " + e.argumentHint + "\nallowed-tools: " + e.allowedTools + "\ndisable-model-invocation: true\n---\n"
+	opencode := "---\ndescription: " + e.description + "\n---\n"
+	codexSkill := "---\nname: " + e.codexName + "\ndescription: " + e.description + " Invoked as $" + e.codexName + " " + e.argumentHint + ".\n---\n"
+	codexPrompt := "---\ndescription: " + e.description + "\nargument-hint: " + e.argumentHint + "\n---\n"
 	return []commandAsset{
-		{Rel: filepath.Join(".claude", "skills", "join_team", "SKILL.md"), Label: ".claude/skills/join_team/SKILL.md (/join_team in Claude Code)", Content: renderJoinTeam(claude, "claude-code", "claude --version")},
-		{Rel: filepath.Join(".opencode", "commands", "join_team.md"), Label: ".opencode/commands/join_team.md (/join_team in OpenCode)", Content: renderJoinTeam(opencode, "opencode", "opencode --version")},
-		{Rel: filepath.Join(".agents", "skills", "join-team", "SKILL.md"), Label: ".agents/skills/join-team/SKILL.md ($join-team in Codex)", Content: renderJoinTeam(codexSkill, "codex", "codex --version")},
-		{Rel: filepath.Join(".codex", "prompts", "join_team.md"), Label: "~/.codex/prompts/join_team.md (/prompts:join_team in Codex)", User: true, Content: renderJoinTeam(codexPrompt, "codex", "codex --version")},
+		{Rel: filepath.Join(".claude", "skills", e.claudeName, "SKILL.md"), Label: ".claude/skills/" + e.claudeName + "/SKILL.md (/" + e.claudeName + " in Claude Code)", Content: render(e.body, claude, "claude-code", "claude --version")},
+		{Rel: filepath.Join(".opencode", "commands", e.fileName+".md"), Label: ".opencode/commands/" + e.fileName + ".md (/" + e.fileName + " in OpenCode)", Content: render(e.body, opencode, "opencode", "opencode --version")},
+		{Rel: filepath.Join(".agents", "skills", e.codexName, "SKILL.md"), Label: ".agents/skills/" + e.codexName + "/SKILL.md ($" + e.codexName + " in Codex)", Content: render(e.body, codexSkill, "codex", "codex --version")},
+		{Rel: filepath.Join(".codex", "prompts", e.fileName+".md"), Label: "~/.codex/prompts/" + e.fileName + ".md (/prompts:" + e.fileName + " in Codex)", User: true, Content: render(e.body, codexPrompt, "codex", "codex --version")},
 	}
+}
+
+func commandAssets() []commandAsset {
+	join := entryPoint{body: joinTeamBody, claudeName: "join_team", codexName: "join-team", fileName: "join_team", description: joinTeamDescription, argumentHint: "TEAM [worker|coordinator]", allowedTools: "Bash(aimem teams setup *) Bash(aimem teams mine *) Bash(claude --version)"}
+	resume := entryPoint{body: resumeTeamBody, claudeName: "resume_team", codexName: "resume-team", fileName: "resume_team", description: resumeTeamDescription, argumentHint: "[TEAM]", allowedTools: "Bash(aimem teams continue *) Bash(git status *)"}
+	return append(join.assets(), resume.assets()...)
 }
 
 // InstallCommands writes or refreshes the /join_team entry points for the

@@ -2,13 +2,16 @@
 name: join_team
 description: Join an aimem team from this checkout as worker or coordinator with verified onboarding (aimem teams setup). Use only when the user asks to join a team, become the coordinator or a worker, or onboard into the team pilot.
 argument-hint: TEAM [worker|coordinator]
-allowed-tools: Bash(aimem teams setup *) Bash(claude --version)
+allowed-tools: Bash(aimem teams setup *) Bash(aimem teams mine *) Bash(claude --version)
 disable-model-invocation: true
 ---
 
 <!-- managed by aimem (`aimem teams commands`): regenerated from the aimem binary; change the source in the aimem repository, not this file -->
 
-Join an aimem team from this checkout with verified onboarding.
+Join an aimem team from this checkout with verified onboarding. If this
+checkout already holds a membership (a restart, a compaction), `/resume_team`
+is the command; the setup below recognizes a saved session and never joins
+twice, but `/resume_team` also restores the duties.
 
 Arguments: `$ARGUMENTS` = TEAM [worker|coordinator]. TEAM is the team's
 readable name (quote it if it has spaces) or its ID. If TEAM is missing, run

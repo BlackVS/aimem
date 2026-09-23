@@ -24,6 +24,7 @@ import (
 	"aimem/internal/ident"
 	"aimem/internal/store"
 	"aimem/internal/taskcred"
+	"aimem/internal/teamstate"
 )
 
 // TaskCallFunc performs one task-API request with the caller's own
@@ -303,7 +304,19 @@ func (s *srv) taskTool(ctx context.Context, name string, raw json.RawMessage) (s
 		return "", errors.New("task tools are not available on this server")
 	}
 	if strings.HasPrefix(name, "team_") {
-		return callTeamTool(ctx, tasks, s.project, name, raw)
+		out, err := callTeamTool(ctx, tasks, s.project, name, raw)
+		if err == nil && name == "team_leave" && s.taskSetup != nil {
+			// The stdio facade runs in the checkout: an explicit leave ends the
+			// saved membership, so a later setup or continue does not mistake
+			// the closed handle for a stale one.
+			var h struct {
+				SessionID string `json:"session_id"`
+			}
+			if json.Unmarshal(raw, &h) == nil && h.SessionID != "" {
+				teamstate.NoteLeave(".", mcpStateRoot(), h.SessionID)
+			}
+		}
+		return out, err
 	}
 	a, err := decodeTaskArgs(raw)
 	if err != nil {

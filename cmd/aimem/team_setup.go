@@ -2,8 +2,6 @@ package main
 
 import (
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"flag"
@@ -21,6 +19,7 @@ import (
 	"aimem/internal/process"
 	"aimem/internal/store"
 	"aimem/internal/taskcred"
+	"aimem/internal/teamstate"
 	"aimem/internal/uuidv7"
 	"aimem/internal/wiring"
 )
@@ -73,31 +72,6 @@ type teamSetupCheck struct {
 	Fix    string `json:"fix,omitempty"`
 }
 
-// teamSetupState is the nonsecret record of this checkout's membership,
-// bound to the exact repo, project, hub, URL and credential (token ID) so a
-// copied file or a rebound checkout never revives a foreign handle.
-type teamSetupState struct {
-	Version               int               `json:"version"`
-	Repo                  string            `json:"repo"`
-	Project               string            `json:"project"`
-	HubName               string            `json:"hub"`
-	HubURL                string            `json:"url"`
-	TokenID               string            `json:"token_id"`
-	User                  string            `json:"user"`
-	Team                  string            `json:"team"`
-	TeamID                string            `json:"team_id,omitempty"`
-	Role                  string            `json:"role"`
-	Profile               store.TeamProfile `json:"profile"`
-	JoinKey               string            `json:"join_key,omitempty"`
-	ResumeKey             string            `json:"resume_key,omitempty"`
-	SessionID             string            `json:"session_id,omitempty"`
-	Generation            int64             `json:"generation,omitempty"`
-	CoordinatorGeneration int64             `json:"coordinator_generation,omitempty"`
-	ProfileRevision       int64             `json:"profile_revision,omitempty"`
-	JoinedAt              string            `json:"joined_at,omitempty"`
-	VerifiedAt            string            `json:"verified_at,omitempty"`
-}
-
 // teamSetupSession is the public member view the hub returns.
 type teamSetupSession struct {
 	ID                    string `json:"id"`
@@ -131,19 +105,39 @@ type teamSetupReport struct {
 	ServerTime string             `json:"server_time,omitempty"`
 }
 
-// teamSetupReserved is the part of a reserved assignment the report needs.
+// teamSetupReserved is the part of a reserved assignment the report needs:
+// the hub's record of what this session owns, and what its state asks for.
 type teamSetupReserved struct {
-	ID     string `json:"id"`
-	TaskID string `json:"task_id"`
-	State  string `json:"state"`
+	ID        string `json:"id"`
+	TaskID    string `json:"task_id"`
+	State     string `json:"state"`
+	Title     string `json:"title,omitempty"`
+	UpdatedAt string `json:"updated_at,omitempty"`
+	Reason    string `json:"reason,omitempty"`
+	Next      string `json:"next,omitempty"`
+}
+
+// teamSetupMessage is one unacknowledged inbox message, summarized.
+type teamSetupMessage struct {
+	ID        string `json:"id"`
+	Sequence  int64  `json:"sequence"`
+	Kind      string `json:"kind"`
+	From      string `json:"from"` // sender label, or "hub" for a lifecycle message
+	Operation string `json:"operation,omitempty"`
+	AttemptID string `json:"attempt_id,omitempty"`
+	TaskID    string `json:"task_id,omitempty"`
+	State     string `json:"state,omitempty"`
+	CreatedAt string `json:"created_at,omitempty"`
+	Excerpt   string `json:"excerpt,omitempty"`
 }
 
 type teamSetupInbox struct {
-	Unacknowledged int    `json:"unacknowledged"`
-	NextCursor     int64  `json:"next_cursor"`
-	HasMore        bool   `json:"has_more"`
-	WaitSeconds    int    `json:"wait_seconds"`
-	Note           string `json:"note"`
+	Unacknowledged int                `json:"unacknowledged"`
+	NextCursor     int64              `json:"next_cursor"`
+	HasMore        bool               `json:"has_more"`
+	WaitSeconds    int                `json:"wait_seconds"`
+	Note           string             `json:"note"`
+	Messages       []teamSetupMessage `json:"messages,omitempty"`
 }
 
 // errTeamSetupBlocked is the exit-1 outcome; the report already said why.
@@ -290,8 +284,12 @@ type teamSetup struct {
 	sel       *taskcred.Selection
 	identity  teamSetupIdentity
 	report    *teamSetupReport
-	state     *teamSetupState
+	state     *teamstate.State
 	statePath string
+	// continueOnly is the `teams continue` mode: the saved membership is
+	// verified, resumed or reported as ended, but never replaced by a new
+	// join (a pending join's replay is not a new join).
+	continueOnly bool
 }
 
 type teamSetupIdentity struct {
@@ -317,13 +315,7 @@ func runTeamSetup(args []string, dir, root string, stdout io.Writer) error {
 	if joined {
 		s.report.Status = "joined"
 	}
-	if opts.jsonOut {
-		enc := json.NewEncoder(stdout)
-		enc.SetIndent("", "  ")
-		enc.Encode(s.report)
-	} else {
-		s.report.print(stdout)
-	}
+	s.report.print(stdout, opts.jsonOut)
 	if !joined {
 		return errTeamSetupBlocked
 	}
@@ -350,7 +342,7 @@ func (s *teamSetup) run() bool {
 	}
 	s.checkProcess()
 	s.checkBaseCommit()
-	s.statePath = teamSetupStatePath(s.root, s.sel.Repo)
+	s.statePath = teamstate.Path(s.root, s.sel.Repo)
 	s.report.StateFile = s.statePath
 	return s.reconcile()
 }
@@ -768,6 +760,9 @@ func (s *teamSetup) resume(why string) bool {
 // request so an uncertain result is retried with the same key, which
 // replays the original session instead of creating a second one.
 func (s *teamSetup) join(key, team string, profile store.TeamProfile) bool {
+	if s.continueOnly && key == "" {
+		return s.fail("session", "the saved membership has ended (the session left or was closed); nothing was joined", "join again on purpose with /join_team "+team+" "+s.opts.role+" (aimem teams setup); a restart never re-joins by itself")
+	}
 	if !s.opts.platformSet && profile.Platform == "unknown" {
 		s.check("profile", "warn", "platform not given; declared as unknown (pass --platform from the entry point that knows the client)", "")
 	}
@@ -775,7 +770,7 @@ func (s *teamSetup) join(key, team string, profile store.TeamProfile) bool {
 	if key == "" {
 		key = uuidv7.New()
 	}
-	s.state = &teamSetupState{Version: 1, Repo: s.sel.Repo, Project: s.sel.Project, HubName: s.sel.HubName, HubURL: s.sel.Hub.URL, TokenID: s.identity.TokenID, User: s.identity.Name, Team: team, Role: s.opts.role, Profile: profile, JoinKey: key}
+	s.state = &teamstate.State{Version: 1, Repo: s.sel.Repo, Project: s.sel.Project, HubName: s.sel.HubName, HubURL: s.sel.Hub.URL, TokenID: s.identity.TokenID, User: s.identity.Name, Team: team, Role: s.opts.role, Profile: profile, JoinKey: key}
 	if err := s.saveState(); err != nil {
 		return s.fail("session", "cannot record the join key before sending it: "+err.Error(), "make the state root writable (aimem state-root) and re-run; nothing was sent")
 	}
@@ -831,6 +826,19 @@ func (s *teamSetup) enterRole(me *teamSetupSession) bool {
 		return s.fail("roster", "roster not read after the session was recorded: "+hubOutcome(status, body, err), "membership is saved; re-run to verify it (enrollment or grant changes show up here as a refusal)")
 	}
 	s.report.Roster = roster
+	if me.Role != "coordinator" {
+		status, body, err = s.teamCall("team_heartbeat", map[string]any{"team": me.TeamID, "session_id": me.ID, "generation": me.Generation, "availability": "available", "idempotency_key": uuidv7.New()})
+		if err != nil || status != http.StatusOK {
+			return s.fail("availability", "heartbeat refused: "+hubOutcome(status, body, err), "membership is saved; re-run to verify it")
+		}
+		s.check("availability", "ok", "announced available", "")
+		if !s.readReserved(me) {
+			return false
+		}
+	}
+	if !s.readInbox(me) {
+		return false
+	}
 	if me.Role == "coordinator" {
 		s.report.Next = append(s.report.Next,
 			"coordinator playbook (docs/TEAM-PLAYBOOKS.md) step 2: select work the process allows; offer one attempt per task with suitability and cost rationale",
@@ -839,53 +847,175 @@ func (s *teamSetup) enterRole(me *teamSetupSession) bool {
 			"MCP handle: "+handle)
 		return true
 	}
-	status, body, err = s.teamCall("team_heartbeat", map[string]any{"team": me.TeamID, "session_id": me.ID, "generation": me.Generation, "availability": "available", "idempotency_key": uuidv7.New()})
-	if err != nil || status != http.StatusOK {
-		return s.fail("availability", "heartbeat refused: "+hubOutcome(status, body, err), "membership is saved; re-run to verify it")
+	if s.report.Reserved == nil {
+		s.report.Next = append(s.report.Next, "worker playbook (docs/TEAM-PLAYBOOKS.md) step 2: wait for an addressed offer; never select, claim or edit backlog tasks while joined, even while the coordinator is disconnected")
 	}
-	s.check("availability", "ok", "announced available", "")
-	// The reserved attempt is the authoritative ownership record; an old
-	// receipt or a saved note is not. Read it before any local work.
-	status, body, err = s.teamCall("team_reserved", map[string]any{"team": me.TeamID, "session_id": me.ID, "generation": me.Generation})
-	switch {
-	case err == nil && status == http.StatusOK:
-		var res struct {
-			Assignment *teamSetupReserved `json:"assignment"`
-			teamSetupReserved
-		}
-		json.Unmarshal(body, &res)
-		r := res.teamSetupReserved
-		if res.Assignment != nil {
-			r = *res.Assignment
-		}
-		s.report.Reserved = &r
-		s.check("reserved", "ok", fmt.Sprintf("attempt %s on task %s is %s for this session; reconcile local work against it before any command", r.ID, r.TaskID, r.State), "")
-		s.report.Next = append(s.report.Next, "reserved attempt "+r.ID+" ("+r.State+"): read it with team_assignment, then act per its state (accept or decline an offer; continue, block, stop or submit running work)")
-	case err == nil && status == http.StatusNotFound:
-		s.check("reserved", "ok", "no attempt reserved for this session", "")
-	default:
-		return s.fail("reserved", "reserved attempt not read: "+hubOutcome(status, body, err), "membership is saved; re-run to verify it")
-	}
-	status, body, err = s.teamCall("team_inbox", map[string]any{"team": me.TeamID, "session_id": me.ID, "generation": me.Generation, "after": 0, "wait_seconds": 0})
-	if err != nil || status != http.StatusOK {
-		return s.fail("inbox", "inbox not read: "+hubOutcome(status, body, err), "membership is saved; re-run to verify it")
-	}
-	inbox := &teamSetupInbox{Note: "one bounded read; nothing wakes an idle member. Poll team_inbox with wait_seconds up to 25 and ack what you read"}
-	var page struct {
-		Messages   []json.RawMessage `json:"messages"`
-		NextCursor int64             `json:"next_cursor"`
-		HasMore    bool              `json:"has_more"`
-	}
-	json.Unmarshal(body, &page)
-	inbox.Unacknowledged, inbox.NextCursor, inbox.HasMore = len(page.Messages), page.NextCursor, page.HasMore
-	s.check("inbox", "ok", fmt.Sprintf("%d unacknowledged message(s) waiting", len(page.Messages)), "")
-	s.report.Inbox = inbox
 	s.report.Next = append(s.report.Next,
-		"worker playbook (docs/TEAM-PLAYBOOKS.md) step 2: wait for an addressed offer; never select, claim or edit backlog tasks while joined, even while the coordinator is disconnected",
-		"poll team_inbox (after 0 on reconnect, wait_seconds up to 25), team_ack what you read, then accept or decline the offer with a reason",
+		"poll team_inbox (after the cursor above, wait_seconds up to 25), team_ack only what you have read and acted on, then accept or decline an offer with a reason",
 		"heartbeat every 30 s while active",
 		"MCP handle: "+handle)
 	return true
+}
+
+// readReserved reads the attempt the hub holds for this session, the
+// authoritative ownership record, and the assignment behind it; the
+// attempt's state, not any local note, says what comes next.
+func (s *teamSetup) readReserved(me *teamSetupSession) bool {
+	status, body, err := s.teamCall("team_reserved", map[string]any{"team": me.TeamID, "session_id": me.ID, "generation": me.Generation})
+	switch {
+	case err == nil && status == http.StatusNotFound:
+		s.check("reserved", "ok", "no attempt reserved for this session", "")
+		return true
+	case err != nil || status != http.StatusOK:
+		return s.fail("reserved", "reserved attempt not read: "+hubOutcome(status, body, err), "membership is saved; re-run to verify it")
+	}
+	var res struct {
+		Assignment *teamSetupReserved `json:"assignment"`
+		teamSetupReserved
+	}
+	json.Unmarshal(body, &res)
+	r := res.teamSetupReserved
+	if res.Assignment != nil {
+		r = *res.Assignment
+	}
+	if status, body, err = s.teamCall("team_assignment", map[string]any{"team": me.TeamID, "session_id": me.ID, "generation": me.Generation, "attempt": r.ID}); err == nil && status == http.StatusOK {
+		var full struct {
+			Assignment struct {
+				State        string `json:"state"`
+				UpdatedAt    string `json:"updated_at"`
+				Reason       string `json:"reason"`
+				Requirements struct {
+					Title string `json:"title"`
+				} `json:"requirements"`
+			} `json:"assignment"`
+		}
+		if json.Unmarshal(body, &full) == nil {
+			r.State, r.UpdatedAt, r.Reason, r.Title = orKeep(full.Assignment.State, r.State), full.Assignment.UpdatedAt, full.Assignment.Reason, full.Assignment.Requirements.Title
+		}
+	}
+	r.Next = attemptNext(r.State)
+	s.report.Reserved = &r
+	s.check("reserved", "ok", fmt.Sprintf("attempt %s on task %s (%s) is %s for this session", r.ID, r.TaskID, orUnknown(r.Title), r.State), "")
+	s.report.Next = append(s.report.Next, "reserved attempt "+r.ID+" ("+r.State+"): "+r.Next)
+	switch r.State {
+	case "RUNNING", "BLOCKED", "STOP_REQUESTED":
+		s.report.Next = append(s.report.Next, s.reconcileLine())
+	}
+	return true
+}
+
+// attemptNext is the worker playbook's step for one attempt state.
+func attemptNext(state string) string {
+	switch state {
+	case "OFFERED":
+		return "read it with team_assignment, then team_accept or team_decline with a reason; nothing is authorized until accepted"
+	case "RUNNING":
+		return "continue the accepted work in your isolated worktree from the recorded base commit; send progress at milestones, block (team_block) if you cannot proceed, submit (team_submit) with base commit, candidate commit, validation and evidence when done"
+	case "BLOCKED":
+		return "the need you named is open: read the inbox for the answer, then team_resume_work when it is met"
+	case "STOP_REQUESTED":
+		return "the coordinator asked you to stop: finish or abandon the current step safely, reconcile local execution, then team_stopped; never continue after acknowledging"
+	case "STOPPED":
+		return "you acknowledged a stop; wait for the coordinator's close-stop in the inbox and do nothing on this task"
+	case "SUBMITTED":
+		return "your result is under review; wait for accept or rework in the inbox (rework arrives as a new offer)"
+	}
+	return "read it with team_assignment and act per docs/TEAM-PLAYBOOKS.md"
+}
+
+// reconcileLine is the restart checklist: what to establish before any
+// command is retried, because the hub cannot see local effects.
+func (s *teamSetup) reconcileLine() string {
+	line := "reconcile before retrying anything: the attempt state above is what the hub acknowledged"
+	if s.state != nil && s.state.BaseCommit != "" && s.report.BaseCommit != "" {
+		if s.state.BaseCommit == s.report.BaseCommit {
+			line += "; HEAD is still the recorded base " + s.state.BaseCommit[:min(12, len(s.state.BaseCommit))]
+		} else {
+			line += "; HEAD " + s.report.BaseCommit[:min(12, len(s.report.BaseCommit))] + " differs from the recorded base " + s.state.BaseCommit[:min(12, len(s.state.BaseCommit))] + " (your candidate, or a change to reconcile)"
+		}
+	}
+	if dirty, _ := gitOutput(s.dir, "status", "--porcelain"); dirty != "" {
+		line += "; the checkout has uncommitted changes"
+	}
+	return line + "; check yourself whether a child process of the old session still runs; retry an uncertain command only with its original key and content"
+}
+
+// readInbox lists what this session has not acknowledged (one bounded
+// read, cursor 0, no wait). Nothing is acknowledged here.
+func (s *teamSetup) readInbox(me *teamSetupSession) bool {
+	status, body, err := s.teamCall("team_inbox", map[string]any{"team": me.TeamID, "session_id": me.ID, "generation": me.Generation, "after": 0, "limit": 50, "wait_seconds": 0})
+	if err != nil || status != http.StatusOK {
+		return s.fail("inbox", "inbox not read: "+hubOutcome(status, body, err), "membership is saved; re-run to verify it")
+	}
+	var page struct {
+		Messages []struct {
+			ID        string `json:"id"`
+			Sequence  int64  `json:"sequence"`
+			Kind      string `json:"kind"`
+			TaskID    string `json:"task_id"`
+			AttemptID string `json:"attempt_id"`
+			CreatedAt string `json:"created_at"`
+			Profile   struct {
+				Label string `json:"label"`
+			} `json:"profile"`
+			Lifecycle *struct {
+				Operation string `json:"operation"`
+				TaskID    string `json:"task_id"`
+				AttemptID string `json:"attempt_id"`
+				State     string `json:"state"`
+			} `json:"lifecycle"`
+			Payload struct {
+				Text string `json:"text"`
+			} `json:"payload"`
+		} `json:"messages"`
+		NextCursor int64 `json:"next_cursor"`
+		HasMore    bool  `json:"has_more"`
+	}
+	json.Unmarshal(body, &page)
+	inbox := &teamSetupInbox{Unacknowledged: len(page.Messages), NextCursor: page.NextCursor, HasMore: page.HasMore, Note: "one bounded read at cursor 0; nothing wakes an idle member and nothing here acknowledges. Poll team_inbox with wait_seconds up to 25 and team_ack only what you have read and acted on"}
+	for _, m := range page.Messages {
+		sm := teamSetupMessage{ID: m.ID, Sequence: m.Sequence, Kind: m.Kind, From: m.Profile.Label, TaskID: m.TaskID, AttemptID: m.AttemptID, CreatedAt: m.CreatedAt, Excerpt: excerpt(m.Payload.Text, 160)}
+		if m.Lifecycle != nil {
+			sm.From, sm.Operation, sm.State = "hub", m.Lifecycle.Operation, m.Lifecycle.State
+			if sm.TaskID == "" {
+				sm.TaskID = m.Lifecycle.TaskID
+			}
+			if sm.AttemptID == "" {
+				sm.AttemptID = m.Lifecycle.AttemptID
+			}
+		}
+		if sm.From == "" {
+			sm.From = "unknown"
+		}
+		inbox.Messages = append(inbox.Messages, sm)
+	}
+	s.report.Inbox = inbox
+	if len(page.Messages) == 0 {
+		s.check("inbox", "ok", "no unacknowledged messages", "")
+		return true
+	}
+	more := ""
+	if page.HasMore {
+		more = " (more pages after cursor " + fmt.Sprint(page.NextCursor) + ")"
+	}
+	s.check("inbox", "ok", fmt.Sprintf("%d unacknowledged message(s) waiting%s; listed below, none acknowledged", len(page.Messages), more), "")
+	s.report.Next = append(s.report.Next, fmt.Sprintf("act on the %d unacknowledged message(s) above (offers, cancellations, reviews and questions are among them), then team_ack the ones you consumed; next cursor %d", len(page.Messages), page.NextCursor))
+	return true
+}
+
+func orKeep(v, fallback string) string {
+	if v == "" {
+		return fallback
+	}
+	return v
+}
+
+func excerpt(s string, n int) string {
+	r := []rune(strings.Join(strings.Fields(s), " "))
+	if len(r) <= n {
+		return string(r)
+	}
+	return string(r[:n]) + "..."
 }
 
 // roster pages the member list with the given handle until our own row is
@@ -952,29 +1082,6 @@ func (s *teamSetup) sessionOf(body []byte) (*teamSetupSession, bool) {
 	return res.Session, true
 }
 
-// noteTeamLeave clears the saved handle after an explicit leave through the
-// CLI, so the next setup joins afresh instead of reporting a closed handle.
-// Best effort: a leave through the MCP tool is not seen here.
-func noteTeamLeave(dir, root, sessionID string) {
-	repo, err := filepath.Abs(dir)
-	if err != nil {
-		return
-	}
-	if canon, err := filepath.EvalSymlinks(repo); err == nil {
-		repo = canon
-	}
-	path := teamSetupStatePath(root, repo)
-	raw, err := os.ReadFile(path)
-	if err != nil {
-		return
-	}
-	var st teamSetupState
-	if json.Unmarshal(raw, &st) != nil || st.SessionID != sessionID {
-		return
-	}
-	os.Remove(path)
-}
-
 // forgetJoin drops a pending join record after a definite refusal; only
 // an unconfirmed result (transport failure, unreadable reply) keeps the
 // key for a replay.
@@ -987,6 +1094,9 @@ func (s *teamSetup) recordSession(me *teamSetupSession) {
 	st := s.state
 	st.TeamID, st.SessionID, st.Generation, st.CoordinatorGeneration, st.ProfileRevision = me.TeamID, me.ID, me.Generation, me.CoordinatorGeneration, me.ProfileRevision
 	st.VerifiedAt = time.Now().UTC().Format(time.RFC3339)
+	if s.report.BaseCommit != "" {
+		st.BaseCommit = s.report.BaseCommit
+	}
 	if err := s.saveState(); err != nil {
 		s.check("state", "warn", "session state not saved: "+err.Error()+"; keep the handle from this report", "")
 	}
@@ -1073,53 +1183,40 @@ func teamSetupHandoff(project, team, role, user, userID string, grantMissing boo
 	return b.String()
 }
 
-// teamSetupStatePath keys the state file by the canonical checkout path,
-// the same way the credential store does.
-func teamSetupStatePath(root, repo string) string {
-	sum := sha256.Sum256([]byte(repo))
-	return filepath.Join(root, "team-sessions", hex.EncodeToString(sum[:])+".json")
-}
-
 // loadState returns the saved state only when it is bound to this exact
 // repo, project, hub, URL and credential; anything else is ignored, not
 // revived.
-func (s *teamSetup) loadState() *teamSetupState {
-	raw, err := os.ReadFile(s.statePath)
+func (s *teamSetup) loadState() *teamstate.State {
+	st, err := teamstate.Load(s.statePath)
 	if err != nil {
+		s.check("state", "warn", "ignoring an unreadable session state file", "")
 		return nil
 	}
-	var st teamSetupState
-	if json.Unmarshal(raw, &st) != nil || st.Version != 1 {
-		s.check("state", "warn", "ignoring an unreadable session state file", "")
+	if st == nil {
 		return nil
 	}
 	if st.Repo != s.sel.Repo || st.Project != s.sel.Project || st.HubName != s.sel.HubName || st.HubURL != s.sel.Hub.URL || st.TokenID != s.identity.TokenID {
 		s.check("state", "warn", "ignoring saved session state bound to another checkout, project, hub or credential", "")
 		return nil
 	}
-	return &st
+	return st
 }
 
 func (s *teamSetup) saveState() error {
 	if s.state == nil {
-		return os.Remove(s.statePath)
+		return teamstate.Clear(s.statePath)
 	}
-	if err := os.MkdirAll(filepath.Dir(s.statePath), 0o700); err != nil {
-		return err
-	}
-	raw, err := json.MarshalIndent(s.state, "", "  ")
-	if err != nil {
-		return err
-	}
-	tmp := s.statePath + ".tmp"
-	if err := os.WriteFile(tmp, raw, 0o600); err != nil {
-		return err
-	}
-	return os.Rename(tmp, s.statePath)
+	return teamstate.Save(s.statePath, s.state)
 }
 
-func (r *teamSetupReport) print(w io.Writer) {
-	fmt.Fprintf(w, "aimem teams setup: team %q, role %s, checkout %s\n", r.Team, r.Role, r.Checkout)
+func (r *teamSetupReport) print(w io.Writer, jsonOut bool) {
+	if jsonOut {
+		enc := json.NewEncoder(w)
+		enc.SetIndent("", "  ")
+		enc.Encode(r)
+		return
+	}
+	fmt.Fprintf(w, "aimem teams: team %q, role %s, checkout %s\n", r.Team, r.Role, r.Checkout)
 	for _, c := range r.Checks {
 		fmt.Fprintf(w, "  %-5s %-12s %s\n", c.Level, c.Name, c.Detail)
 		if c.Fix != "" {
@@ -1136,8 +1233,34 @@ func (r *teamSetupReport) print(w io.Writer) {
 			fmt.Fprintf(w, "  %-28s %-12s %-24s platform %s %s; model %s (%s)\n", m.Label, m.Role, flags, m.Platform, m.PlatformVersion, m.Model.ID, m.Model.Source)
 		}
 	}
+	if r.Reserved != nil {
+		fmt.Fprintf(w, "Reserved attempt %s on task %s (%s): %s", r.Reserved.ID, r.Reserved.TaskID, orUnknown(r.Reserved.Title), r.Reserved.State)
+		if r.Reserved.Reason != "" {
+			fmt.Fprintf(w, "; reason: %s", r.Reserved.Reason)
+		}
+		fmt.Fprintln(w)
+	}
 	if r.Inbox != nil {
-		fmt.Fprintf(w, "Inbox: %d unacknowledged; %s\n", r.Inbox.Unacknowledged, r.Inbox.Note)
+		fmt.Fprintf(w, "Inbox: %d unacknowledged (next cursor %d); %s\n", r.Inbox.Unacknowledged, r.Inbox.NextCursor, r.Inbox.Note)
+		for _, m := range r.Inbox.Messages {
+			line := fmt.Sprintf("  #%d %s %s from %s", m.Sequence, m.ID, m.Kind, m.From)
+			if m.Operation != "" {
+				line += " " + m.Operation
+			}
+			if m.AttemptID != "" {
+				line += " attempt " + m.AttemptID
+			}
+			if m.TaskID != "" {
+				line += " task " + m.TaskID
+			}
+			if m.State != "" {
+				line += " -> " + m.State
+			}
+			if m.Excerpt != "" {
+				line += ": " + m.Excerpt
+			}
+			fmt.Fprintln(w, line)
+		}
 	}
 	if r.Wiring != nil && len(r.Wiring.Skills) > 0 {
 		fmt.Fprintln(w, "Skills per client:")
