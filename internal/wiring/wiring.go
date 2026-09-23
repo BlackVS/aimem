@@ -13,10 +13,10 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"reflect"
 	"regexp"
 	"sort"
 	"strings"
@@ -216,7 +216,14 @@ func checkHooks(path, client string, o Options) []Finding {
 	var out []Finding
 	var present []string
 	for _, ev := range stopHooks {
-		if raw, ok := hooks[ev]; ok && len(bytes.TrimSpace(raw)) > 0 && string(bytes.TrimSpace(raw)) != "[]" && string(bytes.TrimSpace(raw)) != "null" {
+		raw, ok := hooks[ev]
+		if !ok {
+			continue
+		}
+		// Decoded, not text-matched: `[ ]`, a multi-line empty array and
+		// null hold no hook.
+		var list []json.RawMessage
+		if json.Unmarshal(raw, &list) != nil || len(list) > 0 {
 			present = append(present, ev)
 		}
 	}
@@ -306,14 +313,22 @@ func checkOpenCode(path string, repair bool) []Finding {
 	if err != nil {
 		return []Finding{{File: rel, Level: "fail", Detail: "unreadable: " + err.Error(), Fix: "repair the file by hand; nothing was written"}}
 	}
-	var out []Finding
-	changed := false
+	// Both members are validated before any finding is drafted, so a claim
+	// of repair is made only for a write that then happens.
 	var instructions []string
 	if raw, ok := obj["instructions"]; ok {
 		if json.Unmarshal(raw, &instructions) != nil {
 			return []Finding{{File: rel, Level: "fail", Detail: "instructions is not an array of strings", Fix: "repair the file by hand; nothing was written"}}
 		}
 	}
+	mcp := object{}
+	if raw, ok := obj["mcp"]; ok {
+		if json.Unmarshal(raw, &mcp) != nil || mcp == nil {
+			return []Finding{{File: rel, Level: "fail", Detail: "mcp is not a JSON object", Fix: "repair the file by hand; nothing was written"}}
+		}
+	}
+	var out []Finding
+	changed := false
 	hasHandoff := false
 	for _, i := range instructions {
 		if i == "docs/SESSION-STATE.md" {
@@ -330,12 +345,6 @@ func checkOpenCode(path string, repair bool) []Finding {
 		obj["instructions"], _ = json.Marshal(instructions)
 		changed = true
 		out = append(out, Finding{File: rel, Level: "ok", Detail: "OpenCode handoff instruction added", Repaired: true})
-	}
-	mcp := object{}
-	if raw, ok := obj["mcp"]; ok {
-		if json.Unmarshal(raw, &mcp) != nil || mcp == nil {
-			return append(out, Finding{File: rel, Level: "fail", Detail: "mcp is not a JSON object", Fix: "repair the file by hand; nothing was written"})
-		}
 	}
 	want := map[string]any{"type": "local", "command": []string{"aimem", "mcp"}, "enabled": true}
 	switch raw, ok := mcp["aimem"]; {
@@ -356,16 +365,19 @@ func checkOpenCode(path string, repair bool) []Finding {
 			obj["$schema"], _ = json.Marshal("https://opencode.ai/config.json")
 		}
 		if err := writeObject(path, obj, mode); err != nil {
-			return append(out, Finding{File: rel, Level: "fail", Detail: "cannot write: " + err.Error()})
+			// Nothing landed: no repair happened, whatever was drafted above.
+			return []Finding{{File: rel, Level: "fail", Detail: "cannot write: " + err.Error(), Fix: "make the file writable and re-run; nothing was changed"}}
 		}
 	}
 	return out
 }
 
+// sameJSON compares decoded JSON values structurally: a string "[mcp]" is
+// not the array ["mcp"], and "true" is not true.
 func sameJSON(raw json.RawMessage, want any) bool {
 	var a, b any
 	wb, _ := json.Marshal(want)
-	return json.Unmarshal(raw, &a) == nil && json.Unmarshal(wb, &b) == nil && fmt.Sprint(a) == fmt.Sprint(b)
+	return json.Unmarshal(raw, &a) == nil && json.Unmarshal(wb, &b) == nil && reflect.DeepEqual(a, b)
 }
 
 func relName(path string) string {

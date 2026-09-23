@@ -189,6 +189,49 @@ func TestProjectStopHooksBlockUnlessAllowed(t *testing.T) {
 	}
 }
 
+func TestEmptyStopHookArraysDoNotBlock(t *testing.T) {
+	for _, body := range []string{`{"hooks":{"Stop":[ ]}}`, "{\"hooks\":{\"Stop\":[\n  \n],\"PreCompact\":null,\"StopFailure\":[]}}"} {
+		dir := t.TempDir()
+		write(t, filepath.Join(dir, ".claude", "settings.json"), body)
+		r := Check(dir, Options{Repair: false})
+		if r.Failed() {
+			t.Fatalf("%q blocked: %+v", body, r.Findings)
+		}
+		for _, f := range findingsByFile(r)[".claude/settings.json"] {
+			if strings.Contains(f.Detail, "journal") {
+				t.Fatalf("%q: %+v", body, f)
+			}
+		}
+	}
+}
+
+func TestTypeMismatchesAreDrift(t *testing.T) {
+	dir := t.TempDir()
+	write(t, filepath.Join(dir, ".mcp.json"), `{"mcpServers": {"aimem": {"command": "aimem", "args": "[mcp]"}}}`)
+	write(t, filepath.Join(dir, "opencode.json"), `{"instructions": ["docs/SESSION-STATE.md"], "mcp": {"aimem": {"type": "local", "command": ["aimem", "mcp"], "enabled": "true"}}}`)
+	r := Check(dir, Options{Repair: true})
+	by := findingsByFile(r)
+	if f := by[".mcp.json"]; len(f) != 1 || f[0].Level != "warn" || !strings.Contains(f[0].Detail, "differs") {
+		t.Fatalf("string args accepted: %+v", f)
+	}
+	if f := by["opencode.json"]; len(f) != 2 || f[1].Level != "warn" || !strings.Contains(f[1].Detail, "differs") {
+		t.Fatalf("string enabled accepted: %+v", f)
+	}
+}
+
+func TestOpenCodeInvalidMCPLeavesFileAndClaimsNoRepair(t *testing.T) {
+	dir := t.TempDir()
+	write(t, filepath.Join(dir, "opencode.json"), `{"mcp": []}`)
+	r := Check(dir, Options{Repair: true})
+	f := findingsByFile(r)["opencode.json"]
+	if len(f) != 1 || f[0].Level != "fail" || f[0].Repaired {
+		t.Fatalf("%+v", f)
+	}
+	if read(t, filepath.Join(dir, "opencode.json")) != `{"mcp": []}` {
+		t.Fatal("invalid file was rewritten")
+	}
+}
+
 func TestNoRepairOnlyReports(t *testing.T) {
 	dir := t.TempDir()
 	r := Check(dir, Options{Repair: false})
