@@ -35,7 +35,7 @@ func Serve(api *http.Client, projectID string, groups []string) error {
 	in.Buffer(make([]byte, 1024*1024), 16*1024*1024)
 	out := bufio.NewWriter(os.Stdout)
 	s := &srv{api: api, project: projectID, groups: groups, taskSetup: localTaskCaller,
-		taskState: probeTaskState(".", mcpStateRoot(), projectID)}
+		taskState: probeTaskState(".", mcpStateRoot(), projectID), local: &localCheckout{dir: ".", root: mcpStateRoot()}}
 	for in.Scan() {
 		line := strings.TrimSpace(in.Text())
 		if line == "" {
@@ -69,6 +69,10 @@ type srv struct {
 	// disabled project. "" on the hub facade, which enforces per call.
 	taskState   string
 	noticeShown bool // the one restart notice after an availability change
+	// local is the checkout the stdio facade is bound to; the onboarding
+	// tools (team_setup, team_continue) exist only when it is set. nil on
+	// the hub facade, which has no checkout.
+	local *localCheckout
 }
 
 type rpcRequest struct {
@@ -120,7 +124,11 @@ func (s *srv) handle(ctx context.Context, raw []byte) []byte {
 		if s.taskState == taskStateDisabled {
 			return reply(req.ID, map[string]any{"tools": append([]map[string]any{}, toolDefs...)}, nil)
 		}
-		return reply(req.ID, map[string]any{"tools": append(append([]map[string]any{}, toolDefs...), taskToolDefs...)}, nil)
+		tools := append(append([]map[string]any{}, toolDefs...), taskToolDefs...)
+		if s.local != nil {
+			tools = append(tools, onboardToolDefs...)
+		}
+		return reply(req.ID, map[string]any{"tools": tools}, nil)
 	case "tools/call":
 		return s.toolCall(ctx, req)
 	default:
@@ -330,9 +338,11 @@ func (s *srv) toolCall(ctx context.Context, req rpcRequest) []byte {
 	var text string
 	var err error
 	switch {
-	case isTaskTool(head.Name) && s.taskState == taskStateDisabled:
+	case (isTaskTool(head.Name) || isOnboardTool(head.Name)) && s.taskState == taskStateDisabled:
 		// Hidden tools stay hidden when called by name.
 		err = errors.New("tasks are not enabled for this project (as of this session's start); an admin enables them on the hub, then restart the session")
+	case isOnboardTool(head.Name):
+		text, err = s.onboardTool(head.Name, head.Arguments)
 	case isTaskTool(head.Name):
 		text, err = s.taskTool(ctx, head.Name, head.Arguments)
 		if err != nil && s.taskState == taskStateEnabled && !s.noticeShown && strings.Contains(err.Error(), "not enabled for this project") {

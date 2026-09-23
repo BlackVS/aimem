@@ -24,7 +24,7 @@ func TestInstallCommandsWritesRefreshesAndRespectsForeignFiles(t *testing.T) {
 		t.Fatalf("written %d: %+v", written, out)
 	}
 	resume := read(t, filepath.Join(dir, ".claude", "skills", "resume_team", "SKILL.md"))
-	for _, want := range []string{"name: resume_team", `argument-hint: "[TEAM]"`, `description: "Continue the aimem team membership`, "aimem teams continue [TEAM] --json", "never joins", `allowed-tools: "Bash(aimem teams continue *)`, "STOP_REQUESTED: stop safely", "read them in\n     full with `team_inbox` from cursor 0"} {
+	for _, want := range []string{"name: resume_team", `argument-hint: "[TEAM]"`, `description: "Continue the aimem team membership`, "Call `team_continue` with `team` = TEAM when given, nothing else.", "never joins", `allowed-tools: "mcp__aimem__team_continue Bash(git status *)"`, "Do not run `aimem teams continue` in a shell instead", "STOP_REQUESTED: stop safely", "read them in\n     full with `team_inbox` from cursor 0"} {
 		if !strings.Contains(resume, want) {
 			t.Fatalf("resume skill missing %q:\n%s", want, resume)
 		}
@@ -36,7 +36,7 @@ func TestInstallCommandsWritesRefreshesAndRespectsForeignFiles(t *testing.T) {
 		t.Fatal("prompt written without a Codex home")
 	}
 	claude := read(t, filepath.Join(dir, ".claude", "skills", "join_team", "SKILL.md"))
-	for _, want := range []string{"name: join_team", `argument-hint: "TEAM [worker|coordinator]"`, `description: "Join an aimem team`, managedMarker, "--platform claude-code", "`claude --version`", "$ARGUMENTS", "docs/TEAM-PLAYBOOKS.md", "never\n   paste a token", "`aimem teams mine <project>`", "Do not build, download or substitute"} {
+	for _, want := range []string{"name: join_team", `argument-hint: "TEAM [worker|coordinator]"`, `description: "Join an aimem team`, managedMarker, `"platform": "claude-code"`, "`claude --version`", "$ARGUMENTS", "docs/TEAM-PLAYBOOKS.md", "never\n   paste a token", "call the `team_list` tool", "Do not run `aimem teams setup` in a shell", `allowed-tools: "mcp__aimem__team_setup mcp__aimem__team_list Bash(claude --version)"`, "disable a sandbox, build, download"} {
 		if !strings.Contains(claude, want) {
 			t.Fatalf("claude skill missing %q:\n%s", want, claude)
 		}
@@ -45,11 +45,11 @@ func TestInstallCommandsWritesRefreshesAndRespectsForeignFiles(t *testing.T) {
 		t.Fatal("unrendered placeholder")
 	}
 	oc := read(t, filepath.Join(dir, ".opencode", "commands", "join_team.md"))
-	if !strings.Contains(oc, "--platform opencode") || strings.Contains(oc, "name: join_team") {
+	if !strings.Contains(oc, `"platform": "opencode"`) || strings.Contains(oc, "name: join_team") {
 		t.Fatalf("opencode command:\n%s", oc)
 	}
 	codex := read(t, filepath.Join(dir, ".agents", "skills", "join-team", "SKILL.md"))
-	if !strings.Contains(codex, "name: join-team") || !strings.Contains(codex, "--platform codex") {
+	if !strings.Contains(codex, "name: join-team") || !strings.Contains(codex, `"platform": "codex"`) {
 		t.Fatalf("codex skill:\n%s", codex)
 	}
 	// Idempotent: everything present and current, nothing rewritten.
@@ -83,7 +83,7 @@ func TestInstallCommandsWritesRefreshesAndRespectsForeignFiles(t *testing.T) {
 	}
 	InstallCommands(dir, home, true)
 	prompt := read(t, filepath.Join(home, ".codex", "prompts", "join_team.md"))
-	if !strings.Contains(prompt, `argument-hint: "TEAM [worker|coordinator]"`) || !strings.Contains(prompt, "--platform codex") {
+	if !strings.Contains(prompt, `argument-hint: "TEAM [worker|coordinator]"`) || !strings.Contains(prompt, `"platform": "codex"`) {
 		t.Fatalf("codex prompt:\n%s", prompt)
 	}
 	if _, err := os.Stat(filepath.Join(home, ".codex", "prompts", "resume_team.md")); err != nil {

@@ -1,5 +1,8 @@
 # Team setup for administrators
 
+For the complete manual path from provisioning to joining and restarting
+agents, see [Start an agent team](TEAM-QUICKSTART.md).
+
 This is the first implementation slice of [agent teams](DESIGN-agent-teams.md).
 It stores team configuration and enrollment. Agent join, roster and messaging
 are described in [TEAM-AGENT-QUICKSTART.md](TEAM-AGENT-QUICKSTART.md).
