@@ -15,6 +15,16 @@ currently 18); a binary refuses a database newer than it understands.
 
 ### Added
 
+- Members list their own teams before joining: `GET /v1/projects/{p}/teams/mine`
+  (ordinary write token, current grant, tasks enabled; read only, no session,
+  nothing recorded, other members not disclosed) returns the teams enrolling
+  the caller with `coordinator` (may take the slot) and `coordinator_active`;
+  exposed as the `team_list` MCP tool and `aimem teams mine PROJECT`. `aimem
+  teams setup` uses it to report "not enrolled", "enrolled elsewhere" (naming
+  those teams) and "enrolled but not coordinator-eligible" before the join,
+  each with the operator handoff; on an older hub it says so and the join
+  decides as before. New route: requires a hub upgrade to be reachable.
+
 - `/join_team TEAM [worker|coordinator]` entry points for Claude Code
   (`.claude/skills/join_team/SKILL.md`), OpenCode
   (`.opencode/commands/join_team.md`) and Codex (`.agents/skills/join-team/

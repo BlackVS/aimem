@@ -139,6 +139,7 @@ func (s *Server) Routes() []Route {
 		{"GET", "/v1/projects/{p}/teams/{team}/export", s.teamExport, true},
 		{"POST", "/v1/projects/{p}/teams/{team}/join", s.joinTeam, false},
 		{"GET", "/v1/projects/{p}/teams/{team}/members", s.teamMembers, false},
+		{"GET", "/v1/projects/{p}/teams/mine", s.myTeams, false},
 		{"POST", "/v1/projects/{p}/teams/{team}/heartbeat", s.changeTeamSession, false},
 		{"POST", "/v1/projects/{p}/teams/{team}/resume", s.changeTeamSession, false},
 		{"POST", "/v1/projects/{p}/teams/{team}/leave", s.changeTeamSession, false},

@@ -25,7 +25,9 @@ legacy and read-only credentials cannot join or read the roster.
 
 ## MCP
 
-Tools: `team_join`, `team_members`, `team_profile`, `team_heartbeat`,
+Tools: `team_list` (the teams enrolling your credential, with coordinator
+eligibility and whether a coordinator is active; read only, no session
+needed), `team_join`, `team_members`, `team_profile`, `team_heartbeat`,
 `team_resume`, `team_leave`, `team_send`, `team_messages`, `team_inbox`, `team_ack`;
 assignment and execution: `team_offer`, `team_assignment`, `team_reserved`,
 `team_accept`, `team_decline`, `team_withdraw`, `team_block`, `team_resume_work`,
@@ -82,8 +84,13 @@ checkout's client integration (below); the credential's identity (`/v1/access/id
 write grant, tasks enabled); the hub version and, on the first team response,
 protocol version 1; the selected process and its required skills (a warning,
 since they are needed at the review gate, not at join); and the Git HEAD as the
-base commit. Then it joins the team, or recognizes the session this checkout
-already holds, and ends in the role entry: a coordinator gets the roster with
+base commit. On a hub that lists enrolled teams (`GET
+/v1/projects/{p}/teams/mine`) it also checks the enrollment before joining, so
+"not enrolled", "enrolled elsewhere" (naming those teams) and "enrolled but not
+coordinator-eligible" are reported as such with the operator handoff; an older
+hub leaves that to the join's refusal. Then it joins the team, or recognizes
+the session this checkout already holds, and ends in the role entry: a
+coordinator gets the roster with
 each member's reported model and its source, a worker announces itself
 available, reads its reserved attempt and its inbox once (bounded, wait 0).
 Exit status 0 means joined and verified; 1 means blocked, and the report names
@@ -163,7 +170,9 @@ teams setup` repeats it on every run:
 The text tells the agent to declare its platform and only a
 runtime-reported model, run `aimem teams setup` with `--json`, read the
 report, stop on `blocked` and show the fixes or the operator handoff, and
-enter the role per the [playbooks](TEAM-PLAYBOOKS.md). The Claude Code skill
+enter the role per the [playbooks](TEAM-PLAYBOOKS.md). Without a TEAM it runs
+`aimem teams mine` and offers the teams enrolling the credential (the person
+still chooses). The Claude Code skill
 is user-invocable only (`disable-model-invocation: true`); the Codex skill
 says the same in its description, since joining is the person's decision. Client integration repair and
 operator provisioning are separate increments; the command reports what it
@@ -174,6 +183,7 @@ found and how to fix it.
 Place `role` and `profile` from the example in `join.json`:
 
 ```sh
+aimem teams mine example-project                       # teams enrolling this credential; no session needed
 aimem teams join example-project Builders join.json join-worker-001
 aimem teams members example-project TEAM_ID handle.json
 aimem teams heartbeat example-project TEAM_ID heartbeat.json heartbeat-001

@@ -70,6 +70,7 @@ var teamToolDefs = func() []map[string]any {
 		}
 		defs = append(defs, map[string]any{"name": "team_" + op, "description": "Team " + op + " using your project task credential. All messages are team-visible; recipient means inbox routing. Reading is a delivery attempt; explicit ack records receipt, not answer or completion. Use inbox reads/bounded waits; notifications do not prove model receipt. Workers wait for coordinator assignments; never pick backlog tasks independently while joined. Offers, cancellations, reviews, recoveries and handoffs arrive in the inbox as lifecycle messages; only an accepted offer authorizes work, and messages cannot assign it. Resume fences old handles but cannot stop local commands; reconcile old execution first. A retry returns its original result, which may have an old generation.", "inputSchema": objSchema(props, required...)})
 	}
+	defs = append(defs, map[string]any{"name": "team_list", "description": "Teams of the project that enroll your credential, with whether you may take the coordinator slot and whether one is active now: the one read possible before any session exists. Read only; creates nothing. Uses your project task credential.", "inputSchema": objSchema(map[string]any{"project": prop("string", "project, default current checkout")})})
 	return defs
 }()
 
@@ -145,7 +146,8 @@ func buildTeamRequest(defaultProject, name string, raw json.RawMessage) (method,
 			return fail(fmt.Errorf("unknown team argument %q", k))
 		}
 	}
-	for _, k := range schema["required"].([]string) {
+	required, _ := schema["required"].([]string)
+	for _, k := range required {
 		if len(fields[k]) == 0 || string(fields[k]) == "null" {
 			return fail(fmt.Errorf("%s required", k))
 		}
@@ -176,6 +178,12 @@ func buildTeamRequest(defaultProject, name string, raw json.RawMessage) (method,
 	}
 	if a.Project == "" {
 		a.Project = defaultProject
+	}
+	if name == "team_list" {
+		if a.Project == "" {
+			return fail(errors.New("project is required"))
+		}
+		return "GET", "/v1/projects/" + url.PathEscape(a.Project) + "/teams/mine", map[string]string{}, nil, nil
 	}
 	if a.Project == "" || a.Team == "" {
 		return fail(errors.New("project and team are required"))

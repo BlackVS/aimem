@@ -45,6 +45,8 @@ Agent commands (from a configured checkout, using its task credential):
                                                         reconcile, role entry (setup --help)
   aimem teams commands [DIR] [--check]                  write or refresh the /join_team entry
                                                         points for Claude Code, OpenCode and Codex
+  aimem teams mine PROJECT                              the teams enrolling this credential, with
+                                                        coordinator eligibility (no session needed)
   aimem teams <join|members|heartbeat|resume|leave|profile|send|messages|inbox|ack> PROJECT TEAM request.json [KEY]
   aimem teams <offer|assignment|reserved|accept|decline|withdraw|block|resume-work|cancel|stopped|close-stop|submit|review|handoff|edit|finalize> PROJECT TEAM request.json [KEY]
 KEY is required for writes. join accepts a team name or ID; other commands use
@@ -58,6 +60,20 @@ func teamsCmd(args []string) error {
 	}
 	if len(args) > 0 && args[0] == "commands" {
 		return teamCommandsCmd(args[1:])
+	}
+	if len(args) > 0 && args[0] == "mine" {
+		if len(args) != 2 {
+			return errors.New("usage: aimem teams mine PROJECT")
+		}
+		raw, _ := json.Marshal(map[string]string{"project": args[1]})
+		ctx, cancel := context.WithTimeout(context.Background(), 35*time.Second)
+		defer cancel()
+		out, err := mcp.RunTeamTool(ctx, "team_list", raw)
+		if err != nil {
+			return err
+		}
+		fmt.Println(out)
+		return nil
 	}
 	if len(args) > 0 && teamAgentOps[args[0]] {
 		return teamSessionCmd(args)

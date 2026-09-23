@@ -27,7 +27,7 @@ func TestInstallCommandsWritesRefreshesAndRespectsForeignFiles(t *testing.T) {
 		t.Fatal("prompt written without a Codex home")
 	}
 	claude := read(t, filepath.Join(dir, ".claude", "skills", "join_team", "SKILL.md"))
-	for _, want := range []string{"name: join_team", "argument-hint: TEAM [worker|coordinator]", managedMarker, "--platform claude-code", "`claude --version`", "$ARGUMENTS", "docs/TEAM-PLAYBOOKS.md", "never\n   paste a token"} {
+	for _, want := range []string{"name: join_team", "argument-hint: TEAM [worker|coordinator]", managedMarker, "--platform claude-code", "`claude --version`", "$ARGUMENTS", "docs/TEAM-PLAYBOOKS.md", "never\n   paste a token", "`aimem teams mine <project>`", "Do not build, download or substitute"} {
 		if !strings.Contains(claude, want) {
 			t.Fatalf("claude skill missing %q:\n%s", want, claude)
 		}

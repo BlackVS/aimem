@@ -345,7 +345,7 @@ func (s *teamSetup) fail(name, detail, fix string) bool {
 // run performs the checks in order and stops at the first blocking one.
 // It returns true only when a verified session exists at the end.
 func (s *teamSetup) run() bool {
-	if !s.checkBinding() || !s.checkIntegration() || !s.checkIdentity() || !s.checkHub() {
+	if !s.checkBinding() || !s.checkIntegration() || !s.checkIdentity() || !s.checkHub() || !s.checkEnrollment() {
 		return false
 	}
 	s.checkProcess()
@@ -477,6 +477,66 @@ func (s *teamSetup) checkHub() bool {
 		s.check("hub", "ok", detail, "")
 	}
 	return true
+}
+
+// checkEnrollment asks the hub which teams enroll this credential, the one
+// read possible before a session exists, so a missing enrollment or a
+// missing coordinator eligibility is named before the join instead of
+// surfacing as the join's undifferentiated refusal. A hub without the
+// route (older than this client) is reported and the join decides.
+func (s *teamSetup) checkEnrollment() bool {
+	status, body, err := s.teamCall("team_list", map[string]any{})
+	if err != nil {
+		return s.fail("enrollment", "could not list this credential's teams: "+err.Error(), "retry when the hub is reachable")
+	}
+	// A hub older than the route answers 404, or 403 from the gate that
+	// refuses ordinary tokens every route it does not list; the identity
+	// check already passed, so that 403 is the route's absence, not a
+	// grant refusal.
+	if status == http.StatusNotFound || status == http.StatusForbidden && strings.Contains(hubErrorText(body), "not authorized for this endpoint") {
+		s.check("enrollment", "warn", "this hub does not list enrolled teams (older hub); the join reports enrollment refusals", "")
+		return true
+	}
+	if status != http.StatusOK {
+		return s.fail("enrollment", "team listing refused: "+hubOutcome(status, body, nil), "")
+	}
+	var res struct {
+		Protocol int `json:"protocol_version"`
+		Teams    []struct {
+			ID                string `json:"id"`
+			Name              string `json:"name"`
+			Coordinator       bool   `json:"coordinator"`
+			CoordinatorActive bool   `json:"coordinator_active"`
+		} `json:"teams"`
+	}
+	if json.Unmarshal(body, &res) != nil || res.Protocol != 1 {
+		return s.fail("enrollment", "team listing is not team protocol 1", "upgrade to a compatible client/hub pair")
+	}
+	var names []string
+	for _, t := range res.Teams {
+		names = append(names, fmt.Sprintf("%s (%s)", t.Name, t.ID))
+		if t.Name != s.opts.team && t.ID != s.opts.team {
+			continue
+		}
+		if s.opts.role == "coordinator" && !t.Coordinator {
+			s.report.Handoff = teamSetupHandoff(s.sel.Project, s.opts.team, s.opts.role, s.identity.Name, s.identity.UserID, false)
+			return s.fail("enrollment", fmt.Sprintf("user %s is enrolled in team %q but not as coordinator-eligible", s.identity.Name, t.Name), "operator: set coordinator:true on this user's enrollment (see the operator handoff), or join as worker")
+		}
+		detail := fmt.Sprintf("user %s is enrolled in team %q (%s)", s.identity.Name, t.Name, t.ID)
+		if t.Coordinator {
+			detail += ", coordinator-eligible"
+		}
+		if t.CoordinatorActive {
+			detail += "; a coordinator session is active now"
+		}
+		s.check("enrollment", "ok", detail, "")
+		return true
+	}
+	s.report.Handoff = teamSetupHandoff(s.sel.Project, s.opts.team, s.opts.role, s.identity.Name, s.identity.UserID, false)
+	if len(names) == 0 {
+		return s.fail("enrollment", fmt.Sprintf("user %s is not enrolled in any team of project %s", s.identity.Name, s.sel.Project), "operator: enroll this user in team "+s.opts.team+" (see the operator handoff), then re-run; agents cannot self-enroll")
+	}
+	return s.fail("enrollment", fmt.Sprintf("user %s is not enrolled in team %q; enrolled in: %s", s.identity.Name, s.opts.team, strings.Join(names, ", ")), "re-run with one of those teams, or operator: enroll this user in "+s.opts.team+" (see the operator handoff)")
 }
 
 // checkProcess reports the selected process and its required skills. It
