@@ -40,7 +40,6 @@ func teamContextCmd(args []string, stdout io.Writer) error {
 		out, err = u.SectionText(*section, version)
 	default:
 		out, err = u.Index(version)
-		out += "\n"
 	}
 	if err != nil {
 		return err

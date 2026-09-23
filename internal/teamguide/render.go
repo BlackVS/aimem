@@ -96,7 +96,8 @@ func (u *Unit) SectionText(id, version string) (string, error) {
 }
 
 // Index is the manifest with the build version and digest: what exists,
-// how large it is and what each role requires, without the content.
+// how large it is and what each role requires, without the content. Like
+// every read it ends with its terminator line, after the JSON.
 func (u *Unit) Index(version string) (string, error) {
 	out, err := json.MarshalIndent(struct {
 		Unit    string   `json:"unit"`
@@ -108,5 +109,5 @@ func (u *Unit) Index(version string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	return string(out), nil
+	return string(out) + "\n" + u.Terminator("index", version) + "\n", nil
 }

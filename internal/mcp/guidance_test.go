@@ -39,6 +39,11 @@ func TestTeamContextOnTheHubUnderOrdinaryAuthentication(t *testing.T) {
 			t.Errorf("%s: role read differs from the embedded unit (error %v)", name, isErr)
 		}
 	}
+	// The index, like every read, ends with its terminator.
+	text, isErr := toolText(f.rpc(t, f.stranger, "tools/call", map[string]any{"name": "team_context", "arguments": map[string]any{}}))
+	if isErr || !strings.HasSuffix(text, u.Terminator("index", "")+"\n") {
+		t.Errorf("index read: %v %.200s", isErr, text[max(0, len(text)-200):])
+	}
 	// Unknown and forbidden arguments are refused with a bounded, useful error.
 	for args, wantErr := range map[string]string{
 		`{"section":"example/nope"}`:                      "example/offer",
@@ -67,7 +72,7 @@ func TestTeamContextOnTheHubUnderOrdinaryAuthentication(t *testing.T) {
 		}
 	}
 	// Tasks-only filtering is unchanged for everything else.
-	text, isErr := toolText(f.rpc(t, f.stranger, "tools/call", map[string]any{"name": "recall_memory", "arguments": map[string]any{"query": "x", "project": "alpha"}}))
+	text, isErr = toolText(f.rpc(t, f.stranger, "tools/call", map[string]any{"name": "recall_memory", "arguments": map[string]any{"query": "x", "project": "alpha"}}))
 	if !isErr || !strings.Contains(text, "task tools only") {
 		t.Errorf("legacy tool by name: %v %q", isErr, text)
 	}

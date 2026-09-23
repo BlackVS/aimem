@@ -133,7 +133,7 @@ func TestTeamContextThroughLocalMCPOutsideAnyCheckout(t *testing.T) {
 			t.Errorf("call %v: want an error with %q, got %v %q", id, want, isErr, msg)
 		}
 	}
-	if idx, isErr := text(8); isErr || !strings.Contains(idx, `"digest": "`+u.Digest+`"`) {
+	if idx, isErr := text(8); isErr || !strings.Contains(idx, `"digest": "`+u.Digest+`"`) || !strings.HasSuffix(idx, u.Terminator("index", "dev")+"\n") {
 		t.Errorf("index: %v %s", isErr, idx)
 	}
 	// Reading changed nothing: no file in the directory, no saved membership
@@ -163,11 +163,13 @@ func TestTeamsContextCLI(t *testing.T) {
 		t.Error("the coordinator set lacks the offer template it links")
 	}
 	out, _, err = runAimem(t, dir, state, "", "teams", "context")
+	// The index is the JSON manifest, then the terminator line like every read.
+	payload, found := strings.CutSuffix(out, "\n"+u.Terminator("index", "dev")+"\n")
 	var idx struct {
 		Digest   string             `json:"digest"`
 		Manifest teamguide.Manifest `json:"manifest"`
 	}
-	if err != nil || json.Unmarshal([]byte(out), &idx) != nil || idx.Digest != u.Digest || len(idx.Manifest.Sections) != len(u.Manifest.Sections) {
+	if err != nil || !found || json.Unmarshal([]byte(payload), &idx) != nil || idx.Digest != u.Digest || len(idx.Manifest.Sections) != len(u.Manifest.Sections) {
 		t.Fatalf("index: %v %s", err, out)
 	}
 	for _, args := range [][]string{

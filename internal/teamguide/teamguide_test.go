@@ -2,6 +2,7 @@ package teamguide
 
 import (
 	"bytes"
+	"encoding/json"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -302,5 +303,29 @@ func TestReadsAcceptOnlyKnownIdentifiers(t *testing.T) {
 	want, _ := u.Section("example/offer")
 	if !strings.Contains(text, string(want)) || !strings.HasSuffix(text, u.Terminator("section example/offer", "v1")+"\n") {
 		t.Errorf("section text:\n%s", text)
+	}
+}
+
+// Every read ends with its terminator, the index included, and the index
+// payload before it is the manifest JSON.
+func TestEveryReadEndsWithItsTerminator(t *testing.T) {
+	u, err := Embedded()
+	if err != nil {
+		t.Fatal(err)
+	}
+	idx, err := u.Index("v1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	payload, found := strings.CutSuffix(idx, "\n"+u.Terminator("index", "v1")+"\n")
+	if !found || !json.Valid([]byte(payload)) {
+		t.Fatalf("index must be the manifest JSON then its terminator:\n%s", idx[max(0, len(idx)-300):])
+	}
+	role, _ := u.Role("worker", "v1")
+	section, _ := u.SectionText("worker", "v1")
+	for what, text := range map[string]string{"role worker": role, "section worker": section} {
+		if !strings.HasSuffix(text, u.Terminator(what, "v1")+"\n") {
+			t.Errorf("%s: no terminator at the end", what)
+		}
 	}
 }
