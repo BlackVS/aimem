@@ -1,11 +1,13 @@
 # Roadmap
 
-Released baseline: v0.7.1 (PR #60-97): the enabled-project picker and epic
+Released baseline: v0.7.2 (PR #60-101): the enabled-project picker and epic
 details, the agent-team coordination protocol through the scripted
-rehearsal, and one-command team onboarding (`aimem teams setup`, the
+rehearsal, one-command team onboarding (`aimem teams setup`, the
 `/join_team` and `/resume_team` entry points, team listing, guided
-provisioning), with the process set 1.15.1 selected for this project. The
-manual cross-platform pilot and any deployment are separate owner decisions.
+provisioning), and onboarding through the checkout-bound local MCP
+(`team_setup`, `team_continue`), with the process set 1.15.1 selected for
+this project. The manual cross-platform pilot and any deployment are
+separate owner decisions.
 This file records delivery order and scope. The aimem task board owns live
 task state, dependencies and completion evidence; design documents own the
 contracts. Do not maintain a second checklist of task statuses here.
@@ -22,31 +24,50 @@ contracts. Do not maintain a second checklist of task statuses here.
   onboarding hold. Completion evidence lives on the board.
 - Reviewed process assets selected at a pinned commit, with complete bootstrap
   and templates verified on participating clients. Selection is per project.
+- The [agent-team protocol](DESIGN-agent-teams.md) for one project: roster,
+  structured inbox, protected assignments, results, recovery, audit export,
+  scripted rehearsal and guided onboarding: v0.7.0-v0.7.1. Onboarding through
+  the checkout-bound local MCP, so a sandboxed shell needs no credential:
+  v0.7.2. The live cross-platform pilot is still pending.
 
 ## Next delivery sequence
 
-The owner brought team-coordination review/planning ahead of access-console
-implementation on 2026-09-21, to enable several coding agents to share the backlog.
+The owner brought team coordination ahead of access-console implementation
+on 2026-09-21, and on 2026-09-23 approved the staged direction of the
+[portable teams review](TEAM-MULTIPROJECT-REVIEW.md): portable instruction
+delivery first, then user-level agent contexts and multi-project teams, each
+behind its own design and review gates.
 
-1. Review the [agent-team protocol and phased plan](DESIGN-agent-teams.md):
-   manual startup and MCP join, roles, structured bidirectional/direct messages,
-   atomic assignments, recovery, communication audit and serial integration.
-   Split implementation into bounded tasks; no terminal scraping or implicit
-   change to merge policy. Design approval/merge precedes coordination code.
-2. Deliver the agreed team foundation in small increments: membership/roster,
-   structured inbox, protected assignments, results/recovery and audit export.
-   A cross-platform pilot must verify client delivery and failure behavior
-   before unattended use is promised. Automatic pickup reuses the existing
-   priority/complexity tasks; it is not needed for explicit assignments.
-3. Stage 4 increment 1: access snapshot, users and groups. Include the
+1. Portable teams increment 1, per the
+   [portable team context contract](DESIGN-portable-team-context.md): 1a the
+   contract (docs only); 1b team protocol guidance embedded in the binary and
+   readable through MCP; 1c readiness in `team_setup`/`team_continue`, with
+   the project process delivered through MCP and not-ready workers reported
+   `unavailable`; 1d a hub-served process bundle only if a pilot host lacks
+   Git access to the process repository. Then the single-project
+   cross-platform pilot with every member upgraded. The separate Codex shell
+   runner failure is not fixed by this work.
+2. User-level agent context independent of the checkout (review increment 2),
+   after its own design approval. It preserves checkout mode and strict
+   project-token selection.
+3. Work-store ADR and migration prototype (review increment 3). No
+   multi-project implementation or migration starts before its evidence is
+   reviewed.
+4. Multi-project protocol and migration (review increment 4), split into
+   storage, authorization and client increments; then the cross-host pilot
+   (review increment 5).
+5. Stage 4 increment 1: access snapshot, users and groups. Include the
    tracked console escaper/handler correction and focused executable UI
    regressions. Grants and tokens remain read-only in this increment.
-4. Stage 4 increment 2: grant management, stale-instance cleanup and
+6. Stage 4 increment 2: grant management, stale-instance cleanup and
    ordinary-token issue/revoke, including one-time secret handling and
    operator documentation. Depend on increment 1.
-5. Pull maintenance work as observed failures or use justify it. The
+7. Pull maintenance work as observed failures or use justify it. The
    remaining task-page harness is incremental work, not a prerequisite to
    implement a new general browser-testing framework before stage 4.
+
+Items 2 to 4 are larger and gated; the owner may place stage 4 ahead of them
+once increment 1 and its pilot are done. The board records that choice.
 
 Stage 4 has no assigned release version yet. Keep its existing authority
 and route boundaries; no new identity system or admin-token web management.
