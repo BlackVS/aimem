@@ -2211,6 +2211,39 @@
         ]
       }
     },
+    "/v1/projects/{p}/teams/mine": {
+      "get": {
+        "x-role": "writer",
+        "summary": "Teams enrolling the calling user",
+        "description": "Requires a live ordinary project write token with a current grant and tasks enabled; admin/local/legacy/read-only credentials are refused. Lists the teams of the project that enroll the caller: id, name, description, revision, coordinator (the caller may take the coordinator slot) and coordinator_active (an active coordinator session holds it now). Read only: no session is created and nothing is recorded. Other members are not disclosed. Protocol version 1. A team literally named mine is reached by ID on the admin route.",
+        "parameters": [
+          {
+            "name": "p",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Protocol-v1 listing of the caller's enrolled teams"
+          },
+          "400": {
+            "description": "Invalid request"
+          },
+          "403": {
+            "description": "Current ordinary write authority required"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      }
+    },
     "/v1/projects/{p}/teams/{team}/members": {
       "get": {
         "x-role": "writer",

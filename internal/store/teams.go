@@ -283,3 +283,48 @@ func (d *DB) HasTeams() (bool, error) {
 	err := d.sql.QueryRow(`SELECT EXISTS(SELECT 1 FROM teams)`).Scan(&exists)
 	return exists, err
 }
+
+// EnrolledTeam is what an ordinary member may learn about a team it is
+// enrolled in, before any session exists: enough to name the team and to
+// know whether the coordinator role is open to it.
+type EnrolledTeam struct {
+	ID                string `json:"id"`
+	Name              string `json:"name"`
+	Description       string `json:"description"`
+	Revision          int64  `json:"revision"`
+	Coordinator       bool   `json:"coordinator"`        // this user may take the coordinator slot
+	CoordinatorActive bool   `json:"coordinator_active"` // an active coordinator session holds the slot now
+}
+
+// EnrolledTeams lists the teams of this project that enroll userID. Other
+// members' identities never leave the store here.
+func (d *DB) EnrolledTeams(userID string) ([]EnrolledTeam, error) {
+	if err := d.taskScopeOK(); err != nil {
+		return nil, err
+	}
+	out := []EnrolledTeam{}
+	after := ""
+	for {
+		page, err := d.ListTeams(after, 100)
+		if err != nil {
+			return nil, err
+		}
+		for _, t := range page {
+			for _, e := range t.Enrollment {
+				if e.UserID != userID {
+					continue
+				}
+				var active int
+				if err := d.sql.QueryRow(`SELECT COUNT(*) FROM team_sessions WHERE team_id=? AND role='coordinator' AND state='active'`, t.ID).Scan(&active); err != nil {
+					return nil, err
+				}
+				out = append(out, EnrolledTeam{ID: t.ID, Name: t.Name, Description: t.Description, Revision: t.Revision, Coordinator: e.Coordinator, CoordinatorActive: active > 0})
+				break
+			}
+		}
+		if len(page) < 100 {
+			return out, nil
+		}
+		after = page[len(page)-1].ID
+	}
+}

@@ -36,7 +36,10 @@ aimem teams events PROJECT TEAM_ID
 ```
 
 Names are unique within the project, case-sensitive, 1-128 UTF-8 bytes without
-surrounding whitespace or line/tab controls. Description is limited to 4096 bytes;
+surrounding whitespace or line/tab controls. An enrolled member sees its own
+teams through `aimem teams mine PROJECT` (or the `team_list` MCP tool), read
+only and without a session; a team literally named `mine` is reached by ID on
+the admin routes. Description is limited to 4096 bytes;
 at most 100 distinct existing users may be enrolled. Disabled users may be listed
 in configuration; enrollment never re-enables them or widens their grants.
 

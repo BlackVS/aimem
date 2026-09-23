@@ -51,6 +51,7 @@ var taskRoutes = map[string]bool{
 	"POST /v1/projects/{p}/teams/{team}/ack":                               true,
 	"POST /v1/projects/{p}/teams/{team}/join":                              true,
 	"GET /v1/projects/{p}/teams/{team}/members":                            true,
+	"GET /v1/projects/{p}/teams/mine":                                      true,
 	"POST /v1/projects/{p}/teams/{team}/heartbeat":                         true,
 	"POST /v1/projects/{p}/teams/{team}/resume":                            true,
 	"POST /v1/projects/{p}/teams/{team}/leave":                             true,

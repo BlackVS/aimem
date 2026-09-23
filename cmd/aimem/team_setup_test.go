@@ -41,6 +41,8 @@ type fakeTeamHub struct {
 	heartbeat     int               // 0 means 200
 	resumeGarbage int               // resume replies to send as unreadable 200s
 	resumeKeys    map[string]string // idempotency key -> session id already resumed
+	mine          []map[string]any  // enrolled-teams listing; nil means enrolled in Pilot as coordinator
+	mineCode      int               // non-zero: refuse the listing with this status
 }
 
 type fakeSession struct {
@@ -92,6 +94,22 @@ func (h *fakeTeamHub) serve(w http.ResponseWriter, r *http.Request) {
 		write(200, h.identity)
 	case r.URL.Path == "/v1/projects/alpha/process":
 		write(404, map[string]any{"error": "no process reference selected"})
+	case r.URL.Path == "/v1/projects/alpha/teams/mine":
+		if h.mineCode == 403 {
+			// What a hub older than the route says: its ordinary-token gate
+			// refuses every route it does not list.
+			write(403, map[string]any{"error": "ordinary token is not authorized for this endpoint"})
+			return
+		}
+		if h.mineCode != 0 {
+			write(h.mineCode, map[string]any{"error": "no such route"})
+			return
+		}
+		teams := h.mine
+		if teams == nil {
+			teams = []map[string]any{{"id": "team-1", "name": "Pilot", "description": "", "revision": 1, "coordinator": true, "coordinator_active": false}}
+		}
+		write(200, map[string]any{"protocol_version": 1, "teams": teams, "server_time": "2026-09-23T04:00:00Z"})
 	case strings.HasSuffix(r.URL.Path, "/join"):
 		if r.Header.Get("Idempotency-Key") == "" {
 			write(400, map[string]any{"error": "Idempotency-Key header is required for task writes"})
@@ -431,6 +449,9 @@ func TestTeamSetupCoordinatorRejoinsAfterLeaveButNotOverLiveSlot(t *testing.T) {
 func TestTeamSetupRefusalsAndHandoff(t *testing.T) {
 	h, ts := newFakeTeamHub(t)
 	repo, root := setupCheckout(t, h, ts)
+	// An older hub without the enrolled-teams listing: the join's own
+	// refusals are what the command maps here.
+	h.mineCode = 404
 	h.joinCode, h.joinMsg = 403, "current team enrollment and bound ordinary write session required"
 	out, err := runSetup(t, repo, root, "Pilot", "coordinator")
 	if err == nil || !strings.Contains(out, "not enrolled in team \"Pilot\" as coordinator") || !strings.Contains(out, `{"user_id":"u-1","coordinator":true}`) || !strings.Contains(out, "aimem teams configure alpha <TEAM_ID>") || !strings.Contains(out, "Status: blocked") {
@@ -550,6 +571,9 @@ func TestTeamSetupUncertainResumeReplaysBeforeAnyRead(t *testing.T) {
 func TestTeamSetupPendingJoinKeepsTeamAndRole(t *testing.T) {
 	h, ts := newFakeTeamHub(t)
 	h.garbage = 1
+	// Enrolled in both teams, so the pending-join guard, not the enrollment
+	// check, is what refuses the other team below.
+	h.mine = []map[string]any{{"id": "team-1", "name": "Pilot", "coordinator": true}, {"id": "team-9", "name": "Other", "coordinator": true}}
 	repo, root := setupCheckout(t, h, ts)
 	if out, err := runSetup(t, repo, root, "Pilot", "coordinator"); err == nil {
 		t.Fatal("unreadable join reply accepted", out)
@@ -679,6 +703,44 @@ func TestTeamSetupProjectStopHooksBlockBeforeAnyHubCall(t *testing.T) {
 	out, err = runSetup(t, repo, root, "Pilot", "worker", "--allow-project-stop-hooks")
 	if err != nil || !strings.Contains(out, "joined as worker") {
 		t.Fatalf("%v\n%s", err, out)
+	}
+}
+
+func TestTeamSetupEnrollmentIsCheckedBeforeJoining(t *testing.T) {
+	h, ts := newFakeTeamHub(t)
+	repo, root := setupCheckout(t, h, ts)
+	// Not enrolled anywhere: blocked with the handoff, no join sent.
+	h.mine = []map[string]any{}
+	out, err := runSetup(t, repo, root, "Pilot", "worker")
+	if err == nil || !strings.Contains(out, "not enrolled in any team") || !strings.Contains(out, "aimem teams configure alpha") || h.count("/join") != 0 {
+		t.Fatalf("%v joins %d\n%s", err, h.count("/join"), out)
+	}
+	// Enrolled elsewhere: the enrolled teams are listed.
+	h.mine = []map[string]any{{"id": "team-9", "name": "Other", "coordinator": false, "coordinator_active": false}}
+	out, err = runSetup(t, repo, root, "Pilot", "worker")
+	if err == nil || !strings.Contains(out, `not enrolled in team "Pilot"; enrolled in: Other (team-9)`) || h.count("/join") != 0 {
+		t.Fatalf("%v\n%s", err, out)
+	}
+	// Enrolled without coordinator eligibility: coordinator blocked, worker proceeds.
+	h.mine = []map[string]any{{"id": "team-1", "name": "Pilot", "coordinator": false, "coordinator_active": true}}
+	out, err = runSetup(t, repo, root, "Pilot", "coordinator")
+	if err == nil || !strings.Contains(out, "not as coordinator-eligible") || !strings.Contains(out, `"coordinator":true`) || h.count("/join") != 0 {
+		t.Fatalf("%v\n%s", err, out)
+	}
+	out, err = runSetup(t, repo, root, "team-1", "worker")
+	if err != nil || !strings.Contains(out, `enrolled in team "Pilot" (team-1); a coordinator session is active now`) || !strings.Contains(out, "joined as worker") {
+		t.Fatalf("%v\n%s", err, out)
+	}
+	// An older hub without the route (404, or the ordinary-token gate's
+	// 403 as observed live on v0.7.0): reported, and the join decides.
+	for _, code := range []int{404, 403} {
+		h2, ts2 := newFakeTeamHub(t)
+		h2.mineCode = code
+		repo2, root2 := setupCheckout(t, h2, ts2)
+		out, err = runSetup(t, repo2, root2, "Pilot", "worker")
+		if err != nil || !strings.Contains(out, "does not list enrolled teams") || !strings.Contains(out, "joined as worker") {
+			t.Fatalf("code %d: %v\n%s", code, err, out)
+		}
 	}
 }
 

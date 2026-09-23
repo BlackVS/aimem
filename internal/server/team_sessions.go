@@ -220,3 +220,26 @@ func (s *Server) teamMembers(w http.ResponseWriter, r *http.Request) {
 	}
 	s.ok(w, map[string]any{"protocol_version": 1, "members": views, "next_cursor": next, "server_time": now.Format(time.RFC3339Nano), "operations": teamSessionOperations, "instructions": teamWaitingInstructions})
 }
+
+// myTeams lists the teams enrolling the calling user: the one read an
+// ordinary member can make before it holds a session, so a checkout can
+// name its team and know whether the coordinator role is open to it. No
+// session is created and nothing is recorded.
+func (s *Server) myTeams(w http.ResponseWriter, r *http.Request) {
+	db := s.sessionProject(w, r)
+	if db == nil {
+		return
+	}
+	if len(r.URL.Query()) != 0 {
+		s.fail(w, 400, errors.New("invalid team listing query"))
+		return
+	}
+	id, _ := IdentityFrom(r.Context())
+	teams, err := db.EnrolledTeams(id.UserID)
+	if err != nil {
+		s.teamError(w, r, err)
+		return
+	}
+	w.Header().Set("Cache-Control", "no-store")
+	s.ok(w, map[string]any{"protocol_version": 1, "teams": teams, "server_time": time.Now().UTC().Format(time.RFC3339Nano)})
+}

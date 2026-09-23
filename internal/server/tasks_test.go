@@ -383,7 +383,7 @@ func TestOrdinaryTokenGateMatrix(t *testing.T) {
 	// The admitted set is pinned here, independently of the map the gate
 	// consults: widening it is a deliberate, reviewed change.
 	want := []string{"GET /v1/projects/{p}/tasks", "POST /v1/projects/{p}/tasks", "GET /v1/tasks/{id}", "PUT /v1/tasks/{id}",
-		"POST /v1/projects/{p}/teams/{team}/join", "GET /v1/projects/{p}/teams/{team}/members",
+		"POST /v1/projects/{p}/teams/{team}/join", "GET /v1/projects/{p}/teams/{team}/members", "GET /v1/projects/{p}/teams/mine",
 		"POST /v1/projects/{p}/teams/{team}/heartbeat", "POST /v1/projects/{p}/teams/{team}/resume",
 		"POST /v1/projects/{p}/teams/{team}/leave", "POST /v1/projects/{p}/teams/{team}/profile",
 		"POST /v1/projects/{p}/teams/{team}/messages", "GET /v1/projects/{p}/teams/{team}/messages",
