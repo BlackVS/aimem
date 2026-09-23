@@ -8,8 +8,14 @@ description: Join an aimem team from this checkout as worker or coordinator with
 Join an aimem team from this checkout with verified onboarding.
 
 Arguments: `$ARGUMENTS` = TEAM [worker|coordinator]. TEAM is the team's
-readable name (quote it if it has spaces) or its ID. If the role is missing,
-ask the user one question: worker or coordinator? Never assume coordinator.
+readable name (quote it if it has spaces) or its ID. If TEAM is missing, run
+`aimem teams mine <project>` (the project from `.aimem.json`, or as reported
+by `aimem task-token show-source`): it lists the teams enrolling this
+checkout's credential with whether the coordinator role is open to it; show
+them and ask the user which one (on a hub that answers "not authorized for
+this endpoint", say the hub predates the listing and ask for the team name).
+If the role is missing, ask the user one question: worker or coordinator?
+Never assume coordinator.
 
 1. Declare yourself honestly. Platform: `codex`. Platform version:
    the version printed by `codex --version` if it answers quickly, else

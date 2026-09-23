@@ -170,7 +170,9 @@ teams setup` repeats it on every run:
 The text tells the agent to declare its platform and only a
 runtime-reported model, run `aimem teams setup` with `--json`, read the
 report, stop on `blocked` and show the fixes or the operator handoff, and
-enter the role per the [playbooks](TEAM-PLAYBOOKS.md). The Claude Code skill
+enter the role per the [playbooks](TEAM-PLAYBOOKS.md). Without a TEAM it runs
+`aimem teams mine` and offers the teams enrolling the credential (the person
+still chooses). The Claude Code skill
 is user-invocable only (`disable-model-invocation: true`); the Codex skill
 says the same in its description, since joining is the person's decision. Client integration repair and
 operator provisioning are separate increments; the command reports what it
