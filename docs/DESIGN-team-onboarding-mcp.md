@@ -79,8 +79,11 @@ the OS account the run held the credential as, so pilot evidence records
 the process identity.
 
 `taskcred.Resolve` failures carry a class: missing, denied, decrypt,
-malformed, rebound, config. Only missing, malformed and rebound are told to
-(re)install the token. Denied (the file exists, this process may not read
+malformed, rebound, config. Only malformed and rebound are told outright to
+reinstall the token. A binding failure names the state root and the account
+the process runs as, and a missing credential or hub entry leads with the
+other-account case: another account's state root is invisible from here
+and looks exactly like nothing installed. Denied (the file exists, this process may not read
 it) and decrypt (DPAPI refuses the blob: another account's, or bytes it
 never wrote) name the account and route to the owner-context path; a
 reinstall is mentioned only as the deliberate choice to give this account

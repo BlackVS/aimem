@@ -303,7 +303,10 @@ func (s *setup) continueSaved(want string) bool {
 func (s *setup) checkBinding() bool {
 	sel, err := taskcred.Resolve(s.env.Dir, s.env.Root)
 	if err != nil {
-		return s.fail("binding", err.Error(), CredentialFix(err, s.report.RunAs))
+		// The state root and the account matter here: a hub entry or a
+		// credential that another account installed under its own state
+		// root is absent from this process's view, not missing.
+		return s.fail("binding", fmt.Sprintf("%s (state root %s, running as %s)", err.Error(), s.env.Root, s.report.RunAs), CredentialFix(err, s.report.RunAs))
 	}
 	s.sel = sel
 	s.check("binding", "ok", fmt.Sprintf("project %s, hub %s (%s), credential %s", sel.Project, sel.HubName, sel.Hub.URL, sel.Source), "")
@@ -311,15 +314,18 @@ func (s *setup) checkBinding() bool {
 }
 
 // CredentialFix names the step that repairs a binding failure for the
-// process running as runAs. A missing, malformed or rebound credential is
-// (re)installed. One this process cannot read or decrypt exists and may
+// process running as runAs. A malformed or rebound credential is
+// reinstalled. One this process cannot read or decrypt exists and may
 // well be valid: it belongs to another OS account (the sandboxed shell
 // under the checkout owner's credential, another user's DPAPI key), and
 // the step is to run onboarding as that account, which the checkout's
 // local MCP process does; replacing the token would leave the owner's
-// copy in place and add a second one.
+// copy in place and add a second one. A missing credential or hub entry
+// gets the same caveat first, because another account's state root is
+// invisible from here and looks exactly like nothing installed.
 func CredentialFix(err error, runAs string) string {
 	msg := err.Error()
+	otherAccount := "if the checkout was set up by another account, run onboarding as that account (the local aimem MCP process of this checkout runs there) instead of installing anything as " + runAs + "; otherwise "
 	switch taskcred.Classify(err) {
 	case taskcred.ClassDenied:
 		return "the credential exists but this process (" + runAs + ") is not allowed to read it: run onboarding as the account that installed it (the local aimem MCP process of this checkout runs there) rather than replacing the token; reinstall with `aimem task-token set` only if this account is meant to hold its own credential"
@@ -327,9 +333,9 @@ func CredentialFix(err error, runAs string) string {
 		return "the credential is protected for another OS account than this process (" + runAs + "), or was not written on this machine: run onboarding as the account that installed it (the local aimem MCP process of this checkout runs there) rather than replacing the token; reinstall with `aimem task-token set` only if this account is meant to hold its own credential"
 	case taskcred.ClassMissing:
 		if strings.Contains(msg, "hub task-token") {
-			return "run `aimem hub task-token <hub> <ordinary-token>` for the OS user, or require a project-local credential with `aimem task-token set`"
+			return otherAccount + "run `aimem hub task-token <hub> <ordinary-token>` for the OS user, or require a project-local credential with `aimem task-token set`"
 		}
-		return "run `aimem task-token set` in this checkout with the member's project-scoped token on stdin (secret never on the command line)"
+		return otherAccount + "run `aimem task-token set` in this checkout with the member's project-scoped token on stdin (secret never on the command line)"
 	case taskcred.ClassMalformed, taskcred.ClassRebound:
 		return "run `aimem task-token set` in this checkout with the member's project-scoped token on stdin (secret never on the command line)"
 	case taskcred.ClassConfig:
@@ -337,7 +343,7 @@ func CredentialFix(err error, runAs string) string {
 	}
 	switch {
 	case strings.Contains(msg, "aimem hub add"):
-		return "configure the hub named in .aimem.json with `aimem hub add`"
+		return otherAccount + "configure the hub named in .aimem.json with `aimem hub add`"
 	case strings.Contains(msg, ".aimem.json"):
 		return "repair .aimem.json (valid JSON; task_credential may only be \"local\")"
 	}

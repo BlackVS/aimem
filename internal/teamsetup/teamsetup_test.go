@@ -233,6 +233,9 @@ func TestUnusableCredentialIsNotReplaced(t *testing.T) {
 	if rep.Joined() || len(rep.Checks) != 1 || rep.Checks[0].Name != "binding" || rep.Checks[0].Level != "fail" {
 		t.Fatalf("%+v", rep)
 	}
+	if d := rep.Checks[0].Detail; !strings.Contains(d, "state root "+root) || !strings.Contains(d, "running as "+rep.RunAs) {
+		t.Fatalf("binding detail does not name the root and the account: %s", d)
+	}
 	fix := rep.Checks[0].Fix
 	if !strings.Contains(fix, rep.RunAs) || !strings.Contains(fix, "local aimem MCP process") || !strings.Contains(fix, "only if this account is meant to hold its own credential") {
 		t.Fatalf("fix does not route to the owner context: %s", fix)
@@ -251,14 +254,15 @@ func TestCredentialFixByClass(t *testing.T) {
 		err       error
 		must, not string
 	}{
-		{&taskcred.Failure{Class: taskcred.ClassMissing, Msg: "local task credential required: no such file"}, reinstall, "MCP"},
-		{&taskcred.Failure{Class: taskcred.ClassMissing, Msg: `hub "h" has no task credential: aimem hub task-token h <ordinary-token>`}, "aimem hub task-token", "MCP"},
+		{&taskcred.Failure{Class: taskcred.ClassMissing, Msg: "local task credential required: no such file"}, reinstall, ""},
+		{&taskcred.Failure{Class: taskcred.ClassMissing, Msg: `hub "h" has no task credential: aimem hub task-token h <ordinary-token>`}, "aimem hub task-token", ""},
 		{&taskcred.Failure{Class: taskcred.ClassMalformed, Msg: "malformed local task credential; run aimem task-token set"}, reinstall, "MCP"},
 		{&taskcred.Failure{Class: taskcred.ClassRebound, Msg: "local task credential binding changed; run aimem task-token set"}, reinstall, "MCP"},
 		{&taskcred.Failure{Class: taskcred.ClassDenied, Msg: "cannot read required local task credential"}, "this process (acct) is not allowed to read it", ""},
 		{&taskcred.Failure{Class: taskcred.ClassDecrypt, Msg: "cannot decrypt required local task credential"}, "protected for another OS account than this process (acct)", ""},
 		{&taskcred.Failure{Class: taskcred.ClassConfig, Msg: "task credential state directory must be outside the checkout"}, "credential location", "task-token set"},
 		{errors.New(`no hub configured for this project (binding "x"); configure it with aimem hub add`), "aimem hub add", "task-token"},
+		{errors.New("something with .aimem.json"), "repair .aimem.json", "acct"},
 		{errors.New("task tools refused: invalid .aimem.json"), "repair .aimem.json", "task-token"},
 		{errors.New("something else"), "fix the checkout binding or credential", "task-token"},
 	}
@@ -272,6 +276,14 @@ func TestCredentialFixByClass(t *testing.T) {
 		fix := CredentialFix(&taskcred.Failure{Class: class}, "acct")
 		if !strings.Contains(fix, "reinstall with `aimem task-token set` only if this account is meant to hold its own credential") {
 			t.Errorf("%s: reinstall not conditioned: %s", class, fix)
+		}
+	}
+	// Nothing installed under this process's state root looks the same
+	// whether nothing was installed or another account installed it under
+	// its own root, so those fixes lead with the other-account case.
+	for _, err := range []error{&taskcred.Failure{Class: taskcred.ClassMissing, Msg: "local task credential required: no such file"}, &taskcred.Failure{Class: taskcred.ClassMissing, Msg: "hub task-token"}, errors.New("aimem hub add")} {
+		if fix := CredentialFix(err, "acct"); !strings.HasPrefix(fix, "if the checkout was set up by another account, run onboarding as that account") || !strings.Contains(fix, "instead of installing anything as acct") {
+			t.Errorf("%v: %s", err, fix)
 		}
 	}
 }

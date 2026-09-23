@@ -25,8 +25,10 @@ currently 18); a binary refuses a database newer than it understands.
 - Credential failures are classified (`taskcred.Classify`): a credential
   this process cannot read or decrypt is reported as belonging to another OS
   account, with the fix pointing at the owner-context path (the checkout's
-  local MCP process) rather than at replacing the token; only a missing,
-  malformed or rebound credential is told to run `aimem task-token set`.
+  local MCP process) rather than at replacing the token; only a malformed or
+  rebound credential is told outright to run `aimem task-token set`, and a
+  missing one is reported with the state root and account the process runs
+  as, since another account's state root looks the same as nothing installed.
 
 ## [0.7.1] — 2026-09-23
 
