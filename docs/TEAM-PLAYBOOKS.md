@@ -47,7 +47,9 @@ notification, and delivery while a model is busy is only partly observed. So:
    `aimem teams setup TEAM coordinator --platform <client> [--model-id ...
    --model-source ...]` does this step in one verified call: checks, join or
    the recognition of a session this checkout already holds, then the roster
-   ([quickstart](TEAM-AGENT-QUICKSTART.md#one-command-onboarding)).
+   ([quickstart](TEAM-AGENT-QUICKSTART.md#one-command-onboarding)); in a
+   client session, `/join_team TEAM coordinator` (Codex: `$join-team` or
+   `/prompts:join_team`) runs it and enters this playbook.
 2. **Select work the process allows.** Readiness and dependencies come first:
    an explicit owner selection, then READY tasks with DONE dependencies in
    roadmap order, oldest ID first. A team-managed task is offered by the
@@ -98,7 +100,9 @@ notification, and delivery while a model is busy is only partly observed. So:
    `aimem teams setup TEAM worker --platform <client> [--model-id ...
    --model-source ...]` does this step in one verified call and ends with the
    availability heartbeat, the reserved attempt and one bounded inbox read
-   ([quickstart](TEAM-AGENT-QUICKSTART.md#one-command-onboarding)).
+   ([quickstart](TEAM-AGENT-QUICKSTART.md#one-command-onboarding)); in a
+   client session, `/join_team TEAM worker` (Codex: `$join-team` or
+   `/prompts:join_team`) runs it and enters this playbook.
 2. **Wait for an addressed offer.** Poll the inbox with bounded waits and
    acknowledge what you read. Do not select, claim or edit backlog tasks while
    joined, including while the coordinator is disconnected; a message saying
