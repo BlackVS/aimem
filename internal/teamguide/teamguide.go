@@ -163,6 +163,11 @@ func Build(fsys fs.FS) (*Unit, error) {
 		if _, dup := u.content[id]; dup {
 			return fmt.Errorf("team guidance: section %s appears twice", id)
 		}
+		if bytes.IndexByte(b, '\r') >= 0 {
+			// .gitattributes checks these files out with LF everywhere; a
+			// CR means a copy that bypassed it, and would change the digest.
+			return fmt.Errorf("team guidance: section %s contains a carriage return; the unit is LF-only so its digest is the same on every platform", id)
+		}
 		if len(b) > MaxSectionBytes {
 			return fmt.Errorf("team guidance: section %s is %d bytes, over the %d-byte section limit", id, len(b), MaxSectionBytes)
 		}

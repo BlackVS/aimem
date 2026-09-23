@@ -176,6 +176,11 @@ func TestDigestIsStableAndCoversContentAndRoleMap(t *testing.T) {
 	if c.Digest == a.Digest {
 		t.Error("a changed role set kept the digest")
 	}
+	// A CRLF copy (a checkout that bypassed .gitattributes) is refused, not
+	// given a platform-specific digest.
+	m = canonical(t)
+	m["examples/team/accept.json"].Data = bytes.ReplaceAll(m["examples/team/accept.json"].Data, []byte("\n"), []byte("\r\n"))
+	buildErr(t, m, "section example/accept contains a carriage return")
 	// The build version is not content.
 	ra, _ := a.Role("worker", "v1")
 	rb, _ := a.Role("worker", "v2")
