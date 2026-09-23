@@ -5,8 +5,8 @@ The `/join_team` and `/resume_team` entry points call the `team_setup` and
 client starts in the checkout as the account that installed the credential.
 A shell the client sandboxes under another account (the Windows pilot's
 case) cannot read that credential; the MCP process can, so joining and
-resuming do not depend on the shell. Both sides need aimem at or after the
-release that carries these tools; restart agent sessions after upgrading so
+resuming do not depend on the shell. Agent machines need aimem v0.7.2 or
+later; hubs on v0.7.1 remain compatible. Restart agent sessions after upgrading so
 the MCP process restarts. Do not replace a valid token or grant broad
 credential-directory access to work around a credential the shell cannot
 read. See [checkout-bound onboarding over local MCP](DESIGN-team-onboarding-mcp.md).
@@ -22,7 +22,8 @@ agent conversation or commit them to Git.
 
 ## 1. Check prerequisites
 
-Install aimem v0.7.1 or later on the hub and each participating machine.
+Install aimem v0.7.1 or later on the hub and v0.7.2 or later on each
+participating agent machine.
 Complete [client installation](INSTALL-CLIENT.md) and configure the target
 hub. Run on each machine:
 

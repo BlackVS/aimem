@@ -13,6 +13,21 @@ currently 18); a binary refuses a database newer than it understands.
 
 ## [Unreleased]
 
+## [0.7.2] — 2026-09-23
+
+Team join and resume now use the local MCP process, so agents can use
+their existing checkout credentials even when shell commands run under
+a different sandbox account. Includes PR #99 and PR #100.
+
+### Upgrade notes
+
+- No schema change or new hub route; v0.7.1 hubs remain compatible.
+- Upgrade participating agent machines to v0.7.2, run `aimem teams commands .`
+  in each member checkout, and restart agent clients so their MCP processes
+  load the new binary. Existing project tokens do not need replacing.
+- Live Windows, Linux and macOS pilot validation remains pending. This
+  release does not fix client-specific shell-runner failures.
+
 ### Added
 
 - Team onboarding over the checkout-bound local MCP server: `team_setup`
