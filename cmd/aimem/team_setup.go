@@ -10,7 +10,6 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-	"time"
 
 	"aimem/internal/mcp"
 	"aimem/internal/process"
@@ -149,19 +148,8 @@ func parseTeamSetupArgs(args []string) (*teamSetupOptions, error) {
 	if fs.NArg() != 0 {
 		return nil, fmt.Errorf("unexpected argument %q\n%s", fs.Arg(0), teamSetupUsage)
 	}
-	switch o.Profile.Model.Source {
-	case "runtime_reported", "operator_configured", "agent_reported", "unknown":
-	default:
-		return nil, fmt.Errorf("model-source must be runtime_reported, operator_configured, agent_reported or unknown\n%s", teamSetupUsage)
-	}
-	if o.Profile.Model.Source != "unknown" && o.Profile.Model.ID == "unknown" {
-		return nil, errors.New("a declared model source needs --model-id; an unknown model stays source unknown")
-	}
-	if o.Profile.Model.Source == "unknown" && o.Profile.Model.ID != "unknown" {
-		return nil, errors.New("--model-id needs --model-source (who declared it: runtime_reported, operator_configured or agent_reported)")
-	}
-	if o.Profile.Model.ID != "unknown" {
-		o.Profile.Model.ObservedAt = time.Now().UTC().Format(time.RFC3339)
+	if err := teamsetup.CheckProfile(&o.Profile); err != nil {
+		return nil, fmt.Errorf("%v\n%s", err, teamSetupUsage)
 	}
 	if o.Resume && o.NewSession {
 		return nil, errors.New("--resume and --new-session exclude each other")

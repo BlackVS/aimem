@@ -2,284 +2,16 @@ package main
 
 import (
 	"bytes"
-	"context"
 	"encoding/json"
-	"fmt"
-	"net/http"
-	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
-	"sync"
 	"testing"
 
-	"aimem/internal/adapter"
-	"aimem/internal/taskcred"
 	"aimem/internal/teamsetup"
+	"aimem/internal/teamsetup/teamsetuptest"
 	"aimem/internal/teamstate"
 )
-
-// fakeTeamHub is the smallest hub the setup command can talk to: identity,
-// status, process selection, join, roster, heartbeat, resume, reserved
-// attempt and inbox, with switches for every refusal the command maps.
-type fakeTeamHub struct {
-	mu       sync.Mutex
-	secret   string
-	identity map[string]any
-	joinCode int    // 0 means 201
-	joinMsg  string // error text for a refusal
-	joinKeys []string
-	garbage  int // number of join replies to send as unreadable 201s
-	sessions map[string]*fakeSession
-	nextID   int
-	roster   int // 0 means 200; 409 means closed/stale
-	resumes  int
-	inboxN   int
-	reserved map[string]any // nil means 404
-	requests []string
-
-	rosterFails   int               // roster replies to refuse with 500 before serving
-	rosterPages   int               // >0: serve this many filler pages before the real roster
-	heartbeat     int               // 0 means 200
-	resumeGarbage int               // resume replies to send as unreadable 200s
-	resumeKeys    map[string]string // idempotency key -> session id already resumed
-	mine          []map[string]any  // enrolled-teams listing; nil means enrolled in Pilot as coordinator
-	mineCode      int               // non-zero: refuse the listing with this status
-}
-
-type fakeSession struct {
-	id, role, state string
-	generation      int64
-	suspect         bool
-	profile         json.RawMessage
-}
-
-func newFakeTeamHub(t *testing.T) (*fakeTeamHub, *httptest.Server) {
-	h := &fakeTeamHub{secret: "aimem_user_" + strings.Repeat("e", 64), sessions: map[string]*fakeSession{}, resumeKeys: map[string]string{}}
-	h.identity = map[string]any{"user_id": "u-1", "token_id": "t-1", "name": "pilot-a", "role": "user", "scope": "project", "task_read": "all-projects", "project": "alpha", "task_write": true, "tasks_enabled": true}
-	ts := httptest.NewServer(http.HandlerFunc(h.serve))
-	t.Cleanup(ts.Close)
-	return h, ts
-}
-
-func (h *fakeTeamHub) view(s *fakeSession) map[string]any {
-	v := map[string]any{"id": s.id, "team_id": "team-1", "generation": s.generation, "role": s.role, "state": s.state, "availability": "available", "profile_revision": 1, "last_seen_at": "2026-09-23T04:00:00Z", "suspect": s.suspect}
-	if s.role == "coordinator" {
-		v["coordinator_generation"] = s.generation
-	}
-	var p map[string]any
-	json.Unmarshal(s.profile, &p)
-	for k, val := range p {
-		v[k] = val
-	}
-	return v
-}
-
-func (h *fakeTeamHub) serve(w http.ResponseWriter, r *http.Request) {
-	h.mu.Lock()
-	defer h.mu.Unlock()
-	h.requests = append(h.requests, r.Method+" "+r.URL.Path)
-	write := func(code int, v any) {
-		w.WriteHeader(code)
-		json.NewEncoder(w).Encode(v)
-	}
-	if r.URL.Path == "/v1/status" {
-		write(200, map[string]any{"status": "ok", "version": "v0.7.0", "hub_name": "fake"})
-		return
-	}
-	if r.Header.Get("Authorization") != "Bearer "+h.secret {
-		write(401, map[string]any{"error": "bad credential"})
-		return
-	}
-	switch {
-	case r.URL.Path == "/v1/access/identity":
-		write(200, h.identity)
-	case r.URL.Path == "/v1/projects/alpha/process":
-		write(404, map[string]any{"error": "no process reference selected"})
-	case r.URL.Path == "/v1/projects/alpha/teams/mine":
-		if h.mineCode == 403 {
-			// What a hub older than the route says: its ordinary-token gate
-			// refuses every route it does not list.
-			write(403, map[string]any{"error": "ordinary token is not authorized for this endpoint"})
-			return
-		}
-		if h.mineCode != 0 {
-			write(h.mineCode, map[string]any{"error": "no such route"})
-			return
-		}
-		teams := h.mine
-		if teams == nil {
-			teams = []map[string]any{{"id": "team-1", "name": "Pilot", "description": "", "revision": 1, "coordinator": true, "coordinator_active": false}}
-		}
-		write(200, map[string]any{"protocol_version": 1, "teams": teams, "server_time": "2026-09-23T04:00:00Z"})
-	case strings.HasSuffix(r.URL.Path, "/join"):
-		if r.Header.Get("Idempotency-Key") == "" {
-			write(400, map[string]any{"error": "Idempotency-Key header is required for task writes"})
-			return
-		}
-		h.joinKeys = append(h.joinKeys, r.Header.Get("Idempotency-Key"))
-		if h.joinCode != 0 {
-			write(h.joinCode, map[string]any{"error": h.joinMsg})
-			return
-		}
-		var body struct {
-			Role    string          `json:"role"`
-			Profile json.RawMessage `json:"profile"`
-		}
-		json.NewDecoder(r.Body).Decode(&body)
-		for _, k := range h.joinKeys[:len(h.joinKeys)-1] {
-			if k == r.Header.Get("Idempotency-Key") {
-				// Replay: the original session.
-				for _, s := range h.sessions {
-					write(201, map[string]any{"protocol_version": 1, "session": h.view(s), "server_time": "2026-09-23T04:00:01Z"})
-					return
-				}
-			}
-		}
-		if body.Role == "coordinator" {
-			for _, s := range h.sessions {
-				if s.role == "coordinator" && s.state == "active" {
-					write(409, map[string]any{"error": "team coordinator slot is occupied"})
-					return
-				}
-			}
-		}
-		h.nextID++
-		s := &fakeSession{id: fmt.Sprintf("sess-%d", h.nextID), role: body.Role, state: "active", generation: 1, profile: body.Profile}
-		h.sessions[s.id] = s
-		if h.garbage > 0 {
-			h.garbage--
-			w.WriteHeader(201)
-			w.Write([]byte("not json"))
-			return
-		}
-		write(201, map[string]any{"protocol_version": 1, "session": h.view(s), "server_time": "2026-09-23T04:00:01Z"})
-	case strings.HasSuffix(r.URL.Path, "/members"):
-		if h.roster != 0 {
-			write(h.roster, map[string]any{"error": "team session is closed or generation is stale"})
-			return
-		}
-		s := h.sessions[r.URL.Query().Get("session_id")]
-		if s == nil || s.state != "active" || fmt.Sprint(s.generation) != r.URL.Query().Get("generation") {
-			write(409, map[string]any{"error": "team session is closed or generation is stale"})
-			return
-		}
-		if h.rosterFails > 0 {
-			h.rosterFails--
-			write(500, map[string]any{"error": "team storage failure"})
-			return
-		}
-		if h.rosterPages > 0 {
-			// Filler pages of historical sessions that are not ours.
-			h.rosterPages--
-			filler := []map[string]any{h.view(&fakeSession{id: "old-" + r.URL.Query().Get("after"), role: "worker", state: "left", generation: 1, profile: json.RawMessage(`{"label":"old"}`)})}
-			write(200, map[string]any{"protocol_version": 1, "members": filler, "next_cursor": fmt.Sprintf("c%d", h.rosterPages), "server_time": "2026-09-23T04:00:02Z"})
-			return
-		}
-		var members []map[string]any
-		for _, m := range h.sessions {
-			members = append(members, h.view(m))
-		}
-		write(200, map[string]any{"protocol_version": 1, "members": members, "next_cursor": "", "server_time": "2026-09-23T04:00:02Z"})
-	case strings.HasSuffix(r.URL.Path, "/resume"):
-		key := r.Header.Get("Idempotency-Key")
-		if id, seen := h.resumeKeys[key]; seen {
-			// Replay: the original result, whatever the generation is now.
-			write(200, map[string]any{"protocol_version": 1, "session": h.view(h.sessions[id]), "server_time": "2026-09-23T04:00:03Z"})
-			return
-		}
-		var body struct {
-			SessionID  string `json:"session_id"`
-			Generation int64  `json:"generation"`
-		}
-		json.NewDecoder(r.Body).Decode(&body)
-		s := h.sessions[body.SessionID]
-		if s == nil || s.state != "active" || s.generation != body.Generation {
-			write(409, map[string]any{"error": "team session is closed or generation is stale"})
-			return
-		}
-		h.resumes++
-		s.generation++
-		s.suspect = false
-		h.resumeKeys[key] = s.id
-		if h.resumeGarbage > 0 {
-			h.resumeGarbage--
-			w.WriteHeader(200)
-			w.Write([]byte("not json"))
-			return
-		}
-		write(200, map[string]any{"protocol_version": 1, "session": h.view(s), "server_time": "2026-09-23T04:00:03Z"})
-	case strings.HasSuffix(r.URL.Path, "/heartbeat"):
-		if h.heartbeat != 0 {
-			write(h.heartbeat, map[string]any{"error": "current team enrollment and bound ordinary write session required"})
-			return
-		}
-		write(200, map[string]any{"protocol_version": 1, "session": map[string]any{"id": "x"}})
-	case strings.HasSuffix(r.URL.Path, "/assignments/reserved"):
-		if h.reserved == nil {
-			write(404, map[string]any{"error": "no reserved attempt"})
-			return
-		}
-		write(200, map[string]any{"protocol_version": 1, "assignment": h.reserved, "workflow_ready": true})
-	case strings.Contains(r.URL.Path, "/assignments/"):
-		if h.reserved == nil || !strings.HasSuffix(r.URL.Path, "/assignments/"+fmt.Sprint(h.reserved["id"])) {
-			write(404, map[string]any{"error": "no such attempt"})
-			return
-		}
-		full := map[string]any{"requirements": map[string]any{"title": "Fix the parser"}, "updated_at": "2026-09-23T04:00:05Z"}
-		for k, v := range h.reserved {
-			full[k] = v
-		}
-		write(200, map[string]any{"protocol_version": 1, "assignment": full, "workflow_ready": true})
-	case strings.HasSuffix(r.URL.Path, "/inbox"):
-		msgs := []map[string]any{}
-		for i := 0; i < h.inboxN; i++ {
-			m := map[string]any{"id": fmt.Sprintf("m-%d", i), "sequence": i + 1, "kind": "question", "profile": map[string]any{"label": "coordinator"}, "payload": map[string]any{"text": fmt.Sprintf("Question %d: which test covers the parser change? %s", i, strings.Repeat("more ", 40))}}
-			if i == 0 {
-				m = map[string]any{"id": "m-0", "sequence": 1, "kind": "lifecycle", "lifecycle": map[string]any{"operation": "team.assignment.offer", "attempt_id": "att-1", "task_id": "task-1", "state": "OFFERED"}, "payload": map[string]any{"text": ""}}
-			}
-			msgs = append(msgs, m)
-		}
-		write(200, map[string]any{"protocol_version": 1, "messages": msgs, "next_cursor": h.inboxN, "has_more": false, "server_time": "2026-09-23T04:00:04Z"})
-	default:
-		write(404, map[string]any{"error": "unexpected " + r.URL.Path})
-	}
-}
-
-func (h *fakeTeamHub) count(suffix string) int {
-	h.mu.Lock()
-	defer h.mu.Unlock()
-	n := 0
-	for _, r := range h.requests {
-		if strings.HasSuffix(r, suffix) {
-			n++
-		}
-	}
-	return n
-}
-
-// setupCheckout binds a temporary checkout to the fake hub with a
-// project-local credential and returns (checkout, state root).
-func setupCheckout(t *testing.T, h *fakeTeamHub, ts *httptest.Server) (string, string) {
-	t.Helper()
-	root, repo := t.TempDir(), t.TempDir()
-	t.Setenv("AIMEM_STATE_DIR", root)
-	// The wiring step reads and writes user-level locations; keep them in
-	// the test's own home on every platform.
-	home := t.TempDir()
-	t.Setenv("HOME", home)
-	t.Setenv("USERPROFILE", home)
-	if err := adapter.SaveHubs(root, map[string]*adapter.HubConfig{"hub": {URL: ts.URL, Token: "checkpoint"}}, "hub"); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(repo, ".aimem.json"), []byte(`{"project":"alpha"}`), 0600); err != nil {
-		t.Fatal(err)
-	}
-	if err := taskcred.Set(context.Background(), repo, root, h.secret); err != nil {
-		t.Fatal(err)
-	}
-	return repo, root
-}
 
 func runSetup(t *testing.T, repo, root string, args ...string) (string, error) {
 	t.Helper()
@@ -309,8 +41,8 @@ func readState(t *testing.T, root, repo string) *teamstate.State {
 }
 
 func TestTeamSetupJoinsOnceAndVerifiesOnRepeat(t *testing.T) {
-	h, ts := newFakeTeamHub(t)
-	repo, root := setupCheckout(t, h, ts)
+	h, ts := teamsetuptest.New(t)
+	repo, root := teamsetuptest.Checkout(t, h, ts)
 	out, err := runSetup(t, repo, root, "Pilot", "coordinator", "--platform", "claude-code", "--platform-version", "2.1", "--model-id", "claude-fable-5-1", "--model-source", "runtime_reported", "--model-provider", "anthropic")
 	if err != nil {
 		t.Fatalf("%v\n%s", err, out)
@@ -329,8 +61,8 @@ func TestTeamSetupJoinsOnceAndVerifiesOnRepeat(t *testing.T) {
 	if err != nil {
 		t.Fatalf("%v\n%s", err, out)
 	}
-	if !strings.Contains(out, "already joined as coordinator: session sess-1, generation 1") || h.count("/join") != 1 || h.resumes != 0 {
-		t.Fatalf("repeat invocation: joins %d resumes %d\n%s", h.count("/join"), h.resumes, out)
+	if !strings.Contains(out, "already joined as coordinator: session sess-1, generation 1") || h.Count("/join") != 1 || h.Resumes != 0 {
+		t.Fatalf("repeat invocation: joins %d resumes %d\n%s", h.Count("/join"), h.Resumes, out)
 	}
 	// A different role for the same checkout is refused, not silently switched.
 	out, err = runSetup(t, repo, root, "Pilot", "worker")
@@ -349,10 +81,10 @@ func TestTeamSetupJoinsOnceAndVerifiesOnRepeat(t *testing.T) {
 }
 
 func TestTeamSetupWorkerEntersWaiting(t *testing.T) {
-	h, ts := newFakeTeamHub(t)
-	h.inboxN = 2
-	h.reserved = map[string]any{"id": "att-1", "task_id": "task-1", "state": "OFFERED"}
-	repo, root := setupCheckout(t, h, ts)
+	h, ts := teamsetuptest.New(t)
+	h.InboxN = 2
+	h.Reserved = map[string]any{"id": "att-1", "task_id": "task-1", "state": "OFFERED"}
+	repo, root := teamsetuptest.Checkout(t, h, ts)
 	out, err := runSetup(t, repo, root, "team-1", "worker", "--platform", "codex", "--capabilities", "go, unit-tests")
 	if err != nil {
 		t.Fatalf("%v\n%s", err, out)
@@ -362,20 +94,20 @@ func TestTeamSetupWorkerEntersWaiting(t *testing.T) {
 			t.Fatalf("missing %q in\n%s", want, out)
 		}
 	}
-	if h.count("/heartbeat") != 1 || h.count("/inbox") != 1 || h.count("/assignments/reserved") != 1 {
-		t.Fatalf("requests %v", h.requests)
+	if h.Count("/heartbeat") != 1 || h.Count("/inbox") != 1 || h.Count("/assignments/reserved") != 1 {
+		t.Fatalf("requests %v", h.Requests)
 	}
 	var caps []string
-	for _, s := range h.sessions {
+	for _, s := range h.Sessions {
 		var p struct {
 			Capabilities []string                `json:"capabilities"`
 			Platform     string                  `json:"platform"`
 			Model        struct{ Source string } `json:"model"`
 		}
-		json.Unmarshal(s.profile, &p)
+		json.Unmarshal(s.Profile, &p)
 		caps = p.Capabilities
 		if p.Platform != "codex" || p.Model.Source != "unknown" {
-			t.Fatalf("profile %s", s.profile)
+			t.Fatalf("profile %s", s.Profile)
 		}
 	}
 	if len(caps) != 2 || caps[1] != "unit-tests" {
@@ -384,45 +116,45 @@ func TestTeamSetupWorkerEntersWaiting(t *testing.T) {
 }
 
 func TestTeamSetupResumeAndStaleHandle(t *testing.T) {
-	h, ts := newFakeTeamHub(t)
-	repo, root := setupCheckout(t, h, ts)
+	h, ts := teamsetuptest.New(t)
+	repo, root := teamsetuptest.Checkout(t, h, ts)
 	if out, err := runSetup(t, repo, root, "Pilot", "worker"); err != nil {
 		t.Fatal(err, out)
 	}
 	// A suspect session (no heartbeat) is the restart case: resumed automatically.
-	h.sessions["sess-1"].suspect = true
+	h.Sessions["sess-1"].Suspect = true
 	out, err := runSetup(t, repo, root, "Pilot", "worker")
-	if err != nil || !strings.Contains(out, "resumed session sess-1 (no heartbeat since") || h.resumes != 1 {
-		t.Fatalf("%v resumes %d\n%s", err, h.resumes, out)
+	if err != nil || !strings.Contains(out, "resumed session sess-1 (no heartbeat since") || h.Resumes != 1 {
+		t.Fatalf("%v resumes %d\n%s", err, h.Resumes, out)
 	}
 	if st := readState(t, root, repo); st.Generation != 2 || st.ResumeKey != "" {
 		t.Fatalf("state after resume %+v", st)
 	}
 	// A live session is only verified; --resume fences it explicitly.
 	out, err = runSetup(t, repo, root, "Pilot", "worker")
-	if err != nil || !strings.Contains(out, "already joined as worker: session sess-1, generation 2") || h.resumes != 1 {
+	if err != nil || !strings.Contains(out, "already joined as worker: session sess-1, generation 2") || h.Resumes != 1 {
 		t.Fatalf("%v\n%s", err, out)
 	}
 	out, err = runSetup(t, repo, root, "Pilot", "worker", "--resume")
-	if err != nil || !strings.Contains(out, "resumed session sess-1 (--resume requested): generation 3") || h.resumes != 2 {
+	if err != nil || !strings.Contains(out, "resumed session sess-1 (--resume requested): generation 3") || h.Resumes != 2 {
 		t.Fatalf("%v\n%s", err, out)
 	}
 	// Another process advanced the handle: reported, never taken over.
-	h.sessions["sess-1"].generation = 9
+	h.Sessions["sess-1"].Generation = 9
 	out, err = runSetup(t, repo, root, "Pilot", "worker")
-	if err == nil || !strings.Contains(out, "advanced by another process") || h.resumes != 2 || h.count("/join") != 1 {
-		t.Fatalf("%v joins %d resumes %d\n%s", err, h.count("/join"), h.resumes, out)
+	if err == nil || !strings.Contains(out, "advanced by another process") || h.Resumes != 2 || h.Count("/join") != 1 {
+		t.Fatalf("%v joins %d resumes %d\n%s", err, h.Count("/join"), h.Resumes, out)
 	}
 	// --new-session discards the handle and joins afresh.
 	out, err = runSetup(t, repo, root, "Pilot", "worker", "--new-session")
-	if err != nil || !strings.Contains(out, "joined as worker: session sess-2") || h.count("/join") != 2 {
+	if err != nil || !strings.Contains(out, "joined as worker: session sess-2") || h.Count("/join") != 2 {
 		t.Fatalf("%v\n%s", err, out)
 	}
 	// A worker session that left outside this command looks like a stale
 	// handle (the hub refuses both alike): explicit choice, no silent duplicate.
-	h.sessions["sess-2"].state = "left"
+	h.Sessions["sess-2"].State = "left"
 	out, err = runSetup(t, repo, root, "Pilot", "worker")
-	if err == nil || !strings.Contains(out, "closed or was advanced by another process") || h.count("/join") != 2 {
+	if err == nil || !strings.Contains(out, "closed or was advanced by another process") || h.Count("/join") != 2 {
 		t.Fatalf("%v\n%s", err, out)
 	}
 	// A leave through the CLI clears the handle, so the next setup joins afresh.
@@ -438,21 +170,21 @@ func TestTeamSetupResumeAndStaleHandle(t *testing.T) {
 }
 
 func TestTeamSetupCoordinatorRejoinsAfterLeaveButNotOverLiveSlot(t *testing.T) {
-	h, ts := newFakeTeamHub(t)
-	repo, root := setupCheckout(t, h, ts)
+	h, ts := teamsetuptest.New(t)
+	repo, root := teamsetuptest.Checkout(t, h, ts)
 	if out, err := runSetup(t, repo, root, "Pilot", "coordinator", "--platform", "claude-code", "--platform-version", "2.1", "--model-id", "claude-fable-5-1", "--model-source", "runtime_reported"); err != nil {
 		t.Fatal(err, out)
 	}
 	// The old coordinator session is still active but its generation moved
 	// (another process resumed it): the hub refuses the fresh join.
-	h.sessions["sess-1"].generation = 5
+	h.Sessions["sess-1"].Generation = 5
 	out, err := runSetup(t, repo, root, "Pilot", "coordinator")
-	if err == nil || !strings.Contains(out, "joining afresh") || !strings.Contains(out, "coordinator slot is occupied") || h.resumes != 0 {
+	if err == nil || !strings.Contains(out, "joining afresh") || !strings.Contains(out, "coordinator slot is occupied") || h.Resumes != 0 {
 		t.Fatalf("%v\n%s", err, out)
 	}
 	// After that session left, the same command joins afresh, and a bare
 	// re-run keeps the declaration the first run made.
-	h.sessions["sess-1"].state = "left"
+	h.Sessions["sess-1"].State = "left"
 	out, err = runSetup(t, repo, root, "Pilot", "coordinator")
 	if err != nil || !strings.Contains(out, "joined as coordinator: session sess-2") || !strings.Contains(out, "platform claude-code 2.1; model claude-fable-5-1 (runtime_reported)") {
 		t.Fatalf("%v\n%s", err, out)
@@ -463,12 +195,12 @@ func TestTeamSetupCoordinatorRejoinsAfterLeaveButNotOverLiveSlot(t *testing.T) {
 }
 
 func TestTeamSetupRefusalsAndHandoff(t *testing.T) {
-	h, ts := newFakeTeamHub(t)
-	repo, root := setupCheckout(t, h, ts)
+	h, ts := teamsetuptest.New(t)
+	repo, root := teamsetuptest.Checkout(t, h, ts)
 	// An older hub without the enrolled-teams listing: the join's own
 	// refusals are what the command maps here.
-	h.mineCode = 404
-	h.joinCode, h.joinMsg = 403, "current team enrollment and bound ordinary write session required"
+	h.MineCode = 404
+	h.JoinCode, h.JoinMsg = 403, "current team enrollment and bound ordinary write session required"
 	out, err := runSetup(t, repo, root, "Pilot", "coordinator")
 	if err == nil || !strings.Contains(out, "not enrolled in team \"Pilot\" as coordinator") || !strings.Contains(out, `aimem teams provision add alpha --team "Pilot" --member u-1 --role coordinator --no-token`) || !strings.Contains(out, "Status: blocked") {
 		t.Fatalf("%v\n%s", err, out)
@@ -476,34 +208,34 @@ func TestTeamSetupRefusalsAndHandoff(t *testing.T) {
 	if readState(t, root, repo) != nil {
 		t.Fatal("a definite refusal must not leave a pending join")
 	}
-	h.joinCode, h.joinMsg = 404, "team or project not found"
+	h.JoinCode, h.JoinMsg = 404, "team or project not found"
 	out, _ = runSetup(t, repo, root, "Nope", "worker")
 	if !strings.Contains(out, `team "Nope" not found`) || !strings.Contains(out, `aimem teams provision create alpha --team "Nope" --coordinator <coordinator-user>`) {
 		t.Fatalf("%s", out)
 	}
 	// Occupied coordinator slot.
-	h.joinCode = 0
-	h.sessions["other"] = &fakeSession{id: "other", role: "coordinator", state: "active", generation: 1, profile: json.RawMessage(`{"label":"c"}`)}
+	h.JoinCode = 0
+	h.Sessions["other"] = &teamsetuptest.Session{ID: "other", Role: "coordinator", State: "active", Generation: 1, Profile: json.RawMessage(`{"label":"c"}`)}
 	out, err = runSetup(t, repo, root, "Pilot", "coordinator")
 	if err == nil || !strings.Contains(out, "coordinator slot is occupied") || !strings.Contains(out, "never freed by a timeout") {
 		t.Fatalf("%v\n%s", err, out)
 	}
 	// Missing grant: identity stops before any join, with the grant command.
-	delete(h.sessions, "other")
-	h.identity["task_write"] = false
-	joins := h.count("/join")
+	delete(h.Sessions, "other")
+	h.Identity["task_write"] = false
+	joins := h.Count("/join")
 	out, err = runSetup(t, repo, root, "Pilot", "worker")
-	if err == nil || !strings.Contains(out, "no current write grant") || !strings.Contains(out, "sets the project grant (missing now)") || h.count("/join") != joins {
+	if err == nil || !strings.Contains(out, "no current write grant") || !strings.Contains(out, "sets the project grant (missing now)") || h.Count("/join") != joins {
 		t.Fatalf("%v\n%s", err, out)
 	}
-	h.identity["task_write"] = true
-	h.identity["tasks_enabled"] = false
+	h.Identity["task_write"] = true
+	h.Identity["tasks_enabled"] = false
 	out, err = runSetup(t, repo, root, "Pilot", "worker")
 	if err == nil || !strings.Contains(out, "aimem tasks on -p alpha") {
 		t.Fatalf("%v\n%s", err, out)
 	}
-	h.identity["tasks_enabled"] = true
-	h.identity["role"] = "admin"
+	h.Identity["tasks_enabled"] = true
+	h.Identity["role"] = "admin"
 	out, err = runSetup(t, repo, root, "Pilot", "worker")
 	if err == nil || !strings.Contains(out, "require an ordinary user token") {
 		t.Fatalf("%v\n%s", err, out)
@@ -511,9 +243,9 @@ func TestTeamSetupRefusalsAndHandoff(t *testing.T) {
 }
 
 func TestTeamSetupUncertainJoinReplaysWithSameKey(t *testing.T) {
-	h, ts := newFakeTeamHub(t)
-	h.garbage = 1
-	repo, root := setupCheckout(t, h, ts)
+	h, ts := teamsetuptest.New(t)
+	h.Garbage = 1
+	repo, root := teamsetuptest.Checkout(t, h, ts)
 	out, err := runSetup(t, repo, root, "Pilot", "worker")
 	if err == nil || !strings.Contains(out, "not team protocol 1") {
 		t.Fatalf("%v\n%s", err, out)
@@ -526,19 +258,19 @@ func TestTeamSetupUncertainJoinReplaysWithSameKey(t *testing.T) {
 	if err != nil || !strings.Contains(out, "joined as worker: session sess-1") {
 		t.Fatalf("%v\n%s", err, out)
 	}
-	if len(h.joinKeys) != 2 || h.joinKeys[0] != h.joinKeys[1] || len(h.sessions) != 1 {
-		t.Fatalf("replay keys %v sessions %d", h.joinKeys, len(h.sessions))
+	if len(h.JoinKeys) != 2 || h.JoinKeys[0] != h.JoinKeys[1] || len(h.Sessions) != 1 {
+		t.Fatalf("replay keys %v sessions %d", h.JoinKeys, len(h.Sessions))
 	}
 }
 
 func TestTeamSetupIgnoresForeignState(t *testing.T) {
-	h, ts := newFakeTeamHub(t)
-	repo, root := setupCheckout(t, h, ts)
+	h, ts := teamsetuptest.New(t)
+	repo, root := teamsetuptest.Checkout(t, h, ts)
 	if out, err := runSetup(t, repo, root, "Pilot", "worker"); err != nil {
 		t.Fatal(err, out)
 	}
 	// The same file under another credential is ignored, not revived.
-	h.identity["token_id"] = "t-2"
+	h.Identity["token_id"] = "t-2"
 	out, err := runSetup(t, repo, root, "Pilot", "worker")
 	if err != nil || !strings.Contains(out, "bound to another checkout, project, hub or credential") || !strings.Contains(out, "session sess-2") {
 		t.Fatalf("%v\n%s", err, out)
@@ -546,22 +278,22 @@ func TestTeamSetupIgnoresForeignState(t *testing.T) {
 	// The credential store refuses a missing local override; nothing reaches the hub.
 	files, _ := filepath.Glob(filepath.Join(root, "task-credentials", "*.json"))
 	os.Remove(files[0])
-	before := len(h.requests)
+	before := len(h.Requests)
 	out, err = runSetup(t, repo, root, "Pilot", "worker")
-	if err == nil || !strings.Contains(out, "aimem task-token set") || len(h.requests) != before {
+	if err == nil || !strings.Contains(out, "aimem task-token set") || len(h.Requests) != before {
 		t.Fatalf("%v\n%s", err, out)
 	}
 }
 
 func TestTeamSetupUncertainResumeReplaysBeforeAnyRead(t *testing.T) {
-	h, ts := newFakeTeamHub(t)
-	repo, root := setupCheckout(t, h, ts)
+	h, ts := teamsetuptest.New(t)
+	repo, root := teamsetuptest.Checkout(t, h, ts)
 	if out, err := runSetup(t, repo, root, "Pilot", "worker"); err != nil {
 		t.Fatal(err, out)
 	}
 	// The resume commits generation 2 on the hub, but its reply is unreadable.
-	h.sessions["sess-1"].suspect = true
-	h.resumeGarbage = 1
+	h.Sessions["sess-1"].Suspect = true
+	h.ResumeGarbage = 1
 	out, err := runSetup(t, repo, root, "Pilot", "worker")
 	if err == nil || !strings.Contains(out, "not team protocol 1") {
 		t.Fatalf("%v\n%s", err, out)
@@ -579,18 +311,18 @@ func TestTeamSetupUncertainResumeReplaysBeforeAnyRead(t *testing.T) {
 	if st := readState(t, root, repo); st.Generation != 2 || st.ResumeKey != "" {
 		t.Fatalf("state after replay %+v", st)
 	}
-	if h.resumes != 1 || h.count("/join") != 1 || len(h.resumeKeys) != 1 {
-		t.Fatalf("resumes %d joins %d keys %d", h.resumes, h.count("/join"), len(h.resumeKeys))
+	if h.Resumes != 1 || h.Count("/join") != 1 || len(h.ResumeKeys) != 1 {
+		t.Fatalf("resumes %d joins %d keys %d", h.Resumes, h.Count("/join"), len(h.ResumeKeys))
 	}
 }
 
 func TestTeamSetupPendingJoinKeepsTeamAndRole(t *testing.T) {
-	h, ts := newFakeTeamHub(t)
-	h.garbage = 1
+	h, ts := teamsetuptest.New(t)
+	h.Garbage = 1
 	// Enrolled in both teams, so the pending-join guard, not the enrollment
 	// check, is what refuses the other team below.
-	h.mine = []map[string]any{{"id": "team-1", "name": "Pilot", "coordinator": true}, {"id": "team-9", "name": "Other", "coordinator": true}}
-	repo, root := setupCheckout(t, h, ts)
+	h.Mine = []map[string]any{{"id": "team-1", "name": "Pilot", "coordinator": true}, {"id": "team-9", "name": "Other", "coordinator": true}}
+	repo, root := teamsetuptest.Checkout(t, h, ts)
 	if out, err := runSetup(t, repo, root, "Pilot", "coordinator"); err == nil {
 		t.Fatal("unreadable join reply accepted", out)
 	}
@@ -598,23 +330,23 @@ func TestTeamSetupPendingJoinKeepsTeamAndRole(t *testing.T) {
 	// does not join afresh either.
 	for _, args := range [][]string{{"Pilot", "worker"}, {"Other", "coordinator"}} {
 		out, err := runSetup(t, repo, root, args...)
-		if err == nil || !strings.Contains(out, "has an unconfirmed coordinator join pending") || h.count("/join") != 1 {
-			t.Fatalf("%v: %v joins %d\n%s", args, err, h.count("/join"), out)
+		if err == nil || !strings.Contains(out, "has an unconfirmed coordinator join pending") || h.Count("/join") != 1 {
+			t.Fatalf("%v: %v joins %d\n%s", args, err, h.Count("/join"), out)
 		}
 	}
 	// The original request replays and finds the one session the hub created.
 	out, err := runSetup(t, repo, root, "Pilot", "coordinator")
-	if err != nil || !strings.Contains(out, "joined as coordinator: session sess-1") || len(h.sessions) != 1 {
-		t.Fatalf("%v sessions %d\n%s", err, len(h.sessions), out)
+	if err != nil || !strings.Contains(out, "joined as coordinator: session sess-1") || len(h.Sessions) != 1 {
+		t.Fatalf("%v sessions %d\n%s", err, len(h.Sessions), out)
 	}
 }
 
 func TestTeamSetupRoleEntryRefusalsAreFailures(t *testing.T) {
-	h, ts := newFakeTeamHub(t)
-	repo, root := setupCheckout(t, h, ts)
+	h, ts := teamsetuptest.New(t)
+	repo, root := teamsetuptest.Checkout(t, h, ts)
 	// A coordinator whose roster read fails right after the join: the
 	// membership is kept and the run is not reported as complete.
-	h.rosterFails = 1
+	h.RosterFails = 1
 	out, err := runSetup(t, repo, root, "Pilot", "coordinator")
 	if err == nil || !strings.Contains(out, "roster not read after the session was recorded: HTTP 500") || !strings.Contains(out, "Status: blocked") {
 		t.Fatalf("%v\n%s", err, out)
@@ -623,14 +355,14 @@ func TestTeamSetupRoleEntryRefusalsAreFailures(t *testing.T) {
 		t.Fatalf("membership lost: %+v", st)
 	}
 	out, err = runSetup(t, repo, root, "Pilot", "coordinator")
-	if err != nil || !strings.Contains(out, "already joined as coordinator: session sess-1") || h.count("/join") != 1 {
+	if err != nil || !strings.Contains(out, "already joined as coordinator: session sess-1") || h.Count("/join") != 1 {
 		t.Fatalf("%v\n%s", err, out)
 	}
 	// A worker whose heartbeat is refused (enrollment revoked between join
 	// and entry) is not "announced available".
-	h2, ts2 := newFakeTeamHub(t)
-	h2.heartbeat = 403
-	repo2, root2 := setupCheckout(t, h2, ts2)
+	h2, ts2 := teamsetuptest.New(t)
+	h2.Heartbeat = 403
+	repo2, root2 := teamsetuptest.Checkout(t, h2, ts2)
 	out, err = runSetup(t, repo2, root2, "Pilot", "worker")
 	if err == nil || !strings.Contains(out, "heartbeat refused: HTTP 403") || strings.Contains(out, "announced available") {
 		t.Fatalf("%v\n%s", err, out)
@@ -641,23 +373,23 @@ func TestTeamSetupRoleEntryRefusalsAreFailures(t *testing.T) {
 }
 
 func TestTeamSetupIncompleteRosterNeverJoinsAgain(t *testing.T) {
-	h, ts := newFakeTeamHub(t)
-	repo, root := setupCheckout(t, h, ts)
+	h, ts := teamsetuptest.New(t)
+	repo, root := teamsetuptest.Checkout(t, h, ts)
 	if out, err := runSetup(t, repo, root, "Pilot", "worker"); err != nil {
 		t.Fatal(err, out)
 	}
 	// More historical pages than the command reads: our row is never
 	// reached, and that is an incomplete read, not a missing membership.
-	h.rosterPages = 40
+	h.RosterPages = 40
 	out, err := runSetup(t, repo, root, "Pilot", "worker")
-	if err == nil || !strings.Contains(out, "roster read incomplete") || h.count("/join") != 1 {
-		t.Fatalf("%v joins %d\n%s", err, h.count("/join"), out)
+	if err == nil || !strings.Contains(out, "roster read incomplete") || h.Count("/join") != 1 {
+		t.Fatalf("%v joins %d\n%s", err, h.Count("/join"), out)
 	}
 	if st := readState(t, root, repo); st == nil || st.SessionID != "sess-1" {
 		t.Fatalf("membership lost: %+v", st)
 	}
 	// Two pages that do include our row verify normally.
-	h.rosterPages = 2
+	h.RosterPages = 2
 	out, err = runSetup(t, repo, root, "Pilot", "worker")
 	if err != nil || !strings.Contains(out, "already joined as worker: session sess-1") {
 		t.Fatalf("%v\n%s", err, out)
@@ -665,8 +397,8 @@ func TestTeamSetupIncompleteRosterNeverJoinsAgain(t *testing.T) {
 }
 
 func TestTeamSetupIntegrationRepairAndNoRepair(t *testing.T) {
-	h, ts := newFakeTeamHub(t)
-	repo, root := setupCheckout(t, h, ts)
+	h, ts := teamsetuptest.New(t)
+	repo, root := teamsetuptest.Checkout(t, h, ts)
 	// --no-repair reports the missing wiring and writes nothing.
 	out, err := runSetup(t, repo, root, "Pilot", "worker", "--no-repair")
 	if err != nil {
@@ -703,18 +435,18 @@ func TestTeamSetupIntegrationRepairAndNoRepair(t *testing.T) {
 }
 
 func TestTeamSetupProjectStopHooksBlockBeforeAnyHubCall(t *testing.T) {
-	h, ts := newFakeTeamHub(t)
-	repo, root := setupCheckout(t, h, ts)
+	h, ts := teamsetuptest.New(t)
+	repo, root := teamsetuptest.Checkout(t, h, ts)
 	if err := os.MkdirAll(filepath.Join(repo, ".claude"), 0o755); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(filepath.Join(repo, ".claude", "settings.json"), []byte(`{"hooks": {"Stop": [{"hooks": [{"type": "command", "command": "aimem submit-claude"}]}]}}`), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	before := len(h.requests)
+	before := len(h.Requests)
 	out, err := runSetup(t, repo, root, "Pilot", "worker")
-	if err == nil || !strings.Contains(out, "would journal every turn twice") || !strings.Contains(out, "Status: blocked") || len(h.requests) != before {
-		t.Fatalf("%v requests %d\n%s", err, len(h.requests)-before, out)
+	if err == nil || !strings.Contains(out, "would journal every turn twice") || !strings.Contains(out, "Status: blocked") || len(h.Requests) != before {
+		t.Fatalf("%v requests %d\n%s", err, len(h.Requests)-before, out)
 	}
 	out, err = runSetup(t, repo, root, "Pilot", "worker", "--allow-project-stop-hooks")
 	if err != nil || !strings.Contains(out, "joined as worker") {
@@ -723,24 +455,24 @@ func TestTeamSetupProjectStopHooksBlockBeforeAnyHubCall(t *testing.T) {
 }
 
 func TestTeamSetupEnrollmentIsCheckedBeforeJoining(t *testing.T) {
-	h, ts := newFakeTeamHub(t)
-	repo, root := setupCheckout(t, h, ts)
+	h, ts := teamsetuptest.New(t)
+	repo, root := teamsetuptest.Checkout(t, h, ts)
 	// Not enrolled anywhere: blocked with the handoff, no join sent.
-	h.mine = []map[string]any{}
+	h.Mine = []map[string]any{}
 	out, err := runSetup(t, repo, root, "Pilot", "worker")
-	if err == nil || !strings.Contains(out, "not enrolled in any team") || !strings.Contains(out, "aimem teams provision add alpha") || h.count("/join") != 0 {
-		t.Fatalf("%v joins %d\n%s", err, h.count("/join"), out)
+	if err == nil || !strings.Contains(out, "not enrolled in any team") || !strings.Contains(out, "aimem teams provision add alpha") || h.Count("/join") != 0 {
+		t.Fatalf("%v joins %d\n%s", err, h.Count("/join"), out)
 	}
 	// Enrolled elsewhere: the enrolled teams are listed.
-	h.mine = []map[string]any{{"id": "team-9", "name": "Other", "coordinator": false, "coordinator_active": false}}
+	h.Mine = []map[string]any{{"id": "team-9", "name": "Other", "coordinator": false, "coordinator_active": false}}
 	out, err = runSetup(t, repo, root, "Pilot", "worker")
-	if err == nil || !strings.Contains(out, `not enrolled in team "Pilot"; enrolled in: Other (team-9)`) || h.count("/join") != 0 {
+	if err == nil || !strings.Contains(out, `not enrolled in team "Pilot"; enrolled in: Other (team-9)`) || h.Count("/join") != 0 {
 		t.Fatalf("%v\n%s", err, out)
 	}
 	// Enrolled without coordinator eligibility: coordinator blocked, worker proceeds.
-	h.mine = []map[string]any{{"id": "team-1", "name": "Pilot", "coordinator": false, "coordinator_active": true}}
+	h.Mine = []map[string]any{{"id": "team-1", "name": "Pilot", "coordinator": false, "coordinator_active": true}}
 	out, err = runSetup(t, repo, root, "Pilot", "coordinator")
-	if err == nil || !strings.Contains(out, "not as coordinator-eligible") || !strings.Contains(out, "--role coordinator --no-token") || h.count("/join") != 0 {
+	if err == nil || !strings.Contains(out, "not as coordinator-eligible") || !strings.Contains(out, "--role coordinator --no-token") || h.Count("/join") != 0 {
 		t.Fatalf("%v\n%s", err, out)
 	}
 	out, err = runSetup(t, repo, root, "team-1", "worker")
@@ -750,9 +482,9 @@ func TestTeamSetupEnrollmentIsCheckedBeforeJoining(t *testing.T) {
 	// An older hub without the route (404, or the ordinary-token gate's
 	// 403 as observed live on v0.7.0): reported, and the join decides.
 	for _, code := range []int{404, 403} {
-		h2, ts2 := newFakeTeamHub(t)
-		h2.mineCode = code
-		repo2, root2 := setupCheckout(t, h2, ts2)
+		h2, ts2 := teamsetuptest.New(t)
+		h2.MineCode = code
+		repo2, root2 := teamsetuptest.Checkout(t, h2, ts2)
 		out, err = runSetup(t, repo2, root2, "Pilot", "worker")
 		if err != nil || !strings.Contains(out, "does not list enrolled teams") || !strings.Contains(out, "joined as worker") {
 			t.Fatalf("code %d: %v\n%s", code, err, out)
@@ -771,28 +503,28 @@ func runContinue(t *testing.T, repo, root string, args ...string) (string, error
 }
 
 func TestTeamContinueRestoresDutiesAndNeverJoins(t *testing.T) {
-	h, ts := newFakeTeamHub(t)
-	repo, root := setupCheckout(t, h, ts)
+	h, ts := teamsetuptest.New(t)
+	repo, root := teamsetuptest.Checkout(t, h, ts)
 	// No membership yet: continue refuses to join.
 	out, err := runContinue(t, repo, root)
-	if err == nil || !strings.Contains(out, "no saved membership") || h.count("/join") != 0 {
-		t.Fatalf("%v joins %d\n%s", err, h.count("/join"), out)
+	if err == nil || !strings.Contains(out, "no saved membership") || h.Count("/join") != 0 {
+		t.Fatalf("%v joins %d\n%s", err, h.Count("/join"), out)
 	}
 	if out, err := runSetup(t, repo, root, "Pilot", "worker", "--platform", "codex"); err != nil {
 		t.Fatal(err, out)
 	}
 	// A live session is verified (no generation churn); duties come from
 	// the hub: a RUNNING attempt with its title, the inbox with its cursor.
-	h.reserved = map[string]any{"id": "att-1", "task_id": "task-1", "state": "RUNNING"}
-	h.inboxN = 2
+	h.Reserved = map[string]any{"id": "att-1", "task_id": "task-1", "state": "RUNNING"}
+	h.InboxN = 2
 	out, err = runContinue(t, repo, root)
 	for _, want := range []string{"already joined as worker: session sess-1, generation 1", "attempt att-1 on task task-1 (Fix the parser) is RUNNING", "continue the accepted work in your isolated worktree", "reconcile before retrying anything", "2 unacknowledged message(s)", "next cursor 2", "Status: joined"} {
 		if err != nil || !strings.Contains(out, want) {
 			t.Fatalf("missing %q: %v\n%s", want, err, out)
 		}
 	}
-	if h.resumes != 0 || h.count("/join") != 1 {
-		t.Fatalf("continue churned: resumes %d joins %d", h.resumes, h.count("/join"))
+	if h.Resumes != 0 || h.Count("/join") != 1 {
+		t.Fatalf("continue churned: resumes %d joins %d", h.Resumes, h.Count("/join"))
 	}
 	// A team argument must match the saved membership.
 	out, err = runContinue(t, repo, root, "Other")
@@ -800,39 +532,39 @@ func TestTeamContinueRestoresDutiesAndNeverJoins(t *testing.T) {
 		t.Fatalf("%v\n%s", err, out)
 	}
 	// A suspect session is resumed; --fence resumes a live one.
-	h.sessions["sess-1"].suspect = true
+	h.Sessions["sess-1"].Suspect = true
 	out, err = runContinue(t, repo, root, "Pilot")
-	if err != nil || !strings.Contains(out, "resumed session sess-1 (no heartbeat since") || h.resumes != 1 {
+	if err != nil || !strings.Contains(out, "resumed session sess-1 (no heartbeat since") || h.Resumes != 1 {
 		t.Fatalf("%v\n%s", err, out)
 	}
 	out, err = runContinue(t, repo, root, "--fence")
-	if err != nil || !strings.Contains(out, "resumed session sess-1 (--resume requested): generation 3") || h.resumes != 2 {
+	if err != nil || !strings.Contains(out, "resumed session sess-1 (--resume requested): generation 3") || h.Resumes != 2 {
 		t.Fatalf("%v\n%s", err, out)
 	}
 	// Each attempt state maps to its next step.
 	for state, want := range map[string]string{"STOP_REQUESTED": "then team_stopped", "SUBMITTED": "wait for accept or rework", "BLOCKED": "team_resume_work", "STOPPED": "close-stop"} {
-		h.reserved["state"] = state
+		h.Reserved["state"] = state
 		out, err = runContinue(t, repo, root)
 		if err != nil || !strings.Contains(out, want) {
 			t.Fatalf("%s: %v\n%s", state, err, out)
 		}
 	}
 	// The membership ended (session left): reported, never re-joined.
-	h.sessions["sess-1"].state = "left"
+	h.Sessions["sess-1"].State = "left"
 	out, err = runContinue(t, repo, root)
-	if err == nil || !strings.Contains(out, "closed or was advanced by another process") || h.count("/join") != 1 {
-		t.Fatalf("%v joins %d\n%s", err, h.count("/join"), out)
+	if err == nil || !strings.Contains(out, "closed or was advanced by another process") || h.Count("/join") != 1 {
+		t.Fatalf("%v joins %d\n%s", err, h.Count("/join"), out)
 	}
 	// Same for a coordinator whose session left: setup would re-join, continue does not.
-	h2, ts2 := newFakeTeamHub(t)
-	repo2, root2 := setupCheckout(t, h2, ts2)
+	h2, ts2 := teamsetuptest.New(t)
+	repo2, root2 := teamsetuptest.Checkout(t, h2, ts2)
 	if out, err := runSetup(t, repo2, root2, "Pilot", "coordinator"); err != nil {
 		t.Fatal(err, out)
 	}
-	h2.sessions["sess-1"].state = "left"
+	h2.Sessions["sess-1"].State = "left"
 	out, err = runContinue(t, repo2, root2)
-	if err == nil || !strings.Contains(out, "the saved membership has ended") || h2.count("/join") != 1 {
-		t.Fatalf("%v joins %d\n%s", err, h2.count("/join"), out)
+	if err == nil || !strings.Contains(out, "the saved membership has ended") || h2.Count("/join") != 1 {
+		t.Fatalf("%v joins %d\n%s", err, h2.Count("/join"), out)
 	}
 }
 
@@ -864,8 +596,8 @@ func gitCommit(t *testing.T, repo, name string) string {
 }
 
 func TestTeamContinueComparesHeadWithThePreviouslyRecordedBase(t *testing.T) {
-	h, ts := newFakeTeamHub(t)
-	repo, root := setupCheckout(t, h, ts)
+	h, ts := teamsetuptest.New(t)
+	repo, root := teamsetuptest.Checkout(t, h, ts)
 	a := gitCommit(t, repo, "a.txt")
 	if out, err := runSetup(t, repo, root, "Pilot", "worker"); err != nil {
 		t.Fatal(err, out)
@@ -876,7 +608,7 @@ func TestTeamContinueComparesHeadWithThePreviouslyRecordedBase(t *testing.T) {
 	// HEAD moves on while a RUNNING attempt is held; a fenced resume must
 	// compare HEAD with the base recorded before, then advance the baseline.
 	b := gitCommit(t, repo, "b.txt")
-	h.reserved = map[string]any{"id": "att-1", "task_id": "task-1", "state": "RUNNING"}
+	h.Reserved = map[string]any{"id": "att-1", "task_id": "task-1", "state": "RUNNING"}
 	out, err := runContinue(t, repo, root, "--fence")
 	if err != nil || !strings.Contains(out, "resumed session sess-1") || !strings.Contains(out, "HEAD "+b[:12]+" differs from the base recorded at the last verification, "+a[:12]) {
 		t.Fatalf("%v\n%s", err, out)

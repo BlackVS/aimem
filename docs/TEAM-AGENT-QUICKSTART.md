@@ -1,5 +1,8 @@
 # Agent team registration, messages and work
 
+For a step-by-step operator walkthrough with simple commands, credential
+rules and troubleshooting, start with [Start an agent team](TEAM-QUICKSTART.md).
+
 Registration, roster, messages, assignments, execution and coordinator
 management are available through HTTP, CLI and MCP, and every transition
 delivers a lifecycle message to the counterpart's inbox, so responses say
@@ -24,6 +27,23 @@ credentials never fall back to the trusted operator socket. Admin, checkpoint,
 legacy and read-only credentials cannot join or read the roster.
 
 ## MCP
+
+Onboarding, on the checkout-bound local server only (`aimem mcp`, started
+by the client in the checkout as the account that installed its
+credential): `team_setup` (verified onboarding as worker or coordinator:
+the same checks, saved-session reconciliation, retry keys and role entry as
+`aimem teams setup`; arguments `team`, `role`, an optional declared
+`profile`, `resume`, `new_session`, `repair_integration` (default report
+only), `allow_project_stop_hooks`) and `team_continue` (the restart path of
+`aimem teams continue`: verify or resume the saved membership and report
+its duties; arguments `team` and `fence`; never joins). Both return the
+same JSON report as the CLI's `--json`, with `run_as` naming the account
+the process runs as; a blocked report is a result, not a tool error. They
+accept no token, checkout, command or executable, read HEAD but not the
+working tree, and are absent from the hub's MCP endpoint, which has no
+checkout. A shell the client runs under another account cannot read the
+checkout owner's credential; the MCP process can, which is why the
+`/join_team` and `/resume_team` entry points call these tools.
 
 Tools: `team_list` (the teams enrolling your credential, with coordinator
 eligibility and whether a coordinator is active; read only, no session
@@ -176,9 +196,11 @@ afterwards.
 
 ### The `/join_team` and `/resume_team` entry points
 
-Each client gets a short native entry point that wraps the command, so a
-member session starts with `/join_team TEAM [worker|coordinator]` and no
-pasted startup prompt. The entry points are one text rendered by the binary
+Each client gets a short native entry point that calls the `team_setup` or
+`team_continue` tool of the checkout's local aimem MCP server, so a member
+session starts with `/join_team TEAM [worker|coordinator]` and no pasted
+startup prompt and no shell command that needs the credential. The CLI
+commands remain for operators and scripts and share the saved state. The entry points are one text rendered by the binary
 per client (managed files carrying an `aimem teams commands` marker,
 refreshed whenever the rendered text changes, never touching a file that
 does not carry the marker); `aimem teams commands [DIR]` writes them,
@@ -192,18 +214,22 @@ teams setup` repeats it on every run:
 | Codex (project) | `.agents/skills/join-team/SKILL.md`, `.agents/skills/resume-team/SKILL.md` | mention `$join-team TEAM [ROLE]` or `$resume-team [TEAM]` (or `/skills`); also in a `codex exec` prompt |
 | Codex (user) | `~/.codex/prompts/join_team.md`, `~/.codex/prompts/resume_team.md`, written only when `~/.codex` exists | `/prompts:join_team TEAM [ROLE]`, `/prompts:resume_team [TEAM]` (Codex custom prompts live only in the Codex home, not in repositories) |
 
-`/resume_team` wraps `aimem teams continue`: it tells the agent to run it with
-`--json`, reconcile before retrying anything, and take up the reported
+`/resume_team` calls `team_continue`: it tells the agent to pass only the
+saved team, reconcile before retrying anything, and take up the reported
 duties in order (the reserved attempt per its state, then the unacknowledged
 messages with `team_ack` only for the consumed ones, then the role's
 waiting or coordinating loop). It states that the command is the explicit
 step: client startup alone and an idle model do not poll or wake.
 
-The text tells the agent to declare its platform and only a
-runtime-reported model, run `aimem teams setup` with `--json`, read the
-report, stop on `blocked` and show the fixes or the operator handoff, and
-enter the role per the [playbooks](TEAM-PLAYBOOKS.md). Without a TEAM it runs
-`aimem teams mine` and offers the teams enrolling the credential (the person
+The text tells the agent to check that the server lists the tool (an older
+`aimem mcp` process does not: upgrade and restart the client, never fall
+back to a shell command or a broader permission), declare its platform and
+only a runtime-reported model, call `team_setup`, read the report, stop on
+`blocked` and show the fixes or the operator handoff (a credential the
+process cannot read or decrypt means the MCP process is not the account
+that installed it, never a reason to reinstall the token), and enter the
+role per the [playbooks](TEAM-PLAYBOOKS.md). Without a TEAM it calls
+`team_list` and offers the teams enrolling the credential (the person
 still chooses). The Claude Code skill
 is user-invocable only (`disable-model-invocation: true`); the Codex skill
 says the same in its description, since joining is the person's decision. Client integration repair and

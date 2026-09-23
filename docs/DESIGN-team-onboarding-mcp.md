@@ -1,7 +1,8 @@
 # Checkout-bound onboarding over local MCP
 
-Status: owner-approved direction, 2026-09-23; increment 1 (shared core)
-implemented, increment 2 (MCP tools) pending.
+Status: owner-approved direction, 2026-09-23; increments 1 (shared core)
+and 2 (local MCP tools, entry points, quickstart) implemented; live
+platform validation tracked by the pilot task.
 
 Team authentication remains unchanged. The agent's `/join_team` and
 `/resume_team` entry points should invoke structured local MCP tools instead
@@ -135,4 +136,65 @@ suite drives `Run` and `Continue` through an in-memory session caller
 produces the denied class (Unix, file mode 0) and the decrypt class
 (Windows, bytes DPAPI never protected) and asserts the fix names the
 account and the owner-context path and never opens with a token reinstall.
+
+## Increment 2: local MCP tools, entry points, quickstart
+
+`internal/mcp` gains `team_setup` and `team_continue`, listed and served
+only when the facade is bound to a checkout (`localCheckout`: the directory
+the client started `aimem mcp` in, and this process's state root). The hub
+endpoint constructs no such binding, so it neither lists nor serves them,
+for a full principal and for a tasks-only one alike; a call by name is
+refused. Arguments are decoded strictly: `team`, `role`, an optional
+`profile` (label, platform and platform version required once given;
+model rules shared with the CLI through `teamsetup.CheckProfile`),
+`resume`, `new_session`, `repair_integration`, `allow_project_stop_hooks`
+for setup; `team` and `fence` for continue. An unknown field, a token, a
+checkout or a command is a decode error. The result is the report as
+JSON, the CLI's `--json` shape; a blocked report is a result with its
+checks and fixes, not a tool error.
+
+The host environment the facade supplies resolves the inspection record
+of increment 1:
+
+- Git: `teamsetup.GitHeadOnly`, which runs `rev-parse HEAD` and reports
+  everything else as not probed (`ErrNotProbed`); the core prints
+  "(working tree not probed)" and the entry point tells the agent to check
+  `git status` itself. No `git status` runs under the owner's identity.
+- Integration repairs: `repair_integration` defaults to false, so a join
+  reports the wiring and writes nothing; the installers and `aimem teams
+  commands` remain the writers.
+- Process context: `processctx.Bootstrap`, the session-start bootstrap
+  moved out of the CLI into its own package (the process package sits
+  below adapter in the import graph), for the facade's own state root, so
+  the process check is the same on both paths.
+- State and credential: the facade's state root, the same files.
+
+`team_leave` through the facade clears the saved membership for the bound
+checkout (it used the process working directory before). The generated
+`/join_team` and `/resume_team` entry points call the tools, stop with an
+upgrade-and-restart message when the server does not list them, never fall
+back to a shell command or a broader permission, and read a credential the
+process cannot open as an account mismatch. The Claude Code skills allow
+`mcp__aimem__team_setup`, `mcp__aimem__team_list` and
+`mcp__aimem__team_continue`.
+
+Tests (`internal/mcp/onboard_test.go`, over the fake hub now shared in
+`internal/teamsetup/teamsetuptest`): listing on the facade; join, repeat
+without a second join, saved declaration reuse, refusal of a role or team
+change in place, continue, resume of a suspect session with a new
+generation, wrong team, argument strictness; the CLI core reading the
+session the facade created; explicit leave ending it for both; a lost join
+reply replayed with its saved key, continue replaying a pending join and
+never a fresh one, a refused handle reported with nothing taken over,
+`new_session` as the explicit way out; a second checkout under the same
+state root seeing no membership and no credential; the denied (Unix) and
+decrypt (Windows) classes refused before any hub call; the hub facade
+listing and serving neither tool; tools hidden with tasks off; schema
+validity and the absence of token, checkout, command and executable
+arguments.
+
+Live validation: automated coverage above; real Windows, Linux and macOS
+client runs (OS, client, MCP process identity from `run_as`, checkout,
+model provenance) are recorded by the pilot task and remain pending until
+run.
 

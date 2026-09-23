@@ -13,7 +13,30 @@ currently 18); a binary refuses a database newer than it understands.
 
 ## [Unreleased]
 
+### Added
+
+- Team onboarding over the checkout-bound local MCP server: `team_setup`
+  and `team_continue` run the same code and saved state as `aimem teams
+  setup` and `continue` from the `aimem mcp` process the client starts in
+  the checkout as the credential's owner, so a shell the client sandboxes
+  under another account is not needed. They take the team, role, a declared
+  profile and explicit recovery choices, no token, checkout or command;
+  report HEAD but never probe the working tree; write no integration files
+  unless asked (`repair_integration`); and are absent from the hub's MCP
+  endpoint. The `/join_team` and `/resume_team` entry points call them and
+  stop with an upgrade-and-restart message when an older `aimem mcp` does
+  not list them, never falling back to a shell command.
+  [Design](docs/DESIGN-team-onboarding-mcp.md); step-by-step
+  [team quickstart](docs/TEAM-QUICKSTART.md).
+
 ### Changed
+
+- The session-start process bootstrap moved into `internal/processctx`,
+  shared by the CLI and the MCP facade; `aimem session-start`, `aimem
+  process show` and `aimem teams setup` behave as before.
+- `team_leave` through the stdio MCP facade clears the saved membership of
+  the checkout the facade is bound to (before: the process working
+  directory).
 
 - Team onboarding runs on one shared core (`internal/teamsetup`): `aimem
   teams setup` and `aimem teams continue` are now shells over `Run` and

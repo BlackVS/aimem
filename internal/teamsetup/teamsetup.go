@@ -198,9 +198,9 @@ func Continue(env Env, team string, fence bool) *Report {
 
 // GitOutput is the shell's git probe: git from PATH, run in the checkout,
 // output trimmed. Read-only queries only; the checkout's own .git/config
-// still applies to them (core.fsmonitor names a program git status runs),
-// so a host that runs as a different identity than the one that edits the
-// checkout decides whether to run this probe at all.
+// still applies to them (core.fsmonitor and filter.*.clean name programs
+// git status may run), so a host that runs as a different identity than
+// the one that edits the checkout uses GitHeadOnly instead.
 func GitOutput(dir string, args ...string) (string, error) {
 	cmd := exec.Command("git", append([]string{"-C", dir}, args...)...)
 	out, err := cmd.Output()
@@ -208,6 +208,48 @@ func GitOutput(dir string, args ...string) (string, error) {
 		return "", err
 	}
 	return strings.TrimSpace(string(out)), nil
+}
+
+// ErrNotProbed is what a host's probe returns for a query it does not run
+// under its identity; the report says so instead of guessing.
+var ErrNotProbed = errors.New("not probed under this identity")
+
+// GitHeadOnly is the owner-context probe: `rev-parse HEAD` reads refs and
+// nothing else, so it is run; everything else (the working-tree status,
+// which consults configuration the checkout's editor controls) is
+// reported as not probed.
+func GitHeadOnly(dir string, args ...string) (string, error) {
+	if len(args) == 2 && args[0] == "rev-parse" && args[1] == "HEAD" {
+		return GitOutput(dir, args...)
+	}
+	return "", ErrNotProbed
+}
+
+// CheckProfile applies the declaration rules the CLI flags and the MCP
+// arguments share: blank fields are unknown, a model source other than
+// unknown needs a model id, a model id needs its source, and a declared
+// model gets its observation time. A declaration is never inferred.
+func CheckProfile(p *store.TeamProfile) error {
+	for _, f := range []*string{&p.Platform, &p.PlatformVersion, &p.Model.Provider, &p.Model.ID, &p.Model.Version, &p.Model.Source} {
+		if strings.TrimSpace(*f) == "" {
+			*f = "unknown"
+		}
+	}
+	switch p.Model.Source {
+	case "runtime_reported", "operator_configured", "agent_reported", "unknown":
+	default:
+		return errors.New("model source must be runtime_reported, operator_configured, agent_reported or unknown")
+	}
+	if p.Model.Source != "unknown" && p.Model.ID == "unknown" {
+		return errors.New("a declared model source needs a model id; an unknown model stays source unknown")
+	}
+	if p.Model.Source == "unknown" && p.Model.ID != "unknown" {
+		return errors.New("a model id needs its source (who declared it: runtime_reported, operator_configured or agent_reported)")
+	}
+	if p.Model.ID != "unknown" {
+		p.Model.ObservedAt = time.Now().UTC().Format(time.RFC3339)
+	}
+	return nil
 }
 
 // setup carries one run: the resolved checkout, the report being built
@@ -596,9 +638,12 @@ func (s *setup) checkBaseCommit() {
 		return
 	}
 	s.report.BaseCommit = head
-	dirty, _ := s.env.Git(s.env.Dir, "status", "--porcelain")
+	dirty, err := s.env.Git(s.env.Dir, "status", "--porcelain")
 	state := "clean"
-	if dirty != "" {
+	switch {
+	case err != nil:
+		state = "(working tree not probed)"
+	case dirty != "":
 		state = "with uncommitted changes"
 	}
 	s.check("base commit", "ok", head[:min(12, len(head))]+" "+state, "")
@@ -759,7 +804,7 @@ func (s *setup) join(key, team string, profile store.TeamProfile) bool {
 		return s.fail("session", "the saved membership has ended (the session left or was closed); nothing was joined", "join again on purpose with /join_team "+team+" "+s.opts.Role+" (aimem teams setup); a restart never re-joins by itself")
 	}
 	if !s.opts.PlatformSet && profile.Platform == "unknown" {
-		s.check("profile", "warn", "platform not given; declared as unknown (pass --platform from the entry point that knows the client)", "")
+		s.check("profile", "warn", "platform not given; declared as unknown (the entry point that knows the client should declare it)", "")
 	}
 	retry := key != ""
 	if key == "" {
@@ -935,7 +980,7 @@ func (s *setup) reconcileLine() string {
 		line += "; HEAD " + s.report.BaseCommit[:min(12, len(s.report.BaseCommit))] + " differs from the base recorded at the last verification, " + s.previousBase[:min(12, len(s.previousBase))] + " (your candidate, or a change to reconcile)"
 	}
 	if s.env.Git != nil {
-		if dirty, _ := s.env.Git(s.env.Dir, "status", "--porcelain"); dirty != "" {
+		if dirty, err := s.env.Git(s.env.Dir, "status", "--porcelain"); err == nil && dirty != "" {
 			line += "; the checkout has uncommitted changes"
 		}
 	}

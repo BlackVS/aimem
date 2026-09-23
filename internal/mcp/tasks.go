@@ -313,7 +313,11 @@ func (s *srv) taskTool(ctx context.Context, name string, raw json.RawMessage) (s
 				SessionID string `json:"session_id"`
 			}
 			if json.Unmarshal(raw, &h) == nil && h.SessionID != "" {
-				teamstate.NoteLeave(".", mcpStateRoot(), h.SessionID)
+				dir, root := ".", mcpStateRoot()
+				if s.local != nil {
+					dir, root = s.local.dir, s.local.root
+				}
+				teamstate.NoteLeave(dir, root, h.SessionID)
 			}
 		}
 		return out, err

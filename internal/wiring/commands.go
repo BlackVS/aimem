@@ -22,7 +22,7 @@ var resumeTeamBody string
 // by aimem and is rewritten whenever the rendered content changes.
 const managedMarker = "<!-- managed by aimem (`aimem teams commands`): regenerated from the aimem binary; change the source in the aimem repository, not this file -->"
 
-const joinTeamDescription = "Join an aimem team from this checkout as worker or coordinator with verified onboarding (aimem teams setup). Use only when the user asks to join a team, become the coordinator or a worker, or onboard into the team pilot."
+const joinTeamDescription = "Join an aimem team from this checkout as worker or coordinator with verified onboarding (the team_setup tool of the local aimem MCP server). Use only when the user asks to join a team, become the coordinator or a worker, or onboard into the team pilot."
 
 // commandAsset is one rendered entry point at one path. User is true for
 // the one client whose native prompts live only under the home directory.
@@ -33,7 +33,7 @@ type commandAsset struct {
 	Content string
 }
 
-const resumeTeamDescription = "Continue the aimem team membership this checkout already holds after a client restart or compaction (aimem teams continue): verify or resume the session and take up the reserved attempt and unacknowledged inbox. Use only when the user asks to resume, continue or pick up team work; it never joins."
+const resumeTeamDescription = "Continue the aimem team membership this checkout already holds after a client restart or compaction (the team_continue tool of the local aimem MCP server): verify or resume the session and take up the reserved attempt and unacknowledged inbox. Use only when the user asks to resume, continue or pick up team work; it never joins."
 
 func render(body, frontmatter, platform, versionCmd string) string {
 	body = strings.ReplaceAll(body, "{{PLATFORM}}", platform)
@@ -69,8 +69,8 @@ func (e entryPoint) assets() []commandAsset {
 }
 
 func commandAssets() []commandAsset {
-	join := entryPoint{body: joinTeamBody, claudeName: "join_team", codexName: "join-team", fileName: "join_team", description: joinTeamDescription, argumentHint: "TEAM [worker|coordinator]", allowedTools: "Bash(aimem teams setup *) Bash(aimem teams mine *) Bash(claude --version)"}
-	resume := entryPoint{body: resumeTeamBody, claudeName: "resume_team", codexName: "resume-team", fileName: "resume_team", description: resumeTeamDescription, argumentHint: "[TEAM]", allowedTools: "Bash(aimem teams continue *) Bash(git status *)"}
+	join := entryPoint{body: joinTeamBody, claudeName: "join_team", codexName: "join-team", fileName: "join_team", description: joinTeamDescription, argumentHint: "TEAM [worker|coordinator]", allowedTools: "mcp__aimem__team_setup mcp__aimem__team_list Bash(claude --version)"}
+	resume := entryPoint{body: resumeTeamBody, claudeName: "resume_team", codexName: "resume-team", fileName: "resume_team", description: resumeTeamDescription, argumentHint: "[TEAM]", allowedTools: "mcp__aimem__team_continue Bash(git status *)"}
 	return append(join.assets(), resume.assets()...)
 }
 
