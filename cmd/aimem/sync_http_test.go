@@ -168,8 +168,8 @@ func TestVersionAtLeast(t *testing.T) {
 		{"", false}, {"garbage", false},
 	}
 	for _, c := range cases {
-		if got := versionAtLeast(c.v, 0, 3, 24); got != c.want {
-			t.Errorf("versionAtLeast(%q) = %v, want %v", c.v, got, c.want)
+		if got := adapter.VersionAtLeast(c.v, 0, 3, 24); got != c.want {
+			t.Errorf("adapter.VersionAtLeast(%q) = %v, want %v", c.v, got, c.want)
 		}
 	}
 }

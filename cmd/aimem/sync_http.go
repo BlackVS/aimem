@@ -189,28 +189,6 @@ func hubStatus(h *adapter.HubConfig) (version, hubName string) {
 	return st.Version, st.HubName
 }
 
-// versionAtLeast parses release-shaped versions ("v0.3.24", plus git
-// describe suffixes) and reports v >= major.minor.patch. Unparseable
-// versions ("dev", "") report false: requiring a capability of a build
-// we cannot date would break sync against older source installs.
-func versionAtLeast(v string, major, minor, patch int) bool {
-	v = strings.TrimPrefix(strings.TrimSpace(v), "v")
-	if i := strings.IndexAny(v, "-+"); i >= 0 {
-		v = v[:i]
-	}
-	var a, b, c int
-	if n, err := fmt.Sscanf(v, "%d.%d.%d", &a, &b, &c); err != nil || n != 3 {
-		return false
-	}
-	if a != major {
-		return a > major
-	}
-	if b != minor {
-		return b > minor
-	}
-	return c >= patch
-}
-
 // verifyEventStream decides whether a pull may advance the cursor.
 // A present terminator must match the received line count exactly; an
 // absent one is fatal only when the hub is known to send terminators
@@ -222,7 +200,7 @@ func verifyEventStream(end *int, received int, hubVersion string) error {
 		}
 		return nil
 	}
-	if versionAtLeast(hubVersion, 0, 3, 24) {
+	if adapter.VersionAtLeast(hubVersion, 0, 3, 24) {
 		return fmt.Errorf("event stream ended without its terminator (hub %s should send one) — truncated mid-stream? cursor not advanced", hubVersion)
 	}
 	return nil // legacy hub: the pre-verification trust model, unchanged

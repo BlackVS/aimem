@@ -16,8 +16,31 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 )
+
+// VersionAtLeast parses release-shaped versions ("v0.3.24", plus git
+// describe suffixes) and reports v >= major.minor.patch. Unparseable
+// versions ("dev", "") report false: requiring a capability of a build
+// we cannot date would break sync against older source installs.
+func VersionAtLeast(v string, major, minor, patch int) bool {
+	v = strings.TrimPrefix(strings.TrimSpace(v), "v")
+	if i := strings.IndexAny(v, "-+"); i >= 0 {
+		v = v[:i]
+	}
+	var a, b, c int
+	if n, err := fmt.Sscanf(v, "%d.%d.%d", &a, &b, &c); err != nil || n != 3 {
+		return false
+	}
+	if a != major {
+		return a > major
+	}
+	if b != minor {
+		return b > minor
+	}
+	return c >= patch
+}
 
 // HubConfig is one hub entry in <state-root>/hub.json (mode 0600 — it
 // holds tokens). A machine may know several hubs (e.g. a work hub and a
