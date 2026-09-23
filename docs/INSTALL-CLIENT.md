@@ -58,6 +58,7 @@ or `.codex/hooks.json`: registering them twice journals every turn twice.
 | `.claude/settings.json` | a `SessionStart` hook running `aimem session-start` |
 | `.codex/hooks.json` | the same `SessionStart` hook for Codex (runs once the project is trusted in Codex). Codex runs hook commands without a shell, so this one cannot guard on aimem's presence — a collaborator without aimem sees a one-line hook failure per session start, nothing worse |
 | `.mcp.json`, `opencode.json` | MCP registration for recall |
+| `.claude/skills/join_team/SKILL.md`, `.opencode/commands/join_team.md`, `.agents/skills/join-team/SKILL.md` | the `/join_team` team-onboarding entry points, rendered by `aimem teams commands` (managed files; `~/.codex/prompts/join_team.md` too when a Codex home exists) |
 | `.aimem.json` | project identity, knowledge groups, hub binding |
 
 Commit these if the project is tracked. Re-running the installer in

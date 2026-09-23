@@ -255,6 +255,14 @@ Updated: (date) | branch: (branch) | HEAD: (sha) | by: (client/session)
   Write-Json $ocPath $oc
   Say 'OpenCode instructions + MCP wired'
 
+  # /join_team entry points (Claude Code skill, OpenCode command, Codex skill
+  # and custom prompt) are rendered by the binary from one source, so they
+  # refresh on upgrade. Managed files; `aimem teams setup` repeats this.
+  if (Get-Command aimem -ErrorAction SilentlyContinue) {
+    & aimem teams commands $dir | Out-Null
+    Say '/join_team entry points written (Claude Code, OpenCode, Codex)'
+  }
+
   if (-not (Test-Path (Join-Path $dir 'AGENTS.md'))) {
     Copy-Item (Join-Path $RepoDir 'templates\AGENTS.md') (Join-Path $dir 'AGENTS.md')
     Say 'copied AGENTS.md protocol (edit its project-context section)'

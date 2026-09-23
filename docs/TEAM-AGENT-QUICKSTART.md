@@ -140,7 +140,32 @@ skill is a directory holding `SKILL.md` in a location that client reads
 `~/.claude/skills`, `~/.agents/skills`, `~/.codex/skills`,
 `~/.config/opencode/skills`), reported as found or NOT FOUND per client.
 Installing skills and the user-level pieces (binary, checkpoint hooks, the
-OpenCode plugin) stay with the installers. Client integration repair and
+OpenCode plugin) stay with the installers.
+
+### The `/join_team` entry points
+
+Each client gets a short native entry point that wraps the command, so a
+member session starts with `/join_team TEAM [worker|coordinator]` and no
+pasted startup prompt. The entry points are one text rendered by the binary
+per client (managed files carrying an `aimem teams commands` marker,
+refreshed whenever the rendered text changes, never touching a file that
+does not carry the marker); `aimem teams commands [DIR]` writes them,
+`--check` reports only, the installers' project mode calls it, and `aimem
+teams setup` repeats it on every run:
+
+| Client | Path | Invocation |
+|---|---|---|
+| Claude Code | `.claude/skills/join_team/SKILL.md` | `/join_team TEAM [ROLE]`; also `claude -p "/join_team TEAM ROLE"` |
+| OpenCode | `.opencode/commands/join_team.md` | `/join_team TEAM [ROLE]`; also `opencode run --command join_team "TEAM ROLE"` |
+| Codex (project) | `.agents/skills/join-team/SKILL.md` | mention `$join-team TEAM [ROLE]` (or `/skills`); also in a `codex exec` prompt |
+| Codex (user) | `~/.codex/prompts/join_team.md`, written only when `~/.codex` exists | `/prompts:join_team TEAM [ROLE]` (Codex custom prompts live only in the Codex home, not in repositories) |
+
+The text tells the agent to declare its platform and only a
+runtime-reported model, run `aimem teams setup` with `--json`, read the
+report, stop on `blocked` and show the fixes or the operator handoff, and
+enter the role per the [playbooks](TEAM-PLAYBOOKS.md). The Claude Code skill
+is user-invocable only (`disable-model-invocation: true`); the Codex skill
+says the same in its description, since joining is the person's decision. Client integration repair and
 operator provisioning are separate increments; the command reports what it
 found and how to fix it.
 

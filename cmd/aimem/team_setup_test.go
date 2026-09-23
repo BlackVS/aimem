@@ -230,6 +230,11 @@ func setupCheckout(t *testing.T, h *fakeTeamHub, ts *httptest.Server) (string, s
 	t.Helper()
 	root, repo := t.TempDir(), t.TempDir()
 	t.Setenv("AIMEM_STATE_DIR", root)
+	// The wiring step reads and writes user-level locations; keep them in
+	// the test's own home on every platform.
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
 	if err := adapter.SaveHubs(root, map[string]*adapter.HubConfig{"hub": {URL: ts.URL, Token: "checkpoint"}}, "hub"); err != nil {
 		t.Fatal(err)
 	}
@@ -637,8 +642,11 @@ func TestTeamSetupIntegrationRepairAndNoRepair(t *testing.T) {
 	}
 	// The default run repairs and says so; the next run finds everything present.
 	out, err = runSetup(t, repo, root, "Pilot", "worker")
-	if err != nil || !strings.Contains(out, "repaired: Claude Code MCP registration added") || !strings.Contains(out, "repaired: handoff template created") {
+	if err != nil || !strings.Contains(out, "repaired: Claude Code MCP registration added") || !strings.Contains(out, "repaired: handoff template created") || !strings.Contains(out, "repaired: command asset written (missing)") {
 		t.Fatalf("%v\n%s", err, out)
+	}
+	if _, err := os.Stat(filepath.Join(repo, ".claude", "skills", "join_team", "SKILL.md")); err != nil {
+		t.Fatal("setup did not write the /join_team skill")
 	}
 	if _, err := os.Stat(filepath.Join(repo, "opencode.json")); err != nil {
 		t.Fatal("repair did not write opencode.json")

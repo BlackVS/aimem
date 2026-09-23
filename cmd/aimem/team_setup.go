@@ -157,6 +157,47 @@ func teamSetupCmd(args []string) error {
 	return runTeamSetup(args, ".", stateRoot(), os.Stdout)
 }
 
+// teamCommandsCmd writes or refreshes the /join_team entry points of a
+// checkout (the installers call it after wiring a project; setup repeats
+// it on every run). --check reports without writing.
+func teamCommandsCmd(args []string) error {
+	dir, check := ".", false
+	for _, a := range args {
+		switch {
+		case a == "--check":
+			check = true
+		case strings.HasPrefix(a, "-"):
+			return errors.New("usage: aimem teams commands [DIR] [--check]")
+		default:
+			dir = a
+		}
+	}
+	abs, err := filepath.Abs(dir)
+	if err != nil {
+		return err
+	}
+	if canon, err := filepath.EvalSymlinks(abs); err == nil {
+		abs = canon
+	}
+	home, _ := os.UserHomeDir()
+	failed := false
+	for _, f := range wiring.InstallCommands(abs, home, !check) {
+		detail := f.Detail
+		if f.Repaired {
+			detail = "written: " + detail
+		}
+		fmt.Printf("  %-5s %s: %s\n", f.Level, f.File, detail)
+		if f.Fix != "" {
+			fmt.Printf("        fix: %s\n", f.Fix)
+		}
+		failed = failed || f.Level == "fail"
+	}
+	if failed {
+		return errors.New("some entry points could not be written")
+	}
+	return nil
+}
+
 type teamSetupOptions struct {
 	team, role  string
 	profile     store.TeamProfile
@@ -345,6 +386,7 @@ func (s *teamSetup) checkBinding() bool {
 func (s *teamSetup) checkIntegration() bool {
 	o := s.opts.wiring
 	o.Home, _ = os.UserHomeDir()
+	o.Commands = true
 	rep := wiring.Check(s.sel.Repo, o)
 	s.report.Wiring = &rep
 	for _, f := range rep.Findings {

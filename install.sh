@@ -296,6 +296,13 @@ ANALYZE
   done
   say "/aimem-analyze command wired (Claude Code + OpenCode)"
 
+  # /join_team entry points (Claude Code skill, OpenCode command, Codex skill
+  # and custom prompt) are rendered by the binary from one source, so they
+  # refresh on upgrade. Managed files; `aimem teams setup` repeats this.
+  if command -v aimem >/dev/null 2>&1; then
+    (cd "$dir" && aimem teams commands "$dir" >/dev/null) && say "/join_team entry points written (Claude Code, OpenCode, Codex)"
+  fi
+
   if [ ! -f "$dir/AGENTS.md" ]; then
     cp "$REPO_DIR/templates/AGENTS.md" "$dir/AGENTS.md"
     say "copied AGENTS.md protocol (edit its project-context section)"

@@ -15,6 +15,18 @@ currently 18); a binary refuses a database newer than it understands.
 
 ### Added
 
+- `/join_team TEAM [worker|coordinator]` entry points for Claude Code
+  (`.claude/skills/join_team/SKILL.md`), OpenCode
+  (`.opencode/commands/join_team.md`) and Codex (`.agents/skills/join-team/
+  SKILL.md`, mentioned as `$join-team`, plus `~/.codex/prompts/join_team.md`
+  for `/prompts:join_team` when a Codex home exists). One text, rendered by
+  the binary per client and written as managed files by the new `aimem
+  teams commands [DIR] [--check]`, by the installers' project mode, and by
+  every `aimem teams setup` run; a file without the managed marker is never
+  touched. The text has the agent declare its platform and only a
+  runtime-reported model, run `aimem teams setup --json`, stop on a blocked
+  report, and enter the role per the playbooks.
+
 - `aimem teams setup` checks the checkout's client integration before
   joining and repairs only what aimem owns: `docs/SESSION-STATE.md`, the
   `SessionStart` handoff hook in `.claude/settings.json` and

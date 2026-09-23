@@ -73,6 +73,7 @@ type Options struct {
 	RequiredSkills        []string // skills the selected process requires
 	Home                  string   // user home for user-level skill locations; "" skips them
 	ClientVersions        bool     // run `<client> --version` (bounded) for detected clients
+	Commands              bool     // also install or refresh the /join_team entry points (report only when Repair is false)
 }
 
 // sessionStartMarkers are the two spellings the installers write for the
@@ -112,6 +113,9 @@ func Check(dir string, o Options) Report {
 	r.Findings = append(r.Findings, checkHooks(filepath.Join(dir, ".codex", "hooks.json"), "Codex", o)...)
 	r.Findings = append(r.Findings, checkMCPJSON(filepath.Join(dir, ".mcp.json"), o.Repair))
 	r.Findings = append(r.Findings, checkOpenCode(filepath.Join(dir, "opencode.json"), o.Repair)...)
+	if o.Commands {
+		r.Findings = append(r.Findings, InstallCommands(dir, o.Home, o.Repair)...)
+	}
 	r.Clients = detectClients(o.ClientVersions)
 	r.Skills = skillReport(dir, o.Home, r.Clients, o.RequiredSkills)
 	return r
