@@ -49,11 +49,17 @@ type entryPoint struct {
 	allowedTools                    string
 }
 
+// yamlQuote renders a frontmatter value as a YAML double-quoted scalar, so
+// a description with ": " or a hint like [TEAM] parses as the string it is.
+func yamlQuote(s string) string {
+	return `"` + strings.NewReplacer(`\`, `\\`, `"`, `\"`).Replace(s) + `"`
+}
+
 func (e entryPoint) assets() []commandAsset {
-	claude := "---\nname: " + e.claudeName + "\ndescription: " + e.description + "\nargument-hint: " + e.argumentHint + "\nallowed-tools: " + e.allowedTools + "\ndisable-model-invocation: true\n---\n"
-	opencode := "---\ndescription: " + e.description + "\n---\n"
-	codexSkill := "---\nname: " + e.codexName + "\ndescription: " + e.description + " Invoked as $" + e.codexName + " " + e.argumentHint + ".\n---\n"
-	codexPrompt := "---\ndescription: " + e.description + "\nargument-hint: " + e.argumentHint + "\n---\n"
+	claude := "---\nname: " + e.claudeName + "\ndescription: " + yamlQuote(e.description) + "\nargument-hint: " + yamlQuote(e.argumentHint) + "\nallowed-tools: " + yamlQuote(e.allowedTools) + "\ndisable-model-invocation: true\n---\n"
+	opencode := "---\ndescription: " + yamlQuote(e.description) + "\n---\n"
+	codexSkill := "---\nname: " + e.codexName + "\ndescription: " + yamlQuote(e.description+" Invoked as $"+e.codexName+" "+e.argumentHint+".") + "\n---\n"
+	codexPrompt := "---\ndescription: " + yamlQuote(e.description) + "\nargument-hint: " + yamlQuote(e.argumentHint) + "\n---\n"
 	return []commandAsset{
 		{Rel: filepath.Join(".claude", "skills", e.claudeName, "SKILL.md"), Label: ".claude/skills/" + e.claudeName + "/SKILL.md (/" + e.claudeName + " in Claude Code)", Content: render(e.body, claude, "claude-code", "claude --version")},
 		{Rel: filepath.Join(".opencode", "commands", e.fileName+".md"), Label: ".opencode/commands/" + e.fileName + ".md (/" + e.fileName + " in OpenCode)", Content: render(e.body, opencode, "opencode", "opencode --version")},

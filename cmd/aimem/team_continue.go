@@ -89,7 +89,7 @@ func (s *teamSetup) continueSaved(want string) bool {
 	}
 	s.opts.team, s.opts.role, s.opts.profile = saved.Team, saved.Role, saved.Profile
 	s.report.Team, s.report.Role = saved.Team, saved.Role
-	s.state = saved
+	s.state, s.previousBase = saved, saved.BaseCommit
 	switch {
 	case saved.SessionID != "" && saved.ResumeKey != "":
 		return s.resume("replaying an unconfirmed resume")

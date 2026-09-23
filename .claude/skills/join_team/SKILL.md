@@ -1,8 +1,8 @@
 ---
 name: join_team
-description: Join an aimem team from this checkout as worker or coordinator with verified onboarding (aimem teams setup). Use only when the user asks to join a team, become the coordinator or a worker, or onboard into the team pilot.
-argument-hint: TEAM [worker|coordinator]
-allowed-tools: Bash(aimem teams setup *) Bash(aimem teams mine *) Bash(claude --version)
+description: "Join an aimem team from this checkout as worker or coordinator with verified onboarding (aimem teams setup). Use only when the user asks to join a team, become the coordinator or a worker, or onboard into the team pilot."
+argument-hint: "TEAM [worker|coordinator]"
+allowed-tools: "Bash(aimem teams setup *) Bash(aimem teams mine *) Bash(claude --version)"
 disable-model-invocation: true
 ---
 

@@ -290,6 +290,10 @@ type teamSetup struct {
 	// verified, resumed or reported as ended, but never replaced by a new
 	// join (a pending join's replay is not a new join).
 	continueOnly bool
+	// previousBase is the base commit the saved state held before this run
+	// touched it: what the reconciliation line compares HEAD with, kept
+	// apart from the baseline that verifying or resuming advances.
+	previousBase string
 }
 
 type teamSetupIdentity struct {
@@ -631,6 +635,7 @@ func (s *teamSetup) reconcile() bool {
 		saved = nil
 	}
 	if saved != nil {
+		s.previousBase = saved.BaseCommit
 		// The saved record, confirmed or pending, binds this checkout to one
 		// team and role; a different request is a separate decision, never a
 		// silent second membership.
@@ -692,6 +697,9 @@ func (s *teamSetup) verifySaved() bool {
 		}
 		s.check("session", "ok", fmt.Sprintf("already joined as %s: session %s, generation %d, last seen %s (no second join; --resume would fence this live handle)", me.Role, me.ID, me.Generation, me.LastSeenAt), "")
 		st.VerifiedAt = time.Now().UTC().Format(time.RFC3339)
+		if s.report.BaseCommit != "" {
+			st.BaseCommit = s.report.BaseCommit // the baseline advances; previousBase keeps the old one for the report
+		}
 		s.saveState()
 		return s.enterRole(me)
 	case status == http.StatusOK && me != nil:
@@ -930,12 +938,14 @@ func attemptNext(state string) string {
 // command is retried, because the hub cannot see local effects.
 func (s *teamSetup) reconcileLine() string {
 	line := "reconcile before retrying anything: the attempt state above is what the hub acknowledged"
-	if s.state != nil && s.state.BaseCommit != "" && s.report.BaseCommit != "" {
-		if s.state.BaseCommit == s.report.BaseCommit {
-			line += "; HEAD is still the recorded base " + s.state.BaseCommit[:min(12, len(s.state.BaseCommit))]
-		} else {
-			line += "; HEAD " + s.report.BaseCommit[:min(12, len(s.report.BaseCommit))] + " differs from the recorded base " + s.state.BaseCommit[:min(12, len(s.state.BaseCommit))] + " (your candidate, or a change to reconcile)"
-		}
+	switch {
+	case s.report.BaseCommit == "":
+	case s.previousBase == "":
+		line += "; no base commit was recorded at the last verification (membership from an older release); HEAD " + s.report.BaseCommit[:min(12, len(s.report.BaseCommit))] + " is recorded now"
+	case s.previousBase == s.report.BaseCommit:
+		line += "; HEAD is still the base recorded at the last verification, " + s.previousBase[:min(12, len(s.previousBase))]
+	default:
+		line += "; HEAD " + s.report.BaseCommit[:min(12, len(s.report.BaseCommit))] + " differs from the base recorded at the last verification, " + s.previousBase[:min(12, len(s.previousBase))] + " (your candidate, or a change to reconcile)"
 	}
 	if dirty, _ := gitOutput(s.dir, "status", "--porcelain"); dirty != "" {
 		line += "; the checkout has uncommitted changes"

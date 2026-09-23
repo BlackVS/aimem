@@ -1,8 +1,8 @@
 ---
 name: resume_team
-description: Continue the aimem team membership this checkout already holds after a client restart or compaction (aimem teams continue): verify or resume the session and take up the reserved attempt and unacknowledged inbox. Use only when the user asks to resume, continue or pick up team work; it never joins.
-argument-hint: [TEAM]
-allowed-tools: Bash(aimem teams continue *) Bash(git status *)
+description: "Continue the aimem team membership this checkout already holds after a client restart or compaction (aimem teams continue): verify or resume the session and take up the reserved attempt and unacknowledged inbox. Use only when the user asks to resume, continue or pick up team work; it never joins."
+argument-hint: "[TEAM]"
+allowed-tools: "Bash(aimem teams continue *) Bash(git status *)"
 disable-model-invocation: true
 ---
 
@@ -54,10 +54,13 @@ team. Never pass a role: it comes from the saved membership.
      RUNNING: continue the work; BLOCKED: wait for the answer, then
      resume-work; STOP_REQUESTED: stop safely, then `team_stopped`;
      STOPPED: wait for close-stop; SUBMITTED: wait for the review).
-   - Then the unacknowledged inbox messages listed in the report: read each
-     (offers, cancellations, reviews, recoveries, questions), act, and
-     `team_ack` only the ones you consumed; the report's `next_cursor` is
-     where your next `team_inbox` read starts.
+   - Then the unacknowledged inbox messages the report lists. The list is a
+     summary (an excerpt of each text, no refs, deadlines or reply
+     context): before acting on or acknowledging any of them, read them in
+     full with `team_inbox` from cursor 0 (`after` 0, `wait_seconds` 0),
+     then act (offers, cancellations, reviews, recoveries, questions) and
+     `team_ack` only the ones you consumed; the read's `next_cursor` is
+     where your later reads start.
    - Worker without a reserved attempt: wait for an addressed offer by
      polling `team_inbox` (`wait_seconds` 25) and never select, claim or
      edit backlog tasks while joined, even while the coordinator is

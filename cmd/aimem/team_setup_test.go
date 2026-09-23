@@ -835,6 +835,72 @@ func TestTeamContinueRestoresDutiesAndNeverJoins(t *testing.T) {
 	}
 }
 
+// gitCommit makes the checkout a Git repository (or adds a commit to it)
+// and returns HEAD.
+func gitCommit(t *testing.T, repo, name string) string {
+	t.Helper()
+	if _, err := os.Stat(filepath.Join(repo, ".git")); err != nil {
+		for _, args := range [][]string{{"init", "-q"}, {"config", "user.email", "t@example.invalid"}, {"config", "user.name", "t"}} {
+			if _, err := gitOutput(repo, args...); err != nil {
+				t.Skipf("git unavailable: %v", err)
+			}
+		}
+	}
+	if err := os.WriteFile(filepath.Join(repo, name), []byte(name+"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := gitOutput(repo, "add", name); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := gitOutput(repo, "-c", "commit.gpgsign=false", "commit", "-q", "-m", name); err != nil {
+		t.Fatal(err)
+	}
+	head, err := gitOutput(repo, "rev-parse", "HEAD")
+	if err != nil {
+		t.Fatal(err)
+	}
+	return head
+}
+
+func TestTeamContinueComparesHeadWithThePreviouslyRecordedBase(t *testing.T) {
+	h, ts := newFakeTeamHub(t)
+	repo, root := setupCheckout(t, h, ts)
+	a := gitCommit(t, repo, "a.txt")
+	if out, err := runSetup(t, repo, root, "Pilot", "worker"); err != nil {
+		t.Fatal(err, out)
+	}
+	if st := readState(t, root, repo); st.BaseCommit != a {
+		t.Fatalf("base not recorded at join: %+v", st)
+	}
+	// HEAD moves on while a RUNNING attempt is held; a fenced resume must
+	// compare HEAD with the base recorded before, then advance the baseline.
+	b := gitCommit(t, repo, "b.txt")
+	h.reserved = map[string]any{"id": "att-1", "task_id": "task-1", "state": "RUNNING"}
+	out, err := runContinue(t, repo, root, "--fence")
+	if err != nil || !strings.Contains(out, "resumed session sess-1") || !strings.Contains(out, "HEAD "+b[:12]+" differs from the base recorded at the last verification, "+a[:12]) {
+		t.Fatalf("%v\n%s", err, out)
+	}
+	if st := readState(t, root, repo); st.BaseCommit != b || st.Generation != 2 {
+		t.Fatalf("baseline not advanced: %+v", st)
+	}
+	// A verify-only run now finds HEAD equal to the recorded base.
+	out, err = runContinue(t, repo, root)
+	if err != nil || !strings.Contains(out, "HEAD is still the base recorded at the last verification, "+b[:12]) {
+		t.Fatalf("%v\n%s", err, out)
+	}
+	// A membership recorded without a base (older release) says so.
+	st := readState(t, root, repo)
+	st.BaseCommit = ""
+	canon, _ := filepath.EvalSymlinks(repo)
+	if err := teamstate.Save(teamstate.Path(root, canon), st); err != nil {
+		t.Fatal(err)
+	}
+	out, err = runContinue(t, repo, root)
+	if err != nil || !strings.Contains(out, "no base commit was recorded at the last verification") {
+		t.Fatalf("%v\n%s", err, out)
+	}
+}
+
 func TestTeamSetupArgs(t *testing.T) {
 	for _, args := range [][]string{nil, {"Pilot"}, {"Pilot", "reviewer"}, {"--json", "Pilot", "worker"}, {"Pilot", "worker", "extra"}, {"Pilot", "worker", "--model-source", "guess"}, {"Pilot", "worker", "--model-id", "x"}, {"Pilot", "worker", "--model-source", "agent_reported"}, {"Pilot", "worker", "--resume", "--new-session"}} {
 		if _, err := parseTeamSetupArgs(args); err == nil {

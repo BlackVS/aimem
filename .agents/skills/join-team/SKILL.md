@@ -1,6 +1,6 @@
 ---
 name: join-team
-description: Join an aimem team from this checkout as worker or coordinator with verified onboarding (aimem teams setup). Use only when the user asks to join a team, become the coordinator or a worker, or onboard into the team pilot. Invoked as $join-team TEAM [worker|coordinator].
+description: "Join an aimem team from this checkout as worker or coordinator with verified onboarding (aimem teams setup). Use only when the user asks to join a team, become the coordinator or a worker, or onboard into the team pilot. Invoked as $join-team TEAM [worker|coordinator]."
 ---
 
 <!-- managed by aimem (`aimem teams commands`): regenerated from the aimem binary; change the source in the aimem repository, not this file -->
