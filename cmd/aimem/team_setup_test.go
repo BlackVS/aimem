@@ -619,6 +619,61 @@ func TestTeamSetupIncompleteRosterNeverJoinsAgain(t *testing.T) {
 	}
 }
 
+func TestTeamSetupIntegrationRepairAndNoRepair(t *testing.T) {
+	h, ts := newFakeTeamHub(t)
+	repo, root := setupCheckout(t, h, ts)
+	// --no-repair reports the missing wiring and writes nothing.
+	out, err := runSetup(t, repo, root, "Pilot", "worker", "--no-repair")
+	if err != nil {
+		t.Fatalf("%v\n%s", err, out)
+	}
+	for _, want := range []string{"warn  wiring docs/SESSION-STATE.md", "warn  wiring .claude/settings.json", "warn  wiring .mcp.json", "warn  wiring opencode.json"} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("missing %q in\n%s", want, out)
+		}
+	}
+	if _, err := os.Stat(filepath.Join(repo, ".mcp.json")); err == nil {
+		t.Fatal("--no-repair wrote .mcp.json")
+	}
+	// The default run repairs and says so; the next run finds everything present.
+	out, err = runSetup(t, repo, root, "Pilot", "worker")
+	if err != nil || !strings.Contains(out, "repaired: Claude Code MCP registration added") || !strings.Contains(out, "repaired: handoff template created") {
+		t.Fatalf("%v\n%s", err, out)
+	}
+	if _, err := os.Stat(filepath.Join(repo, "opencode.json")); err != nil {
+		t.Fatal("repair did not write opencode.json")
+	}
+	out, err = runSetup(t, repo, root, "Pilot", "worker")
+	if err != nil || strings.Contains(out, "repaired:") || !strings.Contains(out, "ok    wiring .codex/hooks.json Codex SessionStart handoff hook present") {
+		t.Fatalf("%v\n%s", err, out)
+	}
+	var rep teamSetupReport
+	out, _ = runSetup(t, repo, root, "Pilot", "worker", "--json")
+	if json.Unmarshal([]byte(out), &rep) != nil || rep.Wiring == nil || len(rep.Wiring.Findings) < 6 {
+		t.Fatalf("json integration report: %s", out)
+	}
+}
+
+func TestTeamSetupProjectStopHooksBlockBeforeAnyHubCall(t *testing.T) {
+	h, ts := newFakeTeamHub(t)
+	repo, root := setupCheckout(t, h, ts)
+	if err := os.MkdirAll(filepath.Join(repo, ".claude"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(repo, ".claude", "settings.json"), []byte(`{"hooks": {"Stop": [{"hooks": [{"type": "command", "command": "aimem submit-claude"}]}]}}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	before := len(h.requests)
+	out, err := runSetup(t, repo, root, "Pilot", "worker")
+	if err == nil || !strings.Contains(out, "would journal every turn twice") || !strings.Contains(out, "Status: blocked") || len(h.requests) != before {
+		t.Fatalf("%v requests %d\n%s", err, len(h.requests)-before, out)
+	}
+	out, err = runSetup(t, repo, root, "Pilot", "worker", "--allow-project-stop-hooks")
+	if err != nil || !strings.Contains(out, "joined as worker") {
+		t.Fatalf("%v\n%s", err, out)
+	}
+}
+
 func TestTeamSetupArgs(t *testing.T) {
 	for _, args := range [][]string{nil, {"Pilot"}, {"Pilot", "reviewer"}, {"--json", "Pilot", "worker"}, {"Pilot", "worker", "extra"}, {"Pilot", "worker", "--model-source", "guess"}, {"Pilot", "worker", "--model-id", "x"}, {"Pilot", "worker", "--model-source", "agent_reported"}, {"Pilot", "worker", "--resume", "--new-session"}} {
 		if _, err := parseTeamSetupArgs(args); err == nil {
