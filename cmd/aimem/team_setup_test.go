@@ -469,7 +469,7 @@ func TestTeamSetupRefusalsAndHandoff(t *testing.T) {
 	h.mineCode = 404
 	h.joinCode, h.joinMsg = 403, "current team enrollment and bound ordinary write session required"
 	out, err := runSetup(t, repo, root, "Pilot", "coordinator")
-	if err == nil || !strings.Contains(out, "not enrolled in team \"Pilot\" as coordinator") || !strings.Contains(out, `{"user_id":"u-1","coordinator":true}`) || !strings.Contains(out, "aimem teams configure alpha <TEAM_ID>") || !strings.Contains(out, "Status: blocked") {
+	if err == nil || !strings.Contains(out, "not enrolled in team \"Pilot\" as coordinator") || !strings.Contains(out, `aimem teams provision add alpha --team "Pilot" --member u-1 --role coordinator --no-token`) || !strings.Contains(out, "Status: blocked") {
 		t.Fatalf("%v\n%s", err, out)
 	}
 	if readState(t, root, repo) != nil {
@@ -477,7 +477,7 @@ func TestTeamSetupRefusalsAndHandoff(t *testing.T) {
 	}
 	h.joinCode, h.joinMsg = 404, "team or project not found"
 	out, _ = runSetup(t, repo, root, "Nope", "worker")
-	if !strings.Contains(out, `team "Nope" not found`) || !strings.Contains(out, "aimem teams create alpha team.json") {
+	if !strings.Contains(out, `team "Nope" not found`) || !strings.Contains(out, `aimem teams provision create alpha --team "Nope" --coordinator <coordinator-user>`) {
 		t.Fatalf("%s", out)
 	}
 	// Occupied coordinator slot.
@@ -492,7 +492,7 @@ func TestTeamSetupRefusalsAndHandoff(t *testing.T) {
 	h.identity["task_write"] = false
 	joins := h.count("/join")
 	out, err = runSetup(t, repo, root, "Pilot", "worker")
-	if err == nil || !strings.Contains(out, "no current write grant") || !strings.Contains(out, "aimem access grant add alpha user u-1") || h.count("/join") != joins {
+	if err == nil || !strings.Contains(out, "no current write grant") || !strings.Contains(out, "sets the project grant (missing now)") || h.count("/join") != joins {
 		t.Fatalf("%v\n%s", err, out)
 	}
 	h.identity["task_write"] = true
@@ -727,7 +727,7 @@ func TestTeamSetupEnrollmentIsCheckedBeforeJoining(t *testing.T) {
 	// Not enrolled anywhere: blocked with the handoff, no join sent.
 	h.mine = []map[string]any{}
 	out, err := runSetup(t, repo, root, "Pilot", "worker")
-	if err == nil || !strings.Contains(out, "not enrolled in any team") || !strings.Contains(out, "aimem teams configure alpha") || h.count("/join") != 0 {
+	if err == nil || !strings.Contains(out, "not enrolled in any team") || !strings.Contains(out, "aimem teams provision add alpha") || h.count("/join") != 0 {
 		t.Fatalf("%v joins %d\n%s", err, h.count("/join"), out)
 	}
 	// Enrolled elsewhere: the enrolled teams are listed.
@@ -739,7 +739,7 @@ func TestTeamSetupEnrollmentIsCheckedBeforeJoining(t *testing.T) {
 	// Enrolled without coordinator eligibility: coordinator blocked, worker proceeds.
 	h.mine = []map[string]any{{"id": "team-1", "name": "Pilot", "coordinator": false, "coordinator_active": true}}
 	out, err = runSetup(t, repo, root, "Pilot", "coordinator")
-	if err == nil || !strings.Contains(out, "not as coordinator-eligible") || !strings.Contains(out, `"coordinator":true`) || h.count("/join") != 0 {
+	if err == nil || !strings.Contains(out, "not as coordinator-eligible") || !strings.Contains(out, "--role coordinator --no-token") || h.count("/join") != 0 {
 		t.Fatalf("%v\n%s", err, out)
 	}
 	out, err = runSetup(t, repo, root, "team-1", "worker")

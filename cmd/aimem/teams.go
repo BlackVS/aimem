@@ -27,8 +27,13 @@ const teamsUsage = `usage: aimem teams list <project>
        aimem teams recover <project> <team-id> <attempt-id> <reconciliation.json> [idempotency-key]
        aimem teams unmanage <project> <team-id> <task-id> <request.json> [idempotency-key]
        aimem teams rebind-token <project> <team-id> <session-id> <request.json> [idempotency-key]
+       aimem teams provision create <project> --team NAME --coordinator USER --expiry RFC3339 [flags]
+       aimem teams provision add <project> --team NAME|ID --member USER --role worker|coordinator --expiry RFC3339 [flags]
 
-Run on the hub host as its local operator. recover closes an abandoned attempt
+Run on the hub host as its local operator. provision is the guided path:
+user (by exact name or ID, --create-user for a new one), project grant,
+team creation or enrollment, and one project-scoped token per member whose
+secret is shown once (aimem teams provision for flags). recover closes an abandoned attempt
 after recorded reconciliation; unmanage releases a task this team manages;
 rebind-token moves a session to a replacement token of the same user after
 recorded reconciliation. Configuration JSON contains name,
@@ -66,6 +71,9 @@ func teamsCmd(args []string) error {
 	}
 	if len(args) > 0 && args[0] == "continue" {
 		return teamContinueCmd(args[1:])
+	}
+	if len(args) > 0 && args[0] == "provision" {
+		return teamProvisionCmd(args[1:])
 	}
 	if len(args) > 0 && args[0] == "mine" {
 		if len(args) != 2 {

@@ -94,10 +94,10 @@ coordinator gets the roster with
 each member's reported model and its source, a worker announces itself
 available, reads its reserved attempt and its inbox once (bounded, wait 0).
 Exit status 0 means joined and verified; 1 means blocked, and the report names
-the missing prerequisite or prints the operator handoff (the exact hub-host
-commands for a grant, a team or an enrollment). Agents cannot enroll
-themselves, and the hub does not tell a missing enrollment from missing
-coordinator eligibility.
+the missing prerequisite or prints the operator handoff: the exact
+`aimem teams provision` commands for the hub host that set the grant, create
+the team or add the enrollment ([TEAM-SETUP](TEAM-SETUP.md#guided-provisioning)).
+Agents cannot enroll themselves.
 
 Session state is saved outside the checkout, under the state root in
 `team-sessions/<sha256 of the checkout path>.json`, bound to the checkout,
