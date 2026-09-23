@@ -15,6 +15,24 @@ currently 18); a binary refuses a database newer than it understands.
 
 ### Added
 
+- `aimem teams continue [TEAM] [--fence] [--json]` and the `/resume_team`
+  entry points (Claude Code skill, OpenCode command, Codex skill and home
+  prompt, rendered by `aimem teams commands` like `/join_team`): after a
+  client restart the saved membership is verified or resumed (persisted
+  retry key; a live session is only verified, `--fence` resumes it) and the
+  duties the hub holds are reported: the reserved attempt with its
+  assignment title and state mapped to the next protocol step, a
+  reconciliation line (HEAD against the base commit recorded at the last
+  verification, uncommitted changes, surviving processes, retry only with
+  the original key), the unacknowledged inbox listed at cursor 0 with the
+  next cursor and nothing acknowledged, and the roster. It never joins: a
+  membership that ended is reported and `/join_team` is the way back in.
+  `aimem teams setup` shares the richer role entry. The saved membership
+  state moved to `internal/teamstate` and records the base commit; an
+  explicit `team_leave` through the stdio MCP facade now clears it like the
+  CLI leave does, so a closed handle after a leave is told apart from a
+  stale one.
+
 - Members list their own teams before joining: `GET /v1/projects/{p}/teams/mine`
   (ordinary write token, current grant, tasks enabled; read only, no session,
   nothing recorded, other members not disclosed) returns the teams enrolling

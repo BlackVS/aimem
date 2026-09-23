@@ -20,14 +20,23 @@ func TestInstallCommandsWritesRefreshesAndRespectsForeignFiles(t *testing.T) {
 			written++
 		}
 	}
-	if written != 3 {
+	if written != 6 { // two entry points, three checkout targets each
 		t.Fatalf("written %d: %+v", written, out)
+	}
+	resume := read(t, filepath.Join(dir, ".claude", "skills", "resume_team", "SKILL.md"))
+	for _, want := range []string{"name: resume_team", `argument-hint: "[TEAM]"`, `description: "Continue the aimem team membership`, "aimem teams continue [TEAM] --json", "never joins", `allowed-tools: "Bash(aimem teams continue *)`, "STOP_REQUESTED: stop safely", "read them in\n     full with `team_inbox` from cursor 0"} {
+		if !strings.Contains(resume, want) {
+			t.Fatalf("resume skill missing %q:\n%s", want, resume)
+		}
+	}
+	if !strings.Contains(read(t, filepath.Join(dir, ".agents", "skills", "resume-team", "SKILL.md")), "name: resume-team") {
+		t.Fatal("codex resume skill")
 	}
 	if _, err := os.Stat(filepath.Join(home, ".codex", "prompts", "join_team.md")); err == nil {
 		t.Fatal("prompt written without a Codex home")
 	}
 	claude := read(t, filepath.Join(dir, ".claude", "skills", "join_team", "SKILL.md"))
-	for _, want := range []string{"name: join_team", "argument-hint: TEAM [worker|coordinator]", managedMarker, "--platform claude-code", "`claude --version`", "$ARGUMENTS", "docs/TEAM-PLAYBOOKS.md", "never\n   paste a token", "`aimem teams mine <project>`", "Do not build, download or substitute"} {
+	for _, want := range []string{"name: join_team", `argument-hint: "TEAM [worker|coordinator]"`, `description: "Join an aimem team`, managedMarker, "--platform claude-code", "`claude --version`", "$ARGUMENTS", "docs/TEAM-PLAYBOOKS.md", "never\n   paste a token", "`aimem teams mine <project>`", "Do not build, download or substitute"} {
 		if !strings.Contains(claude, want) {
 			t.Fatalf("claude skill missing %q:\n%s", want, claude)
 		}
@@ -74,8 +83,11 @@ func TestInstallCommandsWritesRefreshesAndRespectsForeignFiles(t *testing.T) {
 	}
 	InstallCommands(dir, home, true)
 	prompt := read(t, filepath.Join(home, ".codex", "prompts", "join_team.md"))
-	if !strings.Contains(prompt, "argument-hint: TEAM [worker|coordinator]") || !strings.Contains(prompt, "--platform codex") {
+	if !strings.Contains(prompt, `argument-hint: "TEAM [worker|coordinator]"`) || !strings.Contains(prompt, "--platform codex") {
 		t.Fatalf("codex prompt:\n%s", prompt)
+	}
+	if _, err := os.Stat(filepath.Join(home, ".codex", "prompts", "resume_team.md")); err != nil {
+		t.Fatal("codex resume prompt not written with a Codex home")
 	}
 }
 

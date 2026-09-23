@@ -15,6 +15,7 @@ import (
 
 	"aimem/internal/adapter"
 	"aimem/internal/taskcred"
+	"aimem/internal/teamstate"
 )
 
 // fakeTeamHub is the smallest hub the setup command can talk to: identity,
@@ -219,10 +220,24 @@ func (h *fakeTeamHub) serve(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		write(200, map[string]any{"protocol_version": 1, "assignment": h.reserved, "workflow_ready": true})
+	case strings.Contains(r.URL.Path, "/assignments/"):
+		if h.reserved == nil || !strings.HasSuffix(r.URL.Path, "/assignments/"+fmt.Sprint(h.reserved["id"])) {
+			write(404, map[string]any{"error": "no such attempt"})
+			return
+		}
+		full := map[string]any{"requirements": map[string]any{"title": "Fix the parser"}, "updated_at": "2026-09-23T04:00:05Z"}
+		for k, v := range h.reserved {
+			full[k] = v
+		}
+		write(200, map[string]any{"protocol_version": 1, "assignment": full, "workflow_ready": true})
 	case strings.HasSuffix(r.URL.Path, "/inbox"):
 		msgs := []map[string]any{}
 		for i := 0; i < h.inboxN; i++ {
-			msgs = append(msgs, map[string]any{"id": fmt.Sprintf("m-%d", i)})
+			m := map[string]any{"id": fmt.Sprintf("m-%d", i), "sequence": i + 1, "kind": "question", "profile": map[string]any{"label": "coordinator"}, "payload": map[string]any{"text": fmt.Sprintf("Question %d: which test covers the parser change? %s", i, strings.Repeat("more ", 40))}}
+			if i == 0 {
+				m = map[string]any{"id": "m-0", "sequence": 1, "kind": "lifecycle", "lifecycle": map[string]any{"operation": "team.assignment.offer", "attempt_id": "att-1", "task_id": "task-1", "state": "OFFERED"}, "payload": map[string]any{"text": ""}}
+			}
+			msgs = append(msgs, m)
 		}
 		write(200, map[string]any{"protocol_version": 1, "messages": msgs, "next_cursor": h.inboxN, "has_more": false, "server_time": "2026-09-23T04:00:04Z"})
 	default:
@@ -275,17 +290,17 @@ func runSetup(t *testing.T, repo, root string, args ...string) (string, error) {
 	return out.String(), err
 }
 
-func readState(t *testing.T, root, repo string) *teamSetupState {
+func readState(t *testing.T, root, repo string) *teamstate.State {
 	t.Helper()
 	canon, _ := filepath.EvalSymlinks(repo)
-	raw, err := os.ReadFile(teamSetupStatePath(root, canon))
+	raw, err := os.ReadFile(teamstate.Path(root, canon))
 	if err != nil {
 		return nil
 	}
 	if strings.Contains(string(raw), "aimem_user_") {
 		t.Fatal("token leaked into the state file")
 	}
-	var st teamSetupState
+	var st teamstate.State
 	if err := json.Unmarshal(raw, &st); err != nil {
 		t.Fatal(err)
 	}
@@ -341,7 +356,7 @@ func TestTeamSetupWorkerEntersWaiting(t *testing.T) {
 	if err != nil {
 		t.Fatalf("%v\n%s", err, out)
 	}
-	for _, want := range []string{"joined as worker", "announced available", "2 unacknowledged message(s)", "attempt att-1 on task task-1 is OFFERED", "never select, claim or edit backlog tasks", "Status: joined"} {
+	for _, want := range []string{"joined as worker", "announced available", "2 unacknowledged message(s)", "attempt att-1 on task task-1 (Fix the parser) is OFFERED", "team_accept or team_decline with a reason", "#1 m-0 lifecycle from hub team.assignment.offer attempt att-1 task task-1 -> OFFERED", "#2 m-1 question from coordinator: Question 1", "next cursor 2", "Status: joined"} {
 		if !strings.Contains(out, want) {
 			t.Fatalf("missing %q in\n%s", want, out)
 		}
@@ -411,7 +426,7 @@ func TestTeamSetupResumeAndStaleHandle(t *testing.T) {
 	}
 	// A leave through the CLI clears the handle, so the next setup joins afresh.
 	canon, _ := filepath.EvalSymlinks(repo)
-	noteTeamLeave(canon, root, "sess-2")
+	teamstate.NoteLeave(canon, root, "sess-2")
 	if readState(t, root, repo) != nil {
 		t.Fatal("leave did not clear the saved handle")
 	}
@@ -741,6 +756,148 @@ func TestTeamSetupEnrollmentIsCheckedBeforeJoining(t *testing.T) {
 		if err != nil || !strings.Contains(out, "does not list enrolled teams") || !strings.Contains(out, "joined as worker") {
 			t.Fatalf("code %d: %v\n%s", code, err, out)
 		}
+	}
+}
+
+func runContinue(t *testing.T, repo, root string, args ...string) (string, error) {
+	t.Helper()
+	var out bytes.Buffer
+	err := runTeamContinue(args, repo, root, &out)
+	if strings.Contains(out.String(), "aimem_user_") {
+		t.Fatalf("token leaked into output: %s", out.String())
+	}
+	return out.String(), err
+}
+
+func TestTeamContinueRestoresDutiesAndNeverJoins(t *testing.T) {
+	h, ts := newFakeTeamHub(t)
+	repo, root := setupCheckout(t, h, ts)
+	// No membership yet: continue refuses to join.
+	out, err := runContinue(t, repo, root)
+	if err == nil || !strings.Contains(out, "no saved membership") || h.count("/join") != 0 {
+		t.Fatalf("%v joins %d\n%s", err, h.count("/join"), out)
+	}
+	if out, err := runSetup(t, repo, root, "Pilot", "worker", "--platform", "codex"); err != nil {
+		t.Fatal(err, out)
+	}
+	// A live session is verified (no generation churn); duties come from
+	// the hub: a RUNNING attempt with its title, the inbox with its cursor.
+	h.reserved = map[string]any{"id": "att-1", "task_id": "task-1", "state": "RUNNING"}
+	h.inboxN = 2
+	out, err = runContinue(t, repo, root)
+	for _, want := range []string{"already joined as worker: session sess-1, generation 1", "attempt att-1 on task task-1 (Fix the parser) is RUNNING", "continue the accepted work in your isolated worktree", "reconcile before retrying anything", "2 unacknowledged message(s)", "next cursor 2", "Status: joined"} {
+		if err != nil || !strings.Contains(out, want) {
+			t.Fatalf("missing %q: %v\n%s", want, err, out)
+		}
+	}
+	if h.resumes != 0 || h.count("/join") != 1 {
+		t.Fatalf("continue churned: resumes %d joins %d", h.resumes, h.count("/join"))
+	}
+	// A team argument must match the saved membership.
+	out, err = runContinue(t, repo, root, "Other")
+	if err == nil || !strings.Contains(out, `the saved membership is in team "Pilot"`) {
+		t.Fatalf("%v\n%s", err, out)
+	}
+	// A suspect session is resumed; --fence resumes a live one.
+	h.sessions["sess-1"].suspect = true
+	out, err = runContinue(t, repo, root, "Pilot")
+	if err != nil || !strings.Contains(out, "resumed session sess-1 (no heartbeat since") || h.resumes != 1 {
+		t.Fatalf("%v\n%s", err, out)
+	}
+	out, err = runContinue(t, repo, root, "--fence")
+	if err != nil || !strings.Contains(out, "resumed session sess-1 (--resume requested): generation 3") || h.resumes != 2 {
+		t.Fatalf("%v\n%s", err, out)
+	}
+	// Each attempt state maps to its next step.
+	for state, want := range map[string]string{"STOP_REQUESTED": "then team_stopped", "SUBMITTED": "wait for accept or rework", "BLOCKED": "team_resume_work", "STOPPED": "close-stop"} {
+		h.reserved["state"] = state
+		out, err = runContinue(t, repo, root)
+		if err != nil || !strings.Contains(out, want) {
+			t.Fatalf("%s: %v\n%s", state, err, out)
+		}
+	}
+	// The membership ended (session left): reported, never re-joined.
+	h.sessions["sess-1"].state = "left"
+	out, err = runContinue(t, repo, root)
+	if err == nil || !strings.Contains(out, "closed or was advanced by another process") || h.count("/join") != 1 {
+		t.Fatalf("%v joins %d\n%s", err, h.count("/join"), out)
+	}
+	// Same for a coordinator whose session left: setup would re-join, continue does not.
+	h2, ts2 := newFakeTeamHub(t)
+	repo2, root2 := setupCheckout(t, h2, ts2)
+	if out, err := runSetup(t, repo2, root2, "Pilot", "coordinator"); err != nil {
+		t.Fatal(err, out)
+	}
+	h2.sessions["sess-1"].state = "left"
+	out, err = runContinue(t, repo2, root2)
+	if err == nil || !strings.Contains(out, "the saved membership has ended") || h2.count("/join") != 1 {
+		t.Fatalf("%v joins %d\n%s", err, h2.count("/join"), out)
+	}
+}
+
+// gitCommit makes the checkout a Git repository (or adds a commit to it)
+// and returns HEAD.
+func gitCommit(t *testing.T, repo, name string) string {
+	t.Helper()
+	if _, err := os.Stat(filepath.Join(repo, ".git")); err != nil {
+		for _, args := range [][]string{{"init", "-q"}, {"config", "user.email", "t@example.invalid"}, {"config", "user.name", "t"}} {
+			if _, err := gitOutput(repo, args...); err != nil {
+				t.Skipf("git unavailable: %v", err)
+			}
+		}
+	}
+	if err := os.WriteFile(filepath.Join(repo, name), []byte(name+"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := gitOutput(repo, "add", name); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := gitOutput(repo, "-c", "commit.gpgsign=false", "commit", "-q", "-m", name); err != nil {
+		t.Fatal(err)
+	}
+	head, err := gitOutput(repo, "rev-parse", "HEAD")
+	if err != nil {
+		t.Fatal(err)
+	}
+	return head
+}
+
+func TestTeamContinueComparesHeadWithThePreviouslyRecordedBase(t *testing.T) {
+	h, ts := newFakeTeamHub(t)
+	repo, root := setupCheckout(t, h, ts)
+	a := gitCommit(t, repo, "a.txt")
+	if out, err := runSetup(t, repo, root, "Pilot", "worker"); err != nil {
+		t.Fatal(err, out)
+	}
+	if st := readState(t, root, repo); st.BaseCommit != a {
+		t.Fatalf("base not recorded at join: %+v", st)
+	}
+	// HEAD moves on while a RUNNING attempt is held; a fenced resume must
+	// compare HEAD with the base recorded before, then advance the baseline.
+	b := gitCommit(t, repo, "b.txt")
+	h.reserved = map[string]any{"id": "att-1", "task_id": "task-1", "state": "RUNNING"}
+	out, err := runContinue(t, repo, root, "--fence")
+	if err != nil || !strings.Contains(out, "resumed session sess-1") || !strings.Contains(out, "HEAD "+b[:12]+" differs from the base recorded at the last verification, "+a[:12]) {
+		t.Fatalf("%v\n%s", err, out)
+	}
+	if st := readState(t, root, repo); st.BaseCommit != b || st.Generation != 2 {
+		t.Fatalf("baseline not advanced: %+v", st)
+	}
+	// A verify-only run now finds HEAD equal to the recorded base.
+	out, err = runContinue(t, repo, root)
+	if err != nil || !strings.Contains(out, "HEAD is still the base recorded at the last verification, "+b[:12]) {
+		t.Fatalf("%v\n%s", err, out)
+	}
+	// A membership recorded without a base (older release) says so.
+	st := readState(t, root, repo)
+	st.BaseCommit = ""
+	canon, _ := filepath.EvalSymlinks(repo)
+	if err := teamstate.Save(teamstate.Path(root, canon), st); err != nil {
+		t.Fatal(err)
+	}
+	out, err = runContinue(t, repo, root)
+	if err != nil || !strings.Contains(out, "no base commit was recorded at the last verification") {
+		t.Fatalf("%v\n%s", err, out)
 	}
 }
 

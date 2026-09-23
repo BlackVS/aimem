@@ -127,9 +127,12 @@ notification, and delivery while a model is busy is only partly observed. So:
    state before any retry: which commands were acknowledged, which files
    changed, whether a child process still runs. Retry an uncertain command only
    with its original key and content; never re-issue a new one to "make sure".
-   `aimem teams setup TEAM worker` after a restart resumes the saved session
-   when the hub reports it suspect (or with `--resume`), never a session
-   another process still heartbeats, and reads the reserved attempt first.
+   `aimem teams continue` (in a client session, `/resume_team`) does this
+   step: it resumes the saved session when the hub reports it suspect (or
+   with `--fence`), never one another process still heartbeats, reads the
+   reserved attempt and the unacknowledged inbox first, and never joins; a
+   membership that ended is reported, and `/join_team` is the way back in.
+   The same holds for a coordinator after a restart.
 8. **Leave cleanly** when done and released, with no reserved attempt. Losing
    the coordinator or restarting does not leave the team.
 

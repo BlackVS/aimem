@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"aimem/internal/mcp"
+	"aimem/internal/teamstate"
 	"aimem/internal/uuidv7"
 )
 
@@ -43,8 +44,10 @@ export also takes limit (page size) and include_bodies=true.
 Agent commands (from a configured checkout, using its task credential):
   aimem teams setup TEAM <worker|coordinator> [flags]   verified onboarding: checks, join or
                                                         reconcile, role entry (setup --help)
-  aimem teams commands [DIR] [--check]                  write or refresh the /join_team entry
-                                                        points for Claude Code, OpenCode and Codex
+  aimem teams continue [TEAM] [--fence] [--json]        after a restart: verify or resume the saved
+                                                        membership and report its duties; never joins
+  aimem teams commands [DIR] [--check]                  write or refresh the /join_team and /resume_team
+                                                        entry points for Claude Code, OpenCode and Codex
   aimem teams mine PROJECT                              the teams enrolling this credential, with
                                                         coordinator eligibility (no session needed)
   aimem teams <join|members|heartbeat|resume|leave|profile|send|messages|inbox|ack> PROJECT TEAM request.json [KEY]
@@ -60,6 +63,9 @@ func teamsCmd(args []string) error {
 	}
 	if len(args) > 0 && args[0] == "commands" {
 		return teamCommandsCmd(args[1:])
+	}
+	if len(args) > 0 && args[0] == "continue" {
+		return teamContinueCmd(args[1:])
 	}
 	if len(args) > 0 && args[0] == "mine" {
 		if len(args) != 2 {
@@ -274,7 +280,7 @@ func teamSessionCmd(args []string) error {
 			SessionID string `json:"session_id"`
 		}
 		if json.Unmarshal(body["session_id"], &handle.SessionID) == nil {
-			noteTeamLeave(".", stateRoot(), handle.SessionID)
+			teamstate.NoteLeave(".", stateRoot(), handle.SessionID)
 		}
 	}
 	return nil
