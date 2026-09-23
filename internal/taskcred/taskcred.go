@@ -38,6 +38,61 @@ type credential struct {
 	Token   string `json:"token"`
 }
 
+// Class says why a credential could not be used, so a caller names the
+// next step without parsing the message. A missing credential is
+// installed and a malformed or rebound one reinstalled, but one this
+// process cannot read or decrypt belongs to another OS account (a
+// sandboxed shell under the checkout owner's credential, another user's
+// DPAPI key) and is not replaced: the fix is to run as that account.
+type Class string
+
+const (
+	ClassMissing   Class = "missing"   // nothing is installed for this checkout or hub
+	ClassDenied    Class = "denied"    // the credential exists but this process may not read it
+	ClassDecrypt   Class = "decrypt"   // protected for another OS account, or not written on this machine
+	ClassMalformed Class = "malformed" // not a credential aimem can use as written; reinstalling fixes it
+	ClassRebound   Class = "rebound"   // the checkout, project or hub behind it changed; reinstalling fixes it
+	ClassConfig    Class = "config"    // the credential location itself is unusable (symlink, wrong mode, inside the checkout)
+)
+
+// Failure is a Resolve error that carries its class. The message is the
+// one callers printed before classes existed; the cause is kept for
+// errors.Is.
+type Failure struct {
+	Class Class
+	Msg   string
+	Cause error
+}
+
+func (f *Failure) Error() string { return f.Msg }
+func (f *Failure) Unwrap() error { return f.Cause }
+
+// Classify returns the class of a Resolve error, or "" for an error that
+// is not about the credential (an unusable checkout binding, for one).
+func Classify(err error) Class {
+	var f *Failure
+	if errors.As(err, &f) {
+		return f.Class
+	}
+	return ""
+}
+
+func failure(class Class, msg string, cause error) error {
+	return &Failure{Class: class, Msg: msg, Cause: cause}
+}
+
+// classOf maps a filesystem error on the credential path to its class:
+// absent is missing, refused is denied, anything else is the location.
+func classOf(err error) Class {
+	switch {
+	case errors.Is(err, os.ErrNotExist):
+		return ClassMissing
+	case errors.Is(err, os.ErrPermission):
+		return ClassDenied
+	}
+	return ClassConfig
+}
+
 func canonical(dir string) (string, error) {
 	abs, err := filepath.Abs(dir)
 	if err != nil {
@@ -122,42 +177,46 @@ func Resolve(dir, root string) (*Selection, error) {
 	if !local {
 		s.Source, s.Token = "user-hub", s.Hub.TaskToken
 		if s.Token == "" {
-			return nil, fmt.Errorf("hub %q has no task credential: aimem hub task-token %s <ordinary-token>", s.HubName, s.HubName)
+			return nil, failure(ClassMissing, fmt.Sprintf("hub %q has no task credential: aimem hub task-token %s <ordinary-token>", s.HubName, s.HubName), nil)
 		}
 		return s, nil
 	}
 	s.Source = "project-local"
 	path, err := credentialPath(root, s.Repo, false)
 	if err != nil {
-		return nil, fmt.Errorf("local task credential required: %w", err)
+		return nil, failure(classOf(err), "local task credential required: "+err.Error(), err)
 	}
 	fi, err := os.Lstat(path)
 	if err != nil {
-		return nil, fmt.Errorf("local task credential required: %w", err)
+		return nil, failure(classOf(err), "local task credential required: "+err.Error(), err)
 	}
 	if !fi.Mode().IsRegular() {
-		return nil, errors.New("local task credential must be a regular file")
+		return nil, failure(ClassConfig, "local task credential must be a regular file", nil)
 	}
 	if err := checkPrivate(fi); err != nil {
-		return nil, err
+		return nil, failure(ClassMalformed, err.Error(), err)
 	}
 	if fi.Size() > 16384 {
-		return nil, errors.New("local task credential is too large")
+		return nil, failure(ClassMalformed, "local task credential is too large", nil)
 	}
 	raw, err := os.ReadFile(path)
 	if err != nil {
-		return nil, errors.New("cannot read required local task credential")
+		// Whatever refused the read, this process does not hold the
+		// credential; a reinstall would make a second copy, not fix it.
+		return nil, failure(ClassDenied, "cannot read required local task credential", err)
 	}
 	raw, err = unprotect(raw)
 	if err != nil {
-		return nil, errors.New("cannot decrypt required local task credential")
+		// On Windows, DPAPI refuses a blob protected by another account
+		// exactly as it refuses bytes it never wrote; both are this class.
+		return nil, failure(ClassDecrypt, "cannot decrypt required local task credential", err)
 	}
 	var c credential
 	if json.Unmarshal(raw, &c) != nil || c.Version != 1 || !validToken(c.Token) {
-		return nil, errors.New("malformed local task credential; run aimem task-token set")
+		return nil, failure(ClassMalformed, "malformed local task credential; run aimem task-token set", nil)
 	}
 	if c.Repo != s.Repo || c.Project != s.Project || c.Hub != s.HubName || c.URL != s.Hub.URL {
-		return nil, errors.New("local task credential binding changed; run aimem task-token set")
+		return nil, failure(ClassRebound, "local task credential binding changed; run aimem task-token set", nil)
 	}
 	s.Token = c.Token
 	return s, nil

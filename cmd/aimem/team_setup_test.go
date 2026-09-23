@@ -15,6 +15,7 @@ import (
 
 	"aimem/internal/adapter"
 	"aimem/internal/taskcred"
+	"aimem/internal/teamsetup"
 	"aimem/internal/teamstate"
 )
 
@@ -341,7 +342,7 @@ func TestTeamSetupJoinsOnceAndVerifiesOnRepeat(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	var rep teamSetupReport
+	var rep teamsetup.Report
 	if json.Unmarshal([]byte(out), &rep) != nil || rep.Status != "joined" || rep.Session == nil || rep.Session.ID != "sess-1" {
 		t.Fatalf("json report: %s", out)
 	}
@@ -694,7 +695,7 @@ func TestTeamSetupIntegrationRepairAndNoRepair(t *testing.T) {
 	if err != nil || strings.Contains(out, "repaired:") || !strings.Contains(out, "ok    wiring .codex/hooks.json Codex SessionStart handoff hook present") {
 		t.Fatalf("%v\n%s", err, out)
 	}
-	var rep teamSetupReport
+	var rep teamsetup.Report
 	out, _ = runSetup(t, repo, root, "Pilot", "worker", "--json")
 	if json.Unmarshal([]byte(out), &rep) != nil || rep.Wiring == nil || len(rep.Wiring.Findings) < 6 {
 		t.Fatalf("json integration report: %s", out)
@@ -841,7 +842,7 @@ func gitCommit(t *testing.T, repo, name string) string {
 	t.Helper()
 	if _, err := os.Stat(filepath.Join(repo, ".git")); err != nil {
 		for _, args := range [][]string{{"init", "-q"}, {"config", "user.email", "t@example.invalid"}, {"config", "user.name", "t"}} {
-			if _, err := gitOutput(repo, args...); err != nil {
+			if _, err := teamsetup.GitOutput(repo, args...); err != nil {
 				t.Skipf("git unavailable: %v", err)
 			}
 		}
@@ -849,13 +850,13 @@ func gitCommit(t *testing.T, repo, name string) string {
 	if err := os.WriteFile(filepath.Join(repo, name), []byte(name+"\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := gitOutput(repo, "add", name); err != nil {
+	if _, err := teamsetup.GitOutput(repo, "add", name); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := gitOutput(repo, "-c", "commit.gpgsign=false", "commit", "-q", "-m", name); err != nil {
+	if _, err := teamsetup.GitOutput(repo, "-c", "commit.gpgsign=false", "commit", "-q", "-m", name); err != nil {
 		t.Fatal(err)
 	}
-	head, err := gitOutput(repo, "rev-parse", "HEAD")
+	head, err := teamsetup.GitOutput(repo, "rev-parse", "HEAD")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -908,7 +909,7 @@ func TestTeamSetupArgs(t *testing.T) {
 		}
 	}
 	o, err := parseTeamSetupArgs([]string{"My Team", "coordinator", "--label", "coord", "--model-id", "m", "--model-source", "operator_configured"})
-	if err != nil || o.team != "My Team" || o.profile.Label != "coord" || o.profile.Model.ObservedAt == "" || o.profile.Platform != "unknown" {
+	if err != nil || o.Team != "My Team" || o.Profile.Label != "coord" || o.Profile.Model.ObservedAt == "" || o.Profile.Platform != "unknown" {
 		t.Fatalf("%v %+v", err, o)
 	}
 }

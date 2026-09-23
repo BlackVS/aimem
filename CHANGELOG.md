@@ -13,6 +13,21 @@ currently 18); a binary refuses a database newer than it understands.
 
 ## [Unreleased]
 
+### Changed
+
+- Team onboarding runs on one shared core (`internal/teamsetup`): `aimem
+  teams setup` and `aimem teams continue` are now shells over `Run` and
+  `Continue`, which take the checkout, state root, hub session caller and
+  probes from the caller and nothing else. This is the first step of
+  [checkout-bound onboarding over local MCP](docs/DESIGN-team-onboarding-mcp.md);
+  CLI behavior, reports, saved state and retry keys are unchanged, and the
+  JSON report gains `run_as` (the OS account the run held the credential as).
+- Credential failures are classified (`taskcred.Classify`): a credential
+  this process cannot read or decrypt is reported as belonging to another OS
+  account, with the fix pointing at the owner-context path (the checkout's
+  local MCP process) rather than at replacing the token; only a missing,
+  malformed or rebound credential is told to run `aimem task-token set`.
+
 ## [0.7.1] — 2026-09-23
 
 One-command team onboarding for the pilot clients: `aimem teams setup`
