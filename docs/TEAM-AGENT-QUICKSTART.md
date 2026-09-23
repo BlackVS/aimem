@@ -64,6 +64,58 @@ are declarations, not attestation or permission. Save the returned session ID,
 generation and profile revision. Two agents using the same credential have
 distinct sessions but remain the same security principal.
 
+## One-command onboarding
+
+From the configured checkout, one command performs the verified path a
+member needs before it can act:
+
+```sh
+aimem teams setup Builders worker --platform codex --platform-version 0.42 \
+  --model-id gpt-6-sol --model-source operator_configured --capabilities go,unit-tests
+aimem teams setup Builders coordinator --platform claude-code --json
+```
+
+It checks, in order and stopping at the first blocking failure: the strict
+`.aimem.json` binding and the selected credential (project-local override or
+the per-hub task token; never the checkpoint token, never a fallback); the
+credential's identity (`/v1/access/identity`: ordinary user, scope, current
+write grant, tasks enabled); the hub version and, on the first team response,
+protocol version 1; the selected process and its required skills (a warning,
+since they are needed at the review gate, not at join); and the Git HEAD as the
+base commit. Then it joins the team, or recognizes the session this checkout
+already holds, and ends in the role entry: a coordinator gets the roster with
+each member's reported model and its source, a worker announces itself
+available, reads its reserved attempt and its inbox once (bounded, wait 0).
+Exit status 0 means joined and verified; 1 means blocked, and the report names
+the missing prerequisite or prints the operator handoff (the exact hub-host
+commands for a grant, a team or an enrollment). Agents cannot enroll
+themselves, and the hub does not tell a missing enrollment from missing
+coordinator eligibility.
+
+Session state is saved outside the checkout, under the state root in
+`team-sessions/<sha256 of the checkout path>.json`, bound to the checkout,
+project, hub, URL and token ID; it holds handles and the declared profile,
+never the token. A repeated invocation verifies the saved handle with a roster
+read and makes no second join. A session the hub reports as suspect (no
+heartbeat within its window) is the restart case and is resumed, which fences
+the old handle; a session still heartbeating may belong to a live process and
+is only verified, unless `--resume` asks for the fence explicitly. The hub
+refuses every command on a closed session and on a stale generation alike, so
+a saved handle cannot tell an explicit leave from another live process. A
+coordinator then joins afresh and lets the hub arbitrate: an occupied slot
+means the old session is live (it must leave or be handed off; no timeout
+frees the slot), success means it had left. A worker's fresh join is never
+refused, so a duplicate would be silent: the command stops and
+`--new-session` makes that choice explicit. `aimem teams leave` through the
+CLI clears the saved handle, so the next setup joins afresh without the
+question. An unconfirmed join or resume keeps its retry key and is replayed
+on the next run.
+A model is declared only with `--model-id` and a `--model-source` naming who
+stated it; without them it stays `unknown`. A re-run without profile flags
+keeps the declaration the first run saved. Client integration repair and
+operator provisioning are separate increments; the command reports what it
+found and how to fix it.
+
 ## CLI
 
 Place `role` and `profile` from the example in `join.json`:

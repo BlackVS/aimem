@@ -13,6 +13,27 @@ currently 18); a binary refuses a database newer than it understands.
 
 ## [Unreleased]
 
+### Added
+
+- `aimem teams setup TEAM <worker|coordinator>`: verified team onboarding
+  from a configured checkout in one command. It checks the strict project
+  binding and the selected credential (no fallback), the credential's
+  identity (ordinary user, scope, current write grant, tasks enabled), the
+  hub version and team protocol, the selected process and its required
+  skills, and the Git base commit; then it joins the team or recognizes the
+  session the checkout already holds, and ends in the role entry (roster for
+  a coordinator; availability, reserved attempt and one bounded inbox read
+  for a worker). Nonsecret session state lives under the state root in
+  `team-sessions/`, bound to checkout, project, hub, URL and token ID, so a
+  repeated run verifies instead of joining twice, a suspect session is
+  resumed (`--resume` forces it, `--new-session` discards the handle), a
+  stale handle is reported rather than taken over, and an unconfirmed join
+  or resume replays with its original key. Refusals map to the exact fix,
+  including a bounded operator handoff for a missing grant, team or
+  enrollment. `--json` prints the report for command wrappers.
+  (`mcp.TeamRequestIn` exposes the same credential path with raw hub
+  responses; the request builders were split from the MCP forwarders.)
+
 ## [0.7.0] — 2026-09-22
 
 The agent-team coordination protocol for a manual pilot: registration and

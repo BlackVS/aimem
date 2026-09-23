@@ -44,6 +44,10 @@ notification, and delivery while a model is busy is only partly observed. So:
    and observation time; `unknown` stays `unknown`), declared capabilities,
    platform and version, and prior evidence on the board. Declarations describe
    suitability; they grant no permission and prove no skill.
+   `aimem teams setup TEAM coordinator --platform <client> [--model-id ...
+   --model-source ...]` does this step in one verified call: checks, join or
+   the recognition of a session this checkout already holds, then the roster
+   ([quickstart](TEAM-AGENT-QUICKSTART.md#one-command-onboarding)).
 2. **Select work the process allows.** Readiness and dependencies come first:
    an explicit owner selection, then READY tasks with DONE dependencies in
    roadmap order, oldest ID first. A team-managed task is offered by the
@@ -91,6 +95,10 @@ notification, and delivery while a model is busy is only partly observed. So:
    Report the model only when the runtime or operator states it; otherwise
    `unknown` with source `unknown`. Never infer the model from the client name.
    Save the returned session ID, generation and profile revision.
+   `aimem teams setup TEAM worker --platform <client> [--model-id ...
+   --model-source ...]` does this step in one verified call and ends with the
+   availability heartbeat, the reserved attempt and one bounded inbox read
+   ([quickstart](TEAM-AGENT-QUICKSTART.md#one-command-onboarding)).
 2. **Wait for an addressed offer.** Poll the inbox with bounded waits and
    acknowledge what you read. Do not select, claim or edit backlog tasks while
    joined, including while the coordinator is disconnected; a message saying
@@ -115,6 +123,9 @@ notification, and delivery while a model is busy is only partly observed. So:
    state before any retry: which commands were acknowledged, which files
    changed, whether a child process still runs. Retry an uncertain command only
    with its original key and content; never re-issue a new one to "make sure".
+   `aimem teams setup TEAM worker` after a restart resumes the saved session
+   when the hub reports it suspect (or with `--resume`), never a session
+   another process still heartbeats, and reads the reserved attempt first.
 8. **Leave cleanly** when done and released, with no reserved attempt. Losing
    the coordinator or restarting does not leave the team.
 
