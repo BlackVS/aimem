@@ -1180,18 +1180,12 @@ func teamSetupHandoff(project, team, role, user, userID string, grantMissing boo
 	if userID == "" {
 		userID = "<USER_ID>"
 	}
-	fmt.Fprintf(&b, "  aimem access list                                  # confirm user %s (id %s)\n", user, userID)
-	if grantMissing {
-		fmt.Fprintf(&b, "  aimem access grant add %s user %s      # current write grant on the project\n", project, userID)
-	}
-	fmt.Fprintf(&b, "  aimem teams list %s                                # find team %q (create it with `aimem teams create %s team.json` if absent)\n", project, team, project)
-	fmt.Fprintf(&b, "  aimem teams show %s <TEAM_ID>                      # current name, description, enrollment, revision\n", project)
-	enrollment := fmt.Sprintf(`{"user_id":"%s"}`, userID)
-	if role == "coordinator" {
-		enrollment = fmt.Sprintf(`{"user_id":"%s","coordinator":true}`, userID)
-	}
-	fmt.Fprintf(&b, "  aimem teams configure %s <TEAM_ID> replacement.json enroll-%s-1\n", project, user)
-	fmt.Fprintf(&b, "      replacement.json = the shown configuration plus %s in enrollment and its expected_revision\n", enrollment)
+	// This credential already exists and answered the identity probe, so
+	// the member needs enrollment (and the grant, when missing), not a new
+	// token: --no-token keeps the guided command from issuing one.
+	fmt.Fprintf(&b, "  aimem teams provision add %s --team %q --member %s --role %s --no-token\n", project, team, userID, role)
+	fmt.Fprintf(&b, "      # user %s (id %s): sets the project grant%s, enrolls it in team %q as %s; existing users, grants and enrollments are reused\n", user, userID, map[bool]string{true: " (missing now)", false: ""}[grantMissing], team, role)
+	fmt.Fprintf(&b, "  aimem teams provision create %s --team %q --coordinator <coordinator-user> --expiry <RFC3339>   # only if the team does not exist yet\n", project, team)
 	fmt.Fprintf(&b, "Then, in this checkout: aimem teams setup %q %s\n", team, role)
 	return b.String()
 }

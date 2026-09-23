@@ -15,6 +15,24 @@ currently 18); a binary refuses a database newer than it understands.
 
 ### Added
 
+- `aimem teams provision create PROJECT --team NAME --coordinator USER
+  --expiry RFC3339` and `aimem teams provision add PROJECT --team NAME|ID
+  --member USER --role worker|coordinator --expiry RFC3339`: the guided
+  operator path on the hub host, replacing hand-written team JSON and setup
+  scripts. Each run resolves the user by exact name or ID (`--create-user`
+  for a new one), sets the project grant, creates the team with its first
+  coordinator or adds the member to the existing enrollment at the read
+  revision (one retry on a conflict; unrelated enrollment kept; a worker
+  request never removes a coordinator flag), and issues one project-scoped
+  token labelled `team-<team>-<user>` whose secret is shown once at the end
+  or written to `--secret-file` (new file, 0600). Every step is reported as
+  existing or created; reruns duplicate nothing and never reissue a live
+  token with the same label (one that cannot authorize this project, such
+  as another project's, is refused as a label collision); a disabled user
+  is refused by name or ID before anything is granted; `--no-token` enrolls
+  a member that has one.
+  `aimem teams setup` prints these commands as its operator handoff.
+
 - `aimem teams continue [TEAM] [--fence] [--json]` and the `/resume_team`
   entry points (Claude Code skill, OpenCode command, Codex skill and home
   prompt, rendered by `aimem teams commands` like `/join_team`): after a

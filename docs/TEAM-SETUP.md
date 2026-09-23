@@ -14,6 +14,42 @@ running. Team routes require administrator authority; ordinary agent tokens
 cannot configure or inspect this administrative surface. The target must be
 an existing ordinary project with tasks enabled.
 
+## Guided provisioning
+
+The normal path needs no JSON file. On the hub host, as its service user:
+
+```sh
+aimem teams provision create PROJECT --team "Pilot" --coordinator alice --expiry 2026-12-31T00:00:00Z
+aimem teams provision add PROJECT --team "Pilot" --member worker-b --role worker --create-user --expiry 2026-12-31T00:00:00Z
+aimem teams provision add PROJECT --team "Pilot" --member bob --role coordinator --no-token
+```
+
+Each run resolves the user by exact name or ID (a name shared by two users
+must be given as an ID; a missing user is created only with `--create-user`),
+sets the project grant, creates the team with its first coordinator or adds
+the member to the existing team's enrollment at the read revision (one retry
+on a revision conflict; unrelated enrollment and settings are kept; a worker
+request never removes an existing coordinator flag), and issues that member
+one project-scoped token labelled `team-<team>-<user>` (or `--label`). The
+secret is shown once, at the end, on its own line, with the installation
+line for the member's checkout (`printf '%s' "$SECRET" | aimem task-token
+set`); `--secret-file PATH` writes it to a new file with mode 0600 instead
+and prints nothing secret (on Windows the file carries its directory's
+ACL rather than a Unix mode, so keep it in a private directory and delete it
+after delivery). Every step is reported as existing or created, so
+a rerun after a partial failure duplicates nothing: an existing user, grant,
+team or enrollment is reused, and a live token with the same label is never
+reissued (a lost secret means revoking that token and issuing another under
+a new `--label`); a live same-label token that cannot authorize this project
+(another project's, or read-only) is refused as a label collision, so pass
+another `--label`. A disabled user is refused, by name or by ID, before
+anything is granted. Creating an enrollment creates no session: the member
+joins with `/join_team` under its own token. Ordinary member tokens cannot
+run this; `aimem teams setup` prints these commands as the operator handoff
+when a member lacks a grant or an enrollment.
+
+## Configuration files
+
 Create access users with `aimem access user-add NAME`, then use their IDs in a
 UTF-8 JSON file. Enrollment is separate from project grants: it grants no project
 access, and coordinator eligibility does not create an active coordinator session.
