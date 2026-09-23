@@ -32,6 +32,8 @@ type hubFixture struct {
 	h                  http.Handler
 	env, alice, reader string
 	aliceID            string
+	// stranger is a user-scoped token of a user with no project grant.
+	stranger string
 }
 
 func newHub(t *testing.T) *hubFixture {
@@ -76,6 +78,14 @@ func newHub(t *testing.T) *hubFixture {
 	if err != nil {
 		t.Fatal(err)
 	}
+	bob, err := acc.CreateUser("admin", "Bob")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, strangerSecret, err := acc.Issue("admin", bob.ID, "no-grants", "", time.Now().Add(time.Hour))
+	if err != nil {
+		t.Fatal(err)
+	}
 	// The legacy tools' local client points nowhere: nothing in these
 	// tests may reach it.
 	dead := &http.Client{Transport: http.NewFileTransport(http.Dir(t.TempDir()))}
@@ -86,7 +96,7 @@ func newHub(t *testing.T) *hubFixture {
 		}
 		return call, only
 	})
-	return &hubFixture{h: srv.TCPHandler("env-secret", map[string]http.Handler{"/mcp": mcpHandler}), env: "env-secret", alice: aliceSecret, reader: readerSecret, aliceID: alice.ID}
+	return &hubFixture{h: srv.TCPHandler("env-secret", map[string]http.Handler{"/mcp": mcpHandler}), env: "env-secret", alice: aliceSecret, reader: readerSecret, aliceID: alice.ID, stranger: strangerSecret}
 }
 
 func (f *hubFixture) rpc(t *testing.T, token, method string, params any) map[string]any {
@@ -134,14 +144,14 @@ func toolNames(res map[string]any) []string {
 
 func TestRemoteMCPTaskToolsUseTheCallersAuthority(t *testing.T) {
 	f := newHub(t)
-	// An ordinary token sees task tools only, and hidden tools stay hidden
-	// when called by name.
+	// An ordinary token sees task tools and the public team guidance only,
+	// and hidden tools stay hidden when called by name.
 	names := toolNames(f.rpc(t, f.alice, "tools/list", nil))
-	if len(names) != len(taskToolDefs) {
+	if len(names) != len(taskToolDefs)+len(guidanceToolDefs) {
 		t.Fatalf("ordinary token tool list: %v", names)
 	}
 	for _, n := range names {
-		if !isTaskTool(n) {
+		if !isTaskTool(n) && !isGuidanceTool(n) {
 			t.Fatalf("legacy tool %q exposed to an ordinary token", n)
 		}
 	}
@@ -150,7 +160,7 @@ func TestRemoteMCPTaskToolsUseTheCallersAuthority(t *testing.T) {
 		t.Fatalf("hidden tool by name: %q %v", text, isErr)
 	}
 	// The admin sees everything.
-	if n := len(toolNames(f.rpc(t, f.env, "tools/list", nil))); n != len(toolDefs)+len(taskToolDefs) {
+	if n := len(toolNames(f.rpc(t, f.env, "tools/list", nil))); n != len(toolDefs)+len(taskToolDefs)+len(guidanceToolDefs) {
 		t.Fatalf("admin tool list: %d", n)
 	}
 
