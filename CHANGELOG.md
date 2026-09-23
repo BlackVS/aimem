@@ -15,6 +15,21 @@ currently 18); a binary refuses a database newer than it understands.
 
 ### Added
 
+- `aimem teams setup` checks the checkout's client integration before
+  joining and repairs only what aimem owns: `docs/SESSION-STATE.md`, the
+  `SessionStart` handoff hook in `.claude/settings.json` and
+  `.codex/hooks.json` (either installer spelling counts), `mcpServers.aimem`
+  in `.mcp.json`, and the handoff instruction plus `mcp.aimem` in
+  `opencode.json`. Missing entries are added in the installers' shapes
+  (BOM-free, other keys kept); an entry that differs is reported, never
+  replaced; an unreadable file is never overwritten; project-level `Stop`,
+  `StopFailure` or `PreCompact` hooks block the run (`--allow-project-stop-hooks`
+  overrides); `--no-repair` reports only. The report also lists the agent
+  clients on PATH (`--client-versions` adds their versions) and, per client,
+  where each skill the selected process requires is found (a directory with
+  `SKILL.md` in a location that client reads) or that it is NOT FOUND.
+  New package `internal/wiring`.
+
 - `aimem teams setup TEAM <worker|coordinator>`: verified team onboarding
   from a configured checkout in one command. It checks the strict project
   binding and the selected credential (no fallback), the credential's

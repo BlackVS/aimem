@@ -78,7 +78,7 @@ aimem teams setup Builders coordinator --platform claude-code --json
 It checks, in order and stopping at the first blocking failure: the strict
 `.aimem.json` binding and the selected credential (project-local override or
 the per-hub task token; never the checkpoint token, never a fallback); the
-credential's identity (`/v1/access/identity`: ordinary user, scope, current
+checkout's client integration (below); the credential's identity (`/v1/access/identity`: ordinary user, scope, current
 write grant, tasks enabled); the hub version and, on the first team response,
 protocol version 1; the selected process and its required skills (a warning,
 since they are needed at the review gate, not at join); and the Git HEAD as the
@@ -120,7 +120,27 @@ the command's own row is incomplete, not a missing membership, and never
 leads to a second join.
 A model is declared only with `--model-id` and a `--model-source` naming who
 stated it; without them it stays `unknown`. A re-run without profile flags
-keeps the declaration the first run saved. Client integration repair and
+keeps the declaration the first run saved.
+
+The client integration step covers what
+[wiring a project](INSTALL-CLIENT.md) adds: `docs/SESSION-STATE.md`, the
+`SessionStart` handoff hook in `.claude/settings.json` and `.codex/hooks.json`
+(either installer spelling counts), `mcpServers.aimem` in `.mcp.json`, and the
+handoff instruction plus `mcp.aimem` in `opencode.json`. By default it adds
+what is missing in the installers' shapes, writing the file back without a
+byte-order mark and keeping every other key; `--no-repair` reports only. An
+entry that exists but differs is reported and left alone, an unreadable file
+is reported and never overwritten, and a project-level `Stop`, `StopFailure`
+or `PreCompact` hook blocks the run (they belong to the user-level install;
+`--allow-project-stop-hooks` overrides). It then lists the agent clients on
+PATH (`--client-versions` also runs each one's `--version`) and, once the
+selected process is known, where each client finds every required skill: a
+skill is a directory holding `SKILL.md` in a location that client reads
+(`.claude/skills`, `.agents/skills`, `.opencode/skills`, and the user-level
+`~/.claude/skills`, `~/.agents/skills`, `~/.codex/skills`,
+`~/.config/opencode/skills`), reported as found or NOT FOUND per client.
+Installing skills and the user-level pieces (binary, checkpoint hooks, the
+OpenCode plugin) stay with the installers. Client integration repair and
 operator provisioning are separate increments; the command reports what it
 found and how to fix it.
 

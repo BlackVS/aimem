@@ -61,7 +61,10 @@ or `.codex/hooks.json`: registering them twice journals every turn twice.
 | `.aimem.json` | project identity, knowledge groups, hub binding |
 
 Commit these if the project is tracked. Re-running the installer in
-another directory only wires that directory.
+another directory only wires that directory. `aimem teams setup` checks
+this wiring in a checkout before joining a team and adds what is missing
+in the same shapes (`--no-repair` to report only); see
+[TEAM-AGENT-QUICKSTART.md](TEAM-AGENT-QUICKSTART.md#one-command-onboarding).
 
 ## 2. Options
 

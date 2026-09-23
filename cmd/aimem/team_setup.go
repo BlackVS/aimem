@@ -22,6 +22,7 @@ import (
 	"aimem/internal/store"
 	"aimem/internal/taskcred"
 	"aimem/internal/uuidv7"
+	"aimem/internal/wiring"
 )
 
 const teamSetupUsage = `usage: aimem teams setup TEAM <worker|coordinator> [flags]
@@ -47,9 +48,18 @@ Flags (all optional; a declaration is never inferred from the client):
   --resume                 after a restart: resume the saved session (new generation;
                            the old handle is fenced) instead of only verifying it
   --new-session            discard the saved handle and join afresh
+  --no-repair              report the client integration only; add nothing
+  --allow-project-stop-hooks
+                           do not block on project-level Stop/StopFailure/PreCompact
+                           hooks (they journal every turn twice next to the user-level ones)
+  --client-versions        run <client> --version for each client found on PATH
   --json                   machine-readable report on stdout
-Exit status 0 means joined and verified; 1 means blocked, with the missing
-prerequisite or the operator handoff in the report.`
+The client integration step checks docs/SESSION-STATE.md, the SessionStart
+handoff hook in .claude/settings.json and .codex/hooks.json, mcpServers.aimem
+in .mcp.json and the handoff instruction plus mcp.aimem in opencode.json; it
+adds only what is missing, in the installers' shapes, and never replaces an
+entry that differs. Exit status 0 means joined and verified; 1 means blocked,
+with the missing prerequisite or the operator handoff in the report.`
 
 // teamSetupProtocol is the first hub release with the complete session,
 // assignment and lifecycle-inbox loop the playbooks assume.
@@ -114,6 +124,7 @@ type teamSetupReport struct {
 	Roster     []teamSetupSession `json:"roster,omitempty"`
 	Inbox      *teamSetupInbox    `json:"inbox,omitempty"`
 	Reserved   *teamSetupReserved `json:"reserved,omitempty"`
+	Wiring     *wiring.Report     `json:"integration,omitempty"`
 	Handoff    string             `json:"operator_handoff,omitempty"`
 	Next       []string           `json:"next"`
 	StateFile  string             `json:"state_file"`
@@ -154,6 +165,7 @@ type teamSetupOptions struct {
 	jsonOut     bool
 	platformSet bool
 	profileSet  bool // any profile flag given; otherwise a saved declaration is reused
+	wiring      wiring.Options
 }
 
 func parseTeamSetupArgs(args []string) (*teamSetupOptions, error) {
@@ -185,9 +197,14 @@ func parseTeamSetupArgs(args []string) (*teamSetupOptions, error) {
 	fs.BoolVar(&o.resume, "resume", false, "")
 	fs.BoolVar(&o.newSession, "new-session", false, "")
 	fs.BoolVar(&o.jsonOut, "json", false, "")
+	noRepair := false
+	fs.BoolVar(&noRepair, "no-repair", false, "")
+	fs.BoolVar(&o.wiring.AllowProjectStopHooks, "allow-project-stop-hooks", false, "")
+	fs.BoolVar(&o.wiring.ClientVersions, "client-versions", false, "")
 	if err := fs.Parse(args[2:]); err != nil {
 		return nil, fmt.Errorf("%v\n%s", err, teamSetupUsage)
 	}
+	o.wiring.Repair = !noRepair
 	if fs.NArg() != 0 {
 		return nil, fmt.Errorf("unexpected argument %q\n%s", fs.Arg(0), teamSetupUsage)
 	}
@@ -287,7 +304,7 @@ func (s *teamSetup) fail(name, detail, fix string) bool {
 // run performs the checks in order and stops at the first blocking one.
 // It returns true only when a verified session exists at the end.
 func (s *teamSetup) run() bool {
-	if !s.checkBinding() || !s.checkIdentity() || !s.checkHub() {
+	if !s.checkBinding() || !s.checkIntegration() || !s.checkIdentity() || !s.checkHub() {
 		return false
 	}
 	s.checkProcess()
@@ -319,6 +336,37 @@ func (s *teamSetup) checkBinding() bool {
 	}
 	s.sel = sel
 	s.check("binding", "ok", fmt.Sprintf("project %s, hub %s (%s), credential %s", sel.Project, sel.HubName, sel.Hub.URL, sel.Source), "")
+	return true
+}
+
+// checkIntegration verifies the client wiring of the checkout and repairs
+// only what aimem owns. Unreadable files and project-level checkpoint
+// hooks block; everything else is reported and the run continues.
+func (s *teamSetup) checkIntegration() bool {
+	o := s.opts.wiring
+	o.Home, _ = os.UserHomeDir()
+	rep := wiring.Check(s.sel.Repo, o)
+	s.report.Wiring = &rep
+	for _, f := range rep.Findings {
+		detail := f.Detail
+		if f.Repaired {
+			detail = "repaired: " + detail
+		}
+		s.check("wiring "+f.File, f.Level, detail, f.Fix)
+	}
+	if len(rep.Clients) == 0 {
+		s.check("clients", "warn", "no agent client (claude, codex, opencode) found on PATH; skill locations are reported for none", "")
+	} else {
+		var parts []string
+		for _, c := range rep.Clients {
+			parts = append(parts, c.Name+" "+c.Version)
+		}
+		s.check("clients", "ok", "on PATH: "+strings.Join(parts, ", "), "")
+	}
+	if rep.Failed() {
+		s.report.Next = append(s.report.Next, "fix the blocking integration findings above, then re-run")
+		return false
+	}
 	return true
 }
 
@@ -405,23 +453,43 @@ func (s *teamSetup) checkProcess() {
 		s.check("process", "warn", detail, "")
 		return
 	}
-	home, _ := os.UserHomeDir()
-	installed := process.SkillInstalled(s.dir, home)
-	var missing []string
-	for _, name := range set.Manifest.Skills {
-		if !installed(name) {
-			missing = append(missing, name)
-		}
-	}
-	detail := fmt.Sprintf("process set selected; required skills: %s", strings.Join(set.Manifest.Skills, ", "))
 	if len(set.Manifest.Skills) == 0 {
-		detail = "process set selected; no required skills"
-	}
-	if len(missing) > 0 {
-		s.check("process", "warn", detail+"; NOT FOUND on this machine: "+strings.Join(missing, ", "), "install the missing skills before the step that needs them (the review gate); .claude/skills, .agents/skills, ~/.claude/skills or ~/.codex/skills")
+		s.check("process", "ok", "process set selected; no required skills", "")
 		return
 	}
-	s.check("process", "ok", detail, "")
+	home, _ := os.UserHomeDir()
+	if s.report.Wiring == nil || len(s.report.Wiring.Clients) == 0 {
+		// No client on PATH to judge for: the machine-wide locations decide.
+		installed := process.SkillInstalled(s.dir, home)
+		var missing []string
+		for _, name := range set.Manifest.Skills {
+			if !installed(name) {
+				missing = append(missing, name)
+			}
+		}
+		detail := "process set selected; required skills: " + strings.Join(set.Manifest.Skills, ", ")
+		if len(missing) > 0 {
+			s.check("process", "warn", detail+"; NOT FOUND on this machine: "+strings.Join(missing, ", "), "install the missing skills before the step that needs them (the review gate)")
+			return
+		}
+		s.check("process", "ok", detail, "")
+		return
+	}
+	// Per client: a skill counts only where that client reads it, and only
+	// as a directory holding SKILL.md.
+	s.report.Wiring.Skills = wiring.Skills(s.sel.Repo, home, s.report.Wiring.Clients, set.Manifest.Skills)
+	var missing []string
+	for _, st := range s.report.Wiring.Skills {
+		if st.Path == "" {
+			missing = append(missing, st.Skill+" for "+st.Client)
+		}
+	}
+	detail := "process set selected; required skills: " + strings.Join(set.Manifest.Skills, ", ")
+	if len(missing) > 0 {
+		s.check("process", "warn", detail+"; NOT FOUND: "+strings.Join(missing, ", "), "install the missing skills where that client reads them before the step that needs them (the review gate); see the skills list below")
+		return
+	}
+	s.check("process", "ok", detail+" (found for every client on PATH)", "")
 }
 
 // checkBaseCommit records HEAD: the base commit a worker's attempt and a
@@ -968,6 +1036,16 @@ func (r *teamSetupReport) print(w io.Writer) {
 	}
 	if r.Inbox != nil {
 		fmt.Fprintf(w, "Inbox: %d unacknowledged; %s\n", r.Inbox.Unacknowledged, r.Inbox.Note)
+	}
+	if r.Wiring != nil && len(r.Wiring.Skills) > 0 {
+		fmt.Fprintln(w, "Skills per client:")
+		for _, st := range r.Wiring.Skills {
+			if st.Path != "" {
+				fmt.Fprintf(w, "  %-24s %-9s %s\n", st.Skill, st.Client, st.Path)
+			} else {
+				fmt.Fprintf(w, "  %-24s %-9s NOT FOUND: %s\n", st.Skill, st.Client, st.Fix)
+			}
+		}
 	}
 	if r.Handoff != "" {
 		fmt.Fprintln(w, r.Handoff)
