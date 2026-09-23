@@ -40,7 +40,10 @@ after delivery). Every step is reported as existing or created, so
 a rerun after a partial failure duplicates nothing: an existing user, grant,
 team or enrollment is reused, and a live token with the same label is never
 reissued (a lost secret means revoking that token and issuing another under
-a new `--label`). Creating an enrollment creates no session: the member
+a new `--label`); a live same-label token that cannot authorize this project
+(another project's, or read-only) is refused as a label collision, so pass
+another `--label`. A disabled user is refused, by name or by ID, before
+anything is granted. Creating an enrollment creates no session: the member
 joins with `/join_team` under its own token. Ordinary member tokens cannot
 run this; `aimem teams setup` prints these commands as the operator handoff
 when a member lacks a grant or an enrollment.

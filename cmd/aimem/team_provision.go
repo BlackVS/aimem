@@ -145,10 +145,11 @@ func runTeamProvision(args []string, call operatorCall, stdout io.Writer) error 
 }
 
 type provisioner struct {
-	o    *provisionOptions
-	call operatorCall
-	out  io.Writer
-	done []string
+	o        *provisionOptions
+	call     operatorCall
+	out      io.Writer
+	done     []string
+	instance string // the target project's instance, from the grant reply
 }
 
 func (p *provisioner) say(format string, a ...any) {
@@ -204,17 +205,20 @@ func (p *provisioner) run() error {
 }
 
 // resolveUser finds USER by ID, then by exact name; two users of one exact
-// name are an ambiguity the operator resolves by ID.
+// name are an ambiguity the operator resolves by ID. A disabled user is
+// refused whichever way it was named, before anything is granted.
 func (p *provisioner) resolveUser(snap access.Snapshot) (access.User, error) {
-	var byName []access.User
+	var byID, byName []access.User
 	for _, u := range snap.Users {
 		if u.ID == p.o.user {
-			p.say("user %s: existing (id %s)", u.Name, u.ID)
-			return u, nil
+			byID = append(byID, u)
 		}
 		if u.Name == p.o.user {
 			byName = append(byName, u)
 		}
+	}
+	if len(byID) == 1 {
+		byName = byID
 	}
 	switch len(byName) {
 	case 1:
@@ -257,6 +261,13 @@ func (p *provisioner) grant(u access.User) error {
 	if status != http.StatusOK {
 		return p.hubError(status, body)
 	}
+	var res struct {
+		Instance string `json:"project_instance"`
+	}
+	if json.Unmarshal(body, &res) != nil || res.Instance == "" {
+		return errors.New("unexpected grant reply: no project instance")
+	}
+	p.instance = res.Instance
 	p.say("grant on project %s: set for user %s (idempotent)", p.o.project, u.Name)
 	return nil
 }
@@ -389,17 +400,24 @@ func (p *provisioner) enroll(u access.User) (*store.Team, error) {
 }
 
 // token issues the member's project-scoped token unless a live one with
-// the same label exists; a lost secret is never replaced implicitly.
+// the same label exists; a lost secret is never replaced implicitly. A live
+// same-label token that cannot authorize this project (another project's,
+// or read-only) is a label collision, refused so the operator picks another
+// label rather than being told the member holds a usable credential.
 func (p *provisioner) token(snap access.Snapshot, u access.User, team *store.Team) error {
 	label := p.o.label
 	if label == "" {
 		label = "team-" + team.Name + "-" + u.Name
 	}
 	for _, t := range snap.Tokens {
-		if t.UserID == u.ID && t.Label == label && !t.Revoked && t.ExpiresAt.After(time.Now()) {
-			p.say("token %s: exists for %s since before this run (id %s, expires %s); not reissued. Its secret was shown once when issued; to issue another, pass --label with a new name (and revoke the old one with aimem access token-revoke if it is lost)", label, u.Name, t.ID, t.ExpiresAt.UTC().Format(time.RFC3339))
-			return nil
+		if t.UserID != u.ID || t.Label != label || t.Revoked || !t.ExpiresAt.After(time.Now()) {
+			continue
 		}
+		if !tokenAuthorizes(t, p.instance) {
+			return fmt.Errorf("token label %s is taken by a live token of %s that does not authorize project %s (id %s, scope %s, project instance %q); pass --label with another name", label, u.Name, p.o.project, t.ID, t.Scope, t.Project)
+		}
+		p.say("token %s: exists for %s since before this run (id %s, expires %s); not reissued. Its secret was shown once when issued; to issue another, pass --label with a new name (and revoke the old one with aimem access token-revoke if it is lost)", label, u.Name, t.ID, t.ExpiresAt.UTC().Format(time.RFC3339))
+		return nil
 	}
 	status, body, err := p.call(http.MethodPost, "/v1/access/tokens", map[string]any{"user_id": u.ID, "label": label, "project": p.o.project, "expires_at": p.o.expiry})
 	if err != nil {
@@ -432,4 +450,16 @@ func (p *provisioner) token(snap access.Snapshot, u access.User, team *store.Tea
 	}
 	fmt.Fprintf(p.out, "one-time secret for %s (shown once, never again; install %s):\n%s\n", u.Name, install, res.Secret)
 	return nil
+}
+
+// tokenAuthorizes mirrors the hub's write check: a project token for this
+// instance, or a user token, can act on the project once granted.
+func tokenAuthorizes(t access.Token, instance string) bool {
+	switch t.Scope {
+	case access.ScopeProject:
+		return t.Project == instance
+	case access.ScopeUser:
+		return t.Project == ""
+	}
+	return false
 }

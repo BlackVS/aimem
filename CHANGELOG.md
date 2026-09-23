@@ -27,7 +27,10 @@ currently 18); a binary refuses a database newer than it understands.
   token labelled `team-<team>-<user>` whose secret is shown once at the end
   or written to `--secret-file` (new file, 0600). Every step is reported as
   existing or created; reruns duplicate nothing and never reissue a live
-  token with the same label; `--no-token` enrolls a member that has one.
+  token with the same label (one that cannot authorize this project, such
+  as another project's, is refused as a label collision); a disabled user
+  is refused by name or ID before anything is granted; `--no-token` enrolls
+  a member that has one.
   `aimem teams setup` prints these commands as its operator handoff.
 
 - `aimem teams continue [TEAM] [--fence] [--json]` and the `/resume_team`

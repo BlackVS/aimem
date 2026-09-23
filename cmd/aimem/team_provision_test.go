@@ -198,6 +198,7 @@ func TestTeamProvisionConflictsAndRefusals(t *testing.T) {
 		{"add alpha --team Pilot --member dup --role worker --no-token", "is ambiguous (ids u-dup1, u-dup2)"},
 		{"add alpha --team Pilot --member carol --role worker --no-token", `no user named "carol"; pass --create-user`},
 		{"add alpha --team Pilot --member off --role worker --no-token", "is disabled"},
+		{"add alpha --team Pilot --member u-off --role worker --no-token", "is disabled"},
 		{"add alpha --team Pilot --member bob --role worker", "--expiry RFC3339 is required"},
 		{"create alpha --team Pilot --coordinator alice --expiry 2020-01-01T00:00:00Z", "expiry must be in the future"},
 		{"add alpha --team Pilot --member bob --role reviewer --no-token", "usage:"},
@@ -206,7 +207,26 @@ func TestTeamProvisionConflictsAndRefusals(t *testing.T) {
 			t.Fatalf("%s: %v", tc.args, err)
 		}
 	}
+	// The disabled user was refused before any mutation, by name and by ID.
+	if h.grants["inst-alpha/u-off"] || len(h.teams[0].Enrollment) != 2 {
+		t.Fatalf("disabled user provisioned: grants %v enrollment %+v", h.grants, h.teams[0].Enrollment)
+	}
+	// A live same-label token for another project is a collision, not a
+	// usable credential: refused with the label advice, nothing issued and
+	// nothing reported as reused. A user-scoped one authorizes any granted
+	// project and counts as existing.
+	exp2 := time.Now().Add(48 * time.Hour).UTC()
+	h.tokens = append(h.tokens, access.Token{ID: "tok-beta", UserID: "u-bob", Label: "team-Pilot-bob", Scope: access.ScopeProject, Project: "inst-beta", ExpiresAt: exp2})
 	before := len(h.tokens)
+	out, err = runProvision(t, h, "add", "alpha", "--team", "Pilot", "--member", "bob", "--role", "worker", "--expiry", exp)
+	if err == nil || !strings.Contains(err.Error(), "does not authorize project alpha (id tok-beta") || !strings.Contains(err.Error(), "pass --label with another name") || strings.Contains(out, "not reissued") || len(h.tokens) != before {
+		t.Fatalf("other-project token accepted: %v tokens %d\n%s", err, len(h.tokens), out)
+	}
+	h.tokens = append(h.tokens, access.Token{ID: "tok-user", UserID: "u-bob", Label: "bob-user", Scope: access.ScopeUser, ExpiresAt: exp2})
+	before = len(h.tokens)
+	if out, err := runProvision(t, h, "add", "alpha", "--team", "Pilot", "--member", "bob", "--role", "worker", "--expiry", exp, "--label", "bob-user"); err != nil || !strings.Contains(out, "token bob-user: exists for bob since before this run (id tok-user") || len(h.tokens) != before {
+		t.Fatalf("user-scoped token not reused: %v\n%s", err, out)
+	}
 	// A partial failure reports what was done; a rerun repeats idempotently.
 	h.forbidden = true
 	out, err = runProvision(t, h, "add", "alpha", "--team", "Pilot", "--member", "bob", "--role", "worker", "--expiry", exp)
