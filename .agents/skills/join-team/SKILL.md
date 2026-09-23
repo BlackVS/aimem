@@ -56,5 +56,9 @@ ask the user one question: worker or coordinator? Never assume coordinator.
      wakes you: your polling is the only way you see messages.
 
 5. If `aimem` is not on PATH, the command is denied, or no report is
-   produced, say exactly what failed and what the user should run. Do not
-   escalate permissions or edit settings.
+   produced, say exactly what failed and what the user should run. If the
+   installed `aimem` answers `teams setup` with a usage text instead of a
+   report, it predates this command: tell the user to upgrade aimem to a
+   release that has `aimem teams setup` (the one-line installer, or the hub
+   installer on a hub host) and stop. Do not build, download or substitute
+   a binary yourself, escalate permissions, or edit settings.
