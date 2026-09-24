@@ -45,6 +45,18 @@ checkout. A shell the client runs under another account cannot read the
 checkout owner's credential; the MCP process can, which is why the
 `/join_team` and `/resume_team` entry points call these tools.
 
+Guidance, on both the local and the hub endpoint, for any caller the
+endpoint admits: `team_context` returns the team guidance built into the
+running aimem binary (this page's [playbooks](TEAM-PLAYBOOKS.md) and the
+request templates), with the unit's version and SHA-256 digest. `role`
+(`worker` or `coordinator`) returns that role's complete required set,
+`section` one section by id (`worker`, `example/submit`, ...), and no
+argument the index of ids, sizes and digests. It needs no session,
+checkout, project grant, network or shell, changes nothing and grants no
+permission; it accepts no path, URL or command. Every read ends with a
+terminator line naming the unit, version and digest: text without it was
+cut by the client, so read the sections one at a time.
+
 Tools: `team_list` (the teams enrolling your credential, with coordinator
 eligibility and whether a coordinator is active; read only, no session
 needed), `team_join`, `team_members`, `team_profile`, `team_heartbeat`,
@@ -237,6 +249,15 @@ operator provisioning are separate increments; the command reports what it
 found and how to fix it.
 
 ## CLI
+
+The team guidance built into the binary, readable anywhere (no checkout,
+hub or credential):
+
+```sh
+aimem teams context                      # index: section ids, sizes, digests, role sets
+aimem teams context --role worker        # the worker's complete required set
+aimem teams context --section example/submit
+```
 
 Place `role` and `profile` from the example in `join.json`:
 

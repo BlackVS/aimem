@@ -2,10 +2,20 @@
 
 Status: proposed contract for increment 1 of the
 [portable teams review](TEAM-MULTIPROJECT-REVIEW.md), written against
-e3dea35 (v0.7.2). Task `01a0cf0f-d158-7000-8956-40d43405d5fe`. Nothing
-here is implemented. Tool, field and state names below are proposals until
+e3dea35 (v0.7.2). Task `01a0cf0f-d158-7000-8956-40d43405d5fe`. What is
+implemented is stated below. Tool, field and state names below are proposals until
 the implementing increment merges them; the existing single-project v1
 authority, session, assignment and credential contracts stay as they are.
+
+Implementation status: increment 1b (decision 1: the embedded unit,
+`team_context` on both MCP facades and `aimem teams context`) is implemented
+in `internal/teamguide`, `docs/embed.go` and `internal/mcp/guidance.go`.
+Its section ids are `common`, `responsiveness` (the probe section, which the
+list below did not name), `coordinator`, `worker`, `questions`,
+`escalation`, `process-authority` and `example/<name>`; a role's required
+set is its playbook sections plus every template they link to. The unit
+records `team_protocol` 1 and `min_hub` 0.7.0. Increments 1c and later are
+not implemented.
 
 ## Problem, from source
 

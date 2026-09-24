@@ -55,6 +55,9 @@ Agent commands (from a configured checkout, using its task credential):
                                                         entry points for Claude Code, OpenCode and Codex
   aimem teams mine PROJECT                              the teams enrolling this credential, with
                                                         coordinator eligibility (no session needed)
+  aimem teams context [--role ROLE | --section ID]      the team guidance built into this binary: index,
+                                                        a role's required set or one section (no
+                                                        checkout, hub or credential needed)
   aimem teams <join|members|heartbeat|resume|leave|profile|send|messages|inbox|ack> PROJECT TEAM request.json [KEY]
   aimem teams <offer|assignment|reserved|accept|decline|withdraw|block|resume-work|cancel|stopped|close-stop|submit|review|handoff|edit|finalize> PROJECT TEAM request.json [KEY]
 KEY is required for writes. join accepts a team name or ID; other commands use
@@ -63,6 +66,9 @@ task where the operation needs one. See docs/TEAM-AGENT-QUICKSTART.md. The hub
 reports workflow_ready:false until lifecycle events reach the inbox.`
 
 func teamsCmd(args []string) error {
+	if len(args) > 0 && args[0] == "context" {
+		return teamContextCmd(args[1:], os.Stdout)
+	}
 	if len(args) > 0 && args[0] == "setup" {
 		return teamSetupCmd(args[1:])
 	}

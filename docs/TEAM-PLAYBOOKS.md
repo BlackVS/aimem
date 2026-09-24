@@ -22,6 +22,12 @@ always come from the latest response, never from a copy.
 Mechanics (tool names, CLI files, HTTP routes, paging, waits) are in the
 [quickstart](TEAM-AGENT-QUICKSTART.md); this page assumes them.
 
+This page and the templates are built into the aimem binary: an agent without
+this repository reads them with the `team_context` MCP tool (`role` for its
+complete required set, `section` for one part) or `aimem teams context`. Each
+part below has a stable id, and a new or renamed heading needs one before the
+binary builds.
+
 ## What the probe established about responsiveness
 
 The [capability probe](AGENT-CAPABILITY-PROBE.md) observed explicit inbox

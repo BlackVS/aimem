@@ -13,6 +13,25 @@ currently 18); a binary refuses a database newer than it understands.
 
 ## [Unreleased]
 
+### Added
+
+- Team guidance built into the binary, for agents without an aimem
+  checkout or a working shell: the team playbooks and request templates
+  are embedded from their canonical files in `docs/` (no copy), split into
+  sections with stable ids, and served with the unit's build version,
+  protocol compatibility and a SHA-256 digest over the manifest and every
+  section. The `team_context` MCP tool, on the local and the hub endpoint
+  for any caller the endpoint already admits, returns a role's complete
+  required set (`role`), one section (`section`) or the index; it needs no
+  session, checkout, project grant, network or shell, changes nothing, and
+  takes no path, URL or command. `aimem teams context` is the same read on
+  the command line. Every read ends with a terminator line so a result the
+  client cut is recognizable. The build fails when a section exceeds
+  16 KiB, a role's set 32 KiB or the unit 128 KiB, when a heading has no
+  stable id, or when a relative link neither resolves inside the unit nor
+  is listed as informative. Setup and continue do not deliver it yet
+  (increment 1c); [design](docs/DESIGN-portable-team-context.md).
+
 ## [0.7.2] — 2026-09-23
 
 Team join and resume now use the local MCP process, so agents can use

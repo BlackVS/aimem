@@ -118,16 +118,19 @@ func (s *srv) handle(ctx context.Context, raw []byte) []byte {
 	case "ping":
 		return reply(req.ID, map[string]any{}, nil)
 	case "tools/list":
+		// The public team guidance is listed for every caller a facade
+		// admits: it reads nothing but this binary.
 		if s.tasksOnly {
-			return reply(req.ID, map[string]any{"tools": taskToolDefs}, nil)
+			return reply(req.ID, map[string]any{"tools": append(append([]map[string]any{}, taskToolDefs...), guidanceToolDefs...)}, nil)
 		}
 		if s.taskState == taskStateDisabled {
-			return reply(req.ID, map[string]any{"tools": append([]map[string]any{}, toolDefs...)}, nil)
+			return reply(req.ID, map[string]any{"tools": append(append([]map[string]any{}, toolDefs...), guidanceToolDefs...)}, nil)
 		}
 		tools := append(append([]map[string]any{}, toolDefs...), taskToolDefs...)
 		if s.local != nil {
 			tools = append(tools, onboardToolDefs...)
 		}
+		tools = append(tools, guidanceToolDefs...)
 		return reply(req.ID, map[string]any{"tools": tools}, nil)
 	case "tools/call":
 		return s.toolCall(ctx, req)
@@ -338,6 +341,8 @@ func (s *srv) toolCall(ctx context.Context, req rpcRequest) []byte {
 	var text string
 	var err error
 	switch {
+	case isGuidanceTool(head.Name):
+		text, err = guidanceTool(head.Arguments)
 	case (isTaskTool(head.Name) || isOnboardTool(head.Name)) && s.taskState == taskStateDisabled:
 		// Hidden tools stay hidden when called by name.
 		err = errors.New("tasks are not enabled for this project (as of this session's start); an admin enables them on the hub, then restart the session")
