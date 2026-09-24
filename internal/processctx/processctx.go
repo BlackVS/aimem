@@ -248,7 +248,13 @@ func LoadRef(dir, root, projectID string, pinned process.Ref) *Result {
 		var sel struct {
 			Current *process.Ref `json:"current"`
 		}
-		if err := hubGetJSONClient(hub, hubClient, "/v1/projects/"+url.PathEscape(id)+"/process", &sel); err == nil && sel.Current != nil {
+		serr := hubGetJSONClient(hub, hubClient, "/v1/projects/"+url.PathEscape(id)+"/process", &sel)
+		if errors.As(serr, &refused) && refused.denied() {
+			// A refusal of this credential is a denial wherever it comes
+			// from; the pinned cache does not stand in for it.
+			return r.set(Denied, "the hub refused to read the process selection: "+serr.Error(), credentialFix, "")
+		}
+		if serr == nil && sel.Current != nil {
 			r.Current = sel.Current
 		}
 	}

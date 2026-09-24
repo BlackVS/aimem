@@ -47,6 +47,8 @@ currently 18); a binary refuses a database newer than it understands.
   newer project selection is named but applies to new work only. An
   accepted attempt whose version was not recorded here or cannot be
   recovered is not ready (a `RUNNING` one is blocked); none is assumed.
+  A worker run that cannot read its reserved attempt delivers no project
+  process and is not ready, since the version that applies is unknown.
 
 ### Changed
 

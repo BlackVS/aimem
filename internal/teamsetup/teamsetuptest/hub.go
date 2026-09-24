@@ -59,8 +59,10 @@ type Hub struct {
 	HeartbeatAvailability []string
 	// Version is the hub's reported release; "" means v0.7.0.
 	Version string
-	// InboxCode, when set, refuses inbox reads with that status.
-	InboxCode int
+	// InboxCode, when set, refuses inbox reads with that status;
+	// ReservedCode the reserved-attempt read.
+	InboxCode    int
+	ReservedCode int
 
 	// Attempt writes (worker POSTs under /assignments/{id}/): Writes records
 	// every one as "op attempt key", replayed or not; WorkCode refuses an
@@ -324,6 +326,8 @@ func (h *Hub) serve(w http.ResponseWriter, r *http.Request) {
 		write(200, map[string]any{"id": strings.TrimPrefix(r.URL.Path, "/v1/tasks/"), "revision": h.TaskRevision, "state": "IN_PROGRESS"})
 	case r.Method == "POST" && strings.Contains(r.URL.Path, "/assignments/") && !strings.HasSuffix(r.URL.Path, "/assignments"):
 		h.work(w, r, write)
+	case strings.HasSuffix(r.URL.Path, "/assignments/reserved") && h.ReservedCode != 0:
+		write(h.ReservedCode, map[string]any{"error": "reserved read failed"})
 	case strings.HasSuffix(r.URL.Path, "/assignments/reserved"):
 		if h.Reserved == nil {
 			write(404, map[string]any{"error": "no reserved attempt"})

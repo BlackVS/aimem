@@ -287,3 +287,46 @@ func TestProcessContextIgnoresARecordOfAnotherProject(t *testing.T) {
 	}
 	forbidden(t, h, "/accept")
 }
+
+// A worker run that cannot establish its reserved attempt (the reserved
+// read or the first heartbeat fails) after an accept under A and a new
+// selection B: which version applies is unknown, so B is not delivered,
+// the worker is not ready, and a worker already announced available is
+// announced unavailable again.
+func TestUnknownAttemptWithholdsTheCurrentSelection(t *testing.T) {
+	for name, fail := range map[string]func(h *teamsetuptest.Hub){
+		"reserved read fails": func(h *teamsetuptest.Hub) { h.ReservedCode = 500 },
+		"heartbeat fails":     func(h *teamsetuptest.Hub) { h.Heartbeat = 500 },
+	} {
+		t.Run(name, func(t *testing.T) {
+			h, s, repo, root := acceptedFixture(t)
+			if text, isErr := accept(t, s, "k1"); isErr {
+				t.Fatal(text)
+			}
+			sel := selB
+			h.Selection = &sel
+			fail(h)
+			heartbeats := len(h.HeartbeatAvailability)
+			rep, blocks := onboardBlocks(t, stdioFor(repo, root), "team_continue", map[string]any{})
+			pp := rep.Readiness.ProjectProcess
+			if rep.Status != "blocked" || rep.Readiness.ReadyForWork || pp.State != "not_evaluated" || processBlock(blocks) != "" {
+				t.Fatalf("status %s, readiness %+v, process block:\n%s", rep.Status, rep.Readiness, processBlock(blocks))
+			}
+			for _, b := range blocks {
+				if strings.Contains(b, rulesB) {
+					t.Fatalf("B was delivered:\n%s", b)
+				}
+			}
+			if strings.HasPrefix(rep.Next[0], "ready_for_work:") {
+				t.Fatalf("next: %q", rep.Next)
+			}
+			if h.Heartbeat == 0 {
+				got := h.HeartbeatAvailability[heartbeats:]
+				if len(got) != 2 || got[0] != "available" || got[1] != "unavailable" {
+					t.Fatalf("heartbeats after the failed read: %v", got)
+				}
+			}
+			forbidden(t, h, "/accept")
+		})
+	}
+}

@@ -101,7 +101,10 @@ once the attempt ends. An accepted attempt whose version this checkout did
 not record (accepted through the hub endpoint, from another checkout, by
 an older aimem, or with the record lost) or cannot recover (the exact
 commit unavailable, access denied, the hub unreachable) is not ready, and
-a `RUNNING` one is blocked as above; no version is assumed.
+a `RUNNING` one is blocked as above; no version is assumed. When a worker's
+run cannot read its reserved attempt at all (the heartbeat or the reserved
+read fails), which version applies is unknown: no project process is
+delivered, the worker is not ready, and it is announced unavailable.
 
 Project process, on the checkout-bound local server only: `process_context`
 returns this project's selected process as one complete unit (the text

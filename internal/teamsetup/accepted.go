@@ -150,6 +150,22 @@ func (s *setup) recoverAccepted(me *Session, attempt string, rec *teamstate.Acce
 	return part
 }
 
+// attemptUnknown is a worker run that could not establish its reserved
+// attempt (the heartbeat or the reserved read failed): which process
+// version applies is unknown, because an accepted attempt keeps its own.
+// The current selection is withheld and the worker is not ready. It
+// reports whether readiness changed.
+func (s *setup) attemptUnknown() bool {
+	rd := s.report.Readiness
+	before := rd.ReadyForWork
+	s.dropDelivery("project_process")
+	rd.ProjectProcess = Part{State: "not_evaluated", Version: "",
+		Detail: "the reserved attempt could not be read, so which process version applies (an accepted attempt keeps the one it was accepted under) is unknown; nothing is delivered as the process",
+		Fix:    "re-run team_continue when the hub answers"}
+	rd.ReadyForWork = false
+	return rd.ReadyForWork != before
+}
+
 func (s *setup) dropDelivery(kind string) {
 	kept := s.report.Delivered[:0]
 	for _, d := range s.report.Delivered {

@@ -895,13 +895,20 @@ func (s *setup) enterRole(me *Session) bool {
 		// declined, never accepted.
 		announced, ok := s.announce(me)
 		if !ok {
+			s.attemptUnknown()
 			return false
 		}
 		readOK := s.readReserved(me)
-		// An accepted attempt keeps the process version it was accepted
-		// under: readiness is re-evaluated against that version, and the
-		// availability follows it.
-		if readOK && s.pinAccepted(me) && availabilityFor(rd) != announced {
+		changed := false
+		if readOK {
+			// An accepted attempt keeps the process version it was accepted
+			// under: readiness is re-evaluated against that version.
+			changed = s.pinAccepted(me)
+		} else {
+			changed = s.attemptUnknown()
+		}
+		// The availability follows readiness.
+		if changed && availabilityFor(rd) != announced {
 			if _, ok := s.announce(me); !ok {
 				return false
 			}

@@ -26,6 +26,7 @@ var projectSecret = "aimem_user_" + strings.Repeat("e", 64)
 type fakeHub struct {
 	mu             sync.Mutex
 	identityStatus int  // 0 = 200
+	processStatus  int  // 0 = the selection below
 	gatewayStatus  int  // when set, every route answers it
 	tasksEnabled   bool // identity's tasks_enabled
 	ref            *process.Ref
@@ -49,6 +50,11 @@ func (h *fakeHub) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 		json.NewEncoder(w).Encode(map[string]any{"scope": "project", "task_write": true, "tasks_enabled": h.tasksEnabled})
 	case strings.HasSuffix(r.URL.Path, "/process"):
+		if h.processStatus != 0 {
+			w.WriteHeader(h.processStatus)
+			json.NewEncoder(w).Encode(map[string]string{"error": "token revoked"})
+			return
+		}
 		if h.ref == nil {
 			w.WriteHeader(http.StatusNotFound)
 			json.NewEncoder(w).Encode(map[string]string{"error": "no process reference selected for this project; an admin selects one (aimem process select … on the hub host)"})
@@ -422,5 +428,28 @@ func TestLastObservedRecordWithoutTimeIsNotUsed(t *testing.T) {
 	}
 	if text, err := r.Deliver(); err != nil || !strings.Contains(text, "NOTE: the hub is unreachable") {
 		t.Errorf("delivery must be marked: %v", err)
+	}
+}
+
+// LoadRef runs Load's live checks: a refusal of the selection read after a
+// successful identity read is a denial, and the pinned cache does not stand
+// in for it.
+func TestLoadRefHonorsADeniedSelectionRead(t *testing.T) {
+	h := &fakeHub{}
+	h.change(ready)
+	dir, root, _ := checkout(t, h, true)
+	cache(t, root, selection, "# Handbook\n\npinned rules\n")
+	if r := LoadRef(dir, root, "", selection); r.State != Ready || !strings.Contains(r.Unit, "pinned rules") {
+		t.Fatalf("pinned, ready: %+v", r)
+	}
+	for _, status := range []int{http.StatusUnauthorized, http.StatusForbidden} {
+		h.change(func(h *fakeHub) { h.processStatus = status })
+		r := LoadRef(dir, root, "", selection)
+		if r.State != Denied || r.Set != nil || r.Unit != "" {
+			t.Fatalf("status %d: %+v", status, r)
+		}
+		if _, err := r.Deliver(); err == nil {
+			t.Fatalf("status %d: a denied pin delivered", status)
+		}
 	}
 }
