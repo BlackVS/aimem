@@ -66,6 +66,10 @@ type Env struct {
 	// status --porcelain) and returns its trimmed output. GitOutput is the
 	// shell's probe; see its note before running it under another identity.
 	Git func(dir string, args ...string) (string, error)
+	// Task reads one task (GET /v1/tasks/{id}) with the checkout's
+	// credential: the current revision a worker's block must name. nil
+	// means this host cannot read it, and no block is sent.
+	Task func(ctx context.Context, id string) (int, []byte, error)
 }
 
 // Options are the request: the team and role asked for, the declared
@@ -905,6 +909,8 @@ func (s *setup) enterRole(me *Session) bool {
 		if !s.readReserved(me) {
 			return false
 		}
+		s.handleUnreadyAttempt(me)
+		s.reservedNext()
 	}
 	if !s.readInbox(me) {
 		return false
@@ -969,11 +975,6 @@ func (s *setup) readReserved(me *Session) bool {
 	r.Next = AttemptNext(r.State)
 	s.report.Reserved = &r
 	s.check("reserved", "ok", fmt.Sprintf("attempt %s on task %s (%s) is %s for this session", r.ID, r.TaskID, orUnknown(r.Title), r.State), "")
-	s.report.Next = append(s.report.Next, "reserved attempt "+r.ID+" ("+r.State+"): "+r.Next)
-	switch r.State {
-	case "RUNNING", "BLOCKED", "STOP_REQUESTED":
-		s.report.Next = append(s.report.Next, s.reconcileLine())
-	}
 	return true
 }
 

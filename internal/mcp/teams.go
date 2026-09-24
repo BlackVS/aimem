@@ -111,6 +111,16 @@ func TeamRequestIn(ctx context.Context, dir, root, name string, raw json.RawMess
 	return call(ctx, method, path, headers, body)
 }
 
+// TaskGetIn reads one task with the checkout's own task credential: the
+// narrow read the onboarding core needs for the revision a block names.
+func TaskGetIn(ctx context.Context, dir, root, id string) (int, []byte, error) {
+	call, err := taskCallerIn(dir, root)
+	if err != nil {
+		return 0, nil, err
+	}
+	return call(ctx, "GET", "/v1/tasks/"+url.PathEscape(id), nil, nil)
+}
+
 func callTeamTool(ctx context.Context, call TaskCallFunc, defaultProject, name string, raw json.RawMessage) (string, error) {
 	if tool, ok := teamWorkToolByName(name); ok {
 		return callTeamWorkTool(ctx, call, defaultProject, tool, raw)

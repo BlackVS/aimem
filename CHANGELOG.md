@@ -24,9 +24,19 @@ currently 18); a binary refuses a database newer than it understands.
   as their own MCP text blocks after the unchanged JSON report, printed
   after the CLI report, under `delivered` in `--json`, each ending with its
   terminator. A changed guidance digest since the last delivery is
-  reported. Delivery is not recorded as acknowledgement. Attempts already
-  reserved for a worker that is not ready are listed, not yet handled
-  (increment 1c-3); the generated entry points are unchanged (1c-5).
+  reported. Delivery is not recorded as acknowledgement. The generated
+  entry points are unchanged (1c-5).
+- A worker that is not ready no longer only lists the attempt the hub holds
+  for it: `team_setup` and `team_continue` decline an `OFFERED` attempt
+  (including one that raced the join) with the readiness reason, block a
+  `RUNNING` one with the missing context (reading the task's current
+  revision; the attempt stays reserved), leave `BLOCKED` as it is, and send
+  nothing for `STOP_REQUESTED`, `STOPPED` or `SUBMITTED`; a stop is never
+  acknowledged for the worker. Each write is recorded with its retry key
+  and exact content before it is sent, repeated identically only while the
+  attempt is unchanged, and never replayed across a new session generation
+  or once the worker is ready. The reserved attempt's next step no longer
+  tells a worker that is not ready to accept its offer.
 
 ### Changed
 

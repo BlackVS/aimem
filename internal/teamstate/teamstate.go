@@ -43,6 +43,21 @@ type State struct {
 	// membership, so a later run can report that it changed.
 	RoleDigest  string `json:"role_digest,omitempty"`
 	RoleVersion string `json:"role_version,omitempty"`
+	// PendingWork is an attempt write sent (or about to be sent) whose
+	// outcome this checkout has not seen; a replay repeats it exactly.
+	PendingWork *PendingWork `json:"pending_work,omitempty"`
+}
+
+// PendingWork is one not-ready attempt write: its operation, attempt,
+// session generation, retry key and the exact request content, so an
+// uncertain outcome is retried as the identical request.
+type PendingWork struct {
+	Op               string `json:"op"` // decline or block
+	Attempt          string `json:"attempt"`
+	Generation       int64  `json:"generation"`
+	Key              string `json:"key"`
+	Reason           string `json:"reason"`
+	ExpectedRevision int64  `json:"expected_revision,omitempty"`
 }
 
 // Canonical resolves dir the way the credential store does, so the state

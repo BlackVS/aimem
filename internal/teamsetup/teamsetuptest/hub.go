@@ -9,6 +9,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -60,6 +61,27 @@ type Hub struct {
 	Version string
 	// InboxCode, when set, refuses inbox reads with that status.
 	InboxCode int
+
+	// Attempt writes (worker POSTs under /assignments/{id}/): Writes records
+	// every one as "op attempt key", replayed or not; WorkCode refuses an
+	// operation with that status; DropBefore closes the connection before
+	// applying the next such write (it never landed), DropAfter after (it
+	// landed, the reply was lost). net/http replays a keyed POST once on a
+	// dropped keep-alive connection, so a lasting failure needs a count of 2.
+	// TaskRevision is the reserved task's
+	// revision; a block must name it, and a block bumps it.
+	Writes       []string
+	WorkCode     map[string]int
+	DropBefore   map[string]int
+	DropAfter    map[string]int
+	TaskRevision int64
+	TaskReads    int
+	workKeys     map[string]workReceipt
+}
+
+type workReceipt struct {
+	body   string
+	result map[string]any
 }
 
 // Selection is the process every New hub selects, and Checkout caches
@@ -290,6 +312,11 @@ func (h *Hub) serve(w http.ResponseWriter, r *http.Request) {
 		json.NewDecoder(r.Body).Decode(&hb)
 		h.HeartbeatAvailability = append(h.HeartbeatAvailability, hb.Availability)
 		write(200, map[string]any{"protocol_version": 1, "session": map[string]any{"id": "x"}})
+	case r.Method == "GET" && strings.HasPrefix(r.URL.Path, "/v1/tasks/"):
+		h.TaskReads++
+		write(200, map[string]any{"id": strings.TrimPrefix(r.URL.Path, "/v1/tasks/"), "revision": h.TaskRevision, "state": "IN_PROGRESS"})
+	case r.Method == "POST" && strings.Contains(r.URL.Path, "/assignments/") && !strings.HasSuffix(r.URL.Path, "/assignments"):
+		h.work(w, r, write)
 	case strings.HasSuffix(r.URL.Path, "/assignments/reserved"):
 		if h.Reserved == nil {
 			write(404, map[string]any{"error": "no reserved attempt"})
@@ -321,6 +348,91 @@ func (h *Hub) serve(w http.ResponseWriter, r *http.Request) {
 	default:
 		write(404, map[string]any{"error": "unexpected " + r.URL.Path})
 	}
+}
+
+// work applies one worker attempt write the way the hub's transitions do:
+// decline only from OFFERED (the attempt leaves the reservation), block only
+// from RUNNING with the current task revision (it stays reserved). A retry
+// key replays its first result; reused with different content it is a 409.
+func (h *Hub) work(w http.ResponseWriter, r *http.Request, write func(int, any)) {
+	parts := strings.Split(strings.TrimSuffix(r.URL.Path, "/"), "/")
+	op, attempt := parts[len(parts)-1], parts[len(parts)-2]
+	key := r.Header.Get("Idempotency-Key")
+	raw, _ := io.ReadAll(r.Body)
+	h.Writes = append(h.Writes, op+" "+attempt+" "+key)
+	if h.workKeys == nil {
+		h.workKeys = map[string]workReceipt{}
+	}
+	drop := func(m map[string]int) bool {
+		if m[op] > 0 {
+			m[op]--
+			if hj, ok := w.(http.Hijacker); ok {
+				if conn, _, err := hj.Hijack(); err == nil {
+					conn.Close()
+				}
+			}
+			return true
+		}
+		return false
+	}
+	if prev, seen := h.workKeys[key]; seen {
+		if prev.body != string(raw) {
+			write(409, map[string]any{"error": "idempotency key reused with different content"})
+			return
+		}
+		if drop(h.DropAfter) { // the replayed receipt's reply is lost too
+			return
+		}
+		write(200, prev.result)
+		return
+	}
+	if drop(h.DropBefore) {
+		return
+	}
+	if code := h.WorkCode[op]; code != 0 {
+		write(code, map[string]any{"error": "refused by the test hub"})
+		return
+	}
+	if h.Reserved == nil || fmt.Sprint(h.Reserved["id"]) != attempt {
+		write(404, map[string]any{"error": "no such attempt"})
+		return
+	}
+	var body struct {
+		ExpectedRevision int64  `json:"expected_revision"`
+		Reason           string `json:"reason"`
+	}
+	json.Unmarshal(raw, &body)
+	state := fmt.Sprint(h.Reserved["state"])
+	var next string
+	switch {
+	case op == "decline" && state == "OFFERED":
+		next = "DECLINED"
+	case op == "block" && state == "RUNNING":
+		if body.ExpectedRevision != h.TaskRevision {
+			write(409, map[string]any{"error": "task revision changed"})
+			return
+		}
+		h.TaskRevision++
+		next = "BLOCKED"
+	default:
+		write(409, map[string]any{"error": "assignment state conflict"})
+		return
+	}
+	if strings.TrimSpace(body.Reason) == "" {
+		write(400, map[string]any{"error": "reason required"})
+		return
+	}
+	result := map[string]any{"protocol_version": 1, "assignment": map[string]any{"id": attempt, "state": next, "reason": body.Reason}, "workflow_ready": true}
+	h.workKeys[key] = workReceipt{body: string(raw), result: result}
+	if next == "DECLINED" {
+		h.Reserved = nil // no longer reserved for the worker
+	} else {
+		h.Reserved["state"] = next
+	}
+	if drop(h.DropAfter) {
+		return
+	}
+	write(200, result)
 }
 
 func (h *Hub) Count(suffix string) int {
