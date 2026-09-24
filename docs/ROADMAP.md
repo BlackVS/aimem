@@ -1,12 +1,13 @@
 # Roadmap
 
-Released baseline: v0.7.2 (PR #60-101): the enabled-project picker and epic
+Released baseline: v0.7.3 (PR #60-108): the enabled-project picker and epic
 details, the agent-team coordination protocol through the scripted
 rehearsal, one-command team onboarding (`aimem teams setup`, the
 `/join_team` and `/resume_team` entry points, team listing, guided
-provisioning), and onboarding through the checkout-bound local MCP
-(`team_setup`, `team_continue`), with the process set 1.15.1 selected for
-this project. The manual cross-platform pilot and any deployment are
+provisioning), onboarding through the checkout-bound local MCP
+(`team_setup`, `team_continue`), and portable team context (guidance and
+project process delivered through MCP with an explicit readiness report),
+with the process set 1.15.1 selected for this project. The manual cross-platform pilot and any deployment are
 separate owner decisions.
 This file records delivery order and scope. The aimem task board owns live
 task state, dependencies and completion evidence; design documents own the
@@ -28,7 +29,10 @@ contracts. Do not maintain a second checklist of task statuses here.
   structured inbox, protected assignments, results, recovery, audit export,
   scripted rehearsal and guided onboarding: v0.7.0-v0.7.1. Onboarding through
   the checkout-bound local MCP, so a sandboxed shell needs no credential:
-  v0.7.2. The live cross-platform pilot is still pending.
+  v0.7.2. Portable team context, increment 1a-1c of the
+  [contract](DESIGN-portable-team-context.md): v0.7.3, PR #102-108, with the
+  [rollout and pilot checklist](TEAM-ROLLOUT-0.7.3.md). The live
+  cross-platform pilot is still pending.
 
 ## Next delivery sequence
 
@@ -44,8 +48,9 @@ behind its own design and review gates.
    readable through MCP; 1c readiness in `team_setup`/`team_continue`, with
    the project process delivered through MCP and not-ready workers reported
    `unavailable`; 1d a hub-served process bundle only if a pilot host lacks
-   Git access to the process repository. Then the single-project
-   cross-platform pilot with every member upgraded. The separate Codex shell
+   Git access to the process repository. 1a-1c are delivered (v0.7.3). Next
+   the single-project cross-platform pilot with every member upgraded, per
+   the [rollout and pilot checklist](TEAM-ROLLOUT-0.7.3.md). The separate Codex shell
    runner failure is not fixed by this work.
 2. User-level agent context independent of the checkout (review increment 2),
    after its own design approval. It preserves checkout mode and strict

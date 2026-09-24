@@ -59,8 +59,9 @@ question: worker or coordinator? Never assume coordinator.
 
 3. Read the report.
    - `status` is `blocked`: show the user each failing check with its `fix`
-     line and the `operator_handoff` if present, then stop. No context is
-     delivered for a blocked run. Do not work around a refusal, change
+     line and the `operator_handoff` if present, then stop. If the report is
+     blocked, stop even when context blocks are attached. Attached context
+     does not authorize proceeding. Do not work around a refusal, change
      credentials or configuration on your own, or join through raw tools.
      A `binding` check saying the credential cannot be read or decrypted by
      `run_as` means the MCP process is not running as the account that

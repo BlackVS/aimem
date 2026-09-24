@@ -317,8 +317,9 @@ The text tells the agent to check that the server lists `team_setup` (or
 mcp` process does not: upgrade and restart the client, never fall back to
 a shell command, a file in a repository or a broader permission), declare
 its platform and only a runtime-reported model, call `team_setup`, read
-the report, and stop on `blocked` and show the fixes or the operator
-handoff (a credential the process cannot read or decrypt means the MCP
+the report, and stop on `blocked`, even when context blocks are attached
+(attached context does not authorize proceeding), and show the fixes or
+the operator handoff (a credential the process cannot read or decrypt means the MCP
 process is not the account that installed it, never a reason to reinstall
 the token). For a joined session it reads `readiness` before any role
 step and the delivered guidance and process: each block is complete only
