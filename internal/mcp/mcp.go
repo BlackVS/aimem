@@ -340,6 +340,7 @@ func (s *srv) toolCall(ctx context.Context, req rpcRequest) []byte {
 		return reply(req.ID, nil, &rpcError{Code: -32602, Message: err.Error()})
 	}
 	var text string
+	var extra []string // further text blocks after text (delivered content)
 	var err error
 	switch {
 	case isGuidanceTool(head.Name):
@@ -348,7 +349,7 @@ func (s *srv) toolCall(ctx context.Context, req rpcRequest) []byte {
 		// Hidden tools stay hidden when called by name.
 		err = errors.New("tasks are not enabled for this project (as of this session's start); an admin enables them on the hub, then restart the session")
 	case isOnboardTool(head.Name):
-		text, err = s.onboardTool(head.Name, head.Arguments)
+		text, extra, err = s.onboardTool(head.Name, head.Arguments)
 	case isProcessTool(head.Name):
 		text, err = s.processTool(head.Arguments)
 	case isTaskTool(head.Name):
@@ -376,9 +377,11 @@ func (s *srv) toolCall(ctx context.Context, req rpcRequest) []byte {
 			"isError": true,
 		}, nil)
 	}
-	return reply(req.ID, map[string]any{
-		"content": []map[string]any{{"type": "text", "text": text}},
-	}, nil)
+	content := []map[string]any{{"type": "text", "text": text}}
+	for _, block := range extra {
+		content = append(content, map[string]any{"type": "text", "text": block})
+	}
+	return reply(req.ID, map[string]any{"content": content}, nil)
 }
 
 // scopeProjects resolves a tool's scope to backing project ids. explicit

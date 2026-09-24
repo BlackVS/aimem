@@ -20,7 +20,6 @@ import (
 	"os"
 	"strings"
 
-	"aimem/internal/process"
 	"aimem/internal/processctx"
 	"aimem/internal/server"
 	"aimem/internal/store"
@@ -51,14 +50,14 @@ func (l *localCheckout) env() teamsetup.Env {
 		TeamCall: func(ctx context.Context, name string, raw json.RawMessage) (int, []byte, error) {
 			return TeamRequestIn(ctx, l.dir, l.root, name, raw)
 		},
-		Process: func(dir, project string) (string, *process.Set) {
-			return processctx.Bootstrap(dir, l.root, project, false)
+		Process: func(dir, project string) *processctx.Result {
+			return processctx.Load(dir, l.root, project)
 		},
 		Git: teamsetup.GitHeadOnly,
 	}
 }
 
-const onboardCommon = " Runs in this MCP process, as the account that installed this checkout's credential, bound to this checkout and its state root: the same code and the same saved session state as the aimem CLI, so a shell that cannot read the credential is not needed. Accepts no token, checkout, command or executable. The result is the report: status joined or blocked, every check with its fix, the session handle for the team_* tools, and next steps; on blocked, show the failing checks and the operator handoff to the user and stop (never work around a refusal, change credentials or join through raw tools). Nothing here wakes an idle agent: poll team_inbox afterwards."
+const onboardCommon = " Runs in this MCP process, as the account that installed this checkout's credential, bound to this checkout and its state root: the same code and the same saved session state as the aimem CLI, so a shell that cannot read the credential is not needed. Accepts no token, checkout, command or executable. The result is the report (the first text block): status joined or blocked, every check with its fix, the session handle for the team_* tools, a readiness object and next steps. For a verified session, the role's team guidance and the project's selected process follow as their own text blocks, each ending with a terminator line (a block without it was cut). joined is not permission to work: only readiness.ready_for_work is, and execution (your shell, build tools, runner) is never verified here. A worker that is not ready is announced unavailable and must accept nothing; a coordinator that is not ready issues no offers. On blocked, show the failing checks and the operator handoff to the user and stop (never work around a refusal, change credentials or join through raw tools). Nothing here wakes an idle agent: poll team_inbox afterwards."
 
 var onboardToolDefs = []map[string]any{
 	{
@@ -95,11 +94,30 @@ var onboardToolNames = func() map[string]bool {
 func isOnboardTool(name string) bool { return onboardToolNames[name] }
 
 // onboardTool runs one onboarding tool for the bound checkout and returns
-// the report as indented JSON. A blocked report is a result, not a tool
-// error: the checks say why and what to do.
-func (s *srv) onboardTool(name string, raw json.RawMessage) (string, error) {
+// the report as indented JSON, then each delivered text as its own block. A
+// blocked report is a result, not a tool error: the checks say why and what
+// to do.
+func (s *srv) onboardTool(name string, raw json.RawMessage) (string, []string, error) {
+	rep, err := s.onboardReport(name, raw)
+	if err != nil {
+		return "", nil, err
+	}
+	var blocks []string
+	for _, d := range rep.Delivered {
+		blocks = append(blocks, d.Text)
+	}
+	out := *rep
+	out.Delivered = nil // carried as blocks, not repeated inside the JSON
+	text, err := json.MarshalIndent(&out, "", "  ")
+	if err != nil {
+		return "", nil, err
+	}
+	return string(text), blocks, nil
+}
+
+func (s *srv) onboardReport(name string, raw json.RawMessage) (*teamsetup.Report, error) {
 	if s.local == nil {
-		return "", errors.New("team onboarding tools exist only on the checkout-bound local MCP server (aimem mcp, started by the client in the checkout), never on the hub")
+		return nil, errors.New("team onboarding tools exist only on the checkout-bound local MCP server (aimem mcp, started by the client in the checkout), never on the hub")
 	}
 	var a struct {
 		Team                  string             `json:"team"`
@@ -115,37 +133,37 @@ func (s *srv) onboardTool(name string, raw json.RawMessage) (string, error) {
 		raw = json.RawMessage("{}")
 	}
 	if len(raw) > 64<<10 {
-		return "", errors.New("arguments must be a JSON object at most 64 KiB")
+		return nil, errors.New("arguments must be a JSON object at most 64 KiB")
 	}
 	dec := json.NewDecoder(bytes.NewReader(raw))
 	dec.DisallowUnknownFields()
 	if err := dec.Decode(&a); err != nil {
-		return "", err
+		return nil, err
 	}
 	if dec.Decode(&struct{}{}) != io.EOF {
-		return "", errors.New("expected one JSON object")
+		return nil, errors.New("expected one JSON object")
 	}
 	var rep *teamsetup.Report
 	switch name {
 	case "team_setup":
 		if strings.TrimSpace(a.Team) == "" {
-			return "", errors.New("team is required")
+			return nil, errors.New("team is required")
 		}
 		if a.Role != "worker" && a.Role != "coordinator" {
-			return "", fmt.Errorf("role must be worker or coordinator, got %q", a.Role)
+			return nil, fmt.Errorf("role must be worker or coordinator, got %q", a.Role)
 		}
 		if a.Fence {
-			return "", errors.New("fence belongs to team_continue; team_setup takes resume")
+			return nil, errors.New("fence belongs to team_continue; team_setup takes resume")
 		}
 		if a.Resume && a.NewSession {
-			return "", errors.New("resume and new_session exclude each other")
+			return nil, errors.New("resume and new_session exclude each other")
 		}
 		opts := &teamsetup.Options{Team: a.Team, Role: a.Role, Resume: a.Resume, NewSession: a.NewSession, Wiring: wiring.Options{Repair: a.RepairIntegration, AllowProjectStopHooks: a.AllowProjectStopHooks}}
 		if a.Profile != nil {
 			// The schema requires label, platform and platform version once a
 			// profile is given; the core reuses a saved declaration when none is.
 			if a.Profile.Label == "" || a.Profile.Platform == "" || a.Profile.PlatformVersion == "" {
-				return "", errors.New("profile needs label, platform and platform_version (use unknown, never a guess)")
+				return nil, errors.New("profile needs label, platform and platform_version (use unknown, never a guess)")
 			}
 			opts.Profile, opts.ProfileSet, opts.PlatformSet = *a.Profile, true, a.Profile.Platform != "unknown"
 		} else {
@@ -156,20 +174,16 @@ func (s *srv) onboardTool(name string, raw json.RawMessage) (string, error) {
 			opts.Profile.Label = a.Role + "-" + host
 		}
 		if err := teamsetup.CheckProfile(&opts.Profile); err != nil {
-			return "", err
+			return nil, err
 		}
 		rep = teamsetup.Run(s.local.env(), opts)
 	case "team_continue":
 		if a.Role != "" || a.Profile != nil || a.Resume || a.NewSession || a.RepairIntegration || a.AllowProjectStopHooks {
-			return "", errors.New("team_continue takes only team and fence: the role and profile come from the saved membership, and a restart never joins")
+			return nil, errors.New("team_continue takes only team and fence: the role and profile come from the saved membership, and a restart never joins")
 		}
 		rep = teamsetup.Continue(s.local.env(), a.Team, a.Fence)
 	default:
-		return "", errors.New("unknown onboarding tool")
+		return nil, errors.New("unknown onboarding tool")
 	}
-	out, err := json.MarshalIndent(rep, "", "  ")
-	if err != nil {
-		return "", err
-	}
-	return string(out), nil
+	return rep, nil
 }

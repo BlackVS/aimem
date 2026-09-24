@@ -364,7 +364,7 @@ func TestTeamSetupRoleEntryRefusalsAreFailures(t *testing.T) {
 	h2.Heartbeat = 403
 	repo2, root2 := teamsetuptest.Checkout(t, h2, ts2)
 	out, err = runSetup(t, repo2, root2, "Pilot", "worker")
-	if err == nil || !strings.Contains(out, "heartbeat refused: HTTP 403") || strings.Contains(out, "announced available") {
+	if err == nil || !strings.Contains(out, "heartbeat (available) not accepted: HTTP 403") || strings.Contains(out, "announced available") {
 		t.Fatalf("%v\n%s", err, out)
 	}
 	if st := readState(t, root2, repo2); st == nil || st.SessionID != "sess-1" {
@@ -643,5 +643,24 @@ func TestTeamSetupArgs(t *testing.T) {
 	o, err := parseTeamSetupArgs([]string{"My Team", "coordinator", "--label", "coord", "--model-id", "m", "--model-source", "operator_configured"})
 	if err != nil || o.Team != "My Team" || o.Profile.Label != "coord" || o.Profile.Model.ObservedAt == "" || o.Profile.Platform != "unknown" {
 		t.Fatalf("%v %+v", err, o)
+	}
+}
+
+// The CLI report shows the readiness parts and prints the delivered
+// guidance and process after the status, each ending with its terminator.
+func TestTeamSetupPrintsReadinessAndDeliveries(t *testing.T) {
+	h, ts := teamsetuptest.New(t)
+	repo, root := teamsetuptest.Checkout(t, h, ts)
+	out, err := runSetup(t, repo, root, "Pilot", "worker", "--platform", "codex")
+	if err != nil {
+		t.Fatalf("%v\n%s", err, out)
+	}
+	for _, want := range []string{"Readiness: ready_for_work true", "role_context     delivered", "project_process  ready version " + teamsetuptest.Selection.Commit, "execution        not_verified", "=== end aimem-team-guidance role worker version dev", "Work only on READY tasks", "=== end aimem process context unit project alpha"} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("missing %q in\n%s", want, out)
+		}
+	}
+	if strings.Index(out, "Status: joined") > strings.Index(out, "=== end aimem-team-guidance") {
+		t.Fatal("the deliveries must follow the report")
 	}
 }

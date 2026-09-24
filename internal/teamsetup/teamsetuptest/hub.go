@@ -18,6 +18,7 @@ import (
 	"testing"
 
 	"aimem/internal/adapter"
+	"aimem/internal/process"
 	"aimem/internal/taskcred"
 )
 
@@ -47,6 +48,48 @@ type Hub struct {
 	ResumeKeys    map[string]string // idempotency key -> session id already resumed
 	Mine          []map[string]any  // enrolled-teams listing; nil means enrolled in Pilot as coordinator
 	MineCode      int               // non-zero: refuse the listing with this status
+	// Selection is the project's process selection; nil answers "no process
+	// reference selected". ProcessCode, when set, answers the process route
+	// with that status and no selection message (an older hub, an outage).
+	Selection   *process.Ref
+	ProcessCode int
+	// HeartbeatAvailability records the availability of each accepted
+	// heartbeat, in order.
+	HeartbeatAvailability []string
+	// Version is the hub's reported release; "" means v0.7.0.
+	Version string
+	// InboxCode, when set, refuses inbox reads with that status.
+	InboxCode int
+}
+
+// Selection is the process every New hub selects, and Checkout caches
+// exactly: its repository address is unreachable, so only the cache can
+// serve it.
+var Selection = process.Ref{Repo: "https://127.0.0.1:1/process.git", Commit: strings.Repeat("ab", 20), Manifest: "proc/manifest.json"}
+
+// Handbook is the selected process's handbook text.
+const Handbook = "# Handbook\n\nWork only on READY tasks; review gates apply.\n"
+
+// CacheProcess writes a complete exact-commit cache entry for ref under
+// root, the way a finished fetch leaves it.
+func CacheProcess(t *testing.T, root string, ref process.Ref) {
+	t.Helper()
+	dir := process.CacheDir(root, ref)
+	for p, body := range map[string]string{
+		ref.Manifest:       `{"version":1,"handbook":"proc/handbook.md","checklists":{"READY":"proc/ready.json"},"templates":{"task":"proc/task.json"}}`,
+		"proc/handbook.md": Handbook,
+		"proc/ready.json":  `{"state":"READY","items":[{"id":"ready.outcome","text":"Objective and criteria are concrete."}]}`,
+		"proc/task.json":   `{"title":""}`,
+		".complete":        ref.Manifest + "\n",
+	} {
+		fp := filepath.Join(dir, filepath.FromSlash(p))
+		if err := os.MkdirAll(filepath.Dir(fp), 0o700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(fp, []byte(body), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
 }
 
 type Session struct {
@@ -57,7 +100,8 @@ type Session struct {
 }
 
 func New(t *testing.T) (*Hub, *httptest.Server) {
-	h := &Hub{Secret: "aimem_user_" + strings.Repeat("e", 64), Sessions: map[string]*Session{}, ResumeKeys: map[string]string{}}
+	sel := Selection
+	h := &Hub{Secret: "aimem_user_" + strings.Repeat("e", 64), Sessions: map[string]*Session{}, ResumeKeys: map[string]string{}, Selection: &sel}
 	h.Identity = map[string]any{"user_id": "u-1", "token_id": "t-1", "name": "pilot-a", "role": "user", "scope": "project", "task_read": "all-projects", "project": "alpha", "task_write": true, "tasks_enabled": true}
 	ts := httptest.NewServer(http.HandlerFunc(h.serve))
 	t.Cleanup(ts.Close)
@@ -86,7 +130,11 @@ func (h *Hub) serve(w http.ResponseWriter, r *http.Request) {
 		json.NewEncoder(w).Encode(v)
 	}
 	if r.URL.Path == "/v1/status" {
-		write(200, map[string]any{"status": "ok", "version": "v0.7.0", "hub_name": "fake"})
+		version := h.Version
+		if version == "" {
+			version = "v0.7.0"
+		}
+		write(200, map[string]any{"status": "ok", "version": version, "hub_name": "fake"})
 		return
 	}
 	if r.Header.Get("Authorization") != "Bearer "+h.Secret {
@@ -97,7 +145,14 @@ func (h *Hub) serve(w http.ResponseWriter, r *http.Request) {
 	case r.URL.Path == "/v1/access/identity":
 		write(200, h.Identity)
 	case r.URL.Path == "/v1/projects/alpha/process":
-		write(404, map[string]any{"error": "no process reference selected"})
+		switch {
+		case h.ProcessCode != 0:
+			w.WriteHeader(h.ProcessCode)
+		case h.Selection == nil:
+			write(404, map[string]any{"error": "no process reference selected"})
+		default:
+			write(200, map[string]any{"project": "alpha", "current": h.Selection})
+		}
 	case r.URL.Path == "/v1/projects/alpha/teams/mine":
 		if h.MineCode == 403 {
 			// What a hub older than the route says: its ordinary-token gate
@@ -229,6 +284,11 @@ func (h *Hub) serve(w http.ResponseWriter, r *http.Request) {
 			write(h.Heartbeat, map[string]any{"error": "current team enrollment and bound ordinary write session required"})
 			return
 		}
+		var hb struct {
+			Availability string `json:"availability"`
+		}
+		json.NewDecoder(r.Body).Decode(&hb)
+		h.HeartbeatAvailability = append(h.HeartbeatAvailability, hb.Availability)
 		write(200, map[string]any{"protocol_version": 1, "session": map[string]any{"id": "x"}})
 	case strings.HasSuffix(r.URL.Path, "/assignments/reserved"):
 		if h.Reserved == nil {
@@ -246,6 +306,8 @@ func (h *Hub) serve(w http.ResponseWriter, r *http.Request) {
 			full[k] = v
 		}
 		write(200, map[string]any{"protocol_version": 1, "assignment": full, "workflow_ready": true})
+	case strings.HasSuffix(r.URL.Path, "/inbox") && h.InboxCode != 0:
+		write(h.InboxCode, map[string]any{"error": "inbox unavailable"})
 	case strings.HasSuffix(r.URL.Path, "/inbox"):
 		msgs := []map[string]any{}
 		for i := 0; i < h.InboxN; i++ {
@@ -293,5 +355,6 @@ func Checkout(t *testing.T, h *Hub, ts *httptest.Server) (string, string) {
 	if err := taskcred.Set(context.Background(), repo, root, h.Secret); err != nil {
 		t.Fatal(err)
 	}
+	CacheProcess(t, root, Selection)
 	return repo, root
 }
