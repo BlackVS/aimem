@@ -21,7 +21,7 @@ var processToolDefs = []map[string]any{{
 	"name": "process_context",
 	"description": "Read this project's selected process (handbook, checklists gating task states, required skills, template kinds) as the complete unit the session-start hook would inject in full, or one template by kind. " +
 		"Runs in this checkout-bound MCP process with the checkout's own task credential (no fallback to another), so no shell is needed; reads only the selection the hub names for this checkout's project and this machine's exact-commit cache or Git at that commit. Changes nothing and grants no permission; the process is the authority for project policy. " +
-		"The result ends with a terminator line; text without it was cut by the client. States other than ready (last_observed: hub unreachable, exact cached commit of the last observed selection, never authorization for a task write) are errors that name the state, the cause and the fix: disabled, not_selected, denied, unavailable, too_large. Takes only an optional template kind, never a path, URL, repository, commit, project or command.",
+		"The result ends with a terminator line; text without it was cut by the client. It is delivered in state ready, or in state last_observed (the hub is unreachable: the exact cached commit of the last observed selection, marked as such, never authorization for a task write); every other state is an error naming the state, the cause and the fix: disabled, not_selected, denied, unavailable, too_large. Takes only an optional template kind, never a path, URL, repository, commit, project or command.",
 	"inputSchema": objSchema(map[string]any{
 		"template": prop("string", "a template kind the process manifest names (e.g. task); omit for the complete unit"),
 	}),

@@ -23,9 +23,10 @@ currently 18); a binary refuses a database newer than it understands.
   else (no path, URL, repository, commit or project), is neither listed nor
   served by the hub endpoint, and ends every delivery with a terminator
   naming project, commit, manifest and the SHA-256 of the text. A unit over
-  32 KiB is refused whole. Other states are errors naming the state, cause
-  and fix: `last_observed`, `disabled`, `not_selected`, `denied`,
-  `unavailable`, `too_large`. The states come from a typed
+  32 KiB is refused whole. It delivers in state `ready`, or `last_observed`
+  (hub unreachable; the exact cached commit of the last observed selection,
+  marked as such); the other states are errors naming the state, cause and
+  fix: `disabled`, `not_selected`, `denied`, `unavailable`, `too_large`. The states come from a typed
   `processctx.Load`; the session-start hook, `aimem process show` and
   `team_setup` keep their text. Setup and continue do not deliver it yet
   (increment 1c-2).
