@@ -81,11 +81,14 @@ type Result struct {
 	Project    string
 	Ref        *process.Ref // the selection the set belongs to, when one is known
 	Source     string       // SourceFetched or SourceCache, with a set
-	ObservedAt string       // LastObserved: when this machine last read the selection from the hub
-	Detail     string       // what happened, for every state but Ready
-	Fix        string       // who does what about it, when someone can
-	Set        *process.Set
-	Unit       string // the complete unit, as `aimem process show --full` prints it
+	ObservedAt string       // when this machine last read the selection from the hub, for a last-observed one
+	// FromLastObserved: the hub was not asked successfully and the selection
+	// is this machine's last observed one, so the result is never Ready.
+	FromLastObserved bool
+	Detail           string // what happened, for every state but Ready
+	Fix              string // who does what about it, when someone can
+	Set              *process.Set
+	Unit             string // the complete unit, as `aimem process show --full` prints it
 	// notice is the text Bootstrap has always returned for this outcome;
 	// "" where it said nothing.
 	notice string
@@ -121,7 +124,7 @@ func Bootstrap(dir, root, projectID string, full bool) (string, *process.Set) {
 			return "process context unavailable: " + err.Error(), r.Set
 		}
 	}
-	if r.ObservedAt != "" { // last observed, whether or not it fits a delivery
+	if r.FromLastObserved { // whether or not it fits a delivery
 		text = lastObservedNote(r.ObservedAt) + text
 	}
 	return text, r.Set
@@ -169,7 +172,7 @@ func Load(dir, root, projectID string) *Result {
 		cancel()
 		if err != nil {
 			var rejected *taskcred.Rejected
-			if errors.As(err, &rejected) {
+			if errors.As(err, &rejected) && (rejected.Status == http.StatusUnauthorized || rejected.Status == http.StatusForbidden) {
 				return r.set(Denied, err.Error(), credentialFix, "process context unavailable: "+err.Error())
 			}
 			// A local credential that cannot be validated is not used, and
@@ -211,11 +214,11 @@ func Load(dir, root, projectID string) *Result {
 			Ref        process.Ref `json:"ref"`
 			ObservedAt string      `json:"observed_at"`
 		}
-		if rerr != nil || json.Unmarshal(b, &last) != nil || last.Ref.Validate() != nil {
+		if rerr != nil || json.Unmarshal(b, &last) != nil || last.Ref.Validate() != nil || !validTime(last.ObservedAt) {
 			return r.set(Unavailable, fmt.Sprintf("hub unreachable (%v) and no last-observed selection on this machine", ierr), "retry when the hub is reachable",
 				fmt.Sprintf("process context unavailable: hub unreachable (%v) and no last-observed selection on this machine; tasks availability unknown", ierr))
 		}
-		r.Ref, r.ObservedAt = &last.Ref, last.ObservedAt
+		r.Ref, r.ObservedAt, r.FromLastObserved = &last.Ref, last.ObservedAt, true
 	case identity.TasksEnabled == nil || !*identity.TasksEnabled:
 		return r.set(Disabled, "tasks are not enabled for project "+id+" (or the hub predates the signal)", "an admin enables tasks for the project on the hub", "") // by design, nothing to say
 	case errors.As(serr, &refused) && refused.denied():
@@ -235,12 +238,18 @@ func Load(dir, root, projectID string) *Result {
 			os.WriteFile(lastPath, b, 0o600)
 		}
 	}
-	// 2. The files, from the cache or Git, bounded. For a last-observed
-	// selection the cache is the only source that can answer while the hub
-	// is unreachable; Fetch never substitutes another commit.
-	ctx, cancel := context.WithTimeout(context.Background(), process.FetchTimeout+time.Second)
-	defer cancel()
-	res := process.Fetch(ctx, root, *r.Ref)
+	// 2. The files. A selection the hub just confirmed comes from the cache
+	// or Git, bounded; a last-observed one only from this machine's exact
+	// cache (docs/DESIGN-kanban-docs.md: the cache must match that
+	// selection), never from Git. Neither substitutes another commit.
+	var res process.Result
+	if r.FromLastObserved {
+		res = process.Cached(root, *r.Ref)
+	} else {
+		ctx, cancel := context.WithTimeout(context.Background(), process.FetchTimeout+time.Second)
+		defer cancel()
+		res = process.Fetch(ctx, root, *r.Ref)
+	}
 	switch res.Status {
 	case process.StatusDenied:
 		return r.set(Denied, fmt.Sprintf("Git refused this machine's access to %s: %v", r.Ref.Repo, res.Err), "give the account running aimem on this machine read access to "+r.Ref.Repo,
@@ -263,11 +272,18 @@ func Load(dir, root, projectID string) *Result {
 	}
 	r.Unit = unit
 	r.State = Ready
-	if r.ObservedAt != "" {
+	if r.FromLastObserved {
 		r.State = LastObserved
 		r.Detail = "the hub is unreachable; this is the exact cached commit of the selection last observed at " + r.ObservedAt + "; it may be stale and never authorizes a task write"
 	}
 	return r
+}
+
+// validTime reports an RFC 3339 observation time: a last-observed record
+// without one cannot say how old it is and is not used.
+func validTime(s string) bool {
+	_, err := time.Parse(time.RFC3339, s)
+	return err == nil
 }
 
 // short is a commit's display prefix; a malformed commit from a damaged

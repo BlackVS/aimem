@@ -248,6 +248,21 @@ func Fetch(ctx context.Context, root string, ref Ref) Result {
 	return fetchNoValidate(ctx, root, ref)
 }
 
+// Cached returns the set for ref from this machine's complete exact-commit
+// cache entry and never contacts Git: the only source a selection the hub
+// has not just confirmed (a last-observed one) may use.
+func Cached(root string, ref Ref) Result {
+	if err := ref.Validate(); err != nil {
+		return Result{Status: StatusUnavailable, Err: err}
+	}
+	set, err := loadSet(CacheDir(root, ref), ref)
+	if err != nil {
+		return Result{Status: StatusUnavailable, Err: fmt.Errorf("commit %s is not complete in this machine's cache: %w", ref.Commit[:12], err)}
+	}
+	set.FromCache = true
+	return Result{Set: set, Status: StatusCached}
+}
+
 // fetchNoValidate is Fetch after validation; tests drive it against a
 // local repository, which Validate refuses for a hub selection.
 func fetchNoValidate(ctx context.Context, root string, ref Ref) Result {

@@ -347,3 +347,80 @@ func TestMalformedSelectionIsUnavailableNotACrash(t *testing.T) {
 		t.Errorf("damaged last-observed record: %+v", r)
 	}
 }
+
+// writeLast records sel as this machine's last observed selection.
+func writeLast(t *testing.T, root string, sel process.Ref, observedAt string) {
+	t.Helper()
+	b, _ := json.Marshal(map[string]any{"ref": sel, "observed_at": observedAt})
+	if err := os.MkdirAll(filepath.Join(root, "process"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "process", "last-alpha.json"), b, 0o600); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// A last-observed selection is served from the exact cache only: with the
+// commit missing from the cache and Git reachable, Git is not contacted.
+func TestLastObservedSelectionNeverFetches(t *testing.T) {
+	var gitHits atomic.Int64
+	git := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gitHits.Add(1)
+		w.WriteHeader(http.StatusUnauthorized)
+	}))
+	defer git.Close()
+	t.Setenv("GIT_SSL_NO_VERIFY", "1")
+	h := &fakeHub{}
+	dir, root, ts := checkout(t, h, false)
+	writeLast(t, root, process.Ref{Repo: git.URL + "/process.git", Commit: selection.Commit, Manifest: selection.Manifest}, "2026-09-24T00:00:00Z")
+	ts.Close()
+	r := Load(dir, root, "")
+	if r.State != Unavailable || r.Set != nil || !strings.Contains(r.Detail, "not complete in this machine's cache") {
+		t.Errorf("last observed, cache miss: %+v", r)
+	}
+	if n := gitHits.Load(); n != 0 {
+		t.Errorf("Git was contacted %d times for a selection the hub did not confirm", n)
+	}
+}
+
+// A hub that fails to answer the local credential's validation is an
+// outage; only 401 and 403 are a verdict on the credential.
+func TestLocalCredentialValidationOutageIsNotADenial(t *testing.T) {
+	h := &fakeHub{}
+	h.change(ready)
+	dir, root, _ := checkout(t, h, true)
+	cache(t, root, selection, "# Handbook\n")
+	for _, status := range []int{http.StatusBadGateway, http.StatusServiceUnavailable, http.StatusGatewayTimeout, http.StatusInternalServerError} {
+		h.change(func(h *fakeHub) { h.gatewayStatus = status })
+		if r := Load(dir, root, ""); r.State != Unavailable || strings.Contains(r.Fix, "reissues") {
+			t.Errorf("status %d: %+v", status, r)
+		}
+	}
+	h.change(func(h *fakeHub) { h.gatewayStatus, h.identityStatus = 0, http.StatusUnauthorized })
+	if r := Load(dir, root, ""); r.State != Denied {
+		t.Errorf("401: %+v", r)
+	}
+}
+
+// A last-observed record that cannot say when it was observed is damaged:
+// its selection is not delivered, and never as ready.
+func TestLastObservedRecordWithoutTimeIsNotUsed(t *testing.T) {
+	h := &fakeHub{}
+	dir, root, ts := checkout(t, h, false)
+	cache(t, root, selection, "# Handbook\n\nstale rules\n")
+	ts.Close()
+	for _, at := range []string{"", "yesterday"} {
+		writeLast(t, root, selection, at)
+		if r := Load(dir, root, ""); r.State != Unavailable || r.Set != nil || strings.Contains(r.Unit, "stale rules") {
+			t.Errorf("observed_at %q: %+v", at, r)
+		}
+	}
+	writeLast(t, root, selection, "2026-09-24T00:00:00Z")
+	r := Load(dir, root, "")
+	if r.State != LastObserved || !r.FromLastObserved {
+		t.Fatalf("valid record: %+v", r)
+	}
+	if text, err := r.Deliver(); err != nil || !strings.Contains(text, "NOTE: the hub is unreachable") {
+		t.Errorf("delivery must be marked: %v", err)
+	}
+}

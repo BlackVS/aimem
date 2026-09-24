@@ -82,7 +82,7 @@ func (r *Result) render(what, payload string) string {
 	terminator := fmt.Sprintf("=== end aimem process context %s project %s commit %s manifest %s sha256 %s ===", what, r.Project, r.Ref.Commit, r.Ref.Manifest, hex.EncodeToString(sum[:]))
 	var b strings.Builder
 	fmt.Fprintf(&b, "aimem process context, %s: project %s, state %s, selection %s @ %s (manifest %s), from %s.\n", what, r.Project, r.State, r.Ref.Repo, r.Ref.Commit, r.Ref.Manifest, sourceText(r.Source))
-	if r.ObservedAt != "" {
+	if r.FromLastObserved {
 		b.WriteString(lastObservedNote(r.ObservedAt))
 	}
 	fmt.Fprintf(&b, "This is the project's selected process: it is the authority for project policy, and reading it grants no permission. Complete only if the last line is %q.\n\n", terminator)
