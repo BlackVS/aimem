@@ -13,6 +13,46 @@ currently 18); a binary refuses a database newer than it understands.
 
 ## [Unreleased]
 
+## [0.7.3] — 2026-09-24
+
+Portable team context: a member joining from any project's checkout now
+receives the team guidance and the project's selected process through MCP,
+with an explicit readiness report, instead of being sent to a playbook file
+that exists only in an aimem checkout. A worker whose context is missing is
+announced unavailable and does not start, continue or resume work; an
+accepted attempt keeps the process version it was accepted under. The
+`/join_team` and `/resume_team` entry points are regenerated to use all of
+it. A hub that refuses the checkout's credential is no longer mistaken for
+an offline one. Includes PR #102-#108.
+
+### Upgrade notes
+
+- No schema change and no new hub route; hubs on v0.7.1 or later remain
+  compatible. Upgrading a hub adds `team_context` to its MCP endpoint;
+  nothing in the member flow needs that.
+- Upgrade every participating agent machine to v0.7.3. The new entry points
+  stop with an upgrade-and-restart message on an older `aimem mcp`.
+  Then, in each member checkout, run `aimem teams commands .` (it also
+  refreshes the Codex prompts under `~/.codex` when that directory exists)
+  and restart the agent clients so their MCP processes load the new binary.
+- Select the project's process before a team starts work: with tasks on and
+  no process selected, workers are never ready and are announced
+  unavailable.
+- Upgrade between attempts, not during one. The process version of an
+  accepted attempt is recorded only by the checkout that accepted it with
+  this release; an attempt accepted before the upgrade, through the hub
+  endpoint or from another checkout has no record, so its worker is not
+  ready when it resumes and a running attempt is blocked, with no
+  automatic resume.
+- Missing context blocks running work, including a temporary outage, and a
+  blocked attempt stays blocked until the coordinator answers. Blocking an
+  attempt is a coordination record: it does not stop a process on the
+  worker's machine.
+- Real-client validation (Claude Code, Codex and OpenCode on Windows, Linux
+  and macOS) is still pending; the release is covered by fixture tests
+  through the real local MCP only. See the
+  [v0.7.3 rollout and pilot checklist](https://github.com/BlackVS/aimem/blob/master/docs/TEAM-ROLLOUT-0.7.3.md).
+
 ### Added
 
 - Readiness in `team_setup` and `team_continue` (and `aimem teams setup` /
@@ -51,6 +91,9 @@ currently 18); a binary refuses a database newer than it understands.
 
 ### Changed
 
+- The generated entry points stop on a `blocked` report even when context
+  blocks are attached (a coordinator whose inbox read failed after its
+  context was delivered): attached context does not authorize proceeding.
 - The generated `/join_team` and `/resume_team` entry points (every client:
   Claude Code, OpenCode, Codex skills and prompts; refreshed by `aimem
   teams commands` and by every `aimem teams setup`) use the delivered
@@ -97,8 +140,8 @@ currently 18); a binary refuses a database newer than it understands.
   marked as such); the other states are errors naming the state, cause and
   fix: `disabled`, `not_selected`, `denied`, `unavailable`, `too_large`. The states come from a typed
   `processctx.Load`; the session-start hook, `aimem process show` and
-  `team_setup` keep their text. Setup and continue do not deliver it yet
-  (increment 1c-2).
+  `team_setup` keep their text. `team_setup` and `team_continue` deliver
+  the same unit with their readiness report (above).
 
 - Team guidance built into the binary, for agents without an aimem
   checkout or a working shell: the team playbooks and request templates
@@ -114,8 +157,9 @@ currently 18); a binary refuses a database newer than it understands.
   client cut is recognizable. The build fails when a section exceeds
   16 KiB, a role's set 32 KiB or the unit 128 KiB, when a heading has no
   stable id, or when a relative link neither resolves inside the unit nor
-  is listed as informative. Setup and continue do not deliver it yet
-  (increment 1c); [design](docs/DESIGN-portable-team-context.md).
+  is listed as informative. `team_setup` and `team_continue` deliver the
+  role's set with their readiness report (above);
+  [design](https://github.com/BlackVS/aimem/blob/master/docs/DESIGN-portable-team-context.md).
 
 ### Fixed
 

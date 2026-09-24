@@ -121,7 +121,7 @@ func TestEntryPointsUseTheDeliveredContext(t *testing.T) {
 		"tell the user which tool is missing, to upgrade aimem on this machine and to restart the client",
 		"or any other shell command instead, do not read the guidance from files in a repository",
 		"`status` is `blocked`: show the user each failing check with its `fix` line",
-		"No context is delivered for a blocked run.",
+		"If the report is blocked, stop even when context blocks are attached. Attached context does not authorize proceeding.",
 		"`joined` is membership, not permission to work",
 		"`execution` is always `not_verified`: a working MCP server",
 		"check those yourself before accepting a coding attempt",
@@ -188,7 +188,7 @@ func TestEntryPointsUseTheDeliveredContext(t *testing.T) {
 		// The guidance comes from the tools, never from a file in some
 		// repository; and a worker is never told to heartbeat available
 		// unconditionally.
-		for _, bad := range []string{"TEAM-PLAYBOOKS", "docs/", "{{", "Both: heartbeat (`team_heartbeat`, `available`)", "only while ready, accept or decline"} {
+		for _, bad := range []string{"TEAM-PLAYBOOKS", "docs/", "{{", "Both: heartbeat (`team_heartbeat`, `available`)", "only while ready, accept or decline", "No context is delivered for a blocked run"} {
 			if strings.Contains(a.Content, bad) {
 				t.Errorf("%s: contains %q", a.Label, bad)
 			}

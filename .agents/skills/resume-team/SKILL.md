@@ -38,8 +38,9 @@ team. Never pass a role: it comes from the saved membership.
 
 2. Read the report.
    - `status` is `blocked`: show the user each failing check with its `fix`
-     line, then stop. No context is delivered for a blocked run. Do not
-     join, do not change credentials or configuration, do not retry
+     line, then stop. If the report is blocked, stop even when context
+     blocks are attached. Attached context does not authorize proceeding.
+     Do not join, do not change credentials or configuration, do not retry
      blindly. A `binding` check saying the credential cannot be read or
      decrypted by `run_as` means the MCP process is not running as the
      account that installed it: report that mismatch and stop.

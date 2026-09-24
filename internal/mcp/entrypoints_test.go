@@ -137,3 +137,25 @@ func TestEntryPointTerminatorChecksHoldForTheDeliveredContext(t *testing.T) {
 		check(t, s, rep, blocks, "worker", false)
 	})
 }
+
+// A blocked report can still carry context: a coordinator whose inbox read
+// fails after its context was evaluated. The entry points stop on blocked
+// whatever is attached, and say so.
+func TestEntryPointsStopOnABlockedReportWithAttachedContext(t *testing.T) {
+	h, ts := teamsetuptest.New(t)
+	h.InboxCode = 500
+	repo, root := teamsetuptest.Checkout(t, h, ts)
+	rep, blocks := onboardBlocks(t, stdioFor(repo, root), "team_setup", map[string]any{"team": "Pilot", "role": "coordinator", "profile": map[string]any{"label": "c", "platform": "codex", "platform_version": "1"}})
+	if rep.Status != "blocked" || len(blocks) == 0 {
+		t.Fatalf("status %s with %d blocks: the case this rule covers did not occur", rep.Status, len(blocks))
+	}
+	for _, f := range entryPointFiles {
+		raw, err := os.ReadFile(f)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !strings.Contains(strings.Join(strings.Fields(string(raw)), " "), "If the report is blocked, stop even when context blocks are attached. Attached context does not authorize proceeding.") {
+			t.Errorf("%s does not stop on a blocked report with attached context", f)
+		}
+	}
+}

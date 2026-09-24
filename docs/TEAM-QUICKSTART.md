@@ -5,9 +5,13 @@ The `/join_team` and `/resume_team` entry points call the `team_setup` and
 client starts in the checkout as the account that installed the credential.
 A shell the client sandboxes under another account (the Windows pilot's
 case) cannot read that credential; the MCP process can, so joining and
-resuming do not depend on the shell. Agent machines need aimem v0.7.2 or
-later; hubs on v0.7.1 remain compatible. Restart agent sessions after upgrading so
-the MCP process restarts. Do not replace a valid token or grant broad
+resuming do not depend on the shell. The same tools deliver the role's team
+guidance and the project's selected process with a readiness report, so a
+member needs no aimem checkout and no playbook file. Agent machines need
+aimem v0.7.3 or later; hubs on v0.7.1 or later remain compatible. After
+upgrading, refresh the entry points and restart agent sessions so the MCP
+process restarts ([upgrading an existing team](#7-upgrade-an-existing-team)).
+Do not replace a valid token or grant broad
 credential-directory access to work around a credential the shell cannot
 read. See [checkout-bound onboarding over local MCP](DESIGN-team-onboarding-mcp.md).
 
@@ -22,7 +26,7 @@ agent conversation or commit them to Git.
 
 ## 1. Check prerequisites
 
-Install aimem v0.7.1 or later on the hub and v0.7.2 or later on each
+Install aimem v0.7.1 or later on the hub and v0.7.3 or later on each
 participating agent machine.
 Complete [client installation](INSTALL-CLIENT.md) and configure the target
 hub. Run on each machine:
@@ -43,8 +47,10 @@ aimem tasks on -p my-project
 ```
 
 This can create a missing project, so check the name before running it.
-Configure the project's process and skills using the
-[Kanban quickstart](KANBAN-QUICKSTART.md) before assigning work.
+Select the project's process and skills using the
+[Kanban quickstart](KANBAN-QUICKSTART.md) before any member joins: with
+tasks on and no process selected, no member is ready for work, workers are
+announced unavailable and the coordinator is told to issue no offers.
 
 On Debian, from a root shell, switch with a login shell:
 
@@ -172,9 +178,15 @@ $join-team Builders worker
 ```
 
 Have the coordinator check that both workers appear with the expected user,
-platform, model and availability. Start with small independent tasks and
-follow the [team playbooks](TEAM-PLAYBOOKS.md). Joining alone does not
-authorize a worker to code: it waits for and accepts an addressed offer.
+platform, model and availability. Start with small independent tasks. The
+join report delivers each member's role guidance (the
+[team playbooks](TEAM-PLAYBOOKS.md), built into the binary) and the project
+process, and its `readiness.ready_for_work` says whether the member may
+work. Joining alone does not authorize a worker to code: it waits for and
+accepts an addressed offer, and only while ready. A worker that is not
+ready is announced `unavailable`; the report names the missing part and
+its fix. Nothing checks the agent's own shell, build tools or coding
+runner: the agent does that itself before accepting coding work.
 The repository's review, serial-PR and human-merge rules still apply.
 
 ## 6. Pause, restart or change clients
@@ -200,6 +212,40 @@ Do not run two agents from the same checkout simultaneously.
 To end membership, ask the agent to resolve its active work under the
 playbook and leave through `team_leave`. A later return uses join, not
 resume. Never force a new session just to hide an unresolved old one.
+
+Missing context stops work, not membership. When a member's guidance or
+project process is missing, including during a temporary hub or Git
+outage, the report says it is not ready: an offered attempt is declined, a
+running one is blocked with the reason and stays reserved to the worker.
+Nothing resumes it automatically. After the cause is fixed, resume the
+member and let the coordinator decide; the worker resumes the attempt only
+on that answer. A block, like any coordination record, does not stop
+anything on the worker's machine: stop the agent's local work yourself
+if it is still running, and acknowledge a stop request only once the work
+has actually stopped.
+
+## 7. Upgrade an existing team
+
+1. Upgrade between attempts, not during one. An accepted attempt keeps
+   the process version it was accepted under, and that version is recorded
+   only in the accepting checkout by a release that records it (v0.7.3 or
+   later). An attempt accepted before the upgrade, through the hub
+   endpoint or from another checkout has no record: after the upgrade its
+   worker is not ready and a running attempt is blocked. Let running
+   attempts finish, or have the coordinator settle them, first.
+2. Upgrade aimem on every participating agent machine through the normal
+   installer and check `aimem version`. The hub needs no upgrade for this
+   release; upgrading it adds the guidance read to its MCP endpoint.
+3. In each member checkout, run `aimem teams commands .`. It rewrites the
+   aimem-managed entry points and, where `~/.codex` exists, the Codex
+   prompts under it; `aimem teams commands . --check` then reports every
+   asset current.
+4. Restart every agent client, so its `aimem mcp` process runs the new
+   binary. A client started before the upgrade keeps the old process: the
+   new entry points stop with an upgrade-and-restart message when the
+   server does not list `team_context` or `process_context`.
+5. Resume each member with the resume command from the table and read its
+   readiness: `ready_for_work` true, or the part that is missing and its fix.
 
 ## The MCP process, the checkout and the model
 
@@ -251,7 +297,9 @@ run coordination against the original member context.
 | Not enrolled or not coordinator-eligible | Run the operator provisioning command printed by setup on the hub. A project grant alone is not team enrollment. |
 | Join/resume command missing | Run `aimem teams commands .`, then restart the agent. Verify the client's invocation spelling in the table. |
 | MCP team tools missing | Check the setup integration report and client MCP configuration; restart after repairing it. |
-| `team_setup` or `team_continue` not listed by the aimem MCP server | The running `aimem mcp` process predates these tools: upgrade aimem on that machine and restart the client so the process restarts. Do not run the CLI command from a sandboxed shell instead. |
+| `team_setup`, `team_continue`, `team_context` or `process_context` not listed by the aimem MCP server | The running `aimem mcp` process predates these tools: upgrade aimem on that machine and restart the client so the process restarts. Do not run the CLI command from a sandboxed shell instead. |
+| Joined, but `ready_for_work` is false | Read the not-ready part and its `fix`. `project_process: not_selected` means no process is selected for the project (step 1); `denied` or `unavailable` names the credential, Git or hub problem. Fix it and resume; the worker stays unavailable until then. |
+| After an upgrade, a running attempt is blocked: its process version was not recorded | Expected for an attempt accepted before the upgrade or elsewhere (step 7); no version is assumed for it. The coordinator decides how to settle it; an attempt accepted after the upgrade records the version current then. |
 | `binding` check: credential cannot be read or decrypted by `run_as` | The MCP process runs as a different account than the one that installed the credential. Start the client as that account; do not reinstall the token to get past it. |
 | Setup or continue prints old usage | Check binary version and PATH on that machine. Upgrade through the normal installer. |
 | Session refused or coordinator slot occupied | Stop and read the report; verify who owns the existing session. Do not take it over or add `--new-session` blindly. |
