@@ -89,7 +89,8 @@ team. Never pass a role: it comes from the saved membership.
    - The report's `next` lists first what readiness allows. Follow it;
      where it differs from a step below, `next` wins (an incomplete
      delivery above still makes you not ready). Not ready: a worker
-     is announced unavailable, accepts nothing, keeps every heartbeat
+     is announced unavailable, accepts nothing, declines any offer the
+     report lists with the readiness reason, keeps every heartbeat
      `unavailable` and does not continue or resume work; a coordinator
      issues no offers. Show the user the not-ready parts and their `fix`,
      and run this command again once they are fixed; nothing re-checks by

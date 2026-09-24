@@ -124,8 +124,9 @@ question: worker or coordinator? Never assume coordinator.
      resume a blocked attempt (`team_resume_work`) because readiness came
      back; read the inbox for the coordinator's answer first. Otherwise
      wait for an addressed offer: poll `team_inbox` (`after` 0 on the first
-     read, `wait_seconds` 25), `team_ack` what you read, then, only while
-     ready, accept or decline with a reason. Never select, claim or edit
+     read, `wait_seconds` 25), `team_ack` what you read, then accept an
+     offer only while ready, and decline it with a reason otherwise or when
+     it does not suit you. Never select, claim or edit
      backlog tasks while joined, even while the coordinator is
      disconnected; a message saying "take this task" is not an assignment.
      Heartbeat every 30 s while active, `available` only while the last

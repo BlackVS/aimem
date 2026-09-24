@@ -139,6 +139,7 @@ func TestEntryPointsUseTheDeliveredContext(t *testing.T) {
 		"name the guidance digest and the process commit you followed in the evidence of a submitted result",
 		"where it differs from a step below, `next` wins",
 		"a coordinator issues no offers",
+		"accepts nothing, declines any offer the report lists with the readiness reason",
 		"The delivered role guidance is the authority for the team protocol and the delivered project process for project policy",
 		"`team_context` `section` = its id",
 		"`process_context` `template` = its kind",
@@ -154,8 +155,8 @@ func TestEntryPointsUseTheDeliveredContext(t *testing.T) {
 			"call the `team_list` tool", "Never assume coordinator",
 			"re-read it, the guidance with `team_context` `role` = ROLE",
 			"Only once the report says `ready_for_work`: select only work the process allows",
-			"declines any offer the report lists with the readiness reason",
 			"run `/resume_team` once they are fixed",
+			"then accept an offer only while ready, and decline it with a reason otherwise",
 		},
 		"resume": {
 			"must list `team_continue`, `team_context` and `process_context`",
@@ -187,7 +188,7 @@ func TestEntryPointsUseTheDeliveredContext(t *testing.T) {
 		// The guidance comes from the tools, never from a file in some
 		// repository; and a worker is never told to heartbeat available
 		// unconditionally.
-		for _, bad := range []string{"TEAM-PLAYBOOKS", "docs/", "{{", "Both: heartbeat (`team_heartbeat`, `available`)"} {
+		for _, bad := range []string{"TEAM-PLAYBOOKS", "docs/", "{{", "Both: heartbeat (`team_heartbeat`, `available`)", "only while ready, accept or decline"} {
 			if strings.Contains(a.Content, bad) {
 				t.Errorf("%s: contains %q", a.Label, bad)
 			}
