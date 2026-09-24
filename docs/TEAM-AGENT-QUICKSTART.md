@@ -45,6 +45,24 @@ checkout. A shell the client runs under another account cannot read the
 checkout owner's credential; the MCP process can, which is why the
 `/join_team` and `/resume_team` entry points call these tools.
 
+Project process, on the checkout-bound local server only: `process_context`
+returns this project's selected process as one complete unit (the text
+`aimem process show --full` prints: handbook, the checklists gating task
+states, required skills, template kinds), or with `template` one template
+by the kind the manifest names. It uses the checkout's own credential with
+no fallback, reads only the selection the hub names and this machine's
+exact-commit cache or Git at that commit, changes nothing and takes no
+path, URL, repository, commit or project. The result ends with a
+terminator line (project, commit, manifest, SHA-256 of the delivered
+text). It is delivered in state `ready`, or in state `last_observed`:
+the hub is unreachable, and the exact cached commit of the selection last
+observed is delivered with that notice, never as authorization for a task
+write. Every other state is an error naming the state, the cause and the
+fix: `disabled`, `not_selected`, `denied` (the hub refused the credential,
+or Git refused this machine; never replaced by a cached selection),
+`unavailable` and `too_large` (over 32 KiB; nothing is delivered in part,
+templates still are).
+
 Guidance, on both the local and the hub endpoint, for any caller the
 endpoint admits: `team_context` returns the team guidance built into the
 running aimem binary (this page's [playbooks](TEAM-PLAYBOOKS.md) and the

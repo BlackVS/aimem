@@ -14,8 +14,21 @@ Its section ids are `common`, `responsiveness` (the probe section, which the
 list below did not name), `coordinator`, `worker`, `questions`,
 `escalation`, `process-authority` and `example/<name>`; a role's required
 set is its playbook sections plus every template they link to. The unit
-records `team_protocol` 1 and `min_hub` 0.7.0. Increments 1c and later are
-not implemented.
+records `team_protocol` 1 and `min_hub` 0.7.0.
+
+Increment 1c is split into serial children on the board (1c-1 to 1c-5,
+parent task `01a0cf0f-fb31`). 1c-1 is implemented: `processctx.Load` returns
+the typed state of decision 3's `project_process` part and the complete
+unit, and the local-only `process_context` tool delivers it (decision 2).
+Two clarifications from the source: the tool also reports `last_observed`
+(the hub cannot be asked, and the exact cached commit of the last observed
+selection is delivered with that notice; it is never `ready`), and "cannot
+be asked" means a transport failure or a gateway's 502, 503 or 504. A 401
+or 403 is `denied` and no cached selection stands in for it, which
+corrects the earlier fallback that let a revoked credential look like an
+offline hub. With a required project-local credential an unreachable hub
+stays `unavailable`, because the credential cannot be validated. Setup and
+continue readiness (1c-2 onward) are not implemented.
 
 ## Problem, from source
 
