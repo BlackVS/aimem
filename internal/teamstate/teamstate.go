@@ -63,7 +63,7 @@ type AcceptedAttempt struct {
 	Repo          string `json:"repo"`
 	Commit        string `json:"commit"`
 	Manifest      string `json:"manifest"`
-	ProcessDigest string `json:"process_digest"` // SHA-256 of the unit delivered at accept
+	ProcessDigest string `json:"process_digest"` // SHA-256 of the unit delivered at accept: evidence, not identity (the commit is)
 	RoleDigest    string `json:"role_digest"`
 	RoleVersion   string `json:"role_version"`
 	Confirmed     bool   `json:"confirmed"` // the hub answered the accept with RUNNING

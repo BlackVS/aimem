@@ -139,10 +139,11 @@ func (s *setup) recoverAccepted(me *Session, attempt string, rec *teamstate.Acce
 	part.Digest = "sha256:" + hex.EncodeToString(sum[:])
 	s.report.Delivered = append(s.report.Delivered, Delivery{Kind: "project_process", Text: text})
 	if res.State == processctx.Ready {
+		// The commit is the version. The unit's own digest is not compared
+		// with the one recorded at accept: its text names where the files
+		// came from (Git or this machine's cache) and which skills are
+		// installed here, so it differs across reads of the same commit.
 		part.Detail = "the process version attempt " + attempt + " was accepted under follows this report, pinned; it stays that attempt's rules even when the project selects a newer one"
-		if part.Digest != rec.ProcessDigest && rec.ProcessDigest != "" {
-			s.check("accepted version", "warn", "the recovered unit of commit "+rec.Commit+" differs from the one delivered at accept (for example a changed skill installation on this machine); the commit is the same", "")
-		}
 	} else {
 		part.Detail = "the pinned version of attempt " + attempt + " is delivered with its notice but is not ready: " + res.Detail
 	}

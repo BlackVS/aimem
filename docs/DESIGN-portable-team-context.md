@@ -60,9 +60,9 @@ and never deliver a newer selection as its rules. Limits: the hub keeps no
 such field, so an attempt accepted through the hub endpoint, from another
 checkout or by an older aimem has no record and is blocked on recovery
 (including attempts in flight at upgrade); the recovered unit is rebuilt
-from the recorded commit, and a difference from the unit delivered at
-accept (for example installed skills) is reported, not treated as another
-version. Still open, and why the onboarding flow is not pilot-ready: the
+from the recorded commit, which is the version: the unit's text names its
+source and this machine's installed skills, so its digest (recorded at
+accept as evidence) is not compared. Still open, and why the onboarding flow is not pilot-ready: the
 generated `/join_team` and `/resume_team` entry points and the report's
 role steps still name `docs/TEAM-PLAYBOOKS.md` (1c-5).
 
