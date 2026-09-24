@@ -77,6 +77,14 @@ func Classify(err error) Class {
 	return ""
 }
 
+// Rejected is Validate's answer when the hub refused the local credential:
+// a denial, which callers must not treat as an outage.
+type Rejected struct{ Status int }
+
+func (r *Rejected) Error() string {
+	return fmt.Sprintf("local task credential rejected (HTTP %d); no fallback", r.Status)
+}
+
 func failure(class Class, msg string, cause error) error {
 	return &Failure{Class: class, Msg: msg, Cause: cause}
 }
@@ -255,7 +263,7 @@ func (s *Selection) Validate(ctx context.Context) error {
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("local task credential rejected (HTTP %d); no fallback", resp.StatusCode)
+		return &Rejected{Status: resp.StatusCode}
 	}
 	var id struct {
 		Scope     string `json:"scope"`

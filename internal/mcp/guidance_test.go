@@ -123,3 +123,40 @@ func TestTeamGuidanceMinimumHubMatchesTheSetupProtocol(t *testing.T) {
 		t.Fatalf("teamguide.MinHub %s, teamsetup.Protocol %s", teamguide.MinHub, want)
 	}
 }
+
+// process_context belongs to the checkout-bound local facade: the hub
+// neither lists it nor serves it by name, and a local facade that knows
+// tasks are disabled hides it like the other task-bound local tools.
+func TestProcessContextIsLocalOnly(t *testing.T) {
+	f := newHub(t)
+	for _, token := range []string{f.alice, f.stranger, f.env} {
+		for _, n := range toolNames(f.rpc(t, token, "tools/list", nil)) {
+			if n == "process_context" {
+				t.Errorf("the hub lists process_context")
+			}
+		}
+		text, isErr := toolText(f.rpc(t, token, "tools/call", map[string]any{"name": "process_context", "arguments": map[string]any{}}))
+		if !isErr || !strings.Contains(text, "only on the checkout-bound local MCP") {
+			t.Errorf("hub call by name: %v %q", isErr, text)
+		}
+	}
+	for state, listed := range map[string]bool{taskStateEnabled: true, taskStateUnknown: true, taskStateDisabled: false} {
+		s := &srv{api: &http.Client{Transport: failTransport{t}}, taskState: state, local: &localCheckout{dir: t.TempDir(), root: t.TempDir()}}
+		var list struct {
+			Result map[string]any `json:"result"`
+		}
+		json.Unmarshal(s.handle(t.Context(), []byte(`{"jsonrpc":"2.0","id":1,"method":"tools/list"}`)), &list)
+		if got := strings.Contains(fmt.Sprint(toolNames(list.Result)), "process_context"); got != listed {
+			t.Errorf("%s: listed %v, want %v", state, got, listed)
+		}
+		if state == taskStateDisabled {
+			var call struct {
+				Result map[string]any `json:"result"`
+			}
+			json.Unmarshal(s.handle(t.Context(), []byte(`{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"process_context","arguments":{}}}`)), &call)
+			if text, isErr := toolText(call.Result); !isErr || !strings.Contains(text, "tasks are not enabled") {
+				t.Errorf("disabled call by name: %v %q", isErr, text)
+			}
+		}
+	}
+}

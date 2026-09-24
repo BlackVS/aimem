@@ -129,6 +129,7 @@ func (s *srv) handle(ctx context.Context, raw []byte) []byte {
 		tools := append(append([]map[string]any{}, toolDefs...), taskToolDefs...)
 		if s.local != nil {
 			tools = append(tools, onboardToolDefs...)
+			tools = append(tools, processToolDefs...)
 		}
 		tools = append(tools, guidanceToolDefs...)
 		return reply(req.ID, map[string]any{"tools": tools}, nil)
@@ -343,11 +344,13 @@ func (s *srv) toolCall(ctx context.Context, req rpcRequest) []byte {
 	switch {
 	case isGuidanceTool(head.Name):
 		text, err = guidanceTool(head.Arguments)
-	case (isTaskTool(head.Name) || isOnboardTool(head.Name)) && s.taskState == taskStateDisabled:
+	case (isTaskTool(head.Name) || isOnboardTool(head.Name) || isProcessTool(head.Name)) && s.taskState == taskStateDisabled:
 		// Hidden tools stay hidden when called by name.
 		err = errors.New("tasks are not enabled for this project (as of this session's start); an admin enables them on the hub, then restart the session")
 	case isOnboardTool(head.Name):
 		text, err = s.onboardTool(head.Name, head.Arguments)
+	case isProcessTool(head.Name):
+		text, err = s.processTool(head.Arguments)
 	case isTaskTool(head.Name):
 		text, err = s.taskTool(ctx, head.Name, head.Arguments)
 		if err != nil && s.taskState == taskStateEnabled && !s.noticeShown && strings.Contains(err.Error(), "not enabled for this project") {

@@ -15,6 +15,21 @@ currently 18); a binary refuses a database newer than it understands.
 
 ### Added
 
+- `process_context` on the checkout-bound local MCP: the project's selected
+  process as one complete unit (what `aimem process show --full` prints)
+  or one template by kind, read with the checkout's own credential and no
+  fallback, from the hub's selection and this machine's exact-commit cache
+  or Git at that commit. It takes an optional template kind and nothing
+  else (no path, URL, repository, commit or project), is neither listed nor
+  served by the hub endpoint, and ends every delivery with a terminator
+  naming project, commit, manifest and the SHA-256 of the text. A unit over
+  32 KiB is refused whole. Other states are errors naming the state, cause
+  and fix: `last_observed`, `disabled`, `not_selected`, `denied`,
+  `unavailable`, `too_large`. The states come from a typed
+  `processctx.Load`; the session-start hook, `aimem process show` and
+  `team_setup` keep their text. Setup and continue do not deliver it yet
+  (increment 1c-2).
+
 - Team guidance built into the binary, for agents without an aimem
   checkout or a working shell: the team playbooks and request templates
   are embedded from their canonical files in `docs/` (no copy), split into
@@ -31,6 +46,16 @@ currently 18); a binary refuses a database newer than it understands.
   stable id, or when a relative link neither resolves inside the unit nor
   is listed as informative. Setup and continue do not deliver it yet
   (increment 1c); [design](docs/DESIGN-portable-team-context.md).
+
+### Fixed
+
+- A hub that refuses the checkout's credential (HTTP 401 or 403) no longer
+  makes the session-start process context fall back to the last observed
+  selection and its cached handbook, as if the hub were offline: the hook
+  now reports the refusal and uses nothing cached. Only a hub that cannot
+  be reached (a transport failure, or a gateway answering 502, 503 or 504)
+  lets the last observed selection stand in, as before; any other hub
+  error is reported as unavailable.
 
 ## [0.7.2] — 2026-09-23
 
