@@ -15,6 +15,30 @@ currently 18); a binary refuses a database newer than it understands.
 
 ### Added
 
+- Readiness in `team_setup` and `team_continue` (and `aimem teams setup` /
+  `continue`): for a verified session the report carries a `readiness`
+  object (membership, role guidance, project process, and execution, which
+  is always `not_verified` because nothing here can observe the agent's own
+  shell or runner) and `ready_for_work`. The role's complete guidance and
+  the complete selected project process are delivered in the same result:
+  as their own MCP text blocks after the unchanged JSON report, printed
+  after the CLI report, under `delivered` in `--json`, each ending with its
+  terminator. A changed guidance digest since the last delivery is
+  reported. Delivery is not recorded as acknowledgement. Attempts already
+  reserved for a worker that is not ready are listed, not yet handled
+  (increment 1c-3); the generated entry points are unchanged (1c-5).
+
+### Changed
+
+- A worker whose role guidance or project process is not ready is now
+  announced `unavailable` by `team_setup` and `team_continue`, instead of
+  `available`, so the hub neither offers it work nor lets it accept any. In
+  a project with tasks on but no selected process, workers are therefore
+  never ready: select the process (`aimem process select` on the hub host)
+  before a team starts work. A coordinator that is not ready is told to
+  issue no offers. The heartbeat failure message now names the
+  availability that was sent.
+
 - `process_context` on the checkout-bound local MCP: the project's selected
   process as one complete unit (what `aimem process show --full` prints)
   or one template by kind, read with the checkout's own credential and no

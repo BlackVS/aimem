@@ -27,8 +27,24 @@ be asked" means a transport failure or a gateway's 502, 503 or 504. A 401
 or 403 is `denied` and no cached selection stands in for it, which
 corrects the earlier fallback that let a revoked credential look like an
 offline hub. With a required project-local credential an unreachable hub
-stays `unavailable`, because the credential cannot be validated. Setup and
-continue readiness (1c-2 onward) are not implemented.
+stays `unavailable`, because the credential cannot be validated.
+
+1c-2 is implemented: `team_setup` and `team_continue` report the four
+readiness parts of decision 3 for a verified session, deliver the role
+guidance and the complete project unit as their own MCP text blocks after
+the unchanged JSON report (the CLI prints them after the report), announce
+a worker that is not ready `unavailable`, tell a coordinator that is not
+ready to issue no offers, and report a changed guidance digest (saved in
+the nonsecret team state). Membership adds `not_verified` to the states
+above for a run that established no session; a blocked run evaluates no
+context. `last_observed` is delivered, marked, and never ready. A project
+with tasks on but no selected process therefore has no ready members.
+Still open, and why the onboarding flow is not pilot-ready: an offer or
+attempt already reserved when a worker is not ready is only listed with
+"decline" guidance (1c-3), an accepted attempt does not yet keep its
+process version across a selection change (1c-4), and the generated
+`/join_team` and `/resume_team` entry points and the report's role steps
+still name `docs/TEAM-PLAYBOOKS.md` (1c-5).
 
 ## Problem, from source
 

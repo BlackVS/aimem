@@ -12,7 +12,7 @@ import (
 	"strings"
 
 	"aimem/internal/mcp"
-	"aimem/internal/process"
+	"aimem/internal/processctx"
 	"aimem/internal/teamsetup"
 	"aimem/internal/wiring"
 )
@@ -183,7 +183,7 @@ func teamSetupEnv(dir, root string) teamsetup.Env {
 		TeamCall: func(ctx context.Context, name string, raw json.RawMessage) (int, []byte, error) {
 			return mcp.TeamRequestIn(ctx, dir, root, name, raw)
 		},
-		Process: func(dir, project string) (string, *process.Set) { return processBootstrap(dir, project, false) },
+		Process: func(d, project string) *processctx.Result { return processctx.Load(d, root, project) },
 		Git:     teamsetup.GitOutput,
 	}
 }

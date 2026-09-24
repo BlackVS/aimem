@@ -39,6 +39,10 @@ type State struct {
 	BaseCommit            string            `json:"base_commit,omitempty"` // HEAD when the membership was last verified
 	JoinedAt              string            `json:"joined_at,omitempty"`
 	VerifiedAt            string            `json:"verified_at,omitempty"`
+	// RoleDigest and RoleVersion are the team guidance last delivered to this
+	// membership, so a later run can report that it changed.
+	RoleDigest  string `json:"role_digest,omitempty"`
+	RoleVersion string `json:"role_version,omitempty"`
 }
 
 // Canonical resolves dir the way the credential store does, so the state

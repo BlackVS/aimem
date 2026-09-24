@@ -81,5 +81,31 @@ func (r *Report) Print(w io.Writer, jsonOut bool) {
 			fmt.Fprintf(w, "  - %s\n", n)
 		}
 	}
+	if rd := r.Readiness; rd != nil {
+		fmt.Fprintf(w, "Readiness: ready_for_work %v\n", rd.ReadyForWork)
+		for _, p := range []struct {
+			name string
+			part Part
+		}{{"membership", rd.Membership}, {"role_context", rd.RoleContext}, {"project_process", rd.ProjectProcess}, {"execution", rd.Execution}} {
+			line := fmt.Sprintf("  %-16s %s", p.name, p.part.State)
+			if p.part.Version != "" {
+				line += " version " + p.part.Version
+			}
+			if p.part.Digest != "" {
+				line += " " + p.part.Digest
+			}
+			if p.part.Detail != "" {
+				line += ": " + p.part.Detail
+			}
+			fmt.Fprintln(w, line)
+			if p.part.Fix != "" {
+				fmt.Fprintf(w, "        fix: %s\n", p.part.Fix)
+			}
+		}
+		fmt.Fprintf(w, "  acknowledged: %s\n", rd.Acknowledged)
+	}
 	fmt.Fprintf(w, "Status: %s (state file %s)\n", r.Status, r.StateFile)
+	for _, d := range r.Delivered {
+		fmt.Fprintf(w, "\n%s", d.Text)
+	}
 }

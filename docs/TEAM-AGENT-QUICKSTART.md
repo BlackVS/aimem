@@ -45,6 +45,28 @@ checkout. A shell the client runs under another account cannot read the
 checkout owner's credential; the MCP process can, which is why the
 `/join_team` and `/resume_team` entry points call these tools.
 
+`joined` is not permission to work. For a verified session the report's
+`readiness` object has four parts: `membership` (`active`, or `ended`,
+`refused`, `not_verified` without a session), `role_context` (`delivered`
+with the guidance version and digest), `project_process` (the
+`process_context` state, `ready` only when the hub confirmed the selection
+and the complete unit is here) and `execution`, always `not_verified`:
+nothing here can see your own shell, build tools or coding runner.
+`ready_for_work` is true only for an active membership with the role
+guidance delivered and the process `ready`. The role's complete guidance
+and the complete project process follow the report as their own text
+blocks (the CLI prints them after the report; `--json` carries them under
+`delivered`), each ending with its terminator line. Delivery is not
+acknowledgement: name the guidance digest and the process commit you
+followed in the evidence of a submitted result. A worker that is not ready
+is announced `unavailable`, so the hub neither offers it work nor lets it
+accept any; keep your own heartbeats `unavailable` until `team_continue`
+reports ready. A coordinator that is not ready issues no offers. A
+heartbeat the hub refuses is reported; the membership is kept. A changed
+guidance digest since the last delivery is reported as a `role context`
+warning. Offers or attempts already reserved when a worker is not ready
+are listed with the instruction to decline, not handled for you yet.
+
 Project process, on the checkout-bound local server only: `process_context`
 returns this project's selected process as one complete unit (the text
 `aimem process show --full` prints: handbook, the checklists gating task

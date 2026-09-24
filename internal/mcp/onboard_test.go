@@ -357,7 +357,7 @@ func TestOnboardToolDefsAreValidSchema(t *testing.T) {
 		}
 	}
 	// A profile, once given, must be complete: no half declaration.
-	if _, isErr := (&srv{local: &localCheckout{dir: t.TempDir(), root: t.TempDir()}}).onboardTool("team_setup", json.RawMessage(`{"team":"Pilot","role":"worker","profile":{"label":"x"}}`)); isErr == nil {
+	if _, _, isErr := (&srv{local: &localCheckout{dir: t.TempDir(), root: t.TempDir()}}).onboardTool("team_setup", json.RawMessage(`{"team":"Pilot","role":"worker","profile":{"label":"x"}}`)); isErr == nil {
 		t.Fatal("profile without platform accepted")
 	}
 }

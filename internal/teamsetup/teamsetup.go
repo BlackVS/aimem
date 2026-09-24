@@ -28,6 +28,7 @@ import (
 
 	"aimem/internal/adapter"
 	"aimem/internal/process"
+	"aimem/internal/processctx"
 	"aimem/internal/store"
 	"aimem/internal/taskcred"
 	"aimem/internal/teamstate"
@@ -58,10 +59,9 @@ type Env struct {
 	// the checkout's ordinary credential and returns the hub's status and
 	// raw body; never the operator socket, never a checkpoint token.
 	TeamCall func(ctx context.Context, name string, args json.RawMessage) (int, []byte, error)
-	// Process reports the process set selected for the project the way the
-	// session-start bootstrap does: the notice text and the set, nil when
-	// none is selected or reachable.
-	Process func(dir, project string) (string, *process.Set)
+	// Process resolves the process context selected for the project, with
+	// the checkout's credential: processctx.Load, typed.
+	Process func(dir, project string) *processctx.Result
 	// Git runs one read-only git query in the checkout (rev-parse HEAD,
 	// status --porcelain) and returns its trimmed output. GitOutput is the
 	// shell's probe; see its note before running it under another identity.
@@ -123,6 +123,11 @@ type Report struct {
 	Next       []string       `json:"next"`
 	StateFile  string         `json:"state_file"`
 	ServerTime string         `json:"server_time,omitempty"`
+	// Readiness says whether this member may start work, part by part;
+	// status says only whether a verified session exists.
+	Readiness *Readiness `json:"readiness"`
+	// Delivered is the content this result carries in full.
+	Delivered []Delivery `json:"delivered,omitempty"`
 }
 
 // Joined reports whether the run ended in a verified session.
@@ -169,7 +174,7 @@ type Inbox struct {
 // entry. The report says joined only when a verified session exists at
 // the end.
 func Run(env Env, opts *Options) *Report {
-	s := &setup{env: env, opts: opts, report: &Report{Status: "blocked", Team: opts.Team, Role: opts.Role, RunAs: processUser()}}
+	s := &setup{env: env, opts: opts, report: &Report{Status: "blocked", Team: opts.Team, Role: opts.Role, RunAs: processUser(), Readiness: newReadiness()}}
 	if abs, err := filepath.Abs(env.Dir); err == nil {
 		s.report.Checkout = abs
 	}
@@ -186,7 +191,7 @@ func Run(env Env, opts *Options) *Report {
 // given, must match the saved membership; fence resumes the saved session
 // even when it is still heartbeating.
 func Continue(env Env, team string, fence bool) *Report {
-	s := &setup{env: env, opts: &Options{Resume: fence}, continueOnly: true, report: &Report{Status: "blocked", Team: team, Role: "saved", RunAs: processUser()}}
+	s := &setup{env: env, opts: &Options{Resume: fence}, continueOnly: true, report: &Report{Status: "blocked", Team: team, Role: "saved", RunAs: processUser(), Readiness: newReadiness()}}
 	if abs, err := teamstate.Canonical(env.Dir); err == nil {
 		s.report.Checkout = abs
 	}
@@ -270,6 +275,8 @@ type setup struct {
 	// touched it: what the reconciliation line compares HEAD with, kept
 	// apart from the baseline that verifying or resuming advances.
 	previousBase string
+	// proc is the process context this run resolved, once.
+	proc *processctx.Result
 }
 
 type identity struct {
@@ -316,6 +323,7 @@ func (s *setup) continueSaved(want string) bool {
 	s.report.StateFile = s.statePath
 	saved := s.loadState()
 	if saved == nil {
+		s.member(memberNotVerified, "no saved membership for this checkout and credential")
 		return s.fail("session", "no saved membership for this checkout and credential", "join on purpose with /join_team TEAM ROLE (aimem teams setup); a restart never joins by itself")
 	}
 	if want != "" && saved.Team != want && saved.TeamID != want {
@@ -573,16 +581,11 @@ func (s *setup) checkProcess() {
 		s.check("process", "warn", "process context not checked by this entry point; the session-start hook reports it", "")
 		return
 	}
-	text, set := s.env.Process(s.env.Dir, s.sel.Project)
+	r := s.env.Process(s.env.Dir, s.sel.Project)
+	s.proc = r
+	set := r.Set
 	if set == nil {
-		detail := strings.TrimSpace(text)
-		if detail == "" {
-			detail = "no process context (hub unreachable or tasks off)"
-		}
-		if i := strings.IndexByte(detail, '\n'); i > 0 {
-			detail = detail[:i]
-		}
-		s.check("process", "warn", detail, "")
+		s.check("process", "warn", fmt.Sprintf("process context %s: %s", r.State, r.Detail), r.Fix)
 		return
 	}
 	if len(set.Manifest.Skills) == 0 {
@@ -755,9 +758,11 @@ func (s *setup) verifySaved() bool {
 			s.state = nil
 			return s.join("", s.opts.Team, s.opts.Profile)
 		}
+		s.member(memberRefused, "the saved handle is closed or was advanced by another process")
 		return s.fail("session", fmt.Sprintf("saved handle (session %s, generation %d) is closed or was advanced by another process: %s", st.SessionID, st.Generation, hubErrorText(body)), "if that process is gone (or you left explicitly outside this command), re-run with --new-session for a separate worker session; nothing was taken over")
 	case status == http.StatusForbidden:
 		s.report.Handoff = Handoff(s.sel.Project, s.opts.Team, s.opts.Role, s.identity.Name, s.identity.UserID, false)
+		s.member(memberRefused, "the saved session is no longer authorized")
 		return s.fail("session", "the saved session is no longer authorized: "+hubErrorText(body), "operator: restore the enrollment or grant (see the operator handoff); an enrollment revoked mid-session blocks even leave until an admin handoff")
 	default:
 		return s.fail("session", fmt.Sprintf("roster read HTTP %d: %s", status, hubErrorText(body)), "")
@@ -784,6 +789,7 @@ func (s *setup) resume(why string) bool {
 	if status != http.StatusOK {
 		st.ResumeKey = ""
 		s.saveState()
+		s.member(memberRefused, "the hub refused to resume the saved session")
 		return s.fail("session", fmt.Sprintf("resume refused (HTTP %d): %s", status, hubErrorText(body)), "the saved handle is stale or closed; nothing was taken over. Re-run to verify, or with --new-session")
 	}
 	me, ok := s.sessionOf(body)
@@ -801,6 +807,7 @@ func (s *setup) resume(why string) bool {
 // replays the original session instead of creating a second one.
 func (s *setup) join(key, team string, profile store.TeamProfile) bool {
 	if s.continueOnly && key == "" {
+		s.member(memberEnded, "the saved membership has ended")
 		return s.fail("session", "the saved membership has ended (the session left or was closed); nothing was joined", "join again on purpose with /join_team "+team+" "+s.opts.Role+" (aimem teams setup); a restart never re-joins by itself")
 	}
 	if !s.opts.PlatformSet && profile.Platform == "unknown" {
@@ -829,6 +836,7 @@ func (s *setup) join(key, team string, profile store.TeamProfile) bool {
 		// A definite refusal: the hub created nothing, so the pending key is
 		// dropped and the next run sends a fresh join with current flags.
 		s.forgetJoin()
+		s.member(memberRefused, fmt.Sprintf("the hub refused the join (HTTP %d)", status))
 		switch {
 		case status == http.StatusConflict && strings.Contains(msg, "coordinator slot"):
 			return s.fail("session", "the coordinator slot is occupied: "+msg, "the current coordinator must leave or hand off (its own live handle, or an admin handoff with reconciliation on the hub host); a slot is never freed by a timeout. If another checkout on this machine holds that session, run setup there with --resume and leave from it")
@@ -866,12 +874,34 @@ func (s *setup) enterRole(me *Session) bool {
 		return s.fail("roster", "roster not read after the session was recorded: "+hubOutcome(status, body, err), "membership is saved; re-run to verify it (enrollment or grant changes show up here as a refusal)")
 	}
 	s.report.Roster = roster
-	if me.Role != "coordinator" {
-		status, body, err = s.teamCall("team_heartbeat", map[string]any{"team": me.TeamID, "session_id": me.ID, "generation": me.Generation, "availability": "available", "idempotency_key": uuidv7.New()})
-		if err != nil || status != http.StatusOK {
-			return s.fail("availability", "heartbeat refused: "+hubOutcome(status, body, err), "membership is saved; re-run to verify it")
+	s.member(memberActive, fmt.Sprintf("%s session %s, generation %d, verified with the hub in this run", me.Role, me.ID, me.Generation))
+	s.evaluateContext(me.Role)
+	rd := s.report.Readiness
+	if me.Role == "coordinator" {
+		s.readinessNext(me.Role)
+	} else {
+		// The hub offers work to, and lets accept work from, only an
+		// available worker: a worker that is not ready says unavailable.
+		// A join creates the session available, so between the join and
+		// this heartbeat an offer can land; it is listed below, and it is
+		// declined, never accepted.
+		availability := "available"
+		if !rd.ReadyForWork {
+			availability = "unavailable"
 		}
-		s.check("availability", "ok", "announced available", "")
+		status, body, err = s.teamCall("team_heartbeat", map[string]any{"team": me.TeamID, "session_id": me.ID, "generation": me.Generation, "availability": availability, "idempotency_key": uuidv7.New()})
+		if err != nil || status != http.StatusOK {
+			if !rd.ReadyForWork {
+				s.report.Next = append(s.report.Next, "NOT ready for work ("+rd.notReady()+") and the unavailable announcement was not accepted: the hub may still offer you work (a join starts available). Accept nothing and decline any offer with this reason")
+			}
+			return s.fail("availability", "heartbeat ("+availability+") not accepted: "+hubOutcome(status, body, err), "membership is saved, nothing was left or released; the hub still shows the availability it last accepted. Re-run to verify it")
+		}
+		s.readinessNext(me.Role)
+		if rd.ReadyForWork {
+			s.check("availability", "ok", "announced available", "")
+		} else {
+			s.check("availability", "warn", "announced unavailable: not ready for work ("+rd.notReady()+"), so the hub will neither offer work to this session nor let it accept any", "")
+		}
 		if !s.readReserved(me) {
 			return false
 		}
@@ -881,7 +911,7 @@ func (s *setup) enterRole(me *Session) bool {
 	}
 	if me.Role == "coordinator" {
 		s.report.Next = append(s.report.Next,
-			"coordinator playbook (docs/TEAM-PLAYBOOKS.md) step 2: select work the process allows; offer one attempt per task with suitability and cost rationale",
+			onceReady(rd, "coordinator playbook (docs/TEAM-PLAYBOOKS.md) step 2: select work the process allows; offer one attempt per task with suitability and cost rationale"),
 			"read the roster above: availability, reported model and its source, declared capabilities; unknown stays unknown",
 			"heartbeat every 30 s while active (team_heartbeat); read the inbox with a bounded wait after every command you issue",
 			"MCP handle: "+handle)
@@ -891,7 +921,7 @@ func (s *setup) enterRole(me *Session) bool {
 		s.report.Next = append(s.report.Next, "worker playbook (docs/TEAM-PLAYBOOKS.md) step 2: wait for an addressed offer; never select, claim or edit backlog tasks while joined, even while the coordinator is disconnected")
 	}
 	s.report.Next = append(s.report.Next,
-		"poll team_inbox (after the cursor above, wait_seconds up to 25), team_ack only what you have read and acted on, then accept or decline an offer with a reason",
+		onceReady(rd, "poll team_inbox (after the cursor above, wait_seconds up to 25), team_ack only what you have read and acted on, then accept or decline an offer with a reason"),
 		"heartbeat every 30 s while active",
 		"MCP handle: "+handle)
 	return true
