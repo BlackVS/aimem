@@ -46,8 +46,11 @@ workspace's local settings.
 `scripts/agent-probe/channel-drive.cjs` pushes synthetic events (`emit RUN ID
 TEXT`), stops the server to simulate a crash (`exit RUN`), and prints a merged
 timeline (`report RUN`). The timeline merges the fixture's own state with the
-channel, turn and API-request lines from the session's debug file. The model
-received five inputs: four channel events and one typed prompt.
+channel, turn and API-request lines from the session's debug file. The run
+used four model-triggering inputs: three channel events sent to an idle
+session (`m1`, `m4`, `m6`) and one typed prompt, during whose turn three more
+events arrived (`m2`, `m3` and a duplicate `m2`). A seventh event (`m5`) was
+lost at startup.
 
 ## Results
 
