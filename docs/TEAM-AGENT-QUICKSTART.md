@@ -64,8 +64,25 @@ accept any; keep your own heartbeats `unavailable` until `team_continue`
 reports ready. A coordinator that is not ready issues no offers. A
 heartbeat the hub refuses is reported; the membership is kept. A changed
 guidance digest since the last delivery is reported as a `role context`
-warning. Offers or attempts already reserved when a worker is not ready
-are listed with the instruction to decline, not handled for you yet.
+warning.
+
+An attempt the hub already holds for a worker that is not ready is handled
+by its state, with the worker's own operations only: an `OFFERED` attempt
+(including one that landed between the join and the `unavailable`
+heartbeat) is declined with the readiness reason, which returns the offer
+to the coordinator as any decline does; a `RUNNING` attempt is blocked
+with the missing context and stays reserved to the worker (the block names
+the task's current revision, read with the checkout's credential); a
+`BLOCKED` attempt is left as it is; for `STOP_REQUESTED`, `STOPPED` and
+`SUBMITTED` nothing is sent, and a stop is never acknowledged for you:
+send `team_stopped` yourself once you have established that the work
+stopped. Accept, resume-work, stopped and leave are never sent. Each write
+is recorded with its retry key and exact content before it is sent; an
+outcome that is not confirmed is repeated identically on the next run only
+while the attempt is still where it was, and dropped when it moved on,
+when the session generation changed or when the worker is ready. The
+`attempt` check says what happened, and the reserved attempt's next step
+never tells a worker that is not ready to accept, continue or resume.
 
 Project process, on the checkout-bound local server only: `process_context`
 returns this project's selected process as one complete unit (the text

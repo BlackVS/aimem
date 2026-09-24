@@ -39,12 +39,20 @@ the nonsecret team state). Membership adds `not_verified` to the states
 above for a run that established no session; a blocked run evaluates no
 context. `last_observed` is delivered, marked, and never ready. A project
 with tasks on but no selected process therefore has no ready members.
-Still open, and why the onboarding flow is not pilot-ready: an offer or
-attempt already reserved when a worker is not ready is only listed with
-"decline" guidance (1c-3), an accepted attempt does not yet keep its
-process version across a selection change (1c-4), and the generated
-`/join_team` and `/resume_team` entry points and the report's role steps
-still name `docs/TEAM-PLAYBOOKS.md` (1c-5).
+1c-3 is implemented: a worker that is not ready declines an `OFFERED`
+attempt (the existing decline: the offer leaves the reservation), blocks a
+`RUNNING` one (it stays reserved), preserves `BLOCKED`, and sends nothing
+for `STOP_REQUESTED`, `STOPPED` or `SUBMITTED`; decision 4's "blocks it" is
+therefore state-dependent, because the hub accepts a worker's block only
+from `RUNNING`. Writes carry a retry key persisted with the exact request
+in the nonsecret team state; the transport itself replays a keyed request
+once on a dropped connection, and a still-unconfirmed outcome is repeated
+by the next run only while the attempt, the generation and the not-ready
+condition are unchanged. Still open, and why the onboarding flow is not
+pilot-ready: an accepted attempt does not yet keep its process version
+across a selection change (1c-4), and the generated `/join_team` and
+`/resume_team` entry points and the report's role steps still name
+`docs/TEAM-PLAYBOOKS.md` (1c-5).
 
 ## Problem, from source
 

@@ -185,6 +185,9 @@ func teamSetupEnv(dir, root string) teamsetup.Env {
 		},
 		Process: func(d, project string) *processctx.Result { return processctx.Load(d, root, project) },
 		Git:     teamsetup.GitOutput,
+		Task: func(ctx context.Context, id string) (int, []byte, error) {
+			return mcp.TaskGetIn(ctx, dir, root, id)
+		},
 	}
 }
 

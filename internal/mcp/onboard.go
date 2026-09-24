@@ -54,6 +54,9 @@ func (l *localCheckout) env() teamsetup.Env {
 			return processctx.Load(dir, l.root, project)
 		},
 		Git: teamsetup.GitHeadOnly,
+		Task: func(ctx context.Context, id string) (int, []byte, error) {
+			return TaskGetIn(ctx, l.dir, l.root, id)
+		},
 	}
 }
 
