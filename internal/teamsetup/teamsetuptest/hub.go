@@ -59,8 +59,10 @@ type Hub struct {
 	HeartbeatAvailability []string
 	// Version is the hub's reported release; "" means v0.7.0.
 	Version string
-	// InboxCode, when set, refuses inbox reads with that status.
-	InboxCode int
+	// InboxCode, when set, refuses inbox reads with that status;
+	// ReservedCode the reserved-attempt read.
+	InboxCode    int
+	ReservedCode int
 
 	// Attempt writes (worker POSTs under /assignments/{id}/): Writes records
 	// every one as "op attempt key", replayed or not; WorkCode refuses an
@@ -96,10 +98,17 @@ const Handbook = "# Handbook\n\nWork only on READY tasks; review gates apply.\n"
 // root, the way a finished fetch leaves it.
 func CacheProcess(t *testing.T, root string, ref process.Ref) {
 	t.Helper()
+	CacheProcessWith(t, root, ref, Handbook)
+}
+
+// CacheProcessWith is CacheProcess with the handbook text given, so two
+// cached versions can be told apart in what is delivered.
+func CacheProcessWith(t *testing.T, root string, ref process.Ref, handbook string) {
+	t.Helper()
 	dir := process.CacheDir(root, ref)
 	for p, body := range map[string]string{
 		ref.Manifest:       `{"version":1,"handbook":"proc/handbook.md","checklists":{"READY":"proc/ready.json"},"templates":{"task":"proc/task.json"}}`,
-		"proc/handbook.md": Handbook,
+		"proc/handbook.md": handbook,
 		"proc/ready.json":  `{"state":"READY","items":[{"id":"ready.outcome","text":"Objective and criteria are concrete."}]}`,
 		"proc/task.json":   `{"title":""}`,
 		".complete":        ref.Manifest + "\n",
@@ -317,6 +326,8 @@ func (h *Hub) serve(w http.ResponseWriter, r *http.Request) {
 		write(200, map[string]any{"id": strings.TrimPrefix(r.URL.Path, "/v1/tasks/"), "revision": h.TaskRevision, "state": "IN_PROGRESS"})
 	case r.Method == "POST" && strings.Contains(r.URL.Path, "/assignments/") && !strings.HasSuffix(r.URL.Path, "/assignments"):
 		h.work(w, r, write)
+	case strings.HasSuffix(r.URL.Path, "/assignments/reserved") && h.ReservedCode != 0:
+		write(h.ReservedCode, map[string]any{"error": "reserved read failed"})
 	case strings.HasSuffix(r.URL.Path, "/assignments/reserved"):
 		if h.Reserved == nil {
 			write(404, map[string]any{"error": "no reserved attempt"})
@@ -405,6 +416,9 @@ func (h *Hub) work(w http.ResponseWriter, r *http.Request, write func(int, any))
 	state := fmt.Sprint(h.Reserved["state"])
 	var next string
 	switch {
+	case op == "accept" && state == "OFFERED":
+		h.TaskRevision++
+		next = "RUNNING"
 	case op == "decline" && state == "OFFERED":
 		next = "DECLINED"
 	case op == "block" && state == "RUNNING":
@@ -418,7 +432,7 @@ func (h *Hub) work(w http.ResponseWriter, r *http.Request, write func(int, any))
 		write(409, map[string]any{"error": "assignment state conflict"})
 		return
 	}
-	if strings.TrimSpace(body.Reason) == "" {
+	if op != "accept" && strings.TrimSpace(body.Reason) == "" {
 		write(400, map[string]any{"error": "reason required"})
 		return
 	}

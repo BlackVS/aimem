@@ -84,6 +84,28 @@ when the session generation changed or when the worker is ready. The
 `attempt` check says what happened, and the reserved attempt's next step
 never tells a worker that is not ready to accept, continue or resume.
 
+An accepted attempt keeps the process version it was accepted under. From
+a checkout (`team_accept` on the checkout-bound local server, or `aimem
+teams accept`), the accept first records that version in the checkout's
+nonsecret team state: the attempt, the session, the exact process commit
+and manifest, and the team guidance digest. It is refused locally, with
+nothing sent, when that cannot be recorded: no saved membership for the
+session in the request, or a project process that is not `ready` (a worker
+that is not ready accepts nothing). A retry of the same attempt, after an
+uncertain reply or a restart, reuses the recorded version and never binds
+a newer selection to it. While the attempt is reserved, `team_setup`,
+`team_continue` and `process_context` deliver that exact version, marked
+PINNED, with the live checks of any other read; a newer project selection
+is named but not delivered as the attempt's rules, and applies to new work
+once the attempt ends. An accepted attempt whose version this checkout did
+not record (accepted through the hub endpoint, from another checkout, by
+an older aimem, or with the record lost) or cannot recover (the exact
+commit unavailable, access denied, the hub unreachable) is not ready, and
+a `RUNNING` one is blocked as above; no version is assumed. When a worker's
+run cannot read its reserved attempt at all (the heartbeat or the reserved
+read fails), which version applies is unknown: no project process is
+delivered, the worker is not ready, and it is announced unavailable.
+
 Project process, on the checkout-bound local server only: `process_context`
 returns this project's selected process as one complete unit (the text
 `aimem process show --full` prints: handbook, the checklists gating task

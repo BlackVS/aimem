@@ -82,7 +82,10 @@ func (r *Result) render(what, payload string) string {
 	terminator := fmt.Sprintf("=== end aimem process context %s project %s commit %s manifest %s sha256 %s ===", what, r.Project, r.Ref.Commit, r.Ref.Manifest, hex.EncodeToString(sum[:]))
 	var b strings.Builder
 	fmt.Fprintf(&b, "aimem process context, %s: project %s, state %s, selection %s @ %s (manifest %s), from %s.\n", what, r.Project, r.State, r.Ref.Repo, r.Ref.Commit, r.Ref.Manifest, sourceText(r.Source))
-	if r.FromLastObserved {
+	switch {
+	case r.Pinned:
+		b.WriteString(pinnedNote(r))
+	case r.FromLastObserved:
 		b.WriteString(lastObservedNote(r.ObservedAt))
 	}
 	fmt.Fprintf(&b, "This is the project's selected process: it is the authority for project policy, and reading it grants no permission. Complete only if the last line is %q.\n\n", terminator)
@@ -100,4 +103,25 @@ func sourceText(source string) string {
 		return "this machine's exact-commit cache"
 	}
 	return "Git at that commit"
+}
+
+// pinnedNote says whose rules a pinned delivery carries, and that a newer
+// project selection is not them.
+func pinnedNote(r *Result) string {
+	whose := "an accepted attempt"
+	if r.PinnedFor != "" {
+		whose = r.PinnedFor
+	}
+	note := "PINNED: this is the exact process version " + whose + " was taken under, from this machine's record of that accept; it stays that attempt's rules.\n"
+	switch {
+	case r.FromLastObserved:
+		note += "The hub could not be asked: no live check ran, so this cached copy is not ready and never authorizes a task write.\n"
+	case r.Current != nil && r.Current.Commit != r.Ref.Commit:
+		note += fmt.Sprintf("The project now selects %s @ %s (manifest %s). That applies to new work only; it is not delivered here and is not this attempt's rules.\n", r.Current.Repo, r.Current.Commit, r.Current.Manifest)
+	case r.Current != nil:
+		note += "The project's current selection is the same commit.\n"
+	default:
+		note += "The project's current selection was not read.\n"
+	}
+	return note
 }

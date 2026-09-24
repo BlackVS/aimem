@@ -48,11 +48,23 @@ from `RUNNING`. Writes carry a retry key persisted with the exact request
 in the nonsecret team state; the transport itself replays a keyed request
 once on a dropped connection, and a still-unconfirmed outcome is repeated
 by the next run only while the attempt, the generation and the not-ready
-condition are unchanged. Still open, and why the onboarding flow is not
-pilot-ready: an accepted attempt does not yet keep its process version
-across a selection change (1c-4), and the generated `/join_team` and
-`/resume_team` entry points and the report's role steps still name
-`docs/TEAM-PLAYBOOKS.md` (1c-5).
+condition are unchanged.
+
+1c-4 is implemented (decision 6, recorded locally rather than on the hub):
+the checkout's accept path (`team_accept` on the local MCP, `aimem teams
+accept`) records the attempt's exact process version and guidance digest
+before it sends the accept, and refuses locally when it cannot; setup,
+continue and `process_context` recover that version for a reserved accepted
+attempt through `processctx.LoadRef`, with the same live checks as any read,
+and never deliver a newer selection as its rules. Limits: the hub keeps no
+such field, so an attempt accepted through the hub endpoint, from another
+checkout or by an older aimem has no record and is blocked on recovery
+(including attempts in flight at upgrade); the recovered unit is rebuilt
+from the recorded commit, which is the version: the unit's text names its
+source and this machine's installed skills, so its digest (recorded at
+accept as evidence) is not compared. Still open, and why the onboarding flow is not pilot-ready: the
+generated `/join_team` and `/resume_team` entry points and the report's
+role steps still name `docs/TEAM-PLAYBOOKS.md` (1c-5).
 
 ## Problem, from source
 

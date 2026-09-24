@@ -83,6 +83,9 @@ func RunTeamTool(ctx context.Context, name string, raw json.RawMessage) (string,
 	if err != nil {
 		return "", err
 	}
+	if name == "team_accept" {
+		return acceptWithRecord(ctx, call, "", ".", mcpStateRoot(), raw)
+	}
 	return callTeamTool(ctx, call, "", name, raw)
 }
 

@@ -70,6 +70,10 @@ type Env struct {
 	// credential: the current revision a worker's block must name. nil
 	// means this host cannot read it, and no block is sent.
 	Task func(ctx context.Context, id string) (int, []byte, error)
+	// ProcessAt resolves one exact recorded process version with the same
+	// live checks as Process: processctx.LoadRef. nil means an accepted
+	// attempt's version cannot be recovered here, and it is not ready.
+	ProcessAt func(dir, project string, ref process.Ref) *processctx.Result
 }
 
 // Options are the request: the team and role asked for, the declared
@@ -889,24 +893,28 @@ func (s *setup) enterRole(me *Session) bool {
 		// A join creates the session available, so between the join and
 		// this heartbeat an offer can land; it is listed below, and it is
 		// declined, never accepted.
-		availability := "available"
-		if !rd.ReadyForWork {
-			availability = "unavailable"
+		announced, ok := s.announce(me)
+		if !ok {
+			s.attemptUnknown()
+			return false
 		}
-		status, body, err = s.teamCall("team_heartbeat", map[string]any{"team": me.TeamID, "session_id": me.ID, "generation": me.Generation, "availability": availability, "idempotency_key": uuidv7.New()})
-		if err != nil || status != http.StatusOK {
-			if !rd.ReadyForWork {
-				s.report.Next = append(s.report.Next, "NOT ready for work ("+rd.notReady()+") and the unavailable announcement was not accepted: the hub may still offer you work (a join starts available). Accept nothing and decline any offer with this reason")
+		readOK := s.readReserved(me)
+		changed := false
+		if readOK {
+			// An accepted attempt keeps the process version it was accepted
+			// under: readiness is re-evaluated against that version.
+			changed = s.pinAccepted(me)
+		} else {
+			changed = s.attemptUnknown()
+		}
+		// The availability follows readiness.
+		if changed && availabilityFor(rd) != announced {
+			if _, ok := s.announce(me); !ok {
+				return false
 			}
-			return s.fail("availability", "heartbeat ("+availability+") not accepted: "+hubOutcome(status, body, err), "membership is saved, nothing was left or released; the hub still shows the availability it last accepted. Re-run to verify it")
 		}
 		s.readinessNext(me.Role)
-		if rd.ReadyForWork {
-			s.check("availability", "ok", "announced available", "")
-		} else {
-			s.check("availability", "warn", "announced unavailable: not ready for work ("+rd.notReady()+"), so the hub will neither offer work to this session nor let it accept any", "")
-		}
-		if !s.readReserved(me) {
+		if !readOK {
 			return false
 		}
 		s.handleUnreadyAttempt(me)

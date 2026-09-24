@@ -3,6 +3,7 @@ package mcp
 import (
 	"encoding/json"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -66,12 +67,13 @@ func pending(t *testing.T, repo, root string) *teamstate.PendingWork {
 	return st.PendingWork
 }
 
-// forbidden fails on any request the not-ready handling must never make.
-func forbidden(t *testing.T, h *teamsetuptest.Hub) {
+// forbidden fails on any request the not-ready handling must never make;
+// allowed names operations the test itself sends on purpose.
+func forbidden(t *testing.T, h *teamsetuptest.Hub, allowed ...string) {
 	t.Helper()
 	for _, req := range h.Requests {
 		for _, op := range []string{"/accept", "/stopped", "/resume-work", "/leave", "/withdraw", "/cancel", "/close-stop", "/submit"} {
-			if strings.HasSuffix(req, op) {
+			if strings.HasSuffix(req, op) && !slices.Contains(allowed, op) {
 				t.Fatalf("forbidden request %s in %v", req, h.Requests)
 			}
 		}

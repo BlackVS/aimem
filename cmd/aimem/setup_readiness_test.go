@@ -3,6 +3,8 @@ package main
 import (
 	"bufio"
 	"encoding/json"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -72,5 +74,28 @@ func TestSetupAndContinueDeliverContextThroughTheRealLocalMCP(t *testing.T) {
 		if h.Count("/join") != 1 {
 			t.Fatalf("call %d: %d joins", i, h.Count("/join"))
 		}
+	}
+}
+
+// `aimem teams accept` from the checkout records the process version the
+// attempt is accepted under, like the checkout-bound MCP tool.
+func TestCLIAcceptRecordsTheVersion(t *testing.T) {
+	h, ts := teamsetuptest.New(t)
+	h.Reserved = map[string]any{"id": "att-1", "task_id": "task-1", "state": "OFFERED"}
+	repo, root := teamsetuptest.Checkout(t, h, ts)
+	if out, err := runSetup(t, repo, root, "Pilot", "worker", "--platform", "codex"); err != nil {
+		t.Fatal(err, out)
+	}
+	req := filepath.Join(t.TempDir(), "accept.json")
+	if err := os.WriteFile(req, []byte(`{"session_id":"sess-1","generation":1,"attempt":"att-1"}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	out, stderr, err := runAimem(t, repo, root, "", "teams", "accept", "alpha", "team-1", req, "cli-accept-1")
+	if err != nil || !strings.Contains(out, "process version is recorded on this checkout: commit "+teamsetuptest.Selection.Commit) {
+		t.Fatalf("%v\n%s\n%s", err, out, stderr)
+	}
+	st := readState(t, root, repo)
+	if st.Accepted == nil || st.Accepted.Attempt != "att-1" || st.Accepted.Commit != teamsetuptest.Selection.Commit || !st.Accepted.Confirmed || h.Reserved["state"] != "RUNNING" {
+		t.Fatalf("record %+v, reserved %v", st.Accepted, h.Reserved)
 	}
 }

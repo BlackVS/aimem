@@ -20,6 +20,7 @@ import (
 	"os"
 	"strings"
 
+	"aimem/internal/process"
 	"aimem/internal/processctx"
 	"aimem/internal/server"
 	"aimem/internal/store"
@@ -52,6 +53,9 @@ func (l *localCheckout) env() teamsetup.Env {
 		},
 		Process: func(dir, project string) *processctx.Result {
 			return processctx.Load(dir, l.root, project)
+		},
+		ProcessAt: func(dir, project string, ref process.Ref) *processctx.Result {
+			return processctx.LoadRef(dir, l.root, project, ref)
 		},
 		Git: teamsetup.GitHeadOnly,
 		Task: func(ctx context.Context, id string) (int, []byte, error) {

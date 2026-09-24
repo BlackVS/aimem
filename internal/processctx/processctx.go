@@ -83,12 +83,19 @@ type Result struct {
 	Source     string       // SourceFetched or SourceCache, with a set
 	ObservedAt string       // when this machine last read the selection from the hub, for a last-observed one
 	// FromLastObserved: the hub was not asked successfully and the selection
-	// is this machine's last observed one, so the result is never Ready.
+	// is this machine's last observed one (or the pinned one, unconfirmed),
+	// so the result is never Ready.
 	FromLastObserved bool
-	Detail           string // what happened, for every state but Ready
-	Fix              string // who does what about it, when someone can
-	Set              *process.Set
-	Unit             string // the complete unit, as `aimem process show --full` prints it
+	// Pinned: Ref is a version the caller supplied from trusted local state
+	// (LoadRef), not the hub's current selection; Current is that current
+	// selection when the hub answered it.
+	Pinned    bool
+	Current   *process.Ref
+	PinnedFor string // whose version a pinned result is, for its notice
+	Detail    string // what happened, for every state but Ready
+	Fix       string // who does what about it, when someone can
+	Set       *process.Set
+	Unit      string // the complete unit, as `aimem process show --full` prints it
 	// notice is the text Bootstrap has always returned for this outcome;
 	// "" where it said nothing.
 	notice string
@@ -140,50 +147,11 @@ func lastObservedNote(at string) string {
 // credential that is missing or refused ends the lookup, never falls back.
 func Load(dir, root, projectID string) *Result {
 	r := &Result{Project: projectID}
-	if r.Project == "" {
-		id, err := ident.ProjectID(dir)
-		if err != nil {
-			return r.set(Unavailable, "not a project checkout: "+err.Error(), "", "")
-		}
-		r.Project = id
+	hub, hubClient, ok := r.connect(dir, root)
+	if !ok {
+		return r
 	}
 	id := r.Project
-	hubName, err := ident.ProjectHubNameStrict(dir)
-	if err != nil {
-		return r.set(Unavailable, err.Error(), "fix the checkout's .aimem.json hub binding", "process context unavailable: "+err.Error())
-	}
-	_, hub := adapter.ResolveHub(root, hubName)
-	if hub == nil {
-		// No hub: no tasks anywhere; the hook says nothing.
-		return r.set(Unavailable, "no hub is configured for this checkout", "configure the hub this project syncs with (aimem hub add)", "")
-	}
-	hubClient := hub.HTTPClient()
-	local, err := taskcred.LocalRequired(dir)
-	if err != nil {
-		return r.set(Unavailable, err.Error(), "fix the checkout's .aimem.json", "process context unavailable: "+err.Error())
-	}
-	if local {
-		selected, err := taskcred.Resolve(dir, root)
-		if err != nil {
-			return r.set(Unavailable, err.Error(), "install this checkout's project credential with `aimem task-token set`, as the account that runs aimem; no other credential is used", "process context unavailable: "+err.Error())
-		}
-		ctx, cancel := context.WithTimeout(context.Background(), hubLookupTimeout)
-		err = selected.Validate(ctx)
-		cancel()
-		if err != nil {
-			var rejected *taskcred.Rejected
-			if errors.As(err, &rejected) && (rejected.Status == http.StatusUnauthorized || rejected.Status == http.StatusForbidden) {
-				return r.set(Denied, err.Error(), credentialFix, "process context unavailable: "+err.Error())
-			}
-			// A local credential that cannot be validated is not used, and
-			// nothing cached stands in for it.
-			return r.set(Unavailable, err.Error(), "retry when the hub is reachable", "process context unavailable: "+err.Error())
-		}
-		copyHub := *hub
-		copyHub.Token = selected.Token
-		hub = &copyHub
-		hubClient = selected.Client()
-	}
 	lastPath := filepath.Join(root, "process", "last-"+id+".json")
 	// 1. Enablement and the selection, from the hub, bounded.
 	var identity struct {
@@ -238,10 +206,124 @@ func Load(dir, root, projectID string) *Result {
 			os.WriteFile(lastPath, b, 0o600)
 		}
 	}
-	// 2. The files. A selection the hub just confirmed comes from the cache
-	// or Git, bounded; a last-observed one only from this machine's exact
-	// cache (docs/DESIGN-kanban-docs.md: the cache must match that
-	// selection), never from Git. Neither substitutes another commit.
+	return r.finish(dir, root)
+}
+
+// LoadRef resolves one exact process version the caller holds as trusted
+// local state (the version an accepted attempt was taken under) instead of
+// the hub's current selection. The live checks are Load's: the checkout's
+// credential, strictly selected and validated; a refusal is a denial; tasks
+// must be on. The hub's current selection is read only to report it
+// (Current), never to replace the pinned one. The content is the pinned
+// commit exactly, from the cache or a bounded fetch of that commit; when the
+// hub cannot be asked, from the cache only, and never ready.
+func LoadRef(dir, root, projectID string, pinned process.Ref) *Result {
+	r := &Result{Project: projectID, Pinned: true}
+	hub, hubClient, ok := r.connect(dir, root)
+	if !ok {
+		return r
+	}
+	id := r.Project
+	if err := pinned.Validate(); err != nil {
+		return r.set(Unavailable, "the recorded process version is malformed: "+err.Error(), "", "")
+	}
+	r.Ref = &pinned
+	var identity struct {
+		TasksEnabled *bool `json:"tasks_enabled"`
+	}
+	ierr := hubGetJSONClient(hub, hubClient, "/v1/access/identity?project="+url.QueryEscape(id), &identity)
+	var refused *hubRefusal
+	switch {
+	case errors.As(ierr, &refused) && refused.denied():
+		return r.set(Denied, "the hub refused this checkout's credential: "+ierr.Error(), credentialFix, "")
+	case ierr != nil && !unreachable(ierr):
+		return r.set(Unavailable, "the hub answered with an error: "+ierr.Error(), "retry; if it persists, check the hub's log", "")
+	case ierr != nil:
+		// The hub cannot be asked: no live check ran, so the content comes
+		// only from the exact cache and is never ready.
+		r.FromLastObserved = true
+	case identity.TasksEnabled == nil || !*identity.TasksEnabled:
+		return r.set(Disabled, "tasks are not enabled for project "+id+" (or the hub predates the signal)", "an admin enables tasks for the project on the hub", "")
+	default:
+		var sel struct {
+			Current *process.Ref `json:"current"`
+		}
+		serr := hubGetJSONClient(hub, hubClient, "/v1/projects/"+url.PathEscape(id)+"/process", &sel)
+		if errors.As(serr, &refused) && refused.denied() {
+			// A refusal of this credential is a denial wherever it comes
+			// from; the pinned cache does not stand in for it.
+			return r.set(Denied, "the hub refused to read the process selection: "+serr.Error(), credentialFix, "")
+		}
+		if serr == nil && sel.Current != nil {
+			r.Current = sel.Current
+		}
+	}
+	return r.finish(dir, root)
+}
+
+// connect resolves the project, its hub binding and the checkout's
+// credential, strictly: a required local credential that is missing or
+// refused ends the lookup, never falls back. ok false means r is set.
+func (r *Result) connect(dir, root string) (*adapter.HubConfig, *http.Client, bool) {
+	if r.Project == "" {
+		id, err := ident.ProjectID(dir)
+		if err != nil {
+			r.set(Unavailable, "not a project checkout: "+err.Error(), "", "")
+			return nil, nil, false
+		}
+		r.Project = id
+	}
+	fail := func(state State, detail, fix, notice string) (*adapter.HubConfig, *http.Client, bool) {
+		r.set(state, detail, fix, notice)
+		return nil, nil, false
+	}
+	hubName, err := ident.ProjectHubNameStrict(dir)
+	if err != nil {
+		return fail(Unavailable, err.Error(), "fix the checkout's .aimem.json hub binding", "process context unavailable: "+err.Error())
+	}
+	_, hub := adapter.ResolveHub(root, hubName)
+	if hub == nil {
+		// No hub: no tasks anywhere; the hook says nothing.
+		return fail(Unavailable, "no hub is configured for this checkout", "configure the hub this project syncs with (aimem hub add)", "")
+	}
+	hubClient := hub.HTTPClient()
+	local, err := taskcred.LocalRequired(dir)
+	if err != nil {
+		return fail(Unavailable, err.Error(), "fix the checkout's .aimem.json", "process context unavailable: "+err.Error())
+	}
+	if local {
+		selected, err := taskcred.Resolve(dir, root)
+		if err != nil {
+			return fail(Unavailable, err.Error(), "install this checkout's project credential with `aimem task-token set`, as the account that runs aimem; no other credential is used", "process context unavailable: "+err.Error())
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), hubLookupTimeout)
+		err = selected.Validate(ctx)
+		cancel()
+		if err != nil {
+			var rejected *taskcred.Rejected
+			if errors.As(err, &rejected) && (rejected.Status == http.StatusUnauthorized || rejected.Status == http.StatusForbidden) {
+				return fail(Denied, err.Error(), credentialFix, "process context unavailable: "+err.Error())
+			}
+			// A local credential that cannot be validated is not used, and
+			// nothing cached stands in for it.
+			return fail(Unavailable, err.Error(), "retry when the hub is reachable", "process context unavailable: "+err.Error())
+		}
+		copyHub := *hub
+		copyHub.Token = selected.Token
+		hub = &copyHub
+		hubClient = selected.Client()
+	}
+	return hub, hubClient, true
+}
+
+// finish reads the files of r.Ref and sets the final state. A selection
+// the hub just confirmed comes from the cache or Git, bounded; one the hub
+// did not confirm now (last observed, or pinned while the hub cannot be
+// asked) only from this machine's exact cache (docs/DESIGN-kanban-docs.md:
+// the cache must match that selection), never from Git. Neither
+// substitutes another commit.
+func (r *Result) finish(dir, root string) *Result {
+	id := r.Project
 	var res process.Result
 	if r.FromLastObserved {
 		res = process.Cached(root, *r.Ref)
@@ -272,7 +354,11 @@ func Load(dir, root, projectID string) *Result {
 	}
 	r.Unit = unit
 	r.State = Ready
-	if r.FromLastObserved {
+	switch {
+	case r.FromLastObserved && r.Pinned:
+		r.State = LastObserved
+		r.Detail = "the hub could not be asked, so no live check ran; this is the exact cached commit of the pinned version and never authorizes a task write"
+	case r.FromLastObserved:
 		r.State = LastObserved
 		r.Detail = "the hub is unreachable; this is the exact cached commit of the selection last observed at " + r.ObservedAt + "; it may be stale and never authorizes a task write"
 	}

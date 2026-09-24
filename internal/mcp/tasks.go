@@ -304,6 +304,11 @@ func (s *srv) taskTool(ctx context.Context, name string, raw json.RawMessage) (s
 		return "", errors.New("task tools are not available on this server")
 	}
 	if strings.HasPrefix(name, "team_") {
+		if name == "team_accept" && s.local != nil {
+			// The checkout-bound facade records the process version the
+			// attempt is accepted under before it sends the accept.
+			return acceptWithRecord(ctx, tasks, s.project, s.local.dir, s.local.root, raw)
+		}
 		out, err := callTeamTool(ctx, tasks, s.project, name, raw)
 		if err == nil && name == "team_leave" && s.taskSetup != nil {
 			// The stdio facade runs in the checkout: an explicit leave ends the
