@@ -96,10 +96,17 @@ const Handbook = "# Handbook\n\nWork only on READY tasks; review gates apply.\n"
 // root, the way a finished fetch leaves it.
 func CacheProcess(t *testing.T, root string, ref process.Ref) {
 	t.Helper()
+	CacheProcessWith(t, root, ref, Handbook)
+}
+
+// CacheProcessWith is CacheProcess with the handbook text given, so two
+// cached versions can be told apart in what is delivered.
+func CacheProcessWith(t *testing.T, root string, ref process.Ref, handbook string) {
+	t.Helper()
 	dir := process.CacheDir(root, ref)
 	for p, body := range map[string]string{
 		ref.Manifest:       `{"version":1,"handbook":"proc/handbook.md","checklists":{"READY":"proc/ready.json"},"templates":{"task":"proc/task.json"}}`,
-		"proc/handbook.md": Handbook,
+		"proc/handbook.md": handbook,
 		"proc/ready.json":  `{"state":"READY","items":[{"id":"ready.outcome","text":"Objective and criteria are concrete."}]}`,
 		"proc/task.json":   `{"title":""}`,
 		".complete":        ref.Manifest + "\n",
@@ -405,6 +412,9 @@ func (h *Hub) work(w http.ResponseWriter, r *http.Request, write func(int, any))
 	state := fmt.Sprint(h.Reserved["state"])
 	var next string
 	switch {
+	case op == "accept" && state == "OFFERED":
+		h.TaskRevision++
+		next = "RUNNING"
 	case op == "decline" && state == "OFFERED":
 		next = "DECLINED"
 	case op == "block" && state == "RUNNING":
@@ -418,7 +428,7 @@ func (h *Hub) work(w http.ResponseWriter, r *http.Request, write func(int, any))
 		write(409, map[string]any{"error": "assignment state conflict"})
 		return
 	}
-	if strings.TrimSpace(body.Reason) == "" {
+	if op != "accept" && strings.TrimSpace(body.Reason) == "" {
 		write(400, map[string]any{"error": "reason required"})
 		return
 	}

@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 
+	"aimem/internal/process"
 	"aimem/internal/teamsetup"
 	"aimem/internal/teamsetup/teamsetuptest"
 	"aimem/internal/teamstate"
@@ -517,6 +518,10 @@ func TestTeamContinueRestoresDutiesAndNeverJoins(t *testing.T) {
 	// the hub: a RUNNING attempt with its title, the inbox with its cursor.
 	h.Reserved = map[string]any{"id": "att-1", "task_id": "task-1", "state": "RUNNING"}
 	h.InboxN = 2
+	// The attempt was accepted from this checkout under the selected
+	// process: the record its accept left (an attempt without one is not
+	// ready and is blocked; see the accepted-version tests).
+	recordAccepted(t, root, repo, "att-1", "sess-1", teamsetuptest.Selection)
 	out, err = runContinue(t, repo, root)
 	for _, want := range []string{"already joined as worker: session sess-1, generation 1", "attempt att-1 on task task-1 (Fix the parser) is RUNNING", "continue the accepted work in your isolated worktree", "reconcile before retrying anything", "2 unacknowledged message(s)", "next cursor 2", "Status: joined"} {
 		if err != nil || !strings.Contains(out, want) {
@@ -662,5 +667,21 @@ func TestTeamSetupPrintsReadinessAndDeliveries(t *testing.T) {
 	}
 	if strings.Index(out, "Status: joined") > strings.Index(out, "=== end aimem-team-guidance") {
 		t.Fatal("the deliveries must follow the report")
+	}
+}
+
+// recordAccepted writes the record the checkout's accept path leaves: the
+// attempt and the exact process version it was accepted under.
+func recordAccepted(t *testing.T, root, repo, attempt, session string, ref process.Ref) {
+	t.Helper()
+	canon, _ := filepath.EvalSymlinks(repo)
+	path := teamstate.Path(root, canon)
+	st, err := teamstate.Load(path)
+	if err != nil || st == nil {
+		t.Fatalf("state: %+v %v", st, err)
+	}
+	st.Accepted = &teamstate.AcceptedAttempt{Attempt: attempt, SessionID: session, Generation: 1, Key: "accept-key", Repo: ref.Repo, Commit: ref.Commit, Manifest: ref.Manifest, Confirmed: true, RecordedAt: "2026-09-24T00:00:00Z"}
+	if err := teamstate.Save(path, st); err != nil {
+		t.Fatal(err)
 	}
 }

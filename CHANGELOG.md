@@ -37,9 +37,26 @@ currently 18); a binary refuses a database newer than it understands.
   attempt is unchanged, and never replayed across a new session generation
   or once the worker is ready. The reserved attempt's next step no longer
   tells a worker that is not ready to accept its offer.
+- An accepted attempt keeps the process version it was accepted under:
+  `team_accept` on the checkout-bound local MCP and `aimem teams accept`
+  record the attempt's exact process commit and manifest and the team
+  guidance digest in the checkout's nonsecret team state before sending
+  the accept, and a retry reuses that record. `team_setup`, `team_continue`
+  and `process_context` then deliver that exact version, marked PINNED and
+  with the usual live checks, for as long as the attempt is reserved; a
+  newer project selection is named but applies to new work only. An
+  accepted attempt whose version was not recorded here or cannot be
+  recovered is not ready (a `RUNNING` one is blocked); none is assumed.
 
 ### Changed
 
+- `team_accept` from a checkout (the local MCP tool and `aimem teams
+  accept`) is refused locally, with nothing sent, when the process version
+  cannot be recorded: no saved membership for the session in the request,
+  or a project process that is not ready. An attempt accepted before this
+  release, or through the hub endpoint, has no record: `team_continue`
+  reports it as not ready and blocks it if it is running, so upgrade
+  members between attempts.
 - A worker whose role guidance or project process is not ready is now
   announced `unavailable` by `team_setup` and `team_continue`, instead of
   `available`, so the hub neither offers it work nor lets it accept any. In

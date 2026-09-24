@@ -14,7 +14,10 @@ import (
 	"errors"
 	"io"
 
+	"aimem/internal/ident"
+	"aimem/internal/process"
 	"aimem/internal/processctx"
+	"aimem/internal/teamstate"
 )
 
 var processToolDefs = []map[string]any{{
@@ -51,9 +54,32 @@ func (s *srv) processTool(raw json.RawMessage) (string, error) {
 	if dec.Decode(&struct{}{}) != io.EOF {
 		return "", errors.New("expected one JSON object")
 	}
-	r := processctx.Load(s.local.dir, s.local.root, "")
+	r := s.processForCheckout()
 	if a.Template != "" {
 		return r.Template(a.Template)
 	}
 	return r.Deliver()
+}
+
+// processForCheckout is the version this checkout works under: the one an
+// attempt was accepted under, when the checkout holds that record (pinned,
+// never replaced by a newer selection), otherwise the current selection.
+// Whether the attempt is still reserved is checked by team_setup and
+// team_continue, which drop the record once it is not; the pinned notice
+// says so.
+func (s *srv) processForCheckout() *processctx.Result {
+	if repo, err := teamstate.Canonical(s.local.dir); err == nil {
+		st, err := teamstate.Load(teamstate.Path(s.local.root, repo))
+		project, perr := ident.ProjectID(s.local.dir)
+		// Only a record of this checkout's current project and binding: a
+		// checkout re-pointed at another project is not that attempt's.
+		if err == nil && st != nil && st.Accepted != nil && perr == nil && st.Project == project && st.Repo == repo {
+			a := st.Accepted
+			ref := process.Ref{Repo: a.Repo, Commit: a.Commit, Manifest: a.Manifest}
+			r := processctx.LoadRef(s.local.dir, s.local.root, st.Project, ref)
+			r.PinnedFor = "accepted attempt " + a.Attempt + " (recorded on this checkout; whether it is still reserved is checked by team_continue, not here)"
+			return r
+		}
+	}
+	return processctx.Load(s.local.dir, s.local.root, "")
 }

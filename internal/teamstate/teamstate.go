@@ -46,6 +46,28 @@ type State struct {
 	// PendingWork is an attempt write sent (or about to be sent) whose
 	// outcome this checkout has not seen; a replay repeats it exactly.
 	PendingWork *PendingWork `json:"pending_work,omitempty"`
+	// Accepted is the process version (and guidance) an attempt was
+	// accepted under from this checkout, recorded before the accept was
+	// sent: the attempt's rules for as long as it is reserved.
+	Accepted *AcceptedAttempt `json:"accepted,omitempty"`
+}
+
+// AcceptedAttempt binds one accepted attempt to the exact process version
+// and role guidance current when it was accepted. It is trusted local
+// state written only by this checkout's accept path, never an argument.
+type AcceptedAttempt struct {
+	Attempt       string `json:"attempt"`
+	SessionID     string `json:"session_id"`
+	Generation    int64  `json:"generation"` // at accept; a resume moves the attempt on, not this record
+	Key           string `json:"key"`        // the accept's retry key
+	Repo          string `json:"repo"`
+	Commit        string `json:"commit"`
+	Manifest      string `json:"manifest"`
+	ProcessDigest string `json:"process_digest"` // SHA-256 of the unit delivered at accept
+	RoleDigest    string `json:"role_digest"`
+	RoleVersion   string `json:"role_version"`
+	Confirmed     bool   `json:"confirmed"` // the hub answered the accept with RUNNING
+	RecordedAt    string `json:"recorded_at"`
 }
 
 // PendingWork is one not-ready attempt write: its operation, attempt,
