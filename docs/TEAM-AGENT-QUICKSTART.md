@@ -312,14 +312,29 @@ messages with `team_ack` only for the consumed ones, then the role's
 waiting or coordinating loop). It states that the command is the explicit
 step: client startup alone and an idle model do not poll or wake.
 
-The text tells the agent to check that the server lists the tool (an older
-`aimem mcp` process does not: upgrade and restart the client, never fall
-back to a shell command or a broader permission), declare its platform and
-only a runtime-reported model, call `team_setup`, read the report, stop on
-`blocked` and show the fixes or the operator handoff (a credential the
-process cannot read or decrypt means the MCP process is not the account
-that installed it, never a reason to reinstall the token), and enter the
-role per the [playbooks](TEAM-PLAYBOOKS.md). Without a TEAM it calls
+The text tells the agent to check that the server lists `team_setup` (or
+`team_continue`), `team_context` and `process_context` (an older `aimem
+mcp` process does not: upgrade and restart the client, never fall back to
+a shell command, a file in a repository or a broader permission), declare
+its platform and only a runtime-reported model, call `team_setup`, read
+the report, and stop on `blocked` and show the fixes or the operator
+handoff (a credential the process cannot read or decrypt means the MCP
+process is not the account that installed it, never a reason to reinstall
+the token). For a joined session it reads `readiness` before any role
+step and the delivered guidance and process: each block is complete only
+when its last line is the terminator its first lines quote, naming the
+`role_context` version and digest or the `project_process` commit and
+digest. A block that is missing, cut or names another version is re-read
+with `team_context` (`role`, then `section` one at a time) or
+`process_context`; versions are never combined, and until both are
+complete the agent acts as not ready whatever `ready_for_work` says. The
+report's next steps win over the entry point's role steps: a worker that
+is not ready accepts nothing and heartbeats `unavailable`, a coordinator
+that is not ready offers nothing, a block does not stop local work (the
+agent stops it), a blocked attempt is not resumed because readiness came
+back, and execution is checked by the agent itself. It then enters the
+role per the delivered guidance, the authority for the protocol, and the
+delivered process, the authority for project policy. Without a TEAM it calls
 `team_list` and offers the teams enrolling the credential (the person
 still chooses). The Claude Code skill
 is user-invocable only (`disable-model-invocation: true`); the Codex skill

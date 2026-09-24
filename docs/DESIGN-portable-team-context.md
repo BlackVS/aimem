@@ -62,9 +62,20 @@ checkout or by an older aimem has no record and is blocked on recovery
 (including attempts in flight at upgrade); the recovered unit is rebuilt
 from the recorded commit, which is the version: the unit's text names its
 source and this machine's installed skills, so its digest (recorded at
-accept as evidence) is not compared. Still open, and why the onboarding flow is not pilot-ready: the
-generated `/join_team` and `/resume_team` entry points and the report's
-role steps still name `docs/TEAM-PLAYBOOKS.md` (1c-5).
+accept as evidence) is not compared.
+
+1c-5 is implemented: the canonical `/join_team` and `/resume_team`
+templates (`internal/wiring/assets`) and the report's role steps name the
+delivered guidance (`team_context` sections) instead of
+`docs/TEAM-PLAYBOOKS.md`; step 0 requires `team_context` and
+`process_context` besides the entry tool (the compatibility row below);
+the agent checks each delivered block's terminator against the readiness
+version and digest and re-reads through the same tools, never combining
+versions; and the report's readiness steps take precedence over the
+entry point's role steps. The committed client assets are the binary's
+rendering, held by a test. This completes 1c in source; whether real
+clients show the delivered blocks whole and follow the entry points is
+measured on the pilot task, not inferred from these fixture tests.
 
 ## Problem, from source
 
@@ -287,7 +298,7 @@ the project credential exactly as the session-start hook does.
 | --- | --- | --- |
 | New | New or v0.7.x | Role context comes from the client binary and needs no hub change; project process through the existing routes. Works against any hub with protocol v0.7.0. |
 | v0.7.2 or older | Any | Unchanged: no `team_context`, no readiness object, the playbook path in the report. The hub cannot detect this; the pilot must upgrade every member. |
-| New command assets | Old `aimem mcp` still running | Step 0 of the regenerated entry points already stops when a tool is missing (`join_team.md:20`); it must check for `team_context` too and tell the user to upgrade and restart. No shell fallback. |
+| New command assets | Old `aimem mcp` still running | Step 0 of the regenerated entry points stops when `team_setup`/`team_continue`, `team_context` or `process_context` is missing and tells the user to upgrade and restart. No shell fallback. |
 | Any | Hub without the optional process bundle routes | The client uses Git as today; a 404 or 405 on the bundle route is "unsupported", never "denied". |
 
 The report gains fields and never removes one; a consumer of `status`,

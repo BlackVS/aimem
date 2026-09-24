@@ -925,14 +925,14 @@ func (s *setup) enterRole(me *Session) bool {
 	}
 	if me.Role == "coordinator" {
 		s.report.Next = append(s.report.Next,
-			onceReady(rd, "coordinator playbook (docs/TEAM-PLAYBOOKS.md) step 2: select work the process allows; offer one attempt per task with suitability and cost rationale"),
+			onceReady(rd, "coordinator playbook step 2, in the coordinator guidance delivered after this report (team_context section=coordinator re-reads it): select work the process allows; offer one attempt per task with suitability and cost rationale"),
 			"read the roster above: availability, reported model and its source, declared capabilities; unknown stays unknown",
 			"heartbeat every 30 s while active (team_heartbeat); read the inbox with a bounded wait after every command you issue",
 			"MCP handle: "+handle)
 		return true
 	}
 	if s.report.Reserved == nil {
-		s.report.Next = append(s.report.Next, "worker playbook (docs/TEAM-PLAYBOOKS.md) step 2: wait for an addressed offer; never select, claim or edit backlog tasks while joined, even while the coordinator is disconnected")
+		s.report.Next = append(s.report.Next, "worker playbook step 2, in the worker guidance delivered after this report (team_context section=worker re-reads it): wait for an addressed offer; never select, claim or edit backlog tasks while joined, even while the coordinator is disconnected")
 	}
 	s.report.Next = append(s.report.Next,
 		onceReady(rd, "poll team_inbox (after the cursor above, wait_seconds up to 25), team_ack only what you have read and acted on, then accept or decline an offer with a reason"),
@@ -1002,7 +1002,7 @@ func AttemptNext(state string) string {
 	case "SUBMITTED":
 		return "your result is under review; wait for accept or rework in the inbox (rework arrives as a new offer)"
 	}
-	return "read it with team_assignment and act per docs/TEAM-PLAYBOOKS.md"
+	return "read it with team_assignment and act per the worker guidance (team_context section=worker)"
 }
 
 // reconcileLine is the restart checklist: what to establish before any

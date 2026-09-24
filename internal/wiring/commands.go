@@ -69,8 +69,8 @@ func (e entryPoint) assets() []commandAsset {
 }
 
 func commandAssets() []commandAsset {
-	join := entryPoint{body: joinTeamBody, claudeName: "join_team", codexName: "join-team", fileName: "join_team", description: joinTeamDescription, argumentHint: "TEAM [worker|coordinator]", allowedTools: "mcp__aimem__team_setup mcp__aimem__team_list Bash(claude --version)"}
-	resume := entryPoint{body: resumeTeamBody, claudeName: "resume_team", codexName: "resume-team", fileName: "resume_team", description: resumeTeamDescription, argumentHint: "[TEAM]", allowedTools: "mcp__aimem__team_continue Bash(git status *)"}
+	join := entryPoint{body: joinTeamBody, claudeName: "join_team", codexName: "join-team", fileName: "join_team", description: joinTeamDescription, argumentHint: "TEAM [worker|coordinator]", allowedTools: "mcp__aimem__team_setup mcp__aimem__team_list mcp__aimem__team_context mcp__aimem__process_context Bash(claude --version)"}
+	resume := entryPoint{body: resumeTeamBody, claudeName: "resume_team", codexName: "resume-team", fileName: "resume_team", description: resumeTeamDescription, argumentHint: "[TEAM]", allowedTools: "mcp__aimem__team_continue mcp__aimem__team_context mcp__aimem__process_context Bash(git status *)"}
 	return append(join.assets(), resume.assets()...)
 }
 
