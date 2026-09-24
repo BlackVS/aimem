@@ -75,7 +75,8 @@ is not an inbox subscription or a vendor-specific wakeup primitive. A two-second
 negative observation cannot establish that every notification mechanism is
 unsupported. Use explicit inbox reads as the fallback and bounded polling once
 the real messaging transport is implemented; qualify other wakeup mechanisms
-separately before promising background delivery.
+separately before promising background delivery. The
+[Claude channel probe](CLAUDE-CHANNEL-PROBE.md) qualifies one such mechanism.
 
 ## Reproduce
 
