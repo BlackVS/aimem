@@ -24,8 +24,7 @@ currently 18); a binary refuses a database newer than it understands.
   as their own MCP text blocks after the unchanged JSON report, printed
   after the CLI report, under `delivered` in `--json`, each ending with its
   terminator. A changed guidance digest since the last delivery is
-  reported. Delivery is not recorded as acknowledgement. The generated
-  entry points are unchanged (1c-5).
+  reported. Delivery is not recorded as acknowledgement.
 - A worker that is not ready no longer only lists the attempt the hub holds
   for it: `team_setup` and `team_continue` decline an `OFFERED` attempt
   (including one that raced the join) with the readiness reason, block a
@@ -52,6 +51,23 @@ currently 18); a binary refuses a database newer than it understands.
 
 ### Changed
 
+- The generated `/join_team` and `/resume_team` entry points (every client:
+  Claude Code, OpenCode, Codex skills and prompts; refreshed by `aimem
+  teams commands` and by every `aimem teams setup`) use the delivered
+  context instead of `docs/TEAM-PLAYBOOKS.md`, a path that exists only in
+  an aimem checkout. Step 0 also requires `team_context` and
+  `process_context`: when the server lacks one, the agent tells the user to
+  upgrade aimem and restart the client and stops, with no shell fallback.
+  The agent reads `readiness` before any role step, checks each delivered
+  block's terminator against the readiness version and digest, re-reads a
+  cut or stale block with `team_context` or `process_context` and treats
+  itself as not ready until it holds both complete, follows the report's
+  next steps where they differ from the entry point, heartbeats `available`
+  only while ready, never resumes a blocked attempt because readiness came
+  back, and never infers its own execution environment from the MCP server.
+  The Claude Code skills pre-approve the two read tools. The `team_setup`
+  next steps name the delivered guidance and `team_context` sections
+  instead of the repository path.
 - `team_accept` from a checkout (the local MCP tool and `aimem teams
   accept`) is refused locally, with nothing sent, when the process version
   cannot be recorded: no saved membership for the session in the request,
