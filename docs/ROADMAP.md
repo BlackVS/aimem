@@ -36,6 +36,16 @@ contracts. Do not maintain a second checklist of task statuses here.
 
 ## Next delivery sequence
 
+**Operator update, 2026-09-25:** general aimem development, web management and
+legacy-team removal are on hold until aicrew is functional. Only aicrew-required
+aimem prerequisites are eligible. The current direction is the
+[AIForge split proposal](DESIGN-AIFORGE.md): direct aimem knowledge/task tools,
+verified session access contexts, generic reservations and actionable denials;
+aicrew owns coordination in a separate GitHub repository and aimem board.
+The AIForge epic on each board owns current dependencies and evidence. The
+earlier sequence below is historical planning, not authorization to resume it.
+No long-lived aimem redesign branch is needed; use normal reviewed feature PRs.
+
 The owner brought team coordination ahead of access-console implementation
 on 2026-09-21, and on 2026-09-23 approved the staged direction of the
 [portable teams review](TEAM-MULTIPROJECT-REVIEW.md): portable instruction
