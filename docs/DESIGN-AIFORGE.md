@@ -93,6 +93,9 @@ it cannot replace verified individual context with arbitrary actor labels.
 The proposed [verified identity and session context contract](DESIGN-AIFORGE-CONTEXT.md)
 specifies the link and grant-selection boundary for review.
 
+The proposed [task reservation and dependency contract](DESIGN-AIFORGE-RESERVATIONS.md)
+specifies shared ownership and same-hub pickup checks for review.
+
 **Current gap:** ordinary aimem task tokens cannot access the legacy knowledge
 API. Define a small scoped extension before claiming full integration. Do not
 hide a broad fallback token or ask each worker to configure a second credential.
