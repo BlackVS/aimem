@@ -30,7 +30,7 @@ An operator establishes the trusted aicrew service ID and its allowed aimem hub,
 
 The proposed proof is a one-time server-verified receipt, avoiding a custom signed token and avoiding disclosure of the aimem bearer to aicrew:
 
-1. Aicrew creates an unpredictable challenge bound to its service ID, an invitation or existing agent record, the target hub ID and a short expiry. The challenge carries no authority.
+1. Aicrew creates an unpredictable challenge ID and a deadline within five minutes, bound to its service ID, a pending invitation or existing agent record, and the target hub ID. The challenge carries no authority.
 2. The agent sends that challenge directly to aimem with its individual aimem credential. Aimem authenticates the token and enabled user, requires a user-scoped token (not a project-scoped, read-only or legacy token), and creates a short-lived single-use proof receipt bound to the challenge, aicrew service ID, hub ID, user ID and token ID. The receipt itself is not a knowledge or task credential.
 3. The agent gives the receipt to aicrew. Aicrew redeems it through an authenticated service-to-service call to aimem. Aimem returns the verified IDs, token status and receipt result only to the intended aicrew service. Consumption is atomic. A retry by that same service with the same request key returns the same result; a different caller or changed request is denied.
 4. Aicrew links by (hub ID, user ID), never by name, URL, repository or model. Linking an existing aicrew agent to a different aimem user requires an explicit operator-authorized rebind and reconciliation of active work. A duplicate name never silently merges identities.
@@ -41,7 +41,7 @@ Proof expiry, bounded request-key retention, transport authentication and secret
 
 ## Peer verification and delegation limits
 
-The one-time proof challenge expires within five minutes; its receipt expires within one minute and is consumed once. Aimem chooses both IDs and deadlines, stores only a digest of the receipt, and never logs the receipt or bearer. The aicrew redemption call names its registered service ID, original challenge and idempotency key; aimem verifies the receipt, audience and current token state before returning hub/user/token IDs. Aicrew must bind the result to its pending invitation or agent record, not accept an unrequested proof. The concrete wire encoding and service authentication mechanism remain open for the implementation review.
+Aicrew chooses the challenge ID and its deadline (at most five minutes). Aimem chooses the proof receipt ID and its deadline (at most one minute), stores only a digest of the receipt, and never logs the receipt or bearer. Aicrew first checks that the original challenge is still pending and unexpired. Its redemption call names its registered service ID, that exact challenge and an idempotency key; aimem verifies the receipt binding, audience, receipt expiry and current token state before returning hub/user/token IDs. Aicrew binds the result to its pending invitation or agent record, not an unrequested proof. The concrete wire encoding and service authentication mechanism remain open for the implementation review.
 
 Aicrew's session-introspection answer is derived from its stored verified identity link and current membership/session state. It cannot merely echo IDs supplied by aimem. It includes the linked hub/user/token IDs, team key, role, session ID, generation, active state and expiry. Aimem checks all of them, including that the reply came from the registered aicrew service for the linked team profile. The session handle is random, limited to one actor/team/session, expires within fifteen minutes and is refreshed automatically; renewal retains the same actor and cannot revive a fenced generation. Aicrew never returns a grant decision: aimem computes that from its own current profile grants.
 
@@ -87,6 +87,8 @@ All team roles remain subject to the project's review and human-merge gates. Det
 | Leave or switch with outstanding work | Aicrew refuses clean leave until accepted/blocked/stop-pending work is reconciled. Aimem does not infer personal authority from a leave request. After confirmed leave, a separate personal conversation may use personal grants. |
 | Simultaneous personal and team sessions | They are isolated by connection/session key. Personal operations cannot take a team-held reservation; team operations never acquire personal grants. The task reservation contract resolves collisions across modes. |
 
+Revocation takes effect for an operation whose authorization check starts after the revocation commits at its owning service. An operation already authorized may finish; the two services do not share one transaction. Mutations must revalidate the aimem token/profile and the aicrew session generation immediately before their own commit. The separate reservation contract must fence task writes across a concurrent stop or role change; this document does not promise retroactive cancellation of an in-flight read.
+
 Rotation is a new credential for the same actor, not a new identity. Aicrew links and historical attribution survive token and display-name changes. If the client loses its individual credential, recovery requires an authorized reissue path; neither a session handle nor a service credential is a fallback. Local restart restores only protected session state, then verifies it online before reporting ready. Unknown, expired and incomplete context reports are blocked, not treated as personal mode.
 
 ## Failure contract
@@ -112,7 +114,7 @@ A response may identify the caller's active mode, project and own session/attemp
 
 The design is accepted only when reviewers can trace each allowed operation to authenticated actor, one selected context, a live resource grant and any required reservation. Before implementation, settle endpoint schemas, service authentication, proof retention, timeout behavior, storage migrations and the knowledge matrix in reviewed increments. Proposed bounded implementation slices are:
 
-1. Stable hub/profile IDs and one-time identity proof with a fake aicrew verifier. Prove expiry, concurrent redemption, lost replies, wrong audience and token rotation without exposing the aimem bearer.
+1. Stable hub/profile IDs and one-time identity proof with a fake aicrew verifier. Prove the original challenge ID survives issue and redemption, plus expiry, concurrent redemption, lost replies, wrong audience and token rotation without exposing the aimem bearer.
 2. Aimem team-context verification with a fake aicrew introspection service. Prove no grant union, user/token mismatch, revocation, role downgrade, outage denial and simultaneous sessions through real HTTP/MCP routes.
 3. Trusted local session binding and restart/recovery. Prove two local conversations cannot swap context, no broad fallback occurs, and stale state blocks until verified.
 4. Integrate the separately reviewed knowledge matrix and task reservation contract, then a first-pilot end-to-end flow. Do not infer those approvals from this document.
