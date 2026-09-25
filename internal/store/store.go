@@ -492,7 +492,7 @@ func (r *Registry) Close() {
 	r.dbs = map[string]*DB{}
 }
 
-const currentSchema = 18
+const currentSchema = 19
 
 // SetMeta / GetMeta store small key-value project metadata (e.g. the
 // project's declared knowledge groups, stamped from event pushes so the
@@ -977,6 +977,39 @@ UPDATE meta SET value='17' WHERE key='schema_version';`); err != nil {
 		if err := d.step(`
 ALTER TABLE team_managed_tasks ADD COLUMN managed INTEGER NOT NULL DEFAULT 1 CHECK(managed IN (0,1));
 UPDATE meta SET value='18' WHERE key='schema_version';`); err != nil {
+			return err
+		}
+	}
+	if v < 19 {
+		// Reservation ledger (task_reservations.go). Rows persist after release
+		// so a later claim cannot reuse an earlier fence. Existing task rows and
+		// legacy team tables are unchanged. The version bump makes older binaries
+		// refuse this database instead of silently ignoring active holds.
+		if err := d.step(`
+CREATE TABLE task_reservations(
+  task_id TEXT PRIMARY KEY REFERENCES tasks(id),
+  fence INTEGER NOT NULL CHECK(fence >= 1),
+  active_id TEXT NOT NULL DEFAULT '',
+  holder_mode TEXT NOT NULL DEFAULT '',
+  holder_ref TEXT NOT NULL DEFAULT '',
+  CHECK ((active_id = '' AND holder_mode = '' AND holder_ref = '') OR
+         (active_id <> '' AND holder_mode <> '' AND holder_ref <> '')));
+CREATE TABLE task_reservation_events(
+  sequence INTEGER PRIMARY KEY AUTOINCREMENT,
+  task_id TEXT NOT NULL REFERENCES tasks(id),
+  fence INTEGER NOT NULL,
+  operation TEXT NOT NULL,
+  body TEXT NOT NULL);
+CREATE INDEX idx_task_reservation_events_task ON task_reservation_events(task_id, sequence);
+CREATE TABLE task_reservation_requests(
+  principal TEXT NOT NULL,
+  operation TEXT NOT NULL,
+  task_id TEXT NOT NULL,
+  key TEXT NOT NULL,
+  digest TEXT NOT NULL,
+  result TEXT NOT NULL,
+  PRIMARY KEY(principal, operation, task_id, key));
+UPDATE meta SET value='19' WHERE key='schema_version';`); err != nil {
 			return err
 		}
 	}

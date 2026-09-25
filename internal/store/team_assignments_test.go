@@ -435,6 +435,7 @@ func TestTeamAssignmentRollback(t *testing.T) {
 
 func TestTeamAssignmentMigrationAndReopen(t *testing.T) {
 	r, d, team, a, _, c := assignmentFixture(t)
+	rewindReservationSchema(t, d)
 	for _, q := range []string{`DROP TABLE team_assignments`, `DROP TABLE team_managed_tasks`, `UPDATE meta SET value='16' WHERE key='schema_version'`} {
 		if _, err := d.sql.Exec(q); err != nil {
 			t.Fatal(err)

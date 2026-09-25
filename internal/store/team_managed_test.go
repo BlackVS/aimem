@@ -666,6 +666,7 @@ func TestManagedTaskRaces(t *testing.T) {
 func TestManagedTaskMigrationAndReopen(t *testing.T) {
 	r, d, team, a, admin, c, accepted := acceptedFixture(t)
 	// Roll the flag column back to the schema 17 shape and migrate forward.
+	rewindReservationSchema(t, d)
 	for _, q := range []string{`ALTER TABLE team_managed_tasks DROP COLUMN managed`, `UPDATE meta SET value='17' WHERE key='schema_version'`} {
 		if _, err := d.sql.Exec(q); err != nil {
 			t.Fatal(err)
