@@ -90,6 +90,9 @@ aimem's knowledge interfaces. Exact issuance and verification protocols remain
 design work. Backend task integration may use a bounded service credential;
 it cannot replace verified individual context with arbitrary actor labels.
 
+The proposed [verified identity and session context contract](DESIGN-AIFORGE-CONTEXT.md)
+specifies the link and grant-selection boundary for review.
+
 **Current gap:** ordinary aimem task tokens cannot access the legacy knowledge
 API. Define a small scoped extension before claiming full integration. Do not
 hide a broad fallback token or ask each worker to configure a second credential.
