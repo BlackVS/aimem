@@ -135,7 +135,11 @@ func TestScopeMigrationPreservesLegacyTokens(t *testing.T) {
 		t.Fatal(err)
 	}
 	// Reconstruct schema 1 with real issued secrets, digests and metadata.
-	if _, err := s.db.Exec("ALTER TABLE tokens DROP COLUMN scope; PRAGMA user_version=1;"); err != nil {
+	if _, err := s.db.Exec(`DROP TABLE team_profile_grants;
+DROP TABLE team_access_profiles;
+DROP TABLE hub_identity;
+ALTER TABLE tokens DROP COLUMN scope;
+PRAGMA user_version=1;`); err != nil {
 		t.Fatal(err)
 	}
 	if err := s.Close(); err != nil {
@@ -147,7 +151,7 @@ func TestScopeMigrationPreservesLegacyTokens(t *testing.T) {
 			t.Fatal(err)
 		}
 		var version int
-		if err := s.db.QueryRow("PRAGMA user_version").Scan(&version); err != nil || version != 2 {
+		if err := s.db.QueryRow("PRAGMA user_version").Scan(&version); err != nil || version != 3 {
 			t.Fatalf("version %d: %v", version, err)
 		}
 		for _, tc := range []struct {
