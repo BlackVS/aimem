@@ -30,8 +30,10 @@ import (
 // ordinary token, and the env admin token.
 type hubFixture struct {
 	h                  http.Handler
+	reg                *store.Registry
 	env, alice, reader string
 	aliceID            string
+	aliceTokenID       string
 	// stranger is a user-scoped token of a user with no project grant.
 	stranger string
 }
@@ -70,7 +72,7 @@ func newHub(t *testing.T) *hubFixture {
 	if err := acc.SetGrant("admin", instance, "user", alice.ID, true); err != nil {
 		t.Fatal(err)
 	}
-	_, aliceSecret, err := acc.Issue("admin", alice.ID, "agent", instance, time.Now().Add(time.Hour))
+	aliceToken, aliceSecret, err := acc.Issue("admin", alice.ID, "agent", instance, time.Now().Add(time.Hour))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -96,7 +98,47 @@ func newHub(t *testing.T) *hubFixture {
 		}
 		return call, only
 	})
-	return &hubFixture{h: srv.TCPHandler("env-secret", map[string]http.Handler{"/mcp": mcpHandler}), env: "env-secret", alice: aliceSecret, reader: readerSecret, aliceID: alice.ID, stranger: strangerSecret}
+	return &hubFixture{h: srv.TCPHandler("env-secret", map[string]http.Handler{"/mcp": mcpHandler}), reg: reg, env: "env-secret", alice: aliceSecret, reader: readerSecret, aliceID: alice.ID, aliceTokenID: aliceToken.ID, stranger: strangerSecret}
+}
+
+func TestMCPGenericTaskWriteRefusedDuringReservation(t *testing.T) {
+	f := newHub(t)
+	text, isErr := toolText(f.rpc(t, f.alice, "tools/call", map[string]any{"name": "create_task", "arguments": map[string]any{
+		"project": "alpha", "title": "held work", "state": "READY", "idempotency_key": "held-create"}}))
+	if isErr {
+		t.Fatalf("create_task: %s", text)
+	}
+	var task struct {
+		ID       string `json:"id"`
+		Revision int64  `json:"revision"`
+	}
+	if err := json.Unmarshal([]byte(text), &task); err != nil || task.ID == "" || task.Revision != 1 {
+		t.Fatalf("create result: %v %s", err, text)
+	}
+	db, err := f.reg.OpenExisting("alpha")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = db.ApplyTaskReservation(store.ReservationClaim, store.TaskReservationInput{TaskID: task.ID, ExpectedRevision: task.Revision,
+		Holder: store.ReservationHolder{Mode: "standalone", Ref: "mcp-work"}},
+		store.TaskActor{Kind: "user", Name: "Alice", UserID: f.aliceID, TokenID: f.aliceTokenID}, "held-claim")
+	if err != nil {
+		t.Fatal(err)
+	}
+	text, isErr = toolText(f.rpc(t, f.alice, "tools/call", map[string]any{"name": "update_task", "arguments": map[string]any{
+		"id": task.ID, "title": "bypass", "state": "DONE", "expected_revision": task.Revision, "idempotency_key": "held-update"}}))
+	if !isErr || !strings.Contains(text, "active reservation") || strings.Contains(text, "mcp-work") {
+		t.Fatalf("MCP generic write bypassed or leaked holder: %v %s", isErr, text)
+	}
+	text, isErr = toolText(f.rpc(t, f.alice, "tools/call", map[string]any{"name": "add_task_comment", "arguments": map[string]any{
+		"id": task.ID, "body": "discussion", "idempotency_key": "held-comment"}}))
+	if isErr {
+		t.Fatalf("immutable comment refused: %s", text)
+	}
+	got, err := db.GetTask(task.ID)
+	if err != nil || got.Revision != task.Revision || got.State != "READY" {
+		t.Fatalf("held task changed: %+v, %v", got, err)
+	}
 }
 
 func (f *hubFixture) rpc(t *testing.T, token, method string, params any) map[string]any {

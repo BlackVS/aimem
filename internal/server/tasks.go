@@ -376,7 +376,7 @@ func (s *Server) taskError(w http.ResponseWriter, err error) {
 	switch {
 	case errors.Is(err, store.ErrTaskNotFound), errors.Is(err, store.ErrEpicNotFound):
 		s.fail(w, http.StatusNotFound, err)
-	case errors.Is(err, store.ErrTaskArchived), errors.Is(err, store.ErrTaskRetryConflict), errors.Is(err, store.ErrManagedTask):
+	case errors.Is(err, store.ErrTaskArchived), errors.Is(err, store.ErrTaskRetryConflict), errors.Is(err, store.ErrManagedTask), errors.Is(err, store.ErrTaskReserved):
 		s.fail(w, http.StatusConflict, err)
 	case errors.Is(err, store.ErrTaskInvalid), errors.Is(err, store.ErrTaskReservedScope):
 		s.fail(w, http.StatusBadRequest, err)

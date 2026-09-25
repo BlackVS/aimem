@@ -646,6 +646,61 @@ func TestTaskRoutesCASCommentsAndPermissionChanges(t *testing.T) {
 	}
 }
 
+func TestTaskRoutesRejectGenericWritesDuringReservation(t *testing.T) {
+	f := newTaskFixture(t)
+	created := taskReq(t, f.h, "POST", "/v1/projects/alpha/tasks", f.alice, "reserve-create", `{"title":"held work","state":"READY"}`)
+	if created.Code != http.StatusCreated {
+		t.Fatalf("create: %d %s", created.Code, created.Body)
+	}
+	task := decodeTask(t, created)
+	pre := `{"title":"held work","state":"READY","expected_revision":1}`
+	if w := taskReq(t, f.h, "PUT", "/v1/tasks/"+task.ID, f.alice, "reserve-pre", pre); w.Code != http.StatusOK {
+		t.Fatalf("pre-claim update: %d %s", w.Code, w.Body)
+	}
+	db, err := f.reg.OpenExisting("alpha")
+	if err != nil {
+		t.Fatal(err)
+	}
+	hold, err := db.ApplyTaskReservation(store.ReservationClaim, store.TaskReservationInput{TaskID: task.ID, ExpectedRevision: 2,
+		Holder: store.ReservationHolder{Mode: "standalone", Ref: "test-work"}},
+		store.TaskActor{Kind: "user", Name: "Alice", UserID: f.aliceUser, TokenID: f.aliceTokenID}, "reserve-claim")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, tc := range []struct {
+		name, token, key, body string
+	}{
+		{"user", f.alice, "reserve-user", `{"title":"bypass","state":"IN_PROGRESS","expected_revision":2}`},
+		{"admin archive", f.admin, "reserve-admin", `{"title":"bypass","state":"DONE","archived":true,"expected_revision":2}`},
+		{"stale revision", f.alice, "reserve-stale", pre},
+		{"evidence reference", f.alice, "reserve-evidence", `{"title":"held work","state":"READY","expected_revision":2,"evidence_refs":[{"kind":"text","ref":"unfenced"}]}`},
+		{"prior receipt", f.alice, "reserve-pre", pre},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			w := taskReq(t, f.h, "PUT", "/v1/tasks/"+task.ID, tc.token, tc.key, tc.body)
+			if w.Code != http.StatusConflict || !strings.Contains(w.Body.String(), "active reservation") || strings.Contains(w.Body.String(), "test-work") {
+				t.Fatalf("generic write response: %d %s", w.Code, w.Body)
+			}
+		})
+	}
+	if w := taskReq(t, f.h, "POST", "/v1/tasks/"+task.ID+"/comments", f.alice, "reserve-comment", `{"body":"discussion while held"}`); w.Code != http.StatusCreated {
+		t.Fatalf("immutable comment: %d %s", w.Code, w.Body)
+	}
+	current := decodeTask(t, taskReq(t, f.h, "GET", "/v1/tasks/"+task.ID, f.alice, "", ""))
+	if current.Revision != 2 || current.State != "READY" || len(current.EvidenceRefs) != 0 {
+		t.Fatalf("held task changed: %+v", current)
+	}
+	release := current.TaskContent
+	if _, err := db.ApplyTaskReservation(store.ReservationRelease, store.TaskReservationInput{TaskID: task.ID, ID: hold.Reservation.ID,
+		Fence: hold.Reservation.Fence, ExpectedRevision: 2, Content: &release, Reason: "stopped"},
+		store.TaskActor{Kind: "user", Name: "Alice", UserID: f.aliceUser, TokenID: f.aliceTokenID}, "reserve-release"); err != nil {
+		t.Fatal(err)
+	}
+	if w := taskReq(t, f.h, "PUT", "/v1/tasks/"+task.ID, f.alice, "reserve-after", `{"title":"ordinary edit","state":"READY","expected_revision":3}`); w.Code != http.StatusOK {
+		t.Fatalf("unreserved update after release: %d %s", w.Code, w.Body)
+	}
+}
+
 // A storage fault is a 500 that names nothing internal, and a task in a
 // readable project is still found past an unreadable sibling.
 func TestTaskRoutesStorageFaultMapping(t *testing.T) {

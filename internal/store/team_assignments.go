@@ -104,6 +104,9 @@ func assignmentReady(tx *sql.Tx, id string, revision int64) (Task, error) {
 	if err != nil {
 		return t, err
 	}
+	if err := rejectActiveReservation(tx, id); err != nil {
+		return t, err
+	}
 	if t.Revision != revision {
 		return t, &TaskConflict{Current: t}
 	}
@@ -148,7 +151,12 @@ func (d *DB) OfferTeamAssignment(teamID string, c TeamOffer, a TeamAuditContext,
 			return TeamAssignment{}, invalid(err)
 		}
 	}
-	check := func(tx *sql.Tx) error { _, _, err := boundTeamSession(tx, teamID, c.SessionID, a.Actor); return err }
+	check := func(tx *sql.Tx) error {
+		if _, _, err := boundTeamSession(tx, teamID, c.SessionID, a.Actor); err != nil {
+			return err
+		}
+		return rejectActiveReservation(tx, c.TaskID)
+	}
 	return checkedTaskMutation(d, a.Actor, "team.assignment.offer", teamID, key, c, check, func(tx *sql.Tx) (TeamAssignment, error) {
 		tm, coordinator, err := currentCoordinator(tx, teamID, c.TeamSessionHandle, c.CoordinatorGeneration, a.Actor)
 		if err != nil {

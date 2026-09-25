@@ -143,6 +143,39 @@ func TestAssignmentHTTPExchange(t *testing.T) {
 	}
 }
 
+func TestAssignmentOfferRefusesActiveTaskReservation(t *testing.T) {
+	f := newAssignmentFixture(t)
+	db, err := f.reg.OpenExisting("alpha")
+	if err != nil {
+		t.Fatal(err)
+	}
+	hold, err := db.ApplyTaskReservation(store.ReservationClaim, store.TaskReservationInput{TaskID: f.task.ID,
+		ExpectedRevision: f.task.Revision, Holder: store.ReservationHolder{Mode: "standalone", Ref: "private-work"}},
+		store.TaskActor{Kind: "user", Name: "Alice", UserID: f.aliceUser, TokenID: f.aliceTokenID}, "offer-held-claim")
+	if err != nil {
+		t.Fatal(err)
+	}
+	w := f.offerRequest(t, "offer-held")
+	if w.Code != http.StatusConflict || !strings.Contains(w.Body.String(), "active reservation") || strings.Contains(w.Body.String(), "private-work") {
+		t.Fatalf("legacy offer bypass or holder disclosure: %d %s", w.Code, w.Body)
+	}
+	if got, err := db.GetTask(f.task.ID); err != nil || got.Coordination != nil || got.Revision != f.task.Revision {
+		t.Fatalf("refused offer changed task: %+v, %v", got, err)
+	}
+	content := f.task.TaskContent
+	released, err := db.ApplyTaskReservation(store.ReservationRelease, store.TaskReservationInput{TaskID: f.task.ID,
+		ID: hold.Reservation.ID, Fence: hold.Reservation.Fence, ExpectedRevision: f.task.Revision,
+		Content: &content, Reason: "standalone stopped"},
+		store.TaskActor{Kind: "user", Name: "Alice", UserID: f.aliceUser, TokenID: f.aliceTokenID}, "offer-held-release")
+	if err != nil {
+		t.Fatal(err)
+	}
+	f.offer.ExpectedRevision = released.Task.Revision
+	if w := f.offerRequest(t, "offer-after-release"); w.Code != http.StatusCreated {
+		t.Fatalf("legacy offer after release: %d %s", w.Code, w.Body)
+	}
+}
+
 func TestAssignmentHTTPBoundary(t *testing.T) {
 	f := newAssignmentFixture(t)
 	out := assignmentResult(t, f.offerRequest(t, "offer"), 201)
