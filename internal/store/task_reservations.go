@@ -72,6 +72,15 @@ type TaskReservationOutcome struct {
 	Reservation TaskReservation `json:"reservation"`
 }
 
+// DependencyEvidence is the authoritative state observed while the claim held
+// write-intent locks on the dependency project. It grants no future authority.
+type DependencyEvidence struct {
+	TaskID   string `json:"task_id"`
+	Project  string `json:"project"`
+	AccessID string `json:"access_id"`
+	Revision int64  `json:"revision"`
+}
+
 func validReservationOperation(op ReservationOperation) bool {
 	switch op {
 	case ReservationClaim, ReservationTransfer, ReservationUpdate, ReservationRelease, ReservationFinalize:
@@ -157,13 +166,14 @@ func advanceReservation(tx *sql.Tx, r *TaskReservation) error {
 	return err
 }
 
-func recordReservationEvent(tx *sql.Tx, op ReservationOperation, before, after TaskReservation, actor TaskActor, reason string) error {
+func recordReservationEvent(tx *sql.Tx, op ReservationOperation, before, after TaskReservation, actor TaskActor, reason string, deps []DependencyEvidence) error {
 	body, err := json.Marshal(struct {
-		Before TaskReservation `json:"before"`
-		After  TaskReservation `json:"after"`
-		Actor  TaskActor       `json:"actor"`
-		Reason string          `json:"reason,omitempty"`
-	}{before, after, actor, reason})
+		Before       TaskReservation      `json:"before"`
+		After        TaskReservation      `json:"after"`
+		Actor        TaskActor            `json:"actor"`
+		Reason       string               `json:"reason,omitempty"`
+		Dependencies []DependencyEvidence `json:"dependencies"`
+	}{before, after, actor, reason, deps})
 	if err != nil {
 		return err
 	}
@@ -187,6 +197,26 @@ func reservationPrincipal(actor TaskActor) (string, error) {
 
 func reservationMutation(d *DB, actor TaskActor, op ReservationOperation, in TaskReservationInput, key string,
 	fn func(*sql.Tx) (TaskReservationOutcome, error)) (TaskReservationOutcome, error) {
+	tx, err := d.sql.Begin()
+	if err != nil {
+		return TaskReservationOutcome{}, err
+	}
+	defer tx.Rollback()
+	out, err := reservationMutationTx(d, tx, actor, op, in, key, fn, nil)
+	if err != nil {
+		return TaskReservationOutcome{}, err
+	}
+	if err := tx.Commit(); err != nil {
+		return TaskReservationOutcome{}, err
+	}
+	return out, nil
+}
+
+// reservationMutationTx lets the registry retain dependency locks through the
+// owner commit. authorize runs on both receipt replay and immediately before
+// commit; it must not access this project's single-connection DB.
+func reservationMutationTx(d *DB, tx *sql.Tx, actor TaskActor, op ReservationOperation, in TaskReservationInput, key string,
+	fn func(*sql.Tx) (TaskReservationOutcome, error), authorize func() error) (TaskReservationOutcome, error) {
 	if err := d.taskScopeOK(); err != nil {
 		return TaskReservationOutcome{}, err
 	}
@@ -201,11 +231,6 @@ func reservationMutation(d *DB, actor TaskActor, op ReservationOperation, in Tas
 	if err != nil {
 		return TaskReservationOutcome{}, err
 	}
-	tx, err := d.sql.Begin()
-	if err != nil {
-		return TaskReservationOutcome{}, err
-	}
-	defer tx.Rollback()
 	var savedDigest, saved string
 	err = tx.QueryRow(`SELECT digest,result FROM task_reservation_requests WHERE principal=? AND operation=? AND task_id=? AND key=?`,
 		principal, string(op), in.TaskID, key).Scan(&savedDigest, &saved)
@@ -213,6 +238,11 @@ func reservationMutation(d *DB, actor TaskActor, op ReservationOperation, in Tas
 	case err == nil:
 		if savedDigest != digest {
 			return TaskReservationOutcome{}, ErrTaskRetryConflict
+		}
+		if authorize != nil {
+			if err := authorize(); err != nil {
+				return TaskReservationOutcome{}, err
+			}
 		}
 		var out TaskReservationOutcome
 		if err := json.Unmarshal([]byte(saved), &out); err != nil {
@@ -234,8 +264,10 @@ func reservationMutation(d *DB, actor TaskActor, op ReservationOperation, in Tas
 		principal, string(op), in.TaskID, key, digest, string(result)); err != nil {
 		return TaskReservationOutcome{}, err
 	}
-	if err := tx.Commit(); err != nil {
-		return TaskReservationOutcome{}, err
+	if authorize != nil {
+		if err := authorize(); err != nil {
+			return TaskReservationOutcome{}, err
+		}
 	}
 	return out, nil
 }
@@ -262,6 +294,9 @@ func (d *DB) ApplyTaskReservation(op ReservationOperation, in TaskReservationInp
 			}
 			before := r
 			if op == ReservationClaim {
+				if len(t.Dependencies) != 0 {
+					return TaskReservationOutcome{}, ErrDependencyUnresolved
+				}
 				var managed bool
 				if err := tx.QueryRow(`SELECT EXISTS(SELECT 1 FROM team_managed_tasks WHERE task_id=? AND managed=1)`, in.TaskID).Scan(&managed); err != nil {
 					return TaskReservationOutcome{}, err
@@ -296,7 +331,7 @@ func (d *DB) ApplyTaskReservation(op ReservationOperation, in TaskReservationInp
 			if err := advanceReservation(tx, &r); err != nil {
 				return TaskReservationOutcome{}, err
 			}
-			if err := recordReservationEvent(tx, op, before, r, actor, in.Reason); err != nil {
+			if err := recordReservationEvent(tx, op, before, r, actor, in.Reason, nil); err != nil {
 				return TaskReservationOutcome{}, err
 			}
 			return TaskReservationOutcome{Task: t, Reservation: r}, nil
