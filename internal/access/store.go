@@ -107,11 +107,11 @@ func (s *Store) migrate() error {
 	if err := s.db.QueryRow("PRAGMA user_version").Scan(&current); err != nil {
 		return err
 	}
-	if current == 2 {
+	if current == 3 {
 		return nil
 	}
-	if current > 2 {
-		return fmt.Errorf("access schema %d is newer than supported schema 2", current)
+	if current > 3 {
+		return fmt.Errorf("access schema %d is newer than supported schema 3", current)
 	}
 	tx, err := s.db.Begin()
 	if err != nil {
@@ -122,8 +122,8 @@ func (s *Store) migrate() error {
 	if err := tx.QueryRow("PRAGMA user_version").Scan(&version); err != nil {
 		return err
 	}
-	if version > 2 {
-		return fmt.Errorf("access schema %d is newer than supported schema 2", version)
+	if version > 3 {
+		return fmt.Errorf("access schema %d is newer than supported schema 3", version)
 	}
 	if version == 0 {
 		_, err = tx.Exec(`
@@ -143,6 +143,31 @@ PRAGMA user_version=1;`)
 		if _, err := tx.Exec(`ALTER TABLE tokens ADD COLUMN scope TEXT NOT NULL DEFAULT 'read-only' CHECK(scope IN ('user','project','read-only'));
 UPDATE tokens SET scope=CASE WHEN project='' THEN 'read-only' ELSE 'project' END;
 PRAGMA user_version=2;`); err != nil {
+			return err
+		}
+		version = 2
+	}
+	if version == 2 {
+		if _, err := tx.Exec(`
+CREATE TABLE hub_identity(singleton INTEGER PRIMARY KEY CHECK(singleton=1), id TEXT NOT NULL UNIQUE);
+CREATE TABLE team_access_profiles(
+ id TEXT PRIMARY KEY,
+ service_id TEXT NOT NULL,
+ team_id TEXT NOT NULL,
+ disabled INTEGER NOT NULL DEFAULT 0 CHECK(disabled IN (0,1)),
+ UNIQUE(service_id,team_id)
+);
+CREATE TABLE team_profile_grants(
+ project TEXT NOT NULL,
+ profile_id TEXT NOT NULL REFERENCES team_access_profiles(id),
+ PRIMARY KEY(project,profile_id)
+);`); err != nil {
+			return err
+		}
+		if _, err := tx.Exec("INSERT INTO hub_identity(singleton,id) VALUES(1,?)", uuidv7.New()); err != nil {
+			return err
+		}
+		if _, err := tx.Exec("PRAGMA user_version=3"); err != nil {
 			return err
 		}
 	}

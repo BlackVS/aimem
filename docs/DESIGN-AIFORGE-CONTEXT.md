@@ -1,6 +1,6 @@
 # AIForge verified identity and session context contract
 
-Status: proposed design for review. No endpoint, credential, schema, or client behavior in this document is implemented or approved for deployment. Parent boundary: [DESIGN-AIFORGE.md](DESIGN-AIFORGE.md), merged in f47dc5a. Updated 2026-09-25.
+Status: reviewed contract, implemented in bounded increments. E1 adds only internal identity/profile storage and grant evaluation; no team endpoint, credential, session verification or client behavior is implemented or approved for deployment. Parent boundary: [DESIGN-AIFORGE.md](DESIGN-AIFORGE.md), merged in f47dc5a. Updated 2026-09-25.
 
 ## Outcome and boundary
 
@@ -120,3 +120,9 @@ The design is accepted only when reviewers can trace each allowed operation to a
 4. Integrate the separately reviewed knowledge matrix and task reservation contract, then a first-pilot end-to-end flow. Do not infer those approvals from this document.
 
 Current source basis at f47dc5a: internal/access/store.go holds user IDs, grants, token IDs, expiry and revocation; internal/server/server.go limits ordinary tokens to task/identity routes; internal/taskcred/taskcred.go selects checkout or user-hub credentials; internal/teamstate/teamstate.go binds legacy state to checkout, hub URL and token ID; internal/store/tasks.go protects managed tasks. The current CanWriteToken path requires a personal user or access-group grant, so it cannot authorize team profile grants unchanged. These are the gaps the proposed contract addresses, not evidence that the new protocol already runs. No existing credential or live team state is changed by this design document.
+
+### E1 internal storage boundary
+
+Access schema 3 adds one immutable hub ID in the hub's `access.db`, a team access profile linked by immutable `(service ID, team ID)`, and profile grants keyed by the existing stable project access ID. The project ID moves with a rename; a deleted and recreated project gets a different ID. Profile records have no member list and cannot authenticate. The profile administration and team grant evaluator remain package-private until the peer, actor, role and selected session can be verified by later increments. Test-supplied IDs demonstrate ledger behavior only; they do not prove production authority. Existing `CanWriteToken` and HTTP/MCP task and knowledge routes continue to use standalone grants and never consult profile grants.
+
+Schema 2 data is migrated additively in one access-store transaction. Existing users, groups, grants, tokens, secrets and project databases are preserved; new profile tables start empty and give no access by default. Schema 1 first migrates token scope as before, then adds schema 3. Back up the state root before upgrading. Older binaries reject schema 3, so rolling back the binary alone is not supported; rollback requires restoring a pre-upgrade `access.db` backup together with the corresponding hub state. Do not manually lower `user_version` or assume an old binary will preserve profile isolation. E1 does not issue credentials, establish a peer, or enable a team operation. E2–E5 must supply and test those boundaries before C5 consumes them.
