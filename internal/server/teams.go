@@ -75,7 +75,7 @@ func (s *Server) teamError(w http.ResponseWriter, r *http.Request, err error) {
 	switch {
 	case errors.Is(err, store.ErrTeamSessionDenied):
 		status, message = 403, "current team enrollment and bound ordinary write session required"
-	case errors.Is(err, store.ErrTeamAssignmentConflict):
+	case errors.Is(err, store.ErrTeamAssignmentConflict), errors.Is(err, store.ErrTaskReserved):
 		status, message = 409, err.Error()
 	case errors.Is(err, store.ErrTeamAssignmentNotFound):
 		status, message = 404, "team assignment not found"

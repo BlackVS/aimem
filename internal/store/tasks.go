@@ -450,7 +450,7 @@ func (d *DB) UpdateTask(id string, content TaskContent, expected int64, actor Ta
 		if managed {
 			return ErrManagedTask
 		}
-		return nil
+		return rejectActiveReservation(tx, id)
 	}
 	return checkedTaskMutation(d, actor, "update", id, key, input, check, func(tx *sql.Tx) (Task, error) {
 		t, err := readTask(tx, id)
@@ -474,6 +474,21 @@ func (d *DB) UpdateTask(id string, content TaskContent, expected int64, actor Ta
 // the matching history row in the caller's transaction; a test proves the
 // columns and the snapshot agree.
 func saveTask(tx *sql.Tx, t Task, actor TaskActor, create bool) error {
+	if !create {
+		if err := rejectActiveReservation(tx, t.ID); err != nil {
+			return err
+		}
+	}
+	return writeTask(tx, t, actor, create)
+}
+
+// saveReservedTask is the ledger's narrow write path after it has checked the
+// current reservation ID, fence and task revision in this same transaction.
+func saveReservedTask(tx *sql.Tx, t Task, actor TaskActor) error {
+	return writeTask(tx, t, actor, false)
+}
+
+func writeTask(tx *sql.Tx, t Task, actor TaskActor, create bool) error {
 	t.Coordination = nil // current projection is never persisted into task history
 	body, err := json.Marshal(t)
 	if err != nil {

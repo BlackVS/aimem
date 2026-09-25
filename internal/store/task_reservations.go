@@ -28,7 +28,19 @@ var (
 	ErrReservationConflict = errors.New("task already has an active reservation or is legacy managed")
 	ErrReservationStale    = errors.New("reservation ID or fence is stale")
 	ErrReservationOverflow = errors.New("reservation fence exhausted")
+	ErrTaskReserved        = errors.New("task has an active reservation; generic task writes are unavailable")
 )
+
+func rejectActiveReservation(tx *sql.Tx, taskID string) error {
+	var active bool
+	if err := tx.QueryRow(`SELECT EXISTS(SELECT 1 FROM task_reservations WHERE task_id=? AND active_id<>'')`, taskID).Scan(&active); err != nil {
+		return err
+	}
+	if active {
+		return ErrTaskReserved
+	}
+	return nil
+}
 
 // ReservationHolder is an opaque storage label, not proof of actor authority.
 // Its mode and reference semantics are fixed by later reviewed contracts.
@@ -272,7 +284,7 @@ func (d *DB) ApplyTaskReservation(op ReservationOperation, in TaskReservationInp
 					t.TaskContent = *in.Content
 					t.Revision++
 					t.UpdatedAt = nowUTC()
-					if err := saveTask(tx, t, actor, false); err != nil {
+					if err := saveReservedTask(tx, t, actor); err != nil {
 						return TaskReservationOutcome{}, err
 					}
 					r.TaskRevision = t.Revision

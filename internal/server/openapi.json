@@ -390,7 +390,7 @@
       },
       "put": {
         "summary": "Replace a task's editable fields under expected-revision CAS",
-        "description": "Body is the full editable content plus expected_revision; omitted optional fields clear (candidate_refs and evidence_refs are typed references {kind, ref, note?, scope?} \u2014 a bare string is refused with 400 since schema 13). A stale revision answers 409 with the current task. Ordinary user tokens may call this route; writes are authorized per attempt against the task's owning project (user-scoped token or token issued for that project instance, plus a current grant), legacy writer tokens read only, admin tokens may update unmanaged tasks. Retry keys travel in the Idempotency-Key header. Managed tasks refuse generic update/archive with 409 managed_task, including admins and old update receipts; use dedicated coordination operations when available. The coordination projection is not editable content.",
+        "description": "Body is the full editable content plus expected_revision; omitted optional fields clear (candidate_refs and evidence_refs are typed references {kind, ref, note?, scope?} \u2014 a bare string is refused with 400 since schema 13). A stale revision answers 409 with the current task. Ordinary user tokens may call this route; writes are authorized per attempt against the task's owning project (user-scoped token or token issued for that project instance, plus a current grant), legacy writer tokens read only, admin tokens may update unmanaged tasks. Retry keys travel in the Idempotency-Key header. Managed tasks refuse generic update/archive with 409 managed_task, including admins and old update receipts. Tasks with an active reservation also refuse generic update/archive with 409, including admins and old update receipts; the response does not disclose the holder. Reservation transitions are not exposed through this route. The coordination projection is not editable content.",
         "x-role": "writer",
         "parameters": [
           {
@@ -437,7 +437,7 @@
             "description": "Unknown project, task or comment"
           },
           "409": {
-            "description": "Revision conflict (body carries `current` in the same shape as a read), idempotency key reused with different input, archived task, or managed_task (use coordination operations)"
+            "description": "Revision conflict (body carries `current` in the same shape as a read), idempotency key reused with different input, archived task, managed_task, or an active reservation refusing generic writes"
           },
           "413": {
             "description": "Request body larger than 256 KiB"
@@ -2799,7 +2799,7 @@
       "post": {
         "x-role": "writer",
         "summary": "Offer a team assignment",
-        "description": "Requires a live ordinary project write token, enabled project, current enrollment and a session bound to this token. Admin/local/legacy/read-only credentials are refused. Team ID and session_id/generation are handles, not credentials. Returns protocol_version:1, assignment and workflow_ready:true; every transition also delivers a lifecycle message to the counterpart's inbox, and readiness describes the protocol loop, not a pilot approval. Idempotency-Key required. One JSON body <=64 KiB; unknown fields and trailing values rejected. The caller is reauthorized even on retries; identical accepted commands return their original receipt. Body: coordinator session_id/generation, coordinator_generation, task_id, expected_revision, worker:{session_id,generation}, suitability_rationale and cost_rationale (nonempty, each <=4096 UTF-8 bytes). Only the current coordinator can offer READY tasks with the expected revision and same-project DONE dependencies. Checks intended worker availability/enrollment and live token/user/scope/grants from persisted session bindings. One reservation per task across teams and per worker session. Snapshots task/profile/model/source/rationale; declarations grant no authority.",
+        "description": "Requires a live ordinary project write token, enabled project, current enrollment and a session bound to this token. Admin/local/legacy/read-only credentials are refused. Team ID and session_id/generation are handles, not credentials. Returns protocol_version:1, assignment and workflow_ready:true; every transition also delivers a lifecycle message to the counterpart's inbox, and readiness describes the protocol loop, not a pilot approval. Idempotency-Key required. One JSON body <=64 KiB; unknown fields and trailing values rejected. The caller is reauthorized even on retries; identical accepted commands return their original receipt. Body: coordinator session_id/generation, coordinator_generation, task_id, expected_revision, worker:{session_id,generation}, suitability_rationale and cost_rationale (nonempty, each <=4096 UTF-8 bytes). Only the current coordinator can offer READY tasks with the expected revision and same-project DONE dependencies. Checks intended worker availability/enrollment and live token/user/scope/grants from persisted session bindings. One legacy assignment per task across teams and per worker session; a task with an active AIForge reservation cannot be offered through this route. Snapshots task/profile/model/source/rationale; declarations grant no authority.",
         "parameters": [
           {
             "name": "p",
@@ -2843,7 +2843,7 @@
             "description": "Project, team, assignment or task/dependency not found"
           },
           "409": {
-            "description": "Stale generation, task revision/readiness/dependency conflict, occupied task/worker, invalid transition or retry mismatch. Task revision conflicts include current task and project."
+            "description": "Stale generation, task revision/readiness/dependency conflict, active task reservation, occupied task/worker, invalid transition or retry mismatch. Task revision conflicts include current task and project."
           }
         },
         "security": [
