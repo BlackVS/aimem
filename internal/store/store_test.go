@@ -435,6 +435,7 @@ func TestMigrationV9ToV10(t *testing.T) {
 		t.Fatal(err)
 	}
 	// Roll back to a genuine v9 file: no v10 index and no v11 task tables.
+	rewindReservationSchema(t, db)
 	for _, stmt := range []string{
 		`DROP INDEX idx_memory_audit_memory`,
 		`DROP TABLE epic_history`, `DROP TABLE epics`,

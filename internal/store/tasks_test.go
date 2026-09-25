@@ -74,6 +74,7 @@ func TestMigrationV10ToV11(t *testing.T) {
 	}
 	// Rewind through both task-era steps: 12 (epics, the epic column) and
 	// 11 (the task tables); the migration must replay both, twice.
+	rewindReservationSchema(t, db)
 	for _, stmt := range []string{
 		`DROP TABLE epic_history`, `DROP TABLE epics`,
 		`DROP TABLE task_requests`, `DROP TABLE task_comments`, `DROP TABLE task_history`, `DROP TABLE tasks`,
@@ -880,6 +881,7 @@ func TestDropChecksTasksOnUnopenedFiles(t *testing.T) {
 		t.Fatal(err)
 	}
 	legacy, _ := r.Open("proj-legacy")
+	rewindReservationSchema(t, legacy)
 	for _, stmt := range []string{
 		`DROP TABLE task_requests`, `DROP TABLE task_comments`, `DROP TABLE task_history`, `DROP TABLE tasks`,
 		`UPDATE meta SET value='10' WHERE key='schema_version'`,
@@ -1442,6 +1444,7 @@ func TestMigrateToSchema12(t *testing.T) {
 		t.Fatal(err)
 	}
 	// Rewind to schema 11 by removing what 12 added.
+	rewindReservationSchema(t, db)
 	for _, q := range []string{
 		`DROP INDEX idx_tasks_epic`, `ALTER TABLE tasks DROP COLUMN epic`,
 		`DROP TABLE epic_history`, `DROP INDEX idx_epics_state`, `DROP TABLE epics`,
@@ -1588,6 +1591,7 @@ func TestMigrateToSchema13RewritesRefsAndReceipts(t *testing.T) {
 	d2, _ := receiptDigest(map[string]any{"content": newContent, "expected": float64(1)})
 	actor, _ := json.Marshal(aliceActor)
 	actorKey, _ := aliceActor.key()
+	rewindReservationSchema(t, db)
 	for _, stmt := range []struct {
 		q    string
 		args []any
@@ -1671,6 +1675,7 @@ func TestMigrateToSchema13RewritesRefsAndReceipts(t *testing.T) {
 	}
 	// The step run again over typed data (the version rewound) changes
 	// nothing: objects pass through, and the receipts still replay.
+	rewindReservationSchema(t, db2)
 	for _, q := range []string{`DROP TABLE team_assignments`, `DROP TABLE team_managed_tasks`, `DROP TABLE team_deliveries`, `DROP TABLE team_messages`, `DROP TABLE team_sessions`, `DROP TABLE team_session_control`, `DROP TABLE team_events`, `DROP TABLE teams`} {
 		if _, err := db2.sql.Exec(q); err != nil {
 			t.Fatal(err)

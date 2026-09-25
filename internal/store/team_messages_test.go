@@ -279,6 +279,7 @@ func TestTeamMessageRollbackAndReopen(t *testing.T) {
 func TestTeamMessageMigration(t *testing.T) {
 	_, d, team, a, _ := sessionFixture(t)
 	h := messageMember(t, d, team, a, "sender")
+	rewindReservationSchema(t, d)
 	for _, q := range []string{`DROP TABLE team_assignments`, `DROP TABLE team_managed_tasks`, `DROP TABLE team_deliveries`, `DROP TABLE team_messages`, `UPDATE meta SET value='15' WHERE key='schema_version'`} {
 		if _, err := d.sql.Exec(q); err != nil {
 			t.Fatal(err)
