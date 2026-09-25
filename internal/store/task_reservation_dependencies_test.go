@@ -2,12 +2,60 @@ package store
 
 import (
 	"context"
+	"database/sql"
+	"database/sql/driver"
 	"errors"
 	"testing"
 	"time"
 
+	sqlite "modernc.org/sqlite"
+
 	"aimem/internal/uuidv7"
 )
+
+type pausedCommitDriver struct {
+	base    driver.Driver
+	entered chan struct{}
+	release chan struct{}
+}
+
+func (d *pausedCommitDriver) Open(name string) (driver.Conn, error) {
+	conn, err := d.base.Open(name)
+	if err != nil {
+		return nil, err
+	}
+	return &pausedCommitConn{Conn: conn, entered: d.entered, release: d.release}, nil
+}
+
+type pausedCommitConn struct {
+	driver.Conn
+	entered chan struct{}
+	release chan struct{}
+}
+
+func (c *pausedCommitConn) Begin() (driver.Tx, error) {
+	return nil, errors.New("paused commit test requires BeginTx")
+}
+
+func (c *pausedCommitConn) BeginTx(ctx context.Context, opts driver.TxOptions) (driver.Tx, error) {
+	tx, err := c.Conn.(driver.ConnBeginTx).BeginTx(ctx, opts)
+	if err != nil {
+		return nil, err
+	}
+	return &pausedCommitTx{Tx: tx, entered: c.entered, release: c.release}, nil
+}
+
+type pausedCommitTx struct {
+	driver.Tx
+	entered chan struct{}
+	release chan struct{}
+}
+
+func (t *pausedCommitTx) Commit() error {
+	close(t.entered)
+	<-t.release
+	return t.Tx.Commit()
+}
 
 func dependencyFixture(t *testing.T) (*Registry, *DB, *DB, Task, Task) {
 	t.Helper()
@@ -271,6 +319,73 @@ func TestDependencyClaimLifecycleWaitCancels(t *testing.T) {
 		aliceActor, "lifecycle-wait", allowDependencyRead)
 	if !errors.Is(err, context.DeadlineExceeded) {
 		t.Fatalf("lifecycle wait did not cancel: %v", err)
+	}
+}
+
+func TestDependencyLocksSurviveCancellationDuringOwnerCommit(t *testing.T) {
+	r, ownerDB, depDB, _, _ := dependencyFixture(t)
+	peer, err := NewRegistry(r.Root())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer peer.Close()
+	peerDB, err := peer.OpenExisting(depDB.projectID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	entered := make(chan struct{})
+	release := make(chan struct{})
+	defer func() {
+		select {
+		case <-release:
+		default:
+			close(release)
+		}
+	}()
+	name := "sqlite-c3-paused-" + uuidv7.New()
+	sql.Register(name, &pausedCommitDriver{base: &sqlite.Driver{}, entered: entered, release: release})
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	depHandle, depTx, err := beginClaimTx(ctx, depDB)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer depHandle.Close()
+	defer depTx.Rollback()
+	ownerHandle, ownerTx, err := beginClaimTxDriver(ctx, ownerDB, name)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ownerHandle.Close()
+	defer ownerTx.Rollback()
+	if _, err := ownerTx.Exec(`INSERT INTO meta(key,value) VALUES('c3_commit_pause','written')`); err != nil {
+		t.Fatal(err)
+	}
+	commitResult := make(chan error, 1)
+	go func() { commitResult <- ownerTx.Commit() }()
+	<-entered
+	cancel()
+	peerResult := make(chan error, 1)
+	go func() { peerResult <- peerDB.SetMeta("c3_peer", "written") }()
+	select {
+	case err := <-peerResult:
+		t.Fatalf("dependency lock released during owner commit: %v", err)
+	case <-time.After(150 * time.Millisecond):
+	}
+	close(release)
+	if err := <-commitResult; err != nil {
+		t.Fatalf("owner commit: %v", err)
+	}
+	if err := depTx.Rollback(); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case err := <-peerResult:
+		if err != nil {
+			t.Fatalf("peer write after owner commit: %v", err)
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("dependency peer stayed blocked after rollback")
 	}
 }
 

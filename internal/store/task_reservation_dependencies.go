@@ -21,17 +21,33 @@ const dependencyClaimTimeout = 5 * time.Second
 const maxDependencyWalk = 512
 
 func beginClaimTx(ctx context.Context, db *DB) (*sql.DB, *sql.Tx, error) {
+	return beginClaimTxDriver(ctx, db, "sqlite")
+}
+
+func beginClaimTxDriver(ctx context.Context, db *DB, driverName string) (*sql.DB, *sql.Tx, error) {
 	// A dedicated connection keeps the short busy timeout from changing the
 	// registry handle used by ordinary task writers.
-	handle, err := sql.Open("sqlite", "file:"+db.path+
+	handle, err := sql.Open(driverName, "file:"+db.path+
 		"?mode=rw&_txlock=immediate&_pragma=busy_timeout(50)&_pragma=foreign_keys(ON)&_pragma=synchronous(NORMAL)")
 	if err != nil {
 		return nil, nil, err
 	}
 	handle.SetMaxOpenConns(1)
 	for {
-		tx, err := handle.BeginTx(ctx, nil)
+		if err := ctx.Err(); err != nil {
+			handle.Close()
+			return nil, nil, err
+		}
+		// database/sql automatically rolls back a transaction when its BeginTx
+		// context is canceled. Dependency locks must instead survive a caller
+		// cancellation that arrives during the owner's driver Commit.
+		tx, err := handle.BeginTx(context.WithoutCancel(ctx), nil)
 		if err == nil {
+			if err := ctx.Err(); err != nil {
+				tx.Rollback()
+				handle.Close()
+				return nil, nil, err
+			}
 			return handle, tx, nil
 		}
 		if ctx.Err() != nil {
@@ -372,6 +388,9 @@ func (r *Registry) ClaimTaskReservation(ctx context.Context, in TaskReservationI
 			return TaskReservationOutcome{Task: current, Reservation: hold}, nil
 		}, authorize)
 	if err != nil {
+		return TaskReservationOutcome{}, err
+	}
+	if err := ctx.Err(); err != nil {
 		return TaskReservationOutcome{}, err
 	}
 	if err := ownerTx.Commit(); err != nil {
