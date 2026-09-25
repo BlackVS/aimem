@@ -1,0 +1,127 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "Aimem reservation v1 proposal (unregistered)",
+    "version": "1.0.0",
+    "description": "Design fixture only. No production route or MCP tool is registered until C5 authorization and C6 integration are reviewed."
+  },
+  "x-contract-version": "reservation.v1",
+  "x-security-gate": "C5 must define and test individual-context and bounded aicrew service authentication, including operator recovery, before C6 registers any operation. This proposal deliberately does not choose credential transport.",
+  "x-refusal-status": {
+    "invalid_credential": 401,
+    "identity_link_required": 403,
+    "identity_mismatch": 403,
+    "context_missing": 403,
+    "context_stale": 403,
+    "context_unavailable": 503,
+    "grant_denied": 403,
+    "role_forbidden": 403,
+    "task_unavailable": 404,
+    "reservation_conflict": 409,
+    "revision_conflict": 409,
+    "stale_fence": 409,
+    "idempotency_conflict": 409,
+    "receipt_unresolved": 503,
+    "work_outstanding": 409,
+    "unsupported_version": 400,
+    "invalid_request": 400,
+    "dependency_unresolved": [404, 503]
+  },
+  "x-mcp-parity": {
+    "claim": "task_reservation_claim",
+    "transfer": "task_reservation_transfer",
+    "update": "task_reservation_update",
+    "release": "task_reservation_release",
+    "finalize": "task_reservation_finalize",
+    "status": "task_reservation_status",
+    "receipt": "task_reservation_receipt"
+  },
+  "paths": {
+    "/v1/projects/{project_id}/tasks/{task_id}/reservation": {
+      "parameters": [{"$ref": "#/components/parameters/ProjectID"}, {"$ref": "#/components/parameters/TaskID"}, {"$ref": "#/components/parameters/ReservationVersion"}],
+      "get": {"operationId": "reservationStatus", "x-operation": "status", "x-mcp-tool": "task_reservation_status", "responses": {"200": {"description": "Authorized own hold or none", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/Status"}}}}, "403": {"$ref": "#/components/responses/Refusal"}, "404": {"$ref": "#/components/responses/Refusal"}, "503": {"$ref": "#/components/responses/Refusal"}}}
+    },
+    "/v1/projects/{project_id}/tasks/{task_id}/reservation/claim": {
+      "parameters": [{"$ref": "#/components/parameters/ProjectID"}, {"$ref": "#/components/parameters/TaskID"}, {"$ref": "#/components/parameters/ReservationVersion"}],
+      "post": {"parameters": [{"$ref": "#/components/parameters/IdempotencyKey"}], "operationId": "reservationClaim", "x-operation": "claim", "x-mcp-tool": "task_reservation_claim", "requestBody": {"$ref": "#/components/requestBodies/Mutation"}, "responses": {"200": {"$ref": "#/components/responses/Committed"}, "400": {"$ref": "#/components/responses/Refusal"}, "401": {"$ref": "#/components/responses/Refusal"}, "403": {"$ref": "#/components/responses/Refusal"}, "404": {"$ref": "#/components/responses/Refusal"}, "409": {"$ref": "#/components/responses/Refusal"}, "503": {"$ref": "#/components/responses/Refusal"}}}
+    },
+    "/v1/projects/{project_id}/tasks/{task_id}/reservation/transfer": {
+      "parameters": [{"$ref": "#/components/parameters/ProjectID"}, {"$ref": "#/components/parameters/TaskID"}, {"$ref": "#/components/parameters/ReservationVersion"}],
+      "post": {"parameters": [{"$ref": "#/components/parameters/IdempotencyKey"}], "operationId": "reservationTransfer", "x-operation": "transfer", "x-mcp-tool": "task_reservation_transfer", "requestBody": {"$ref": "#/components/requestBodies/Mutation"}, "responses": {"200": {"$ref": "#/components/responses/Committed"}, "400": {"$ref": "#/components/responses/Refusal"}, "401": {"$ref": "#/components/responses/Refusal"}, "403": {"$ref": "#/components/responses/Refusal"}, "404": {"$ref": "#/components/responses/Refusal"}, "409": {"$ref": "#/components/responses/Refusal"}, "503": {"$ref": "#/components/responses/Refusal"}}}
+    },
+    "/v1/projects/{project_id}/tasks/{task_id}/reservation/update": {
+      "parameters": [{"$ref": "#/components/parameters/ProjectID"}, {"$ref": "#/components/parameters/TaskID"}, {"$ref": "#/components/parameters/ReservationVersion"}],
+      "post": {"parameters": [{"$ref": "#/components/parameters/IdempotencyKey"}], "operationId": "reservationUpdate", "x-operation": "update", "x-mcp-tool": "task_reservation_update", "requestBody": {"$ref": "#/components/requestBodies/Mutation"}, "responses": {"200": {"$ref": "#/components/responses/Committed"}, "400": {"$ref": "#/components/responses/Refusal"}, "401": {"$ref": "#/components/responses/Refusal"}, "403": {"$ref": "#/components/responses/Refusal"}, "404": {"$ref": "#/components/responses/Refusal"}, "409": {"$ref": "#/components/responses/Refusal"}, "503": {"$ref": "#/components/responses/Refusal"}}}
+    },
+    "/v1/projects/{project_id}/tasks/{task_id}/reservation/release": {
+      "parameters": [{"$ref": "#/components/parameters/ProjectID"}, {"$ref": "#/components/parameters/TaskID"}, {"$ref": "#/components/parameters/ReservationVersion"}],
+      "post": {"parameters": [{"$ref": "#/components/parameters/IdempotencyKey"}], "operationId": "reservationRelease", "x-operation": "release", "x-mcp-tool": "task_reservation_release", "requestBody": {"$ref": "#/components/requestBodies/Mutation"}, "responses": {"200": {"$ref": "#/components/responses/Committed"}, "400": {"$ref": "#/components/responses/Refusal"}, "401": {"$ref": "#/components/responses/Refusal"}, "403": {"$ref": "#/components/responses/Refusal"}, "404": {"$ref": "#/components/responses/Refusal"}, "409": {"$ref": "#/components/responses/Refusal"}, "503": {"$ref": "#/components/responses/Refusal"}}}
+    },
+    "/v1/projects/{project_id}/tasks/{task_id}/reservation/finalize": {
+      "parameters": [{"$ref": "#/components/parameters/ProjectID"}, {"$ref": "#/components/parameters/TaskID"}, {"$ref": "#/components/parameters/ReservationVersion"}],
+      "post": {"parameters": [{"$ref": "#/components/parameters/IdempotencyKey"}], "operationId": "reservationFinalize", "x-operation": "finalize", "x-mcp-tool": "task_reservation_finalize", "requestBody": {"$ref": "#/components/requestBodies/Mutation"}, "responses": {"200": {"$ref": "#/components/responses/Committed"}, "400": {"$ref": "#/components/responses/Refusal"}, "401": {"$ref": "#/components/responses/Refusal"}, "403": {"$ref": "#/components/responses/Refusal"}, "404": {"$ref": "#/components/responses/Refusal"}, "409": {"$ref": "#/components/responses/Refusal"}, "503": {"$ref": "#/components/responses/Refusal"}}}
+    },
+    "/v1/projects/{project_id}/tasks/{task_id}/reservation/receipts/{operation}/{request_key}": {
+      "parameters": [{"$ref": "#/components/parameters/ProjectID"}, {"$ref": "#/components/parameters/TaskID"}, {"$ref": "#/components/parameters/Operation"}, {"$ref": "#/components/parameters/RequestKey"}, {"$ref": "#/components/parameters/ReservationVersion"}],
+      "get": {"operationId": "reservationReceipt", "x-operation": "receipt", "x-mcp-tool": "task_reservation_receipt", "responses": {"200": {"description": "Committed, not_committed or unresolved receipt state after current disclosure check", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/ReceiptStatus"}}}}, "400": {"$ref": "#/components/responses/Refusal"}, "401": {"$ref": "#/components/responses/Refusal"}, "403": {"$ref": "#/components/responses/Refusal"}, "404": {"$ref": "#/components/responses/Refusal"}, "503": {"$ref": "#/components/responses/Refusal"}}}
+    }
+  },
+  "components": {
+    "parameters": {
+      "ProjectID": {"name": "project_id", "in": "path", "required": true, "schema": {"type": "string"}},
+      "TaskID": {"name": "task_id", "in": "path", "required": true, "schema": {"type": "string"}},
+      "Operation": {"name": "operation", "in": "path", "required": true, "schema": {"enum": ["claim", "transfer", "update", "release", "finalize"]}},
+      "RequestKey": {"name": "request_key", "in": "path", "required": true, "schema": {"type": "string"}},
+      "ReservationVersion": {"name": "X-Aimem-Reservation-Version", "in": "header", "required": true, "schema": {"type": "string", "const": "1"}},
+      "IdempotencyKey": {"name": "Idempotency-Key", "in": "header", "required": true, "schema": {"type": "string"}}
+    },
+    "requestBodies": {
+      "Mutation": {
+        "required": true,
+        "description": "Requires X-Aimem-Reservation-Version: 1 and Idempotency-Key headers. Actor, mode and session derive from authenticated connection; a bounded service proof is independently verified.",
+        "content": {"application/json": {"schema": {"$ref": "#/components/schemas/Mutation"}}}
+      }
+    },
+    "responses": {
+      "Committed": {"description": "Committed transition or authorized identical replay", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/Outcome"}}}},
+      "Refusal": {"description": "Stable, non-disclosing refusal shared with MCP", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/Refusal"}}}}
+    },
+    "schemas": {
+      "Status": {"type": "object", "required": ["state"], "properties": {"state": {"enum": ["none", "held"]}, "reservation_id": {"type": "string"}, "fence": {"type": "string", "pattern": "^[1-9][0-9]*$"}, "own_work_ref": {"type": "string"}, "task_revision": {"type": "integer", "minimum": 1}}},
+      "ReceiptStatus": {"type": "object", "required": ["state", "operation", "request_key"], "properties": {"state": {"enum": ["committed", "not_committed", "unresolved"]}, "operation": {"enum": ["claim", "transfer", "update", "release", "finalize"]}, "request_key": {"type": "string"}, "outcome": {"$ref": "#/components/schemas/Outcome"}}},
+      "Mutation": {
+        "type": "object",
+        "required": ["expected_revision"],
+        "properties": {
+          "expected_revision": {"type": "integer", "minimum": 1},
+          "reservation_id": {"type": "string"},
+          "fence": {"type": "string", "pattern": "^[1-9][0-9]*$"},
+          "holder": {"type": "object", "required": ["mode", "work_ref"], "properties": {"mode": {"enum": ["standalone", "external"]}, "work_ref": {"type": "string"}}},
+          "intent": {"type": "string"},
+          "content": {"type": "object", "description": "Complete TaskContent, validated by the task contract"},
+          "reason": {"type": "string"},
+          "terminal_evidence": {"type": "array", "items": {"type": "string"}},
+          "coordination_proof": {"type": "string", "description": "Opaque reference to separately verified aicrew transition; never an actor assertion or bearer"}
+        },
+        "additionalProperties": false
+      },
+      "Outcome": {
+        "type": "object",
+        "required": ["receipt", "task_revision", "reservation"],
+        "properties": {
+          "receipt": {"type": "object", "required": ["id", "state", "operation", "request_key", "replayed", "actor_id", "verified_mode"], "properties": {"id": {"type": "string"}, "state": {"const": "committed"}, "operation": {"type": "string"}, "request_key": {"type": "string"}, "replayed": {"type": "boolean"}, "actor_id": {"type": "string"}, "verified_mode": {"enum": ["personal", "team"]}}},
+          "task_revision": {"type": "integer", "minimum": 1},
+          "reservation": {"type": "object", "required": ["id", "fence", "active"], "properties": {"id": {"type": "string", "description": "Empty after release or finalize"}, "fence": {"type": "string", "pattern": "^[1-9][0-9]*$"}, "active": {"type": "boolean"}, "holder_mode": {"enum": ["standalone", "external"]}, "own_work_ref": {"type": "string"}}}
+        }
+      },
+      "Refusal": {
+        "type": "object",
+        "required": ["code", "message", "retryable", "next_action", "correlation_id"],
+        "properties": {
+          "code": {"type": "string"}, "message": {"type": "string"}, "active_mode": {"enum": ["personal", "team"]}, "retryable": {"type": "boolean"}, "next_action": {"type": "string"}, "correlation_id": {"type": "string"}
+        },
+        "additionalProperties": false
+      }
+    }
+  }
+}
