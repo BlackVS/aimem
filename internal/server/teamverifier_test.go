@@ -203,6 +203,12 @@ func TestTeamReadsRefuseAnUngrantedProject(t *testing.T) {
 		if r.status != 403 || code != "grant_denied" || mode != "team" || cid == "" {
 			t.Errorf("GET %s in team mode: %d %s", p, r.status, r.body)
 		}
+		subject := g.assertRefusalAudited(t, r, "user:"+g.aliceID)
+		for _, want := range []string{"service=aicrew-example", "team=team-1", "session=sess-1", "generation=4", "role=worker", "route=", `project="beta"`} {
+			if !strings.Contains(subject, want) {
+				t.Errorf("GET %s: grant refusal audit %q lacks %s", p, subject, want)
+			}
+		}
 	}
 	if err := g.db.SetTeamGrant("admin", g.alphaInstance, g.profile.ID, false); err != nil {
 		t.Fatal(err)
@@ -263,6 +269,9 @@ func TestTeamVerifierRefusals(t *testing.T) {
 		got, mode, _ := refusal(t, r)
 		if r.status != status || got != code || mode != "team" {
 			t.Errorf("%s: %d %s, want %d %s", name, r.status, r.body, status, code)
+		}
+		if subject := g.assertRefusalAudited(t, r, "user:"+g.aliceID); !strings.Contains(subject, "reason=") {
+			t.Errorf("%s: the audit does not name the reason: %q", name, subject)
 		}
 	}
 	for name, tc := range map[string]struct {

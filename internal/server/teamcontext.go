@@ -19,6 +19,7 @@ import (
 	"net/http"
 	"os"
 	"sort"
+	"strings"
 	"time"
 
 	"aimem/internal/access"
@@ -105,43 +106,82 @@ func (s *Server) teamRefuse(w http.ResponseWriter, code, correlationID string) {
 	s.identityRefuseWith(w, code, "team", correlationID)
 }
 
+// teamAuditActor names the authenticated caller in the audit.
+func teamAuditActor(id Identity) string {
+	if id.Role == "user" {
+		return "user:" + id.UserID
+	}
+	return "credential:" + id.Name
+}
+
+// teamRequestRoute is the request line as the audit records it for a refusal
+// that happens before any route or session is known.
+func teamRequestRoute(r *http.Request) string {
+	line := r.Method + " " + r.URL.EscapedPath()
+	if len(line) > 200 {
+		line = line[:200]
+	}
+	return fmt.Sprintf("request=%q", line)
+}
+
+// teamDeny answers every team-mode refusal after authentication. It audits
+// team.refused.<code> under the caller, with detail and the correlation ID,
+// then answers in team mode under that same ID. An audit failure is logged;
+// the request is refused either way.
+func (s *Server) teamDeny(w http.ResponseWriter, id Identity, code, detail, cid string) {
+	subject := strings.TrimSpace(detail + " correlation=" + cid)
+	if db, err := s.openAccess(false); err != nil {
+		s.log.Error("team audit", "err", err)
+	} else if err := db.RecordTeamRequest(teamAuditActor(id), "team.refused."+code, subject); err != nil {
+		s.log.Error("team audit", "err", err)
+	}
+	s.log.Warn("team request refused", "code", code, "correlation_id", cid)
+	s.teamRefuse(w, code, cid)
+}
+
 // teamGate decides a team-mode request. id is the authenticated caller, or nil
 // on the local socket. It returns the verified context, or false once it has
 // answered the refusal. The handle is never echoed, logged or audited.
 func (s *Server) teamGate(w http.ResponseWriter, r *http.Request, id *Identity) (teamContext, bool) {
 	values := r.Header.Values(teamContextHeader)
-	switch {
-	case len(values) != 1 || !introspect.ValidHandle(values[0]):
-		s.identityRefuse(w, "invalid_request")
-		return teamContext{}, false
-	case id == nil || id.Role != "user" || id.Scope != access.ScopeUser || id.Project != "":
-		s.identityRefuse(w, "credential_scope_forbidden")
-		return teamContext{}, false
-	case !teamRouteServed(r):
-		s.teamRefuse(w, "team_operation_unsupported", uuidv7.New())
+	shapeOK := len(values) == 1 && introspect.ValidHandle(values[0])
+	if id == nil {
+		// The local socket's caller is the operator, not an authenticated
+		// credential; there is no one to attribute an audit record to.
+		if !shapeOK {
+			s.identityRefuse(w, "invalid_request")
+		} else {
+			s.identityRefuse(w, "credential_scope_forbidden")
+		}
 		return teamContext{}, false
 	}
-	return s.verifyTeamContext(w, r, *id, values[0])
+	cid := uuidv7.New()
+	switch {
+	case !shapeOK:
+		s.teamDeny(w, *id, "invalid_request", teamRequestRoute(r), cid)
+		return teamContext{}, false
+	case id.Role != "user" || id.Scope != access.ScopeUser || id.Project != "":
+		s.teamDeny(w, *id, "credential_scope_forbidden", teamRequestRoute(r), cid)
+		return teamContext{}, false
+	case !teamRouteServed(r):
+		s.teamDeny(w, *id, "team_operation_unsupported", teamRequestRoute(r), cid)
+		return teamContext{}, false
+	}
+	return s.verifyTeamContext(w, r, *id, values[0], cid)
 }
 
 // verifyTeamContext runs the context contract's verifier after
 // authentication: the single operational peer, one introspection, the exact
 // binding to the authenticated credential, the linked enabled profile and the
-// role policy. Every outcome is audited under one correlation ID.
-func (s *Server) verifyTeamContext(w http.ResponseWriter, r *http.Request, id Identity, handle string) (teamContext, bool) {
-	cid := uuidv7.New()
-	db, err := s.openAccess(false)
-	if err != nil {
-		s.teamRefuse(w, "context_unavailable", cid)
+// role policy. Every outcome is audited under the request's correlation ID.
+func (s *Server) verifyTeamContext(w http.ResponseWriter, r *http.Request, id Identity, handle, cid string) (teamContext, bool) {
+	refuse := func(code, reason, detail string) (teamContext, bool) {
+		s.teamDeny(w, id, code, strings.TrimSpace(detail+" "+teamRequestRoute(r)+" reason="+reason), cid)
 		return teamContext{}, false
 	}
-	refuse := func(code, reason, detail string) (teamContext, bool) {
-		if err := db.RecordTeamRequest(id.UserID, "team.refused."+code, detail+" reason="+reason+" correlation="+cid); err != nil {
-			s.log.Error("team audit", "err", err)
-		}
-		s.log.Warn("team context refused", "code", code, "reason", reason, "correlation_id", cid)
-		s.teamRefuse(w, code, cid)
-		return teamContext{}, false
+	db, err := s.openAccess(false)
+	if err != nil {
+		return refuse("context_unavailable", "access_store", "")
 	}
 	peers, err := s.introspectionPeers(db)
 	if err != nil {
@@ -193,10 +233,9 @@ func (s *Server) verifyTeamContext(w http.ResponseWriter, r *http.Request, id Id
 	case !teamReadRoles[got.Role]:
 		return refuse("role_forbidden", "role", detail)
 	}
-	if err := db.RecordTeamRequest(id.UserID, "team.verified", detail+" correlation="+cid); err != nil {
+	if err := db.RecordTeamRequest(teamAuditActor(id), "team.verified", detail+" correlation="+cid); err != nil {
 		s.log.Error("team audit", "err", err)
-		s.teamRefuse(w, "identity_unavailable", cid)
-		return teamContext{}, false
+		return refuse("identity_unavailable", "audit", detail)
 	}
 	return teamContext{Context: got, ProfileID: profile.ID, CorrelationID: cid}, true
 }
@@ -219,22 +258,17 @@ func (s *Server) teamGrantDenied(w http.ResponseWriter, r *http.Request, project
 		return false
 	}
 	id, _ := IdentityFrom(r.Context())
+	detail := teamAuditDetail(tc.Context, r) + fmt.Sprintf(" project=%q", project)
 	allowed, err := s.teamGrantAllows(id, tc, project)
 	if err != nil {
 		s.log.Error("team grant check", "project", project, "err", err)
-		s.teamRefuse(w, "identity_unavailable", tc.CorrelationID)
+		s.teamDeny(w, id, "identity_unavailable", detail+" reason=grant_store", tc.CorrelationID)
 		return true
 	}
 	if allowed {
 		return false
 	}
-	if db, err := s.openAccess(false); err == nil {
-		if err := db.RecordTeamRequest(id.UserID, "team.refused.grant_denied",
-			fmt.Sprintf("service=%s team=%s session=%s project=%s correlation=%s", tc.ServiceID, tc.TeamID, tc.SessionID, project, tc.CorrelationID)); err != nil {
-			s.log.Error("team audit", "err", err)
-		}
-	}
-	s.teamRefuse(w, "grant_denied", tc.CorrelationID)
+	s.teamDeny(w, id, "grant_denied", detail, tc.CorrelationID)
 	return true
 }
 
@@ -257,14 +291,17 @@ func (s *Server) teamGrantAllows(id Identity, tc teamContext, project string) (b
 // session and the projects its profile currently grants. Knowledge access is
 // reported unavailable until the knowledge matrix exists.
 func (s *Server) teamContextReport(w http.ResponseWriter, r *http.Request, id Identity, tc teamContext) {
+	unavailable := func(reason string) {
+		s.teamDeny(w, id, "identity_unavailable", teamAuditDetail(tc.Context, r)+" reason="+reason, tc.CorrelationID)
+	}
 	db, err := s.openAccess(false)
 	if err != nil {
-		s.teamRefuse(w, "identity_unavailable", tc.CorrelationID)
+		unavailable("access_store")
 		return
 	}
 	instances, err := db.TeamGrantProjects(tc.ProfileID)
 	if err != nil {
-		s.teamRefuse(w, "identity_unavailable", tc.CorrelationID)
+		unavailable("grant_store")
 		return
 	}
 	granted := map[string]bool{}
@@ -273,7 +310,7 @@ func (s *Server) teamContextReport(w http.ResponseWriter, r *http.Request, id Id
 	}
 	names, err := s.reg.Projects()
 	if err != nil {
-		s.teamRefuse(w, "identity_unavailable", tc.CorrelationID)
+		unavailable("registry")
 		return
 	}
 	projects := []string{}
@@ -302,17 +339,17 @@ func (s *Server) teamContextReport(w http.ResponseWriter, r *http.Request, id Id
 			return
 		}
 		if err != nil {
-			s.teamRefuse(w, "identity_unavailable", tc.CorrelationID)
+			unavailable("project_store")
 			return
 		}
 		tasksOn, err := pdb.TasksEnabled()
 		if err != nil {
-			s.teamRefuse(w, "identity_unavailable", tc.CorrelationID)
+			unavailable("project_store")
 			return
 		}
 		allowed, err := s.teamGrantAllows(id, tc, project)
 		if err != nil {
-			s.teamRefuse(w, "identity_unavailable", tc.CorrelationID)
+			unavailable("grant_store")
 			return
 		}
 		out["project"], out["tasks_enabled"], out["project_read"] = project, tasksOn, allowed

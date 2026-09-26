@@ -73,8 +73,11 @@ func TestTeamModeIsRefusedOnEveryRoute(t *testing.T) {
 		if teamRouteServed(req) {
 			want, status = "context_unavailable", http.StatusServiceUnavailable
 		}
-		if r.status != status || r.code() != want || !strings.Contains(string(r.body), `"active_mode":"team"`) {
+		if r.status != status || r.code() != want {
 			t.Errorf("%s %s in team mode: %d %s", tg[0], tg[1], r.status, r.body)
+		}
+		if subject := g.assertRefusalAudited(t, r, "user:"+g.aliceID); !strings.Contains(subject, "request=") {
+			t.Errorf("%s %s: the audit does not name the request: %q", tg[0], tg[1], subject)
 		}
 		if r.header.Get("Cache-Control") != "no-store" || strings.Contains(string(r.body), h) {
 			t.Errorf("%s %s: the refusal is cacheable or echoes the handle", tg[0], tg[1])
@@ -121,21 +124,27 @@ func TestTeamModeRefusalOrder(t *testing.T) {
 		hdr    map[string]string
 		status int
 		code   string
+		actor  string // the audit actor; "" when the caller never authenticated
 	}{
-		"no bearer":            {"", teamHeader(h), 401, "invalid_credential"},
-		"unknown bearer":       {"aimem_user_unknown", teamHeader(h), 401, "invalid_credential"},
-		"unknown admin bearer": {"not-a-token", teamHeader(h), 401, "invalid_credential"},
-		"empty handle":         {g.alice, teamHeader(""), 400, "invalid_request"},
-		"malformed handle":     {g.alice, teamHeader("acs1_short"), 400, "invalid_request"},
-		"proof receipt":        {g.alice, teamHeader("amr1_" + strings.Repeat("A", 43)), 400, "invalid_request"},
-		"admin credential":     {g.env, teamHeader(h), 403, "credential_scope_forbidden"},
-		"project credential":   {g.project, teamHeader(h), 403, "credential_scope_forbidden"},
-		"peer credential":      {peerSecret, teamHeader(h), 403, "credential_scope_forbidden"},
-		"individual, no peer":  {g.alice, teamHeader(h), 503, "context_unavailable"},
+		"no bearer":            {"", teamHeader(h), 401, "invalid_credential", ""},
+		"unknown bearer":       {"aimem_user_unknown", teamHeader(h), 401, "invalid_credential", ""},
+		"unknown admin bearer": {"not-a-token", teamHeader(h), 401, "invalid_credential", ""},
+		"empty handle":         {g.alice, teamHeader(""), 400, "invalid_request", "user:" + g.aliceID},
+		"malformed handle":     {g.alice, teamHeader("acs1_short"), 400, "invalid_request", "user:" + g.aliceID},
+		"proof receipt":        {g.alice, teamHeader("amr1_" + strings.Repeat("A", 43)), 400, "invalid_request", "user:" + g.aliceID},
+		"admin credential":     {g.env, teamHeader(h), 403, "credential_scope_forbidden", "credential:env"},
+		"project credential":   {g.project, teamHeader(h), 403, "credential_scope_forbidden", "user:" + g.aliceID},
+		"peer credential":      {peerSecret, teamHeader(h), 403, "credential_scope_forbidden", "credential:peer:aicrew-example"},
+		"individual, no peer":  {g.alice, teamHeader(h), 503, "context_unavailable", "user:" + g.aliceID},
 	} {
 		r := get(tc.bearer, tc.hdr)
 		if r.status != tc.status || r.code() != tc.code {
 			t.Errorf("%s: %d %s, want %d %s", name, r.status, r.body, tc.status, tc.code)
+		}
+		if tc.actor != "" {
+			g.assertRefusalAudited(t, r, tc.actor)
+		} else if strings.Contains(string(r.body), `"active_mode"`) {
+			t.Errorf("%s: an unauthenticated refusal reveals a mode: %s", name, r.body)
 		}
 	}
 	// Two header values are one malformed request, not a choice.
@@ -450,4 +459,38 @@ func TestServedRefusalsMatchTheContract(t *testing.T) {
 			t.Errorf("%s: the next action points at personal credentials", code)
 		}
 	}
+}
+
+// assertRefusalAudited checks that a team-mode refusal carries active_mode
+// team and that the audit holds team.refused.<code> under actor with the
+// refusal's correlation ID, and returns that audit subject.
+func (g *identityRig) assertRefusalAudited(t *testing.T, r identityResp, actor string) string {
+	t.Helper()
+	var e struct {
+		Code          string `json:"code"`
+		ActiveMode    string `json:"active_mode"`
+		CorrelationID string `json:"correlation_id"`
+	}
+	if json.Unmarshal(r.body, &e) != nil || e.ActiveMode != "team" || e.CorrelationID == "" {
+		t.Errorf("refusal is not in team mode: %d %s", r.status, r.body)
+		return ""
+	}
+	db, err := g.s.openAccess(false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	snap, err := db.Snapshot()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, ev := range snap.Audit {
+		if ev.Action == "team.refused."+e.Code && strings.Contains(ev.Subject, "correlation="+e.CorrelationID) {
+			if ev.Actor != actor {
+				t.Errorf("%s audited under %q, want %q", e.Code, ev.Actor, actor)
+			}
+			return ev.Subject
+		}
+	}
+	t.Errorf("refusal %s (%s) has no audit record", e.Code, e.CorrelationID)
+	return ""
 }

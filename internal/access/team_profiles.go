@@ -118,8 +118,9 @@ WHERE g.profile_id=? ORDER BY g.project`, profileID)
 	return out, rows.Err()
 }
 
-// RecordTeamRequest audits one verified team-mode request. The subject names
-// the service, team, session, generation and correlation ID; never a handle.
-func (s *Store) RecordTeamRequest(userID, action, subject string) error {
-	return s.change("user:"+userID, action, subject, func(*sql.Tx) error { return nil })
+// RecordTeamRequest audits one team-mode request outcome under the
+// authenticated caller. The subject names what is known of the session and
+// the correlation ID; never a handle.
+func (s *Store) RecordTeamRequest(actor, action, subject string) error {
+	return s.change(actor, action, subject, func(*sql.Tx) error { return nil })
 }
