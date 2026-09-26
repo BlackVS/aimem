@@ -1,6 +1,7 @@
 package access
 
 import (
+	"context"
 	"crypto/rand"
 	"crypto/sha256"
 	"database/sql"
@@ -356,7 +357,10 @@ func pruneIdentityLedger(tx *sql.Tx, now time.Time) error {
 
 // IssueProof mints a single-use receipt for the authenticated individual
 // credential (userID, tokenID from authentication; both are rechecked here).
-func (s *Store) IssueProof(userID, tokenID string, req ProofRequest) (ProofReceipt, error) {
+//
+// The wait for the store is bounded by ctx: when it expires before the
+// transaction starts, the call returns ctx.Err() and changes nothing.
+func (s *Store) IssueProof(ctx context.Context, userID, tokenID string, req ProofRequest) (ProofReceipt, error) {
 	if !identityIDPattern.MatchString(req.ChallengeID) || !identityIDPattern.MatchString(req.PeerServiceID) {
 		return ProofReceipt{}, ErrInvalidRequest
 	}
@@ -364,7 +368,7 @@ func (s *Store) IssueProof(userID, tokenID string, req ProofRequest) (ProofRecei
 	if _, err := rand.Read(random[:]); err != nil {
 		return ProofReceipt{}, err
 	}
-	tx, err := s.db.Begin()
+	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return ProofReceipt{}, err
 	}
@@ -429,7 +433,10 @@ VALUES(?,?,?,?,?,?,?,?,?,'live')`, r.ID, digestHex(r.Receipt), r.PeerServiceID, 
 // result after rechecking the token, changed input under the key conflicts,
 // and a receipt consumed under another key is proof_invalid. Every refusal
 // is audited with its exact reason; the caller only sees the stable code.
-func (s *Store) RedeemProof(peer PeerIdentity, req RedeemRequest) (Redemption, error) {
+//
+// As in IssueProof, ctx bounds the wait for the store; an identical retry
+// that cannot start in time returns ctx.Err() and changes nothing.
+func (s *Store) RedeemProof(ctx context.Context, peer PeerIdentity, req RedeemRequest) (Redemption, error) {
 	if !identityRequestKeyShape.MatchString(req.RequestKey) || !identityReceiptShape.MatchString(req.Receipt) ||
 		!identityIDPattern.MatchString(req.ChallengeID) || req.HubID == "" {
 		return Redemption{}, ErrInvalidRequest
@@ -438,7 +445,7 @@ func (s *Store) RedeemProof(peer PeerIdentity, req RedeemRequest) (Redemption, e
 	inputDigest := digestHex(req.HubID + "\x00" + req.ChallengeID + "\x00" + receiptDigest)
 	actor := "peer:" + peer.ServiceID
 
-	tx, err := s.db.Begin()
+	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return Redemption{}, err
 	}

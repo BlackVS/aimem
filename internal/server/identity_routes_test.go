@@ -1,9 +1,11 @@
 package server
 
 import (
+	"context"
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/json"
+	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
@@ -482,5 +484,19 @@ func (g *identityRig) assertNoSecretLeak(t *testing.T) {
 				t.Errorf("a response body contains a secret: %.80s", body)
 			}
 		}
+	}
+}
+
+func TestIdentityWaitMapsToRequestInProgress(t *testing.T) {
+	for _, err := range []error{context.DeadlineExceeded, fmt.Errorf("begin: %w", context.DeadlineExceeded)} {
+		if code := identityStoreError(err); code != "request_in_progress" {
+			t.Errorf("%v: %s", err, code)
+		}
+	}
+	if ref := identityRefusals["request_in_progress"]; ref.status != 503 || !ref.retryable {
+		t.Errorf("request_in_progress must be a retryable 503: %+v", ref)
+	}
+	if identityWait != 5*time.Second {
+		t.Errorf("identity wait %v, contract says 5 s", identityWait)
 	}
 }

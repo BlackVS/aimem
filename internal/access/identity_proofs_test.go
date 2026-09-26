@@ -1,6 +1,7 @@
 package access
 
 import (
+	"context"
 	"crypto/sha256"
 	"database/sql"
 	"encoding/base64"
@@ -127,7 +128,7 @@ func (e *identityEnv) issueCredential(t *testing.T, service string) (PeerCredent
 
 func (e *identityEnv) proof(t *testing.T, challenge string) ProofReceipt {
 	t.Helper()
-	r, err := e.s.IssueProof(e.user, e.token, ProofRequest{PeerServiceID: e.peer.ServiceID, HubID: e.hub, ChallengeID: challenge})
+	r, err := e.s.IssueProof(context.Background(), e.user, e.token, ProofRequest{PeerServiceID: e.peer.ServiceID, HubID: e.hub, ChallengeID: challenge})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -136,7 +137,7 @@ func (e *identityEnv) proof(t *testing.T, challenge string) ProofReceipt {
 }
 
 func (e *identityEnv) redeem(r ProofReceipt, key string) (Redemption, error) {
-	return e.s.RedeemProof(e.peer, RedeemRequest{HubID: r.HubID, ChallengeID: r.ChallengeID, Receipt: r.Receipt, RequestKey: key})
+	return e.s.RedeemProof(context.Background(), e.peer, RedeemRequest{HubID: r.HubID, ChallengeID: r.ChallengeID, Receipt: r.Receipt, RequestKey: key})
 }
 
 func TestIdentityLedgerBoundsMatchContract(t *testing.T) {
@@ -321,7 +322,7 @@ func TestProofIssuance(t *testing.T) {
 		"bad challenge":   {ProofRequest{"aicrew-example", e.hub, "has space"}, ErrInvalidRequest},
 		"empty challenge": {ProofRequest{"aicrew-example", e.hub, ""}, ErrInvalidRequest},
 	} {
-		if _, err := e.s.IssueProof(e.user, e.token, tc.req); !errors.Is(err, tc.want) {
+		if _, err := e.s.IssueProof(context.Background(), e.user, e.token, tc.req); !errors.Is(err, tc.want) {
 			t.Errorf("%s: %v, want %v", name, err, tc.want)
 		}
 	}
@@ -340,17 +341,17 @@ func TestProofIssuance(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if _, err := e.s.IssueProof(u.ID, tok.ID, ProofRequest{"aicrew-example", e.hub, "c"}); !errors.Is(err, ErrCredentialScope) {
+		if _, err := e.s.IssueProof(context.Background(), u.ID, tok.ID, ProofRequest{"aicrew-example", e.hub, "c"}); !errors.Is(err, ErrCredentialScope) {
 			t.Errorf("%s token: %v", sc.scope, err)
 		}
 	}
-	if _, err := e.s.IssueProof(u.ID, e.token, ProofRequest{"aicrew-example", e.hub, "c"}); !errors.Is(err, ErrDenied) {
+	if _, err := e.s.IssueProof(context.Background(), u.ID, e.token, ProofRequest{"aicrew-example", e.hub, "c"}); !errors.Is(err, ErrDenied) {
 		t.Errorf("token presented under another user: %v", err)
 	}
 	if err := e.s.SetIdentityPeerDisabled("admin", "aicrew-example", true); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := e.s.IssueProof(e.user, e.token, ProofRequest{"aicrew-example", e.hub, "c"}); !errors.Is(err, ErrPeerUnknown) {
+	if _, err := e.s.IssueProof(context.Background(), e.user, e.token, ProofRequest{"aicrew-example", e.hub, "c"}); !errors.Is(err, ErrPeerUnknown) {
 		t.Errorf("disabled peer: %v", err)
 	}
 	if err := e.s.SetIdentityPeerDisabled("admin", "aicrew-example", false); err != nil {
@@ -359,7 +360,7 @@ func TestProofIssuance(t *testing.T) {
 	if err := e.s.Revoke("admin", e.token); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := e.s.IssueProof(e.user, e.token, ProofRequest{"aicrew-example", e.hub, "c"}); !errors.Is(err, ErrDenied) {
+	if _, err := e.s.IssueProof(context.Background(), e.user, e.token, ProofRequest{"aicrew-example", e.hub, "c"}); !errors.Is(err, ErrDenied) {
 		t.Errorf("revoked token: %v", err)
 	}
 }
@@ -374,7 +375,7 @@ func TestProofRateLimitAndSupersession(t *testing.T) {
 	for i := 2; i < receiptsPerTokenPerMinute; i++ {
 		e.proof(t, "challenge-other")
 	}
-	if _, err := e.s.IssueProof(e.user, e.token, ProofRequest{"aicrew-example", e.hub, "challenge-2"}); !errors.Is(err, ErrRateLimited) {
+	if _, err := e.s.IssueProof(context.Background(), e.user, e.token, ProofRequest{"aicrew-example", e.hub, "challenge-2"}); !errors.Is(err, ErrRateLimited) {
 		t.Fatalf("receipt beyond the per-minute limit: %v", err)
 	}
 	if _, err := e.redeem(second, fixtureKey("b")); err != nil {
@@ -512,7 +513,7 @@ func TestRedemptionRevocationAndRetention(t *testing.T) {
 	if err := e3.s.RevokePeerCredential("admin", "aicrew-example", list[0].ID); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := e3.s.RedeemProof(stale, RedeemRequest{e3.hub, r3.ChallengeID, r3.Receipt, fixtureKey("k")}); !errors.Is(err, ErrPeerUnauthenticated) {
+	if _, err := e3.s.RedeemProof(context.Background(), stale, RedeemRequest{e3.hub, r3.ChallengeID, r3.Receipt, fixtureKey("k")}); !errors.Is(err, ErrPeerUnauthenticated) {
 		t.Errorf("redemption with a credential revoked after authentication: %v", err)
 	}
 }
@@ -529,7 +530,7 @@ func TestRedemptionWrongPeer(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := e.s.RedeemProof(other, RedeemRequest{r.HubID, r.ChallengeID, r.Receipt, fixtureKey("k")}); !errors.Is(err, ErrProofInvalid) {
+	if _, err := e.s.RedeemProof(context.Background(), other, RedeemRequest{r.HubID, r.ChallengeID, r.Receipt, fixtureKey("k")}); !errors.Is(err, ErrProofInvalid) {
 		t.Errorf("receipt redeemed by a different peer: %v", err)
 	}
 }
@@ -604,7 +605,7 @@ func TestIdentityLedgerStoresNoSecret(t *testing.T) {
 		t.Fatal(err)
 	}
 	e.redeem(e.proof(t, "c-refused"), fixtureKey("k")) // audited refusal
-	_, _ = e.s.IssueProof(e.user, e.token, ProofRequest{"aicrew-example", e.hub, "c-x"})
+	_, _ = e.s.IssueProof(context.Background(), e.user, e.token, ProofRequest{"aicrew-example", e.hub, "c-x"})
 	tables, err := e.s.db.Query("SELECT name FROM sqlite_master WHERE type='table'")
 	if err != nil {
 		t.Fatal(err)
@@ -725,7 +726,7 @@ func TestExpiryIsJudgedWhenTheTransactionStarts(t *testing.T) {
 	e = newIdentityEnv(t)
 	e.advance(24*time.Hour - time.Second)
 	issue := func() (ProofReceipt, error) {
-		return e.s.IssueProof(e.user, e.token, ProofRequest{e.peer.ServiceID, e.hub, "c-issue"})
+		return e.s.IssueProof(context.Background(), e.user, e.token, ProofRequest{e.peer.ServiceID, e.hub, "c-issue"})
 	}
 	if err := expiresWhileBlocked(t, e, 2*time.Second, issue); !errors.Is(err, ErrDenied) {
 		t.Errorf("token that expired while waiting got a receipt: %v", err)
@@ -739,4 +740,32 @@ func mustList(t *testing.T, e *identityEnv) []PeerCredential {
 		t.Fatal(err)
 	}
 	return list
+}
+
+// TestStoreWaitIsBoundedByContext: while another transaction holds the store,
+// a proof or redemption gives up when its context expires, changing nothing,
+// and succeeds once the store is free. The routes use this for the 5 s bound.
+func TestStoreWaitIsBoundedByContext(t *testing.T) {
+	e := newIdentityEnv(t)
+	r := e.proof(t, "c-wait")
+	held, err := e.s.db.Begin()
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+	defer cancel()
+	if _, err := e.s.RedeemProof(ctx, e.peer, RedeemRequest{r.HubID, r.ChallengeID, r.Receipt, fixtureKey("k")}); !errors.Is(err, context.DeadlineExceeded) {
+		t.Errorf("redemption waiting on a held store: %v", err)
+	}
+	ctx2, cancel2 := context.WithTimeout(context.Background(), 50*time.Millisecond)
+	defer cancel2()
+	if _, err := e.s.IssueProof(ctx2, e.user, e.token, ProofRequest{e.peer.ServiceID, e.hub, "c-wait-2"}); !errors.Is(err, context.DeadlineExceeded) {
+		t.Errorf("issuance waiting on a held store: %v", err)
+	}
+	if err := held.Rollback(); err != nil {
+		t.Fatal(err)
+	}
+	if got, err := e.redeem(r, fixtureKey("k")); err != nil || got.Replayed {
+		t.Fatalf("receipt after the timed-out attempt: %+v %v", got, err)
+	}
 }

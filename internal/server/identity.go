@@ -8,6 +8,7 @@ package server
 // or log. Nothing here makes introspection operational.
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -21,6 +22,11 @@ import (
 )
 
 const identityVersionHeader = "X-Aimem-Identity-Version"
+
+// identityWait bounds how long a proof or redemption waits for the store; an
+// identical in-flight request that is still running past it gets the
+// retryable request_in_progress and nothing is applied.
+const identityWait = 5 * time.Second
 
 // identityRefusal is the context contract's refusal envelope. It never
 // carries a bearer, receipt or another actor's identity.
@@ -84,8 +90,8 @@ func peerRouteAllowed(r *http.Request) bool {
 		parts[3] == "peers" && parts[4] != "" && parts[5] == "redemptions"
 }
 
-// identityStoreError maps a ledger error to its stable refusal code. A busy
-// store (SQLite waited out its 5 s busy timeout) is an in-flight retry.
+// identityStoreError maps a ledger error to its stable refusal code. A store
+// that stayed busy past identityWait is an in-flight retry.
 func identityStoreError(err error) string {
 	switch {
 	case errors.Is(err, access.ErrDenied):
@@ -106,7 +112,8 @@ func identityStoreError(err error) string {
 		return "rate_limited"
 	case errors.Is(err, access.ErrInvalidRequest):
 		return "invalid_request"
-	case strings.Contains(err.Error(), "SQLITE_BUSY") || strings.Contains(err.Error(), "database is locked"):
+	case errors.Is(err, context.DeadlineExceeded),
+		strings.Contains(err.Error(), "SQLITE_BUSY") || strings.Contains(err.Error(), "database is locked"):
 		return "request_in_progress"
 	}
 	return "identity_unavailable"
@@ -158,7 +165,9 @@ func (s *Server) identityProof(w http.ResponseWriter, r *http.Request) {
 		s.identityRefuse(w, "identity_unavailable")
 		return
 	}
-	rec, err := db.IssueProof(id.UserID, id.TokenID, access.ProofRequest{PeerServiceID: req.PeerServiceID, HubID: req.HubID, ChallengeID: req.ChallengeID})
+	ctx, cancel := context.WithTimeout(r.Context(), identityWait)
+	defer cancel()
+	rec, err := db.IssueProof(ctx, id.UserID, id.TokenID, access.ProofRequest{PeerServiceID: req.PeerServiceID, HubID: req.HubID, ChallengeID: req.ChallengeID})
 	if err != nil {
 		s.identityRefuse(w, identityStoreError(err))
 		return
@@ -206,7 +215,9 @@ func (s *Server) identityRedeem(w http.ResponseWriter, r *http.Request) {
 		s.identityRefuse(w, "identity_unavailable")
 		return
 	}
-	red, err := db.RedeemProof(id.Peer, access.RedeemRequest{HubID: req.HubID, ChallengeID: req.ChallengeID,
+	ctx, cancel := context.WithTimeout(r.Context(), identityWait)
+	defer cancel()
+	red, err := db.RedeemProof(ctx, id.Peer, access.RedeemRequest{HubID: req.HubID, ChallengeID: req.ChallengeID,
 		Receipt: req.Receipt, RequestKey: r.Header.Get("Idempotency-Key")})
 	if err != nil {
 		s.identityRefuse(w, identityStoreError(err))
