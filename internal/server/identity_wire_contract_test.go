@@ -583,6 +583,7 @@ func checkIdentityRefusals(t *testing.T, refusals []identityRefusal, status map[
 		"team_revoked_bearer", "team_user_mismatch", "team_rotation_pending", "team_generation_advanced", "team_no_handle_for_team_tool",
 		"team_handle_on_personal_connection", "team_introspection_timeout", "team_introspection_tls_mismatch", "team_introspection_nonce_mismatch",
 		"team_profile_not_granted", "team_role_downgrade", "team_introspection_version_rejected", "team_introspection_oversize",
+		"team_operation_not_served",
 	} {
 		if !cases[c] {
 			t.Errorf("missing refusal case %s", c)

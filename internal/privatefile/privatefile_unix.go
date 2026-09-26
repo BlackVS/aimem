@@ -1,6 +1,6 @@
 //go:build !windows
 
-package main
+package privatefile
 
 import (
 	"fmt"
@@ -8,9 +8,9 @@ import (
 	"syscall"
 )
 
-// createPrivateFile creates path exclusively (it must not exist), readable
+// Create creates path exclusively (it must not exist), readable
 // and writable by the current user only.
-func createPrivateFile(path string) (*os.File, error) {
+func Create(path string) (*os.File, error) {
 	f, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
 	if err != nil {
 		return nil, err
@@ -23,10 +23,10 @@ func createPrivateFile(path string) (*os.File, error) {
 	return f, nil
 }
 
-// checkPrivateFile refuses a secret file another local account could read:
+// Check refuses a secret file another local account could read:
 // it must be a regular file owned by the current user with no group or
 // other permission bits.
-func checkPrivateFile(path string) error {
+func Check(path string) error {
 	fi, err := os.Lstat(path)
 	if err != nil {
 		return err
@@ -42,3 +42,7 @@ func checkPrivateFile(path string) error {
 	}
 	return nil
 }
+
+// Expose gives every local account read access to path. It exists for tests
+// that prove Check refuses such a file.
+func Expose(path string) error { return os.Chmod(path, 0o644) }

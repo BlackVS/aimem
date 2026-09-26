@@ -3,10 +3,10 @@
   "info": {
     "title": "Aimem identity v1 wire contract",
     "version": "1.0.0",
-    "description": "The identity.v1 wire contract. The hub serves the two paths below over TLS it terminates itself (E3b); the live internal/server/openapi.json describes them together with the admin peer routes. There is no MCP tool. The aicrew introspection route is owned by aicrew and is listed only as the frozen v1 peer contract; it is not operational until E4."
+    "description": "The identity.v1 wire contract. The hub serves the two paths below over TLS it terminates itself (E3b); the live internal/server/openapi.json describes them together with the admin peer routes. There is no MCP tool. The aicrew introspection route is owned by aicrew and is listed only as the frozen v1 peer contract; the hub's client for it exists from E4a, and no team request relies on it before E4b."
   },
   "x-contract-version": "identity.v1",
-  "x-security-gate": "E3b registers these two wire paths (and the admin peer routes) on the hub, reachable only over TLS terminated by the hub. E4 must implement the introspection client and team-mode verifier against a fake introspection server before introspection is operational. A service credential never authorizes an agent, knowledge or task route.",
+  "x-security-gate": "E3b registers these two wire paths (and the admin peer routes) on the hub, reachable only over TLS terminated by the hub. E4a implements the introspection client against a fake introspection server and refuses every team-mode request; E4b adds the team-mode verifier. A service credential never authorizes an agent, knowledge or task route.",
   "x-mcp": "none: identity.v1 routes are HTTP-only. A proof receipt is a secret and never enters a model-visible tool result, transcript or log.",
   "x-requires-tls": "every path: TLS terminated by the hub; plain HTTP, TLS-terminating proxies and the unix socket are refused with tls_required, and forwarded headers never count",
   "x-service-only": ["redeem"],
@@ -27,6 +27,7 @@
     "context_stale": 403,
     "grant_denied": 403,
     "role_forbidden": 403,
+    "team_operation_unsupported": 403,
     "idempotency_conflict": 409,
     "rate_limited": 429,
     "request_in_progress": 503,

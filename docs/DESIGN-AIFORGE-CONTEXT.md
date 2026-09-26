@@ -103,6 +103,7 @@ HTTP and MCP must expose the same failure envelope: stable code, short explanati
 | context_missing | Team action has no verified session binding | Start or resume the aicrew session in this conversation. |
 | context_stale | Session expired, generation changed or role/membership revoked | Revalidate with aicrew; reconcile pending work before retry. |
 | context_unavailable | Aicrew verification cannot be reached or trusted | Retry verification later; team operation was not authorized or applied. |
+| team_operation_unsupported | The operation is not served in team mode; the hub refuses it before contacting aicrew | Use the aicrew flow for this work; team mode does not serve this operation. |
 | grant_denied | Active context lacks a current aimem resource grant | Request an authorized grant change; do not switch credentials. |
 | role_forbidden | Verified role cannot perform this operation | Use the role's permitted aicrew flow. |
 | work_outstanding | Leave/rotation transition has unreconciled attempt or request | Reconcile the named attempt through aicrew before switching. |

@@ -21,8 +21,9 @@ import (
 // registered aicrew peer, its credentials, proof receipts and redemptions.
 //
 // The hub's identity routes (internal/server/identity.go) are the only
-// callers; no MCP tool reaches this ledger. Nothing here is a working
-// introspection path. Every secret (peer bearer, receipt) is returned once to
+// callers; no MCP tool reaches this ledger. The introspection client itself
+// lives in internal/introspect and reads its credential from a file, never
+// from this store. Every secret (peer bearer, receipt) is returned once to
 // its creator and stored only as a SHA-256 digest; audit subjects carry IDs,
 // never secrets.
 
@@ -55,7 +56,7 @@ var (
 type IdentityPeer struct {
 	ServiceID string
 	HubID     string
-	Endpoint  string // stored for E4; introspection is not operational
+	Endpoint  string // the full URL of aicrew's introspection route
 	TLSMode   string // ca_dns or spki_sha256
 	TLSValue  string
 	Disabled  bool
@@ -136,7 +137,7 @@ func validateTLSTrust(endpoint *url.URL, mode, value string) error {
 
 // RegisterIdentityPeer records the aicrew service allowed to redeem receipts
 // on this hub. The pilot allows one active peer per hub. The endpoint and
-// trust binding are stored for the later introspection increment only.
+// trust binding are what the introspection client calls and verifies.
 func (s *Store) RegisterIdentityPeer(actor string, p IdentityPeer) error {
 	if !identityIDPattern.MatchString(p.ServiceID) {
 		return fmt.Errorf("%w: service ID", ErrInvalidRequest)
@@ -251,6 +252,13 @@ func (s *Store) RevokePeerCredential(actor, serviceID, id string) error {
 		_, err := tx.Exec("UPDATE identity_peer_credentials SET revoked=1 WHERE id=?", id)
 		return err
 	})
+}
+
+// RecordIdentityPeerCheck audits one operator check of a peer's
+// introspection. The outcome is a fixed word; the check's handle and the
+// credential are never recorded.
+func (s *Store) RecordIdentityPeerCheck(actor, serviceID, outcome string) error {
+	return s.change(actor, "identity_peer.check."+outcome, serviceID, func(*sql.Tx) error { return nil })
 }
 
 // ListIdentityPeers returns the registered peers' non-secret records.

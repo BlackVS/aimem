@@ -191,6 +191,7 @@
     {"case": "team_introspection_nonce_mismatch", "operation": "team_request", "code": "context_unavailable", "http_status": 503, "retryable": true, "next_action": "Retry later with the same context."},
     {"case": "team_introspection_version_rejected", "operation": "team_request", "code": "context_unavailable", "http_status": 503, "retryable": true, "next_action": "Retry later with the same context."},
     {"case": "team_introspection_oversize", "operation": "team_request", "code": "context_unavailable", "http_status": 503, "retryable": true, "next_action": "Retry later with the same context."},
+    {"case": "team_operation_not_served", "operation": "team_request", "code": "team_operation_unsupported", "http_status": 403, "retryable": false, "next_action": "Use the aicrew flow for this work; team mode does not serve this operation."},
     {"case": "team_profile_not_granted", "operation": "team_request", "code": "grant_denied", "http_status": 403, "retryable": false, "next_action": "Request an authorized grant change."},
     {"case": "team_role_downgrade", "operation": "team_request", "code": "role_forbidden", "http_status": 403, "retryable": false, "next_action": "Use the role's permitted aicrew flow."}
   ]

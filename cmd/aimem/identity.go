@@ -29,6 +29,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"aimem/internal/privatefile"
 )
 
 const identityUsage = `usage: aimem identity peer list                            [hub flags]
@@ -36,6 +38,7 @@ const identityUsage = `usage: aimem identity peer list                          
                                  (--peer-trust-dns | --peer-trust-pin sha256-BASE64) [hub flags]
        aimem identity peer enable SERVICE                    [hub flags]
        aimem identity peer disable SERVICE                   [hub flags]
+       aimem identity peer check SERVICE                     [hub flags]
        aimem identity cred list SERVICE                      [hub flags]
        aimem identity cred issue SERVICE --expires 90d|RFC3339 --secret-file PATH  [hub flags]
        aimem identity cred rotate SERVICE --expires 90d|RFC3339 --secret-file PATH [hub flags]
@@ -54,9 +57,16 @@ Hub flags (after the positional arguments):
   Without --hub-ca-file or --hub-pin the system roots are used. There is no
   insecure mode.
 
---peer-trust-dns and --peer-trust-pin are the registered peer endpoint's
-trust binding, stored for introspection; they are separate from how this
-command trusts the hub.
+--endpoint is the full URL of the peer's introspection route, ending in
+/v1/crew/introspect. --peer-trust-dns and --peer-trust-pin are its trust
+binding, which the hub verifies on every introspection; they are separate
+from how this command trusts the hub.
+
+peer check has the hub send the peer one introspection with a random handle
+that no session holds and verify the inactive answer. It exits non-zero and
+names the failed step otherwise. The hub reads its introspection credential
+from the private file named by AIMEM_INTROSPECTION_TOKEN_FILE; the credential
+never passes through this command.
 
 cred issue and cred rotate write the new bearer once to --secret-file, a new
 file only you can read, created before anything is issued; it is never
@@ -163,7 +173,7 @@ func runIdentity(args []string, out io.Writer) error {
 	}
 	noun, verb, rest := args[0], args[1], args[2:]
 	positional := map[string]int{
-		"peer list": 0, "peer register": 1, "peer enable": 1, "peer disable": 1,
+		"peer list": 0, "peer register": 1, "peer enable": 1, "peer disable": 1, "peer check": 1,
 		"cred list": 1, "cred issue": 1, "cred rotate": 1, "cred revoke": 2,
 	}
 	n, ok := positional[noun+" "+verb]
@@ -221,6 +231,8 @@ func runIdentity(args []string, out io.Writer) error {
 		return c.peerRegister(pos[0], *endpoint, *trustDNS, *trustPin, out)
 	case "peer enable", "peer disable":
 		return c.peerSetDisabled(pos[0], verb == "disable", out)
+	case "peer check":
+		return c.peerCheck(pos[0], out)
 	case "cred list":
 		return c.credList(pos[0], out)
 	case "cred issue":
@@ -262,7 +274,7 @@ func newIdentityClient(hub, tokenFile, caFile, pin string) (*identityClient, err
 	if tokenFile == "" {
 		return nil, fmt.Errorf("--admin-token-file is required: a hub-admin bearer in a file only you can read")
 	}
-	if err := checkPrivateFile(tokenFile); err != nil {
+	if err := privatefile.Check(tokenFile); err != nil {
 		return nil, fmt.Errorf("--admin-token-file: %w", err)
 	}
 	raw, err := os.ReadFile(tokenFile)
@@ -460,11 +472,53 @@ func (c *identityClient) peerRegister(service, endpoint string, trustDNS bool, t
 		trust = map[string]string{"mode": "ca_dns", "value": u.Hostname()}
 	}
 	body := map[string]any{"service_id": service, "introspection_endpoint": endpoint, "tls_trust": trust}
-	if err := c.call("POST", "/v1/identity/peers", body, http.StatusCreated, nil); err != nil {
+	var got struct {
+		Introspection bool `json:"introspection_operational"`
+	}
+	if err := c.call("POST", "/v1/identity/peers", body, http.StatusCreated, &got); err != nil {
 		return err
 	}
-	fmt.Fprintf(out, "identity peer %s registered (endpoint trust %s %s); introspection is not operational yet\n", service, trust["mode"], trust["value"])
+	state := "not operational yet; see " + c.command("peer", "check", service)
+	if got.Introspection {
+		state = "operational; verify it with " + c.command("peer", "check", service)
+	}
+	fmt.Fprintf(out, "identity peer %s registered (endpoint trust %s %s); introspection %s\n", service, trust["mode"], trust["value"], state)
 	return nil
+}
+
+// peerCheckHints explain the outcomes an operator can act on; every other
+// outcome names the reply check that failed.
+var peerCheckHints = map[string]string{
+	"not_configured":    "the hub has no AIMEM_INTROSPECTION_TOKEN_FILE set",
+	"credential_file":   "the hub's AIMEM_INTROSPECTION_TOKEN_FILE is missing, readable by other accounts, or not one line",
+	"peer_record":       "the registered endpoint must be the https URL of /v1/crew/introspect with a matching trust binding",
+	"peer_disabled":     "the peer is disabled",
+	"peer_ambiguous":    "more than one peer is enabled on this hub",
+	"tls_untrusted":     "the peer's certificate does not match the registered trust binding",
+	"timeout":           "the peer did not answer within 2 s",
+	"transport":         "the peer could not be reached",
+	"version_rejected":  "the peer refused identity version 1",
+	"status":            "the peer answered with an unexpected HTTP status (check its credential for this hub)",
+	"unexpected_active": "the peer called a handle that no session holds active",
+}
+
+func (c *identityClient) peerCheck(service string, out io.Writer) error {
+	var got struct {
+		OK      bool   `json:"ok"`
+		Outcome string `json:"outcome"`
+	}
+	if err := c.call("POST", peerPath(service)+"/check", nil, http.StatusOK, &got); err != nil {
+		return err
+	}
+	if got.OK {
+		fmt.Fprintf(out, "identity peer %s introspection works: the peer verified and answered a probe as inactive\n", service)
+		return nil
+	}
+	msg := fmt.Sprintf("identity peer %s introspection check failed: %s", service, got.Outcome)
+	if hint := peerCheckHints[got.Outcome]; hint != "" {
+		msg += " (" + hint + ")"
+	}
+	return errors.New(msg)
 }
 
 func (c *identityClient) peerSetDisabled(service string, disabled bool, out io.Writer) error {
@@ -524,11 +578,11 @@ func reserveSecretFile(path string) (*os.File, error) {
 	if _, err := os.Lstat(path); err == nil {
 		return nil, fmt.Errorf("--secret-file %s already exists and is never overwritten; choose a new path; nothing was issued", path)
 	}
-	f, err := createPrivateFile(path)
+	f, err := privatefile.Create(path)
 	if err != nil {
 		return nil, fmt.Errorf("--secret-file %s cannot be created (%v); nothing was issued", path, err)
 	}
-	if err := checkPrivateFile(path); err != nil {
+	if err := privatefile.Check(path); err != nil {
 		f.Close()
 		os.Remove(path)
 		return nil, fmt.Errorf("--secret-file %s is not private after creation (%v); nothing was issued", path, err)
