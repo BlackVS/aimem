@@ -87,6 +87,30 @@ type identityClient struct {
 	base  string
 	token string
 	http  *http.Client
+	// hubArgs are the non-secret connection options (the hub URL, the
+	// token file's path and the trust option) repeated in every command
+	// the CLI tells the operator to run next.
+	hubArgs []string
+}
+
+// command renders a complete, runnable aimem identity invocation with this
+// run's connection options. It names the admin token file, never the token.
+func (c *identityClient) command(args ...string) string {
+	parts := []string{"aimem", "identity"}
+	for _, a := range append(args, c.hubArgs...) {
+		parts = append(parts, shellArg(a))
+	}
+	return strings.Join(parts, " ")
+}
+
+// shellArg quotes an argument for POSIX shells, cmd and PowerShell alike:
+// plain words stay bare, anything else goes in double quotes, which none of
+// the three treats a backslash inside of as an escape for ordinary paths.
+func shellArg(s string) string {
+	if s != "" && strings.Trim(s, "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_./:@%+=,\\-") == "" {
+		return s
+	}
+	return `"` + s + `"`
 }
 
 // deliverSecret writes the issued bearer to the reserved secret file. A test
@@ -224,7 +248,14 @@ func newIdentityClient(hub, tokenFile, caFile, pin string) (*identityClient, err
 	if err != nil {
 		return nil, err
 	}
-	return &identityClient{base: "https://" + u.Host, token: token, http: client}, nil
+	hubArgs := []string{"--hub", hub, "--admin-token-file", tokenFile}
+	switch {
+	case caFile != "":
+		hubArgs = append(hubArgs, "--hub-ca-file", caFile)
+	case pin != "":
+		hubArgs = append(hubArgs, "--hub-pin", pin)
+	}
+	return &identityClient{base: "https://" + u.Host, token: token, http: client, hubArgs: hubArgs}, nil
 }
 
 // identityHTTPClient verifies the hub's certificate against the system
@@ -513,8 +544,8 @@ func (c *identityClient) credIssue(service string, expiry time.Time, secretFile 
 			return fmt.Errorf("%s has no active credential to rotate; use cred issue; nothing was issued", service)
 		case 1:
 		default:
-			return fmt.Errorf("%s already has two active credentials; after aicrew uses the new one, revoke the old one with: aimem identity cred revoke %s %s; nothing was issued",
-				service, service, old[0].ID)
+			return fmt.Errorf("%s already has two active credentials; after aicrew uses the new one, revoke the old one with: %s; nothing was issued",
+				service, c.command("cred", "revoke", service, old[0].ID))
 		}
 	}
 	status, data, err := c.do("POST", peerPath(service)+"/credentials", map[string]any{"expires_at": expiry.UTC().Format(time.RFC3339)})
@@ -546,7 +577,7 @@ func (c *identityClient) credIssue(service string, expiry time.Time, secretFile 
 	fmt.Fprintf(out, "issued credential %s for %s, expiring %s\n", resp.Credential.ID, service, resp.Credential.ExpiresAt.Format(time.RFC3339))
 	fmt.Fprintf(out, "the bearer was written once to %s (readable only by you); move it into aicrew's protected storage, then delete the file\n", secretFile)
 	if rotate {
-		fmt.Fprintf(out, "next: once aicrew uses the new credential, revoke the old one explicitly:\n  aimem identity cred revoke %s %s\n", service, old[0].ID)
+		fmt.Fprintf(out, "next: once aicrew uses the new credential, revoke the old one explicitly:\n  %s\n", c.command("cred", "revoke", service, old[0].ID))
 	}
 	return nil
 }
@@ -556,8 +587,8 @@ func (c *identityClient) credIssue(service string, expiry time.Time, secretFile 
 // the result of the revocation is reported.
 func (c *identityClient) undeliverable(service, id, secretFile string, cause error) error {
 	if err := c.credRevoke(service, id); err != nil {
-		return fmt.Errorf("credential %s was issued but its bearer could not be written to %s (%v); revoking it FAILED (%v); revoke it now with: aimem identity cred revoke %s %s",
-			id, secretFile, cause, err, service, id)
+		return fmt.Errorf("credential %s was issued but its bearer could not be written to %s (%v); revoking it FAILED (%v); revoke it now with: %s",
+			id, secretFile, cause, err, c.command("cred", "revoke", service, id))
 	}
 	return fmt.Errorf("credential %s was issued but its bearer could not be written to %s (%v); that credential has been revoked, so issue a new one", id, secretFile, cause)
 }
@@ -570,25 +601,29 @@ func (c *identityClient) unknownOutcome(service string, known map[string]bool, c
 	fmt.Fprintln(out, "nothing was reissued and nothing was revoked. If a credential was issued, its bearer was never delivered and cannot be recovered.")
 	creds, err := c.creds(service)
 	if err != nil {
-		fmt.Fprintf(out, "the credential list is unavailable too (%v); when the hub answers again, run: aimem identity cred list %s\n", err, service)
+		fmt.Fprintf(out, "the credential list is unavailable too (%v); when the hub answers again, run: %s\n", err, c.command("cred", "list", service))
 		return fmt.Errorf("issue outcome unknown")
 	}
-	now := time.Now()
+	// Every new credential the hub has not revoked is a candidate. Its
+	// expiry is shown as the hub reports it, never judged against this
+	// machine's clock, which may disagree with the hub's.
 	var candidates []identityCred
 	for _, cr := range creds {
-		if !known[cr.ID] && cr.state(now) == "active" {
+		if !known[cr.ID] && !cr.Revoked {
 			candidates = append(candidates, cr)
 		}
 	}
 	if len(candidates) == 0 {
-		fmt.Fprintf(out, "no new active credential of %s exists since the request; it is safe to issue again.\n", service)
+		fmt.Fprintf(out, "no new unrevoked credential of %s exists since the request; it is safe to issue again.\n", service)
 		return fmt.Errorf("issue outcome unknown")
 	}
-	fmt.Fprintf(out, "active credentials of %s that did not exist before the request:\n", service)
-	printCreds(out, candidates, now)
+	fmt.Fprintf(out, "unrevoked credentials of %s that did not exist before the request:\n", service)
+	for _, cr := range candidates {
+		fmt.Fprintf(out, "  %s  created %s  expires %s (hub time)\n", cr.ID, cr.CreatedAt.Format(time.RFC3339), cr.ExpiresAt.Format(time.RFC3339))
+	}
 	fmt.Fprintln(out, "if no other operator issued a credential in this window, these bearers were never delivered: revoke each with")
 	for _, cr := range candidates {
-		fmt.Fprintf(out, "  aimem identity cred revoke %s %s\n", service, cr.ID)
+		fmt.Fprintf(out, "  %s\n", c.command("cred", "revoke", service, cr.ID))
 	}
 	fmt.Fprintln(out, "then issue again.")
 	return fmt.Errorf("issue outcome unknown")

@@ -9,6 +9,7 @@ import (
 	"crypto/x509"
 	"crypto/x509/pkix"
 	"encoding/base64"
+	"encoding/json"
 	"encoding/pem"
 	"errors"
 	"io"
@@ -51,7 +52,10 @@ func newIdentityCLIRig(t *testing.T, wrap func(http.Handler) http.Handler) *iden
 	t.Cleanup(func() { reg.Close() })
 	s := server.New(reg, slog.New(slog.NewTextHandler(io.Discard, nil)))
 	t.Cleanup(func() { s.Close() })
-	g := &identityCLIRig{dir: t.TempDir()}
+	g := &identityCLIRig{dir: filepath.Join(t.TempDir(), "operator files")}
+	if err := os.Mkdir(g.dir, 0o700); err != nil {
+		t.Fatal(err)
+	}
 	var h http.Handler = s.TCPHandler(identityAdminToken, nil)
 	if wrap != nil {
 		h = wrap(h)
@@ -516,4 +520,172 @@ func newSelfSignedCert(t *testing.T) *x509.Certificate {
 		t.Fatal(err)
 	}
 	return cert
+}
+
+// printedCommands returns the "aimem identity ..." commands the CLI told the
+// operator to run, split into arguments the way a shell would.
+func printedCommands(text string) [][]string {
+	var cmds [][]string
+	for _, line := range strings.Split(text, "\n") {
+		i := strings.Index(line, "aimem identity ")
+		if i < 0 {
+			continue
+		}
+		var args []string
+		var cur strings.Builder
+		quoted, have := false, false
+		for _, r := range line[i:] {
+			switch {
+			case r == '"':
+				quoted, have = !quoted, true
+			case (r == ' ' || r == ';') && !quoted:
+				if have {
+					args = append(args, cur.String())
+				}
+				cur.Reset()
+				have = false
+			default:
+				cur.WriteRune(r)
+				have = true
+			}
+		}
+		if have {
+			args = append(args, cur.String())
+		}
+		cmds = append(cmds, args)
+	}
+	return cmds
+}
+
+// runPrinted runs a command the CLI printed exactly as printed: no hub flags
+// are added, so it must carry them itself.
+func (g *identityCLIRig) runPrinted(t *testing.T, cmd []string) error {
+	t.Helper()
+	if len(cmd) < 3 || cmd[0] != "aimem" || cmd[1] != "identity" {
+		t.Fatalf("not an aimem identity command: %q", cmd)
+	}
+	_, err := g.runRaw(t, cmd[2:]...)
+	return err
+}
+
+// TestIdentityCLIPrintedRecoveryCommandsRun: every revoke command the CLI
+// prints (unknown outcome, failed automatic revoke, rotation) runs as printed,
+// with the hub URL, the token file path and the trust option, but no secret.
+func TestIdentityCLIPrintedRecoveryCommandsRun(t *testing.T) {
+	var drop, failDelete atomic.Bool
+	wrap := func(h http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			switch {
+			case drop.Load() && r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/credentials"):
+				h.ServeHTTP(httptest.NewRecorder(), r)
+				if conn, _, err := w.(http.Hijacker).Hijack(); err == nil {
+					conn.Close()
+				}
+			case failDelete.Load() && r.Method == http.MethodDelete:
+				http.Error(w, "unavailable", http.StatusServiceUnavailable)
+			default:
+				h.ServeHTTP(w, r)
+			}
+		})
+	}
+	g := newIdentityCLIRig(t, wrap)
+	g.register(t)
+	revoked := func(id string) bool {
+		for _, c := range g.creds(t) {
+			if strings.HasPrefix(c, id+" ") {
+				return strings.HasSuffix(c, "revoked")
+			}
+		}
+		t.Fatalf("credential %s not listed", id)
+		return false
+	}
+
+	// Unknown outcome: the printed revoke removes the undelivered credential.
+	drop.Store(true)
+	out, _ := g.run(t, "cred", "issue", "aicrew-example", "--expires", "30d", "--secret-file", g.secretPath("u.secret"))
+	drop.Store(false)
+	cmds := printedCommands(out)
+	if len(cmds) != 1 || !strings.Contains(strings.Join(cmds[0], " "), "--admin-token-file "+g.tokenFile) {
+		t.Fatalf("unknown outcome printed %q from:\n%s", cmds, out)
+	}
+	id := cmds[0][5]
+	if err := g.runPrinted(t, cmds[0]); err != nil || !revoked(id) {
+		t.Fatalf("printed unknown-outcome revoke: %v", err)
+	}
+
+	// Failed automatic revoke: the printed command works once the hub does.
+	saved := deliverSecret
+	deliverSecret = func(*os.File, string) error { return errors.New("disk full") }
+	failDelete.Store(true)
+	_, err := g.run(t, "cred", "issue", "aicrew-example", "--expires", "30d", "--secret-file", g.secretPath("f.secret"))
+	failDelete.Store(false)
+	deliverSecret = saved
+	if err == nil {
+		t.Fatal("undeliverable issue succeeded")
+	}
+	cmds = printedCommands(err.Error())
+	if len(cmds) != 1 {
+		t.Fatalf("revoke failure printed %q", cmds)
+	}
+	id = cmds[0][5]
+	if revoked(id) {
+		t.Fatal("the failed automatic revoke took effect")
+	}
+	if err := g.runPrinted(t, cmds[0]); err != nil || !revoked(id) {
+		t.Fatalf("printed revoke after a failed automatic revoke: %v", err)
+	}
+
+	// Rotation: the printed revoke retires the old credential.
+	g.mustRun(t, "cred", "issue", "aicrew-example", "--expires", "30d", "--secret-file", g.secretPath("first.secret"))
+	out = g.mustRun(t, "cred", "rotate", "aicrew-example", "--expires", "30d", "--secret-file", g.secretPath("second.secret"))
+	cmds = printedCommands(out)
+	if len(cmds) != 1 {
+		t.Fatalf("rotation printed %q", cmds)
+	}
+	id = cmds[0][5]
+	if err := g.runPrinted(t, cmds[0]); err != nil || !revoked(id) {
+		t.Fatalf("printed rotation revoke: %v", err)
+	}
+	g.assertNoSecrets(t)
+}
+
+// TestIdentityCLIUnknownOutcomeIgnoresTheLocalClock: a new, unrevoked
+// credential is a candidate even when its expiry is already past by this
+// machine's clock, as when the hub's clock runs behind.
+func TestIdentityCLIUnknownOutcomeIgnoresTheLocalClock(t *testing.T) {
+	var drop atomic.Bool
+	skew := func(h http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if drop.Load() && r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/credentials") {
+				h.ServeHTTP(httptest.NewRecorder(), r)
+				if conn, _, err := w.(http.Hijacker).Hijack(); err == nil {
+					conn.Close()
+				}
+				return
+			}
+			if r.Method == http.MethodGet && strings.HasSuffix(r.URL.Path, "/credentials") {
+				// Report every expiry as already past by the client's clock.
+				rec := httptest.NewRecorder()
+				h.ServeHTTP(rec, r)
+				var body map[string][]map[string]any
+				json.Unmarshal(rec.Body.Bytes(), &body)
+				for _, c := range body["credentials"] {
+					c["expires_at"] = time.Now().Add(-5 * time.Minute).UTC().Format(time.RFC3339)
+				}
+				w.Header().Set("Content-Type", "application/json")
+				json.NewEncoder(w).Encode(body)
+				return
+			}
+			h.ServeHTTP(w, r)
+		})
+	}
+	g := newIdentityCLIRig(t, skew)
+	g.register(t)
+	drop.Store(true)
+	out, err := g.run(t, "cred", "issue", "aicrew-example", "--expires", "30d", "--secret-file", g.secretPath("s"))
+	drop.Store(false)
+	if err == nil || strings.Contains(out, "safe to issue again") || len(printedCommands(out)) != 1 {
+		t.Fatalf("a new unrevoked credential was dropped by the local clock: %v\n%s", err, out)
+	}
+	g.assertNoSecrets(t)
 }
