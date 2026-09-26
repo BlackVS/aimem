@@ -109,10 +109,11 @@ type Fake struct {
 	CA  *CA
 	Pin string
 
-	calls  atomic.Int32
-	mu     sync.Mutex
-	answer Answer
-	last   *Seen
+	calls     atomic.Int32
+	mu        sync.Mutex
+	answer    Answer
+	last      *Seen
+	abandoned chan struct{}
 }
 
 // New starts a fake that, until SetAnswer, answers every request as an
@@ -130,8 +131,14 @@ func New(t testing.TB, service, hub string) *Fake {
 		json.Unmarshal(raw, &got)
 		f.mu.Lock()
 		f.last = &Seen{r.Header.Clone(), r.URL.Path, got}
-		answer := f.answer
+		answer, abandoned := f.answer, f.abandoned
+		f.abandoned = nil
 		f.mu.Unlock()
+		if abandoned != nil {
+			<-r.Context().Done()
+			close(abandoned)
+			return
+		}
 		answer(w, got)
 	}))
 	f.Srv.TLS = &tls.Config{Certificates: []tls.Certificate{cert}}
@@ -145,6 +152,15 @@ func (f *Fake) SetAnswer(a Answer) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.answer = a
+}
+
+// StallUntilAbandoned makes the next request hang until the caller gives up
+// on it; the returned channel closes at that moment.
+func (f *Fake) StallUntilAbandoned() <-chan struct{} {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.abandoned = make(chan struct{})
+	return f.abandoned
 }
 
 // Calls counts the requests that reached the fake.

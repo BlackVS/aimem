@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
@@ -48,8 +49,9 @@ func concretePath(pattern string) string {
 
 // TestTeamModeIsRefusedOnEveryRoute sends a well-formed team-mode request
 // with a live individual credential to every route, the MCP endpoint and the
-// public pages. Nothing is served in team mode yet: each is refused with the
-// envelope before any handler runs, and never served as a personal request.
+// public pages. Outside teamRoutes each is refused with the envelope before
+// any handler runs; the team routes verify first, and this hub has no
+// operational peer. None is ever served as a personal request.
 func TestTeamModeIsRefusedOnEveryRoute(t *testing.T) {
 	g := newIdentityRig(t)
 	h := validHandle(t)
@@ -66,7 +68,12 @@ func TestTeamModeIsRefusedOnEveryRoute(t *testing.T) {
 		hdr := teamHeader(h)
 		hdr[identityVersionHeader] = "1"
 		r := g.call(t, g.tls, tg[0], tg[1], g.alice, hdr, body, true)
-		if r.status != http.StatusForbidden || r.code() != "team_operation_unsupported" {
+		req := httptest.NewRequest(tg[0], tg[1], nil)
+		want, status := "team_operation_unsupported", http.StatusForbidden
+		if teamRouteServed(req) {
+			want, status = "context_unavailable", http.StatusServiceUnavailable
+		}
+		if r.status != status || r.code() != want || !strings.Contains(string(r.body), `"active_mode":"team"`) {
 			t.Errorf("%s %s in team mode: %d %s", tg[0], tg[1], r.status, r.body)
 		}
 		if r.header.Get("Cache-Control") != "no-store" || strings.Contains(string(r.body), h) {
@@ -124,7 +131,7 @@ func TestTeamModeRefusalOrder(t *testing.T) {
 		"admin credential":     {g.env, teamHeader(h), 403, "credential_scope_forbidden"},
 		"project credential":   {g.project, teamHeader(h), 403, "credential_scope_forbidden"},
 		"peer credential":      {peerSecret, teamHeader(h), 403, "credential_scope_forbidden"},
-		"individual":           {g.alice, teamHeader(h), 403, "team_operation_unsupported"},
+		"individual, no peer":  {g.alice, teamHeader(h), 503, "context_unavailable"},
 	} {
 		r := get(tc.bearer, tc.hdr)
 		if r.status != tc.status || r.code() != tc.code {
@@ -146,7 +153,10 @@ func TestTeamModeRefusalOrder(t *testing.T) {
 	}
 	// Plain HTTP is refused the same way; team mode never degrades to
 	// personal mode on any listener.
-	if r := g.call(t, g.plain, "GET", "/v1/access/identity", g.alice, teamHeader(h), "", true); r.code() != "team_operation_unsupported" {
+	if r := g.call(t, g.plain, "GET", "/v1/tasks/x", g.alice, teamHeader(h), "", true); r.code() != "context_unavailable" {
+		t.Fatalf("plain HTTP team read: %d %s", r.status, r.body)
+	}
+	if r := g.call(t, g.plain, "POST", "/v1/projects/alpha/tasks", g.alice, teamHeader(h), "{}", true); r.code() != "team_operation_unsupported" {
 		t.Fatalf("plain HTTP team request: %d %s", r.status, r.body)
 	}
 	// Without the header nothing changes.
