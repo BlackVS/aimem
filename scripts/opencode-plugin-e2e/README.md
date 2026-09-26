@@ -3,8 +3,9 @@
 `run.cjs` runs the OpenCode plugin (`.opencode/plugin/aimem.ts`) inside a
 real OpenCode executable and checks what it journals. One file has to work
 on both OpenCode generations, so run it against a 1.x and a 2.x binary
-after changing the plugin. The 1.x floor is 1.14: earlier loaders call
-every export as a function and cannot load a file that also serves 2.x.
+after changing the plugin. The supported 1.x floor is 1.18.0 (loaders
+before 1.14 call every export as a function and cannot load a file that
+also serves 2.x).
 Design and results: [docs/DESIGN-opencode-v2.md](../../docs/DESIGN-opencode-v2.md).
 
 ```sh
@@ -14,7 +15,8 @@ node scripts/opencode-plugin-e2e/run.cjs /path/to/opencode text fail  # a subset
 
 Each scenario uses a disposable project and HOME and a scripted
 OpenAI-compatible provider on 127.0.0.1. It needs no API key and never
-calls a paid model. A fake `aimem`, first on PATH, records every
+calls a paid model. A fake `aimem`, first on PATH (in the launch
+directory for `text`, which the plugin prefers), records every
 `aimem submit` payload. The checks cover the journal events and what
 reached the model; the real `aimem` binary and MCP are not involved.
 Every scenario also requires a clean exit: a run that hangs (killed after

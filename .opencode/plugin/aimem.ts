@@ -5,11 +5,11 @@
 //
 // ONE file serves both OpenCode generations, because a machine may run
 // either (the same `opencode` command name, installed exclusively):
-//   - OpenCode 1.x (1.14 or newer) calls the V1 plugin function, `server`
-//     on the default export, and observes session.idle / session.error /
-//     session.compacted. Loaders before 1.14 call every export as a
-//     function and fail on the default object, which 2.x requires; this
-//     file therefore needs OpenCode 1.14+ on the 1.x line.
+//   - OpenCode 1.x calls the V1 plugin function, `server` on the default
+//     export, and observes session.idle / session.error /
+//     session.compacted. Supported from 1.18.0. (Loaders before 1.14 call
+//     every export as a function and fail on the default object, which
+//     2.x requires, so no single file could serve those.)
 //   - OpenCode 2.x rejects V1 plugins outright and calls `setup(ctx)` on
 //     the default export instead (v2 API: ctx.event.subscribe, session
 //     hooks). V2 also ignores opencode.json `instructions`, so the
@@ -406,18 +406,53 @@ const HANDOFF_MAX_BYTES = 64 * 1024
 // `instructions` upward, so OpenCode started in a subdirectory still gets
 // it. V1 resolves that entry itself; V2 accepts the field but ignores it,
 // so the plugin injects the file for projects that asked.
-function handoffRoot(dir: string, stop: string | undefined): string | undefined {
-  const top = stop ? path.resolve(stop) : undefined
-  for (let d = path.resolve(dir); ; ) {
+function handoffRoot(dir: string, stop: string): string | undefined {
+  const start = canonical(dir)
+  const top = canonical(stop)
+  if (!within(start, top)) return undefined
+  for (let d = start; ; ) {
     for (const rel of ["opencode.json", "opencode.jsonc", ".opencode/opencode.json", ".opencode/opencode.jsonc"]) {
       try {
         if (fs.readFileSync(path.join(d, rel), "utf8").includes("docs/SESSION-STATE.md")) return d
       } catch {}
     }
+    if (d === top) return undefined
     const up = path.dirname(d)
-    if (d === top || up === d || (top && !up.startsWith(top))) return undefined
+    if (up === d || !within(up, top)) return undefined
     d = up
   }
+}
+
+// handoffBound is the highest directory handoffRoot may reach: the
+// project root 2.x reports (the VCS worktree). Without a VCS, 2.x reports
+// the launch directory under the project id "global"; 1.x then still
+// resolves upward, so the bound becomes the home directory, but only for
+// a launch inside it (never shared parents such as /tmp or /).
+function handoffBound(dir: string, project: { id?: string; directory?: string } | undefined): string {
+  if (project?.directory && project.id && project.id !== "global") {
+    // A launch outside the reported root (e.g. a linked git worktree
+    // reported as its main checkout) still checks its own directory.
+    return within(canonical(dir), canonical(project.directory)) ? project.directory : dir
+  }
+  const home = os.homedir()
+  return within(canonical(dir), canonical(home)) ? home : dir
+}
+
+// canonical resolves symlinks (macOS /tmp -> /private/tmp) and, on Windows,
+// folds case, so paths OpenCode reports compare equal to what they name.
+function canonical(p: string): string {
+  let r = path.resolve(p)
+  try {
+    r = fs.realpathSync.native(r)
+  } catch {}
+  return process.platform === "win32" ? r.toLowerCase() : r
+}
+
+// within reports whether child is parent or inside it, on path-segment
+// boundaries (so /a/proj2 is not inside /a/proj).
+function within(child: string, parent: string): boolean {
+  const rel = path.relative(parent, child)
+  return rel === "" || (rel !== ".." && !rel.startsWith(".." + path.sep) && !path.isAbsolute(rel))
 }
 
 // The 2.x events setupV2 acts on; anything else is skipped before the
@@ -435,6 +470,9 @@ const HANDLED = new Set([
   "session.compaction.started",
   "session.compaction.ended",
 ])
+
+// Model-activity events: seeing one proves a turn is still running.
+const ACTIVITY = new Set(["session.text.ended", "session.tool.input.started", "session.step.ended"])
 
 // setupV2 is the OpenCode 2.x entrypoint. It rebuilds the V1 plugin's
 // behavior from V2 primitives:
@@ -472,7 +510,15 @@ async function setupV2(ctx: any) {
   // when the turn starts); a turn is dropped once submitted.
   const turns = new Map<
     string,
-    { user: string; reply: string; tools: string[]; lastAssistantID: string; fallbackID: string }
+    {
+      user: string
+      reply: string
+      tools: string[]
+      lastAssistantID: string
+      fallbackID: string
+      started: number
+      stale?: boolean
+    }
   >()
   const submitted = new Map<string, string>() // sessionID -> last submitted turn id
   const pending = new Map<string, string>() // inboxID -> user text, enqueued but not yet delivered
@@ -485,7 +531,7 @@ async function setupV2(ctx: any) {
   let wired: { root: string | undefined; at: number } | undefined
   const wiredRoot = (): string | undefined => {
     if (!wired || Date.now() - wired.at > 30_000) {
-      wired = { root: handoffRoot(directory, ctx.location?.project?.directory), at: Date.now() }
+      wired = { root: handoffRoot(directory, handoffBound(directory, ctx.location?.project)), at: Date.now() }
     }
     return wired.root
   }
@@ -496,36 +542,54 @@ async function setupV2(ctx: any) {
   // Only definitive answers are cached; a failed or empty lookup (a
   // transient error, a session not yet readable) is retried next time.
   const owner = new Map<string, boolean>()
-  // A thrown lookup is retried a few times: an event whose lookup fails is
-  // dropped for good (the stream does not replay), so one transient error
-  // must not cost a turn its request or its end event. A session that
-  // stays unresolvable (e.g. deleted) is then treated as foreign for 5 s,
-  // so a burst of its events does not each pay the retry delay.
-  const unresolved = new Map<string, number>() // sessionID -> retry after (ms epoch)
-  const mine = async (sid: string): Promise<boolean> => {
+  // A failed lookup (thrown, or an answer without a location, which is how
+  // the SDK reports errors) is retried briefly: an event whose lookup
+  // fails is dropped for good (the stream does not replay), so one
+  // transient error must not cost a turn its request or its end event.
+  // Concurrent callers share one lookup per session. A session that fails
+  // every retry is skipped for 2 s, so a broken one cannot stall the
+  // (sequential) event loop on each of its events; the window is kept short
+  // because events it covers are lost.
+  const self = canonical(directory)
+  const inflight = new Map<string, Promise<boolean>>()
+  const failedUntil = new Map<string, number>()
+  const mine = (sid: string): Promise<boolean> => {
     const known = owner.get(sid)
-    if (known !== undefined) return known
-    if ((unresolved.get(sid) ?? 0) > Date.now()) return false
-    for (let attempt = 0; attempt < 3; attempt++) {
-      if (attempt > 0) await new Promise((r) => setTimeout(r, 200 * attempt))
-      try {
-        const res: any = await ctx.session.get({ sessionID: sid })
-        const dir = res?.location?.directory ?? res?.data?.location?.directory
-        if (typeof dir !== "string") continue
-        const same = path.resolve(dir) === path.resolve(directory)
-        owner.set(sid, same)
-        unresolved.delete(sid)
-        return same
-      } catch {}
+    if (known !== undefined) return Promise.resolve(known)
+    if ((failedUntil.get(sid) ?? 0) > Date.now()) return Promise.resolve(false)
+    let p = inflight.get(sid)
+    if (!p) {
+      p = (async () => {
+        for (let attempt = 0; attempt < 3; attempt++) {
+          if (attempt > 0) await new Promise((r) => setTimeout(r, 100 * attempt))
+          let res: any
+          try {
+            res = await ctx.session.get({ sessionID: sid })
+          } catch {
+            continue
+          }
+          const dir = res?.location?.directory ?? res?.data?.location?.directory
+          if (typeof dir !== "string") continue
+          const same = canonical(dir) === self
+          owner.set(sid, same)
+          failedUntil.delete(sid)
+          // Bounded: a long-lived server sees sessions come and go.
+          while (owner.size > 1000) owner.delete(owner.keys().next().value as string)
+          return same
+        }
+        failedUntil.set(sid, Date.now() + 2_000)
+        while (failedUntil.size > 1000) failedUntil.delete(failedUntil.keys().next().value as string)
+        return false
+      })().finally(() => inflight.delete(sid))
+      inflight.set(sid, p)
     }
-    unresolved.set(sid, Date.now() + 5_000)
-    return false
+    return p
   }
 
   const turn = (sid: string) => {
     let t = turns.get(sid)
     if (!t) {
-      t = { user: "", reply: "", tools: [], lastAssistantID: "", fallbackID: `no-assistant-${Date.now()}` }
+      t = { user: "", reply: "", tools: [], lastAssistantID: "", fallbackID: `no-assistant-${Date.now()}`, started: Date.now() }
       turns.set(sid, t)
     }
     return t
@@ -568,7 +632,6 @@ async function setupV2(ctx: any) {
     limitCache.set(key, entry)
     return entry.value
   }
-
 
   const tokensOf = (k: any): number =>
     k ? (k.input ?? 0) + (k.output ?? 0) + (k.reasoning ?? 0) + (k.cache?.read ?? 0) : 0
@@ -660,6 +723,10 @@ async function setupV2(ctx: any) {
     if (!sid) return
     const type: string = ev?.type ?? ""
     if (!HANDLED.has(type) || !(await mine(sid))) return
+    // Model activity (text, tool, step) of a stale turn shows it is still
+    // running after the stream gap. Inbox events do not: a new prompt's
+    // enqueue always precedes its delivery.
+    if (ACTIVITY.has(type) && turns.get(sid)?.stale) turns.get(sid)!.stale = false
     switch (type) {
       // The user request is taken at DELIVERY, not when the prompt is
       // submitted: a prompt queued behind a running turn (and maybe
@@ -680,6 +747,27 @@ async function setupV2(ctx: any) {
         const text = d.inboxID ? pending.get(d.inboxID) : undefined
         if (text === undefined) break
         pending.delete(d.inboxID)
+        // A turn still stale here (nothing of it seen since a stream gap)
+        // may have ended in the gap. The session says: if it went idle
+        // after the turn started, the turn is over; journal it with its
+        // recorded outcome and start fresh. Otherwise it is still running
+        // and this delivery (a steer) joins it. Unknown: treat as ended.
+        const open = turns.get(sid)
+        if (open?.stale) {
+          let ended = true
+          let outcome: "ok" | "failed" = "failed"
+          try {
+            const res: any = await ctx.session.get({ sessionID: sid })
+            const info = res?.data ?? res
+            const idle = info?.time?.idle
+            if (typeof idle === "number") {
+              ended = idle >= open.started
+              if (info?.outcome === "succeeded") outcome = "ok"
+            }
+          } catch {}
+          if (ended) await submit(sid, outcome)
+          else open.stale = false
+        }
         const t = turn(sid)
         t.user = t.user ? `${t.user}\n\n${text}` : text
         break
@@ -726,21 +814,37 @@ async function setupV2(ctx: any) {
       }
     }
   }
-  // Re-subscribe whenever the stream ends or fails, with a short backoff:
-  // a long-lived V2 server must not stop journaling after one stream reset.
+  // Re-subscribe whenever the stream ends or fails: a long-lived V2 server
+  // must not stop journaling after one stream reset. The stream does not
+  // replay, so a turn open at the gap is marked stale until more of it is
+  // seen: if its end event still arrives it is journaled complete, and if
+  // the gap swallowed it, the next delivered prompt journals it (with the
+  // outcome the session recorded) and starts fresh. The backoff resets after a stream that lived 10 s,
+  // grows to at most 5 s (prompts sent during a gap are lost), and its
+  // timer is unref'd so a host that ends without cleanup can still exit.
   void (async () => {
+    let backoff = 1000
     while (!controller.signal.aborted) {
+      let seen = false
+      const opened = Date.now()
       try {
-        for await (const ev of ctx.event.subscribe({ signal: controller.signal })) await handle(ev)
+        for await (const ev of ctx.event.subscribe({ signal: controller.signal })) {
+          seen = true
+          await handle(ev)
+        }
       } catch (err) {
         if (!controller.signal.aborted) console.error("aimem event stream:", err)
       }
-      if (!controller.signal.aborted) await new Promise((r) => setTimeout(r, 1000))
+      if (controller.signal.aborted) break
+      for (const t of turns.values()) t.stale = true
+      backoff = seen || Date.now() - opened >= 10_000 ? 1000 : Math.min(backoff * 2, 5_000)
+      await new Promise((r) => (setTimeout(r, backoff) as any).unref?.())
     }
   })()
   return () => controller.abort()
 }
 
 // Default export: `id` + `setup` for OpenCode 2.x, `server` for OpenCode
-// 1.14+ (its loader takes `server` from a default object).
+// 1.x (1.14+ loaders take `server` from a default object; 1.18.0+ is
+// supported).
 export default { id: "aimem", setup: setupV2, server: AimemPlugin }

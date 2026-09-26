@@ -43,7 +43,9 @@ const v2 = major >= 2;
 // model-facing context warning) or whose trigger point differs by
 // generation (auto-compaction thresholds).
 const scenarios = {
-  text: { mode: 'text' },
+  // text keeps the fake aimem in the launch directory, the plugin's
+  // preferred (development) location; every other scenario finds it on PATH.
+  text: { mode: 'text', localBin: true },
   tool: { mode: 'tool' },
   // A failed turn may end `opencode run` with 0 or 1 depending on the
   // release; either is a normal exit (a timeout or signal is not).
@@ -217,11 +219,12 @@ async function run(name, sc) {
   fs.mkdirSync(path.join(proj, 'docs'), { recursive: true });
   fs.mkdirSync(home, { recursive: true });
   fs.copyFileSync(path.join(repo, '.opencode', 'plugin', 'aimem.ts'), path.join(proj, '.opencode', 'plugin', 'aimem.ts'));
-  // The fake aimem goes on PATH, as a user-level install puts the real one
-  // (the plugin prefers a binary in its launch directory, then PATH).
+  // The fake aimem goes on PATH, as a user-level install puts the real one;
+  // with `localBin` it goes in the launch directory instead, which the
+  // plugin prefers (a development build).
   const bin = path.join(work, 'bin');
   fs.mkdirSync(bin);
-  fs.writeFileSync(path.join(bin, 'aimem'), '#!/bin/sh\n[ "$1" = submit ] && { cat; echo; } >> "$AIMEM_E2E_LOG"\nexit 0\n', { mode: 0o755 });
+  const fakeAimem = '#!/bin/sh\n[ "$1" = submit ] && { cat; echo; } >> "$AIMEM_E2E_LOG"\nexit 0\n';
   fs.writeFileSync(path.join(proj, 'docs', 'SESSION-STATE.md'), '# Handoff\n\nMARKER-HANDOFF\n');
   const p = await provider(sc.mode, sc.first || 100, { delayFirstMs: sc.delayFirstMs, failFrom: sc.failFrom });
   fs.writeFileSync(path.join(proj, 'opencode.json'), JSON.stringify({
@@ -232,9 +235,15 @@ async function run(name, sc) {
       options: { baseURL: `http://127.0.0.1:${p.port}/v1`, apiKey: 'disposable-not-a-secret' },
       models: { mock: { name: 'mock', limit: { context: sc.limit || 200000, output: 1000 } } } } },
   }, null, 2));
+  // A real repository (with a root commit): 2.x derives the project id and
+  // root from it, which bounds the plugin's handoff lookup.
   cp.execFileSync('git', ['init', '-q', proj]);
+  cp.execFileSync('git', ['-C', proj, '-c', 'user.name=e2e', '-c', 'user.email=e2e@example.invalid',
+    '-c', 'commit.gpgsign=false', '-c', 'core.hooksPath=/dev/null',
+    'commit', '-q', '--allow-empty', '--no-verify', '-m', 'init']);
   const cwd = sc.subdir ? path.join(proj, 'sub') : proj;
   fs.mkdirSync(cwd, { recursive: true });
+  fs.writeFileSync(path.join(sc.localBin ? cwd : bin, 'aimem'), fakeAimem, { mode: 0o755 });
   const env = {
     PATH: `${bin}${path.delimiter}${process.env.PATH}`, HOME: home, TERM: 'dumb',
     XDG_CONFIG_HOME: path.join(home, '.config'), XDG_DATA_HOME: path.join(home, '.local', 'share'),
@@ -275,6 +284,9 @@ async function run(name, sc) {
     assert.ok(p.requests.length > 0, 'the provider was never called');
     assert.ok(primaries.some(x => x.handoff), 'docs/SESSION-STATE.md never reached the model');
     for (const rec of records) {
+      // Both generations name the LAUNCH directory as project_dir, also from
+      // a subdirectory (a known gap, see docs/DESIGN-opencode-v2.md section 7);
+      // this pins that parity rather than endorsing it.
       assert.equal(fs.realpathSync(rec.project_dir), fs.realpathSync(cwd), 'submit names the wrong project');
       assert.equal(rec.event.client, 'opencode');
       assert.ok(rec.event.idempotency_key.startsWith(`opencode:${rec.event.session_id}:`));

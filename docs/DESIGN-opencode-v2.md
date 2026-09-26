@@ -78,9 +78,10 @@ export default { id: "aimem", setup: setupV2, server: AimemPlugin }
 
 - 2.x validates only `default` against `{ id: string, setup: function }`
   and ignores other members and exports.
-- 1.x from 1.14 detects a default object with `server` and calls only
-  `server` (loader code read from the 1.14.24, 1.18.3 and 1.18.32
-  binaries: `readV1Plugin(..., "detect")`, then `getServerPlugin`).
+- 1.x loaders from 1.14 detect a default object with `server` and call
+  only `server` (loader code read from the 1.14.24, 1.18.0, 1.18.3 and
+  1.18.32 binaries: `readV1Plugin(..., "detect")`, then
+  `getServerPlugin`).
 - The 1.x implementation is unchanged except that three helpers were
   lifted out so both halves share them: `makePoster` (the detached
   `aimem submit` spawn), `turnPayload` and `markerPayload` (identical
@@ -106,18 +107,27 @@ integration, plugin, reference, skill`; no `location`, `event` or
 `ctx.event.subscribe` and `ctx.session.hook` all exist, so a 1.x
 session is journaled once. Verified: exactly one submit per turn on 1.18.x.
 
-### 4.3 1.x floor is 1.14
+### 4.3 1.x floor is 1.18.0
 
-Loaders before 1.14 (checked: 1.0.0, 1.1.4) call **every** module export
-as a plugin function with no guard. Given the default object they throw
-`TypeError: fn3 is not a function`, and OpenCode stops with "Unexpected
-error" (observed on 1.1.4). No single export shape satisfies both that
-loader and 2.x (4.1). The floor is therefore OpenCode 1.14 on the 1.x
-line (1.14.24 was released 2026-04-24; aimem's recorded testing was on
-1.18.x). This is stated in the CHANGELOG upgrade notes and the e2e
-README, and enforced where it matters: `install.sh` and `install.ps1`
-read `opencode --version` before copying the plugin and, on 1.x below
-1.14 (or a released 0.x), keep the installed plugin and warn instead of
+The supported 1.x floor is **1.18.0**, the owner's decision (aimem's
+recorded 1.x testing was already on 1.18.x). Two technical facts sit
+under it:
+
+- Loaders before 1.14 (checked: 1.0.0, 1.1.4) call **every** module
+  export as a plugin function with no guard. Given the default object
+  they throw `TypeError: fn3 is not a function`, and OpenCode stops with
+  "Unexpected error" (observed on 1.1.4). No single export shape
+  satisfies both that loader and 2.x (4.1).
+- 1.14.24 loads the plugin, but under load its event order sometimes
+  leaves the 1.x path without the user's text (an empty
+  `user_request`): 3 of 16 parallel `text` runs with this plugin and 2
+  of 16 with master's, so the race predates this change. 1.18.0 and
+  1.18.32 passed 32 of 32 under the same load.
+
+The floor is stated in the CHANGELOG upgrade notes and the e2e README,
+and enforced where it matters: `install.sh` and `install.ps1` read
+`opencode --version` before copying the plugin and, on 1.x below 1.18
+(or a released 0.x), keep the installed plugin and warn instead of
 replacing it. No `opencode` on PATH, an unreadable version, or a
 `0.0.0-<tag>` snapshot build installs as before.
 
@@ -151,7 +161,15 @@ To match what the 1.x wiring did:
 
 - only for projects whose `opencode.json(c)` or
   `.opencode/opencode.json(c)` mentions `docs/SESSION-STATE.md`, which
-  is what `install.sh` and `aimem doctor` wire;
+  is what `install.sh` and `aimem doctor` wire. The wiring is looked up
+  from the launch directory upward to the project root, as 1.x resolves
+  `instructions` upward, and the handoff is read relative to the
+  directory that wires it. The project root is the VCS worktree 2.x
+  reports; without a VCS (2.x then reports the launch directory under the
+  project id `global`) the walk may continue up to the home directory,
+  but only for a launch inside it, never into shared parents such as
+  `/tmp` or `/`. Paths are compared after resolving symlinks and, on
+  Windows, folding case; the result is cached for 30 s;
 - read fresh on every request (the file changes during a session);
   skipped when missing, empty or over 64 KiB;
 - skipped when the system prompt already contains it, so nothing is
@@ -181,9 +199,23 @@ location-scoped service (`packages/core/src/plugin/supervisor.ts`,
 directory in `ctx.location`. The event stream and hooks are not
 documented as location-scoped, though, so every hook and event is
 filtered by the session's own `location.directory` (`ctx.session.get`,
-cached per session). Only definitive answers are cached, so a transient
-lookup failure is retried. The model context limit is likewise cached
-only when the catalog returned one.
+cached per session, compared after resolving symlinks and folding case
+on Windows). Only definitive answers are cached: a failed lookup (thrown,
+or an answer without a location, which is how the SDK reports errors) is
+retried twice within 300 ms, concurrent callers share one lookup, and a
+session that fails every retry is skipped for only 2 s, so a transient
+failure costs at most the events in that window. Only the event types the plugin handles are looked up at
+all. The model context limit is cached when the catalog returned one,
+and "no limit" is re-checked after a minute. If the event stream ends or
+fails, the plugin re-subscribes (1 s backoff, reset after a stream that
+lived 10 s, at most 5 s: prompts sent during a gap are lost). A turn open
+at the gap is kept but marked stale until more of it is seen: if its end
+event still arrives it is journaled complete. If a new prompt is
+delivered first, the session is asked: if it went idle (`time.idle`)
+after the turn started, the turn ended in the gap and is journaled with
+the session's recorded `outcome` before a fresh one starts; otherwise it
+is still running and the delivery (a steer) joins it. The reconnect path
+is code-reviewed only: the e2e check cannot force a stream reset.
 When the plugin is installed both globally and in the project, 2.x loads
 it once (same `id`); 1.x loads both, as on master, and the service drops
 the duplicate by idempotency key.
@@ -194,10 +226,10 @@ the duplicate by idempotency key.
 |---|---|
 | `.opencode/plugin/aimem.ts` | dual export; shared helpers; `setupV2` |
 | `scripts/opencode-plugin-e2e/run.cjs`, `README.md` | new end-to-end check (6.1) |
-| `CHANGELOG.md` | `[Unreleased]`: Added + Upgrade notes (reinstall, `AIMEM_AUTO_COMPACT` 1.x only, 1.14 floor) |
+| `CHANGELOG.md` | `[Unreleased]`: Added + Upgrade notes (reinstall, `AIMEM_AUTO_COMPACT` 1.x only, 1.18.0 floor) |
 | `docs/ADMIN-MANUAL.md` | knob notes for 2.x (warning to the model; auto-compact 1.x only) |
 | `docs/DESIGN.md` | plugin bullet covers both generations |
-| `install.sh`, `install.ps1` | skip replacing the plugin on OpenCode 1.x below 1.14, with a warning (4.3) |
+| `install.sh`, `install.ps1` | skip replacing the plugin on OpenCode 1.x below 1.18, with a warning (4.3) |
 
 The plugin's file name and install destination are unchanged.
 
@@ -229,7 +261,7 @@ Results on the final code (2026-09-26, Linux x64):
 
 | OpenCode | text | tool | fail | subdir | warn | compact | queued | second |
 |---|---|---|---|---|---|---|---|---|
-| 1.14.24 | ok | ok | ok (exit 0) | ok | n/a | n/a | n/a | n/a |
+| 1.18.0 | ok | ok | ok (exit 1) | ok | n/a | n/a | n/a | n/a |
 | 1.18.32 | ok | ok | ok (exit 1) | ok | n/a | n/a | n/a | n/a |
 | 2.0.18 | ok | ok | ok (exit 1) | ok | ok | ok | ok | ok |
 
@@ -254,7 +286,8 @@ Binaries were obtained with `npm pack opencode-linux-x64@<version>`
   global + project): one submit per turn on 2.0.18; on 1.18.32, one
   submit with the global copy only, and two with the same key when both
   copies are present (unchanged from master).
-- Pre-1.14 failure mode reproduced on 1.1.4 (4.3).
+- Pre-1.14 failure mode reproduced on 1.1.4; the 1.14.24 user-text race
+  measured against master (4.3).
 - Pre-push reviews (the built-in code review at medium) found, and this
   change fixes: the pre-1.14 loader problem (resolved by the documented
   floor); a later-turn failure hidden by a reused turn id; a transient
@@ -267,7 +300,7 @@ Binaries were obtained with `npm pack opencode-linux-x64@<version>`
   the 2.x source and does not apply (4.7).
 - The full pre-merge review at high of `04182c6` (posted on the PR)
   found no blockers and ten findings. Fixed: the installers now guard the
-  1.14 floor (4.3); the handoff is found from a subdirectory launch by
+  1.x floor (4.3; now 1.18.0); the handoff is found from a subdirectory launch by
   walking up to the project root, as 1.x resolves `instructions`; a
   transient ownership lookup is retried before an event is dropped; the
   event subscription is re-established when the stream ends or fails;
@@ -279,6 +312,20 @@ Binaries were obtained with `npm pack opencode-linux-x64@<version>`
   applicable: compaction recreating turn state (2.x compaction publishes
   only `session.compaction.*` and usage events, not text, step or tool
   events).
+- The high delta re-review of those fixes found no blockers and ten
+  further findings, two of them introduced by the fixes (a 5 s negative
+  ownership cache that could drop a whole turn, and retry sleeps stalling
+  the event loop): failed lookups (thrown, or answered without a
+  location) are retried briefly with one shared lookup per session, and
+  only a session that fails every retry is skipped, for 2 s. Also fixed: canonical
+  (symlink- and case-safe) path comparison and the no-VCS walk-up in the
+  handoff lookup; a SIGPIPE race in the `install.sh` version pipeline
+  (now a bash regex); the two installer guards made identical and their
+  warning reworded; the re-subscribe timer unref'd, with a bounded
+  backoff, and a turn open across a reconnect kept but never merged into
+  the next; the `text` scenario keeps the
+  fake `aimem` in the launch directory so that path stays covered. The
+  subdirectory project identity is recorded as a known gap (section 7).
 - The external review of `87f358c` raised two follow-ups, both fixed: a
   prompt queued behind a running turn replaced that turn's request
   (reproduced, then fixed by taking the request at inbox delivery; the
@@ -290,8 +337,9 @@ Binaries were obtained with `npm pack opencode-linux-x64@<version>`
 ## 7. Known gaps and follow-ups
 
 - **Not tested:** Windows (the win32 spawn branch only gained an error
-  listener; the `install.ps1` version guard was reviewed but not executed:
-  no PowerShell in the test environment); a 2.x server hosting several aimem projects at once (4.7:
+  listener; the `install.ps1` version guard was reviewed but not
+  executed: no PowerShell in the test environment); a 2.x server hosting
+  several aimem projects at once (4.7:
   per-location loading was read from source, the filtering is
   code-reviewed only); a steer delivered into a running turn (it joins
   that turn's request by design; the unmodified queued case was observed
@@ -305,9 +353,17 @@ Binaries were obtained with `npm pack opencode-linux-x64@<version>`
 - **`scripts/agent-probe`** uses the 1.x server API and will not work
   against 2.x. It is a discovery probe, not a shipped path; not ported
   here.
+- **Launch from a subdirectory: project identity.** Both generations
+  name the launch directory as `project_dir` in submits and read
+  `.aimem.json` knobs there, so a turn started in `repo/sub` is not
+  attributed through `repo/.aimem.json` (a project pin or hub binding
+  there is missed). This predates this change and matches 1.x; the
+  `subdir` scenario pins the parity. Resolving the project root for both
+  generations is a separate change.
 - **Optional later:** have `aimem doctor` write the native 2.x MCP shape
-  (`mcp.servers.aimem`) and warn about OpenCode older than 1.14. Today
+  (`mcp.servers.aimem`) and warn about OpenCode older than 1.18. Today
   version probing runs only under `aimem teams setup --client-versions`.
 - **A failure before any model reply** now gets a `no-assistant-<ts>`
-  turn id on 2.x, fixed when the prompt arrives. 1.x keeps the previous turn's id there, which the
-  service then drops as a duplicate; that 1.x behavior is unchanged here.
+  turn id on 2.x, fixed when the turn starts. 1.x keeps the previous
+  turn's id there, which the service then drops as a duplicate; that 1.x
+  behavior is unchanged here.

@@ -115,9 +115,9 @@ function Install-User {
   Add-AgentHook $ClaudeSettings 'StopFailure' $SubmitCmd 'Checkpointing failed turn'     'aimem submit-claude'
   Add-AgentHook $ClaudeSettings 'PreCompact'  $SubmitCmd 'Journaling compaction marker'  'aimem submit-claude'
 
-  # The plugin serves OpenCode 1.14+ and 2.x from one file; older 1.x
-  # loaders call every export as a function and stop OpenCode at startup
-  # on it. No opencode, an unreadable version, or a 0.0.0-<tag> snapshot
+  # The plugin supports OpenCode 1.18+ and 2.x from one file; 1.x loaders
+  # before 1.14 call every export as a function and stop OpenCode at
+  # startup on it. No opencode, an unreadable version, or a 0.0.0-<tag> snapshot
   # build (current code, not an old release): install as before.
   $ocOld = $null
   $oc = Get-Command opencode -ErrorAction SilentlyContinue
@@ -129,15 +129,15 @@ function Install-User {
     $raw = ''
     try { $raw = (& $oc.Source --version 2>$null | Out-String) } catch { }
     $ErrorActionPreference = $prevEap
-    if ($raw -match '(\d+)\.(\d+)(\.\d+)?' -and $Matches[0] -ne '0.0.0') {
+    if ($raw -match '(\d+)\.(\d+)(\.\d+)?' -and $Matches[0] -notin @('0.0.0', '0.0')) {
       $maj = [int]$Matches[1]; $min = [int]$Matches[2]
-      if ($maj -eq 0 -or ($maj -eq 1 -and $min -lt 14)) { $ocOld = $Matches[0] }
+      if ($maj -eq 0 -or ($maj -eq 1 -and $min -lt 18)) { $ocOld = $Matches[0] }
     }
   }
   if ($ocOld) {
-    Write-Warning ("OpenCode $ocOld is older than 1.14; this aimem plugin needs OpenCode 1.14+ or 2.x " +
-      "and would stop that OpenCode at startup. Kept $OcPluginDir\aimem.ts as it is; " +
-      'upgrade OpenCode, then re-run this install.')
+    Write-Warning ("OpenCode $ocOld is older than 1.18, the oldest release this aimem plugin supports " +
+      "(before 1.14 it would stop OpenCode at startup), so $OcPluginDir\aimem.ts was not installed or updated. " +
+      'Upgrade OpenCode, then re-run this install.')
   } else {
     Say "OpenCode global plugin -> $OcPluginDir\aimem.ts"
     New-Item -ItemType Directory -Force $OcPluginDir | Out-Null

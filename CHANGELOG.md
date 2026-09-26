@@ -34,12 +34,12 @@ currently 18); a binary refuses a database newer than it understands.
   generations.
 - `AIMEM_AUTO_COMPACT` works on OpenCode 1.x only; OpenCode 2 plugins
   cannot request compaction. Use OpenCode 2's own `compaction` settings.
-- On the 1.x line the plugin now needs OpenCode 1.14 or newer. Earlier
-  1.x releases call every plugin export as a function and cannot load the
-  default object that OpenCode 2 requires; no single file can serve both.
-  There, OpenCode itself stops with "Unexpected error" (observed on
+- On the 1.x line the plugin now supports OpenCode 1.18.0 or newer.
+  Releases before 1.14 cannot load it at all: they call every plugin
+  export as a function and fail on the default object that OpenCode 2
+  requires, and OpenCode itself stops with "Unexpected error" (observed on
   1.1.4). The user-level installers (`install.sh`, `install.ps1`, and so
-  the one-liners) check `opencode --version` and, below 1.14, keep the
+  the one-liners) check `opencode --version` and, below 1.18, keep the
   installed plugin and print a warning instead of replacing it; upgrade
   OpenCode, then re-run the install.
 
