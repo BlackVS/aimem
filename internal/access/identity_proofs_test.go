@@ -54,6 +54,7 @@ func fixtureKey(raw string) string {
 
 type identityEnv struct {
 	s        *Store
+	mu       sync.Mutex // guards now; the clock is read from ledger goroutines
 	now      time.Time
 	hub      string
 	user     string
@@ -64,7 +65,17 @@ type identityEnv struct {
 	secrets  []string
 }
 
-func (e *identityEnv) advance(d time.Duration) { e.now = e.now.Add(d) }
+func (e *identityEnv) advance(d time.Duration) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	e.now = e.now.Add(d)
+}
+
+func (e *identityEnv) clock() time.Time {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	return e.now
+}
 
 func newIdentityEnv(t *testing.T) *identityEnv {
 	t.Helper()
@@ -74,7 +85,7 @@ func newIdentityEnv(t *testing.T) *identityEnv {
 	}
 	t.Cleanup(func() { s.Close() })
 	e := &identityEnv{s: s, now: time.Now().UTC().Truncate(time.Second)}
-	s.clock = func() time.Time { return e.now }
+	s.clock = e.clock
 	if e.hub, err = s.HubID(); err != nil {
 		t.Fatal(err)
 	}
@@ -632,4 +643,100 @@ func TestIdentityLedgerStoresNoSecret(t *testing.T) {
 		}
 		rows.Close()
 	}
+}
+
+// expiresWhileBlocked runs op while the store's only connection is held, waits
+// until op is queued for it, advances the clock by d, then releases the
+// connection. An expiry check must use the time at which op's transaction
+// starts, not the time op was called.
+func expiresWhileBlocked[T any](t *testing.T, e *identityEnv, d time.Duration, op func() (T, error)) error {
+	t.Helper()
+	held, err := e.s.db.Begin()
+	if err != nil {
+		t.Fatal(err)
+	}
+	waits := e.s.db.Stats().WaitCount
+	done := make(chan error, 1)
+	go func() {
+		_, err := op()
+		done <- err
+	}()
+	deadline := time.Now().Add(10 * time.Second)
+	for e.s.db.Stats().WaitCount == waits {
+		if time.Now().After(deadline) {
+			t.Fatal("operation never queued for the store connection")
+		}
+		time.Sleep(time.Millisecond)
+	}
+	e.advance(d)
+	if err := held.Rollback(); err != nil {
+		t.Fatal(err)
+	}
+	return <-done
+}
+
+func TestExpiryIsJudgedWhenTheTransactionStarts(t *testing.T) {
+	// Receipt: 1 s before expiry when called, expired once it gets the store.
+	e := newIdentityEnv(t)
+	r := e.proof(t, "c-receipt")
+	e.advance(receiptLifetime - time.Second)
+	if err := expiresWhileBlocked(t, e, 2*time.Second, func() (redemption, error) { return e.redeem(r, fixtureKey("k")) }); !errors.Is(err, errProofInvalid) {
+		t.Errorf("receipt that expired while waiting was redeemed: %v", err)
+	}
+
+	// Peer credential: a one-hour credential replaces the default one.
+	e = newIdentityEnv(t)
+	short, secret, err := e.s.issuePeerCredential("admin", "aicrew-example", e.clock().Add(time.Hour))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, c := range mustList(t, e) {
+		if c.ID != short.ID {
+			if err := e.s.revokePeerCredential("admin", c.ID); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	if e.peer, err = e.s.authenticatePeer(secret); err != nil {
+		t.Fatal(err)
+	}
+	e.advance(time.Hour - receiptLifetime/2)
+	r = e.proof(t, "c-peer")
+	if err := expiresWhileBlocked(t, e, receiptLifetime/2, func() (redemption, error) { return e.redeem(r, fixtureKey("k")) }); !errors.Is(err, errPeerUnauthenticated) {
+		t.Errorf("peer credential that expired while waiting was accepted: %v", err)
+	}
+
+	// Individual token (24 hours), for redemption, replay and issuance.
+	e = newIdentityEnv(t)
+	e.advance(24*time.Hour - receiptLifetime/2)
+	r = e.proof(t, "c-token")
+	if err := expiresWhileBlocked(t, e, receiptLifetime/2, func() (redemption, error) { return e.redeem(r, fixtureKey("k")) }); !errors.Is(err, errCredentialInactive) {
+		t.Errorf("receipt of a token that expired while waiting was redeemed: %v", err)
+	}
+	e = newIdentityEnv(t)
+	e.advance(24*time.Hour - receiptLifetime/2)
+	r = e.proof(t, "c-replay")
+	if _, err := e.redeem(r, fixtureKey("k")); err != nil {
+		t.Fatal(err)
+	}
+	if err := expiresWhileBlocked(t, e, receiptLifetime/2, func() (redemption, error) { return e.redeem(r, fixtureKey("k")) }); !errors.Is(err, errCredentialInactive) {
+		t.Errorf("replay for a token that expired while waiting succeeded: %v", err)
+	}
+	e = newIdentityEnv(t)
+	e.advance(24*time.Hour - time.Second)
+	issue := func() (proofReceipt, error) {
+		return e.s.issueProof(e.user, e.token, proofRequest{e.peer.ServiceID, e.hub, "c-issue"})
+	}
+	if err := expiresWhileBlocked(t, e, 2*time.Second, issue); !errors.Is(err, ErrDenied) {
+		t.Errorf("token that expired while waiting got a receipt: %v", err)
+	}
+}
+
+func mustList(t *testing.T, e *identityEnv) []peerCredential {
+	t.Helper()
+	list, err := e.s.listPeerCredentials("aicrew-example")
+	if err != nil {
+		t.Fatal(err)
+	}
+	return list
 }

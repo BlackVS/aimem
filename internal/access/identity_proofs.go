@@ -220,7 +220,7 @@ func (s *Store) issuePeerCredential(actor, serviceID string, expires time.Time) 
 		}
 		var active int
 		if err := tx.QueryRow("SELECT count(*) FROM identity_peer_credentials WHERE service_id=? AND revoked=0 AND expires_at>?",
-			serviceID, now.Unix()).Scan(&active); err != nil {
+			serviceID, s.now().Unix()).Scan(&active); err != nil {
 			return err
 		}
 		if active >= peerCredentialMaxActive {
@@ -341,17 +341,19 @@ func (s *Store) issueProof(userID, tokenID string, req proofRequest) (proofRecei
 	if _, err := rand.Read(random[:]); err != nil {
 		return proofReceipt{}, err
 	}
+	tx, err := s.db.Begin()
+	if err != nil {
+		return proofReceipt{}, err
+	}
+	defer tx.Rollback()
+	// Validation time is taken only once the transaction holds the store: a
+	// wait in Begin must not let a credential expire unnoticed.
 	now := s.now()
 	r := proofReceipt{
 		Receipt: receiptPrefix + base64.RawURLEncoding.EncodeToString(random[:]), ID: uuidv7.New(),
 		ExpiresAt: now.Add(receiptLifetime).UTC(), HubID: req.HubID, PeerServiceID: req.PeerServiceID,
 		ChallengeID: req.ChallengeID, UserID: userID, TokenID: tokenID,
 	}
-	tx, err := s.db.Begin()
-	if err != nil {
-		return proofReceipt{}, err
-	}
-	defer tx.Rollback()
 	live, userScoped, err := userTokenState(tx, userID, tokenID, now)
 	if err != nil {
 		return proofReceipt{}, err
@@ -411,7 +413,6 @@ func (s *Store) redeemProof(peer peerIdentity, req redeemRequest) (redemption, e
 	}
 	receiptDigest := digestHex(req.Receipt)
 	inputDigest := digestHex(req.HubID + "\x00" + req.ChallengeID + "\x00" + receiptDigest)
-	now := s.now()
 	actor := "peer:" + peer.ServiceID
 
 	tx, err := s.db.Begin()
@@ -419,6 +420,8 @@ func (s *Store) redeemProof(peer peerIdentity, req redeemRequest) (redemption, e
 		return redemption{}, err
 	}
 	defer tx.Rollback()
+	// As in issueProof: expiry is judged at the time the transaction starts.
+	now := s.now()
 	// A refusal commits only its audit record.
 	refuse := func(reason string, cause error) (redemption, error) {
 		if err := audit(tx, actor, "identity.redeem.refused."+reason, req.ChallengeID); err != nil {
