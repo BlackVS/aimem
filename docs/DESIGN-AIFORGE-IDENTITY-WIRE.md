@@ -15,7 +15,7 @@ The owner approved these decisions on task E2, recorded in comments seq161 and s
 
 ## Version, encoding and secrets
 
-The protocol is `identity.v1`. HTTP carries the version in `X-Aimem-Identity-Version: 1`, and MCP carries `version: 1` in tool input. A missing or unsupported version fails with `unsupported_version` and changes nothing. Bodies are UTF-8 JSON, IDs are stable opaque strings, and timestamps are RFC 3339 UTC. A generation is a positive decimal string, which avoids JSON integer precision loss.
+The protocol is `identity.v1`. HTTP carries the version in `X-Aimem-Identity-Version: 1`, and MCP carries `version: 1` in tool input. A missing or unsupported version fails with `unsupported_version` and changes nothing. Introspection is the one identity.v1 call that aicrew receives, and it carries the version in two places: the `X-Aimem-Identity-Version` header and the body field `version`. Both are required and must both be `1`. When either is missing or unsupported, or when the two disagree, aicrew answers `400` with `unsupported_version` and evaluates nothing, so it never reports a handle as active on such a request. Aimem treats that refusal like any other failed introspection. The team operation fails with `context_unavailable` and nothing is applied, and the peer audit records a version mismatch. An introspection reply carries no version. Bodies are UTF-8 JSON, IDs are stable opaque strings, and timestamps are RFC 3339 UTC. A generation is a positive decimal string, which avoids JSON integer precision loss.
 
 | Secret | Format | Lifetime | Stored by |
 | --- | --- | --- | --- |
@@ -24,7 +24,15 @@ The protocol is `identity.v1`. HTTP carries the version in `X-Aimem-Identity-Ver
 | Aicrew→aimem redemption credential | Issued by aimem as a peer token | Until rotated or revoked | Aimem stores a digest. Aicrew keeps the bearer in protected storage. |
 | Aimem→aicrew introspection credential | Issued by aicrew | Until rotated or revoked | Aicrew stores a digest. Aimem keeps the bearer in protected storage. |
 
-No response body, audit record, log line, task, fixture evidence or error message contains any of these secrets, an individual bearer or a D1 enrollment subcode. A secret always travels in a request position and never in a response. The one exception is the receipt, which goes back only to the individual credential holder who requested it.
+No response body, audit record, log line, task, fixture evidence or error message contains any of these secrets, an individual bearer or a D1 enrollment subcode. A secret may appear only in the locations listed below. Every other location is forbidden, including responses, audit records, refusal envelopes and messages.
+
+| Secret | Permitted locations |
+| --- | --- |
+| Individual bearer | `Authorization` header of a proof request or a team-mode request |
+| Proof receipt | The `receipt` field of the proof response, returned only to the credential holder who requested it, and the `receipt` field of a redemption request |
+| Aimem-scoped handle | The `X-Aimem-Team-Context` header of a team-mode request, and the `handle` field of an introspection request |
+| Redemption credential | The `Authorization` header of a redemption request |
+| Introspection credential | The `Authorization` header of an introspection request |
 
 ## 1. Proof receipt (agent → aimem)
 
@@ -48,7 +56,7 @@ An identical retry with the same key and input returns the recorded result with 
 
 An active handle gets `200` with `{nonce, active: true, service_id, hub_id, identity: {user_id, token_id}, agent_id, team_id, role, session_id, generation, handle_expires_at}`. Every other state gets `200` with `{nonce, active: false}`: unknown, expired, superseded, ended, stopped, fenced by a generation change, bound to another hub, or presented with a handle of the wrong audience. That second reply carries no reason, so a probe cannot learn why a handle is inactive. Aicrew never returns a grant, a profile decision or another member's data.
 
-The budget is one attempt of at most 2 s, covering connect, TLS and response, with a 16 KiB response cap. There is no retry inside a request, and caller cancellation propagates. Aimem accepts a reply only if all of these hold:
+The budget is one attempt of at most 2 s, covering connect, TLS and response. Aimem reads at most 16,384 bytes of the reply body. A longer reply is refused as `context_unavailable` without being parsed. There is no retry inside a request, and caller cancellation propagates. Aimem accepts a reply only if all of these hold:
 
 - the TLS identity matches the registration;
 - the nonce matches;
@@ -103,7 +111,7 @@ The limits below are values fixed by this contract. An implementation may tighte
 - An aicrew challenge lives at most 5 min.
 - A receipt lives at most 60 s. Each (token, peer, challenge) has at most one live receipt, and each token may request at most 10 receipts per minute.
 - Redemption outcomes are kept for 15 min. A same-key wait on the server lasts at most 5 s, and aicrew's redemption call times out after at most 10 s.
-- An introspection call gets one attempt of at most 2 s, and its response may be at most 16 KiB.
+- An introspection call gets one attempt of at most 2 s, and its reply body may be at most 16,384 bytes.
 - An aimem-scoped handle lives at most 15 min, and after a refresh the old handle overlaps for at most 60 s.
 
 ## D1 boundary and delivery
