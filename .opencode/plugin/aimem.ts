@@ -23,6 +23,7 @@
 // ends, and any awaited subprocess would be killed mid-flight with the
 // checkpoint silently lost. Detaching lets the submit outlive the host
 // process. Residual risk: teardown can still preempt the spawn itself.
+import { spawn } from "node:child_process"
 import fs from "node:fs"
 import os from "node:os"
 import path from "node:path"
@@ -114,13 +115,17 @@ function makePoster(directory: string, $?: any) {
       if (bin.includes("/") && !fs.existsSync(bin)) return false
       const tmp = path.join(os.tmpdir(), `aimem-oc-${Date.now()}-${Math.random().toString(36).slice(2)}.json`)
       fs.writeFileSync(tmp, JSON.stringify(payload), { mode: 0o600 })
-      const { spawn } = await import("node:child_process")
       if (process.platform === "win32") {
         // No nohup on Windows: detached spawn with stdin redirected from the
         // already-written temp file (payload safe even if the host dies).
         // The temp file is left behind — tiny, and the OS temp dir rotates.
         const fd = fs.openSync(tmp, "r")
-        spawn(bin, ["submit"], { stdio: [fd, "ignore", "ignore"], detached: true, windowsHide: true }).unref()
+        // An 'error' listener is required: a failed spawn (ENOENT when aimem
+        // is not on PATH) is emitted asynchronously, past this try/catch,
+        // and an unhandled 'error' event would take the OpenCode host down.
+        spawn(bin, ["submit"], { stdio: [fd, "ignore", "ignore"], detached: true, windowsHide: true })
+          .on("error", (e) => console.error("aimem submit failed:", e))
+          .unref()
         fs.closeSync(fd)
         return true
       }
@@ -134,7 +139,9 @@ function makePoster(directory: string, $?: any) {
       spawn("/bin/sh", ["-c", '"$0" submit < "$1" >/dev/null 2>&1 && rm -f "$1"', bin, tmp], {
         stdio: "ignore",
         detached: true,
-      }).unref()
+      })
+        .on("error", (e) => console.error("aimem submit failed:", e))
+        .unref()
       return true
     } catch (e) {
       // Fail-open: checkpointing must never break the session.
@@ -225,7 +232,6 @@ const AimemPlugin: Plugin = async ({ directory, client, $ }) => {
     const anchor = turns.get(sid)?.lastAssistantID || `t${Date.now()}`
     await postDetached(markerPayload(directory, sid, anchor))
   }
-
 
   // providerID/modelID -> context limit, from OpenCode's provider config.
   let modelLimits: Map<string, number> | null = null
@@ -392,18 +398,43 @@ const AimemPlugin: Plugin = async ({ directory, client, $ }) => {
 const HANDOFF_REL = path.join("docs", "SESSION-STATE.md")
 const HANDOFF_MAX_BYTES = 64 * 1024
 
-// handoffWired reports whether the project opted into loading the handoff
-// through opencode.json(c) `instructions` (what `aimem doctor` and
-// install.sh wire). V1 resolves that entry itself; V2 accepts the field
-// but ignores it, so the plugin injects the file for projects that asked.
-function handoffWired(dir: string): boolean {
-  for (const rel of ["opencode.json", "opencode.jsonc", ".opencode/opencode.json", ".opencode/opencode.jsonc"]) {
-    try {
-      if (fs.readFileSync(path.join(dir, rel), "utf8").includes("docs/SESSION-STATE.md")) return true
-    } catch {}
+// handoffRoot finds the project directory that opted into loading the
+// handoff through opencode.json(c) `instructions` (what `aimem doctor` and
+// install.sh wire): the nearest of `dir` and its parents, up to `stop`
+// (the project root), whose config mentions docs/SESSION-STATE.md. The
+// handoff file is resolved against that directory, as 1.x resolves
+// `instructions` upward, so OpenCode started in a subdirectory still gets
+// it. V1 resolves that entry itself; V2 accepts the field but ignores it,
+// so the plugin injects the file for projects that asked.
+function handoffRoot(dir: string, stop: string | undefined): string | undefined {
+  const top = stop ? path.resolve(stop) : undefined
+  for (let d = path.resolve(dir); ; ) {
+    for (const rel of ["opencode.json", "opencode.jsonc", ".opencode/opencode.json", ".opencode/opencode.jsonc"]) {
+      try {
+        if (fs.readFileSync(path.join(d, rel), "utf8").includes("docs/SESSION-STATE.md")) return d
+      } catch {}
+    }
+    const up = path.dirname(d)
+    if (d === top || up === d || (top && !up.startsWith(top))) return undefined
+    d = up
   }
-  return false
 }
+
+// The 2.x events setupV2 acts on; anything else is skipped before the
+// per-session ownership lookup.
+const HANDLED = new Set([
+  "session.inbox.enqueued",
+  "session.inbox.cancelled",
+  "session.inbox.delivered",
+  "session.text.ended",
+  "session.tool.input.started",
+  "session.step.ended",
+  "session.execution.succeeded",
+  "session.execution.failed",
+  "session.execution.interrupted",
+  "session.compaction.started",
+  "session.compaction.ended",
+])
 
 // setupV2 is the OpenCode 2.x entrypoint. It rebuilds the V1 plugin's
 // behavior from V2 primitives:
@@ -449,25 +480,46 @@ async function setupV2(ctx: any) {
   const used = new Map<string, number>() // sessionID -> context tokens of the last model step
   const ctxWarnedStep = new Map<string, number>() // sessionID -> last logged 5%-step
 
+  // The wiring changes rarely; re-check it at most every 30 s rather than
+  // reading up to four config files per level on every model request.
+  let wired: { root: string | undefined; at: number } | undefined
+  const wiredRoot = (): string | undefined => {
+    if (!wired || Date.now() - wired.at > 30_000) {
+      wired = { root: handoffRoot(directory, ctx.location?.project?.directory), at: Date.now() }
+    }
+    return wired.root
+  }
+
   // One V2 server can host several projects, and the event stream is not
   // guaranteed to be scoped to this plugin's location: journal only the
   // sessions that live here, resolved once per session.
   // Only definitive answers are cached; a failed or empty lookup (a
   // transient error, a session not yet readable) is retried next time.
   const owner = new Map<string, boolean>()
+  // A thrown lookup is retried a few times: an event whose lookup fails is
+  // dropped for good (the stream does not replay), so one transient error
+  // must not cost a turn its request or its end event. A session that
+  // stays unresolvable (e.g. deleted) is then treated as foreign for 5 s,
+  // so a burst of its events does not each pay the retry delay.
+  const unresolved = new Map<string, number>() // sessionID -> retry after (ms epoch)
   const mine = async (sid: string): Promise<boolean> => {
     const known = owner.get(sid)
     if (known !== undefined) return known
-    try {
-      const res: any = await ctx.session.get({ sessionID: sid })
-      const dir = res?.location?.directory ?? res?.data?.location?.directory
-      if (typeof dir !== "string") return false
-      const same = path.resolve(dir) === path.resolve(directory)
-      owner.set(sid, same)
-      return same
-    } catch {
-      return false
+    if ((unresolved.get(sid) ?? 0) > Date.now()) return false
+    for (let attempt = 0; attempt < 3; attempt++) {
+      if (attempt > 0) await new Promise((r) => setTimeout(r, 200 * attempt))
+      try {
+        const res: any = await ctx.session.get({ sessionID: sid })
+        const dir = res?.location?.directory ?? res?.data?.location?.directory
+        if (typeof dir !== "string") continue
+        const same = path.resolve(dir) === path.resolve(directory)
+        owner.set(sid, same)
+        unresolved.delete(sid)
+        return same
+      } catch {}
     }
+    unresolved.set(sid, Date.now() + 5_000)
+    return false
   }
 
   const turn = (sid: string) => {
@@ -491,35 +543,32 @@ async function setupV2(ctx: any) {
     if (ok) submitted.set(sid, turnID)
   }
 
-  const limitCache = new Map<string, Promise<number>>()
+  // A known limit is cached for the plugin's life. "No limit" (a model
+  // without one, a failed or not-yet-loaded catalog) is re-checked after a
+  // minute: never permanently, but not on every model request either.
+  const limitCache = new Map<string, { value: Promise<number>; until: number }>()
   const contextLimit = (model: { providerID: string; id: string } | undefined): Promise<number> => {
     if (CTX_LIMIT > 0) return Promise.resolve(CTX_LIMIT)
     if (!model) return Promise.resolve(0)
     const key = `${model.providerID}/${model.id}`
-    let p = limitCache.get(key)
-    if (!p) {
-      p = (async () => {
-        // Yield first: the cache entry below must exist before any cleanup
-        // in this body runs, even if list() throws synchronously.
-        await null
-        try {
-          const res: any = await ctx.model?.list?.()
-          const list: any[] = res?.data ?? (Array.isArray(res) ? res : [])
-          const m = list.find((x) => x?.providerID === model.providerID && (x?.id === model.id || x?.modelID === model.id))
-          const lim = Number(m?.limit?.context ?? 0)
-          // Cache only a real limit: a failed or not-yet-loaded catalog
-          // must not switch warnings off for the model until restart.
-          if (!(lim > 0)) limitCache.delete(key)
-          return lim > 0 ? lim : 0
-        } catch {
-          limitCache.delete(key)
-          return 0
-        }
-      })()
-      limitCache.set(key, p)
-    }
-    return p
+    const hit = limitCache.get(key)
+    if (hit && Date.now() < hit.until) return hit.value
+    const entry = { value: Promise.resolve(0), until: Infinity }
+    entry.value = (async () => {
+      try {
+        const res: any = await ctx.model?.list?.()
+        const list: any[] = res?.data ?? (Array.isArray(res) ? res : [])
+        const m = list.find((x) => x?.providerID === model.providerID && (x?.id === model.id || x?.modelID === model.id))
+        const lim = Number(m?.limit?.context ?? 0)
+        if (lim > 0) return lim
+      } catch {}
+      entry.until = Date.now() + 60_000
+      return 0
+    })()
+    limitCache.set(key, entry)
+    return entry.value
   }
+
 
   const tokensOf = (k: any): number =>
     k ? (k.input ?? 0) + (k.output ?? 0) + (k.reasoning ?? 0) + (k.cache?.read ?? 0) : 0
@@ -559,9 +608,10 @@ async function setupV2(ctx: any) {
       if (!sid || !Array.isArray(e?.system) || !(await mine(sid))) return
       const existing = e.system.map((p: any) => (typeof p?.text === "string" ? p.text : "")).join("\n")
 
-      if (handoffWired(directory)) {
+      const root = wiredRoot()
+      if (root) {
         try {
-          const file = path.join(directory, HANDOFF_REL)
+          const file = path.join(root, HANDOFF_REL)
           const st = fs.statSync(file)
           if (st.isFile() && st.size > 0 && st.size <= HANDOFF_MAX_BYTES) {
             const body = fs.readFileSync(file, "utf8").replace(/^﻿/, "")
@@ -576,9 +626,12 @@ async function setupV2(ctx: any) {
         }
       }
 
-      const tokens = await contextTokens(sid)
-      const limit = tokens > 0 ? await contextLimit(e.model) : 0
+      // Limit first: without one no warning can fire, so the session's
+      // message list is never fetched for nothing.
+      const limit = await contextLimit(e.model)
       if (limit <= 0) return
+      const tokens = await contextTokens(sid)
+      if (tokens <= 0) return
       const frac = tokens / limit
       if (frac < CTX_WARN_FRACTION) return
       const pct = Math.round(100 * frac)
@@ -601,79 +654,88 @@ async function setupV2(ctx: any) {
   })
 
   const controller = new AbortController()
-  void (async () => {
-    try {
-      for await (const ev of ctx.event.subscribe({ signal: controller.signal })) {
-        const d: any = (ev as any)?.data
-        const sid: string | undefined = d?.sessionID
-        if (!sid) continue
-        const type: string = (ev as any)?.type ?? ""
-        if (!type.startsWith("session.") || !(await mine(sid))) continue
-        switch (type) {
-          // The user request is taken at DELIVERY, not when the prompt is
-          // submitted: a prompt queued behind a running turn (and maybe
-          // cancelled) must not replace that turn's request. A steer
-          // delivered into a running turn joins its request.
-          case "session.inbox.enqueued":
-            if (d.item?.type === "user" && typeof d.item?.payload?.text === "string" && d.inboxID) {
-              pending.set(d.inboxID, d.item.payload.text)
-            }
-            break
-          case "session.inbox.cancelled":
-            if (d.inboxID) pending.delete(d.inboxID)
-            break
-          case "session.inbox.delivered": {
-            const text = d.inboxID ? pending.get(d.inboxID) : undefined
-            if (text === undefined) break
-            pending.delete(d.inboxID)
-            const t = turn(sid)
-            t.user = t.user ? `${t.user}\n\n${text}` : text
-            break
-          }
-          case "session.text.ended":
-            if (typeof d.text === "string") turn(sid).reply = d.text
-            if (d.assistantMessageID) {
-              turn(sid).lastAssistantID = d.assistantMessageID
-              anchors.set(sid, d.assistantMessageID)
-            }
-            break
-          case "session.tool.input.started": {
-            const t = turn(sid)
-            if (typeof d.name === "string" && !t.tools.includes(d.name)) t.tools.push(d.name)
-            break
-          }
-          case "session.step.ended": {
-            if (d.assistantMessageID) {
-              turn(sid).lastAssistantID = d.assistantMessageID
-              anchors.set(sid, d.assistantMessageID)
-            }
-            if (d.tokens) used.set(sid, tokensOf(d.tokens))
-            break
-          }
-          case "session.execution.succeeded":
-            await submit(sid, "ok")
-            break
-          case "session.execution.failed":
-          case "session.execution.interrupted":
-            await submit(sid, "failed")
-            break
-          case "session.compaction.started":
-            // The pre-compaction usage no longer describes the window the
-            // next request will see; drop it before the summary lands.
-            used.delete(sid)
-            break
-          case "session.compaction.ended": {
-            const anchor = turns.get(sid)?.lastAssistantID || anchors.get(sid) || `t${Date.now()}`
-            await postDetached(markerPayload(directory, sid, anchor))
-            // Fresh context window: re-arm the escalating warnings.
-            used.delete(sid)
-            ctxWarnedStep.delete(sid)
-            break
-          }
+  const handle = async (ev: any) => {
+    const d: any = ev?.data
+    const sid: string | undefined = d?.sessionID
+    if (!sid) return
+    const type: string = ev?.type ?? ""
+    if (!HANDLED.has(type) || !(await mine(sid))) return
+    switch (type) {
+      // The user request is taken at DELIVERY, not when the prompt is
+      // submitted: a prompt queued behind a running turn (and maybe
+      // cancelled) must not replace that turn's request. A steer
+      // delivered into a running turn joins its request.
+      case "session.inbox.enqueued":
+        if (d.item?.type === "user" && typeof d.item?.payload?.text === "string" && d.inboxID) {
+          pending.set(d.inboxID, d.item.payload.text)
+          // Bounded: an item whose delivery never reaches this plugin
+          // must not be kept for the server's life (oldest go first).
+          while (pending.size > 200) pending.delete(pending.keys().next().value as string)
         }
+        break
+      case "session.inbox.cancelled":
+        if (d.inboxID) pending.delete(d.inboxID)
+        break
+      case "session.inbox.delivered": {
+        const text = d.inboxID ? pending.get(d.inboxID) : undefined
+        if (text === undefined) break
+        pending.delete(d.inboxID)
+        const t = turn(sid)
+        t.user = t.user ? `${t.user}\n\n${text}` : text
+        break
       }
-    } catch (err) {
-      if (!controller.signal.aborted) console.error("aimem event stream:", err)
+      case "session.text.ended":
+        if (typeof d.text === "string") turn(sid).reply = d.text
+        if (d.assistantMessageID) {
+          turn(sid).lastAssistantID = d.assistantMessageID
+          anchors.set(sid, d.assistantMessageID)
+        }
+        break
+      case "session.tool.input.started": {
+        const t = turn(sid)
+        if (typeof d.name === "string" && !t.tools.includes(d.name)) t.tools.push(d.name)
+        break
+      }
+      case "session.step.ended": {
+        if (d.assistantMessageID) {
+          turn(sid).lastAssistantID = d.assistantMessageID
+          anchors.set(sid, d.assistantMessageID)
+        }
+        if (d.tokens) used.set(sid, tokensOf(d.tokens))
+        break
+      }
+      case "session.execution.succeeded":
+        await submit(sid, "ok")
+        break
+      case "session.execution.failed":
+      case "session.execution.interrupted":
+        await submit(sid, "failed")
+        break
+      case "session.compaction.started":
+        // The pre-compaction usage no longer describes the window the
+        // next request will see; drop it before the summary lands.
+        used.delete(sid)
+        break
+      case "session.compaction.ended": {
+        const anchor = turns.get(sid)?.lastAssistantID || anchors.get(sid) || `t${Date.now()}`
+        await postDetached(markerPayload(directory, sid, anchor))
+        // Fresh context window: re-arm the escalating warnings.
+        used.delete(sid)
+        ctxWarnedStep.delete(sid)
+        break
+      }
+    }
+  }
+  // Re-subscribe whenever the stream ends or fails, with a short backoff:
+  // a long-lived V2 server must not stop journaling after one stream reset.
+  void (async () => {
+    while (!controller.signal.aborted) {
+      try {
+        for await (const ev of ctx.event.subscribe({ signal: controller.signal })) await handle(ev)
+      } catch (err) {
+        if (!controller.signal.aborted) console.error("aimem event stream:", err)
+      }
+      if (!controller.signal.aborted) await new Promise((r) => setTimeout(r, 1000))
     }
   })()
   return () => controller.abort()

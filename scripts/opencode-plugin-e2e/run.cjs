@@ -3,15 +3,19 @@
 // against a real OpenCode executable, 1.x or 2.x.
 //
 // Usage: node scripts/opencode-plugin-e2e/run.cjs /path/to/opencode [scenario...]
-// Scenarios: text tool fail warn compact (default: all that apply to
-// the detected generation). Linux/macOS only: the fake `aimem` that
-// records submits is a shell script.
+// Scenarios: text tool fail subdir on both generations; warn compact queued
+// second on 2.x only (default: all that apply to the detected
+// generation). Linux/macOS only: the fake `aimem` that records submits is
+// a shell script, put first on PATH.
 //
-// Each scenario runs `opencode run` once in a disposable project and HOME,
-// against a local scripted OpenAI-compatible provider (no paid model, no
-// network). The project carries the plugin and a fake `aimem` binary that
-// appends every `aimem submit` payload to a log; the scenario then asserts
-// on those payloads and on what reached the model.
+// Each scenario runs in a disposable project and HOME, against a local
+// scripted OpenAI-compatible provider (no paid model, no network): most
+// run `opencode run` once; `queued` and `second` drive a 2.x
+// `opencode serve` over its /api routes, so several turns reach one
+// plugin process. The project carries the plugin, and a fake `aimem`
+// first on PATH appends every `aimem submit` payload to a log; the scenario
+// then asserts on process health, those payloads and what reached the
+// model.
 'use strict';
 const assert = require('node:assert/strict');
 const cp = require('node:child_process');
@@ -44,6 +48,10 @@ const scenarios = {
   // A failed turn may end `opencode run` with 0 or 1 depending on the
   // release; either is a normal exit (a timeout or signal is not).
   fail: { mode: 'fail', failExit: [0, 1] },
+  // subdir: OpenCode started in a subdirectory still gets the handoff that
+  // the project root's opencode.json wires (1.x resolves `instructions`
+  // upward; the 2.x plugin walks up to the project root).
+  subdir: { mode: 'text', subdir: true },
   warn: { mode: 'tool', limit: 100000, first: 60000, env: { AIMEM_CTX_WARN_FRACTION: '0.5' }, v2only: true },
   compact: { mode: 'tool', limit: 100000, first: 90000, v2only: true },
   // Long-lived server scenarios (2.x `opencode serve`, driven over its
@@ -209,7 +217,11 @@ async function run(name, sc) {
   fs.mkdirSync(path.join(proj, 'docs'), { recursive: true });
   fs.mkdirSync(home, { recursive: true });
   fs.copyFileSync(path.join(repo, '.opencode', 'plugin', 'aimem.ts'), path.join(proj, '.opencode', 'plugin', 'aimem.ts'));
-  fs.writeFileSync(path.join(proj, 'aimem'), '#!/bin/sh\n[ "$1" = submit ] && { cat; echo; } >> "$AIMEM_E2E_LOG"\nexit 0\n', { mode: 0o755 });
+  // The fake aimem goes on PATH, as a user-level install puts the real one
+  // (the plugin prefers a binary in its launch directory, then PATH).
+  const bin = path.join(work, 'bin');
+  fs.mkdirSync(bin);
+  fs.writeFileSync(path.join(bin, 'aimem'), '#!/bin/sh\n[ "$1" = submit ] && { cat; echo; } >> "$AIMEM_E2E_LOG"\nexit 0\n', { mode: 0o755 });
   fs.writeFileSync(path.join(proj, 'docs', 'SESSION-STATE.md'), '# Handoff\n\nMARKER-HANDOFF\n');
   const p = await provider(sc.mode, sc.first || 100, { delayFirstMs: sc.delayFirstMs, failFrom: sc.failFrom });
   fs.writeFileSync(path.join(proj, 'opencode.json'), JSON.stringify({
@@ -221,8 +233,10 @@ async function run(name, sc) {
       models: { mock: { name: 'mock', limit: { context: sc.limit || 200000, output: 1000 } } } } },
   }, null, 2));
   cp.execFileSync('git', ['init', '-q', proj]);
+  const cwd = sc.subdir ? path.join(proj, 'sub') : proj;
+  fs.mkdirSync(cwd, { recursive: true });
   const env = {
-    PATH: process.env.PATH, HOME: home, TERM: 'dumb',
+    PATH: `${bin}${path.delimiter}${process.env.PATH}`, HOME: home, TERM: 'dumb',
     XDG_CONFIG_HOME: path.join(home, '.config'), XDG_DATA_HOME: path.join(home, '.local', 'share'),
     XDG_CACHE_HOME: path.join(home, '.cache'), XDG_STATE_HOME: path.join(home, '.local', 'state'),
     OPENCODE_DISABLE_AUTOUPDATE: '1', NO_PROXY: '127.0.0.1,localhost', AIMEM_E2E_LOG: log,
@@ -234,7 +248,7 @@ async function run(name, sc) {
   // Async on purpose: the scripted provider runs in this process, so a
   // blocking spawn would starve it.
   const r = sc.serve ? await serveRun(proj, env, sc.serve) : await new Promise(resolve => {
-    const child = cp.spawn(exe, args, { cwd: proj, env, stdio: ['ignore', 'ignore', 'pipe'] });
+    const child = cp.spawn(exe, args, { cwd, env, stdio: ['ignore', 'ignore', 'pipe'] });
     let stderr = '';
     child.stderr.on('data', c => { stderr = (stderr + c).slice(-4000); });
     let timedOut = false;
@@ -261,12 +275,13 @@ async function run(name, sc) {
     assert.ok(p.requests.length > 0, 'the provider was never called');
     assert.ok(primaries.some(x => x.handoff), 'docs/SESSION-STATE.md never reached the model');
     for (const rec of records) {
-      assert.equal(fs.realpathSync(rec.project_dir), fs.realpathSync(proj), 'submit names the wrong project');
+      assert.equal(fs.realpathSync(rec.project_dir), fs.realpathSync(cwd), 'submit names the wrong project');
       assert.equal(rec.event.client, 'opencode');
       assert.ok(rec.event.idempotency_key.startsWith(`opencode:${rec.event.session_id}:`));
     }
     switch (name) {
       case 'text':
+      case 'subdir':
         assert.equal(turns.length, 1, 'expected exactly one journaled turn');
         assert.equal(turns[0].assistant_response, 'MOCK-REPLY-OK');
         assert.match(turns[0].user_request, /say hi please/);

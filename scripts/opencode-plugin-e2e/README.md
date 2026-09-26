@@ -14,7 +14,7 @@ node scripts/opencode-plugin-e2e/run.cjs /path/to/opencode text fail  # a subset
 
 Each scenario uses a disposable project and HOME and a scripted
 OpenAI-compatible provider on 127.0.0.1. It needs no API key and never
-calls a paid model. A fake `aimem` in the project records every
+calls a paid model. A fake `aimem`, first on PATH, records every
 `aimem submit` payload. The checks cover the journal events and what
 reached the model; the real `aimem` binary and MCP are not involved.
 Every scenario also requires a clean exit: a run that hangs (killed after
@@ -26,6 +26,7 @@ payloads are right.
 | `text` | one `turn` event with the user request and the reply; `docs/SESSION-STATE.md` reached the model |
 | `tool` | the turn's `tool_summary` names the tool that ran |
 | `fail` | a `failure` event; every submit shares one idempotency key |
+| `subdir` | OpenCode started in a subdirectory still gets the handoff wired in the project root's opencode.json |
 | `warn` | 2.x only: the context warning reached the model |
 | `compact` | 2.x only: the compaction request carries the `AIMEM HANDOFF` note, and one compaction marker is journaled |
 | `queued` | 2.x only, via `opencode serve`: a prompt queued behind a slow turn and cancelled leaves that turn's request intact and is never journaled |

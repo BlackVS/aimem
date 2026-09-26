@@ -6,8 +6,9 @@ evidence in one place so the change can be reviewed without the working
 session. Review verdicts live on the pull request, not here.
 
 Scope: the OpenCode plugin (`.opencode/plugin/aimem.ts`), the docs that
-describe it, and a new end-to-end check (`scripts/opencode-plugin-e2e/`).
-No Go code, schema, installer or hub change.
+describe it, a new end-to-end check (`scripts/opencode-plugin-e2e/`), and
+a version guard in the user-level installers (4.3). No Go code, schema or
+hub change.
 
 ## 1. Problem
 
@@ -114,7 +115,11 @@ error" (observed on 1.1.4). No single export shape satisfies both that
 loader and 2.x (4.1). The floor is therefore OpenCode 1.14 on the 1.x
 line (1.14.24 was released 2026-04-24; aimem's recorded testing was on
 1.18.x). This is stated in the CHANGELOG upgrade notes and the e2e
-README.
+README, and enforced where it matters: `install.sh` and `install.ps1`
+read `opencode --version` before copying the plugin and, on 1.x below
+1.14 (or a released 0.x), keep the installed plugin and warn instead of
+replacing it. No `opencode` on PATH, an unreadable version, or a
+`0.0.0-<tag>` snapshot build installs as before.
 
 ### 4.4 2.x implementation: behavior mapping
 
@@ -192,8 +197,9 @@ the duplicate by idempotency key.
 | `CHANGELOG.md` | `[Unreleased]`: Added + Upgrade notes (reinstall, `AIMEM_AUTO_COMPACT` 1.x only, 1.14 floor) |
 | `docs/ADMIN-MANUAL.md` | knob notes for 2.x (warning to the model; auto-compact 1.x only) |
 | `docs/DESIGN.md` | plugin bullet covers both generations |
+| `install.sh`, `install.ps1` | skip replacing the plugin on OpenCode 1.x below 1.14, with a warning (4.3) |
 
-Installers are unchanged: same file, same destination.
+The plugin's file name and install destination are unchanged.
 
 ## 6. Verification
 
@@ -213,6 +219,7 @@ fails even when its payloads are right. Scenarios:
 | `text` | exactly one `turn` with the request and reply; submit names the right project; handoff reached the model |
 | `tool` | `tool_summary` is `["glob"]` |
 | `fail` | a `failure` event; all submits share one idempotency key |
+| `subdir` | OpenCode started in a subdirectory: the handoff wired at the project root still reaches the model |
 | `warn` (2.x) | the warning note reached the model |
 | `compact` (2.x) | compaction request carries `AIMEM HANDOFF`; one compaction marker |
 | `queued` (2.x) | B queued behind a slow A and cancelled: one turn, with A's request and reply; B never journaled |
@@ -220,17 +227,19 @@ fails even when its payloads are right. Scenarios:
 
 Results on the final code (2026-09-26, Linux x64):
 
-| OpenCode | text | tool | fail | warn | compact | queued | second |
-|---|---|---|---|---|---|---|---|
-| 1.14.24 | ok | ok | ok (exit 0) | n/a | n/a | n/a | n/a |
-| 1.18.32 | ok | ok | ok (exit 1) | n/a | n/a | n/a | n/a |
-| 2.0.18 | ok | ok | ok (exit 1) | ok | ok | ok | ok |
+| OpenCode | text | tool | fail | subdir | warn | compact | queued | second |
+|---|---|---|---|---|---|---|---|---|
+| 1.14.24 | ok | ok | ok (exit 0) | ok | n/a | n/a | n/a | n/a |
+| 1.18.32 | ok | ok | ok (exit 1) | ok | n/a | n/a | n/a | n/a |
+| 2.0.18 | ok | ok | ok (exit 1) | ok | ok | ok | ok | ok |
 
 1.18.3 passed `text`, `tool` and `fail`, and 1.18.23 and 1.18.28 the same
 three, on earlier revisions; the later changes touched `setupV2` only,
 which 1.x never reaches past its guard. `queued` fails against the
 plugin as first reviewed (commit `87f358c`: the running turn is
-journaled with the cancelled prompt's request), and passes with the fix.
+journaled with the cancelled prompt's request), and passes with the fix;
+`subdir` likewise fails against `04182c6` (the handoff never reached the
+model) and passes now.
 With `AIMEM_E2E_TIMEOUT_MS=2000`, `text` fails with "opencode run timed
 out", which shows the process-health check works.
 
@@ -256,6 +265,20 @@ Binaries were obtained with `npm pack opencode-linux-x64@<version>`
   pre-releases misdetected as 2.x by the e2e script. One further finding
   (a single plugin instance serving every project) was checked against
   the 2.x source and does not apply (4.7).
+- The full pre-merge review at high of `04182c6` (posted on the PR)
+  found no blockers and ten findings. Fixed: the installers now guard the
+  1.14 floor (4.3); the handoff is found from a subdirectory launch by
+  walking up to the project root, as 1.x resolves `instructions`; a
+  transient ownership lookup is retried before an event is dropped; the
+  event subscription is re-established when the stream ends or fails;
+  the context hook resolves the limit before reading the session's
+  messages, and caches "no limit" for a minute and the wiring check for
+  30 s; spawn errors get a listener, so a missing `aimem` binary cannot
+  crash the host with an unhandled `error` event; the pending-prompt map
+  is bounded; the e2e header and a dynamic import are tidied. Not
+  applicable: compaction recreating turn state (2.x compaction publishes
+  only `session.compaction.*` and usage events, not text, step or tool
+  events).
 - The external review of `87f358c` raised two follow-ups, both fixed: a
   prompt queued behind a running turn replaced that turn's request
   (reproduced, then fixed by taking the request at inbox delivery; the
@@ -266,8 +289,9 @@ Binaries were obtained with `npm pack opencode-linux-x64@<version>`
 
 ## 7. Known gaps and follow-ups
 
-- **Not tested:** Windows (the win32 spawn branch is unchanged from
-  master); a 2.x server hosting several aimem projects at once (4.7:
+- **Not tested:** Windows (the win32 spawn branch only gained an error
+  listener; the `install.ps1` version guard was reviewed but not executed:
+  no PowerShell in the test environment); a 2.x server hosting several aimem projects at once (4.7:
   per-location loading was read from source, the filtering is
   code-reviewed only); a steer delivered into a running turn (it joins
   that turn's request by design; the unmodified queued case was observed

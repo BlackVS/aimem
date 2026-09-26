@@ -46,6 +46,24 @@ version_older() {
 }
 need() { command -v "$1" >/dev/null 2>&1 || { echo "error: $1 is required" >&2; exit 1; }; }
 
+# opencode_too_old prints the installed OpenCode version and succeeds when
+# it is a 1.x release before 1.14 (or a released 0.x). The plugin serves
+# 1.14+ and 2.x from one file; older loaders call every export as a
+# function and stop OpenCode at startup on it. No opencode, an unreadable
+# version, or a 0.0.0-<tag> snapshot build (current code, not an old
+# release): not too old (install as before).
+opencode_too_old() {
+  command -v opencode >/dev/null 2>&1 || return 1
+  local v
+  v=$(opencode --version 2>/dev/null | grep -oE '[0-9]+\.[0-9]+(\.[0-9]+)?' | head -n1) || return 1
+  [ -n "$v" ] || return 1
+  case "$v" in 0.0.0|0.0) return 1 ;; esac
+  local major=${v%%.*} rest=${v#*.}
+  local minor=${rest%%.*}
+  printf '%s\n' "$v"
+  [ "$major" -eq 0 ] || { [ "$major" -eq 1 ] && [ "$minor" -lt 14 ]; }
+}
+
 # Merge one checkpoint hook entry into a hooks config, keyed on the marker
 # string so re-runs and uninstalls find it. Never touches other hooks.
 # Claude Code's settings.json and Codex's hooks.json share this block shape.
@@ -125,9 +143,16 @@ install_user() {
   add_claude_hook "$CLAUDE_SETTINGS" StopFailure "$SUBMIT_CMD" "Checkpointing failed turn"
   add_claude_hook "$CLAUDE_SETTINGS" PreCompact  "$SUBMIT_CMD" "Journaling compaction marker"
 
-  say "OpenCode global plugin -> $OC_PLUGIN_DIR/aimem.ts"
-  mkdir -p "$OC_PLUGIN_DIR"
-  cp "$REPO_DIR/.opencode/plugin/aimem.ts" "$OC_PLUGIN_DIR/aimem.ts"
+  local oc_old
+  if oc_old=$(opencode_too_old); then
+    echo "warning: OpenCode $oc_old is older than 1.14; this aimem plugin needs OpenCode 1.14+ or 2.x" \
+      "and would stop that OpenCode at startup. Kept $OC_PLUGIN_DIR/aimem.ts as it is;" \
+      "upgrade OpenCode, then re-run this install." >&2
+  else
+    say "OpenCode global plugin -> $OC_PLUGIN_DIR/aimem.ts"
+    mkdir -p "$OC_PLUGIN_DIR"
+    cp "$REPO_DIR/.opencode/plugin/aimem.ts" "$OC_PLUGIN_DIR/aimem.ts"
+  fi
 
   # Codex CLI: same checkpoint hooks, user-level (loads regardless of
   # project trust). Codex has no StopFailure; Stop + PreCompact cover

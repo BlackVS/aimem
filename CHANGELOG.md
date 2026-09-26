@@ -38,7 +38,10 @@ currently 18); a binary refuses a database newer than it understands.
   1.x releases call every plugin export as a function and cannot load the
   default object that OpenCode 2 requires; no single file can serve both.
   There, OpenCode itself stops with "Unexpected error" (observed on
-  1.1.4), so upgrade OpenCode before reinstalling.
+  1.1.4). The user-level installers (`install.sh`, `install.ps1`, and so
+  the one-liners) check `opencode --version` and, below 1.14, keep the
+  installed plugin and print a warning instead of replacing it; upgrade
+  OpenCode, then re-run the install.
 
 ## [0.7.3] — 2026-09-24
 
