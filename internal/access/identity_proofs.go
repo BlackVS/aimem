@@ -19,11 +19,11 @@ import (
 // identity.v1 proof ledger (docs/DESIGN-AIFORGE-IDENTITY-WIRE.md): the
 // registered aicrew peer, its credentials, proof receipts and redemptions.
 //
-// Everything here is package-private. No route, MCP tool or command can reach
-// it until a reviewed wire exports it, so nothing in this file is an
-// operational credential or a working introspection path. Every secret
-// (peer bearer, receipt) is returned once to its creator and stored only as a
-// SHA-256 digest; audit subjects carry IDs, never secrets.
+// The hub's identity routes (internal/server/identity.go) are the only
+// callers; no MCP tool reaches this ledger. Nothing here is a working
+// introspection path. Every secret (peer bearer, receipt) is returned once to
+// its creator and stored only as a SHA-256 digest; audit subjects carry IDs,
+// never secrets.
 
 const (
 	peerOperationRedeem       = "identity.redeem"
@@ -37,21 +37,21 @@ const (
 )
 
 var (
-	errInvalidRequest       = errors.New("invalid_request")
-	errCredentialScope      = errors.New("credential_scope_forbidden")
-	errPeerUnknown          = errors.New("peer_unknown")
-	errPeerUnauthenticated  = errors.New("peer_unauthenticated")
-	errPeerCredentialLimit  = errors.New("peer already has the maximum number of active credentials")
-	errProofInvalid         = errors.New("proof_invalid")
-	errCredentialInactive   = errors.New("credential_inactive")
-	errIdempotencyConflict  = errors.New("idempotency_conflict")
-	errRateLimited          = errors.New("rate_limited")
+	ErrInvalidRequest       = errors.New("invalid_request")
+	ErrCredentialScope      = errors.New("credential_scope_forbidden")
+	ErrPeerUnknown          = errors.New("peer_unknown")
+	ErrPeerUnauthenticated  = errors.New("peer_unauthenticated")
+	ErrPeerCredentialLimit  = errors.New("peer already has the maximum number of active credentials")
+	ErrProofInvalid         = errors.New("proof_invalid")
+	ErrCredentialInactive   = errors.New("credential_inactive")
+	ErrIdempotencyConflict  = errors.New("idempotency_conflict")
+	ErrRateLimited          = errors.New("rate_limited")
 	identityIDPattern       = regexp.MustCompile(`^[A-Za-z0-9._:-]{1,128}$`)
 	identityRequestKeyShape = regexp.MustCompile(`^k1_[A-Za-z0-9_-]{43}$`)
 	identityReceiptShape    = regexp.MustCompile(`^amr1_[A-Za-z0-9_-]{43}$`)
 )
 
-type identityPeer struct {
+type IdentityPeer struct {
 	ServiceID string
 	HubID     string
 	Endpoint  string // stored for E4; introspection is not operational
@@ -60,7 +60,7 @@ type identityPeer struct {
 	Disabled  bool
 }
 
-type peerCredential struct {
+type PeerCredential struct {
 	ID        string
 	ServiceID string
 	CreatedAt time.Time
@@ -68,20 +68,20 @@ type peerCredential struct {
 	Revoked   bool
 }
 
-// peerIdentity is what an authenticated peer bearer proves: one registered
+// PeerIdentity is what an authenticated peer bearer proves: one registered
 // service, through one credential, for identity.redeem only.
-type peerIdentity struct {
+type PeerIdentity struct {
 	ServiceID    string
 	CredentialID string
 }
 
-type proofRequest struct {
+type ProofRequest struct {
 	PeerServiceID string
 	HubID         string
 	ChallengeID   string
 }
 
-type proofReceipt struct {
+type ProofReceipt struct {
 	Receipt       string // the secret; returned once, never stored
 	ID            string
 	ExpiresAt     time.Time
@@ -92,14 +92,14 @@ type proofReceipt struct {
 	TokenID       string
 }
 
-type redeemRequest struct {
+type RedeemRequest struct {
 	HubID       string
 	ChallengeID string
 	Receipt     string
 	RequestKey  string // k1_ encoding of aicrew's request key
 }
 
-type redemption struct {
+type Redemption struct {
 	ID            string
 	RequestKey    string
 	Replayed      bool
@@ -133,26 +133,26 @@ func validateTLSTrust(endpoint *url.URL, mode, value string) error {
 	return nil
 }
 
-// registerIdentityPeer records the aicrew service allowed to redeem receipts
+// RegisterIdentityPeer records the aicrew service allowed to redeem receipts
 // on this hub. The pilot allows one active peer per hub. The endpoint and
 // trust binding are stored for the later introspection increment only.
-func (s *Store) registerIdentityPeer(actor string, p identityPeer) error {
+func (s *Store) RegisterIdentityPeer(actor string, p IdentityPeer) error {
 	if !identityIDPattern.MatchString(p.ServiceID) {
-		return fmt.Errorf("%w: service ID", errInvalidRequest)
+		return fmt.Errorf("%w: service ID", ErrInvalidRequest)
 	}
 	u, err := url.Parse(p.Endpoint)
 	if err != nil || u.Scheme != "https" || u.Hostname() == "" || u.User != nil || u.Fragment != "" || u.RawQuery != "" {
-		return fmt.Errorf("%w: endpoint must be an https URL without credentials, query or fragment", errInvalidRequest)
+		return fmt.Errorf("%w: endpoint must be an https URL without credentials, query or fragment", ErrInvalidRequest)
 	}
 	if err := validateTLSTrust(u, p.TLSMode, p.TLSValue); err != nil {
-		return fmt.Errorf("%w: %v", errInvalidRequest, err)
+		return fmt.Errorf("%w: %v", ErrInvalidRequest, err)
 	}
 	hub, err := s.HubID()
 	if err != nil {
 		return err
 	}
 	if p.HubID != hub {
-		return fmt.Errorf("%w: peer must be registered for this hub", errInvalidRequest)
+		return fmt.Errorf("%w: peer must be registered for this hub", ErrInvalidRequest)
 	}
 	return s.change(actor, "identity_peer.register", p.ServiceID, func(tx *sql.Tx) error {
 		if err := requireNoOtherActivePeer(tx, p.ServiceID); err != nil {
@@ -175,9 +175,9 @@ func requireNoOtherActivePeer(tx *sql.Tx, serviceID string) error {
 	return nil
 }
 
-// setIdentityPeerDisabled disables a peer, which refuses all its credentials,
+// SetIdentityPeerDisabled disables a peer, which refuses all its credentials,
 // or re-enables it under the one-active-peer rule.
-func (s *Store) setIdentityPeerDisabled(actor, serviceID string, disabled bool) error {
+func (s *Store) SetIdentityPeerDisabled(actor, serviceID string, disabled bool) error {
 	return s.change(actor, fmt.Sprintf("identity_peer.disabled.%t", disabled), serviceID, func(tx *sql.Tx) error {
 		var n int
 		if err := tx.QueryRow("SELECT count(*) FROM identity_peers WHERE service_id=?", serviceID).Scan(&n); err != nil {
@@ -196,20 +196,20 @@ func (s *Store) setIdentityPeerDisabled(actor, serviceID string, disabled bool) 
 	})
 }
 
-// issuePeerCredential mints one peer bearer, shown only in this return value.
+// IssuePeerCredential mints one peer bearer, shown only in this return value.
 // A lost response is recovered by revoking the unconfirmed credential (its
 // metadata is listed) and issuing another; the secret is never shown again.
-func (s *Store) issuePeerCredential(actor, serviceID string, expires time.Time) (peerCredential, string, error) {
+func (s *Store) IssuePeerCredential(actor, serviceID string, expires time.Time) (PeerCredential, string, error) {
 	now := s.now()
 	if !expires.After(now) || expires.After(now.Add(peerCredentialMaxLife)) {
-		return peerCredential{}, "", fmt.Errorf("%w: expiry must be in the future and within 366 days", errInvalidRequest)
+		return PeerCredential{}, "", fmt.Errorf("%w: expiry must be in the future and within 366 days", ErrInvalidRequest)
 	}
 	var random [32]byte
 	if _, err := rand.Read(random[:]); err != nil {
-		return peerCredential{}, "", err
+		return PeerCredential{}, "", err
 	}
 	secret := peerCredentialPrefix + hex.EncodeToString(random[:])
-	c := peerCredential{ID: uuidv7.New(), ServiceID: serviceID, CreatedAt: now.UTC().Truncate(time.Second), ExpiresAt: expires.UTC().Truncate(time.Second)}
+	c := PeerCredential{ID: uuidv7.New(), ServiceID: serviceID, CreatedAt: now.UTC().Truncate(time.Second), ExpiresAt: expires.UTC().Truncate(time.Second)}
 	err := s.change(actor, "identity_peer.credential.issue", c.ID, func(tx *sql.Tx) error {
 		var disabled bool
 		if err := tx.QueryRow("SELECT disabled FROM identity_peers WHERE service_id=?", serviceID).Scan(&disabled); err != nil {
@@ -224,40 +224,63 @@ func (s *Store) issuePeerCredential(actor, serviceID string, expires time.Time) 
 			return err
 		}
 		if active >= peerCredentialMaxActive {
-			return errPeerCredentialLimit
+			return ErrPeerCredentialLimit
 		}
 		_, err := tx.Exec("INSERT INTO identity_peer_credentials(id,service_id,digest,created_at,expires_at) VALUES(?,?,?,?,?)",
 			c.ID, serviceID, digestHex(secret), c.CreatedAt.Unix(), c.ExpiresAt.Unix())
 		return err
 	})
 	if err != nil {
-		return peerCredential{}, "", err
+		return PeerCredential{}, "", err
 	}
 	return c, secret, nil
 }
 
-// revokePeerCredential affects only that credential and is idempotent.
-func (s *Store) revokePeerCredential(actor, id string) error {
+// RevokePeerCredential affects only that credential of that peer and is
+// idempotent.
+func (s *Store) RevokePeerCredential(actor, serviceID, id string) error {
 	return s.change(actor, "identity_peer.credential.revoke", id, func(tx *sql.Tx) error {
-		if err := requireRow(tx, "identity_peer_credentials", id); err != nil {
+		var n int
+		if err := tx.QueryRow("SELECT count(*) FROM identity_peer_credentials WHERE id=? AND service_id=?", id, serviceID).Scan(&n); err != nil {
 			return err
+		}
+		if n != 1 {
+			return fmt.Errorf("unknown peer credential")
 		}
 		_, err := tx.Exec("UPDATE identity_peer_credentials SET revoked=1 WHERE id=?", id)
 		return err
 	})
 }
 
-// listPeerCredentials returns metadata only, for lost-response recovery and
+// ListIdentityPeers returns the registered peers' non-secret records.
+func (s *Store) ListIdentityPeers() ([]IdentityPeer, error) {
+	rows, err := s.db.Query("SELECT service_id,hub_id,endpoint,tls_mode,tls_value,disabled FROM identity_peers ORDER BY service_id")
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []IdentityPeer
+	for rows.Next() {
+		var p IdentityPeer
+		if err := rows.Scan(&p.ServiceID, &p.HubID, &p.Endpoint, &p.TLSMode, &p.TLSValue, &p.Disabled); err != nil {
+			return nil, err
+		}
+		out = append(out, p)
+	}
+	return out, rows.Err()
+}
+
+// ListPeerCredentials returns metadata only, for lost-response recovery and
 // rotation; no digest or secret is exposed.
-func (s *Store) listPeerCredentials(serviceID string) ([]peerCredential, error) {
+func (s *Store) ListPeerCredentials(serviceID string) ([]PeerCredential, error) {
 	rows, err := s.db.Query("SELECT id,service_id,created_at,expires_at,revoked FROM identity_peer_credentials WHERE service_id=? ORDER BY id", serviceID)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	var out []peerCredential
+	var out []PeerCredential
 	for rows.Next() {
-		var c peerCredential
+		var c PeerCredential
 		var created, expires int64
 		if err := rows.Scan(&c.ID, &c.ServiceID, &created, &expires, &c.Revoked); err != nil {
 			return nil, err
@@ -268,29 +291,29 @@ func (s *Store) listPeerCredentials(serviceID string) ([]peerCredential, error) 
 	return out, rows.Err()
 }
 
-func (s *Store) lookupPeer(q rowQuery, secret string) (peerIdentity, error) {
+func (s *Store) lookupPeer(q rowQuery, secret string) (PeerIdentity, error) {
 	if !strings.HasPrefix(secret, peerCredentialPrefix) {
-		return peerIdentity{}, errPeerUnauthenticated
+		return PeerIdentity{}, ErrPeerUnauthenticated
 	}
-	var id peerIdentity
+	var id PeerIdentity
 	err := q.QueryRow(`SELECT p.service_id,c.id FROM identity_peer_credentials c
 JOIN identity_peers p ON p.service_id=c.service_id
 JOIN hub_identity h ON h.id=p.hub_id
 WHERE c.digest=? AND c.revoked=0 AND c.expires_at>? AND p.disabled=0 AND p.operation=?`,
 		digestHex(secret), s.now().Unix(), peerOperationRedeem).Scan(&id.ServiceID, &id.CredentialID)
 	if errors.Is(err, sql.ErrNoRows) {
-		return peerIdentity{}, errPeerUnauthenticated
+		return PeerIdentity{}, ErrPeerUnauthenticated
 	}
 	return id, err
 }
 
-// authenticatePeer checks a presented peer bearer. Expired, revoked and
+// AuthenticatePeer checks a presented peer bearer. Expired, revoked and
 // disabled-peer credentials are refused as if unknown.
-func (s *Store) authenticatePeer(secret string) (peerIdentity, error) {
+func (s *Store) AuthenticatePeer(secret string) (PeerIdentity, error) {
 	return s.lookupPeer(s.db, secret)
 }
 
-func peerStillValid(tx *sql.Tx, p peerIdentity, now time.Time) error {
+func peerStillValid(tx *sql.Tx, p PeerIdentity, now time.Time) error {
 	var n int
 	err := tx.QueryRow(`SELECT count(*) FROM identity_peer_credentials c
 JOIN identity_peers p ON p.service_id=c.service_id
@@ -301,7 +324,7 @@ WHERE c.id=? AND c.service_id=? AND c.revoked=0 AND c.expires_at>? AND p.disable
 		return err
 	}
 	if n != 1 {
-		return errPeerUnauthenticated
+		return ErrPeerUnauthenticated
 	}
 	return nil
 }
@@ -331,85 +354,85 @@ func pruneIdentityLedger(tx *sql.Tx, now time.Time) error {
 	return err
 }
 
-// issueProof mints a single-use receipt for the authenticated individual
+// IssueProof mints a single-use receipt for the authenticated individual
 // credential (userID, tokenID from authentication; both are rechecked here).
-func (s *Store) issueProof(userID, tokenID string, req proofRequest) (proofReceipt, error) {
+func (s *Store) IssueProof(userID, tokenID string, req ProofRequest) (ProofReceipt, error) {
 	if !identityIDPattern.MatchString(req.ChallengeID) || !identityIDPattern.MatchString(req.PeerServiceID) {
-		return proofReceipt{}, errInvalidRequest
+		return ProofReceipt{}, ErrInvalidRequest
 	}
 	var random [32]byte
 	if _, err := rand.Read(random[:]); err != nil {
-		return proofReceipt{}, err
+		return ProofReceipt{}, err
 	}
 	tx, err := s.db.Begin()
 	if err != nil {
-		return proofReceipt{}, err
+		return ProofReceipt{}, err
 	}
 	defer tx.Rollback()
 	// Validation time is taken only once the transaction holds the store: a
 	// wait in Begin must not let a credential expire unnoticed.
 	now := s.now()
-	r := proofReceipt{
+	r := ProofReceipt{
 		Receipt: receiptPrefix + base64.RawURLEncoding.EncodeToString(random[:]), ID: uuidv7.New(),
 		ExpiresAt: now.Add(receiptLifetime).UTC(), HubID: req.HubID, PeerServiceID: req.PeerServiceID,
 		ChallengeID: req.ChallengeID, UserID: userID, TokenID: tokenID,
 	}
 	live, userScoped, err := userTokenState(tx, userID, tokenID, now)
 	if err != nil {
-		return proofReceipt{}, err
+		return ProofReceipt{}, err
 	}
 	if !live {
-		return proofReceipt{}, ErrDenied
+		return ProofReceipt{}, ErrDenied
 	}
 	if !userScoped {
-		return proofReceipt{}, errCredentialScope
+		return ProofReceipt{}, ErrCredentialScope
 	}
 	var peers int
 	if err := tx.QueryRow(`SELECT count(*) FROM identity_peers p JOIN hub_identity h ON h.id=p.hub_id
 WHERE p.service_id=? AND p.hub_id=? AND p.disabled=0 AND p.operation=?`, req.PeerServiceID, req.HubID, peerOperationRedeem).Scan(&peers); err != nil {
-		return proofReceipt{}, err
+		return ProofReceipt{}, err
 	}
 	if peers != 1 {
-		return proofReceipt{}, errPeerUnknown
+		return ProofReceipt{}, ErrPeerUnknown
 	}
 	var recent int
 	if err := tx.QueryRow("SELECT count(*) FROM identity_receipts WHERE token_id=? AND created_ms>?",
 		tokenID, now.Add(-time.Minute).UnixMilli()).Scan(&recent); err != nil {
-		return proofReceipt{}, err
+		return ProofReceipt{}, err
 	}
 	if recent >= receiptsPerTokenPerMinute {
-		return proofReceipt{}, errRateLimited
+		return ProofReceipt{}, ErrRateLimited
 	}
 	if err := pruneIdentityLedger(tx, now); err != nil {
-		return proofReceipt{}, err
+		return ProofReceipt{}, err
 	}
 	if _, err := tx.Exec("UPDATE identity_receipts SET state='superseded' WHERE token_id=? AND service_id=? AND challenge_id=? AND state='live'",
 		tokenID, req.PeerServiceID, req.ChallengeID); err != nil {
-		return proofReceipt{}, err
+		return ProofReceipt{}, err
 	}
 	if _, err := tx.Exec(`INSERT INTO identity_receipts(id,digest,service_id,hub_id,challenge_id,user_id,token_id,created_ms,expires_ms,state)
 VALUES(?,?,?,?,?,?,?,?,?,'live')`, r.ID, digestHex(r.Receipt), r.PeerServiceID, r.HubID, r.ChallengeID, userID, tokenID,
 		now.UnixMilli(), r.ExpiresAt.UnixMilli()); err != nil {
-		return proofReceipt{}, err
+		return ProofReceipt{}, err
 	}
 	if err := audit(tx, "user:"+userID, "identity.proof.issue", r.ID); err != nil {
-		return proofReceipt{}, err
+		return ProofReceipt{}, err
 	}
 	if err := tx.Commit(); err != nil {
-		return proofReceipt{}, err
+		return ProofReceipt{}, err
 	}
 	return r, nil
 }
 
-// redeemProof consumes a receipt for the authenticated peer. It is single
+// RedeemProof consumes a receipt for the authenticated peer. It is single
 // effect per (peer, request key): an identical retry returns the recorded
 // result after rechecking the token, changed input under the key conflicts,
 // and a receipt consumed under another key is proof_invalid. Every refusal
 // is audited with its exact reason; the caller only sees the stable code.
-func (s *Store) redeemProof(peer peerIdentity, req redeemRequest) (redemption, error) {
+func (s *Store) RedeemProof(peer PeerIdentity, req RedeemRequest) (Redemption, error) {
 	if !identityRequestKeyShape.MatchString(req.RequestKey) || !identityReceiptShape.MatchString(req.Receipt) ||
 		!identityIDPattern.MatchString(req.ChallengeID) || req.HubID == "" {
-		return redemption{}, errInvalidRequest
+		return Redemption{}, ErrInvalidRequest
 	}
 	receiptDigest := digestHex(req.Receipt)
 	inputDigest := digestHex(req.HubID + "\x00" + req.ChallengeID + "\x00" + receiptDigest)
@@ -417,29 +440,29 @@ func (s *Store) redeemProof(peer peerIdentity, req redeemRequest) (redemption, e
 
 	tx, err := s.db.Begin()
 	if err != nil {
-		return redemption{}, err
+		return Redemption{}, err
 	}
 	defer tx.Rollback()
-	// As in issueProof: expiry is judged at the time the transaction starts.
+	// As in IssueProof: expiry is judged at the time the transaction starts.
 	now := s.now()
 	// A refusal commits only its audit record.
-	refuse := func(reason string, cause error) (redemption, error) {
+	refuse := func(reason string, cause error) (Redemption, error) {
 		if err := audit(tx, actor, "identity.redeem.refused."+reason, req.ChallengeID); err != nil {
-			return redemption{}, err
+			return Redemption{}, err
 		}
 		if err := tx.Commit(); err != nil {
-			return redemption{}, err
+			return Redemption{}, err
 		}
-		return redemption{}, cause
+		return Redemption{}, cause
 	}
 	if err := peerStillValid(tx, peer, now); err != nil {
-		return redemption{}, err
+		return Redemption{}, err
 	}
 	if err := pruneIdentityLedger(tx, now); err != nil {
-		return redemption{}, err
+		return Redemption{}, err
 	}
 
-	var rec redemption
+	var rec Redemption
 	var recordedInput string
 	var redeemedMs int64
 	err = tx.QueryRow(`SELECT id,request_key,hub_id,challenge_id,user_id,token_id,redeemed_ms,input_digest
@@ -448,19 +471,19 @@ FROM identity_redemptions WHERE service_id=? AND request_key=?`, peer.ServiceID,
 	switch {
 	case err == nil:
 		if recordedInput != inputDigest {
-			return refuse("changed_input", errIdempotencyConflict)
+			return refuse("changed_input", ErrIdempotencyConflict)
 		}
 		live, userScoped, err := userTokenState(tx, rec.UserID, rec.TokenID, now)
 		if err != nil {
-			return redemption{}, err
+			return Redemption{}, err
 		}
 		if !live || !userScoped {
-			return refuse("token_inactive_on_replay", errCredentialInactive)
+			return refuse("token_inactive_on_replay", ErrCredentialInactive)
 		}
 		rec.Replayed, rec.PeerServiceID, rec.RedeemedAt = true, peer.ServiceID, time.UnixMilli(redeemedMs).UTC()
 		return rec, tx.Commit()
 	case !errors.Is(err, sql.ErrNoRows):
-		return redemption{}, err
+		return Redemption{}, err
 	}
 
 	var receiptID, service, hub, challenge, userID, tokenID, state string
@@ -468,47 +491,47 @@ FROM identity_redemptions WHERE service_id=? AND request_key=?`, peer.ServiceID,
 	err = tx.QueryRow(`SELECT id,service_id,hub_id,challenge_id,user_id,token_id,expires_ms,state
 FROM identity_receipts WHERE digest=?`, receiptDigest).Scan(&receiptID, &service, &hub, &challenge, &userID, &tokenID, &expiresMs, &state)
 	if errors.Is(err, sql.ErrNoRows) {
-		return refuse("unknown", errProofInvalid)
+		return refuse("unknown", ErrProofInvalid)
 	}
 	if err != nil {
-		return redemption{}, err
+		return Redemption{}, err
 	}
 	switch {
 	case service != peer.ServiceID:
-		return refuse("wrong_peer", errProofInvalid)
+		return refuse("wrong_peer", ErrProofInvalid)
 	case challenge != req.ChallengeID:
-		return refuse("wrong_challenge", errProofInvalid)
+		return refuse("wrong_challenge", ErrProofInvalid)
 	case hub != req.HubID:
-		return refuse("wrong_hub", errProofInvalid)
+		return refuse("wrong_hub", ErrProofInvalid)
 	case state == "redeemed":
-		return refuse("already_redeemed", errProofInvalid)
+		return refuse("already_redeemed", ErrProofInvalid)
 	case state == "superseded":
-		return refuse("superseded", errProofInvalid)
+		return refuse("superseded", ErrProofInvalid)
 	case expiresMs <= now.UnixMilli():
-		return refuse("expired", errProofInvalid)
+		return refuse("expired", ErrProofInvalid)
 	}
 	live, userScoped, err := userTokenState(tx, userID, tokenID, now)
 	if err != nil {
-		return redemption{}, err
+		return Redemption{}, err
 	}
 	if !live || !userScoped {
-		return refuse("token_inactive", errCredentialInactive)
+		return refuse("token_inactive", ErrCredentialInactive)
 	}
 	res, err := tx.Exec("UPDATE identity_receipts SET state='redeemed' WHERE id=? AND state='live'", receiptID)
 	if err != nil {
-		return redemption{}, err
+		return Redemption{}, err
 	}
 	if n, err := res.RowsAffected(); err != nil || n != 1 {
-		return redemption{}, fmt.Errorf("receipt state changed during redemption")
+		return Redemption{}, fmt.Errorf("receipt state changed during redemption")
 	}
-	rec = redemption{ID: uuidv7.New(), RequestKey: req.RequestKey, PeerServiceID: peer.ServiceID, ChallengeID: challenge,
+	rec = Redemption{ID: uuidv7.New(), RequestKey: req.RequestKey, PeerServiceID: peer.ServiceID, ChallengeID: challenge,
 		HubID: hub, UserID: userID, TokenID: tokenID, RedeemedAt: time.UnixMilli(now.UnixMilli()).UTC()}
 	if _, err := tx.Exec(`INSERT INTO identity_redemptions(service_id,request_key,input_digest,id,receipt_id,hub_id,challenge_id,user_id,token_id,redeemed_ms)
 VALUES(?,?,?,?,?,?,?,?,?,?)`, peer.ServiceID, req.RequestKey, inputDigest, rec.ID, receiptID, hub, challenge, userID, tokenID, now.UnixMilli()); err != nil {
-		return redemption{}, err
+		return Redemption{}, err
 	}
 	if err := audit(tx, actor, "identity.redeem", rec.ID); err != nil {
-		return redemption{}, err
+		return Redemption{}, err
 	}
 	return rec, tx.Commit()
 }

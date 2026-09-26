@@ -396,7 +396,8 @@ func TestOrdinaryTokenGateMatrix(t *testing.T) {
 		"GET /v1/projects",                                                                                                              // the listing, read only, reserved stores filtered (TestProjectListForOrdinaryTokens)
 		"GET /v1/projects/{p}/process",                                                                                                  // the selected process reference (TestProcessReferenceSelection)
 		"GET /v1/projects/{p}/epics", "POST /v1/projects/{p}/epics", "GET /v1/projects/{p}/epics/{e}", "PUT /v1/projects/{p}/epics/{e}", // epics (TestEpicRoutes)
-		"GET /v1/access/directory"} // the identity directory (TestAccessDirectory)
+		"GET /v1/access/directory", // the identity directory (TestAccessDirectory)
+		"POST /v1/identity/proofs"} // identity.v1 proof receipt over TLS only (TestIdentityRoutes*)
 	if len(ordinaryRoutes) != len(want) {
 		t.Fatalf("ordinary surface changed: %v", ordinaryRoutes)
 	}
@@ -408,7 +409,8 @@ func TestOrdinaryTokenGateMatrix(t *testing.T) {
 	mcpHits := 0
 	h := f.s.TCPHandler(f.env, map[string]http.Handler{"/mcp": http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { mcpHits++ })})
 	fill := strings.NewReplacer("{p}", "alpha", "{id}", uuidv7.New(), "{c}", uuidv7.New(), "{s}", "s1", "{key}", "about",
-		"{name}", "RUNBOOK", "{instance}", "x", "{kind}", "user", "{g}", "g", "{u}", "u", "{id...}", "x", "{$}", "", "{e}", uuidv7.New())
+		"{name}", "RUNBOOK", "{instance}", "x", "{kind}", "user", "{g}", "g", "{u}", "u", "{id...}", "x", "{$}", "", "{e}", uuidv7.New(),
+		"{service_id}", "aicrew-example", "{credential_id}", uuidv7.New())
 	public := f.s.publicGETs()
 	for _, rt := range f.s.Routes() {
 		path := fill.Replace(rt.Pattern)
@@ -422,6 +424,13 @@ func TestOrdinaryTokenGateMatrix(t *testing.T) {
 		w := taskReq(t, h, rt.Method, path, f.alice, "", body)
 		switch {
 		case public[path] != nil || (rt.Method == "GET" && path == "/v1/access/identity"):
+		case strings.HasPrefix(rt.Pattern, "/v1/identity/"):
+			// Over this plain-HTTP recorder every identity route refuses
+			// (tls_required, or admin/peer-only); identity_routes_test.go
+			// covers each one over real TLS.
+			if w.Code != 403 {
+				t.Errorf("%s %s: identity route reachable without TLS by an ordinary token: %d", rt.Method, rt.Pattern, w.Code)
+			}
 		case rt.Ordinary():
 			if w.Code == 401 || w.Code == 403 {
 				t.Errorf("%s %s: ordinary route refused at the gate: %d %s", rt.Method, rt.Pattern, w.Code, w.Body)

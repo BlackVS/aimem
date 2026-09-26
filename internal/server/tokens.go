@@ -88,11 +88,14 @@ func HashToken(secret string) string {
 // local unix socket carry none and are trusted as the local operator.
 type Identity struct {
 	Name    string
-	Role    string // legacy "writer"/"admin", or scoped ordinary "user"
+	Role    string // legacy "writer"/"admin", scoped ordinary "user", or identity "peer"
 	UserID  string
 	TokenID string
 	Scope   access.TokenScope
 	Project string // ordinary tokens: the access instance the token was issued for
+	// Peer is set only for the "peer" role: the registered identity.v1
+	// service and the credential that authenticated it.
+	Peer access.PeerIdentity
 }
 
 type identityKey struct{}
@@ -134,6 +137,19 @@ func (s *Server) authenticate(envToken, presented string) (Identity, bool) {
 			return Identity{}, false
 		}
 		return Identity{Name: user.Name, Role: "user", UserID: user.UserID, TokenID: user.TokenID, Project: user.Project, Scope: user.Scope}, true
+	}
+	// A peer credential is a service identity for identity.v1 redemption
+	// only; authWrapper confines it to that one route.
+	if !ok && strings.HasPrefix(presented, "aimem_peer_") {
+		db, err := s.openAccess(false)
+		if err != nil {
+			return Identity{}, false
+		}
+		peer, err := db.AuthenticatePeer(presented)
+		if err != nil {
+			return Identity{}, false
+		}
+		return Identity{Name: "peer:" + peer.ServiceID, Role: "peer", Peer: peer}, true
 	}
 	for _, t := range LoadTokens(s.reg.Root()) {
 		if len(t.SHA256) != sha256.Size*2 {

@@ -1,16 +1,18 @@
 {
   "openapi": "3.1.0",
   "info": {
-    "title": "Aimem identity v1 proposal (unregistered)",
+    "title": "Aimem identity v1 wire contract",
     "version": "1.0.0",
-    "description": "Design fixture only. No production route or MCP tool is registered until E3 implements proof issuance, redemption and peer registration and a review approves them. The aicrew introspection route is owned by aicrew and is listed here only as the frozen v1 peer contract."
+    "description": "The identity.v1 wire contract. The hub serves the two paths below over TLS it terminates itself (E3b); the live internal/server/openapi.json describes them together with the admin peer routes. There is no MCP tool. The aicrew introspection route is owned by aicrew and is listed only as the frozen v1 peer contract; it is not operational until E4."
   },
   "x-contract-version": "identity.v1",
-  "x-security-gate": "E3 must implement and test individual-bearer proof issuance, peer-credential redemption and audited hub-admin peer registration against a fake aicrew before any path here is registered. E4 must implement the introspection client and team-mode verifier against a fake introspection server. A service credential never authorizes an agent, knowledge or task route.",
-  "x-mcp-parity": {"proof": "identity_proof"},
+  "x-security-gate": "E3b registers these two wire paths (and the admin peer routes) on the hub, reachable only over TLS terminated by the hub. E4 must implement the introspection client and team-mode verifier against a fake introspection server before introspection is operational. A service credential never authorizes an agent, knowledge or task route.",
+  "x-mcp": "none: identity.v1 routes are HTTP-only. A proof receipt is a secret and never enters a model-visible tool result, transcript or log.",
+  "x-requires-tls": "every path: TLS terminated by the hub; plain HTTP, TLS-terminating proxies and the unix socket are refused with tls_required, and forwarded headers never count",
   "x-service-only": ["redeem"],
   "x-refusal-status": {
     "invalid_request": 400,
+    "tls_required": 403,
     "unsupported_version": 400,
     "invalid_credential": 401,
     "peer_unauthenticated": 401,
@@ -50,7 +52,6 @@
       "post": {
         "operationId": "identityProof",
         "x-operation": "proof",
-        "x-mcp-tool": "identity_proof",
         "security": [{"IndividualBearer": []}],
         "requestBody": {"required": true, "content": {"application/json": {"schema": {"$ref": "#/components/schemas/ProofRequest"}}}},
         "responses": {

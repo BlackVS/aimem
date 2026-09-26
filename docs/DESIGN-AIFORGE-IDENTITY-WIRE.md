@@ -1,6 +1,6 @@
 # AIForge identity proof and introspection wire contract, version 1
 
-Status: reviewed design candidate for task E2. **No route, MCP tool, verifier, peer registration or credential is implemented by this document.** The proposed OpenAPI and examples live in `docs/fixtures/identity-v1/`. The live `internal/server/openapi.json` continues to describe live routes only.
+Status: reviewed contract (task E2). E3a implements the ledger and E3b serves the proof, redemption and peer-management routes over TLS terminated by the hub; see [E3 implementation boundary](#e3-implementation-boundary). **There is no MCP tool, and introspection is not operational until E4.** The contract fixtures live in `docs/fixtures/identity-v1/`; the live `internal/server/openapi.json` describes the served routes.
 
 This contract freezes the wire for the one-time identity proof and the online session introspection defined by the merged [identity and context contract](DESIGN-AIFORGE-CONTEXT.md). It composes with the [enrollment contract](DESIGN-AIFORGE-ENROLLMENT.md) (D1) and with aicrew `main` at [daebc43](https://github.com/BlackVS/aicrew/tree/daebc43018447bbc426d2a668a5bcc42f7391d7a). That aicrew commit covers its onboarding contract, its crew contract and the `store.Verifier` interface in `internal/store/identity.go`. If a parent contract disagrees with this document, the parent wins. Updated 2026-09-26.
 
@@ -15,7 +15,7 @@ The owner approved these decisions on task E2, recorded in comments seq161 and s
 
 ## Version, encoding and secrets
 
-The protocol is `identity.v1`. HTTP carries the version in `X-Aimem-Identity-Version: 1`, and MCP carries `version: 1` in tool input. A missing or unsupported version fails with `unsupported_version` and changes nothing. Introspection is the one identity.v1 call that aicrew receives, and it carries the version in two places: the `X-Aimem-Identity-Version` header and the body field `version`. Both are required and must both be `1`. When either is missing or unsupported, or when the two disagree, aicrew answers `400` with `unsupported_version` and evaluates nothing, so it never reports a handle as active on such a request. Aimem treats that refusal like any other failed introspection. The team operation fails with `context_unavailable` and nothing is applied, and the peer audit records a version mismatch. An introspection reply carries no version. Bodies are UTF-8 JSON, IDs are stable opaque strings, and timestamps are RFC 3339 UTC. A generation is a positive decimal string, which avoids JSON integer precision loss.
+The protocol is `identity.v1`. HTTP carries the version in `X-Aimem-Identity-Version: 1`. identity.v1 is HTTP-only and has no MCP tool. A missing or unsupported version fails with `unsupported_version` and changes nothing. Introspection is the one identity.v1 call that aicrew receives, and it carries the version in two places: the `X-Aimem-Identity-Version` header and the body field `version`. Both are required and must both be `1`. When either is missing or unsupported, or when the two disagree, aicrew answers `400` with `unsupported_version` and evaluates nothing, so it never reports a handle as active on such a request. Aimem treats that refusal like any other failed introspection. The team operation fails with `context_unavailable` and nothing is applied, and the peer audit records a version mismatch. An introspection reply carries no version. Bodies are UTF-8 JSON, IDs are stable opaque strings, and timestamps are RFC 3339 UTC. A generation is a positive decimal string, which avoids JSON integer precision loss.
 
 | Secret | Format | Lifetime | Stored by |
 | --- | --- | --- | --- |
@@ -36,7 +36,7 @@ No response body, audit record, log line, task, fixture evidence or error messag
 
 ## 1. Proof receipt (agent → aimem)
 
-`POST /v1/identity/proofs`, with the matching MCP tool `identity_proof`. The caller authenticates with its individual aimem bearer. The body is `{peer_service_id, hub_id, challenge_id}`. The challenge ID comes from aicrew and is opaque to aimem: 1 to 128 characters from `[A-Za-z0-9._:-]`. Aimem cannot see the challenge's deadline and does not need it, because the receipt deadline is shorter.
+`POST /v1/identity/proofs`. It is HTTP-only: **there is no MCP tool**, because the receipt is a secret that must never enter a model-visible tool result, transcript or log. The client bootstrap or aicrew client code that holds the individual credential calls this route directly. The caller authenticates with its individual aimem bearer. The body is `{peer_service_id, hub_id, challenge_id}`. The challenge ID comes from aicrew and is opaque to aimem: 1 to 128 characters from `[A-Za-z0-9._:-]`. Aimem cannot see the challenge's deadline and does not need it, because the receipt deadline is shorter.
 
 Aimem runs these checks in order. It authenticates the bearer and checks decision 3. It requires `hub_id` to be this hub and `peer_service_id` to be an active registered peer on this hub. Any failure is a non-disclosing `peer_unknown`. It then applies the issuance bounds. On success it returns `200` with `{receipt, receipt_id, expires_at, binding: {hub_id, peer_service_id, challenge_id, user_id, token_id}}`. The binding contains only the caller's own IDs. The call has no request key, because a lost reply is recovered by requesting a new receipt, as the context contract prescribes. Each (token, peer, challenge) has at most one live unredeemed receipt, so a new request supersedes the old one. Aimem allows a new receipt for a challenge even after an earlier receipt was redeemed, because aicrew may have refused that completion afterwards. Issuance is rate-limited to 10 receipts per token per minute.
 
@@ -86,11 +86,12 @@ Aicrew issues the aimem-scoped handle together with its own client-side session 
 
 ## Refusals
 
-Every refusal uses the context contract's envelope: `{code, message, active_mode, retryable, next_action, correlation_id}`. `active_mode` is omitted when revealing it would be unsafe. The `next_action` never tells a caller to switch to personal or broader credentials. HTTP status is fixed by v1, and MCP carries the same code.
+Every refusal uses the context contract's envelope: `{code, message, active_mode, retryable, next_action, correlation_id}`. `active_mode` is omitted when revealing it would be unsafe. The `next_action` never tells a caller to switch to personal or broader credentials. HTTP status is fixed by v1.
 
 | Code | Status | Retryable | Next action |
 | --- | --- | --- | --- |
 | `invalid_request`, `unsupported_version` | 400 | no | Correct the request or use a supported version. |
+| `tls_required` | 403 | no | Connect to the hub's TLS listener with certificate verification. |
 | `invalid_credential` | 401 | no | Renew or recover the individual credential through its authorized flow. |
 | `peer_unauthenticated` | 401 | no | Operator checks the peer registration and credential. |
 | `credential_scope_forbidden` | 403 | no | Use the installation's user-scoped individual credential. |
@@ -118,7 +119,7 @@ The limits below are values fixed by this contract. An implementation may tighte
 
 The D1 enrollment path issues the individual credential. This contract only verifies that credential. A freshly enrolled user-scoped token can request a receipt immediately. The proof route never accepts an enrollment subcode, and a peer credential can never call enrollment. When D1 reissues a credential, it revokes the old token in the same transaction. Receipts that are still outstanding for the old token then fail with `credential_inactive`. Sessions bound to the old token get `context_stale` until aicrew re-proves them.
 
-E3 implements proof issuance, redemption and peer registration against a fake aicrew. E4 implements introspection and the team-mode verifier against a fake introspection server. E5 implements local binding. The fixture test in `internal/server/identity_wire_contract_test.go` is a fake consumer. It checks coverage, the parity between the fixtures and the proposed OpenAPI, the bounds, and that no secret appears in a response. It also checks that no production identity route is registered. It does not prove authorization.
+E3 implements proof issuance, redemption and peer registration against a fake aicrew. E4 implements introspection and the team-mode verifier against a fake introspection server. E5 implements local binding. The fixture test in `internal/server/identity_wire_contract_test.go` is a fake consumer. It checks coverage, the parity between the fixtures and the proposed OpenAPI, the bounds, and that no secret appears in a response. It also checks that each contract path is a live route that requires TLS and names no MCP tool, and that the hub never serves the aicrew-owned route. It does not prove authorization; `internal/server/identity_routes_test.go` exercises the served routes.
 
 ## E3 implementation boundary
 
@@ -140,6 +141,19 @@ The owner approved splitting E3 and made four implementation decisions (E3 task 
 
 **Outbound introspection credential.** Aimem's stored copy of the credential that aicrew issues is deferred to E4. E3 stores the peer's introspection endpoint and TLS trust binding, but introspection does not work until E4 delivers it.
 
-**E3a status.** Access schema 4 adds four ledger tables: `identity_peers`, `identity_peer_credentials`, `identity_receipts` and `identity_redemptions`. The code is `internal/access/identity_proofs.go`. Every administrative and ledger function is package-private: no route, MCP tool or command can reach it until E3b's reviewed wire exports it, and no credential is issued to a real peer. Refusal reasons are audited under `identity.redeem.refused.<reason>`, while callers see only the stable codes above. Aimem stores and compares redemption keys only in `k1_` form.
+**E3a status.** Access schema 4 adds four ledger tables: `identity_peers`, `identity_peer_credentials`, `identity_receipts` and `identity_redemptions`. The code is `internal/access/identity_proofs.go`. Its only callers are E3b's routes; no MCP tool or command reaches it. Refusal reasons are audited under `identity.redeem.refused.<reason>`, while callers see only the stable codes above. Aimem stores and compares redemption keys only in `k1_` form.
 
 **Schema 4 upgrade and rollback.** The migration from schema 3 is additive and runs in one transaction; all existing data is preserved. Older binaries refuse schema 4, so rolling back the binary alone is not supported. Back up the state root before upgrading. A rollback restores the pre-upgrade `access.db` together with the matching hub state.
+
+**E3b status.** `internal/server/identity.go` serves the two wire routes and six hub-admin routes, all only over TLS terminated by the hub:
+
+| Route | Caller |
+| --- | --- |
+| `POST /v1/identity/proofs` | A live user-scoped individual token. Host-managed admin, legacy writer, project-scoped and read-only credentials get `credential_scope_forbidden`. |
+| `POST /v1/identity/peers/{service_id}/redemptions` | The registered peer's `aimem_peer_` credential, for its own `service_id` only (`peer_forbidden` otherwise). |
+| `GET`, `POST /v1/identity/peers`; `PUT /v1/identity/peers/{service_id}` | Hub admin: list, register, disable or re-enable the peer. |
+| `GET`, `POST /v1/identity/peers/{service_id}/credentials`; `DELETE …/credentials/{credential_id}` | Hub admin: list metadata, issue (bearer shown once, `no-store`), revoke. |
+
+A peer credential authenticates as a separate `peer` role that the bearer gate confines to the redemption route shape; every other route, including `/mcp`, refuses it before any handler runs. The peer listing reports `introspection_operational: false`. Proof and credential-issue responses are `no-store`, and no refusal, log line or audit record carries a secret.
+
+**Deploying E3b.** The hub must be started with `AIMEM_TLS_CERT` and `AIMEM_TLS_KEY` so that its TCP listener terminates TLS itself. Without them, and on the local unix socket, every identity route answers `tls_required`. Clients, including the E3c operator CLI, connect to that listener with certificate verification enabled and never disable it.

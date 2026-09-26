@@ -116,6 +116,14 @@ func (s *Server) Routes() []Route {
 		{"DELETE", "/v1/projects/{p}/access/{kind}/{id}", s.setAccessGrant, true},
 		{"POST", "/v1/access/tokens", s.issueAccessToken, true},
 		{"DELETE", "/v1/access/tokens/{id}", s.revokeAccessToken, true},
+		{"POST", "/v1/identity/proofs", s.identityProof, false},
+		{"POST", "/v1/identity/peers/{service_id}/redemptions", s.identityRedeem, false},
+		{"GET", "/v1/identity/peers", s.listIdentityPeers, true},
+		{"POST", "/v1/identity/peers", s.registerIdentityPeer, true},
+		{"PUT", "/v1/identity/peers/{service_id}", s.updateIdentityPeer, true},
+		{"GET", "/v1/identity/peers/{service_id}/credentials", s.listPeerCredentials, true},
+		{"POST", "/v1/identity/peers/{service_id}/credentials", s.issuePeerCredential, true},
+		{"DELETE", "/v1/identity/peers/{service_id}/credentials/{credential_id}", s.revokePeerCredential, true},
 		{"GET", "/v1/projects/{p}/tasks", s.listTasks, false},
 		{"POST", "/v1/projects/{p}/tasks", s.createTask, false},
 		{"GET", "/v1/tasks/{id}", s.getTask, false},
@@ -504,6 +512,12 @@ func (s *Server) authWrapper(token string, next http.Handler) http.Handler {
 		// legacy tool from them) — exactly the routes in ordinaryRoutes.
 		if id.Role == "user" && !(r.Method == "GET" && r.URL.Path == "/v1/access/identity") && !s.ordinaryAllowed(r) {
 			s.fail(w, http.StatusForbidden, fmt.Errorf("ordinary token is not authorized for this endpoint"))
+			return
+		}
+		// A peer credential reaches exactly one route shape: identity.v1
+		// redemption. The handler then requires the path peer to be its own.
+		if id.Role == "peer" && !peerRouteAllowed(r) {
+			s.fail(w, http.StatusForbidden, fmt.Errorf("peer credential is not authorized for this endpoint"))
 			return
 		}
 		next.ServeHTTP(w, r.WithContext(withIdentity(r.Context(), id)))
