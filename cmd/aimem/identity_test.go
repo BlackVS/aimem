@@ -19,7 +19,9 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -52,7 +54,7 @@ func newIdentityCLIRig(t *testing.T, wrap func(http.Handler) http.Handler) *iden
 	t.Cleanup(func() { reg.Close() })
 	s := server.New(reg, slog.New(slog.NewTextHandler(io.Discard, nil)))
 	t.Cleanup(func() { s.Close() })
-	g := &identityCLIRig{dir: filepath.Join(t.TempDir(), "operator files")}
+	g := &identityCLIRig{dir: filepath.Join(t.TempDir(), hostileDirName())}
 	if err := os.Mkdir(g.dir, 0o700); err != nil {
 		t.Fatal(err)
 	}
@@ -522,39 +524,45 @@ func newSelfSignedCert(t *testing.T) *x509.Certificate {
 	return cert
 }
 
-// printedCommands returns the "aimem identity ..." commands the CLI told the
-// operator to run, split into arguments the way a shell would.
-func printedCommands(text string) [][]string {
-	var cmds [][]string
-	for _, line := range strings.Split(text, "\n") {
-		i := strings.Index(line, "aimem identity ")
-		if i < 0 {
-			continue
-		}
-		var args []string
-		var cur strings.Builder
-		quoted, have := false, false
-		for _, r := range line[i:] {
-			switch {
-			case r == '"':
-				quoted, have = !quoted, true
-			case (r == ' ' || r == ';') && !quoted:
-				if have {
-					args = append(args, cur.String())
-				}
-				cur.Reset()
-				have = false
-			default:
-				cur.WriteRune(r)
-				have = true
-			}
-		}
-		if have {
-			args = append(args, cur.String())
-		}
-		cmds = append(cmds, args)
+// hostileDirName is a directory name that a naively quoted command would
+// break on in this platform's operator shell.
+func hostileDirName() string {
+	if runtime.GOOS == "windows" {
+		return "operator $HOME 'files' & `x"
 	}
-	return cmds
+	return "operator \"files\" $HOME 'x' `id`"
+}
+
+// printedLines returns every "aimem identity ..." command line in text, from
+// the command to the end of its line.
+func printedLines(text string) []string {
+	var lines []string
+	for _, line := range strings.Split(text, "\n") {
+		if i := strings.Index(line, "aimem identity "); i >= 0 {
+			lines = append(lines, line[i:])
+		}
+	}
+	return lines
+}
+
+// shellParse runs one printed command line through the platform's real
+// operator shell (PowerShell on Windows, sh elsewhere) with aimem replaced by
+// a function that emits its arguments, and returns them exactly as the shell
+// would pass them to the real command.
+func shellParse(t *testing.T, line string) []string {
+	t.Helper()
+	var cmd *exec.Cmd
+	if runtime.GOOS == "windows" {
+		cmd = exec.Command("powershell", "-NoProfile", "-NonInteractive", "-Command", "-")
+		cmd.Stdin = strings.NewReader("function aimem { [Console]::Out.Write(($args -join [char]0)) }\n" + line + "\n")
+	} else {
+		cmd = exec.Command("sh", "-c", "aimem() { printf '%s\\0' \"$@\"; }\n"+line)
+	}
+	out, err := cmd.Output()
+	if err != nil {
+		t.Fatalf("the shell rejected the printed command %q: %v", line, err)
+	}
+	return append([]string{"aimem"}, strings.Split(strings.TrimSuffix(string(out), "\x00"), "\x00")...)
 }
 
 // runPrinted runs a command the CLI printed exactly as printed: no hub flags
@@ -604,12 +612,18 @@ func TestIdentityCLIPrintedRecoveryCommandsRun(t *testing.T) {
 	drop.Store(true)
 	out, _ := g.run(t, "cred", "issue", "aicrew-example", "--expires", "30d", "--secret-file", g.secretPath("u.secret"))
 	drop.Store(false)
-	cmds := printedCommands(out)
-	if len(cmds) != 1 || !strings.Contains(strings.Join(cmds[0], " "), "--admin-token-file "+g.tokenFile) {
-		t.Fatalf("unknown outcome printed %q from:\n%s", cmds, out)
+	lines := printedLines(out)
+	if len(lines) != 1 {
+		t.Fatalf("unknown outcome printed %q from:\n%s", lines, out)
 	}
-	id := cmds[0][5]
-	if err := g.runPrinted(t, cmds[0]); err != nil || !revoked(id) {
+	args := shellParse(t, lines[0])
+	want := []string{"aimem", "identity", "cred", "revoke", "aicrew-example", args[5],
+		"--hub", g.ts.URL, "--admin-token-file", g.tokenFile, "--hub-ca-file", g.caFile}
+	if strings.Join(args, "\x00") != strings.Join(want, "\x00") {
+		t.Fatalf("the shell parsed the printed command as\n%q\nwant\n%q", args, want)
+	}
+	id := args[5]
+	if err := g.runPrinted(t, args); err != nil || !revoked(id) {
 		t.Fatalf("printed unknown-outcome revoke: %v", err)
 	}
 
@@ -623,27 +637,29 @@ func TestIdentityCLIPrintedRecoveryCommandsRun(t *testing.T) {
 	if err == nil {
 		t.Fatal("undeliverable issue succeeded")
 	}
-	cmds = printedCommands(err.Error())
-	if len(cmds) != 1 {
-		t.Fatalf("revoke failure printed %q", cmds)
+	lines = printedLines(err.Error())
+	if len(lines) != 1 {
+		t.Fatalf("revoke failure printed %q", lines)
 	}
-	id = cmds[0][5]
+	args = shellParse(t, lines[0])
+	id = args[5]
 	if revoked(id) {
 		t.Fatal("the failed automatic revoke took effect")
 	}
-	if err := g.runPrinted(t, cmds[0]); err != nil || !revoked(id) {
+	if err := g.runPrinted(t, args); err != nil || !revoked(id) {
 		t.Fatalf("printed revoke after a failed automatic revoke: %v", err)
 	}
 
 	// Rotation: the printed revoke retires the old credential.
 	g.mustRun(t, "cred", "issue", "aicrew-example", "--expires", "30d", "--secret-file", g.secretPath("first.secret"))
 	out = g.mustRun(t, "cred", "rotate", "aicrew-example", "--expires", "30d", "--secret-file", g.secretPath("second.secret"))
-	cmds = printedCommands(out)
-	if len(cmds) != 1 {
-		t.Fatalf("rotation printed %q", cmds)
+	lines = printedLines(out)
+	if len(lines) != 1 {
+		t.Fatalf("rotation printed %q", lines)
 	}
-	id = cmds[0][5]
-	if err := g.runPrinted(t, cmds[0]); err != nil || !revoked(id) {
+	args = shellParse(t, lines[0])
+	id = args[5]
+	if err := g.runPrinted(t, args); err != nil || !revoked(id) {
 		t.Fatalf("printed rotation revoke: %v", err)
 	}
 	g.assertNoSecrets(t)
@@ -684,8 +700,33 @@ func TestIdentityCLIUnknownOutcomeIgnoresTheLocalClock(t *testing.T) {
 	drop.Store(true)
 	out, err := g.run(t, "cred", "issue", "aicrew-example", "--expires", "30d", "--secret-file", g.secretPath("s"))
 	drop.Store(false)
-	if err == nil || strings.Contains(out, "safe to issue again") || len(printedCommands(out)) != 1 {
+	if err == nil || strings.Contains(out, "safe to issue again") || len(printedLines(out)) != 1 {
 		t.Fatalf("a new unrevoked credential was dropped by the local clock: %v\n%s", err, out)
 	}
 	g.assertNoSecrets(t)
+}
+
+// TestShellArgQuoting pins both quoting forms on every platform; the
+// real-shell round trip above runs each form under its own shell.
+func TestShellArgQuoting(t *testing.T) {
+	for _, c := range []struct {
+		in, posix, pwsh string
+	}{
+		{"plain-word_1.2", "plain-word_1.2", "plain-word_1.2"},
+		{`C:\x`, `'C:\x'`, `C:\x`},
+		{"a b", "'a b'", "'a b'"},
+		{"$HOME", "'$HOME'", "'$HOME'"},
+		{`say "hi"`, `'say "hi"'`, `'say "hi"'`},
+		{"it's", `'it'\''s'`, "'it''s'"},
+		{"`id`", "'`id`'", "'`id`'"},
+		{"a\u2019b", "'a\u2019b'", "'a\u2019\u2019b'"},
+		{"", "''", "''"},
+	} {
+		if got := shellArg(c.in, false); got != c.posix {
+			t.Errorf("POSIX %q: %s, want %s", c.in, got, c.posix)
+		}
+		if got := shellArg(c.in, true); got != c.pwsh {
+			t.Errorf("PowerShell %q: %s, want %s", c.in, got, c.pwsh)
+		}
+	}
 }

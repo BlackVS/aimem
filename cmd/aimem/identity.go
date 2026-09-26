@@ -25,6 +25,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 	"time"
@@ -94,23 +95,51 @@ type identityClient struct {
 }
 
 // command renders a complete, runnable aimem identity invocation with this
-// run's connection options. It names the admin token file, never the token.
+// run's connection options, quoted for this platform's operator shell
+// (PowerShell on Windows, a POSIX shell elsewhere). It names the admin token
+// file, never the token.
 func (c *identityClient) command(args ...string) string {
-	parts := []string{"aimem", "identity"}
-	for _, a := range append(args, c.hubArgs...) {
-		parts = append(parts, shellArg(a))
+	return shellCommand(runtime.GOOS == "windows", append([]string{"aimem", "identity"}, append(args, c.hubArgs...)...))
+}
+
+func shellCommand(powershell bool, args []string) string {
+	parts := make([]string, len(args))
+	for i, a := range args {
+		parts[i] = shellArg(a, powershell)
 	}
 	return strings.Join(parts, " ")
 }
 
-// shellArg quotes an argument for POSIX shells, cmd and PowerShell alike:
-// plain words stay bare, anything else goes in double quotes, which none of
-// the three treats a backslash inside of as an escape for ordinary paths.
-func shellArg(s string) string {
-	if s != "" && strings.Trim(s, "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_./:@%+=,\\-") == "" {
+// shellArg quotes one argument so the shell passes it through literally.
+// Plain words stay bare. Anything else is single-quoted, which neither a
+// POSIX shell nor PowerShell expands ($, backquote, double quote and spaces
+// are literal): POSIX closes the quote around an embedded ' ('\”), and
+// PowerShell doubles each of its single-quote characters.
+func shellArg(s string, powershell bool) string {
+	plain := s != ""
+	for _, r := range s {
+		if !(r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' || r >= '0' && r <= '9' ||
+			strings.ContainsRune("_./:-", r) || (powershell && r == '\\')) {
+			plain = false
+			break
+		}
+	}
+	if plain {
 		return s
 	}
-	return `"` + s + `"`
+	if !powershell {
+		return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
+	}
+	var b strings.Builder
+	b.WriteByte('\'')
+	for _, r := range s {
+		if strings.ContainsRune("'\u2018\u2019\u201a\u201b", r) {
+			b.WriteRune(r)
+		}
+		b.WriteRune(r)
+	}
+	b.WriteByte('\'')
+	return b.String()
 }
 
 // deliverSecret writes the issued bearer to the reserved secret file. A test
