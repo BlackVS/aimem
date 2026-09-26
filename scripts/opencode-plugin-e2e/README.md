@@ -5,6 +5,7 @@ real OpenCode executable and checks what it journals. One file has to work
 on both OpenCode generations, so run it against a 1.x and a 2.x binary
 after changing the plugin. The 1.x floor is 1.14: earlier loaders call
 every export as a function and cannot load a file that also serves 2.x.
+Design and results: [docs/DESIGN-opencode-v2.md](../../docs/DESIGN-opencode-v2.md).
 
 ```sh
 node scripts/opencode-plugin-e2e/run.cjs /path/to/opencode            # all scenarios

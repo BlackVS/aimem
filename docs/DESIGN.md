@@ -40,7 +40,7 @@ CLI / MCP tools  ──┘   SQLite per project   └─ sync ⇆ hub (TLS 8440)
   2.x (the `setup` entrypoint, `ctx.event.subscribe` and session hooks).
   OpenCode 2 ignores opencode.json `instructions`, so on 2.x the plugin's
   context hook injects `docs/SESSION-STATE.md` for projects that list it
-  there.
+  there. Details and test evidence: [OpenCode 2 support](DESIGN-opencode-v2.md).
 - **Codex CLI adapter**: user-level hooks `Stop`/`PreCompact`
   (`~/.codex/hooks.json`) run `aimem submit-codex`, which parses the
   session rollout and journals one event per turn. Codex adopted Claude

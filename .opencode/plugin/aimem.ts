@@ -436,7 +436,12 @@ async function setupV2(ctx: any) {
     )
   }
   const postDetached = makePoster(directory)
-  const turns = new Map<string, { user: string; reply: string; tools: string[]; lastAssistantID: string }>()
+  // fallbackID names a turn that ends before any model step; it is made
+  // once per turn so repeated end events share one idempotency key.
+  const turns = new Map<
+    string,
+    { user: string; reply: string; tools: string[]; lastAssistantID: string; fallbackID: string }
+  >()
   const submitted = new Map<string, string>() // sessionID -> last submitted turn id
   const used = new Map<string, number>() // sessionID -> context tokens of the last model step
   const ctxWarnedStep = new Map<string, number>() // sessionID -> last logged 5%-step
@@ -465,7 +470,7 @@ async function setupV2(ctx: any) {
   const turn = (sid: string) => {
     let t = turns.get(sid)
     if (!t) {
-      t = { user: "", reply: "", tools: [], lastAssistantID: "" }
+      t = { user: "", reply: "", tools: [], lastAssistantID: "", fallbackID: `no-assistant-${Date.now()}` }
       turns.set(sid, t)
     }
     return t
@@ -474,7 +479,7 @@ async function setupV2(ctx: any) {
   const submit = async (sid: string, outcome: "ok" | "failed") => {
     const t = turns.get(sid)
     if (!t) return
-    const turnID = t.lastAssistantID || `no-assistant-${Date.now()}`
+    const turnID = t.lastAssistantID || t.fallbackID
     if (submitted.get(sid) === turnID) return
     const ok = await postDetached(turnPayload(directory, sid, turnID, outcome, t))
     if (ok) submitted.set(sid, turnID)
@@ -488,12 +493,20 @@ async function setupV2(ctx: any) {
     let p = limitCache.get(key)
     if (!p) {
       p = (async () => {
+        // Yield first: the cache entry below must exist before any cleanup
+        // in this body runs, even if list() throws synchronously.
+        await null
         try {
           const res: any = await ctx.model?.list?.()
           const list: any[] = res?.data ?? (Array.isArray(res) ? res : [])
           const m = list.find((x) => x?.providerID === model.providerID && (x?.id === model.id || x?.modelID === model.id))
-          return Number(m?.limit?.context ?? 0)
+          const lim = Number(m?.limit?.context ?? 0)
+          // Cache only a real limit: a failed or not-yet-loaded catalog
+          // must not switch warnings off for the model until restart.
+          if (!(lim > 0)) limitCache.delete(key)
+          return lim > 0 ? lim : 0
         } catch {
+          limitCache.delete(key)
           return 0
         }
       })()
@@ -534,6 +547,7 @@ async function setupV2(ctx: any) {
       reply: "",
       tools: [],
       lastAssistantID: "",
+      fallbackID: `no-assistant-${Date.now()}`,
     })
   })
 

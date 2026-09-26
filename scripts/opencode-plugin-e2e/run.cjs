@@ -32,7 +32,7 @@ if (process.platform === 'win32') {
 }
 const version = cp.execFileSync(exe, ['--version'], { encoding: 'utf8', env: { ...process.env, HOME: os.tmpdir() } }).trim().replace(/^opencode\s+/i, '');
 const major = Number((version.match(/(\d+)\.\d+/) || [])[1]);
-const v2 = major >= 2 || /beta|next/.test(version);
+const v2 = major >= 2;
 
 // Scenarios. `v2only` marks behavior that exists only on OpenCode 2 (the
 // model-facing context warning) or whose trigger point differs by
