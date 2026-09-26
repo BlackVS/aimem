@@ -36,6 +36,11 @@ CLI / MCP tools  ──┘   SQLite per project   └─ sync ⇆ hub (TLS 8440)
 - **OpenCode plugin** (`.opencode/plugin/aimem.ts`, installed globally):
   journals turns/errors, writes a compaction marker on summarize, and
   instructs the summarizer to end with a verbatim `AIMEM HANDOFF:` line.
+  One file serves OpenCode 1.x (the V1 plugin function, event bus) and
+  2.x (the `setup` entrypoint, `ctx.event.subscribe` and session hooks).
+  OpenCode 2 ignores opencode.json `instructions`, so on 2.x the plugin's
+  context hook injects `docs/SESSION-STATE.md` for projects that list it
+  there.
 - **Codex CLI adapter**: user-level hooks `Stop`/`PreCompact`
   (`~/.codex/hooks.json`) run `aimem submit-codex`, which parses the
   session rollout and journals one event per turn. Codex adopted Claude

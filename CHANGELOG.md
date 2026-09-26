@@ -13,6 +13,33 @@ currently 18); a binary refuses a database newer than it understands.
 
 ## [Unreleased]
 
+### Added
+
+- OpenCode 2 support. The OpenCode plugin (`aimem.ts`) now loads on both
+  OpenCode 1.x and 2.x: OpenCode 2 rejects 1.x plugins, so the same file
+  also carries a 2.x implementation built on the new plugin API. On
+  OpenCode 2 it journals turns, failures and compaction markers, and adds
+  the `AIMEM HANDOFF:` line to compaction summaries, as on 1.x. OpenCode 2
+  accepts but ignores opencode.json `instructions`, so for projects that
+  list `docs/SESSION-STATE.md` there the plugin adds the handoff to each
+  model request itself. OpenCode 2 has no toast API, so the context
+  warning is given to the model instead of the user.
+
+### Upgrade notes
+
+- Re-run the user-level install (`install.sh user` / `install.ps1`) to
+  refresh `~/.config/opencode/plugins/aimem.ts`; the previous copy does
+  not load on OpenCode 2. No config change is needed: the existing
+  opencode.json wiring (`instructions`, `mcp.aimem`) works on both
+  generations.
+- `AIMEM_AUTO_COMPACT` works on OpenCode 1.x only; OpenCode 2 plugins
+  cannot request compaction. Use OpenCode 2's own `compaction` settings.
+- On the 1.x line the plugin now needs OpenCode 1.14 or newer. Earlier
+  1.x releases call every plugin export as a function and cannot load the
+  default object that OpenCode 2 requires; no single file can serve both.
+  There, OpenCode itself stops with "Unexpected error" (observed on
+  1.1.4), so upgrade OpenCode before reinstalling.
+
 ## [0.7.3] — 2026-09-24
 
 Portable team context: a member joining from any project's checkout now

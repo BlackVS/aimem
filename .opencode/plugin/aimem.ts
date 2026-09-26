@@ -1,13 +1,27 @@
 // OpenCode adapter for aimem: observes the event bus and submits one
-// normalized checkpoint per completed turn (session.idle) plus failure
-// markers (session.error) and compaction markers (session.compacted).
-// Persistence goes through `aimem submit`, which redacts adapter-side
-// and spools when the service is down.
+// normalized checkpoint per completed turn plus failure markers and
+// compaction markers. Persistence goes through `aimem submit`, which
+// redacts adapter-side and spools when the service is down.
+//
+// ONE file serves both OpenCode generations, because a machine may run
+// either (the same `opencode` command name, installed exclusively):
+//   - OpenCode 1.x (1.14 or newer) calls the V1 plugin function, `server`
+//     on the default export, and observes session.idle / session.error /
+//     session.compacted. Loaders before 1.14 call every export as a
+//     function and fail on the default object, which 2.x requires; this
+//     file therefore needs OpenCode 1.14+ on the 1.x line.
+//   - OpenCode 2.x rejects V1 plugins outright and calls `setup(ctx)` on
+//     the default export instead (v2 API: ctx.event.subscribe, session
+//     hooks). V2 also ignores opencode.json `instructions`, so the
+//     handoff file is injected by the context hook — see setupV2.
+// OpenCode 1.18.x also calls `setup` from an experimental V2 host with a
+// partial context (no location/event/session); setupV2 does nothing
+// there, so a 1.x session is never journaled twice.
 //
 // Submits are a single DETACHED spawn (payload written synchronously,
-// binary backgrounded via nohup): `opencode run` exits immediately after
-// session.idle, and any awaited subprocess would be killed mid-flight with
-// the checkpoint silently lost. Detaching lets the submit outlive the host
+// binary backgrounded): `opencode run` exits immediately after the turn
+// ends, and any awaited subprocess would be killed mid-flight with the
+// checkpoint silently lost. Detaching lets the submit outlive the host
 // process. Residual risk: teardown can still preempt the spawn itself.
 import fs from "node:fs"
 import os from "node:os"
@@ -86,7 +100,96 @@ const HANDOFF_NOTE =
   "continuing; verify volatile state against git/tests; recent completed " +
   "turns are recoverable from the aimem journal."
 
-export const AimemPlugin: Plugin = async ({ directory, client, $ }) => {
+// makePoster returns postDetached for one project: it hands one payload
+// to `aimem submit` in a way that survives host-process teardown (see
+// header comment). Binary resolution: project-local build first
+// (development), else PATH (user-level install via install.sh). `$` is
+// the V1 Bun shell helper; V2 has none, so without it the spawn goes
+// through node:child_process with the same detach semantics.
+function makePoster(directory: string, $?: any) {
+  const localBin = `${directory}/aimem${process.platform === "win32" ? ".exe" : ""}`
+  const bin = fs.existsSync(localBin) ? localBin : "aimem"
+  return async (payload: unknown) => {
+    try {
+      if (bin.includes("/") && !fs.existsSync(bin)) return false
+      const tmp = path.join(os.tmpdir(), `aimem-oc-${Date.now()}-${Math.random().toString(36).slice(2)}.json`)
+      fs.writeFileSync(tmp, JSON.stringify(payload), { mode: 0o600 })
+      const { spawn } = await import("node:child_process")
+      if (process.platform === "win32") {
+        // No nohup on Windows: detached spawn with stdin redirected from the
+        // already-written temp file (payload safe even if the host dies).
+        // The temp file is left behind — tiny, and the OS temp dir rotates.
+        const fd = fs.openSync(tmp, "r")
+        spawn(bin, ["submit"], { stdio: [fd, "ignore", "ignore"], detached: true, windowsHide: true }).unref()
+        fs.closeSync(fd)
+        return true
+      }
+      if (typeof $ === "function") {
+        const cmd = `nohup "${bin}" submit < "${tmp}" >/dev/null 2>&1 && rm -f "${tmp}" &`
+        await $`bash -c ${cmd}`.quiet()
+        return true
+      }
+      // Paths travel as positional parameters, never spliced into the
+      // script, so no quoting of bin or tmp is needed.
+      spawn("/bin/sh", ["-c", '"$0" submit < "$1" >/dev/null 2>&1 && rm -f "$1"', bin, tmp], {
+        stdio: "ignore",
+        detached: true,
+      }).unref()
+      return true
+    } catch (e) {
+      // Fail-open: checkpointing must never break the session.
+      console.error("aimem submit failed:", e)
+      return false
+    }
+  }
+}
+
+// turnPayload and markerPayload are the two journal events both plugin
+// generations submit; the idempotency key shape is shared so a turn keeps
+// one journal row whichever path reported it.
+function turnPayload(
+  directory: string,
+  sid: string,
+  turnID: string,
+  outcome: "ok" | "failed",
+  t: { user: string; reply: string; tools: string[] },
+) {
+  return {
+    project_dir: directory,
+    event: {
+      schema_version: 1,
+      idempotency_key: `opencode:${sid}:${turnID}`,
+      client: "opencode",
+      session_id: sid,
+      turn_id: turnID,
+      kind: outcome === "ok" ? "turn" : "failure",
+      outcome,
+      ts: new Date().toISOString(),
+      user_request: t.user,
+      assistant_response: t.reply,
+      tool_summary: t.tools.slice(0, 50),
+    },
+  }
+}
+
+function markerPayload(directory: string, sid: string, anchor: string) {
+  return {
+    project_dir: directory,
+    event: {
+      schema_version: 1,
+      idempotency_key: `opencode:${sid}:${anchor}-compacted`,
+      client: "opencode",
+      session_id: sid,
+      turn_id: `${anchor}-compacted`,
+      kind: "compaction-marker",
+      outcome: "pre-compaction",
+      ts: new Date().toISOString(),
+      user_request: "session compacted",
+    },
+  }
+}
+
+const AimemPlugin: Plugin = async ({ directory, client, $ }) => {
   const CTX_LIMIT = knob(directory, "AIMEM_CTX_LIMIT", "ctx_limit", 0, false)
   const CTX_WARN_FRACTION = knob(directory, "AIMEM_CTX_WARN_FRACTION", "ctx_warn_fraction", 0.8, true)
   const AUTO_COMPACT = knob(directory, "AIMEM_AUTO_COMPACT", "auto_compact", 0, true)
@@ -95,10 +198,7 @@ export const AimemPlugin: Plugin = async ({ directory, client, $ }) => {
   const submitted = new Map<string, string>() // sessionID -> last submitted turn id
   const ctxWarnedStep = new Map<string, number>() // sessionID -> last warned 5%-step
   const autoCompacted = new Set<string>() // sessions where auto-compact fired (cleared on compaction)
-  // Binary resolution: project-local build first (development), else PATH
-  // (user-level install via install.sh).
-  const localBin = `${directory}/aimem${process.platform === "win32" ? ".exe" : ""}`
-  const bin = fs.existsSync(localBin) ? localBin : "aimem"
+  const postDetached = makePoster(directory, $)
 
   const turn = (sid: string): TurnState => {
     let t = turns.get(sid)
@@ -109,33 +209,6 @@ export const AimemPlugin: Plugin = async ({ directory, client, $ }) => {
     return t
   }
 
-  // postDetached hands one payload to `aimem submit` in a way that
-  // survives host-process teardown (see header comment).
-  const postDetached = async (payload: unknown) => {
-    try {
-      if (bin.includes("/") && !fs.existsSync(bin)) return
-      const tmp = path.join(os.tmpdir(), `aimem-oc-${Date.now()}-${Math.random().toString(36).slice(2)}.json`)
-      fs.writeFileSync(tmp, JSON.stringify(payload), { mode: 0o600 })
-      if (process.platform === "win32") {
-        // No nohup on Windows: detached spawn with stdin redirected from the
-        // already-written temp file (payload safe even if the host dies).
-        // The temp file is left behind — tiny, and the OS temp dir rotates.
-        const { spawn } = await import("node:child_process")
-        const fd = fs.openSync(tmp, "r")
-        spawn(bin, ["submit"], { stdio: [fd, "ignore", "ignore"], detached: true, windowsHide: true }).unref()
-        fs.closeSync(fd)
-        return true
-      }
-      const cmd = `nohup "${bin}" submit < "${tmp}" >/dev/null 2>&1 && rm -f "${tmp}" &`
-      await $`bash -c ${cmd}`.quiet()
-      return true
-    } catch (e) {
-      // Fail-open: checkpointing must never break the session.
-      console.error("aimem submit failed:", e)
-      return false
-    }
-  }
-
   const submit = async (sid: string, outcome: "ok" | "failed") => {
     const t = turns.get(sid)
     if (!t) return
@@ -144,42 +217,15 @@ export const AimemPlugin: Plugin = async ({ directory, client, $ }) => {
     // Deliberate: a turn that errors and then idles submits both outcomes
     // under ONE idempotency key — the journal keeps one event per turn,
     // whichever landed first; the service drops the other.
-    const ok = await postDetached({
-      project_dir: directory,
-      event: {
-        schema_version: 1,
-        idempotency_key: `opencode:${sid}:${turnID}`,
-        client: "opencode",
-        session_id: sid,
-        turn_id: turnID,
-        kind: outcome === "ok" ? "turn" : "failure",
-        outcome,
-        ts: new Date().toISOString(),
-        user_request: t.user,
-        assistant_response: t.reply,
-        tool_summary: t.tools.slice(0, 50),
-      },
-    })
+    const ok = await postDetached(turnPayload(directory, sid, turnID, outcome, t))
     if (ok && outcome === "ok") submitted.set(sid, turnID)
   }
 
   const submitCompactionMarker = async (sid: string) => {
     const anchor = turns.get(sid)?.lastAssistantID || `t${Date.now()}`
-    await postDetached({
-      project_dir: directory,
-      event: {
-        schema_version: 1,
-        idempotency_key: `opencode:${sid}:${anchor}-compacted`,
-        client: "opencode",
-        session_id: sid,
-        turn_id: `${anchor}-compacted`,
-        kind: "compaction-marker",
-        outcome: "pre-compaction",
-        ts: new Date().toISOString(),
-        user_request: "session compacted",
-      },
-    })
+    await postDetached(markerPayload(directory, sid, anchor))
   }
+
 
   // providerID/modelID -> context limit, from OpenCode's provider config.
   let modelLimits: Map<string, number> | null = null
@@ -338,3 +384,269 @@ export const AimemPlugin: Plugin = async ({ directory, client, $ }) => {
     },
   }
 }
+
+// ---------------------------------------------------------------------------
+// OpenCode 2.x
+// ---------------------------------------------------------------------------
+
+const HANDOFF_REL = path.join("docs", "SESSION-STATE.md")
+const HANDOFF_MAX_BYTES = 64 * 1024
+
+// handoffWired reports whether the project opted into loading the handoff
+// through opencode.json(c) `instructions` (what `aimem doctor` and
+// install.sh wire). V1 resolves that entry itself; V2 accepts the field
+// but ignores it, so the plugin injects the file for projects that asked.
+function handoffWired(dir: string): boolean {
+  for (const rel of ["opencode.json", "opencode.jsonc", ".opencode/opencode.json", ".opencode/opencode.jsonc"]) {
+    try {
+      if (fs.readFileSync(path.join(dir, rel), "utf8").includes("docs/SESSION-STATE.md")) return true
+    } catch {}
+  }
+  return false
+}
+
+// setupV2 is the OpenCode 2.x entrypoint. It rebuilds the V1 plugin's
+// behavior from V2 primitives:
+//   turn journal     prompt hook (user text) + session.text.ended (reply)
+//                    + session.tool.input.started (tools), submitted on
+//                    session.execution.succeeded / failed / interrupted
+//   compaction       compaction hook appends HANDOFF_NOTE; a marker is
+//                    journaled on session.compaction.ended
+//   handoff          context hook injects docs/SESSION-STATE.md (V2
+//                    ignores opencode.json `instructions`)
+//   context warning  V2 has no toast API: past the warn fraction the
+//                    context hook tells the MODEL instead, escalating
+//                    with the measured percentage
+// AIMEM_AUTO_COMPACT has no V2 equivalent — the plugin API cannot request
+// compaction — so it is logged once and left to OpenCode's own
+// `compaction` settings.
+async function setupV2(ctx: any) {
+  const directory: string | undefined = ctx?.location?.directory
+  // OpenCode 1.18.x calls setup from an experimental host with a partial
+  // context; only a full V2 context proceeds (see header comment).
+  if (!directory || typeof ctx?.event?.subscribe !== "function" || typeof ctx?.session?.hook !== "function") return
+
+  const CTX_LIMIT = knob(directory, "AIMEM_CTX_LIMIT", "ctx_limit", 0, false)
+  const CTX_WARN_FRACTION = knob(directory, "AIMEM_CTX_WARN_FRACTION", "ctx_warn_fraction", 0.8, true)
+  const AUTO_COMPACT = knob(directory, "AIMEM_AUTO_COMPACT", "auto_compact", 0, true)
+  if (AUTO_COMPACT > 0) {
+    console.error(
+      "aimem: AIMEM_AUTO_COMPACT is not supported on OpenCode 2 (plugins cannot request compaction); " +
+        "tune opencode.json `compaction` instead",
+    )
+  }
+  const postDetached = makePoster(directory)
+  const turns = new Map<string, { user: string; reply: string; tools: string[]; lastAssistantID: string }>()
+  const submitted = new Map<string, string>() // sessionID -> last submitted turn id
+  const used = new Map<string, number>() // sessionID -> context tokens of the last model step
+  const ctxWarnedStep = new Map<string, number>() // sessionID -> last logged 5%-step
+
+  // One V2 server can host several projects, and the event stream is not
+  // guaranteed to be scoped to this plugin's location: journal only the
+  // sessions that live here, resolved once per session.
+  // Only definitive answers are cached; a failed or empty lookup (a
+  // transient error, a session not yet readable) is retried next time.
+  const owner = new Map<string, boolean>()
+  const mine = async (sid: string): Promise<boolean> => {
+    const known = owner.get(sid)
+    if (known !== undefined) return known
+    try {
+      const res: any = await ctx.session.get({ sessionID: sid })
+      const dir = res?.location?.directory ?? res?.data?.location?.directory
+      if (typeof dir !== "string") return false
+      const same = path.resolve(dir) === path.resolve(directory)
+      owner.set(sid, same)
+      return same
+    } catch {
+      return false
+    }
+  }
+
+  const turn = (sid: string) => {
+    let t = turns.get(sid)
+    if (!t) {
+      t = { user: "", reply: "", tools: [], lastAssistantID: "" }
+      turns.set(sid, t)
+    }
+    return t
+  }
+
+  const submit = async (sid: string, outcome: "ok" | "failed") => {
+    const t = turns.get(sid)
+    if (!t) return
+    const turnID = t.lastAssistantID || `no-assistant-${Date.now()}`
+    if (submitted.get(sid) === turnID) return
+    const ok = await postDetached(turnPayload(directory, sid, turnID, outcome, t))
+    if (ok) submitted.set(sid, turnID)
+  }
+
+  const limitCache = new Map<string, Promise<number>>()
+  const contextLimit = (model: { providerID: string; id: string } | undefined): Promise<number> => {
+    if (CTX_LIMIT > 0) return Promise.resolve(CTX_LIMIT)
+    if (!model) return Promise.resolve(0)
+    const key = `${model.providerID}/${model.id}`
+    let p = limitCache.get(key)
+    if (!p) {
+      p = (async () => {
+        try {
+          const res: any = await ctx.model?.list?.()
+          const list: any[] = res?.data ?? (Array.isArray(res) ? res : [])
+          const m = list.find((x) => x?.providerID === model.providerID && (x?.id === model.id || x?.modelID === model.id))
+          return Number(m?.limit?.context ?? 0)
+        } catch {
+          return 0
+        }
+      })()
+      limitCache.set(key, p)
+    }
+    return p
+  }
+
+  const tokensOf = (k: any): number =>
+    k ? (k.input ?? 0) + (k.output ?? 0) + (k.reasoning ?? 0) + (k.cache?.read ?? 0) : 0
+
+  // contextTokens is the usage of the latest model step still in context.
+  // The session's own message list is read first: the step.ended event can
+  // arrive after the next request's context hook has already run, which
+  // would put every warning one request late. A compaction entry newer than
+  // any measured step means the old usage no longer applies.
+  const contextTokens = async (sid: string): Promise<number> => {
+    try {
+      const res: any = await ctx.session.context?.({ sessionID: sid })
+      const msgs: any[] = Array.isArray(res) ? res : Array.isArray(res?.data) ? res.data : []
+      for (let i = msgs.length - 1; i >= 0; i--) {
+        if (msgs[i]?.type === "compaction") return 0
+        if (msgs[i]?.type === "assistant" && msgs[i]?.tokens) return tokensOf(msgs[i].tokens)
+      }
+    } catch {
+      // Fall back to the event-stream figure below.
+    }
+    return used.get(sid) ?? 0
+  }
+
+  await ctx.session.hook("prompt", async (e: any) => {
+    if (!e?.sessionID || !(await mine(e.sessionID))) return
+    // A fresh turn id too: a turn rejected before any model step never
+    // sets one, and reusing the previous turn's id would let the submit
+    // dedup drop its failure.
+    turns.set(e.sessionID, {
+      user: typeof e?.prompt?.text === "string" ? e.prompt.text : "",
+      reply: "",
+      tools: [],
+      lastAssistantID: "",
+    })
+  })
+
+  await ctx.session.hook("compaction", async (e: any) => {
+    // Only ever APPEND: the default compaction instructions stay intact.
+    try {
+      if (!e?.sessionID || !(await mine(e.sessionID))) return
+      if (Array.isArray(e?.system)) e.system.push({ type: "text", text: HANDOFF_NOTE.trim() })
+    } catch (err) {
+      console.error("aimem compaction hook:", err)
+    }
+  })
+
+  await ctx.session.hook("context", async (e: any) => {
+    try {
+      const sid: string | undefined = e?.sessionID
+      if (!sid || !Array.isArray(e?.system) || !(await mine(sid))) return
+      const existing = e.system.map((p: any) => (typeof p?.text === "string" ? p.text : "")).join("\n")
+
+      if (handoffWired(directory)) {
+        try {
+          const file = path.join(directory, HANDOFF_REL)
+          const st = fs.statSync(file)
+          if (st.isFile() && st.size > 0 && st.size <= HANDOFF_MAX_BYTES) {
+            const body = fs.readFileSync(file, "utf8").replace(/^﻿/, "")
+            // Skip when the handoff is already present, e.g. once OpenCode
+            // starts honoring `instructions` itself.
+            if (body.trim() && !existing.includes(body.trim().slice(0, 200))) {
+              e.system.push({ type: "text", text: `Instructions from: ${file}\n${body}` })
+            }
+          }
+        } catch {
+          // No handoff yet is normal for a fresh project.
+        }
+      }
+
+      const tokens = await contextTokens(sid)
+      const limit = tokens > 0 ? await contextLimit(e.model) : 0
+      if (limit <= 0) return
+      const frac = tokens / limit
+      if (frac < CTX_WARN_FRACTION) return
+      const pct = Math.round(100 * frac)
+      const step = Math.floor(frac * 20)
+      if (step > (ctxWarnedStep.get(sid) ?? -1)) {
+        ctxWarnedStep.set(sid, step)
+        console.error(`aimem: context ~${pct}% of ${limit} tokens (${e.model?.id ?? "model"})`)
+      }
+      // Worded by 5% step, not the live percentage: the system prompt then
+      // changes at most once per step, so provider prompt caches survive.
+      e.system.push({
+        type: "text",
+        text:
+          `aimem: this session's context is over ${step * 5}% of the model's ${limit}-token window. ` +
+          "Finish the smallest safe unit of work and update docs/SESSION-STATE.md before compaction.",
+      })
+    } catch (err) {
+      console.error("aimem context hook:", err)
+    }
+  })
+
+  const controller = new AbortController()
+  void (async () => {
+    try {
+      for await (const ev of ctx.event.subscribe({ signal: controller.signal })) {
+        const d: any = (ev as any)?.data
+        const sid: string | undefined = d?.sessionID
+        if (!sid) continue
+        const type: string = (ev as any)?.type ?? ""
+        if (!type.startsWith("session.") || !(await mine(sid))) continue
+        switch (type) {
+          case "session.text.ended":
+            if (typeof d.text === "string") turn(sid).reply = d.text
+            if (d.assistantMessageID) turn(sid).lastAssistantID = d.assistantMessageID
+            break
+          case "session.tool.input.started": {
+            const t = turn(sid)
+            if (typeof d.name === "string" && !t.tools.includes(d.name)) t.tools.push(d.name)
+            break
+          }
+          case "session.step.ended": {
+            if (d.assistantMessageID) turn(sid).lastAssistantID = d.assistantMessageID
+            if (d.tokens) used.set(sid, tokensOf(d.tokens))
+            break
+          }
+          case "session.execution.succeeded":
+            await submit(sid, "ok")
+            break
+          case "session.execution.failed":
+          case "session.execution.interrupted":
+            await submit(sid, "failed")
+            break
+          case "session.compaction.started":
+            // The pre-compaction usage no longer describes the window the
+            // next request will see; drop it before the summary lands.
+            used.delete(sid)
+            break
+          case "session.compaction.ended": {
+            const anchor = turns.get(sid)?.lastAssistantID || `t${Date.now()}`
+            await postDetached(markerPayload(directory, sid, anchor))
+            // Fresh context window: re-arm the escalating warnings.
+            used.delete(sid)
+            ctxWarnedStep.delete(sid)
+            break
+          }
+        }
+      }
+    } catch (err) {
+      if (!controller.signal.aborted) console.error("aimem event stream:", err)
+    }
+  })()
+  return () => controller.abort()
+}
+
+// Default export: `id` + `setup` for OpenCode 2.x, `server` for OpenCode
+// 1.14+ (its loader takes `server` from a default object).
+export default { id: "aimem", setup: setupV2, server: AimemPlugin }
