@@ -619,3 +619,52 @@ func TestIdentityAuthenticationObservesTheDeadline(t *testing.T) {
 		checkEnvelope(t, name, identityResp{w.Code, w.Body.Bytes(), w.Header()}, 503, "request_in_progress")
 	}
 }
+
+// TestIdentityEncodedPathsMatchTheMux: a percent-encoded spelling that the
+// route mux dispatches to an identity wire handler gets exactly what the
+// literal path gets from the gate: the refusal envelope, the deadline before
+// authentication, and peer confinement (task 01a0dda8, CONFIRMED-RUNTIME
+// before the gate classified with the mux's own matching).
+func TestIdentityEncodedPathsMatchTheMux(t *testing.T) {
+	g := newIdentityRig(t)
+	g.registerPeer(t, "aicrew-example")
+	_, peer := g.issueCredential(t, "aicrew-example", time.Now().Add(time.Hour))
+	var mu sync.Mutex
+	remaining := map[string]time.Duration{}
+	gateAuthHook = func(r *http.Request) {
+		left := time.Duration(-1)
+		if d, ok := r.Context().Deadline(); ok {
+			left = time.Until(d)
+		}
+		mu.Lock()
+		remaining[r.URL.EscapedPath()] = left
+		mu.Unlock()
+	}
+	defer func() { gateAuthHook = nil }()
+	proof, redeem := "/v1/identity/%70roofs", "/v1/identity/peers/aicrew-example/%72edemptions"
+	body := `{"peer_service_id":"aicrew-example","hub_id":"` + g.hub + `","challenge_id":"c-encoded"}`
+
+	checkEnvelope(t, "encoded proof, no bearer", g.call(t, g.tls, "POST", proof, "", v1, "{}", true), 401, "invalid_credential")
+	checkEnvelope(t, "encoded proof, peer bearer", g.call(t, g.tls, "POST", proof, peer, v1, "{}", true), 403, "credential_scope_forbidden")
+	checkEnvelope(t, "encoded proof, project token", g.call(t, g.tls, "POST", proof, g.project, v1, body, true), 403, "credential_scope_forbidden")
+	if r := g.call(t, g.tls, "POST", proof, g.alice, v1, body, false); r.status != 200 {
+		t.Errorf("encoded proof for a user token must behave like the literal path: %d %s", r.status, r.body)
+	}
+	checkEnvelope(t, "encoded redeem, no bearer", g.call(t, g.tls, "POST", redeem, "", v1, "{}", true), 401, "peer_unauthenticated")
+	checkEnvelope(t, "encoded redeem, user bearer", g.call(t, g.tls, "POST", redeem, g.alice, v1, "{}", true), 401, "peer_unauthenticated")
+	// The peer's own encoded path reaches its handler (here refused for the
+	// empty body), not the gate's plain 403.
+	checkEnvelope(t, "encoded redeem, own peer", g.call(t, g.tls, "POST", redeem, peer, v1, "{}", true), 400, "invalid_request")
+	// An encoded slash stays inside {service_id}, as the mux reads it; the
+	// handler then refuses a path peer that is not the credential's own.
+	checkEnvelope(t, "encoded slash in service_id", g.call(t, g.tls, "POST", "/v1/identity/peers/aicrew%2Fexample/redemptions", peer, v1, "{}", true), 403, "peer_forbidden")
+
+	mu.Lock()
+	defer mu.Unlock()
+	for _, p := range []string{proof, redeem} {
+		if left, ok := remaining[p]; !ok || left <= 0 || left > identityWait {
+			t.Errorf("%s authenticated without the identity deadline (remaining %v)", p, left)
+		}
+	}
+	g.assertNoSecretLeak(t)
+}
