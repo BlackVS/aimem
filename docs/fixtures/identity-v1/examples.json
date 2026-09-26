@@ -27,6 +27,7 @@
     "handle_max_seconds": 900,
     "handle_refresh_overlap_seconds": 60
   },
+  "request_key_encoding": {"scheme": "k1_ + unpadded base64url(SHA-256(UTF-8 request key))", "cases": [{"case": "ascii", "raw_request_key": "redeem:01a0dbee-0000-7000-8000-00000000c001:complete-1", "idempotency_key": "k1_2IQCL8m83eJDh40yzY28RSvS9Y2E7TBl3dkZxDZJZ0M"}, {"case": "space", "raw_request_key": "redeem:01a0dbee-0000-7000-8000-00000000c001:complete 1", "idempotency_key": "k1_IECxZIo2zezwemyIDXbOdtQCS-dw5FdoezwjuObnHGc"}, {"case": "non_ascii", "raw_request_key": "agent-proof:01a0dbee-0000-7000-8000-00000000c002:é", "idempotency_key": "k1_w4S8h7VVOqv9osTS7ZTCrUUsHwIswB1ZPpsGAHFAR-Y"}, {"case": "control_character", "raw_request_key": "redeem:01a0dbee-0000-7000-8000-00000000c001:line\nbreak", "idempotency_key": "k1_Tsdcj3lAs9qandWbx8ymL0IwH7T2oX3147pd25RsC2M"}, {"case": "max_length_key", "raw_request_key": "redeem:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc:kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk", "idempotency_key": "k1_eveici6pT97KTiPrzAn1v1sdDcNpRy6XJefE4ljnoRY"}]},
   "peer_registration": {
     "authorized_by": "hub_admin",
     "audited": true,
@@ -64,13 +65,13 @@
       "case": "redemption",
       "operation": "redeem",
       "caller": "peer",
-      "http": {"method": "POST", "path": "/v1/identity/peers/aicrew-example/redemptions", "headers": {"Authorization": "Bearer {redemption_credential}", "Idempotency-Key": "redeem:01a0dbee-0000-7000-8000-00000000c001:complete-1", "X-Aimem-Identity-Version": "1"}},
+      "http": {"method": "POST", "path": "/v1/identity/peers/aicrew-example/redemptions", "headers": {"Authorization": "Bearer {redemption_credential}", "Idempotency-Key": "k1_2IQCL8m83eJDh40yzY28RSvS9Y2E7TBl3dkZxDZJZ0M", "X-Aimem-Identity-Version": "1"}},
       "request": {"hub_id": "hub-example", "challenge_id": "01a0dbee-0000-7000-8000-00000000c001", "receipt": "{receipt}"},
       "response": {
         "status": 200,
         "body": {
           "redemption_id": "01a0dbee-0000-7000-8000-00000000d001",
-          "request_key": "redeem:01a0dbee-0000-7000-8000-00000000c001:complete-1",
+          "request_key": "k1_2IQCL8m83eJDh40yzY28RSvS9Y2E7TBl3dkZxDZJZ0M",
           "replayed": false,
           "peer_service_id": "aicrew-example",
           "challenge_id": "01a0dbee-0000-7000-8000-00000000c001",
@@ -84,13 +85,13 @@
       "case": "redemption_identical_replay",
       "operation": "redeem",
       "caller": "peer",
-      "http": {"method": "POST", "path": "/v1/identity/peers/aicrew-example/redemptions", "headers": {"Authorization": "Bearer {redemption_credential}", "Idempotency-Key": "redeem:01a0dbee-0000-7000-8000-00000000c001:complete-1", "X-Aimem-Identity-Version": "1"}},
+      "http": {"method": "POST", "path": "/v1/identity/peers/aicrew-example/redemptions", "headers": {"Authorization": "Bearer {redemption_credential}", "Idempotency-Key": "k1_2IQCL8m83eJDh40yzY28RSvS9Y2E7TBl3dkZxDZJZ0M", "X-Aimem-Identity-Version": "1"}},
       "request": {"hub_id": "hub-example", "challenge_id": "01a0dbee-0000-7000-8000-00000000c001", "receipt": "{receipt}"},
       "response": {
         "status": 200,
         "body": {
           "redemption_id": "01a0dbee-0000-7000-8000-00000000d001",
-          "request_key": "redeem:01a0dbee-0000-7000-8000-00000000c001:complete-1",
+          "request_key": "k1_2IQCL8m83eJDh40yzY28RSvS9Y2E7TBl3dkZxDZJZ0M",
           "replayed": true,
           "peer_service_id": "aicrew-example",
           "challenge_id": "01a0dbee-0000-7000-8000-00000000c001",

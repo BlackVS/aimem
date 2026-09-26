@@ -88,7 +88,7 @@
     "parameters": {
       "IdentityVersion": {"name": "X-Aimem-Identity-Version", "in": "header", "required": true, "schema": {"const": "1"}},
       "ServiceID": {"name": "service_id", "in": "path", "required": true, "schema": {"type": "string", "minLength": 1, "maxLength": 128}},
-      "IdempotencyKey": {"name": "Idempotency-Key", "in": "header", "required": true, "schema": {"type": "string", "minLength": 1, "maxLength": 256, "pattern": "^[!-~]+$"}}
+      "IdempotencyKey": {"name": "Idempotency-Key", "in": "header", "required": true, "description": "k1_ + unpadded base64url SHA-256 of the UTF-8 aicrew request key", "schema": {"type": "string", "pattern": "^k1_[A-Za-z0-9_-]{43}$"}}
     },
     "schemas": {
       "ChallengeID": {"type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[A-Za-z0-9._:-]+$"},

@@ -5,6 +5,8 @@ package server
 // registration; E3 and E4 own those gates.
 
 import (
+	"crypto/sha256"
+	"encoding/base64"
 	"encoding/json"
 	"maps"
 	"os"
@@ -55,11 +57,18 @@ type identityRefusal struct {
 }
 
 type identityExamples struct {
-	Version          int               `json:"version"`
-	Contract         string            `json:"contract"`
-	Status           string            `json:"status"`
-	SampleSecrets    map[string]string `json:"sample_secrets"`
-	Bounds           map[string]int    `json:"bounds"`
+	Version       int               `json:"version"`
+	Contract      string            `json:"contract"`
+	Status        string            `json:"status"`
+	SampleSecrets map[string]string `json:"sample_secrets"`
+	Bounds        map[string]int    `json:"bounds"`
+	KeyEncoding   struct {
+		Cases []struct {
+			Case string `json:"case"`
+			Raw  string `json:"raw_request_key"`
+			Key  string `json:"idempotency_key"`
+		} `json:"cases"`
+	} `json:"request_key_encoding"`
 	PeerRegistration struct {
 		AuthorizedBy  string          `json:"authorized_by"`
 		Audited       bool            `json:"audited"`
@@ -124,6 +133,7 @@ func TestIdentityV1FixtureAndProposedSurface(t *testing.T) {
 	}
 
 	checkIdentityBounds(t, ex.Bounds)
+	checkIdentityKeyEncoding(t, ex)
 	checkIdentityExchanges(t, ex, spec.Parity, spec.ServiceOnly, spec.Paths, spec.PeerRoutes)
 	checkIdentityRefusals(t, ex.Refusals, spec.RefusalStatus)
 	checkIdentityNoSecrets(t, ex)
@@ -281,6 +291,47 @@ func checkIdentityBounds(t *testing.T, b map[string]int) {
 	}
 	if b["receipt_max_seconds"] >= b["challenge_max_seconds"] {
 		t.Error("receipt must expire before the challenge")
+	}
+}
+
+// identityRequestKey is the v1 header encoding of an aicrew request key, whose
+// domain (any valid UTF-8 up to aicrew's limits) cannot travel raw in a header.
+func identityRequestKey(raw string) string {
+	sum := sha256.Sum256([]byte(raw))
+	return "k1_" + base64.RawURLEncoding.EncodeToString(sum[:])
+}
+
+var identityKeyPattern = regexp.MustCompile(`^k1_[A-Za-z0-9_-]{43}$`)
+
+func checkIdentityKeyEncoding(t *testing.T, ex identityExamples) {
+	t.Helper()
+	seen, keys := map[string]bool{}, map[string]string{}
+	for _, c := range ex.KeyEncoding.Cases {
+		seen[c.Case] = true
+		if got := identityRequestKey(c.Raw); got != c.Key {
+			t.Errorf("%s: encoded key %q, want %q", c.Case, c.Key, got)
+		}
+		if !identityKeyPattern.MatchString(c.Key) {
+			t.Errorf("%s: encoded key is not header-safe", c.Case)
+		}
+		if other, dup := keys[c.Key]; dup && other != c.Raw {
+			t.Errorf("%s: two raw keys share one encoding", c.Case)
+		}
+		keys[c.Key] = c.Raw
+	}
+	for _, c := range []string{"ascii", "space", "non_ascii", "control_character", "max_length_key"} {
+		if !seen[c] {
+			t.Errorf("request key encoding missing %s case", c)
+		}
+	}
+	for _, e := range ex.Exchanges {
+		if e.Operation != "redeem" {
+			continue
+		}
+		k := e.HTTP.Headers["Idempotency-Key"]
+		if !identityKeyPattern.MatchString(k) || keys[k] == "" {
+			t.Errorf("%s: Idempotency-Key must be the encoding of a fixture request key", e.Case)
+		}
 	}
 }
 
