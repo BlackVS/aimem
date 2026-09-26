@@ -36,6 +36,9 @@
       "owner": "aicrew",
       "method": "POST",
       "security": "AimemIntrospectionBearer",
+      "version": {"header": "X-Aimem-Identity-Version", "body_field": "version", "rule": "both required and both 1; missing, unsupported or conflicting is refused 400 unsupported_version without evaluation"},
+      "max_response_bytes": 16384,
+      "on_failure": "aimem refuses the team operation with context_unavailable; nothing is applied",
       "request_fields": ["version", "hub_id", "nonce", "handle"],
       "active_fields": ["nonce", "active", "service_id", "hub_id", "identity", "agent_id", "team_id", "role", "session_id", "generation", "handle_expires_at"],
       "inactive_fields": ["nonce", "active"]

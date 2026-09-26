@@ -8,11 +8,11 @@ import (
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/json"
-	"maps"
 	"os"
 	"path/filepath"
 	"regexp"
 	"slices"
+	"strconv"
 	"strings"
 	"testing"
 )
@@ -57,12 +57,44 @@ type identityRefusal struct {
 }
 
 type identityExamples struct {
-	Version       int               `json:"version"`
-	Contract      string            `json:"contract"`
-	Status        string            `json:"status"`
-	SampleSecrets map[string]string `json:"sample_secrets"`
-	Bounds        map[string]int    `json:"bounds"`
-	KeyEncoding   struct {
+	Version              int               `json:"version"`
+	Contract             string            `json:"contract"`
+	Status               string            `json:"status"`
+	SampleSecrets        map[string]string `json:"sample_secrets"`
+	Bounds               map[string]int    `json:"bounds"`
+	IntrospectionVersion struct {
+		Cases []struct {
+			Case     string  `json:"case"`
+			Header   *string `json:"header"`
+			Body     *int    `json:"body"`
+			Accepted bool    `json:"accepted"`
+		} `json:"cases"`
+		Rejection struct {
+			AicrewStatus int    `json:"aicrew_status"`
+			AicrewCode   string `json:"aicrew_code"`
+			Evaluated    bool   `json:"evaluated"`
+			AimemOutcome string `json:"aimem_outcome"`
+			Applied      bool   `json:"applied"`
+		} `json:"rejection"`
+	} `json:"introspection_version"`
+	IntrospectionSize struct {
+		Cases []struct {
+			Case      string `json:"case"`
+			BodyBytes int    `json:"body_bytes"`
+			Accepted  bool   `json:"accepted"`
+		} `json:"cases"`
+		Rejection struct {
+			AimemOutcome string `json:"aimem_outcome"`
+			Parsed       bool   `json:"parsed"`
+			Applied      bool   `json:"applied"`
+		} `json:"rejection"`
+	} `json:"introspection_response_size"`
+	SecretRejections []struct {
+		Case  string `json:"case"`
+		Path  string `json:"path"`
+		Value string `json:"value"`
+	} `json:"secret_location_rejections"`
+	KeyEncoding struct {
 		Cases []struct {
 			Case string `json:"case"`
 			Raw  string `json:"raw_request_key"`
@@ -136,7 +168,8 @@ func TestIdentityV1FixtureAndProposedSurface(t *testing.T) {
 	checkIdentityKeyEncoding(t, ex)
 	checkIdentityExchanges(t, ex, spec.Parity, spec.ServiceOnly, spec.Paths, spec.PeerRoutes)
 	checkIdentityRefusals(t, ex.Refusals, spec.RefusalStatus)
-	checkIdentityNoSecrets(t, ex)
+	checkIdentitySecretLocations(t, ex)
+	checkIdentityIntrospectionLimits(t, ex)
 
 	if ex.PeerRegistration.AuthorizedBy != "hub_admin" || !ex.PeerRegistration.Audited {
 		t.Error("peer registration must be an audited hub-admin operation")
@@ -267,6 +300,7 @@ func checkIdentityBounds(t *testing.T, b map[string]int) {
 		"live_receipts_per_token_peer_challenge": 1,
 		"introspection_attempts":                 1,
 		"introspection_budget_ms":                2000,
+		"introspection_max_response_bytes":       16384,
 		"handle_max_seconds":                     900,
 		"handle_refresh_overlap_seconds":         60,
 	}
@@ -275,7 +309,7 @@ func checkIdentityBounds(t *testing.T, b map[string]int) {
 			t.Errorf("bound %s = %d, want 1..%d", k, v, max)
 		}
 	}
-	for _, k := range []string{"receipts_per_token_per_minute", "redemption_retention_seconds", "server_same_key_wait_seconds", "redemption_call_timeout_seconds", "aicrew_inflight_wait_seconds", "introspection_max_response_bytes"} {
+	for _, k := range []string{"receipts_per_token_per_minute", "redemption_retention_seconds", "server_same_key_wait_seconds", "redemption_call_timeout_seconds", "aicrew_inflight_wait_seconds"} {
 		if b[k] <= 0 {
 			t.Errorf("bound %s must be positive", k)
 		}
@@ -516,7 +550,7 @@ func checkIdentityRefusals(t *testing.T, refusals []identityRefusal, status map[
 		"redeem_changed_input_same_key", "redeem_same_key_in_flight", "redeem_token_revoked_after_issue", "redeem_replay_after_revocation",
 		"team_revoked_bearer", "team_user_mismatch", "team_rotation_pending", "team_generation_advanced", "team_no_handle_for_team_tool",
 		"team_handle_on_personal_connection", "team_introspection_timeout", "team_introspection_tls_mismatch", "team_introspection_nonce_mismatch",
-		"team_profile_not_granted", "team_role_downgrade",
+		"team_profile_not_granted", "team_role_downgrade", "team_introspection_version_rejected", "team_introspection_oversize",
 	} {
 		if !cases[c] {
 			t.Errorf("missing refusal case %s", c)
@@ -524,47 +558,155 @@ func checkIdentityRefusals(t *testing.T, refusals []identityRefusal, status map[
 	}
 }
 
-// checkIdentityNoSecrets proves every sample secret appears only in request
-// positions, plus the receipt returned to its own requester.
-func checkIdentityNoSecrets(t *testing.T, ex identityExamples) {
-	t.Helper()
-	var secrets []string
-	for _, v := range ex.SampleSecrets {
-		secrets = append(secrets, v)
+// identitySecretLocations is the contract's complete list of places where a
+// secret placeholder may appear. Every other location is a disclosure.
+var identitySecretLocations = map[string]string{
+	"exchanges[proof_issue].http.headers.Authorization":                 "{individual_bearer}",
+	"exchanges[proof_issue].response.body.receipt":                      "{receipt}",
+	"exchanges[redemption].http.headers.Authorization":                  "{redemption_credential}",
+	"exchanges[redemption].request.receipt":                             "{receipt}",
+	"exchanges[redemption_identical_replay].http.headers.Authorization": "{redemption_credential}",
+	"exchanges[redemption_identical_replay].request.receipt":            "{receipt}",
+	"exchanges[introspection_active].http.headers.Authorization":        "{introspection_credential}",
+	"exchanges[introspection_active].request.handle":                    "{aimem_handle}",
+	"exchanges[introspection_inactive].http.headers.Authorization":      "{introspection_credential}",
+	"exchanges[introspection_inactive].request.handle":                  "{aimem_handle}",
+	"team_request.headers.Authorization":                                "{individual_bearer}",
+	"team_request.headers.X-Aimem-Team-Context":                         "{aimem_handle}",
+}
+
+var identityPlaceholders = []string{"{individual_bearer}", "{receipt}", "{aimem_handle}", "{redemption_credential}", "{introspection_credential}"}
+
+// identitySecretViolations reports why a string value at path discloses a
+// secret: a real sample value anywhere, or a placeholder outside its
+// permitted location.
+func identitySecretViolations(path, value string, samples map[string]string) []string {
+	var out []string
+	for name, sample := range samples {
+		if strings.Contains(value, sample) {
+			out = append(out, "sample "+name)
+		}
 	}
-	scan := func(where string, v any) {
-		b, _ := json.Marshal(v)
-		s := string(b)
-		for _, secret := range secrets {
-			if strings.Contains(s, secret) {
-				t.Errorf("%s contains a sample secret", where)
-			}
+	for _, ph := range identityPlaceholders {
+		if strings.Contains(value, ph) && identitySecretLocations[path] != ph {
+			out = append(out, ph)
 		}
-		for _, marker := range []string{"{individual_bearer}", "{redemption_credential}", "{introspection_credential}", "{aimem_handle}", "Bearer "} {
-			if strings.Contains(s, marker) {
-				t.Errorf("%s contains credential placeholder %s", where, marker)
+	}
+	return out
+}
+
+// identityWalk visits every string value in a decoded JSON document. Array
+// elements with a "case" field are addressed by it, others by index.
+func identityWalk(path string, v any, visit func(path, value string)) {
+	switch x := v.(type) {
+	case string:
+		visit(path, x)
+	case map[string]any:
+		for k, child := range x {
+			p := k
+			if path != "" {
+				p = path + "." + k
 			}
+			identityWalk(p, child, visit)
 		}
+	case []any:
+		for i, child := range x {
+			key := strconv.Itoa(i)
+			if m, ok := child.(map[string]any); ok {
+				if c, ok := m["case"].(string); ok {
+					key = c
+				}
+			}
+			identityWalk(path+"["+key+"]", child, visit)
+		}
+	}
+}
+
+// checkIdentitySecretLocations walks the whole example document, not a chosen
+// subset, so a secret added to any new section is caught too.
+func checkIdentitySecretLocations(t *testing.T, ex identityExamples) {
+	t.Helper()
+	var doc map[string]any
+	readIdentityFixture(t, "examples.json", &doc)
+	delete(doc, "sample_secrets")
+	delete(doc, "secret_location_rejections")
+	seen := map[string]bool{}
+	identityWalk("", doc, func(path, value string) {
+		if v := identitySecretViolations(path, value, ex.SampleSecrets); len(v) > 0 {
+			t.Errorf("%s discloses %v", path, v)
+		}
+		if ph, ok := identitySecretLocations[path]; ok && strings.Contains(value, ph) {
+			seen[path] = true
+		}
+	})
+	for path := range identitySecretLocations {
+		if !seen[path] {
+			t.Errorf("permitted secret location %s is not exercised by the fixture", path)
+		}
+	}
+	want := map[string]bool{}
+	for _, r := range ex.SecretRejections {
+		want[r.Case] = true
+		if len(identitySecretViolations(r.Path, r.Value, ex.SampleSecrets)) == 0 {
+			t.Errorf("%s: rejected fixture is not detected", r.Case)
+		}
+	}
+	for _, c := range []string{"receipt_in_audit", "receipt_in_refusal_message", "sample_receipt_in_refusal", "receipt_in_redemption_response", "handle_in_introspection_reply", "bearer_in_rotation_step", "redemption_credential_in_proof_header"} {
+		if !want[c] {
+			t.Errorf("missing rejected secret-location case %s", c)
+		}
+	}
+}
+
+// checkIdentityIntrospectionLimits checks the introspection version rule and
+// the reply size ceiling against their accepted and rejected fixtures.
+func checkIdentityIntrospectionLimits(t *testing.T, ex identityExamples) {
+	t.Helper()
+	v := ex.IntrospectionVersion
+	cases := map[string]bool{}
+	for _, c := range v.Cases {
+		cases[c.Case] = true
+		accepted := c.Header != nil && *c.Header == "1" && c.Body != nil && *c.Body == 1
+		if accepted != c.Accepted {
+			t.Errorf("version case %s: accepted=%v, rule gives %v", c.Case, c.Accepted, accepted)
+		}
+	}
+	for _, c := range []string{"both_present_equal", "header_missing", "body_missing", "header_body_conflict", "both_unsupported"} {
+		if !cases[c] {
+			t.Errorf("missing introspection version case %s", c)
+		}
+	}
+	if v.Rejection.AicrewStatus != 400 || v.Rejection.AicrewCode != "unsupported_version" || v.Rejection.Evaluated ||
+		v.Rejection.AimemOutcome != "context_unavailable" || v.Rejection.Applied {
+		t.Error("a rejected introspection version must be refused unevaluated and fail closed in aimem")
 	}
 	for _, e := range ex.Exchanges {
-		body := maps.Clone(e.Response.Body)
-		if e.Case == "proof_issue" {
-			if identityRaw(body["receipt"]) != "{receipt}" {
-				t.Error("proof response must return the receipt only to its requester")
-			}
-			delete(body, "receipt")
+		if e.Operation == "introspect" && (e.HTTP.Headers["X-Aimem-Identity-Version"] != "1" || string(e.Request["version"]) != "1") {
+			t.Errorf("%s: introspection must carry version 1 in both header and body", e.Case)
 		}
-		if strings.Contains(identityJSON(body), "{receipt}") {
-			t.Errorf("%s response echoes the receipt", e.Case)
-		}
-		scan(e.Case+" response", body)
 	}
-	scan("team audit", ex.TeamRequest.AuditExample)
-	scan("peer registration", ex.PeerRegistration.Record)
-	scan("refusal envelope", ex.RefusalEnvelope)
-	scan("refusals", ex.Refusals)
-	scan("rotation sequence", ex.RotationSequence)
-	scan("concurrent sessions", ex.ConcurrentSessions)
+
+	limit := ex.Bounds["introspection_max_response_bytes"]
+	size := ex.IntrospectionSize
+	atLimit, over := false, false
+	for _, c := range size.Cases {
+		if (c.BodyBytes <= limit) != c.Accepted {
+			t.Errorf("size case %s: %d bytes accepted=%v with limit %d", c.Case, c.BodyBytes, c.Accepted, limit)
+		}
+		atLimit = atLimit || c.BodyBytes == limit
+		over = over || c.BodyBytes == limit+1
+	}
+	if !atLimit || !over {
+		t.Error("size cases must cover exactly the ceiling and one byte over it")
+	}
+	if size.Rejection.AimemOutcome != "context_unavailable" || size.Rejection.Parsed || size.Rejection.Applied {
+		t.Error("an oversized reply must fail closed without being parsed")
+	}
+	for _, e := range ex.Exchanges {
+		if e.Operation == "introspect" && len(identityJSON(e.Response.Body)) > limit {
+			t.Errorf("%s: reply example exceeds the ceiling", e.Case)
+		}
+	}
 }
 
 func (ex identityExamples) sampleJSON(name string) []byte {

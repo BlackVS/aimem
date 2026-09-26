@@ -28,6 +28,9 @@
     "handle_refresh_overlap_seconds": 60
   },
   "request_key_encoding": {"scheme": "k1_ + unpadded base64url(SHA-256(UTF-8 request key))", "cases": [{"case": "ascii", "raw_request_key": "redeem:01a0dbee-0000-7000-8000-00000000c001:complete-1", "idempotency_key": "k1_2IQCL8m83eJDh40yzY28RSvS9Y2E7TBl3dkZxDZJZ0M"}, {"case": "space", "raw_request_key": "redeem:01a0dbee-0000-7000-8000-00000000c001:complete 1", "idempotency_key": "k1_IECxZIo2zezwemyIDXbOdtQCS-dw5FdoezwjuObnHGc"}, {"case": "non_ascii", "raw_request_key": "agent-proof:01a0dbee-0000-7000-8000-00000000c002:é", "idempotency_key": "k1_w4S8h7VVOqv9osTS7ZTCrUUsHwIswB1ZPpsGAHFAR-Y"}, {"case": "control_character", "raw_request_key": "redeem:01a0dbee-0000-7000-8000-00000000c001:line\nbreak", "idempotency_key": "k1_Tsdcj3lAs9qandWbx8ymL0IwH7T2oX3147pd25RsC2M"}, {"case": "max_length_key", "raw_request_key": "redeem:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc:kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk", "idempotency_key": "k1_eveici6pT97KTiPrzAn1v1sdDcNpRy6XJefE4ljnoRY"}]},
+  "introspection_version": {"rule": "header X-Aimem-Identity-Version and body version are both required and must both be 1", "cases": [{"case": "both_present_equal", "header": "1", "body": 1, "accepted": true}, {"case": "header_missing", "header": null, "body": 1, "accepted": false}, {"case": "body_missing", "header": "1", "body": null, "accepted": false}, {"case": "header_body_conflict", "header": "1", "body": 2, "accepted": false}, {"case": "both_unsupported", "header": "2", "body": 2, "accepted": false}], "rejection": {"aicrew_status": 400, "aicrew_code": "unsupported_version", "evaluated": false, "aimem_outcome": "context_unavailable", "applied": false}},
+  "introspection_response_size": {"cases": [{"case": "at_ceiling", "body_bytes": 16384, "accepted": true}, {"case": "one_byte_over", "body_bytes": 16385, "accepted": false}], "rejection": {"aimem_outcome": "context_unavailable", "parsed": false, "applied": false}},
+  "secret_location_rejections": [{"case": "receipt_in_audit", "path": "team_request.audit_example.note", "value": "{receipt}"}, {"case": "receipt_in_refusal_message", "path": "refusal_envelope_example.message", "value": "receipt {receipt} was spent"}, {"case": "sample_receipt_in_refusal", "path": "refusals[redeem_expired_receipt].next_action", "value": "retry with amr1_SAMPLEreceiptSAMPLEreceiptSAMPLEreceiptABCD"}, {"case": "receipt_in_redemption_response", "path": "exchanges[redemption].response.body.receipt", "value": "{receipt}"}, {"case": "handle_in_introspection_reply", "path": "exchanges[introspection_active].response.body.handle", "value": "{aimem_handle}"}, {"case": "bearer_in_rotation_step", "path": "rotation_sequence[2].effect", "value": "Bearer {individual_bearer}"}, {"case": "redemption_credential_in_proof_header", "path": "exchanges[proof_issue].http.headers.Authorization", "value": "Bearer {redemption_credential}"}],
   "peer_registration": {
     "authorized_by": "hub_admin",
     "audited": true,
@@ -105,7 +108,7 @@
       "case": "introspection_active",
       "operation": "introspect",
       "caller": "aimem",
-      "http": {"method": "POST", "path": "/v1/crew/introspect", "owner": "aicrew", "headers": {"Authorization": "Bearer {introspection_credential}"}},
+      "http": {"method": "POST", "path": "/v1/crew/introspect", "owner": "aicrew", "headers": {"Authorization": "Bearer {introspection_credential}", "X-Aimem-Identity-Version": "1"}},
       "request": {"version": 1, "hub_id": "hub-example", "nonce": "n-7f3c9a1e5b2d4c6f8a0b1c2d3e4f5a6b", "handle": "{aimem_handle}"},
       "response": {
         "status": 200,
@@ -128,7 +131,7 @@
       "case": "introspection_inactive",
       "operation": "introspect",
       "caller": "aimem",
-      "http": {"method": "POST", "path": "/v1/crew/introspect", "owner": "aicrew", "headers": {"Authorization": "Bearer {introspection_credential}"}},
+      "http": {"method": "POST", "path": "/v1/crew/introspect", "owner": "aicrew", "headers": {"Authorization": "Bearer {introspection_credential}", "X-Aimem-Identity-Version": "1"}},
       "request": {"version": 1, "hub_id": "hub-example", "nonce": "n-0a1b2c3d4e5f60718293a4b5c6d7e8f9", "handle": "{aimem_handle}"},
       "response": {"status": 200, "body": {"nonce": "n-0a1b2c3d4e5f60718293a4b5c6d7e8f9", "active": false}}
     }
@@ -185,6 +188,8 @@
     {"case": "team_introspection_timeout", "operation": "team_request", "code": "context_unavailable", "http_status": 503, "retryable": true, "next_action": "Retry later with the same context."},
     {"case": "team_introspection_tls_mismatch", "operation": "team_request", "code": "context_unavailable", "http_status": 503, "retryable": true, "next_action": "Retry later with the same context."},
     {"case": "team_introspection_nonce_mismatch", "operation": "team_request", "code": "context_unavailable", "http_status": 503, "retryable": true, "next_action": "Retry later with the same context."},
+    {"case": "team_introspection_version_rejected", "operation": "team_request", "code": "context_unavailable", "http_status": 503, "retryable": true, "next_action": "Retry later with the same context."},
+    {"case": "team_introspection_oversize", "operation": "team_request", "code": "context_unavailable", "http_status": 503, "retryable": true, "next_action": "Retry later with the same context."},
     {"case": "team_profile_not_granted", "operation": "team_request", "code": "grant_denied", "http_status": 403, "retryable": false, "next_action": "Request an authorized grant change."},
     {"case": "team_role_downgrade", "operation": "team_request", "code": "role_forbidden", "http_status": 403, "retryable": false, "next_action": "Use the role's permitted aicrew flow."}
   ]
