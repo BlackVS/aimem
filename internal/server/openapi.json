@@ -987,6 +987,401 @@
         }
       }
     },
+    "/v1/identity/proofs": {
+      "post": {
+        "summary": "identity.v1: issue a single-use proof receipt for a registered peer and challenge",
+        "description": "Only a live user-scoped individual token (ordinary role) may call this. The receipt is returned once to that credential holder, is valid for at most 60 s and can be redeemed only by the named peer. The response is no-store; the receipt must never enter a model-visible tool result, transcript or log. Requires TLS terminated by this hub: plain HTTP, a TLS-terminating proxy and the unix socket are refused with tls_required, and forwarded headers never count. Not exposed as an MCP tool.",
+        "x-role": "writer",
+        "x-identity-auth": "individual-user",
+        "x-requires-tls": true,
+        "parameters": [
+          {
+            "name": "X-Aimem-Identity-Version",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "1"
+              ]
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "peer_service_id",
+                  "hub_id",
+                  "challenge_id"
+                ],
+                "properties": {
+                  "peer_service_id": {
+                    "type": "string"
+                  },
+                  "hub_id": {
+                    "type": "string"
+                  },
+                  "challenge_id": {
+                    "type": "string",
+                    "pattern": "^[A-Za-z0-9._:-]{1,128}$"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "{receipt, receipt_id, expires_at, binding{hub_id, peer_service_id, challenge_id, user_id, token_id}}"
+          },
+          "400": {
+            "description": "Refusal envelope {code, message, retryable, next_action, correlation_id}; never contains a secret"
+          },
+          "401": {
+            "description": "Refusal envelope {code, message, retryable, next_action, correlation_id}; never contains a secret"
+          },
+          "403": {
+            "description": "Refusal envelope {code, message, retryable, next_action, correlation_id}; never contains a secret"
+          },
+          "429": {
+            "description": "Refusal envelope {code, message, retryable, next_action, correlation_id}; never contains a secret"
+          },
+          "503": {
+            "description": "Refusal envelope {code, message, retryable, next_action, correlation_id}; never contains a secret"
+          }
+        }
+      }
+    },
+    "/v1/identity/peers/{service_id}/redemptions": {
+      "post": {
+        "summary": "identity.v1: the registered peer redeems a receipt for the verified hub/user/token",
+        "description": "Only an aimem_peer_ credential for the path's service may call this; a peer credential reaches no other route. Idempotency-Key is k1_ plus the unpadded base64url SHA-256 of aicrew's request key. An identical retry returns the recorded result after rechecking the token. Requires TLS terminated by this hub: plain HTTP, a TLS-terminating proxy and the unix socket are refused with tls_required, and forwarded headers never count. Not exposed as an MCP tool.",
+        "x-role": "writer",
+        "x-identity-auth": "peer",
+        "x-requires-tls": true,
+        "parameters": [
+          {
+            "name": "service_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "X-Aimem-Identity-Version",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "1"
+              ]
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^k1_[A-Za-z0-9_-]{43}$"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "hub_id",
+                  "challenge_id",
+                  "receipt"
+                ],
+                "properties": {
+                  "hub_id": {
+                    "type": "string"
+                  },
+                  "challenge_id": {
+                    "type": "string"
+                  },
+                  "receipt": {
+                    "type": "string",
+                    "pattern": "^amr1_[A-Za-z0-9_-]{43}$"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "{redemption_id, request_key, replayed, peer_service_id, challenge_id, identity{hub_id, user_id, token_id}, token_state, redeemed_at}"
+          },
+          "400": {
+            "description": "Refusal envelope {code, message, retryable, next_action, correlation_id}; never contains a secret"
+          },
+          "401": {
+            "description": "Refusal envelope {code, message, retryable, next_action, correlation_id}; never contains a secret"
+          },
+          "403": {
+            "description": "Refusal envelope {code, message, retryable, next_action, correlation_id}; never contains a secret"
+          },
+          "409": {
+            "description": "Refusal envelope {code, message, retryable, next_action, correlation_id}; never contains a secret"
+          },
+          "503": {
+            "description": "Refusal envelope {code, message, retryable, next_action, correlation_id}; never contains a secret"
+          }
+        }
+      }
+    },
+    "/v1/identity/peers": {
+      "get": {
+        "summary": "List registered identity peers (non-secret records)",
+        "description": "introspection_operational is always false until the introspection increment ships. Requires TLS terminated by this hub: plain HTTP, a TLS-terminating proxy and the unix socket are refused with tls_required, and forwarded headers never count. Not exposed as an MCP tool.",
+        "x-role": "admin",
+        "x-requires-tls": true,
+        "responses": {
+          "200": {
+            "description": "{peers: [...]}"
+          },
+          "403": {
+            "description": "Refusal envelope {code, message, retryable, next_action, correlation_id}; never contains a secret"
+          }
+        }
+      },
+      "post": {
+        "summary": "Register the aicrew identity peer for this hub",
+        "description": "Binds service_id, this hub, identity.redeem, an https introspection endpoint and a TLS trust binding (ca_dns naming the endpoint host, or spki_sha256). One active peer per hub. Audited. Registration grants no project access or enrollment authority. Requires TLS terminated by this hub: plain HTTP, a TLS-terminating proxy and the unix socket are refused with tls_required, and forwarded headers never count. Not exposed as an MCP tool.",
+        "x-role": "admin",
+        "x-requires-tls": true,
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "service_id",
+                  "introspection_endpoint",
+                  "tls_trust"
+                ],
+                "properties": {
+                  "service_id": {
+                    "type": "string"
+                  },
+                  "introspection_endpoint": {
+                    "type": "string"
+                  },
+                  "tls_trust": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": [
+                      "mode",
+                      "value"
+                    ],
+                    "properties": {
+                      "mode": {
+                        "type": "string",
+                        "enum": [
+                          "ca_dns",
+                          "spki_sha256"
+                        ]
+                      },
+                      "value": {
+                        "type": "string"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "The registered peer"
+          },
+          "400": {
+            "description": "Invalid registration or another active peer"
+          },
+          "403": {
+            "description": "Refusal envelope {code, message, retryable, next_action, correlation_id}; never contains a secret"
+          }
+        }
+      }
+    },
+    "/v1/identity/peers/{service_id}": {
+      "put": {
+        "summary": "Disable or re-enable an identity peer",
+        "description": "Disabling refuses every credential of the peer; re-enabling keeps one active peer per hub. Audited. Requires TLS terminated by this hub: plain HTTP, a TLS-terminating proxy and the unix socket are refused with tls_required, and forwarded headers never count. Not exposed as an MCP tool.",
+        "x-role": "admin",
+        "x-requires-tls": true,
+        "parameters": [
+          {
+            "name": "service_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "disabled"
+                ],
+                "properties": {
+                  "disabled": {
+                    "type": "boolean"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Updated"
+          },
+          "400": {
+            "description": "Unknown peer or another active peer"
+          },
+          "403": {
+            "description": "Refusal envelope {code, message, retryable, next_action, correlation_id}; never contains a secret"
+          }
+        }
+      }
+    },
+    "/v1/identity/peers/{service_id}/credentials": {
+      "get": {
+        "summary": "List a peer's credential metadata (never secrets)",
+        "description": "For lost-response recovery and rotation: an unconfirmed credential is revoked, then reissued. Requires TLS terminated by this hub: plain HTTP, a TLS-terminating proxy and the unix socket are refused with tls_required, and forwarded headers never count. Not exposed as an MCP tool.",
+        "x-role": "admin",
+        "x-requires-tls": true,
+        "parameters": [
+          {
+            "name": "service_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "{credentials: [{id, service_id, created_at, expires_at, revoked}]}"
+          },
+          "403": {
+            "description": "Refusal envelope {code, message, retryable, next_action, correlation_id}; never contains a secret"
+          }
+        }
+      },
+      "post": {
+        "summary": "Issue a peer credential; the bearer is shown once",
+        "description": "aimem_peer_ plus 256 random bits, stored as a digest, at most 366 days, at most two active per peer. The response is no-store and is never shown again. Requires TLS terminated by this hub: plain HTTP, a TLS-terminating proxy and the unix socket are refused with tls_required, and forwarded headers never count. Not exposed as an MCP tool.",
+        "x-role": "admin",
+        "x-requires-tls": true,
+        "parameters": [
+          {
+            "name": "service_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "expires_at"
+                ],
+                "properties": {
+                  "expires_at": {
+                    "type": "string",
+                    "format": "date-time"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "{credential, secret}"
+          },
+          "400": {
+            "description": "Invalid expiry or peer"
+          },
+          "403": {
+            "description": "Refusal envelope {code, message, retryable, next_action, correlation_id}; never contains a secret"
+          },
+          "409": {
+            "description": "The peer already has two active credentials"
+          }
+        }
+      }
+    },
+    "/v1/identity/peers/{service_id}/credentials/{credential_id}": {
+      "delete": {
+        "summary": "Revoke one peer credential",
+        "description": "Immediate for authentication that starts afterwards; affects only that credential; idempotent. Audited. Requires TLS terminated by this hub: plain HTTP, a TLS-terminating proxy and the unix socket are refused with tls_required, and forwarded headers never count. Not exposed as an MCP tool.",
+        "x-role": "admin",
+        "x-requires-tls": true,
+        "parameters": [
+          {
+            "name": "service_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "credential_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Revoked"
+          },
+          "403": {
+            "description": "Refusal envelope {code, message, retryable, next_action, correlation_id}; never contains a secret"
+          },
+          "404": {
+            "description": "No such credential for this peer"
+          }
+        }
+      }
+    },
     "/": {
       "get": {
         "summary": "Public status page (HTML)",

@@ -86,6 +86,7 @@ var ordinaryRoutes = func() map[string]bool {
 	m["GET /v1/projects"] = true
 	m["GET /v1/projects/{p}/process"] = true // the selected process reference: what an agent needs to find its rules; grants no repository access
 	m["GET /v1/access/directory"] = true     // id, kind, name, enabled of every user and group: what the board labels assignees with
+	m["POST /v1/identity/proofs"] = true     // identity.v1 proof receipt: the handler requires a live user-scoped token and TLS
 	return m
 }()
 

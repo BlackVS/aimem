@@ -1,7 +1,7 @@
 {
   "version": 1,
   "contract": "identity.v1",
-  "status": "proposal_only",
+  "status": "contract",
   "note": "Design fixture for task E2. Every value is synthetic. The sample secrets exist only so the fake-consumer test can prove they never appear in a response, audit or refusal.",
   "sample_secrets": {
     "individual_bearer": "sample-individual-bearer-not-real",
@@ -52,7 +52,6 @@
       "operation": "proof",
       "caller": "individual",
       "http": {"method": "POST", "path": "/v1/identity/proofs", "headers": {"Authorization": "Bearer {individual_bearer}", "X-Aimem-Identity-Version": "1"}},
-      "mcp_tool": "identity_proof",
       "request": {"peer_service_id": "aicrew-example", "hub_id": "hub-example", "challenge_id": "01a0dbee-0000-7000-8000-00000000c001"},
       "response": {
         "status": 200,
@@ -165,6 +164,8 @@
     {"case": "proof_rate_limited", "operation": "proof", "code": "rate_limited", "http_status": 429, "retryable": true, "next_action": "Wait, then request a new receipt."},
     {"case": "proof_unsupported_version", "operation": "proof", "code": "unsupported_version", "http_status": 400, "retryable": false, "next_action": "Use identity version 1."},
     {"case": "proof_malformed_challenge", "operation": "proof", "code": "invalid_request", "http_status": 400, "retryable": false, "next_action": "Send the challenge ID exactly as aicrew issued it."},
+    {"case": "proof_plain_http", "operation": "proof", "code": "tls_required", "http_status": 403, "retryable": false, "next_action": "Connect to the hub's TLS listener with certificate verification."},
+    {"case": "redeem_unix_socket", "operation": "redeem", "code": "tls_required", "http_status": 403, "retryable": false, "next_action": "Connect to the hub's TLS listener with certificate verification."},
     {"case": "redeem_unregistered_credential", "operation": "redeem", "code": "peer_unauthenticated", "http_status": 401, "retryable": false, "next_action": "Operator checks the peer registration and credential."},
     {"case": "redeem_path_service_mismatch", "operation": "redeem", "code": "peer_forbidden", "http_status": 403, "retryable": false, "next_action": "Operator checks the peer's permitted operations."},
     {"case": "redeem_expired_receipt", "operation": "redeem", "code": "proof_invalid", "http_status": 403, "retryable": false, "next_action": "Obtain a new receipt for the challenge, or begin a new challenge."},

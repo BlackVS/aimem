@@ -3,6 +3,7 @@
 package access
 
 import (
+	"context"
 	"crypto/rand"
 	"crypto/sha256"
 	"database/sql"
@@ -494,9 +495,15 @@ type Identity struct {
 }
 
 func (s *Store) Authenticate(secret string) (Identity, error) {
+	return s.AuthenticateContext(context.Background(), secret)
+}
+
+// AuthenticateContext is Authenticate with the wait for the store bounded by
+// ctx; on expiry it returns ctx.Err().
+func (s *Store) AuthenticateContext(ctx context.Context, secret string) (Identity, error) {
 	sum := sha256.Sum256([]byte(secret))
 	var id Identity
-	err := s.db.QueryRow(`SELECT u.id,t.id,u.name,t.project,t.scope FROM tokens t JOIN users u ON u.id=t.user_id
+	err := s.db.QueryRowContext(ctx, `SELECT u.id,t.id,u.name,t.project,t.scope FROM tokens t JOIN users u ON u.id=t.user_id
 WHERE t.digest=? AND t.revoked=0 AND t.expires_at>? AND u.disabled=0`, hex.EncodeToString(sum[:]), time.Now().Unix()).Scan(&id.UserID, &id.TokenID, &id.Name, &id.Project, &id.Scope)
 	if errors.Is(err, sql.ErrNoRows) {
 		return Identity{}, ErrDenied

@@ -15,6 +15,7 @@ import (
 	"crypto/subtle"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"os"
@@ -88,11 +89,14 @@ func HashToken(secret string) string {
 // local unix socket carry none and are trusted as the local operator.
 type Identity struct {
 	Name    string
-	Role    string // legacy "writer"/"admin", or scoped ordinary "user"
+	Role    string // legacy "writer"/"admin", scoped ordinary "user", or identity "peer"
 	UserID  string
 	TokenID string
 	Scope   access.TokenScope
 	Project string // ordinary tokens: the access instance the token was issued for
+	// Peer is set only for the "peer" role: the registered identity.v1
+	// service and the credential that authenticated it.
+	Peer access.PeerIdentity
 }
 
 type identityKey struct{}
@@ -114,6 +118,17 @@ func IdentityFrom(ctx context.Context) (Identity, bool) {
 // identical length, so timing reveals nothing about which token — or
 // how much of one — matched.
 func (s *Server) authenticate(envToken, presented string) (Identity, bool) {
+	id, err := s.authenticateContext(context.Background(), envToken, presented)
+	return id, err == nil
+}
+
+// errNotAuthenticated means the bearer matched no credential. Any other
+// error from authenticateContext is the store failing or ctx expiring.
+var errNotAuthenticated = errors.New("not authenticated")
+
+// authenticateContext is authenticate with the access-store wait bounded by
+// ctx; the identity wire routes pass their 5 s deadline here.
+func (s *Server) authenticateContext(ctx context.Context, envToken, presented string) (Identity, error) {
 	presentedDigest := []byte(HashToken(presented))
 	ok := false
 	id := Identity{}
@@ -127,13 +142,32 @@ func (s *Server) authenticate(envToken, presented string) (Identity, bool) {
 	if !ok && strings.HasPrefix(presented, "aimem_user_") {
 		db, err := s.openAccess(false)
 		if err != nil {
-			return Identity{}, false
+			return Identity{}, errNotAuthenticated
 		}
-		user, err := db.Authenticate(presented)
+		user, err := db.AuthenticateContext(ctx, presented)
+		if errors.Is(err, access.ErrDenied) {
+			return Identity{}, errNotAuthenticated
+		}
 		if err != nil {
-			return Identity{}, false
+			return Identity{}, err
 		}
-		return Identity{Name: user.Name, Role: "user", UserID: user.UserID, TokenID: user.TokenID, Project: user.Project, Scope: user.Scope}, true
+		return Identity{Name: user.Name, Role: "user", UserID: user.UserID, TokenID: user.TokenID, Project: user.Project, Scope: user.Scope}, nil
+	}
+	// A peer credential is a service identity for identity.v1 redemption
+	// only; authWrapper confines it to that one route.
+	if !ok && strings.HasPrefix(presented, "aimem_peer_") {
+		db, err := s.openAccess(false)
+		if err != nil {
+			return Identity{}, errNotAuthenticated
+		}
+		peer, err := db.AuthenticatePeerContext(ctx, presented)
+		if errors.Is(err, access.ErrPeerUnauthenticated) {
+			return Identity{}, errNotAuthenticated
+		}
+		if err != nil {
+			return Identity{}, err
+		}
+		return Identity{Name: "peer:" + peer.ServiceID, Role: "peer", Peer: peer}, nil
 	}
 	for _, t := range LoadTokens(s.reg.Root()) {
 		if len(t.SHA256) != sha256.Size*2 {
@@ -147,7 +181,10 @@ func (s *Server) authenticate(envToken, presented string) (Identity, bool) {
 			id, ok = Identity{Name: t.Name, Role: role}, true
 		}
 	}
-	return id, ok
+	if !ok {
+		return Identity{}, errNotAuthenticated
+	}
+	return id, nil
 }
 
 // requireAdmin gates an admin-only route: a named writer token is

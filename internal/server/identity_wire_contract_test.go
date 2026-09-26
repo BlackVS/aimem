@@ -143,14 +143,15 @@ type identityExamples struct {
 func TestIdentityV1FixtureAndProposedSurface(t *testing.T) {
 	var ex identityExamples
 	readIdentityFixture(t, "examples.json", &ex)
-	if ex.Version != 1 || ex.Contract != "identity.v1" || ex.Status != "proposal_only" {
-		t.Fatalf("unversioned or live fixture: %d %q %q", ex.Version, ex.Contract, ex.Status)
+	if ex.Version != 1 || ex.Contract != "identity.v1" || ex.Status != "contract" {
+		t.Fatalf("unversioned fixture: %d %q %q", ex.Version, ex.Contract, ex.Status)
 	}
 	var spec struct {
 		OpenAPI       string                                `json:"openapi"`
 		Version       string                                `json:"x-contract-version"`
 		SecurityGate  string                                `json:"x-security-gate"`
-		Parity        map[string]string                     `json:"x-mcp-parity"`
+		MCP           string                                `json:"x-mcp"`
+		RequiresTLS   string                                `json:"x-requires-tls"`
 		ServiceOnly   []string                              `json:"x-service-only"`
 		RefusalStatus map[string]int                        `json:"x-refusal-status"`
 		PeerRoutes    map[string]json.RawMessage            `json:"x-peer-routes"`
@@ -161,12 +162,15 @@ func TestIdentityV1FixtureAndProposedSurface(t *testing.T) {
 		t.Fatalf("unexpected proposed OpenAPI version: %q %q", spec.OpenAPI, spec.Version)
 	}
 	if !strings.Contains(spec.SecurityGate, "E3") || !strings.Contains(spec.SecurityGate, "E4") {
-		t.Fatal("proposal must gate registration on E3/E4")
+		t.Fatal("contract must name the E3 wire and the E4 introspection gate")
+	}
+	if !strings.HasPrefix(spec.MCP, "none") || !strings.Contains(spec.RequiresTLS, "tls_required") {
+		t.Fatal("identity.v1 must declare no MCP surface and TLS on every path")
 	}
 
 	checkIdentityBounds(t, ex.Bounds)
 	checkIdentityKeyEncoding(t, ex)
-	checkIdentityExchanges(t, ex, spec.Parity, spec.ServiceOnly, spec.Paths, spec.PeerRoutes)
+	checkIdentityExchanges(t, ex, spec.ServiceOnly, spec.Paths, spec.PeerRoutes)
 	checkIdentityRefusals(t, ex.Refusals, spec.RefusalStatus)
 	checkIdentitySecretLocations(t, ex)
 	checkIdentityIntrospectionLimits(t, ex)
@@ -271,23 +275,50 @@ func TestIdentityV1FixtureAndProposedSurface(t *testing.T) {
 		}
 	}
 
-	// E3 alone registers the routes. A fixture must not accidentally become a
-	// production surface through a copied route or embedded OpenAPI entry.
+	checkIdentityLiveParity(t, spec.Paths)
+}
+
+// checkIdentityLiveParity ties the contract to the hub: each contract path is
+// a live route whose embedded OpenAPI entry requires TLS and names no MCP
+// tool, every live identity route requires TLS, and the aicrew-owned
+// introspection route is never served by the hub.
+func checkIdentityLiveParity(t *testing.T, contract map[string]map[string]json.RawMessage) {
+	t.Helper()
 	s, _ := testServer(t)
+	routes := map[string]bool{}
 	for _, route := range s.Routes() {
-		if strings.Contains(route.Pattern, "/v1/identity/") || strings.Contains(route.Pattern, "/v1/crew/") {
-			t.Errorf("E2 unexpectedly registered route %s", route.Pattern)
+		routes[route.Method+" "+route.Pattern] = true
+		if strings.Contains(route.Pattern, "/v1/crew/") {
+			t.Errorf("the hub must not serve the aicrew-owned route %s", route.Pattern)
 		}
 	}
 	var live struct {
-		Paths map[string]json.RawMessage `json:"paths"`
+		Paths map[string]map[string]struct {
+			RequiresTLS bool   `json:"x-requires-tls"`
+			MCPTool     string `json:"x-mcp-tool"`
+		} `json:"paths"`
 	}
 	if err := json.Unmarshal(openAPISpec, &live); err != nil {
 		t.Fatal(err)
 	}
-	for path := range live.Paths {
-		if strings.HasPrefix(path, "/v1/identity/") || strings.HasPrefix(path, "/v1/crew/") {
-			t.Errorf("E2 unexpectedly changed live OpenAPI path %s", path)
+	for path, methods := range contract {
+		for method := range methods {
+			if method == "parameters" {
+				continue
+			}
+			if !routes[strings.ToUpper(method)+" "+path] {
+				t.Errorf("contract path %s %s is not a live route", method, path)
+			}
+		}
+	}
+	for path, methods := range live.Paths {
+		if !strings.HasPrefix(path, "/v1/identity/") {
+			continue
+		}
+		for method, op := range methods {
+			if !op.RequiresTLS || op.MCPTool != "" {
+				t.Errorf("live %s %s must require TLS and name no MCP tool", method, path)
+			}
 		}
 	}
 }
@@ -369,7 +400,7 @@ func checkIdentityKeyEncoding(t *testing.T, ex identityExamples) {
 	}
 }
 
-func checkIdentityExchanges(t *testing.T, ex identityExamples, parity map[string]string, serviceOnly []string,
+func checkIdentityExchanges(t *testing.T, ex identityExamples, serviceOnly []string,
 	paths map[string]map[string]json.RawMessage, peerRoutes map[string]json.RawMessage) {
 	t.Helper()
 	byCase := map[string]identityExchange{}
@@ -408,11 +439,14 @@ func checkIdentityExchanges(t *testing.T, ex identityExamples, parity map[string
 			t.Errorf("%s: %s %s not in proposed OpenAPI", e.Case, e.HTTP.Method, e.HTTP.Path)
 			continue
 		}
+		if e.MCPTool != "" || op.MCPTool != "" {
+			t.Errorf("%s: identity.v1 has no MCP tool; a receipt must never reach a model", e.Case)
+		}
 		if len(op.Security) != 1 {
 			t.Errorf("%s: proposed operation must name exactly one security scheme", e.Case)
 		}
 		if slices.Contains(serviceOnly, e.Operation) {
-			if e.MCPTool != "" || op.MCPTool != "" || e.Caller != "peer" {
+			if e.Caller != "peer" {
 				t.Errorf("%s: service-only operation exposed to agents", e.Case)
 			}
 			if _, ok := op.Security[0]["PeerRedemptionBearer"]; !ok {
@@ -422,9 +456,6 @@ func checkIdentityExchanges(t *testing.T, ex identityExamples, parity map[string
 				t.Errorf("%s: redemption needs an idempotency key", e.Case)
 			}
 		} else {
-			if e.MCPTool == "" || e.MCPTool != parity[e.Operation] || op.MCPTool != e.MCPTool {
-				t.Errorf("%s: missing HTTP/MCP parity", e.Case)
-			}
 			if _, ok := op.Security[0]["IndividualBearer"]; !ok {
 				t.Errorf("%s: proof must use the individual credential", e.Case)
 			}
@@ -544,6 +575,7 @@ func checkIdentityRefusals(t *testing.T, refusals []identityRefusal, status map[
 		}
 	}
 	for _, c := range []string{
+		"proof_plain_http", "redeem_unix_socket",
 		"proof_revoked_token", "proof_project_scoped_token", "proof_enrollment_subcode_as_bearer", "proof_unknown_peer_or_hub", "proof_rate_limited",
 		"redeem_unregistered_credential", "redeem_path_service_mismatch", "redeem_expired_receipt", "redeem_superseded_receipt",
 		"redeem_wrong_peer_receipt", "redeem_wrong_challenge", "redeem_second_key_same_receipt", "redeem_replay_after_retention",
