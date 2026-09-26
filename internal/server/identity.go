@@ -79,19 +79,33 @@ func identityTLS(r *http.Request) bool {
 	return r.TLS != nil && r.TLS.HandshakeComplete
 }
 
+// identityWireMux holds exactly the two wire patterns, so the gate classifies
+// a request by the same matching the route mux dispatches with, including its
+// segment-by-segment unescaping: every spelling that reaches an identity wire
+// handler (for example /v1/identity/%70roofs) is classified as that route.
+var identityWireMux = func() *http.ServeMux {
+	m := http.NewServeMux()
+	for _, p := range []string{identityProofPattern, identityRedeemPattern} {
+		m.HandleFunc(p, func(http.ResponseWriter, *http.Request) {})
+	}
+	return m
+}()
+
+const (
+	identityProofPattern  = "POST /v1/identity/proofs"
+	identityRedeemPattern = "POST /v1/identity/peers/{service_id}/redemptions"
+)
+
 // identityWireRoute names the identity.v1 wire route a request targets:
 // "proof", "redeem" or "" for any other request.
 func identityWireRoute(r *http.Request) string {
-	if r.Method != http.MethodPost || !canonicalPath(r) {
+	if !canonicalPath(r) {
 		return ""
 	}
-	p := r.URL.EscapedPath()
-	if p == "/v1/identity/proofs" {
+	switch _, pattern := identityWireMux.Handler(r); pattern {
+	case identityProofPattern:
 		return "proof"
-	}
-	parts := strings.Split(p, "/")
-	if len(parts) == 6 && parts[0] == "" && parts[1] == "v1" && parts[2] == "identity" &&
-		parts[3] == "peers" && parts[4] != "" && parts[5] == "redemptions" {
+	case identityRedeemPattern:
 		return "redeem"
 	}
 	return ""
