@@ -1,0 +1,147 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "Aimem identity v1 proposal (unregistered)",
+    "version": "1.0.0",
+    "description": "Design fixture only. No production route or MCP tool is registered until E3 implements proof issuance, redemption and peer registration and a review approves them. The aicrew introspection route is owned by aicrew and is listed here only as the frozen v1 peer contract."
+  },
+  "x-contract-version": "identity.v1",
+  "x-security-gate": "E3 must implement and test individual-bearer proof issuance, peer-credential redemption and audited hub-admin peer registration against a fake aicrew before any path here is registered. E4 must implement the introspection client and team-mode verifier against a fake introspection server. A service credential never authorizes an agent, knowledge or task route.",
+  "x-mcp-parity": {"proof": "identity_proof"},
+  "x-service-only": ["redeem"],
+  "x-refusal-status": {
+    "invalid_request": 400,
+    "unsupported_version": 400,
+    "invalid_credential": 401,
+    "peer_unauthenticated": 401,
+    "credential_scope_forbidden": 403,
+    "peer_unknown": 403,
+    "peer_forbidden": 403,
+    "proof_invalid": 403,
+    "credential_inactive": 403,
+    "identity_mismatch": 403,
+    "identity_link_required": 403,
+    "context_missing": 403,
+    "context_stale": 403,
+    "grant_denied": 403,
+    "role_forbidden": 403,
+    "idempotency_conflict": 409,
+    "rate_limited": 429,
+    "request_in_progress": 503,
+    "identity_unavailable": 503,
+    "context_unavailable": 503
+  },
+  "x-peer-routes": {
+    "/v1/crew/introspect": {
+      "owner": "aicrew",
+      "method": "POST",
+      "security": "AimemIntrospectionBearer",
+      "request_fields": ["version", "hub_id", "nonce", "handle"],
+      "active_fields": ["nonce", "active", "service_id", "hub_id", "identity", "agent_id", "team_id", "role", "session_id", "generation", "handle_expires_at"],
+      "inactive_fields": ["nonce", "active"]
+    }
+  },
+  "paths": {
+    "/v1/identity/proofs": {
+      "parameters": [{"$ref": "#/components/parameters/IdentityVersion"}],
+      "post": {
+        "operationId": "identityProof",
+        "x-operation": "proof",
+        "x-mcp-tool": "identity_proof",
+        "security": [{"IndividualBearer": []}],
+        "requestBody": {"required": true, "content": {"application/json": {"schema": {"$ref": "#/components/schemas/ProofRequest"}}}},
+        "responses": {
+          "200": {"description": "Single-use receipt bound to the caller, peer and challenge", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/ProofReceipt"}}}},
+          "400": {"$ref": "#/components/responses/Refusal"},
+          "401": {"$ref": "#/components/responses/Refusal"},
+          "403": {"$ref": "#/components/responses/Refusal"},
+          "429": {"$ref": "#/components/responses/Refusal"},
+          "503": {"$ref": "#/components/responses/Refusal"}
+        }
+      }
+    },
+    "/v1/identity/peers/{service_id}/redemptions": {
+      "parameters": [{"$ref": "#/components/parameters/ServiceID"}, {"$ref": "#/components/parameters/IdentityVersion"}],
+      "post": {
+        "operationId": "identityRedeem",
+        "x-operation": "redeem",
+        "security": [{"PeerRedemptionBearer": []}],
+        "parameters": [{"$ref": "#/components/parameters/IdempotencyKey"}],
+        "requestBody": {"required": true, "content": {"application/json": {"schema": {"$ref": "#/components/schemas/RedeemRequest"}}}},
+        "responses": {
+          "200": {"description": "Verified identity for the receipt, or the recorded result of an identical retry", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/Redemption"}}}},
+          "400": {"$ref": "#/components/responses/Refusal"},
+          "401": {"$ref": "#/components/responses/Refusal"},
+          "403": {"$ref": "#/components/responses/Refusal"},
+          "409": {"$ref": "#/components/responses/Refusal"},
+          "503": {"$ref": "#/components/responses/Refusal"}
+        }
+      }
+    }
+  },
+  "components": {
+    "securitySchemes": {
+      "IndividualBearer": {"type": "http", "scheme": "bearer", "description": "The installation's enabled, user-scoped individual aimem credential."},
+      "PeerRedemptionBearer": {"type": "http", "scheme": "bearer", "description": "Aimem-issued peer credential registered by the hub admin; permits identity.redeem for one service ID only."},
+      "AimemIntrospectionBearer": {"type": "http", "scheme": "bearer", "description": "Aicrew-issued credential that aimem presents to the registered aicrew introspection endpoint only."}
+    },
+    "parameters": {
+      "IdentityVersion": {"name": "X-Aimem-Identity-Version", "in": "header", "required": true, "schema": {"const": "1"}},
+      "ServiceID": {"name": "service_id", "in": "path", "required": true, "schema": {"type": "string", "minLength": 1, "maxLength": 128}},
+      "IdempotencyKey": {"name": "Idempotency-Key", "in": "header", "required": true, "description": "k1_ + unpadded base64url SHA-256 of the UTF-8 aicrew request key", "schema": {"type": "string", "pattern": "^k1_[A-Za-z0-9_-]{43}$"}}
+    },
+    "schemas": {
+      "ChallengeID": {"type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[A-Za-z0-9._:-]+$"},
+      "ProofRequest": {
+        "type": "object", "additionalProperties": false,
+        "required": ["peer_service_id", "hub_id", "challenge_id"],
+        "properties": {"peer_service_id": {"type": "string"}, "hub_id": {"type": "string"}, "challenge_id": {"$ref": "#/components/schemas/ChallengeID"}}
+      },
+      "ProofReceipt": {
+        "type": "object", "additionalProperties": false,
+        "required": ["receipt", "receipt_id", "expires_at", "binding"],
+        "properties": {
+          "receipt": {"type": "string", "pattern": "^amr1_[A-Za-z0-9_-]{43}$"},
+          "receipt_id": {"type": "string"},
+          "expires_at": {"type": "string", "format": "date-time"},
+          "binding": {
+            "type": "object", "additionalProperties": false,
+            "required": ["hub_id", "peer_service_id", "challenge_id", "user_id", "token_id"],
+            "properties": {"hub_id": {"type": "string"}, "peer_service_id": {"type": "string"}, "challenge_id": {"type": "string"}, "user_id": {"type": "string"}, "token_id": {"type": "string"}}
+          }
+        }
+      },
+      "RedeemRequest": {
+        "type": "object", "additionalProperties": false,
+        "required": ["hub_id", "challenge_id", "receipt"],
+        "properties": {"hub_id": {"type": "string"}, "challenge_id": {"$ref": "#/components/schemas/ChallengeID"}, "receipt": {"type": "string", "pattern": "^amr1_[A-Za-z0-9_-]{43}$"}}
+      },
+      "Redemption": {
+        "type": "object", "additionalProperties": false,
+        "required": ["redemption_id", "request_key", "replayed", "peer_service_id", "challenge_id", "identity", "token_state", "redeemed_at"],
+        "properties": {
+          "redemption_id": {"type": "string"},
+          "request_key": {"type": "string"},
+          "replayed": {"type": "boolean"},
+          "peer_service_id": {"type": "string"},
+          "challenge_id": {"type": "string"},
+          "identity": {
+            "type": "object", "additionalProperties": false,
+            "required": ["hub_id", "user_id", "token_id"],
+            "properties": {"hub_id": {"type": "string"}, "user_id": {"type": "string"}, "token_id": {"type": "string"}}
+          },
+          "token_state": {"const": "active"},
+          "redeemed_at": {"type": "string", "format": "date-time"}
+        }
+      },
+      "Refusal": {
+        "type": "object", "additionalProperties": false,
+        "required": ["code", "message", "retryable", "next_action", "correlation_id"],
+        "properties": {"code": {"type": "string"}, "message": {"type": "string"}, "active_mode": {"enum": ["personal", "team"]}, "retryable": {"type": "boolean"}, "next_action": {"type": "string"}, "correlation_id": {"type": "string"}}
+      }
+    },
+    "responses": {
+      "Refusal": {"description": "Stable refusal envelope; never contains a secret", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/Refusal"}}}}
+    }
+  }
+}
