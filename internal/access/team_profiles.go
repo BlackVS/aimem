@@ -16,41 +16,43 @@ func (s *Store) HubID() (string, error) {
 	return id, err
 }
 
-type teamProfile struct {
+type TeamProfile struct {
 	ID        string
 	ServiceID string
 	TeamID    string
 	Disabled  bool
 }
 
-// Profile administration stays package-private until a reviewed operator
-// protocol can establish the peer service and team keys.
-func (s *Store) createTeamProfile(actor, serviceID, teamID string) (teamProfile, error) {
+// Profile administration has no route or command yet: an operator surface
+// that establishes the peer service and team keys is a separate, reviewed
+// increment. Only the team-mode verifier (internal/server/teamcontext.go)
+// and tests call these methods.
+func (s *Store) CreateTeamProfile(actor, serviceID, teamID string) (TeamProfile, error) {
 	if err := validName(serviceID); err != nil {
-		return teamProfile{}, fmt.Errorf("service ID: %w", err)
+		return TeamProfile{}, fmt.Errorf("service ID: %w", err)
 	}
 	if err := validName(teamID); err != nil {
-		return teamProfile{}, fmt.Errorf("team ID: %w", err)
+		return TeamProfile{}, fmt.Errorf("team ID: %w", err)
 	}
-	p := teamProfile{ID: uuidv7.New(), ServiceID: serviceID, TeamID: teamID}
+	p := TeamProfile{ID: uuidv7.New(), ServiceID: serviceID, TeamID: teamID}
 	err := s.change(actor, "team_profile.create", p.ID, func(tx *sql.Tx) error {
 		_, err := tx.Exec("INSERT INTO team_access_profiles(id,service_id,team_id) VALUES(?,?,?)", p.ID, p.ServiceID, p.TeamID)
 		return err
 	})
 	if err != nil {
-		return teamProfile{}, err
+		return TeamProfile{}, err
 	}
 	return p, nil
 }
 
-func (s *Store) teamProfileByKey(serviceID, teamID string) (teamProfile, error) {
-	var p teamProfile
+func (s *Store) TeamProfileByKey(serviceID, teamID string) (TeamProfile, error) {
+	var p TeamProfile
 	err := s.db.QueryRow("SELECT id,service_id,team_id,disabled FROM team_access_profiles WHERE service_id=? AND team_id=?", serviceID, teamID).
 		Scan(&p.ID, &p.ServiceID, &p.TeamID, &p.Disabled)
 	return p, err
 }
 
-func (s *Store) setTeamProfileDisabled(actor, profileID string, disabled bool) error {
+func (s *Store) SetTeamProfileDisabled(actor, profileID string, disabled bool) error {
 	return s.change(actor, fmt.Sprintf("team_profile.disabled.%t", disabled), profileID, func(tx *sql.Tx) error {
 		if err := requireRow(tx, "team_access_profiles", profileID); err != nil {
 			return err
@@ -60,7 +62,7 @@ func (s *Store) setTeamProfileDisabled(actor, profileID string, disabled bool) e
 	})
 }
 
-func (s *Store) setTeamGrant(actor, project, profileID string, present bool) error {
+func (s *Store) SetTeamGrant(actor, project, profileID string, present bool) error {
 	if project == "" {
 		return fmt.Errorf("project instance is required")
 	}
@@ -77,11 +79,11 @@ func (s *Store) setTeamGrant(actor, project, profileID string, present bool) err
 	})
 }
 
-// canWriteTeamToken evaluates only a profile grant and a live individual
-// user-scoped token. Its profile argument is not proof of membership or role;
-// no production handler may call it until a later verified context boundary
-// supplies those facts.
-func (s *Store) canWriteTeamToken(user, token, profileID, project string) (bool, error) {
+// TeamGrantAllows evaluates only a profile grant and a live individual
+// user-scoped token, never a personal or group grant. Its profile argument is
+// not proof of membership or role: the caller must have verified the team
+// context online (the team-mode verifier) before asking.
+func (s *Store) TeamGrantAllows(user, token, profileID, project string) (bool, error) {
 	if user == "" || token == "" || profileID == "" || project == "" {
 		return false, nil
 	}
@@ -93,4 +95,32 @@ JOIN team_profile_grants g ON g.profile_id=p.id AND g.project=?
 WHERE t.id=? AND u.id=? AND u.disabled=0 AND t.revoked=0 AND t.expires_at>?
 AND t.scope='user' AND t.project=''`, profileID, project, token, user, time.Now().Unix()).Scan(&n)
 	return n == 1, err
+}
+
+// TeamGrantProjects lists the project instances an enabled profile is
+// currently granted, for the team-mode context report.
+func (s *Store) TeamGrantProjects(profileID string) ([]string, error) {
+	rows, err := s.db.Query(`SELECT g.project FROM team_profile_grants g
+JOIN team_access_profiles p ON p.id=g.profile_id AND p.disabled=0
+WHERE g.profile_id=? ORDER BY g.project`, profileID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []string
+	for rows.Next() {
+		var p string
+		if err := rows.Scan(&p); err != nil {
+			return nil, err
+		}
+		out = append(out, p)
+	}
+	return out, rows.Err()
+}
+
+// RecordTeamRequest audits one team-mode request outcome under the
+// authenticated caller. The subject names what is known of the session and
+// the correlation ID; never a handle.
+func (s *Store) RecordTeamRequest(actor, action, subject string) error {
+	return s.change(actor, action, subject, func(*sql.Tx) error { return nil })
 }

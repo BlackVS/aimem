@@ -540,11 +540,15 @@ func (s *Server) authWrapper(token string, next http.Handler) http.Handler {
 			}
 			return
 		}
-		// Team mode serves no operation yet: every such request is refused
-		// here, before any role check or handler, and is never served as a
-		// personal request.
+		// Team mode is decided here, before any role check or handler: the
+		// request is refused or carries its verified team context to the
+		// handler. It is never served as a personal request.
 		if team {
-			s.refuseTeamMode(w, r, &id)
+			tc, ok := s.teamGate(w, r, &id)
+			if !ok {
+				return
+			}
+			next.ServeHTTP(w, r.WithContext(context.WithValue(withIdentity(r.Context(), id), teamContextKey{}, tc)))
 			return
 		}
 		// Ordinary tokens never get the legacy writer surface. They reach

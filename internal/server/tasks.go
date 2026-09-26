@@ -231,6 +231,9 @@ func (s *Server) taskProject(w http.ResponseWriter, r *http.Request) (string, *s
 		s.fail(w, http.StatusInternalServerError, errors.New("task storage failure"))
 		return "", nil
 	}
+	if s.teamGrantDenied(w, r, p) {
+		return "", nil
+	}
 	return p, db
 }
 
@@ -241,6 +244,9 @@ func (s *Server) locateTask(w http.ResponseWriter, r *http.Request) (string, *st
 	project, db, err := s.reg.LocateTask(r.PathValue("id"))
 	if err != nil {
 		s.taskError(w, err)
+		return "", nil, false
+	}
+	if s.teamGrantDenied(w, r, project) {
 		return "", nil, false
 	}
 	return project, db, true

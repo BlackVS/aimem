@@ -33,6 +33,7 @@ const identityWait = 5 * time.Second
 type identityRefusalBody struct {
 	Code          string `json:"code"`
 	Message       string `json:"message"`
+	ActiveMode    string `json:"active_mode,omitempty"`
 	Retryable     bool   `json:"retryable"`
 	NextAction    string `json:"next_action"`
 	CorrelationID string `json:"correlation_id"`
@@ -59,19 +60,29 @@ var identityRefusals = map[string]struct {
 	"request_in_progress":        {503, true, "An identical request is still being processed.", "Retry later with the same key; nothing was applied."},
 	"identity_unavailable":       {503, true, "Identity storage is unavailable.", "Retry later with the same key; nothing was applied."},
 	"team_operation_unsupported": {403, false, "This operation is not available in team mode.", "Use the aicrew flow for this work; team mode does not serve this operation."},
+	"context_unavailable":        {503, true, "The team context could not be verified with aicrew.", "Retry later; nothing was authorized or applied."},
+	"context_stale":              {403, false, "The team session is no longer current.", "Revalidate the session through aicrew, and reconcile pending work before retrying."},
+	"identity_mismatch":          {403, false, "The team session belongs to another identity.", "Stop and reconcile the configured identity; there is no automatic rebind."},
+	"grant_denied":               {403, false, "The team has no current grant for this project.", "Request an authorized grant change for the team; do not switch credentials."},
+	"role_forbidden":             {403, false, "The verified team role cannot perform this operation.", "Use the role's permitted aicrew flow."},
 }
 
 func (s *Server) identityRefuse(w http.ResponseWriter, code string) {
+	s.identityRefuseWith(w, code, "", uuidv7.New())
+}
+
+// identityRefuseWith writes the envelope with a given active mode ("" omits
+// it) and correlation ID, so an audited refusal and its answer share the ID.
+func (s *Server) identityRefuseWith(w http.ResponseWriter, code, mode, correlationID string) {
 	ref, ok := identityRefusals[code]
 	if !ok {
 		code, ref = "identity_unavailable", identityRefusals["identity_unavailable"]
 	}
-	id := uuidv7.New()
-	s.log.Warn("identity request refused", "code", code, "correlation_id", id)
+	s.log.Warn("identity request refused", "code", code, "correlation_id", correlationID)
 	w.Header().Set("Content-Type", "application/json")
 	w.Header().Set("Cache-Control", "no-store")
 	w.WriteHeader(ref.status)
-	json.NewEncoder(w).Encode(identityRefusalBody{Code: code, Message: ref.message, Retryable: ref.retryable, NextAction: ref.next, CorrelationID: id})
+	json.NewEncoder(w).Encode(identityRefusalBody{Code: code, Message: ref.message, ActiveMode: mode, Retryable: ref.retryable, NextAction: ref.next, CorrelationID: correlationID})
 }
 
 // identityTLS reports whether the request arrived over TLS terminated by this
