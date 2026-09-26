@@ -28,7 +28,7 @@ func TestSchema3MigrationPreservesStandaloneAccess(t *testing.T) {
 	}
 	// Reconstruct a populated schema 2 database; its users, grants and token
 	// must survive the additive migration.
-	if _, err := s.db.Exec(`DROP TABLE team_profile_grants;
+	if _, err := s.db.Exec(dropIdentitySchema4 + `DROP TABLE team_profile_grants;
 DROP TABLE team_access_profiles;
 DROP TABLE hub_identity;
 PRAGMA user_version=2;`); err != nil {
@@ -44,7 +44,7 @@ PRAGMA user_version=2;`); err != nil {
 			t.Fatal(err)
 		}
 		var version int
-		if err := s.db.QueryRow("PRAGMA user_version").Scan(&version); err != nil || version != 3 {
+		if err := s.db.QueryRow("PRAGMA user_version").Scan(&version); err != nil || version != 4 {
 			t.Fatalf("schema version %d: %v", version, err)
 		}
 		hubID, err := s.HubID()
