@@ -23,6 +23,7 @@ import (
 
 	"aimem/internal/access"
 	"aimem/internal/embed"
+	"aimem/internal/introspect"
 	"aimem/internal/llmrate"
 	"aimem/internal/schema"
 	"aimem/internal/store"
@@ -52,10 +53,11 @@ type Server struct {
 	ord          *http.ServeMux // ordinary-token allow-list, built from ordinaryRoutes
 	pubOnce      sync.Once
 	pub          map[string]http.HandlerFunc // publicGETs, built once
+	introspect   *introspect.Client          // aicrew introspection (teamcontext.go)
 }
 
 func New(reg *store.Registry, log *slog.Logger) *Server {
-	s := &Server{reg: reg, log: log, emb: embed.ForRoot(reg.Root())}
+	s := &Server{reg: reg, log: log, emb: embed.ForRoot(reg.Root()), introspect: newIntrospectionClient()}
 	// Semantic recall degrading to BM25 must never be silent: an
 	// embedding model that is configured but cannot resolve is a
 	// misconfiguration, and this line is the only place it would show.
@@ -125,6 +127,7 @@ func (s *Server) Routes() []Route {
 		{"GET", "/v1/identity/peers/{service_id}/credentials", s.listPeerCredentials, true},
 		{"POST", "/v1/identity/peers/{service_id}/credentials", s.issuePeerCredential, true},
 		{"DELETE", "/v1/identity/peers/{service_id}/credentials/{credential_id}", s.revokePeerCredential, true},
+		{"POST", "/v1/identity/peers/{service_id}/check", s.checkIdentityPeer, true},
 		{"GET", "/v1/projects/{p}/tasks", s.listTasks, false},
 		{"POST", "/v1/projects/{p}/tasks", s.createTask, false},
 		{"GET", "/v1/tasks/{id}", s.getTask, false},
@@ -473,7 +476,7 @@ func (s *Server) ListenAndServe(root string) (*http.Server, net.Listener, error)
 		ln.Close()
 		return nil, nil, err
 	}
-	srv := &http.Server{Handler: s.Handler(), ReadTimeout: 30 * time.Second, WriteTimeout: 30 * time.Second}
+	srv := &http.Server{Handler: s.localTeamGate(s.Handler()), ReadTimeout: 30 * time.Second, WriteTimeout: 30 * time.Second}
 	go func() {
 		if err := srv.Serve(ln); err != nil && !errors.Is(err, http.ErrServerClosed) {
 			s.log.Error("serve", "err", err)
@@ -490,8 +493,10 @@ func (s *Server) authWrapper(token string, next http.Handler) http.Handler {
 		// The unauthenticated surface is exactly publicGETs: two pages of
 		// static chrome with zero data (they collect a token in the
 		// browser and call the API with it) and two liveness answers.
-		// Everything else stays token-gated.
-		if r.Method == http.MethodGet {
+		// Everything else stays token-gated. A team-mode request is never
+		// public: it is authenticated and then refused below.
+		team := teamMode(r)
+		if r.Method == http.MethodGet && !team {
 			if h := s.publicGETs()[r.URL.Path]; h != nil {
 				h(w, r)
 				return
@@ -508,11 +513,14 @@ func (s *Server) authWrapper(token string, next http.Handler) http.Handler {
 		}
 		presented, ok := strings.CutPrefix(r.Header.Get("Authorization"), "Bearer ")
 		if !ok {
-			if wire != "" {
+			switch {
+			case wire != "":
 				s.identityRefuse(w, identityUnauthenticated[wire])
-				return
+			case team:
+				s.identityRefuse(w, "invalid_credential")
+			default:
+				w.WriteHeader(http.StatusUnauthorized)
 			}
-			w.WriteHeader(http.StatusUnauthorized)
 			return
 		}
 		if gateAuthHook != nil {
@@ -521,13 +529,22 @@ func (s *Server) authWrapper(token string, next http.Handler) http.Handler {
 		id, err := s.authenticateContext(r.Context(), token, presented)
 		if err != nil {
 			switch {
-			case wire != "" && !errors.Is(err, errNotAuthenticated):
+			case (wire != "" || team) && !errors.Is(err, errNotAuthenticated):
 				s.identityRefuse(w, identityStoreError(err))
 			case wire != "":
 				s.identityRefuse(w, identityUnauthenticated[wire])
+			case team:
+				s.identityRefuse(w, "invalid_credential")
 			default:
 				w.WriteHeader(http.StatusUnauthorized)
 			}
+			return
+		}
+		// Team mode serves no operation yet: every such request is refused
+		// here, before any role check or handler, and is never served as a
+		// personal request.
+		if team {
+			s.refuseTeamMode(w, r, &id)
 			return
 		}
 		// Ordinary tokens never get the legacy writer surface. They reach

@@ -260,7 +260,8 @@ func TestIdentityRoutesEndToEndWithFakeVerifier(t *testing.T) {
 	oldID, oldSecret := g.issueCredential(t, "aicrew-example", time.Now().Add(time.Hour))
 	v := fakeVerifier{g: g, service: "aicrew-example", bearer: oldSecret}
 
-	// Peer listing is metadata only and says introspection is not operational.
+	// Peer listing is metadata only. This hub has no introspection credential
+	// file, so introspection is not operational.
 	if r := g.call(t, g.tls, "GET", "/v1/identity/peers", g.env, nil, "", true); r.status != 200 ||
 		!strings.Contains(string(r.body), `"introspection_operational":false`) {
 		t.Fatalf("list peers: %d %s", r.status, r.body)

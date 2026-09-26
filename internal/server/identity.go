@@ -5,7 +5,7 @@ package server
 // hub (r.TLS): plain HTTP and the unix socket are refused, and forwarded
 // headers never count. None of these routes is an MCP tool: a proof receipt
 // is a secret that must never enter a model-visible tool result, transcript
-// or log. Nothing here makes introspection operational.
+// or log. Introspection and team mode live in teamcontext.go.
 
 import (
 	"context"
@@ -49,7 +49,7 @@ var identityRefusals = map[string]struct {
 	"tls_required":               {403, false, "This route requires TLS terminated by the hub.", "Connect to the hub's TLS listener with certificate verification."},
 	"invalid_credential":         {401, false, "The individual credential is missing, expired or revoked.", "Recover the individual credential through its authorized flow."},
 	"peer_unauthenticated":       {401, false, "The peer credential is not valid.", "Operator checks the peer registration and credential."},
-	"credential_scope_forbidden": {403, false, "This credential cannot request identity proofs.", "Use the installation's user-scoped individual credential."},
+	"credential_scope_forbidden": {403, false, "This kind of credential is not accepted for this request.", "Use the installation's user-scoped individual credential."},
 	"peer_unknown":               {403, false, "No such peer is registered for this hub.", "Verify the hub and aicrew service locators."},
 	"peer_forbidden":             {403, false, "The peer credential does not permit this operation.", "Operator checks the peer's permitted operations."},
 	"proof_invalid":              {403, false, "The proof receipt is not valid for this redemption.", "Obtain a new receipt, or begin a new challenge."},
@@ -58,6 +58,7 @@ var identityRefusals = map[string]struct {
 	"rate_limited":               {429, true, "Too many proof receipts were requested.", "Wait, then request again."},
 	"request_in_progress":        {503, true, "An identical request is still being processed.", "Retry later with the same key; nothing was applied."},
 	"identity_unavailable":       {503, true, "Identity storage is unavailable.", "Retry later with the same key; nothing was applied."},
+	"team_operation_unsupported": {403, false, "This operation is not available in team mode.", "Use the aicrew flow for this work; team mode does not serve this operation."},
 }
 
 func (s *Server) identityRefuse(w http.ResponseWriter, code string) {
@@ -328,14 +329,14 @@ func (s *Server) listIdentityPeers(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	peers, err := db.ListIdentityPeers()
+	peers, err := s.introspectionPeers(db)
 	if err != nil {
 		s.fail(w, http.StatusInternalServerError, fmt.Errorf("cannot list identity peers"))
 		return
 	}
 	out := []peerView{}
 	for _, p := range peers {
-		out = append(out, toPeerView(p))
+		out = append(out, p.view())
 	}
 	s.ok(w, map[string]any{"peers": out})
 }
@@ -367,20 +368,19 @@ func (s *Server) registerIdentityPeer(w http.ResponseWriter, r *http.Request) {
 		s.fail(w, http.StatusBadRequest, err)
 		return
 	}
-	peers, err := db.ListIdentityPeers()
+	peers, err := s.introspectionPeers(db)
 	if err != nil {
 		s.fail(w, http.StatusInternalServerError, fmt.Errorf("cannot read identity peer"))
 		return
 	}
-	for _, got := range peers {
-		if got.ServiceID == req.ServiceID {
-			w.Header().Set("Content-Type", "application/json")
-			w.WriteHeader(http.StatusCreated)
-			json.NewEncoder(w).Encode(toPeerView(got))
-			return
-		}
+	got, found := findPeer(peers, req.ServiceID)
+	if !found {
+		s.fail(w, http.StatusInternalServerError, fmt.Errorf("registered peer not found"))
+		return
 	}
-	s.fail(w, http.StatusInternalServerError, fmt.Errorf("registered peer not found"))
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusCreated)
+	json.NewEncoder(w).Encode(got.view())
 }
 
 func (s *Server) updateIdentityPeer(w http.ResponseWriter, r *http.Request) {

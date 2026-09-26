@@ -1,6 +1,6 @@
 //go:build windows
 
-package main
+package privatefile
 
 import (
 	"fmt"
@@ -18,10 +18,10 @@ func currentUserSID() (*windows.SID, error) {
 	return u.User.Sid, nil
 }
 
-// createPrivateFile creates path exclusively (CREATE_NEW) with a protected
+// Create creates path exclusively (CREATE_NEW) with a protected
 // DACL that grants the current user alone; nothing is inherited from the
 // directory.
-func createPrivateFile(path string) (*os.File, error) {
+func Create(path string) (*os.File, error) {
 	me, err := currentUserSID()
 	if err != nil {
 		return nil, err
@@ -47,12 +47,12 @@ func createPrivateFile(path string) (*os.File, error) {
 const privateFileRisky = windows.FILE_READ_DATA | windows.GENERIC_READ | windows.GENERIC_ALL |
 	windows.WRITE_DAC | windows.WRITE_OWNER
 
-// checkPrivateFile checks the file's effective access, not its mode bits: the
+// Check checks the file's effective access, not its mode bits: the
 // owner must be the current user, SYSTEM or Administrators, and every allow
 // entry that grants read (or the right to change the ACL or owner) must name
 // one of those accounts. A null DACL, which grants everyone full access, is
 // refused, and so is any entry type the check does not understand.
-func checkPrivateFile(path string) error {
+func Check(path string) error {
 	fi, err := os.Lstat(path)
 	if err != nil {
 		return err
@@ -124,4 +124,23 @@ func checkPrivateFile(path string) error {
 		}
 	}
 	return nil
+}
+
+// Expose grants Everyone read access to path. It exists for tests that prove
+// Check refuses such a file.
+func Expose(path string) error {
+	me, err := currentUserSID()
+	if err != nil {
+		return err
+	}
+	sd, err := windows.SecurityDescriptorFromString("D:P(A;;FA;;;" + me.String() + ")(A;;FR;;;WD)")
+	if err != nil {
+		return err
+	}
+	dacl, _, err := sd.DACL()
+	if err != nil {
+		return err
+	}
+	return windows.SetNamedSecurityInfo(path, windows.SE_FILE_OBJECT,
+		windows.DACL_SECURITY_INFORMATION|windows.PROTECTED_DACL_SECURITY_INFORMATION, nil, nil, dacl, nil)
 }

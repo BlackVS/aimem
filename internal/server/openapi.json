@@ -1147,7 +1147,7 @@
     "/v1/identity/peers": {
       "get": {
         "summary": "List registered identity peers (non-secret records)",
-        "description": "introspection_operational is always false until the introspection increment ships. Requires TLS terminated by this hub: plain HTTP, a TLS-terminating proxy and the unix socket are refused with tls_required, and forwarded headers never count. Not exposed as an MCP tool.",
+        "description": "introspection_operational is computed without any network call: true only for the single enabled peer on this hub whose endpoint is the https URL of /v1/crew/introspect with a valid TLS trust binding, while AIMEM_INTROSPECTION_TOKEN_FILE names a private file holding the credential. POST /v1/identity/peers/{service_id}/check tests it end to end. Requires TLS terminated by this hub: plain HTTP, a TLS-terminating proxy and the unix socket are refused with tls_required, and forwarded headers never count. Not exposed as an MCP tool.",
         "x-role": "admin",
         "x-requires-tls": true,
         "responses": {
@@ -1378,6 +1378,35 @@
           },
           "404": {
             "description": "No such credential for this peer"
+          }
+        }
+      }
+    },
+    "/v1/identity/peers/{service_id}/check": {
+      "post": {
+        "summary": "Check a peer's introspection end to end",
+        "description": "Sends one identity.v1 introspection to the registered peer with a random handle that no session holds, and reports a fixed outcome: ok is true only for a verified inactive answer. Before any network call the peer must be the single enabled peer on this hub, its endpoint the https URL of /v1/crew/introspect with a valid TLS trust binding, and AIMEM_INTROSPECTION_TOKEN_FILE a private file holding the credential; otherwise the outcome names what is missing. One attempt, at most 2 s, no redirect or proxy. The answer never contains the credential or the handle. Audited with the outcome. Requires TLS terminated by this hub: plain HTTP, a TLS-terminating proxy and the unix socket are refused with tls_required, and forwarded headers never count. Not exposed as an MCP tool.",
+        "x-role": "admin",
+        "x-requires-tls": true,
+        "parameters": [
+          {
+            "name": "service_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The check ran: {service_id, ok, outcome}. outcome is inactive (healthy) or one fixed reason: peer_disabled, peer_ambiguous, wrong_hub, peer_record, not_configured, credential_file, tls_untrusted, timeout, cancelled, transport, redirect, status, version_rejected, oversize, malformed, nonce_mismatch, wrong_service, bad_generation, expired, bad_role, unexpected_active"
+          },
+          "403": {
+            "description": "Refusal envelope {code, message, retryable, next_action, correlation_id}; never contains a secret"
+          },
+          "404": {
+            "description": "Unknown peer"
           }
         }
       }

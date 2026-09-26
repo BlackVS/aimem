@@ -27,6 +27,9 @@ import (
 	"testing"
 	"time"
 
+	"aimem/internal/introspect"
+	"aimem/internal/introspect/introspecttest"
+	"aimem/internal/privatefile"
 	"aimem/internal/server"
 	"aimem/internal/store"
 )
@@ -36,6 +39,7 @@ const identityAdminToken = "env-admin-secret-for-identity-cli-tests"
 // identityCLIRig is a real hub behind httptest's TLS server, driven through
 // server.TCPHandler (the gate ListenTCP serves), plus the operator's files.
 type identityCLIRig struct {
+	s         *server.Server
 	ts        *httptest.Server
 	caFile    string
 	pin       string
@@ -54,7 +58,7 @@ func newIdentityCLIRig(t *testing.T, wrap func(http.Handler) http.Handler) *iden
 	t.Cleanup(func() { reg.Close() })
 	s := server.New(reg, slog.New(slog.NewTextHandler(io.Discard, nil)))
 	t.Cleanup(func() { s.Close() })
-	g := &identityCLIRig{dir: filepath.Join(t.TempDir(), hostileDirName())}
+	g := &identityCLIRig{s: s, dir: filepath.Join(t.TempDir(), hostileDirName())}
 	if err := os.Mkdir(g.dir, 0o700); err != nil {
 		t.Fatal(err)
 	}
@@ -75,7 +79,7 @@ func newIdentityCLIRig(t *testing.T, wrap func(http.Handler) http.Handler) *iden
 	sum := sha256.Sum256(g.ts.Certificate().RawSubjectPublicKeyInfo)
 	g.pin = "sha256-" + base64.StdEncoding.EncodeToString(sum[:])
 	g.tokenFile = filepath.Join(g.dir, "admin.token")
-	f, err := createPrivateFile(g.tokenFile)
+	f, err := privatefile.Create(g.tokenFile)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -187,12 +191,14 @@ func TestIdentityCLIAdminTokenFile(t *testing.T) {
 	g := newIdentityCLIRig(t, nil)
 	loose := g.secretPath("loose.token")
 	os.WriteFile(loose, []byte(identityAdminToken+"\n"), 0o600)
-	makeWorldReadable(t, loose)
+	if err := privatefile.Expose(loose); err != nil {
+		t.Fatal(err)
+	}
 	empty := g.secretPath("empty.token")
-	f, _ := createPrivateFile(empty)
+	f, _ := privatefile.Create(empty)
 	f.Close()
 	two := g.secretPath("two.token")
-	f, _ = createPrivateFile(two)
+	f, _ = privatefile.Create(two)
 	f.WriteString("one two\n")
 	f.Close()
 	before := g.requests.Load()
@@ -219,7 +225,7 @@ func TestIdentityCLIAdminTokenFile(t *testing.T) {
 	}
 	// A wrong token is the hub's refusal, shown without the token.
 	wrong := g.secretPath("wrong.token")
-	f, _ = createPrivateFile(wrong)
+	f, _ = privatefile.Create(wrong)
 	f.WriteString("not-the-admin-token\n")
 	f.Close()
 	if _, err := g.runRaw(t, "peer", "list", "--hub", g.ts.URL, "--hub-ca-file", g.caFile, "--admin-token-file", wrong); err == nil || !strings.Contains(err.Error(), "401") {
@@ -267,7 +273,7 @@ func TestIdentityCLIIssueDeliversOnlyToTheSecretFile(t *testing.T) {
 	if !strings.Contains(out, "issued credential") || !strings.Contains(out, path) {
 		t.Errorf("issue output: %s", out)
 	}
-	if err := checkPrivateFile(path); err != nil {
+	if err := privatefile.Check(path); err != nil {
 		t.Errorf("secret file is not private: %v", err)
 	}
 	raw, err := os.ReadFile(path)
@@ -729,4 +735,70 @@ func TestShellArgQuoting(t *testing.T) {
 			t.Errorf("PowerShell %q: %s, want %s", c.in, got, c.pwsh)
 		}
 	}
+}
+
+// TestIdentityCLIPeerCheck registers a fake aicrew as the peer and runs the
+// operator's end-to-end check through the hub.
+func TestIdentityCLIPeerCheck(t *testing.T) {
+	g := newIdentityCLIRig(t, nil)
+	hub := ""
+	f := introspecttest.New(t, "aicrew-example", "")
+	f.SetAnswer(func(w http.ResponseWriter, got introspecttest.Request) {
+		hub = got.HubID
+		introspecttest.WriteJSON(w, introspecttest.InactiveReply(got.Nonce))
+	})
+	credFile := filepath.Join(g.dir, "introspection.token")
+	fh, err := privatefile.Create(credFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	const bearer = "aicrew_introspect_TESTSECRET_cli"
+	fh.WriteString(bearer + "\n")
+	fh.Close()
+
+	// Before the hub has a credential file, registration says so.
+	g.s.SetIntrospectionClient(&introspect.Client{RootCAs: f.CA.Pool})
+	out := g.mustRun(t, "peer", "register", "aicrew-example", "--endpoint", f.Endpoint(), "--peer-trust-pin", f.Pin)
+	if !strings.Contains(out, "introspection not operational yet") || !strings.Contains(out, "peer check aicrew-example") {
+		t.Fatalf("register output: %s", out)
+	}
+	_, err = g.run(t, "peer", "check", "aicrew-example")
+	if err == nil || !strings.Contains(err.Error(), "not_configured") || !strings.Contains(err.Error(), "AIMEM_INTROSPECTION_TOKEN_FILE") {
+		t.Fatalf("check without a credential file: %v", err)
+	}
+	if f.Calls() != 0 {
+		t.Fatal("the peer was called without a credential")
+	}
+
+	g.s.SetIntrospectionClient(&introspect.Client{TokenFile: credFile, RootCAs: f.CA.Pool})
+	if out := g.mustRun(t, "peer", "list"); !strings.Contains(out, "(operational)") {
+		t.Fatalf("peer list: %s", out)
+	}
+	if out := g.mustRun(t, "peer", "check", "aicrew-example"); !strings.Contains(out, "introspection works") {
+		t.Fatalf("healthy check: %s", out)
+	}
+	if f.Calls() != 1 || hub == "" || f.Last().Header.Get("Authorization") != "Bearer "+bearer {
+		t.Fatalf("the peer saw %d calls for hub %q", f.Calls(), hub)
+	}
+	f.SetAnswer(func(w http.ResponseWriter, got introspecttest.Request) {
+		introspecttest.WriteJSON(w, introspecttest.ActiveReply(got.Nonce, "aicrew-example", got.HubID))
+	})
+	if _, err := g.run(t, "peer", "check", "aicrew-example"); err == nil || !strings.Contains(err.Error(), "unexpected_active") {
+		t.Fatalf("peer answering active: %v", err)
+	}
+	f.SetAnswer(func(w http.ResponseWriter, got introspecttest.Request) {
+		introspecttest.WriteJSON(w, introspecttest.InactiveReply("n-00000000000000000000000000000000"))
+	})
+	if _, err := g.run(t, "peer", "check", "aicrew-example"); err == nil || !strings.Contains(err.Error(), "nonce_mismatch") {
+		t.Fatalf("peer answering another nonce: %v", err)
+	}
+	if _, err := g.run(t, "peer", "check", "unknown-peer"); err == nil || !strings.Contains(err.Error(), "404") {
+		t.Fatalf("unknown peer: %v", err)
+	}
+	for _, o := range g.outputs {
+		if strings.Contains(o, bearer) || strings.Contains(o, "acs1_") {
+			t.Fatalf("the CLI printed a secret: %q", o)
+		}
+	}
+	g.assertNoSecrets(t)
 }
