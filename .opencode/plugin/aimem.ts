@@ -407,16 +407,17 @@ function handoffWired(dir: string): boolean {
 
 // setupV2 is the OpenCode 2.x entrypoint. It rebuilds the V1 plugin's
 // behavior from V2 primitives:
-//   turn journal     prompt hook (user text) + session.text.ended (reply)
-//                    + session.tool.input.started (tools), submitted on
-//                    session.execution.succeeded / failed / interrupted
+//   turn journal     session.inbox.* (user text, taken on delivery) +
+//                    session.text.ended (reply) + session.tool.input.started
+//                    (tools), submitted on session.execution.succeeded /
+//                    failed / interrupted
 //   compaction       compaction hook appends HANDOFF_NOTE; a marker is
 //                    journaled on session.compaction.ended
 //   handoff          context hook injects docs/SESSION-STATE.md (V2
 //                    ignores opencode.json `instructions`)
 //   context warning  V2 has no toast API: past the warn fraction the
 //                    context hook tells the MODEL instead, escalating
-//                    with the measured percentage
+//                    by 5% step
 // AIMEM_AUTO_COMPACT has no V2 equivalent — the plugin API cannot request
 // compaction — so it is logged once and left to OpenCode's own
 // `compaction` settings.
@@ -436,13 +437,15 @@ async function setupV2(ctx: any) {
     )
   }
   const postDetached = makePoster(directory)
-  // fallbackID names a turn that ends before any model step; it is made
-  // once per turn so repeated end events share one idempotency key.
+  // fallbackID names a turn that ends before any model step (it is fixed
+  // when the turn starts); a turn is dropped once submitted.
   const turns = new Map<
     string,
     { user: string; reply: string; tools: string[]; lastAssistantID: string; fallbackID: string }
   >()
   const submitted = new Map<string, string>() // sessionID -> last submitted turn id
+  const pending = new Map<string, string>() // inboxID -> user text, enqueued but not yet delivered
+  const anchors = new Map<string, string>() // sessionID -> latest assistant message id, for markers
   const used = new Map<string, number>() // sessionID -> context tokens of the last model step
   const ctxWarnedStep = new Map<string, number>() // sessionID -> last logged 5%-step
 
@@ -480,6 +483,9 @@ async function setupV2(ctx: any) {
     const t = turns.get(sid)
     if (!t) return
     const turnID = t.lastAssistantID || t.fallbackID
+    // The execution is over either way: the next delivered prompt starts a
+    // clean turn, and a second end event for this one finds nothing.
+    turns.delete(sid)
     if (submitted.get(sid) === turnID) return
     const ok = await postDetached(turnPayload(directory, sid, turnID, outcome, t))
     if (ok) submitted.set(sid, turnID)
@@ -536,20 +542,6 @@ async function setupV2(ctx: any) {
     }
     return used.get(sid) ?? 0
   }
-
-  await ctx.session.hook("prompt", async (e: any) => {
-    if (!e?.sessionID || !(await mine(e.sessionID))) return
-    // A fresh turn id too: a turn rejected before any model step never
-    // sets one, and reusing the previous turn's id would let the submit
-    // dedup drop its failure.
-    turns.set(e.sessionID, {
-      user: typeof e?.prompt?.text === "string" ? e.prompt.text : "",
-      reply: "",
-      tools: [],
-      lastAssistantID: "",
-      fallbackID: `no-assistant-${Date.now()}`,
-    })
-  })
 
   await ctx.session.hook("compaction", async (e: any) => {
     // Only ever APPEND: the default compaction instructions stay intact.
@@ -618,9 +610,32 @@ async function setupV2(ctx: any) {
         const type: string = (ev as any)?.type ?? ""
         if (!type.startsWith("session.") || !(await mine(sid))) continue
         switch (type) {
+          // The user request is taken at DELIVERY, not when the prompt is
+          // submitted: a prompt queued behind a running turn (and maybe
+          // cancelled) must not replace that turn's request. A steer
+          // delivered into a running turn joins its request.
+          case "session.inbox.enqueued":
+            if (d.item?.type === "user" && typeof d.item?.payload?.text === "string" && d.inboxID) {
+              pending.set(d.inboxID, d.item.payload.text)
+            }
+            break
+          case "session.inbox.cancelled":
+            if (d.inboxID) pending.delete(d.inboxID)
+            break
+          case "session.inbox.delivered": {
+            const text = d.inboxID ? pending.get(d.inboxID) : undefined
+            if (text === undefined) break
+            pending.delete(d.inboxID)
+            const t = turn(sid)
+            t.user = t.user ? `${t.user}\n\n${text}` : text
+            break
+          }
           case "session.text.ended":
             if (typeof d.text === "string") turn(sid).reply = d.text
-            if (d.assistantMessageID) turn(sid).lastAssistantID = d.assistantMessageID
+            if (d.assistantMessageID) {
+              turn(sid).lastAssistantID = d.assistantMessageID
+              anchors.set(sid, d.assistantMessageID)
+            }
             break
           case "session.tool.input.started": {
             const t = turn(sid)
@@ -628,7 +643,10 @@ async function setupV2(ctx: any) {
             break
           }
           case "session.step.ended": {
-            if (d.assistantMessageID) turn(sid).lastAssistantID = d.assistantMessageID
+            if (d.assistantMessageID) {
+              turn(sid).lastAssistantID = d.assistantMessageID
+              anchors.set(sid, d.assistantMessageID)
+            }
             if (d.tokens) used.set(sid, tokensOf(d.tokens))
             break
           }
@@ -645,7 +663,7 @@ async function setupV2(ctx: any) {
             used.delete(sid)
             break
           case "session.compaction.ended": {
-            const anchor = turns.get(sid)?.lastAssistantID || `t${Date.now()}`
+            const anchor = turns.get(sid)?.lastAssistantID || anchors.get(sid) || `t${Date.now()}`
             await postDetached(markerPayload(directory, sid, anchor))
             // Fresh context window: re-arm the escalating warnings.
             used.delete(sid)

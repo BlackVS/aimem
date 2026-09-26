@@ -17,6 +17,9 @@ OpenAI-compatible provider on 127.0.0.1. It needs no API key and never
 calls a paid model. A fake `aimem` in the project records every
 `aimem submit` payload. The checks cover the journal events and what
 reached the model; the real `aimem` binary and MCP are not involved.
+Every scenario also requires a clean exit: a run that hangs (killed after
+150 s, or `AIMEM_E2E_TIMEOUT_MS`) or exits non-zero fails even when its
+payloads are right.
 
 | Scenario | Checks |
 |---|---|
@@ -25,6 +28,8 @@ reached the model; the real `aimem` binary and MCP are not involved.
 | `fail` | a `failure` event; every submit shares one idempotency key |
 | `warn` | 2.x only: the context warning reached the model |
 | `compact` | 2.x only: the compaction request carries the `AIMEM HANDOFF` note, and one compaction marker is journaled |
+| `queued` | 2.x only, via `opencode serve`: a prompt queued behind a slow turn and cancelled leaves that turn's request intact and is never journaled |
+| `second` | 2.x only, via `opencode serve`: turn 1 succeeds and turn 2 fails; the failure is journaled under its own turn |
 
 Get a binary without installing it over your own OpenCode:
 

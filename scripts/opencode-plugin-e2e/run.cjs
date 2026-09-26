@@ -15,6 +15,7 @@
 'use strict';
 const assert = require('node:assert/strict');
 const cp = require('node:child_process');
+const crypto = require('node:crypto');
 const fs = require('node:fs');
 const http = require('node:http');
 const os = require('node:os');
@@ -40,15 +41,27 @@ const v2 = major >= 2;
 const scenarios = {
   text: { mode: 'text' },
   tool: { mode: 'tool' },
-  fail: { mode: 'fail' },
+  // A failed turn may end `opencode run` with 0 or 1 depending on the
+  // release; either is a normal exit (a timeout or signal is not).
+  fail: { mode: 'fail', failExit: [0, 1] },
   warn: { mode: 'tool', limit: 100000, first: 60000, env: { AIMEM_CTX_WARN_FRACTION: '0.5' }, v2only: true },
   compact: { mode: 'tool', limit: 100000, first: 90000, v2only: true },
+  // Long-lived server scenarios (2.x `opencode serve`, driven over its
+  // HTTP API): several turns in one plugin process.
+  // queued: B is queued behind a slow A and cancelled before delivery; A
+  // must keep its own request and B must not be journaled.
+  queued: { mode: 'text', delayFirstMs: 6000, serve: 'queued', v2only: true },
+  // second: turn 1 succeeds, turn 2 fails; the failure must be journaled
+  // under its own turn, not dropped as a repeat of turn 1.
+  second: { mode: 'text', failFrom: 2, serve: 'second', v2only: true },
 };
 
 // A scripted provider: `text` answers, `tool` calls glob once then
-// answers, `fail` rejects agent requests. Compaction requests get a
-// summary in OpenCode 2's required template.
-function provider(mode, firstTokens) {
+// answers, `fail` rejects agent requests. `failFrom` rejects agent
+// requests from that one on (1-based); `delayFirstMs` holds the first
+// agent answer back. Compaction requests get a summary in OpenCode 2's
+// required template.
+function provider(mode, firstTokens, opts = {}) {
   const requests = [];
   let primary = 0;
   const server = http.createServer((req, res) => {
@@ -65,13 +78,15 @@ function provider(mode, firstTokens) {
       const messages = body.messages || [];
       const compaction = text.includes('You MUST use this format');
       const isPrimary = Array.isArray(body.tools) && body.tools.length > 0 && !compaction;
+      if (isPrimary) primary += 1;
+      const index = isPrimary ? primary : 0;
       requests.push({
         compaction, primary: isPrimary,
         handoff: text.includes('MARKER-HANDOFF'),
         handoffNote: text.includes('AIMEM HANDOFF'),
         warning: text.includes("aimem: this session's context"),
       });
-      if (mode === 'fail' && isPrimary) {
+      if (isPrimary && ((mode === 'fail') || (opts.failFrom && index >= opts.failFrom))) {
         res.writeHead(400, { 'content-type': 'application/json' });
         res.end(JSON.stringify({ error: { message: 'scripted failure', type: 'invalid_request_error' } }));
         return;
@@ -88,11 +103,11 @@ function provider(mode, firstTokens) {
       let reply = 'MOCK-REPLY-OK';
       if (compaction) reply = '## Objective\nScripted objective.\n\n## Next Move\nContinue.';
       else if (isPrimary) {
-        primary += 1;
-        if (primary === 1) tokens = firstTokens;
+        if (index === 1) tokens = firstTokens;
         const last = messages[messages.length - 1];
         if (mode === 'tool' && !(last && last.role === 'tool')) call = { name: 'glob', arguments: JSON.stringify({ pattern: '*.md' }) };
       }
+      const answer = () => {
       const base = { id: 'c', object: 'chat.completion.chunk', created: Math.floor(Date.now() / 1000), model: 'mock' };
       const usage = { prompt_tokens: tokens, completion_tokens: 10, total_tokens: tokens + 10 };
       const send = d => res.write('data: ' + JSON.stringify(d) + '\n\n');
@@ -105,9 +120,77 @@ function provider(mode, firstTokens) {
         send({ ...base, choices: [{ index: 0, delta: {}, finish_reason: 'stop' }], usage });
       }
       res.end('data: [DONE]\n\n');
+      };
+      if (index === 1 && opts.delayFirstMs) setTimeout(answer, opts.delayFirstMs);
+      else answer();
     });
   });
   return new Promise(resolve => server.listen(0, '127.0.0.1', () => resolve({ server, requests, port: server.address().port })));
+}
+
+// serveRun drives a 2.x `opencode serve` over its HTTP API, so several
+// turns reach one plugin process. It returns the same shape as a CLI run:
+// status 0 when every step completed and the server stayed up until told
+// to stop.
+async function serveRun(proj, env, script) {
+  const port = await new Promise(resolve => {
+    const l = http.createServer().listen(0, '127.0.0.1', () => { const n = l.address().port; l.close(() => resolve(n)); });
+  });
+  const password = crypto.randomBytes(12).toString('hex');
+  const child = cp.spawn(exe, ['serve', '--hostname', '127.0.0.1', '--port', String(port)],
+    { cwd: proj, env: { ...env, OPENCODE_PASSWORD: password }, stdio: ['ignore', 'ignore', 'pipe'] });
+  let stderr = '';
+  let exited = null;
+  child.stderr.on('data', c => { stderr = (stderr + c).slice(-4000); });
+  const closed = new Promise(resolve => child.on('close', (status, signal) => { exited = { status, signal }; resolve(); }));
+  const auth = 'Basic ' + Buffer.from('opencode:' + password).toString('base64');
+  const timeout = Number(process.env.AIMEM_E2E_TIMEOUT_MS) || 150000;
+  const deadline = Date.now() + timeout;
+  const api = async (method, route, body) => {
+    const res = await fetch(`http://127.0.0.1:${port}${route}`, {
+      method, headers: { authorization: auth, 'content-type': 'application/json' },
+      body: body === undefined ? undefined : JSON.stringify(body),
+      signal: AbortSignal.timeout(Math.max(1000, deadline - Date.now())),
+    });
+    if (!res.ok) throw new Error(`${method} ${route}: HTTP ${res.status}`);
+    if (res.status === 204) return null;
+    const json = await res.json();
+    return json && json.data !== undefined ? json.data : json;
+  };
+  const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
+  let failure = null;
+  try {
+    for (;;) {
+      if (exited) throw new Error('opencode serve exited before it was ready');
+      if (Date.now() > deadline) throw new Error('opencode serve never became ready');
+      try { await api('GET', '/api/session'); break; } catch { await sleep(500); }
+    }
+    const session = await api('POST', '/api/session', { location: { directory: proj } });
+    const sid = session.id;
+    const prompt = (text, delivery) => api('POST', `/api/session/${sid}/prompt`, { text, ...(delivery ? { delivery } : {}) });
+    const wait = () => api('POST', `/api/experimental/session/${sid}/wait`);
+    if (script === 'queued') {
+      await prompt('REQUEST-A');
+      await sleep(1500); // A is now held by the provider
+      const b = await prompt('REQUEST-B', 'queue');
+      await api('DELETE', `/api/session/${sid}/inbox/${b.id}`);
+      await wait();
+    } else if (script === 'second') {
+      await prompt('REQUEST-1');
+      await wait();
+      await prompt('REQUEST-2');
+      await wait();
+    }
+    if (exited) throw new Error(`opencode serve exited early (${exited.status ?? exited.signal})`);
+  } catch (error) {
+    failure = error;
+  }
+  const timedOut = Date.now() > deadline;
+  child.kill('SIGTERM');
+  const killer = setTimeout(() => child.kill('SIGKILL'), 10000);
+  await closed;
+  clearTimeout(killer);
+  return { status: failure ? 1 : 0, signal: null, timedOut, stderr, error: failure && failure.message };
 }
 
 function readSubmits(file) {
@@ -128,7 +211,7 @@ async function run(name, sc) {
   fs.copyFileSync(path.join(repo, '.opencode', 'plugin', 'aimem.ts'), path.join(proj, '.opencode', 'plugin', 'aimem.ts'));
   fs.writeFileSync(path.join(proj, 'aimem'), '#!/bin/sh\n[ "$1" = submit ] && { cat; echo; } >> "$AIMEM_E2E_LOG"\nexit 0\n', { mode: 0o755 });
   fs.writeFileSync(path.join(proj, 'docs', 'SESSION-STATE.md'), '# Handoff\n\nMARKER-HANDOFF\n');
-  const p = await provider(sc.mode, sc.first || 100);
+  const p = await provider(sc.mode, sc.first || 100, { delayFirstMs: sc.delayFirstMs, failFrom: sc.failFrom });
   fs.writeFileSync(path.join(proj, 'opencode.json'), JSON.stringify({
     $schema: 'https://opencode.ai/config.json',
     instructions: ['docs/SESSION-STATE.md'],
@@ -150,12 +233,13 @@ async function run(name, sc) {
   const args = ['run', ...(v2 ? ['--standalone', '--auto'] : []), 'say hi please'];
   // Async on purpose: the scripted provider runs in this process, so a
   // blocking spawn would starve it.
-  const r = await new Promise(resolve => {
+  const r = sc.serve ? await serveRun(proj, env, sc.serve) : await new Promise(resolve => {
     const child = cp.spawn(exe, args, { cwd: proj, env, stdio: ['ignore', 'ignore', 'pipe'] });
     let stderr = '';
     child.stderr.on('data', c => { stderr = (stderr + c).slice(-4000); });
-    const timer = setTimeout(() => child.kill('SIGKILL'), 150000);
-    child.on('close', status => { clearTimeout(timer); resolve({ status, stderr }); });
+    let timedOut = false;
+    const timer = setTimeout(() => { timedOut = true; child.kill('SIGKILL'); }, Number(process.env.AIMEM_E2E_TIMEOUT_MS) || 150000);
+    child.on('close', (status, signal) => { clearTimeout(timer); resolve({ status, signal, timedOut, stderr }); });
   });
   // Submits are detached; give the last one a moment to land.
   await new Promise(resolve => setTimeout(resolve, 1500));
@@ -167,6 +251,13 @@ async function run(name, sc) {
   const markers = submits.filter(e => e.kind === 'compaction-marker');
   const primaries = p.requests.filter(x => x.primary);
   try {
+    // Process health first: correct payloads from a run that then hung or
+    // crashed must not pass.
+    assert.ok(!r.timedOut, 'opencode run timed out');
+    if (r.error) assert.fail(`opencode serve: ${r.error}`);
+    assert.equal(r.signal, null, `opencode run was killed by ${r.signal}`);
+    if (name === 'fail') assert.ok(sc.failExit.includes(r.status), `unexpected exit ${r.status} for a failed turn`);
+    else assert.equal(r.status, 0, `opencode run exited ${r.status}`);
     assert.ok(p.requests.length > 0, 'the provider was never called');
     assert.ok(primaries.some(x => x.handoff), 'docs/SESSION-STATE.md never reached the model');
     for (const rec of records) {
@@ -192,13 +283,26 @@ async function run(name, sc) {
       case 'warn':
         assert.ok(primaries.some(x => x.warning), 'the context warning never reached the model');
         break;
+      case 'queued':
+        assert.equal(turns.length, 1, 'expected exactly one journaled turn');
+        assert.equal(turns[0].user_request, 'REQUEST-A', 'the running turn lost its own request');
+        assert.equal(turns[0].assistant_response, 'MOCK-REPLY-OK');
+        assert.ok(!JSON.stringify(submits).includes('REQUEST-B'), 'the cancelled prompt was journaled');
+        break;
+      case 'second':
+        assert.equal(turns.length, 1, 'expected one successful turn');
+        assert.equal(turns[0].user_request, 'REQUEST-1');
+        assert.equal(failures.length, 1, 'the second turn\'s failure was not journaled');
+        assert.equal(failures[0].user_request, 'REQUEST-2');
+        assert.notEqual(failures[0].idempotency_key, turns[0].idempotency_key);
+        break;
       case 'compact':
         assert.ok(p.requests.some(x => x.compaction && x.handoffNote), 'compaction request lacks the AIMEM HANDOFF note');
         assert.equal(markers.length, 1, 'expected one compaction marker');
         break;
     }
     fs.rmSync(work, { recursive: true, force: true });
-    return { name, ok: true, submits: submits.map(e => `${e.kind}/${e.outcome}`) };
+    return { name, ok: true, exit: r.status, submits: submits.map(e => `${e.kind}/${e.outcome}`) };
   } catch (error) {
     return { name, ok: false, error: error.message, exit: r.status, work, stderr: (r.stderr || '').slice(-2000) };
   }
@@ -214,7 +318,7 @@ async function run(name, sc) {
   let failed = 0;
   for (const n of names) {
     const res = await run(n, scenarios[n]);
-    if (res.ok) console.log(`  ok    ${n}  ${res.submits.join(' ')}`);
+    if (res.ok) console.log(`  ok    ${n}  exit=${res.exit}  ${res.submits.join(' ')}`);
     else {
       failed += 1;
       console.log(`  FAIL  ${n}  ${res.error} (exit ${res.exit}; kept ${res.work})`);

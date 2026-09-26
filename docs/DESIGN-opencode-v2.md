@@ -120,7 +120,8 @@ README.
 
 | 1.x behavior | 2.x source in `setupV2` |
 |---|---|
-| user request of a turn | `ctx.session.hook("prompt")` → `event.prompt.text`; starts a fresh turn and resets the turn id |
+| user request of a turn | `session.inbox.enqueued` (user item text) → taken on `session.inbox.delivered`, dropped on `session.inbox.cancelled`; a steer or queued prompt delivered into a running execution joins that turn's request. Taking it at delivery, not at submission, keeps a prompt queued behind a running turn (and maybe cancelled) from replacing that turn's request |
+| turn boundary | the turn is dropped once submitted; the next delivered prompt starts a clean turn with a fresh fallback id |
 | assistant reply (last text part) | `session.text.ended` → `data.text`, `data.assistantMessageID` |
 | tool names | `session.tool.input.started` → `data.name` |
 | turn id | last `assistantMessageID` (from `text.ended` / `step.ended`) |
@@ -201,7 +202,11 @@ Installers are unchanged: same file, same destination.
 `node scripts/opencode-plugin-e2e/run.cjs <opencode-binary>` runs
 `opencode run` in a disposable project and HOME against a scripted
 OpenAI-compatible provider on 127.0.0.1 (no key, no paid model). A fake
-`aimem` records every submit. Scenarios:
+`aimem` records every submit. The `queued` and `second` scenarios drive a
+long-lived 2.x `opencode serve` over its HTTP API instead, so several
+turns reach one plugin process. Every scenario also requires a clean
+process exit: a run that hangs (killed at the timeout) or exits non-zero
+fails even when its payloads are right. Scenarios:
 
 | Scenario | Asserts |
 |---|---|
@@ -210,19 +215,24 @@ OpenAI-compatible provider on 127.0.0.1 (no key, no paid model). A fake
 | `fail` | a `failure` event; all submits share one idempotency key |
 | `warn` (2.x) | the warning note reached the model |
 | `compact` (2.x) | compaction request carries `AIMEM HANDOFF`; one compaction marker |
+| `queued` (2.x) | B queued behind a slow A and cancelled: one turn, with A's request and reply; B never journaled |
+| `second` (2.x) | turn 1 succeeds, turn 2 fails: one turn and one failure, each with its own request and idempotency key |
 
 Results on the final code (2026-09-26, Linux x64):
 
-| OpenCode | text | tool | fail | warn | compact |
-|---|---|---|---|---|---|
-| 1.14.24 | ok | ok | ok | n/a | n/a |
-| 1.18.3 | ok | ok | ok | n/a | n/a |
-| 1.18.32 | ok | ok | ok | n/a | n/a |
-| 2.0.18 | ok | ok | ok | ok | ok |
+| OpenCode | text | tool | fail | warn | compact | queued | second |
+|---|---|---|---|---|---|---|---|
+| 1.14.24 | ok | ok | ok (exit 0) | n/a | n/a | n/a | n/a |
+| 1.18.32 | ok | ok | ok (exit 1) | n/a | n/a | n/a | n/a |
+| 2.0.18 | ok | ok | ok (exit 1) | ok | ok | ok | ok |
 
-1.18.3 was run on the revision before the last review fixes, which touched
-`setupV2` only (which 1.18.x never reaches past its guard). 1.18.23 and
-1.18.28 passed `text`, `tool` and `fail` on an earlier revision.
+1.18.3 passed `text`, `tool` and `fail`, and 1.18.23 and 1.18.28 the same
+three, on earlier revisions; the later changes touched `setupV2` only,
+which 1.x never reaches past its guard. `queued` fails against the
+plugin as first reviewed (commit `87f358c`: the running turn is
+journaled with the cancelled prompt's request), and passes with the fix.
+With `AIMEM_E2E_TIMEOUT_MS=2000`, `text` fails with "opencode run timed
+out", which shows the process-health check works.
 
 Binaries were obtained with `npm pack opencode-linux-x64@<version>`
 (1.x) and `npm pack @opencode/cli-linux-x64@2.0.18` (2.x).
@@ -243,9 +253,15 @@ Binaries were obtained with `npm pack opencode-linux-x64@<version>`
   caching; the compaction note not scoped to the project; a failed model
   catalog lookup cached as "no limit" (including a synchronous throw);
   a reply-less turn getting a new id on each end event; 1.x
-  pre-releases misdetected as 2.x by the e2e script. One further finding (a single plugin instance
-  serving every project) was checked against the 2.x source and does not
-  apply (4.7).
+  pre-releases misdetected as 2.x by the e2e script. One further finding
+  (a single plugin instance serving every project) was checked against
+  the 2.x source and does not apply (4.7).
+- The external review of `87f358c` raised two follow-ups, both fixed: a
+  prompt queued behind a running turn replaced that turn's request
+  (reproduced, then fixed by taking the request at inbox delivery; the
+  `queued` scenario covers it), and the e2e script passed runs that hung
+  or exited non-zero after correct payloads (it now checks process
+  health).
 - No Go change: `gofmt -l .` prints nothing.
 
 ## 7. Known gaps and follow-ups
@@ -253,8 +269,10 @@ Binaries were obtained with `npm pack opencode-linux-x64@<version>`
 - **Not tested:** Windows (the win32 spawn branch is unchanged from
   master); a 2.x server hosting several aimem projects at once (4.7:
   per-location loading was read from source, the filtering is
-  code-reviewed only); the later-turn failure fix (the e2e check starts
-  a fresh process per run, so it cannot reach a second turn).
+  code-reviewed only); a steer delivered into a running turn (it joins
+  that turn's request by design; the unmodified queued case was observed
+  to do the same). Such a joined turn keeps only its last reply, as 1.x
+  keeps only a turn's last text part.
 - **MCP on 2.x:** the aimem MCP server connects and lists its tools, but
   in `opencode run --standalone` no MCP tool reached the model, for aimem
   and for a one-tool control server alike. This is 2.x behavior in that
