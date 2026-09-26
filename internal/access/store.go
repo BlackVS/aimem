@@ -45,7 +45,18 @@ func ResolveScope(scope TokenScope, project string) (TokenScope, error) {
 	return "", fmt.Errorf("scope must be user or read-only without a project, or project with a project")
 }
 
-type Store struct{ db *sql.DB }
+type Store struct {
+	db *sql.DB
+	// clock is replaced only by tests of time-bounded identity records.
+	clock func() time.Time
+}
+
+func (s *Store) now() time.Time {
+	if s.clock != nil {
+		return s.clock()
+	}
+	return time.Now()
+}
 
 // Open creates only the hub access store, never a project. The caller must own
 // the state root. No schema/version change is made to existing project databases.
@@ -107,11 +118,11 @@ func (s *Store) migrate() error {
 	if err := s.db.QueryRow("PRAGMA user_version").Scan(&current); err != nil {
 		return err
 	}
-	if current == 3 {
+	if current == 4 {
 		return nil
 	}
-	if current > 3 {
-		return fmt.Errorf("access schema %d is newer than supported schema 3", current)
+	if current > 4 {
+		return fmt.Errorf("access schema %d is newer than supported schema 4", current)
 	}
 	tx, err := s.db.Begin()
 	if err != nil {
@@ -122,8 +133,8 @@ func (s *Store) migrate() error {
 	if err := tx.QueryRow("PRAGMA user_version").Scan(&version); err != nil {
 		return err
 	}
-	if version > 3 {
-		return fmt.Errorf("access schema %d is newer than supported schema 3", version)
+	if version > 4 {
+		return fmt.Errorf("access schema %d is newer than supported schema 4", version)
 	}
 	if version == 0 {
 		_, err = tx.Exec(`
@@ -168,6 +179,58 @@ CREATE TABLE team_profile_grants(
 			return err
 		}
 		if _, err := tx.Exec("PRAGMA user_version=3"); err != nil {
+			return err
+		}
+		version = 3
+	}
+	if version == 3 {
+		// identity.v1 proof ledger. Secrets are stored only as SHA-256 digests.
+		if _, err := tx.Exec(`
+CREATE TABLE identity_peers(
+ service_id TEXT PRIMARY KEY,
+ hub_id TEXT NOT NULL,
+ operation TEXT NOT NULL CHECK(operation='identity.redeem'),
+ endpoint TEXT NOT NULL,
+ tls_mode TEXT NOT NULL CHECK(tls_mode IN ('ca_dns','spki_sha256')),
+ tls_value TEXT NOT NULL,
+ disabled INTEGER NOT NULL DEFAULT 0 CHECK(disabled IN (0,1))
+);
+CREATE TABLE identity_peer_credentials(
+ id TEXT PRIMARY KEY,
+ service_id TEXT NOT NULL REFERENCES identity_peers(service_id),
+ digest TEXT NOT NULL UNIQUE,
+ created_at INTEGER NOT NULL,
+ expires_at INTEGER NOT NULL,
+ revoked INTEGER NOT NULL DEFAULT 0 CHECK(revoked IN (0,1))
+);
+CREATE TABLE identity_receipts(
+ id TEXT PRIMARY KEY,
+ digest TEXT NOT NULL UNIQUE,
+ service_id TEXT NOT NULL,
+ hub_id TEXT NOT NULL,
+ challenge_id TEXT NOT NULL,
+ user_id TEXT NOT NULL,
+ token_id TEXT NOT NULL,
+ created_ms INTEGER NOT NULL,
+ expires_ms INTEGER NOT NULL,
+ state TEXT NOT NULL CHECK(state IN ('live','superseded','redeemed'))
+);
+CREATE INDEX identity_receipts_binding ON identity_receipts(token_id,service_id,challenge_id,state);
+CREATE INDEX identity_receipts_created ON identity_receipts(token_id,created_ms);
+CREATE TABLE identity_redemptions(
+ service_id TEXT NOT NULL,
+ request_key TEXT NOT NULL,
+ input_digest TEXT NOT NULL,
+ id TEXT NOT NULL UNIQUE,
+ receipt_id TEXT NOT NULL UNIQUE,
+ hub_id TEXT NOT NULL,
+ challenge_id TEXT NOT NULL,
+ user_id TEXT NOT NULL,
+ token_id TEXT NOT NULL,
+ redeemed_ms INTEGER NOT NULL,
+ PRIMARY KEY(service_id,request_key)
+);
+PRAGMA user_version=4;`); err != nil {
 			return err
 		}
 	}

@@ -119,3 +119,27 @@ The limits below are values fixed by this contract. An implementation may tighte
 The D1 enrollment path issues the individual credential. This contract only verifies that credential. A freshly enrolled user-scoped token can request a receipt immediately. The proof route never accepts an enrollment subcode, and a peer credential can never call enrollment. When D1 reissues a credential, it revokes the old token in the same transaction. Receipts that are still outstanding for the old token then fail with `credential_inactive`. Sessions bound to the old token get `context_stale` until aicrew re-proves them.
 
 E3 implements proof issuance, redemption and peer registration against a fake aicrew. E4 implements introspection and the team-mode verifier against a fake introspection server. E5 implements local binding. The fixture test in `internal/server/identity_wire_contract_test.go` is a fake consumer. It checks coverage, the parity between the fixtures and the proposed OpenAPI, the bounds, and that no secret appears in a response. It also checks that no production identity route is registered. It does not prove authorization.
+
+## E3 implementation boundary
+
+The owner approved splitting E3 and made four implementation decisions (E3 task comments seq169 and seq170).
+
+**Split.** E3a is the internal ledger. E3b adds the routes over TLS that aimem terminates itself. E3c adds the operator CLI. **E3c must be delivered before the real pilot and before onboarding is accepted.** The web console remains deferred.
+
+**TLS deployment requirement (from E3b onward).** The proof, redemption and peer-management routes accept a request only when aimem terminated its TLS itself, meaning the hub is started with a certificate and key. A request over plain HTTP, or one terminated by a proxy, is refused. Forwarded headers are never accepted as proof of TLS. Proxy-terminated TLS is deferred. Routes unrelated to identity keep their current behavior.
+
+**Peer credential lifecycle.**
+- **Format.** A peer credential is `aimem_peer_` followed by 256 random bits in hex. It is returned once, when issued, and stored only as a SHA-256 digest.
+- **Scope.** It is bound to one registered peer and to the `identity.redeem` operation family.
+- **Limits.** It lives at most 366 days. A peer has at most two active credentials, so a rotation can overlap.
+- **Lost issuance response.** The bearer cannot be recovered. The admin lists the peer's credential metadata, revokes the credential that was never received, and issues a new one.
+- **Expiry.** An expired credential is refused as if unknown and no longer counts toward the limit of two.
+- **Revocation.** It applies to authentication that starts after it commits, affects only that credential, and is idempotent. Disabling a peer refuses all of its credentials.
+- **Rotation.** Issue a second credential, move aicrew to it, then revoke the old one. Issuing a third while two are active is refused.
+- The bearer is never logged or audited.
+
+**Outbound introspection credential.** Aimem's stored copy of the credential that aicrew issues is deferred to E4. E3 stores the peer's introspection endpoint and TLS trust binding, but introspection does not work until E4 delivers it.
+
+**E3a status.** Access schema 4 adds four ledger tables: `identity_peers`, `identity_peer_credentials`, `identity_receipts` and `identity_redemptions`. The code is `internal/access/identity_proofs.go`. Every administrative and ledger function is package-private: no route, MCP tool or command can reach it until E3b's reviewed wire exports it, and no credential is issued to a real peer. Refusal reasons are audited under `identity.redeem.refused.<reason>`, while callers see only the stable codes above. Aimem stores and compares redemption keys only in `k1_` form.
+
+**Schema 4 upgrade and rollback.** The migration from schema 3 is additive and runs in one transaction; all existing data is preserved. Older binaries refuse schema 4, so rolling back the binary alone is not supported. Back up the state root before upgrading. A rollback restores the pre-upgrade `access.db` together with the matching hub state.
