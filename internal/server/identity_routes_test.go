@@ -460,9 +460,9 @@ func TestPeerCredentialReachesNoOtherRoute(t *testing.T) {
 	if hits != 0 {
 		t.Fatalf("a peer credential reached the MCP dispatcher %d times", hits)
 	}
-	// Legacy writer and ordinary user credentials cannot redeem.
-	if r := g.call(t, g.tls, "POST", "/v1/identity/peers/aicrew-example/redemptions", g.alice, v1, "{}", true); r.status != 403 {
-		t.Errorf("user token on the redemption route: %d", r.status)
+	// An ordinary user credential cannot redeem.
+	if r := g.call(t, g.tls, "POST", "/v1/identity/peers/aicrew-example/redemptions", g.alice, v1, "{}", true); r.status != 401 || r.code() != "peer_unauthenticated" {
+		t.Errorf("user token on the redemption route: %d %s", r.status, r.body)
 	}
 	g.assertNoSecretLeak(t)
 }
@@ -498,5 +498,124 @@ func TestIdentityWaitMapsToRequestInProgress(t *testing.T) {
 	}
 	if identityWait != 5*time.Second {
 		t.Errorf("identity wait %v, contract says 5 s", identityWait)
+	}
+}
+
+// checkEnvelope requires the complete identity refusal envelope.
+func checkEnvelope(t *testing.T, name string, r identityResp, status int, code string) {
+	t.Helper()
+	var env map[string]any
+	if err := json.Unmarshal(r.body, &env); err != nil || r.status != status || env["code"] != code {
+		t.Errorf("%s: %d %s, want %d %s", name, r.status, r.body, status, code)
+		return
+	}
+	for _, f := range []string{"message", "next_action", "correlation_id"} {
+		if s, _ := env[f].(string); s == "" {
+			t.Errorf("%s: envelope missing %s", name, f)
+		}
+	}
+	if _, ok := env["retryable"].(bool); !ok {
+		t.Errorf("%s: envelope missing retryable", name)
+	}
+	if r.header.Get("Cache-Control") != "no-store" {
+		t.Errorf("%s: refusal is cacheable", name)
+	}
+}
+
+// TestIdentityGateRefusalsUseTheEnvelope: every refusal the bearer gate makes
+// on the two wire routes, before any identity handler runs, is the contract
+// envelope with its code.
+func TestIdentityGateRefusalsUseTheEnvelope(t *testing.T) {
+	g := newIdentityRig(t)
+	g.registerPeer(t, "aicrew-example")
+	credID, peer := g.issueCredential(t, "aicrew-example", time.Now().Add(time.Hour))
+	proof, redeem := "/v1/identity/proofs", "/v1/identity/peers/aicrew-example/redemptions"
+	for name, c := range map[string]struct {
+		path, bearer string
+		status       int
+		code         string
+	}{
+		"proof without a bearer":       {proof, "", 401, "invalid_credential"},
+		"proof with an unknown user":   {proof, "aimem_user_" + strings.Repeat("0", 64), 401, "invalid_credential"},
+		"proof with a peer bearer":     {proof, peer, 403, "credential_scope_forbidden"},
+		"redeem without a bearer":      {redeem, "", 401, "peer_unauthenticated"},
+		"redeem with an unknown peer":  {redeem, "aimem_peer_" + strings.Repeat("0", 64), 401, "peer_unauthenticated"},
+		"redeem with a user bearer":    {redeem, g.alice, 401, "peer_unauthenticated"},
+		"redeem with a garbage bearer": {redeem, "nonsense", 401, "peer_unauthenticated"},
+	} {
+		checkEnvelope(t, name, g.call(t, g.tls, "POST", c.path, c.bearer, v1, "{}", true), c.status, c.code)
+	}
+	// A revoked peer credential and a revoked individual token.
+	if r := g.call(t, g.tls, "DELETE", "/v1/identity/peers/aicrew-example/credentials/"+credID, g.env, nil, "", true); r.status != 200 {
+		t.Fatal(r.status)
+	}
+	checkEnvelope(t, "redeem with a revoked peer", g.call(t, g.tls, "POST", redeem, peer, v1, "{}", true), 401, "peer_unauthenticated")
+	db, _ := g.s.openAccess(false)
+	if err := db.Revoke("admin", g.aliceTok); err != nil {
+		t.Fatal(err)
+	}
+	checkEnvelope(t, "proof with a revoked token", g.call(t, g.tls, "POST", proof, g.alice, v1, "{}", true), 401, "invalid_credential")
+	// Non-identity routes keep the gate's existing empty 401.
+	if r := g.call(t, g.tls, "GET", "/v1/projects", "", nil, "", true); r.status != 401 || len(r.body) != 0 {
+		t.Errorf("unrelated route's gate refusal changed: %d %s", r.status, r.body)
+	}
+	g.assertNoSecretLeak(t)
+}
+
+// TestIdentityGateStartsTheDeadlineBeforeAuthentication: over the real TLS
+// listener, the context the gate authenticates with carries the wire routes'
+// deadline (at most identityWait away); other routes are unchanged.
+func TestIdentityGateStartsTheDeadlineBeforeAuthentication(t *testing.T) {
+	g := newIdentityRig(t)
+	g.registerPeer(t, "aicrew-example")
+	_, peer := g.issueCredential(t, "aicrew-example", time.Now().Add(time.Hour))
+	var mu sync.Mutex
+	seen := map[string]time.Duration{}
+	gateAuthHook = func(r *http.Request) {
+		left := time.Duration(-1)
+		if d, ok := r.Context().Deadline(); ok {
+			left = time.Until(d)
+		}
+		mu.Lock()
+		seen[r.URL.Path] = left
+		mu.Unlock()
+	}
+	defer func() { gateAuthHook = nil }()
+	g.proof(t, g.alice, "aicrew-example", "challenge-deadline")
+	g.call(t, g.tls, "POST", "/v1/identity/peers/aicrew-example/redemptions", peer, v1, "{}", true)
+	g.call(t, g.tls, "GET", "/v1/projects", g.alice, nil, "", true)
+	mu.Lock()
+	defer mu.Unlock()
+	for _, p := range []string{"/v1/identity/proofs", "/v1/identity/peers/aicrew-example/redemptions"} {
+		if left, ok := seen[p]; !ok || left <= 0 || left > identityWait {
+			t.Errorf("%s authenticated without the identity deadline (remaining %v)", p, left)
+		}
+	}
+	if left := seen["/v1/projects"]; left != -1 {
+		t.Errorf("an unrelated route gained a deadline: %v", left)
+	}
+}
+
+// TestIdentityAuthenticationObservesTheDeadline: a wire request whose
+// deadline is already spent is refused by the gate with request_in_progress.
+// The request carries no TLS, so an authentication that ignored the deadline
+// would succeed and reach the handler, which answers tls_required instead.
+func TestIdentityAuthenticationObservesTheDeadline(t *testing.T) {
+	g := newIdentityRig(t)
+	g.registerPeer(t, "aicrew-example")
+	_, peer := g.issueCredential(t, "aicrew-example", time.Now().Add(time.Hour))
+	h := g.s.TCPHandler(g.env, nil)
+	for name, c := range map[string]struct{ path, bearer string }{
+		"proof":      {"/v1/identity/proofs", g.alice},
+		"redemption": {"/v1/identity/peers/aicrew-example/redemptions", peer},
+	} {
+		ctx, cancel := context.WithDeadline(context.Background(), time.Now().Add(-time.Second))
+		req := httptest.NewRequest("POST", c.path, strings.NewReader("{}")).WithContext(ctx)
+		req.Header.Set("Authorization", "Bearer "+c.bearer)
+		req.Header.Set(identityVersionHeader, "1")
+		w := httptest.NewRecorder()
+		h.ServeHTTP(w, req)
+		cancel()
+		checkEnvelope(t, name, identityResp{w.Code, w.Body.Bytes(), w.Header()}, 503, "request_in_progress")
 	}
 }

@@ -292,12 +292,12 @@ func (s *Store) ListPeerCredentials(serviceID string) ([]PeerCredential, error) 
 	return out, rows.Err()
 }
 
-func (s *Store) lookupPeer(q rowQuery, secret string) (PeerIdentity, error) {
+func (s *Store) lookupPeer(ctx context.Context, secret string) (PeerIdentity, error) {
 	if !strings.HasPrefix(secret, peerCredentialPrefix) {
 		return PeerIdentity{}, ErrPeerUnauthenticated
 	}
 	var id PeerIdentity
-	err := q.QueryRow(`SELECT p.service_id,c.id FROM identity_peer_credentials c
+	err := s.db.QueryRowContext(ctx, `SELECT p.service_id,c.id FROM identity_peer_credentials c
 JOIN identity_peers p ON p.service_id=c.service_id
 JOIN hub_identity h ON h.id=p.hub_id
 WHERE c.digest=? AND c.revoked=0 AND c.expires_at>? AND p.disabled=0 AND p.operation=?`,
@@ -311,7 +311,13 @@ WHERE c.digest=? AND c.revoked=0 AND c.expires_at>? AND p.disabled=0 AND p.opera
 // AuthenticatePeer checks a presented peer bearer. Expired, revoked and
 // disabled-peer credentials are refused as if unknown.
 func (s *Store) AuthenticatePeer(secret string) (PeerIdentity, error) {
-	return s.lookupPeer(s.db, secret)
+	return s.lookupPeer(context.Background(), secret)
+}
+
+// AuthenticatePeerContext is AuthenticatePeer with the wait for the store
+// bounded by ctx; on expiry it returns ctx.Err().
+func (s *Store) AuthenticatePeerContext(ctx context.Context, secret string) (PeerIdentity, error) {
+	return s.lookupPeer(ctx, secret)
 }
 
 func peerStillValid(tx *sql.Tx, p PeerIdentity, now time.Time) error {

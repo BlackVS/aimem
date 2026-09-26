@@ -769,3 +769,27 @@ func TestStoreWaitIsBoundedByContext(t *testing.T) {
 		t.Fatalf("receipt after the timed-out attempt: %+v %v", got, err)
 	}
 }
+
+// TestAuthenticationWaitIsBoundedByContext: the gate's authentication queries
+// give up on their deadline while another transaction holds the store.
+func TestAuthenticationWaitIsBoundedByContext(t *testing.T) {
+	e := newIdentityEnv(t)
+	held, err := e.s.db.Begin()
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+	defer cancel()
+	if _, err := e.s.AuthenticateContext(ctx, e.bearer); !errors.Is(err, context.DeadlineExceeded) {
+		t.Errorf("user authentication waiting on a held store: %v", err)
+	}
+	if _, err := e.s.AuthenticatePeerContext(ctx, e.peerCred); !errors.Is(err, context.DeadlineExceeded) {
+		t.Errorf("peer authentication waiting on a held store: %v", err)
+	}
+	if err := held.Rollback(); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := e.s.AuthenticateContext(context.Background(), e.bearer); err != nil {
+		t.Errorf("authentication after release: %v", err)
+	}
+}

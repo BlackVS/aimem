@@ -79,16 +79,35 @@ func identityTLS(r *http.Request) bool {
 	return r.TLS != nil && r.TLS.HandshakeComplete
 }
 
+// identityWireRoute names the identity.v1 wire route a request targets:
+// "proof", "redeem" or "" for any other request.
+func identityWireRoute(r *http.Request) string {
+	if r.Method != http.MethodPost || !canonicalPath(r) {
+		return ""
+	}
+	p := r.URL.EscapedPath()
+	if p == "/v1/identity/proofs" {
+		return "proof"
+	}
+	parts := strings.Split(p, "/")
+	if len(parts) == 6 && parts[0] == "" && parts[1] == "v1" && parts[2] == "identity" &&
+		parts[3] == "peers" && parts[4] != "" && parts[5] == "redemptions" {
+		return "redeem"
+	}
+	return ""
+}
+
+// gateAuthHook, when set by a test, sees each request just before the bearer
+// gate authenticates it. It is nil in production.
+var gateAuthHook func(*http.Request)
+
+// identityUnauthenticated is the envelope code for a wire request whose bearer
+// is missing, unknown, or not the kind of credential the route requires.
+var identityUnauthenticated = map[string]string{"proof": "invalid_credential", "redeem": "peer_unauthenticated"}
+
 // peerRouteAllowed is the whole surface of a peer credential: one POST shape.
 // The handler checks that the path names the credential's own peer.
-func peerRouteAllowed(r *http.Request) bool {
-	if r.Method != http.MethodPost || !canonicalPath(r) {
-		return false
-	}
-	parts := strings.Split(r.URL.EscapedPath(), "/")
-	return len(parts) == 6 && parts[0] == "" && parts[1] == "v1" && parts[2] == "identity" &&
-		parts[3] == "peers" && parts[4] != "" && parts[5] == "redemptions"
-}
+func peerRouteAllowed(r *http.Request) bool { return identityWireRoute(r) == "redeem" }
 
 // identityStoreError maps a ledger error to its stable refusal code. A store
 // that stayed busy past identityWait is an in-flight retry.

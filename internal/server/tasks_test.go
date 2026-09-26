@@ -426,9 +426,10 @@ func TestOrdinaryTokenGateMatrix(t *testing.T) {
 		case public[path] != nil || (rt.Method == "GET" && path == "/v1/access/identity"):
 		case strings.HasPrefix(rt.Pattern, "/v1/identity/"):
 			// Over this plain-HTTP recorder every identity route refuses
-			// (tls_required, or admin/peer-only); identity_routes_test.go
-			// covers each one over real TLS.
-			if w.Code != 403 {
+			// (tls_required, admin-only, or peer_unauthenticated for the
+			// redemption route); identity_routes_test.go covers each one
+			// over real TLS.
+			if w.Code != 403 && w.Code != 401 {
 				t.Errorf("%s %s: identity route reachable without TLS by an ordinary token: %d", rt.Method, rt.Pattern, w.Code)
 			}
 		case rt.Ordinary():

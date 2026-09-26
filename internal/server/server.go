@@ -5,6 +5,7 @@
 package server
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -496,14 +497,37 @@ func (s *Server) authWrapper(token string, next http.Handler) http.Handler {
 				return
 			}
 		}
+		// The identity.v1 wire routes bound the whole request, including
+		// this authentication, by one deadline, and answer every gate
+		// refusal with the contract's refusal envelope.
+		wire := identityWireRoute(r)
+		if wire != "" {
+			ctx, cancel := context.WithTimeout(r.Context(), identityWait)
+			defer cancel()
+			r = r.WithContext(ctx)
+		}
 		presented, ok := strings.CutPrefix(r.Header.Get("Authorization"), "Bearer ")
 		if !ok {
+			if wire != "" {
+				s.identityRefuse(w, identityUnauthenticated[wire])
+				return
+			}
 			w.WriteHeader(http.StatusUnauthorized)
 			return
 		}
-		id, ok := s.authenticate(token, presented)
-		if !ok {
-			w.WriteHeader(http.StatusUnauthorized)
+		if gateAuthHook != nil {
+			gateAuthHook(r)
+		}
+		id, err := s.authenticateContext(r.Context(), token, presented)
+		if err != nil {
+			switch {
+			case wire != "" && !errors.Is(err, errNotAuthenticated):
+				s.identityRefuse(w, identityStoreError(err))
+			case wire != "":
+				s.identityRefuse(w, identityUnauthenticated[wire])
+			default:
+				w.WriteHeader(http.StatusUnauthorized)
+			}
 			return
 		}
 		// Ordinary tokens never get the legacy writer surface. They reach
@@ -511,12 +535,20 @@ func (s *Server) authWrapper(token string, next http.Handler) http.Handler {
 		// write themselves) and POST /mcp (whose dispatcher hides every
 		// legacy tool from them) — exactly the routes in ordinaryRoutes.
 		if id.Role == "user" && !(r.Method == "GET" && r.URL.Path == "/v1/access/identity") && !s.ordinaryAllowed(r) {
+			if wire != "" {
+				s.identityRefuse(w, identityUnauthenticated[wire])
+				return
+			}
 			s.fail(w, http.StatusForbidden, fmt.Errorf("ordinary token is not authorized for this endpoint"))
 			return
 		}
 		// A peer credential reaches exactly one route shape: identity.v1
 		// redemption. The handler then requires the path peer to be its own.
 		if id.Role == "peer" && !peerRouteAllowed(r) {
+			if wire == "proof" {
+				s.identityRefuse(w, "credential_scope_forbidden")
+				return
+			}
 			s.fail(w, http.StatusForbidden, fmt.Errorf("peer credential is not authorized for this endpoint"))
 			return
 		}
