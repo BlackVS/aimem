@@ -139,6 +139,8 @@ func main() {
 		err = tokenCmd(args)
 	case "access":
 		err = accessCmd(args)
+	case "identity":
+		err = identityCmd(args)
 	case "review":
 		err = reviewCmd(args)
 	case "logs":
@@ -225,6 +227,7 @@ func usage() {
                              portable (no jq/bash), silent if file missing
   state-root                 print the state root path
   access                     manage users, access groups, grants and ordinary tokens
+  identity                   manage the aicrew identity peer and its credentials (hub TLS listener)
                              on the local service (run without args for usage)
   version                    print the binary version
   tui                        interactive dashboard (q quits)
