@@ -269,12 +269,16 @@ config file tunes everything; restart OpenCode to apply:
 
 - `AIMEM_CTX_WARN_FRACTION` (default 0.8) — first warning threshold;
   warnings then repeat every 5%, so one missed toast is not the last
-  word before the hard context error.
+  word before the hard context error. OpenCode 2 has no toast API:
+  there the warning goes to the model, as a system note on each
+  request past the threshold, and to the OpenCode server log.
 - `AIMEM_AUTO_COMPACT=<fraction>` (e.g. 0.9; unset = off) — trigger
   compaction automatically at that fill, while the summarizer still has
   room to run. The journal, compaction marker, and handoff injection
   make the "prepare" half automatic; this closes the loop for long
-  unattended tasks.
+  unattended tasks. OpenCode 1.x only: OpenCode 2 plugins cannot
+  request compaction, so on 2.x use its `compaction` settings
+  (`auto`, `buffer`, `keep.tokens`) instead.
 - `AIMEM_CTX_LIMIT` — hard override of the model's context limit.
 
 A project can override the host in its `.aimem.json` —

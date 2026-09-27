@@ -115,9 +115,34 @@ function Install-User {
   Add-AgentHook $ClaudeSettings 'StopFailure' $SubmitCmd 'Checkpointing failed turn'     'aimem submit-claude'
   Add-AgentHook $ClaudeSettings 'PreCompact'  $SubmitCmd 'Journaling compaction marker'  'aimem submit-claude'
 
-  Say "OpenCode global plugin -> $OcPluginDir\aimem.ts"
-  New-Item -ItemType Directory -Force $OcPluginDir | Out-Null
-  Copy-Item (Join-Path $RepoDir '.opencode\plugin\aimem.ts') (Join-Path $OcPluginDir 'aimem.ts') -Force
+  # The plugin supports OpenCode 1.18+ and 2.x from one file; 1.x loaders
+  # before 1.14 call every export as a function and stop OpenCode at
+  # startup on it. No opencode, an unreadable version, or a 0.0.0-<tag> snapshot
+  # build (current code, not an old release): install as before.
+  $ocOld = $null
+  $oc = Get-Command opencode -ErrorAction SilentlyContinue
+  if ($oc) {
+    # Same PS 5.1 trap as the codex calls below: relax EAP around the
+    # native call, or any stderr from it would abort the whole install.
+    $prevEap = $ErrorActionPreference
+    $ErrorActionPreference = 'Continue'
+    $raw = ''
+    try { $raw = (& $oc.Source --version 2>$null | Out-String) } catch { }
+    $ErrorActionPreference = $prevEap
+    if ($raw -match '(\d+)\.(\d+)(\.\d+)?' -and $Matches[0] -notin @('0.0.0', '0.0')) {
+      $maj = [int]$Matches[1]; $min = [int]$Matches[2]
+      if ($maj -eq 0 -or ($maj -eq 1 -and $min -lt 18)) { $ocOld = $Matches[0] }
+    }
+  }
+  if ($ocOld) {
+    Write-Warning ("OpenCode $ocOld is older than 1.18, the oldest release this aimem plugin supports " +
+      "(before 1.14 it would stop OpenCode at startup), so $OcPluginDir\aimem.ts was not installed or updated. " +
+      'Upgrade OpenCode, then re-run this install.')
+  } else {
+    Say "OpenCode global plugin -> $OcPluginDir\aimem.ts"
+    New-Item -ItemType Directory -Force $OcPluginDir | Out-Null
+    Copy-Item (Join-Path $RepoDir '.opencode\plugin\aimem.ts') (Join-Path $OcPluginDir 'aimem.ts') -Force
+  }
 
   # Codex CLI: same checkpoint hooks, user-level (loads regardless of
   # project trust; Codex has no StopFailure). Wired even when codex is

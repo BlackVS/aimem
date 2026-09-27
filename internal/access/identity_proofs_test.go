@@ -94,7 +94,7 @@ func newIdentityEnv(t *testing.T) *identityEnv {
 	if err != nil {
 		t.Fatal(err)
 	}
-	tok, secret, err := s.IssueScoped("admin", u.ID, "agent", ScopeUser, "", time.Now().Add(24*time.Hour))
+	tok, secret, err := s.IssueScoped("admin", u.ID, "agent", ScopeUser, "", e.clock().Add(24*time.Hour))
 	if err != nil {
 		t.Fatal(err)
 	}
