@@ -131,3 +131,23 @@ Schema 2 data is migrated additively in one access-store transaction. Existing u
 ### E4 team-mode boundary
 
 E4 implements slice 2 of the split above for reads only. The hub serves the context report and the task and epic reads in team mode, through the online verifier with a live profile grant. Every other operation, including every write, `/mcp` and every knowledge route, is refused with `team_operation_unsupported` before aicrew is contacted. The exact order, codes and audit are in the identity.v1 contract's [E4 implementation boundary](DESIGN-AIFORGE-IDENTITY-WIRE.md#e4-implementation-boundary). The hub admin manages team access profiles and their grants through `aimem identity team` (task 01a0deb1). Local binding (E5), the knowledge matrix and the reservation contract remain separate increments.
+
+### E5a local session binding
+
+E5a implements the client half of slice 3 (task E5a, decisions in E5 seq193). **aimem is the single identity root.** At session entry the agent presents a fresh aimem proof. Aicrew issues its own short-lived, session-scoped token, in the shape of RFC 8693 token exchange, and no persistent agent credential. The individual aimem credential stays the one persistent secret on the installation. It is the hub's user-scoped `task_token` in `hub.json`, and a checkout's project-scoped credential is never used in team mode.
+
+**Commands run by the aicrew client, never by a model.**
+- **`aimem identity proof --peer SERVICE --hub-id HUB --challenge ID`.** It asks the hub for a single-use proof receipt with the individual credential. It writes the receipt to stdout **only when stdout is a pipe**, and checks this before any request, so a terminal or a file is refused and the receipt never reaches a screen, a model's context or a transcript.
+- **`aimem team-session open --service S --team T --session ID`.** It reads the aimem-scoped handle from **stdin only**, never argv, and verifies it online. One team-mode context report must name the same service, team and session. It then writes a private session file under the state root, at `team-sessions/<digest of the session ID>.json`: owner-only on Unix, an owner-only protected DACL on Windows. It prints the file's path.
+- **`refresh ID`** verifies a new handle and replaces the file atomically. **`close ID`** removes it. **`status ID`** shows the binding without the handle.
+
+The file holds the hub name and URL, the user and token IDs, the service, team and session, the generation, and the handle with its expiry. It never holds the individual token or aicrew's token.
+
+**Context per process.** Aicrew starts the agent process with `AIMEM_TEAM_SESSION=<path>`. That conversation's `aimem mcp` inherits it, and no host-wide setting exists.
+- At start the process pins the hub, user, service, team and session.
+- Every hub call re-reads the file and carries the handle in `X-Aimem-Team-Context`. It uses the individual credential over verified TLS: the hub's `ca_file` in `hub.json`, or the system roots. A hub configured `insecure` or without https is refused.
+- Only the handle, its expiry, the token ID and the generation may change. A changed pinned field, or a missing or unusable file, blocks the process for good.
+- The context is verified online, through the hub's context report, before the first tool and again after any team refusal. Until then every tool refuses with the hub's envelope. Nothing falls back to personal mode, the local socket or a checkout's credential.
+- The tool list is exactly the hub's team read routes plus `session_context`. Every other tool is hidden and refused if called.
+
+Without the variable, `aimem mcp` is unchanged. Knowledge hooks in team conversations, restart and rotation hardening, and legacy team-state isolation are E5b.

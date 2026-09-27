@@ -61,6 +61,10 @@ type HubConfig struct {
 	// self-signed phase of a fresh hub (still TLS on the wire + bearer
 	// token). Drop it once a real certificate is installed.
 	Insecure bool `json:"insecure,omitempty"`
+	// CAFile, when set, is the PEM bundle a team-mode client trusts for
+	// this hub instead of the system roots (a hub with a private CA). Team
+	// mode never skips verification; personal traffic ignores this field.
+	CAFile string `json:"ca_file,omitempty"`
 }
 
 // HTTPClient returns the client to talk to this hub with, honoring the

@@ -178,7 +178,12 @@ var deliverSecret = func(f *os.File, secret string) error {
 	return f.Close()
 }
 
-func identityCmd(args []string) error { return runIdentity(args, os.Stdout) }
+func identityCmd(args []string) error {
+	if len(args) > 0 && args[0] == "proof" {
+		return identityProofCmd(args[1:], os.Stdout, stateRoot())
+	}
+	return runIdentity(args, os.Stdout)
+}
 
 func runIdentity(args []string, out io.Writer) error {
 	usage := fmt.Errorf("%s", identityUsage)
