@@ -6,7 +6,7 @@
     "description": "Design fixture only. No production route or MCP tool is registered until C5 authorization and C6 integration are reviewed."
   },
   "x-contract-version": "reservation.v1",
-  "x-security-gate": "C5 must define and test individual-context and bounded aicrew service authentication, including operator recovery, before C6 registers any operation. This proposal deliberately does not choose credential transport.",
+  "x-security-gate": "C5 must define and test individual-context authentication and coordination-proof verification, including operator recovery, before C6 registers any operation. Mutations arrive only over the acting member's own connection (C5 D4(a)); aicrew's read-only scope is in the coordination contract. C6 adds the reviewed security schemes.",
   "x-refusal-status": {
     "invalid_credential": 401,
     "identity_link_required": 403,
@@ -25,7 +25,8 @@
     "work_outstanding": 409,
     "unsupported_version": 400,
     "invalid_request": 400,
-    "dependency_unresolved": [404, 503]
+    "dependency_unresolved": [404, 503],
+    "coordination_rejected": 403
   },
   "x-mcp-parity": {
     "claim": "task_reservation_claim",
@@ -78,7 +79,7 @@
     "requestBodies": {
       "Mutation": {
         "required": true,
-        "description": "Requires X-Aimem-Reservation-Version: 1 and Idempotency-Key headers. Actor, mode and session derive from authenticated connection; a bounded service proof is independently verified.",
+        "description": "Requires X-Aimem-Reservation-Version: 1 and Idempotency-Key headers. Actor, mode and session derive from the authenticated connection; a team transition's coordination proof is verified online through coordination.v1.",
         "content": {"application/json": {"schema": {"$ref": "#/components/schemas/Mutation"}}}
       }
     },

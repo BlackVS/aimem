@@ -157,6 +157,7 @@
     {"case": "unknown_receipt", "code": "receipt_unresolved", "http_status": 503, "retryable": true, "active_mode": "team", "next_action": "Stop later transitions and reconcile the original key."},
     {"case": "leave_with_work", "code": "work_outstanding", "http_status": 409, "retryable": false, "active_mode": "team", "next_action": "Reconcile accepted or stopped work before leaving."},
     {"case": "malformed_body", "code": "invalid_request", "http_status": 400, "retryable": false, "active_mode": null, "next_action": "Correct the request under the original key before any new mutation."},
-    {"case": "unsupported_protocol", "code": "unsupported_version", "http_status": 400, "retryable": false, "active_mode": null, "next_action": "Use a reviewed supported version."}
+    {"case": "unsupported_protocol", "code": "unsupported_version", "http_status": 400, "retryable": false, "active_mode": null, "next_action": "Use a reviewed supported version."},
+    {"case": "coordination_fact_rejected", "code": "coordination_rejected", "http_status": 403, "retryable": false, "active_mode": "team", "next_action": "Begin the step again through aicrew; never reuse the proof or the key."}
   ]
 }
