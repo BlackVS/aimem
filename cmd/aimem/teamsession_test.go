@@ -269,6 +269,10 @@ func TestTeamSessionCommands(t *testing.T) {
 	if f, _ := teamsession.Load(path); f.Handle != handleA2 {
 		t.Fatal("a refused refresh changed the file")
 	}
+	// aicrew ends the session first: close drops only ended sessions (E5b).
+	g.fake.SetAnswer(func(w http.ResponseWriter, got introspecttest.Request) {
+		introspecttest.WriteJSON(w, introspecttest.InactiveReply(got.Nonce))
+	})
 	if out, err := run("", "close", "sess-A"); err != nil || !strings.Contains(out, "closed") {
 		t.Fatalf("close: %v %s", err, out)
 	}

@@ -38,6 +38,7 @@ import (
 	"aimem/internal/provider"
 	"aimem/internal/server"
 	"aimem/internal/store"
+	"aimem/internal/teamsession"
 	"aimem/internal/tui"
 	"aimem/internal/uuidv7"
 )
@@ -468,10 +469,26 @@ func sessionStartCmd(args []string) error {
 		p = args[0]
 	}
 	ctx := ""
+	team := teamsession.Active()
 	if b, err := os.ReadFile(p); err == nil {
 		ctx = "Canonical session handoff (" + p +
 			") — treat all claims as unverified until re-checked against git/tests:\n\n" + string(b)
-		ctx += hubHandoffNotice(string(b))
+		if !team {
+			ctx += hubHandoffNotice(string(b))
+		}
+	}
+	if team {
+		// A team conversation (E5b, D4): only the checkout's own handoff
+		// file; no recalled knowledge, hub handoff, shared-doc beacon or
+		// process context, and nothing is asked of any hub.
+		ctx += "\n\naimem: this is an aicrew team conversation. aimem knowledge capture and recall are off here; " +
+			"the team's task reads are available through aimem's MCP tools (session_context reports the team context)."
+		return json.NewEncoder(os.Stdout).Encode(map[string]any{
+			"hookSpecificOutput": map[string]any{
+				"hookEventName":     "SessionStart",
+				"additionalContext": strings.TrimLeft(ctx, "\n"),
+			},
+		})
 	}
 	// Opt-in recalled knowledge rides along (FEATURE-PROPOSALS #6);
 	// empty unless .aimem.json sets "session_facts".
@@ -1285,6 +1302,9 @@ func budgetCmd(args []string) error {
 // through the spool-backed adapter path. Always exits 0 on spool fallback
 // (fail-open for the coding client).
 func submitCmd() error {
+	if teamsession.Active() {
+		return nil // team conversation: knowledge capture is off (E5b)
+	}
 	raw, err := io.ReadAll(io.LimitReader(os.Stdin, 1<<20))
 	if err != nil {
 		return err
@@ -1302,6 +1322,9 @@ func submitCmd() error {
 
 // submitClaudeCmd is the Stop/StopFailure hook entrypoint.
 func submitClaudeCmd() error {
+	if teamsession.Active() {
+		return nil // team conversation: knowledge capture is off (E5b)
+	}
 	raw, err := io.ReadAll(io.LimitReader(os.Stdin, 1<<20))
 	if err != nil {
 		return err
@@ -1316,6 +1339,9 @@ func submitClaudeCmd() error {
 
 // submitCodexCmd is the Codex CLI Stop/PreCompact hook entrypoint.
 func submitCodexCmd() error {
+	if teamsession.Active() {
+		return nil // team conversation: knowledge capture is off (E5b)
+	}
 	raw, err := io.ReadAll(io.LimitReader(os.Stdin, 1<<20))
 	if err != nil {
 		return err

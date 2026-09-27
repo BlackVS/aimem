@@ -138,7 +138,7 @@ E5a implements the client half of slice 3 (task E5a, decisions in E5 seq193). **
 
 **Commands run by the aicrew client, never by a model.**
 - **`aimem identity proof --peer SERVICE --hub-id HUB --challenge ID`.** It asks the hub for a single-use proof receipt with the individual credential. It writes the receipt to stdout **only when stdout is a pipe**, and checks this before any request, so a terminal or a file is refused and the receipt never reaches a screen, a model's context or a transcript.
-- **`aimem team-session open --service S --team T --session ID`.** It reads the aimem-scoped handle from **stdin only**, never argv, and verifies it online. One team-mode context report must name the same service, team and session. It then writes a private session file under the state root, at `team-sessions/<digest of the session ID>.json`: owner-only on Unix, an owner-only protected DACL on Windows. It prints the file's path.
+- **`aimem team-session open --service S --team T --session ID`.** It reads the aimem-scoped handle from **stdin only**, never argv, and verifies it online. One team-mode context report must name the same service, team and session. It then writes a private session file under the state root, at `aicrew-sessions/<digest of the session ID>.json`: owner-only on Unix, an owner-only protected DACL on Windows. It prints the file's path.
 - **`refresh ID`** verifies a new handle and replaces the file atomically. **`close ID`** removes it. **`status ID`** shows the binding without the handle.
 
 The file holds the hub name and URL, the user and token IDs, the service, team and session, the generation, and the handle with its expiry. It never holds the individual token or aicrew's token.
@@ -150,4 +150,16 @@ The file holds the hub name and URL, the user and token IDs, the service, team a
 - The context is verified online, through the hub's context report, before the first tool and again after any team refusal. Until then every tool refuses with the hub's envelope. Nothing falls back to personal mode, the local socket or a checkout's credential.
 - The tool list is exactly the hub's team read routes plus `session_context`. Every other tool is hidden and refused if called.
 
-Without the variable, `aimem mcp` is unchanged. Knowledge hooks in team conversations, restart and rotation hardening, and legacy team-state isolation are E5b.
+Without the variable, `aimem mcp` is unchanged.
+
+### E5b team-conversation hooks and lifecycle
+
+E5b completes slice 3 (task E5b; the corrections are in its seq194).
+
+- **Hooks (D4).** The agent's hooks inherit `AIMEM_TEAM_SESSION` from the process aicrew launched.
+  - The capture hooks `submit-claude`, `submit-codex` and `submit` do nothing in a team conversation: no journal event, no hub push, no shared-doc publish.
+  - `session-start` injects only the checkout's own `docs/SESSION-STATE.md` and a one-line notice that aimem knowledge capture and recall are off. It adds no recalled knowledge, hub handoff, shared-doc merge beacon or process context, and it asks no hub.
+- **Restart and rotation.** A new `aimem mcp` process restores only the session file and verifies online before its first tool. An expired, ended or unknown session answers `context_stale`, and an incomplete file never reaches the hub.
+  - After the individual token rotates, every call answers `context_stale` until aicrew re-proves the session under the new token and runs `aimem team-session refresh`. The refresh may move the token ID and the generation; the pinned binding stays.
+- **Close.** `aimem team-session close` drops the file only after the hub answers `context_stale` for its handle, meaning aicrew has ended the session. An active session, or a hub that cannot answer, keeps the file. A file that cannot be loaded, or that other accounts can read, binds no conversation and is removed.
+- **Legacy team state.** Aicrew session files live in `aicrew-sessions/`. The legacy team feature keeps `team-sessions/`. Neither side's operations read or write the other's files, and a team conversation's MCP refuses the legacy `team_*` tools.
