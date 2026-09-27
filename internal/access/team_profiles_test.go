@@ -84,19 +84,19 @@ func TestTeamProfileGrantIsSeparateAndLive(t *testing.T) {
 	if err := s.SetGrant("admin", "personal", "user", u.ID, true); err != nil {
 		t.Fatal(err)
 	}
-	p, err := s.createTeamProfile("admin", "service-1", "team-1")
+	p, err := s.CreateTeamProfile("admin", "service-1", "team-1")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.createTeamProfile("admin", "service-1", "team-1"); err == nil {
+	if _, err := s.CreateTeamProfile("admin", "service-1", "team-1"); err == nil {
 		t.Fatal("duplicate peer/team link accepted")
 	}
-	if err := s.setTeamGrant("admin", "team-project", p.ID, true); err != nil {
+	if err := s.SetTeamGrant("admin", "team-project", p.ID, true); err != nil {
 		t.Fatal(err)
 	}
 	check := func(profile, project string, want bool) {
 		t.Helper()
-		got, err := s.canWriteTeamToken(u.ID, tok.ID, profile, project)
+		got, err := s.TeamGrantAllows(u.ID, tok.ID, profile, project)
 		if err != nil || got != want {
 			t.Fatalf("team grant %q/%q = %v, %v; want %v", profile, project, got, err, want)
 		}
@@ -105,10 +105,10 @@ func TestTeamProfileGrantIsSeparateAndLive(t *testing.T) {
 	check(p.ID, "personal", false)
 	check(p.ID, "other", false)
 	check("another-hub-profile", "team-project", false)
-	if got, err := s.canWriteTeamToken("another-user", tok.ID, p.ID, "team-project"); err != nil || got {
+	if got, err := s.TeamGrantAllows("another-user", tok.ID, p.ID, "team-project"); err != nil || got {
 		t.Fatalf("wrong actor gained profile grant: %v, %v", got, err)
 	}
-	if got, err := s.canWriteTeamToken(u.ID, "another-token", p.ID, "team-project"); err != nil || got {
+	if got, err := s.TeamGrantAllows(u.ID, "another-token", p.ID, "team-project"); err != nil || got {
 		t.Fatalf("wrong token gained profile grant: %v, %v", got, err)
 	}
 	if err := s.SetGrant("admin", "team-project", "user", u.ID, true); err != nil {
@@ -118,7 +118,7 @@ func TestTeamProfileGrantIsSeparateAndLive(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got, err := s.canWriteTeamToken(u.ID, projectToken.ID, p.ID, "team-project"); err != nil || got {
+	if got, err := s.TeamGrantAllows(u.ID, projectToken.ID, p.ID, "team-project"); err != nil || got {
 		t.Fatalf("project-scoped token gained team grant: %v, %v", got, err)
 	}
 	if err := s.SetGrant("admin", "team-project", "user", u.ID, false); err != nil {
@@ -130,19 +130,25 @@ func TestTeamProfileGrantIsSeparateAndLive(t *testing.T) {
 	if ok, err := s.CanWriteToken(u.ID, tok.ID, "personal"); err != nil || !ok {
 		t.Fatalf("personal grant changed: %v, %v", ok, err)
 	}
-	if err := s.setTeamProfileDisabled("admin", p.ID, true); err != nil {
+	if got, err := s.TeamGrantProjects(p.ID); err != nil || len(got) != 1 || got[0] != "team-project" {
+		t.Fatalf("granted projects: %v, %v", got, err)
+	}
+	if err := s.SetTeamProfileDisabled("admin", p.ID, true); err != nil {
 		t.Fatal(err)
 	}
 	check(p.ID, "team-project", false)
-	if err := s.setTeamProfileDisabled("admin", p.ID, false); err != nil {
+	if got, err := s.TeamGrantProjects(p.ID); err != nil || len(got) != 0 {
+		t.Fatalf("a disabled profile still lists grants: %v, %v", got, err)
+	}
+	if err := s.SetTeamProfileDisabled("admin", p.ID, false); err != nil {
 		t.Fatal(err)
 	}
 	check(p.ID, "team-project", true)
-	if err := s.setTeamGrant("admin", "team-project", p.ID, false); err != nil {
+	if err := s.SetTeamGrant("admin", "team-project", p.ID, false); err != nil {
 		t.Fatal(err)
 	}
 	check(p.ID, "team-project", false)
-	if err := s.setTeamGrant("admin", "team-project", p.ID, true); err != nil {
+	if err := s.SetTeamGrant("admin", "team-project", p.ID, true); err != nil {
 		t.Fatal(err)
 	}
 	if err := s.SetUser("admin", u.ID, "Agent", true); err != nil {
@@ -196,11 +202,11 @@ func TestTeamProfileGrantFollowsProjectInstanceRename(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	p, err := s.createTeamProfile("admin", "service-1", "team-1")
+	p, err := s.CreateTeamProfile("admin", "service-1", "team-1")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := s.setTeamGrant("admin", projectID, p.ID, true); err != nil {
+	if err := s.SetTeamGrant("admin", projectID, p.ID, true); err != nil {
 		t.Fatal(err)
 	}
 	if err := r.Rename("original", "renamed"); err != nil {
@@ -213,10 +219,10 @@ func TestTeamProfileGrantFollowsProjectInstanceRename(t *testing.T) {
 	if got, err := s.HubID(); err != nil || got != hubID {
 		t.Fatalf("hub ID changed: %q, %v", got, err)
 	}
-	if got, err := s.teamProfileByKey("service-1", "team-1"); err != nil || got.ID != p.ID {
+	if got, err := s.TeamProfileByKey("service-1", "team-1"); err != nil || got.ID != p.ID {
 		t.Fatalf("profile link changed: %+v, %v", got, err)
 	}
-	if ok, err := s.canWriteTeamToken(u.ID, tok.ID, p.ID, newID); err != nil || !ok {
+	if ok, err := s.TeamGrantAllows(u.ID, tok.ID, p.ID, newID); err != nil || !ok {
 		t.Fatalf("renamed project lost grant: %v, %v", ok, err)
 	}
 	if err := s.Close(); err != nil {
@@ -229,13 +235,13 @@ func TestTeamProfileGrantFollowsProjectInstanceRename(t *testing.T) {
 	if got, err := s.HubID(); err != nil || got != hubID {
 		t.Fatalf("hub ID changed on reopen: %q, %v", got, err)
 	}
-	if got, err := s.teamProfileByKey("service-1", "team-1"); err != nil || got.ID != p.ID {
+	if got, err := s.TeamProfileByKey("service-1", "team-1"); err != nil || got.ID != p.ID {
 		t.Fatalf("profile link changed on reopen: %+v, %v", got, err)
 	}
-	if ok, err := s.canWriteTeamToken(u.ID, tok.ID, p.ID, newID); err != nil || !ok {
+	if ok, err := s.TeamGrantAllows(u.ID, tok.ID, p.ID, newID); err != nil || !ok {
 		t.Fatalf("reopen lost profile grant: %v, %v", ok, err)
 	}
-	if _, err := s.teamProfileByKey("service-2", "team-1"); !errors.Is(err, sql.ErrNoRows) {
+	if _, err := s.TeamProfileByKey("service-2", "team-1"); !errors.Is(err, sql.ErrNoRows) {
 		t.Fatalf("wrong service resolved profile: %v", err)
 	}
 }

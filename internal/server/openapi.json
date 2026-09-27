@@ -3,7 +3,7 @@
   "info": {
     "title": "aimem hub API",
     "version": "v1",
-    "description": "The complete HTTP surface of an aimem hub (and of the local service, which serves the same mux over a unix socket without auth). Every route except the three public pages (/, /v1/status, /admin) requires `Authorization: Bearer <token>`; routes marked x-role admin additionally need an admin token (the env token, or a tokens.json entry with role admin). This spec documents the surface and its auth contract; request/response bodies are intentionally loose (JSON objects) - the store types in internal/store are the authority on field shapes. A parity test (openapi_test.go) fails CI when this file and the real route table disagree."
+    "description": "The complete HTTP surface of an aimem hub (and of the local service, which serves the same mux over a unix socket without auth). Every route except the three public pages (/, /v1/status, /admin) requires `Authorization: Bearer <token>`; routes marked x-role admin additionally need an admin token (the env token, or a tokens.json entry with role admin). This spec documents the surface and its auth contract; request/response bodies are intentionally loose (JSON objects) - the store types in internal/store are the authority on field shapes. A parity test (openapi_test.go) fails CI when this file and the real route table disagree. A request carrying X-Aimem-Team-Context is served only on the routes marked x-team-mode, after online verification; every other route refuses it with team_operation_unsupported (403) before aicrew is contacted, and it is never served as a personal request."
   },
   "servers": [
     {
@@ -93,6 +93,7 @@
     },
     "/v1/access/identity": {
       "get": {
+        "x-team-mode": "Team mode: with the optional header X-Aimem-Team-Context (an aimem-scoped acs1_ handle from aicrew) and a user-scoped individual bearer, the hub verifies the session online through aicrew introspection on every request, matches it to the authenticated user and token, and serves the read only under the linked team access profile's live grant, never the caller's personal grants. Refusals use the envelope with active_mode team: context_unavailable (503, retryable), context_stale, identity_mismatch, grant_denied, role_forbidden (403). In team mode this is the context report: mode, the verified team session (service, team, agent, role, session, generation, handle expiry), the projects the profile currently grants, task_write false and knowledge unavailable; with ?project=<id> it adds project_read for that project.",
         "summary": "Inspect authenticated identity and current task-write permission for an optional project",
         "description": "Also available to ordinary user tokens. Ordinary tokens may additionally use the task routes and /mcp task tools; they are refused on every other non-public endpoint. Legacy writer/admin credentials retain their existing rights. With ?project=<id>, every credential also receives tasks_enabled: whether an admin has switched tasks on for that project (task mutations are refused with 403 otherwise).",
         "x-role": "writer",
@@ -117,6 +118,7 @@
     },
     "/v1/projects/{p}/epics": {
       "get": {
+        "x-team-mode": "Team mode: with the optional header X-Aimem-Team-Context (an aimem-scoped acs1_ handle from aicrew) and a user-scoped individual bearer, the hub verifies the session online through aicrew introspection on every request, matches it to the authenticated user and token, and serves the read only under the linked team access profile's live grant, never the caller's personal grants. Refusals use the envelope with active_mode team: context_unavailable (503, retryable), context_stale, identity_mismatch, grant_denied, role_forbidden (403).",
         "summary": "List a project's epics (OPEN unless include_retired=true)",
         "description": "Ordinary user tokens may call this route. An epic is the grouping above tasks that a release or milestone maps to.",
         "x-role": "writer",
@@ -136,6 +138,7 @@
     },
     "/v1/projects/{p}/epics/{e}": {
       "get": {
+        "x-team-mode": "Team mode: with the optional header X-Aimem-Team-Context (an aimem-scoped acs1_ handle from aicrew) and a user-scoped individual bearer, the hub verifies the session online through aicrew introspection on every request, matches it to the authenticated user and token, and serves the read only under the linked team access profile's live grant, never the caller's personal grants. Refusals use the envelope with active_mode team: context_unavailable (503, retryable), context_stale, identity_mismatch, grant_denied, role_forbidden (403).",
         "summary": "Read one epic",
         "description": "Ordinary user tokens may call this route.",
         "x-role": "writer",
@@ -225,6 +228,7 @@
     },
     "/v1/projects/{p}/tasks": {
       "get": {
+        "x-team-mode": "Team mode: with the optional header X-Aimem-Team-Context (an aimem-scoped acs1_ handle from aicrew) and a user-scoped individual bearer, the hub verifies the session online through aicrew introspection on every request, matches it to the authenticated user and token, and serves the read only under the linked team access profile's live grant, never the caller's personal grants. Refusals use the envelope with active_mode team: context_unavailable (503, retryable), context_stale, identity_mismatch, grant_denied, role_forbidden (403).",
         "summary": "List task summaries of a project",
         "description": "Archived tasks are excluded unless include_archived=true. Pages default 20, max 100; pass next_cursor as after. Managed rows include a read-only coordination object with team_id and optional active attempt_id/state; standalone clients must skip them. Ordinary user tokens may call this route; writes are authorized per attempt against the task's owning project (user-scoped token or token issued for that project instance, plus a current grant), legacy writer tokens read only, admin tokens do everything.",
         "x-role": "writer",
@@ -360,6 +364,7 @@
     },
     "/v1/tasks/{id}": {
       "get": {
+        "x-team-mode": "Team mode: with the optional header X-Aimem-Team-Context (an aimem-scoped acs1_ handle from aicrew) and a user-scoped individual bearer, the hub verifies the session online through aicrew introspection on every request, matches it to the authenticated user and token, and serves the read only under the linked team access profile's live grant, never the caller's personal grants. Refusals use the envelope with active_mode team: context_unavailable (503, retryable), context_stale, identity_mismatch, grant_denied, role_forbidden (403).",
         "summary": "Read one task",
         "description": "Current content, revision, owning project (resolved at read time, so a rename is reflected) and origin-relative links. An optional read-only coordination object contains team_id and, when reserved, attempt_id/state; standalone clients must skip managed tasks even between attempts. Ordinary user tokens may call this route; writes are authorized per attempt against the task's owning project (user-scoped token or token issued for that project instance, plus a current grant), legacy writer tokens read only, admin tokens do everything.",
         "x-role": "writer",
@@ -447,6 +452,7 @@
     },
     "/v1/tasks/{id}/history": {
       "get": {
+        "x-team-mode": "Team mode: with the optional header X-Aimem-Team-Context (an aimem-scoped acs1_ handle from aicrew) and a user-scoped individual bearer, the hub verifies the session online through aicrew introspection on every request, matches it to the authenticated user and token, and serves the read only under the linked team access profile's live grant, never the caller's personal grants. Refusals use the envelope with active_mode team: context_unavailable (503, retryable), context_stale, identity_mismatch, grant_denied, role_forbidden (403).",
         "summary": "Accepted revisions in order",
         "description": "Each entry is the complete snapshot plus the actor; after is the last revision seen. Ordinary user tokens may call this route; writes are authorized per attempt against the task's owning project (user-scoped token or token issued for that project instance, plus a current grant), legacy writer tokens read only, admin tokens do everything.",
         "x-role": "writer",
@@ -494,6 +500,7 @@
     },
     "/v1/tasks/{id}/comments": {
       "get": {
+        "x-team-mode": "Team mode: with the optional header X-Aimem-Team-Context (an aimem-scoped acs1_ handle from aicrew) and a user-scoped individual bearer, the hub verifies the session online through aicrew introspection on every request, matches it to the authenticated user and token, and serves the read only under the linked team access profile's live grant, never the caller's personal grants. Refusals use the envelope with active_mode team: context_unavailable (503, retryable), context_stale, identity_mismatch, grant_denied, role_forbidden (403).",
         "summary": "Comments in append order",
         "description": "after is the last sequence seen; the cursor is stable while later comments arrive. Ordinary user tokens may call this route; writes are authorized per attempt against the task's owning project (user-scoped token or token issued for that project instance, plus a current grant), legacy writer tokens read only, admin tokens do everything.",
         "x-role": "writer",
@@ -597,6 +604,7 @@
     },
     "/v1/tasks/{id}/comments/{c}": {
       "get": {
+        "x-team-mode": "Team mode: with the optional header X-Aimem-Team-Context (an aimem-scoped acs1_ handle from aicrew) and a user-scoped individual bearer, the hub verifies the session online through aicrew introspection on every request, matches it to the authenticated user and token, and serves the read only under the linked team access profile's live grant, never the caller's personal grants. Refusals use the envelope with active_mode team: context_unavailable (503, retryable), context_stale, identity_mismatch, grant_denied, role_forbidden (403).",
         "summary": "Read one comment",
         "description": "A comment under the wrong task is not found. Ordinary user tokens may call this route; writes are authorized per attempt against the task's owning project (user-scoped token or token issued for that project instance, plus a current grant), legacy writer tokens read only, admin tokens do everything.",
         "x-role": "writer",

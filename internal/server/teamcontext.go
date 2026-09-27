@@ -3,21 +3,29 @@ package server
 // Team mode and the aicrew introspection it depends on (identity.v1 §3 and
 // §4, docs/DESIGN-AIFORGE-IDENTITY-WIRE.md).
 //
-// A request carrying X-Aimem-Team-Context is in team mode. No operation is
-// served in team mode yet, so the gate refuses every such request before
-// any handler runs and before aicrew is contacted; it never serves one as a
-// personal request. The introspection client is reached only by the
-// operator's peer check.
+// A request carrying X-Aimem-Team-Context is in team mode. It is served only
+// on the routes in teamRoutes, and only after the context is verified online:
+// one introspection of the handle, an exact match with the authenticated
+// individual credential, and a linked, enabled team access profile. The
+// resource check then evaluates that profile's live grant alone, never the
+// caller's personal grants. Any other route is refused before aicrew is
+// contacted, and no team-mode request is ever served as a personal one.
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"fmt"
 	"net/http"
 	"os"
+	"sort"
+	"strings"
+	"time"
 
 	"aimem/internal/access"
 	"aimem/internal/introspect"
+	"aimem/internal/store"
+	"aimem/internal/uuidv7"
 )
 
 const teamContextHeader = "X-Aimem-Team-Context"
@@ -42,26 +50,320 @@ func teamMode(r *http.Request) bool {
 	return ok
 }
 
-// refuseTeamMode answers a team-mode request. id is the authenticated caller,
-// or nil on the local socket. The handle is never echoed.
-func (s *Server) refuseTeamMode(w http.ResponseWriter, r *http.Request, id *Identity) {
-	values := r.Header.Values(teamContextHeader)
-	switch {
-	case len(values) != 1 || !introspect.ValidHandle(values[0]):
-		s.identityRefuse(w, "invalid_request")
-	case id == nil || id.Role != "user" || id.Scope != access.ScopeUser || id.Project != "":
-		s.identityRefuse(w, "credential_scope_forbidden")
-	default:
-		s.identityRefuse(w, "team_operation_unsupported")
+// teamRoutes is the complete team-mode surface (E4 seq186, D2): the context
+// report and the task and epic reads. Every other route, including every
+// write, /mcp and the knowledge routes, refuses a team-mode request with
+// team_operation_unsupported before aicrew is contacted.
+var teamRoutes = []string{
+	"GET /v1/access/identity",
+	"GET /v1/projects/{p}/tasks",
+	"GET /v1/tasks/{id}",
+	"GET /v1/tasks/{id}/history",
+	"GET /v1/tasks/{id}/comments",
+	"GET /v1/tasks/{id}/comments/{c}",
+	"GET /v1/projects/{p}/epics",
+	"GET /v1/projects/{p}/epics/{e}",
+}
+
+// teamRouteMux matches teamRoutes by the route mux's own rules.
+var teamRouteMux = func() *http.ServeMux {
+	m := http.NewServeMux()
+	for _, p := range teamRoutes {
+		m.HandleFunc(p, func(http.ResponseWriter, *http.Request) {})
 	}
+	return m
+}()
+
+func teamRouteServed(r *http.Request) bool {
+	if !canonicalPath(r) {
+		return false
+	}
+	_, pattern := teamRouteMux.Handler(r)
+	return pattern != ""
+}
+
+// teamReadRoles are aicrew's member roles; each may use every team route.
+var teamReadRoles = map[string]bool{"coordinator": true, "worker": true, "independent": true}
+
+// teamContext is a team context verified for one request.
+type teamContext struct {
+	introspect.Context
+	ProfileID     string
+	CorrelationID string
+}
+
+type teamContextKey struct{}
+
+func teamContextFrom(ctx context.Context) (teamContext, bool) {
+	tc, ok := ctx.Value(teamContextKey{}).(teamContext)
+	return tc, ok
+}
+
+// teamRefuse answers a team-mode refusal once the header and the credential
+// are valid: the envelope names the team mode and the correlation ID that
+// the audit record carries.
+func (s *Server) teamRefuse(w http.ResponseWriter, code, correlationID string) {
+	s.identityRefuseWith(w, code, "team", correlationID)
+}
+
+// teamAuditActor names the authenticated caller in the audit.
+func teamAuditActor(id Identity) string {
+	if id.Role == "user" {
+		return "user:" + id.UserID
+	}
+	return "credential:" + id.Name
+}
+
+// teamRequestRoute is the request line as the audit records it for a refusal
+// that happens before any route or session is known.
+func teamRequestRoute(r *http.Request) string {
+	line := r.Method + " " + r.URL.EscapedPath()
+	if len(line) > 200 {
+		line = line[:200]
+	}
+	return fmt.Sprintf("request=%q", line)
+}
+
+// teamDeny answers every team-mode refusal after authentication. It audits
+// team.refused.<code> under the caller, with detail and the correlation ID,
+// then answers in team mode under that same ID. An audit failure is logged;
+// the request is refused either way.
+func (s *Server) teamDeny(w http.ResponseWriter, id Identity, code, detail, cid string) {
+	subject := strings.TrimSpace(detail + " correlation=" + cid)
+	if db, err := s.openAccess(false); err != nil {
+		s.log.Error("team audit", "err", err)
+	} else if err := db.RecordTeamRequest(teamAuditActor(id), "team.refused."+code, subject); err != nil {
+		s.log.Error("team audit", "err", err)
+	}
+	s.log.Warn("team request refused", "code", code, "correlation_id", cid)
+	s.teamRefuse(w, code, cid)
+}
+
+// teamGate decides a team-mode request. id is the authenticated caller, or nil
+// on the local socket. It returns the verified context, or false once it has
+// answered the refusal. The handle is never echoed, logged or audited.
+func (s *Server) teamGate(w http.ResponseWriter, r *http.Request, id *Identity) (teamContext, bool) {
+	values := r.Header.Values(teamContextHeader)
+	shapeOK := len(values) == 1 && introspect.ValidHandle(values[0])
+	if id == nil {
+		// The local socket's caller is the operator, not an authenticated
+		// credential; there is no one to attribute an audit record to.
+		if !shapeOK {
+			s.identityRefuse(w, "invalid_request")
+		} else {
+			s.identityRefuse(w, "credential_scope_forbidden")
+		}
+		return teamContext{}, false
+	}
+	cid := uuidv7.New()
+	switch {
+	case !shapeOK:
+		s.teamDeny(w, *id, "invalid_request", teamRequestRoute(r), cid)
+		return teamContext{}, false
+	case id.Role != "user" || id.Scope != access.ScopeUser || id.Project != "":
+		s.teamDeny(w, *id, "credential_scope_forbidden", teamRequestRoute(r), cid)
+		return teamContext{}, false
+	case !teamRouteServed(r):
+		s.teamDeny(w, *id, "team_operation_unsupported", teamRequestRoute(r), cid)
+		return teamContext{}, false
+	}
+	return s.verifyTeamContext(w, r, *id, values[0], cid)
+}
+
+// verifyTeamContext runs the context contract's verifier after
+// authentication: the single operational peer, one introspection, the exact
+// binding to the authenticated credential, the linked enabled profile and the
+// role policy. Every outcome is audited under the request's correlation ID.
+func (s *Server) verifyTeamContext(w http.ResponseWriter, r *http.Request, id Identity, handle, cid string) (teamContext, bool) {
+	refuse := func(code, reason, detail string) (teamContext, bool) {
+		s.teamDeny(w, id, code, strings.TrimSpace(detail+" "+teamRequestRoute(r)+" reason="+reason), cid)
+		return teamContext{}, false
+	}
+	db, err := s.openAccess(false)
+	if err != nil {
+		return refuse("context_unavailable", "access_store", "")
+	}
+	peers, err := s.introspectionPeers(db)
+	if err != nil {
+		return refuse("context_unavailable", "peer_store", "")
+	}
+	var peer *peerState
+	for i := range peers {
+		if peers[i].NotOperational == "" {
+			if peer != nil {
+				return refuse("context_unavailable", "peer_ambiguous", "")
+			}
+			peer = &peers[i]
+		}
+	}
+	if peer == nil {
+		return refuse("context_unavailable", "not_operational", "")
+	}
+	got, err := s.introspect.Introspect(r.Context(), toIntrospectPeer(peer.IdentityPeer), handle)
+	if err != nil {
+		var f *introspect.Failure
+		code, reason := introspect.CodeUnavailable, "transport"
+		if errors.As(err, &f) {
+			code, reason = f.Code, f.Reason
+		}
+		// A reply naming another hub is about whose session this is, not
+		// about the peer: identity.v1 §4 calls it an identity mismatch.
+		if reason == "wrong_hub" {
+			code = "identity_mismatch"
+		}
+		return refuse(code, reason, "service="+peer.ServiceID)
+	}
+	detail := teamAuditDetail(got, r)
+	switch {
+	case got.UserID != id.UserID:
+		return refuse("identity_mismatch", "other_user", detail)
+	case got.TokenID != id.TokenID:
+		// The same person under a rotated credential: aicrew must re-prove
+		// the session before it binds to the new token.
+		return refuse("context_stale", "other_token", detail)
+	}
+	profile, err := db.TeamProfileByKey(got.ServiceID, got.TeamID)
+	switch {
+	case errors.Is(err, sql.ErrNoRows):
+		return refuse("context_stale", "no_profile", detail)
+	case err != nil:
+		return refuse("context_unavailable", "profile_store", detail)
+	case profile.Disabled:
+		return refuse("context_stale", "profile_disabled", detail)
+	case !teamReadRoles[got.Role]:
+		return refuse("role_forbidden", "role", detail)
+	}
+	if err := db.RecordTeamRequest(teamAuditActor(id), "team.verified", detail+" correlation="+cid); err != nil {
+		s.log.Error("team audit", "err", err)
+		return refuse("identity_unavailable", "audit", detail)
+	}
+	return teamContext{Context: got, ProfileID: profile.ID, CorrelationID: cid}, true
+}
+
+// teamAuditDetail names what the audit records about a verified session: the
+// service, team, session, generation, role and route. Never the handle.
+func teamAuditDetail(c introspect.Context, r *http.Request) string {
+	_, pattern := teamRouteMux.Handler(r)
+	return fmt.Sprintf("service=%s team=%s session=%s generation=%s role=%s route=%q",
+		c.ServiceID, c.TeamID, c.SessionID, c.Generation, c.Role, pattern)
+}
+
+// teamGrantDenied applies a verified team context's resource grant to
+// project, and answers the refusal when the linked profile has no live grant.
+// A personal request passes through untouched. It is called wherever a task
+// or epic read resolves its project (taskProject, locateTask).
+func (s *Server) teamGrantDenied(w http.ResponseWriter, r *http.Request, project string) bool {
+	tc, ok := teamContextFrom(r.Context())
+	if !ok {
+		return false
+	}
+	id, _ := IdentityFrom(r.Context())
+	detail := teamAuditDetail(tc.Context, r) + fmt.Sprintf(" project=%q", project)
+	allowed, err := s.teamGrantAllows(id, tc, project)
+	if err != nil {
+		s.log.Error("team grant check", "project", project, "err", err)
+		s.teamDeny(w, id, "identity_unavailable", detail+" reason=grant_store", tc.CorrelationID)
+		return true
+	}
+	if allowed {
+		return false
+	}
+	s.teamDeny(w, id, "grant_denied", detail, tc.CorrelationID)
+	return true
+}
+
+// teamGrantAllows evaluates only the linked profile's live grant on the
+// project's access instance, together with the caller's live individual
+// token. Personal and group grants never count.
+func (s *Server) teamGrantAllows(id Identity, tc teamContext, project string) (bool, error) {
+	instance, err := s.reg.ExistingProjectAccessID(project)
+	if err != nil || instance == "" {
+		return false, err
+	}
+	db, err := s.openAccess(false)
+	if err != nil {
+		return false, err
+	}
+	return db.TeamGrantAllows(id.UserID, id.TokenID, tc.ProfileID, instance)
+}
+
+// teamContextReport is GET /v1/access/identity in team mode: the verified
+// session and the projects its profile currently grants. Knowledge access is
+// reported unavailable until the knowledge matrix exists.
+func (s *Server) teamContextReport(w http.ResponseWriter, r *http.Request, id Identity, tc teamContext) {
+	unavailable := func(reason string) {
+		s.teamDeny(w, id, "identity_unavailable", teamAuditDetail(tc.Context, r)+" reason="+reason, tc.CorrelationID)
+	}
+	db, err := s.openAccess(false)
+	if err != nil {
+		unavailable("access_store")
+		return
+	}
+	instances, err := db.TeamGrantProjects(tc.ProfileID)
+	if err != nil {
+		unavailable("grant_store")
+		return
+	}
+	granted := map[string]bool{}
+	for _, i := range instances {
+		granted[i] = true
+	}
+	names, err := s.reg.Projects()
+	if err != nil {
+		unavailable("registry")
+		return
+	}
+	projects := []string{}
+	for _, p := range names {
+		if store.IsReservedProject(p) {
+			continue
+		}
+		if instance, err := s.reg.ExistingProjectAccessID(p); err == nil && instance != "" && granted[instance] {
+			projects = append(projects, p)
+		}
+	}
+	sort.Strings(projects)
+	out := map[string]any{
+		"mode": "team", "name": id.Name, "user_id": id.UserID, "token_id": id.TokenID, "role": "user", "scope": id.Scope,
+		"team": map[string]string{
+			"service_id": tc.ServiceID, "team_id": tc.TeamID, "agent_id": tc.AgentID, "role": tc.Role,
+			"session_id": tc.SessionID, "generation": tc.Generation, "handle_expires_at": tc.HandleExpiresAt.Format(time.RFC3339),
+		},
+		"task_read": "granted-projects", "task_write": false, "projects": projects,
+		"knowledge": "unavailable", "correlation_id": tc.CorrelationID,
+	}
+	if project := r.URL.Query().Get("project"); project != "" {
+		pdb, err := s.reg.OpenExisting(project)
+		if errors.Is(err, store.ErrNoSuchProject) {
+			s.fail(w, http.StatusNotFound, fmt.Errorf("unknown project"))
+			return
+		}
+		if err != nil {
+			unavailable("project_store")
+			return
+		}
+		tasksOn, err := pdb.TasksEnabled()
+		if err != nil {
+			unavailable("project_store")
+			return
+		}
+		allowed, err := s.teamGrantAllows(id, tc, project)
+		if err != nil {
+			unavailable("grant_store")
+			return
+		}
+		out["project"], out["tasks_enabled"], out["project_read"] = project, tasksOn, allowed
+	}
+	w.Header().Set("Cache-Control", "no-store")
+	s.ok(w, out)
 }
 
 // localTeamGate guards the local socket, whose caller is the operator rather
-// than an individual credential: a team-mode request is refused there too.
+// than an individual credential: a team-mode request is refused there.
 func (s *Server) localTeamGate(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if teamMode(r) {
-			s.refuseTeamMode(w, r, nil)
+			s.teamGate(w, r, nil)
 			return
 		}
 		next.ServeHTTP(w, r)

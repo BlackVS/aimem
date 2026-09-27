@@ -171,7 +171,7 @@ func TestSchema4MigrationPreservesSchema3(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	profile, err := s.createTeamProfile("admin", "aicrew-example", "team-example")
+	profile, err := s.CreateTeamProfile("admin", "aicrew-example", "team-example")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -205,7 +205,7 @@ func TestSchema4MigrationPreservesSchema3(t *testing.T) {
 		if ok, err := s.CanWriteToken(u.ID, tok.ID, "project-instance"); err != nil || !ok {
 			t.Fatalf("standalone grant lost: %v %v", ok, err)
 		}
-		if p, err := s.teamProfileByKey("aicrew-example", "team-example"); err != nil || p.ID != profile.ID {
+		if p, err := s.TeamProfileByKey("aicrew-example", "team-example"); err != nil || p.ID != profile.ID {
 			t.Fatalf("team profile lost: %+v %v", p, err)
 		}
 		for _, table := range []string{"identity_peers", "identity_peer_credentials", "identity_receipts", "identity_redemptions"} {
