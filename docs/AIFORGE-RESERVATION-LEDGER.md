@@ -43,6 +43,7 @@ C5a (task 01a0e39c-8769, from C5 seq196 with operator decisions D2(a), D3(a) and
 - The authorizer checks the caller's current authority before the transaction, and again inside it immediately before commit and on replay: a live credential, an enabled user and profile, and the personal write grant or the team profile's grant on the project. The claim path's dependency verifier applies the same check.
 - A team context's online answer is accepted only while it is at most five seconds old.
 - A refusal inside the ledger keeps its wire code; the claim path now wraps the verifier's error rather than flattening it.
+- Update, release and finalize run through `Registry.ApplyTaskReservation`, which holds the project lifecycle read lock across the transaction, as a claim does. Drop, rename and merge take that lock before the registry mutex and then wait for the project's single connection. Without it, the in-transaction recheck (which reads the registry) and a concurrent lifecycle operation could each wait on the other.
 
 **What C5a authorizes:**
 - **Personal context:** claim, update, release and finalize of `standalone` holds, under the caller's personal write grant.

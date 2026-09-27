@@ -171,7 +171,7 @@ func (s *Server) reserve(ctx context.Context, op store.ReservationOperation, in 
 	if err := reservationPermits(c, op, in); err != nil {
 		return store.TaskReservationOutcome{}, err
 	}
-	project, db, instance, err := s.reservationTarget(in.TaskID)
+	project, _, instance, err := s.reservationTarget(in.TaskID)
 	if err != nil {
 		return store.TaskReservationOutcome{}, err
 	}
@@ -195,7 +195,7 @@ func (s *Server) reserve(ctx context.Context, op store.ReservationOperation, in 
 		}
 		out, err = s.reg.ClaimTaskReservation(ctx, in, c.actor, c.binding, key, verify)
 	} else {
-		out, err = db.ApplyTaskReservation(op, in, c.actor, c.binding, key, func() error {
+		out, err = s.reg.ApplyTaskReservation(ctx, op, in, c.actor, c.binding, key, func() error {
 			if beforeReservationRecheck != nil {
 				beforeReservationRecheck()
 			}

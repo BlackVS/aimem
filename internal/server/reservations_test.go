@@ -536,3 +536,44 @@ func TestReservationClaimDependencies(t *testing.T) {
 		t.Fatalf("claim with a done dependency: %+v, %v", out, err)
 	}
 }
+
+// A project lifecycle operation that starts while a transition is at its
+// final recheck waits for the transition, and both finish: the recheck reads
+// the registry, and Drop, rename and merge hold the registry while they wait
+// for the project's connection.
+func TestReservationTransitionAndProjectDropBothFinish(t *testing.T) {
+	g := newReservationRig(t)
+	alice := g.personal(g.aliceIdentity)
+	task := g.readyTask(t, g.alpha)
+	hold, err := g.s.reserve(alice, store.ReservationClaim, claimOf(task), "claim")
+	if err != nil {
+		t.Fatal(err)
+	}
+	dropped := make(chan error, 1)
+	beforeReservationRecheck = func() {
+		beforeReservationRecheck = nil
+		go func() { dropped <- g.s.reg.Drop("alpha") }()
+		time.Sleep(200 * time.Millisecond) // let Drop reach its locks
+	}
+	t.Cleanup(func() { beforeReservationRecheck = nil })
+	updated := make(chan error, 1)
+	go func() {
+		_, err := g.s.reserve(alice, store.ReservationUpdate, nextOf(task, hold, "IN_PROGRESS"), "update")
+		updated <- err
+	}()
+	deadline := time.After(20 * time.Second)
+	for i := 0; i < 2; i++ {
+		select {
+		case err := <-updated:
+			if err != nil {
+				t.Fatalf("update beside a drop: %v", err)
+			}
+		case err := <-dropped:
+			if !errors.Is(err, store.ErrProjectHasTasks) {
+				t.Fatalf("drop of a project with tasks: %v", err)
+			}
+		case <-deadline:
+			panic("a reservation transition and a project drop deadlocked")
+		}
+	}
+}

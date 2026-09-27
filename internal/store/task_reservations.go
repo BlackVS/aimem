@@ -5,6 +5,7 @@ package store
 // The caller policy and generic task-write protection belong to later work.
 
 import (
+	"context"
 	"database/sql"
 	"encoding/json"
 	"errors"
@@ -405,6 +406,30 @@ func (d *DB) ApplyTaskReservation(op ReservationOperation, in TaskReservationInp
 			}
 			return TaskReservationOutcome{Task: t, Reservation: r}, nil
 		}, authorize)
+}
+
+// ApplyTaskReservation runs a non-claim transition under the registry's
+// project lifecycle read lock, as ClaimTaskReservation does. Drop, rename
+// and merge take that lock before the registry mutex and then wait for the
+// project's single connection; holding it across the transaction keeps
+// authorize, which reads the registry, from waiting on a lifecycle
+// operation that waits on this transaction.
+func (r *Registry) ApplyTaskReservation(ctx context.Context, op ReservationOperation, in TaskReservationInput, actor TaskActor,
+	binding ReservationBinding, key string, authorize func() error) (TaskReservationOutcome, error) {
+	if op == ReservationClaim {
+		return TaskReservationOutcome{}, invalid(errors.New("a claim goes through ClaimTaskReservation"))
+	}
+	ctx, cancel := context.WithTimeout(ctx, dependencyClaimTimeout)
+	defer cancel()
+	if err := r.lockClaimLifecycle(ctx); err != nil {
+		return TaskReservationOutcome{}, err
+	}
+	defer r.teamMu.RUnlock()
+	_, db, err := r.LocateTask(in.TaskID)
+	if err != nil {
+		return TaskReservationOutcome{}, err
+	}
+	return db.ApplyTaskReservation(op, in, actor, binding, key, authorize)
 }
 
 // GetTaskReservation is an internal status read. The caller must supply its
