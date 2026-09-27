@@ -231,6 +231,10 @@ func runIdentity(args []string, out io.Writer) error {
 		if *endpoint == "" || *trustDNS == (*trustPin != "") {
 			return fmt.Errorf("peer register needs --endpoint and exactly one of --peer-trust-dns or --peer-trust-pin")
 		}
+	case "team create":
+		if pos[1] == "." || pos[1] == ".." {
+			return fmt.Errorf("team ID %q is not allowed: a team ID cannot be \".\" or \"..\"", pos[1])
+		}
 	case "team revoke":
 		if (len(pos) == 3) == (*instance != "") {
 			return fmt.Errorf("team revoke needs exactly one of PROJECT or --instance ID")

@@ -271,7 +271,7 @@ func TestTeamProfileCreationAndAudit(t *testing.T) {
 	if err := s.SetIdentityPeerDisabled("admin", "aicrew-example", true); err != nil {
 		t.Fatal(err)
 	}
-	for _, bad := range []string{"", "team one", "team/1", strings.Repeat("t", 129), "t\n"} {
+	for _, bad := range []string{"", "team one", "team/1", strings.Repeat("t", 129), "t\n", ".", ".."} {
 		if _, err := s.CreateTeamProfile("admin", "aicrew-example", bad); !errors.Is(err, ErrInvalidRequest) {
 			t.Errorf("team ID %q accepted: %v", bad, err)
 		}

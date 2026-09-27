@@ -88,6 +88,8 @@ func TestTeamProfileRoutes(t *testing.T) {
 		`{"team_id":"team-1"}`:            409,
 		`{"team_id":"team one"}`:          400,
 		`{"team_id":"team/1"}`:            400,
+		`{"team_id":"."}`:                 400,
+		`{"team_id":".."}`:                400,
 		`{}`:                              400,
 		`{"team_id":"t","role":"worker"}`: 400,
 	} {
@@ -124,6 +126,7 @@ func TestTeamProfileRoutes(t *testing.T) {
 	if id, err := g.s.reg.ExistingProjectAccessID("beta"); err != nil || id != "" {
 		t.Fatalf("revoke minted an access instance for beta: %q %v", id, err)
 	}
+	g.auditHas(t, "team_grant.false", "env", "team=team-1", "project=beta", "instance=none")
 	// An orphaned instance is listed without a project and revoked by ID.
 	orphan := "01a0e121-0000-7000-8000-000000000001"
 	db, _ := g.s.openAccess(false)

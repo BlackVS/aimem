@@ -54,6 +54,11 @@ func (s *Store) CreateTeamProfile(actor, serviceID, teamID string) (TeamProfile,
 	if !identityIDPattern.MatchString(teamID) {
 		return TeamProfile{}, fmt.Errorf("%w: team ID must be 1-128 of A-Z a-z 0-9 . _ : -", ErrInvalidRequest)
 	}
+	// A dot-only ID would be a "." or ".." path segment, which routers clean
+	// away; aicrew generates its team IDs, so no real team is dot-only.
+	if teamID == "." || teamID == ".." {
+		return TeamProfile{}, fmt.Errorf("%w: a team ID cannot be \".\" or \"..\"", ErrInvalidRequest)
+	}
 	p := TeamProfile{ID: uuidv7.New(), ServiceID: serviceID, TeamID: teamID}
 	err := s.change(actor, "team_profile.create", teamAuditSubject(p, ""), func(tx *sql.Tx) error {
 		var peers int
@@ -214,4 +219,15 @@ func (s *Store) TeamGrantInstances(profileID string) ([]string, error) {
 		out = append(out, p)
 	}
 	return out, rows.Err()
+}
+
+// RecordTeamRevokeWithoutInstance audits a revoke by project name for a
+// project that has never had an access instance. Nothing can be granted
+// there, so nothing changes, but the admin's request stays in the audit.
+func (s *Store) RecordTeamRevokeWithoutInstance(actor, profileID, project string) error {
+	p, err := s.teamProfileByID(profileID)
+	if err != nil {
+		return err
+	}
+	return s.change(actor, "team_grant.false", teamAuditSubject(p, "")+" project="+project+" instance=none", func(*sql.Tx) error { return nil })
 }

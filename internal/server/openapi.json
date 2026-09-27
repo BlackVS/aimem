@@ -1449,7 +1449,7 @@
       },
       "post": {
         "summary": "Create a team access profile",
-        "description": "Links aicrew's team ID to this hub under a registered peer (enabled or disabled). The team ID is 1-128 of A-Z a-z 0-9 . _ : -. The link is immutable: there is no delete; disable it instead. Audited as team_profile.create. Hub admin only. Requires TLS terminated by this hub: plain HTTP, a TLS-terminating proxy and the unix socket are refused with tls_required, and forwarded headers never count. Not exposed as an MCP tool.",
+        "description": "Links aicrew's team ID to this hub under a registered peer (enabled or disabled). The team ID is 1-128 of A-Z a-z 0-9 . _ : -, and not \".\" or \"..\". The link is immutable: there is no delete; disable it instead. Audited as team_profile.create. Hub admin only. Requires TLS terminated by this hub: plain HTTP, a TLS-terminating proxy and the unix socket are refused with tls_required, and forwarded headers never count. Not exposed as an MCP tool.",
         "x-role": "admin",
         "x-requires-tls": true,
         "parameters": [

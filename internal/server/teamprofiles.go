@@ -235,6 +235,10 @@ func (s *Server) revokeTeamProject(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if instance == "" {
+		if err := db.RecordTeamRevokeWithoutInstance(accessActor(r), p.ID, project); err != nil {
+			s.fail(w, http.StatusInternalServerError, fmt.Errorf("cannot record the revoke"))
+			return
+		}
 		s.ok(w, map[string]any{"ok": true, "team_id": p.TeamID, "project": project, "revoked": false})
 		return
 	}

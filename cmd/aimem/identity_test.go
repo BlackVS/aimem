@@ -870,5 +870,15 @@ func TestIdentityCLITeamProfiles(t *testing.T) {
 	if _, err := g.run(t, "team", "grant", "aicrew-example", "team-1", "missing"); err == nil || !strings.Contains(err.Error(), "404") {
 		t.Fatalf("grant of an unknown project: %v", err)
 	}
+	// "." and ".." are refused as team IDs, by the CLI before any request.
+	before = g.requests.Load()
+	for _, team := range []string{".", ".."} {
+		if _, err := g.run(t, "team", "create", "aicrew-example", team); err == nil || !strings.Contains(err.Error(), "cannot be") {
+			t.Fatalf("team ID %q: %v", team, err)
+		}
+	}
+	if g.requests.Load() != before {
+		t.Fatal("a dot-only team ID reached the hub")
+	}
 	g.assertNoSecrets(t)
 }
