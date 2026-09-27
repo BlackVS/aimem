@@ -117,7 +117,7 @@ func (r *Registry) locateDependencyGraph(ctx context.Context, owner Task,
 		}
 		project, db, err := r.LocateTask(id)
 		if err != nil {
-			return nil, fmt.Errorf("%w: %v", ErrDependencyUnresolved, err)
+			return nil, fmt.Errorf("%w: %w", ErrDependencyUnresolved, err)
 		}
 		if err := ctx.Err(); err != nil {
 			return nil, err
@@ -128,13 +128,13 @@ func (r *Registry) locateDependencyGraph(ctx context.Context, owner Task,
 		}
 		if !verified[project] {
 			if err := verify(ctx, project, accessID); err != nil {
-				return nil, fmt.Errorf("%w: %v", ErrDependencyUnresolved, err)
+				return nil, fmt.Errorf("%w: %w", ErrDependencyUnresolved, err)
 			}
 			verified[project] = true
 		}
 		task, err := db.GetTask(id)
 		if err != nil {
-			return nil, fmt.Errorf("%w: %v", ErrDependencyUnresolved, err)
+			return nil, fmt.Errorf("%w: %w", ErrDependencyUnresolved, err)
 		}
 		nodes[id] = dependencyNode{task: task, project: project, accessID: accessID, db: db}
 		pending = append(pending, task.Dependencies...)
@@ -191,7 +191,7 @@ func validateDependencyGraph(ownerID string, nodes map[string]dependencyNode, tx
 				return Task{}, nil, ErrDependencyUnresolved
 			}
 			if err := verify(ctx, node.project, node.accessID); err != nil {
-				return Task{}, nil, fmt.Errorf("%w: %v", ErrDependencyUnresolved, err)
+				return Task{}, nil, fmt.Errorf("%w: %w", ErrDependencyUnresolved, err)
 			}
 			checked[node.project] = true
 		}
@@ -258,7 +258,7 @@ func validateDependencyGraph(ownerID string, nodes map[string]dependencyNode, tx
 // It writes only the owner DB; dependency write-intent transactions remain
 // open until the owner claim and receipt commit. It authorizes no actor role.
 func (r *Registry) ClaimTaskReservation(ctx context.Context, in TaskReservationInput, actor TaskActor,
-	key string, verify DependencyReadVerifier) (TaskReservationOutcome, error) {
+	binding ReservationBinding, key string, verify DependencyReadVerifier) (TaskReservationOutcome, error) {
 	if err := validateReservationInput(ReservationClaim, &in); err != nil {
 		return TaskReservationOutcome{}, err
 	}
@@ -283,11 +283,11 @@ func (r *Registry) ClaimTaskReservation(ctx context.Context, in TaskReservationI
 		return TaskReservationOutcome{}, ErrDependencyUnresolved
 	}
 	if err := verify(ctx, project, ownerAccessID); err != nil {
-		return TaskReservationOutcome{}, fmt.Errorf("%w: %v", ErrDependencyUnresolved, err)
+		return TaskReservationOutcome{}, fmt.Errorf("%w: %w", ErrDependencyUnresolved, err)
 	}
 	// A committed retry is an outcome lookup, not a fresh eligibility
 	// decision. It must remain recoverable if a dependency later reopens.
-	if prior, found, err := db.GetTaskReservationReceipt(ReservationClaim, in, actor, key); err != nil {
+	if prior, found, err := db.GetTaskReservationReceipt(ReservationClaim, in, actor, binding, key); err != nil {
 		return TaskReservationOutcome{}, err
 	} else if found {
 		return prior, nil
@@ -350,12 +350,12 @@ func (r *Registry) ClaimTaskReservation(ctx context.Context, in TaskReservationI
 				return ErrDependencyUnresolved
 			}
 			if err := verify(ctx, p, accessID); err != nil {
-				return fmt.Errorf("%w: %v", ErrDependencyUnresolved, err)
+				return fmt.Errorf("%w: %w", ErrDependencyUnresolved, err)
 			}
 		}
 		return ctx.Err()
 	}
-	out, err := reservationMutationTx(db, ownerTx, actor, ReservationClaim, in, key,
+	out, err := reservationMutationTx(db, ownerTx, actor, binding, ReservationClaim, in, key,
 		func(tx *sql.Tx) (TaskReservationOutcome, error) {
 			current, deps, err := validateDependencyGraph(in.TaskID, nodes, txs, verify, ctx)
 			if err != nil {
@@ -378,11 +378,11 @@ func (r *Registry) ClaimTaskReservation(ctx context.Context, in TaskReservationI
 				return TaskReservationOutcome{}, ErrReservationConflict
 			}
 			before := hold
-			hold.ID, hold.Holder = uuidv7.New(), in.Holder
+			hold.ID, hold.Holder, hold.Binding = uuidv7.New(), in.Holder, binding
 			if err := advanceReservation(tx, &hold); err != nil {
 				return TaskReservationOutcome{}, err
 			}
-			if err := recordReservationEvent(tx, ReservationClaim, before, hold, actor, "", evidence); err != nil {
+			if err := recordReservationEvent(tx, ReservationClaim, before, hold, actor, binding, "", evidence); err != nil {
 				return TaskReservationOutcome{}, err
 			}
 			return TaskReservationOutcome{Task: current, Reservation: hold}, nil
@@ -422,7 +422,7 @@ func (r *Registry) ReconcileReservationDependencies(ctx context.Context, taskID 
 		return true, ErrDependencyUnresolved
 	}
 	if err := verify(ctx, project, accessID); err != nil {
-		return true, fmt.Errorf("%w: %v", ErrDependencyUnresolved, err)
+		return true, fmt.Errorf("%w: %w", ErrDependencyUnresolved, err)
 	}
 	hold, err := db.GetTaskReservation(taskID)
 	if err != nil {
@@ -478,7 +478,7 @@ func (r *Registry) ReconcileReservationDependencies(ctx context.Context, taskID 
 			return true, ErrDependencyUnresolved
 		}
 		if err := verify(ctx, located, currentAccess); err != nil {
-			return true, fmt.Errorf("%w: %v", ErrDependencyUnresolved, err)
+			return true, fmt.Errorf("%w: %w", ErrDependencyUnresolved, err)
 		}
 		on, err := depDB.TasksEnabled()
 		if err != nil || !on {

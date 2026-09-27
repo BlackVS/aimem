@@ -492,7 +492,7 @@ func (r *Registry) Close() {
 	r.dbs = map[string]*DB{}
 }
 
-const currentSchema = 19
+const currentSchema = 20
 
 // SetMeta / GetMeta store small key-value project metadata (e.g. the
 // project's declared knowledge groups, stamped from event pushes so the
@@ -1010,6 +1010,23 @@ CREATE TABLE task_reservation_requests(
   result TEXT NOT NULL,
   PRIMARY KEY(principal, operation, task_id, key));
 UPDATE meta SET value='19' WHERE key='schema_version';`); err != nil {
+			return err
+		}
+	}
+	if v < 20 {
+		// The verified binding of a reservation's holder (task C5a): who holds
+		// it, in which mode and under which team profile, role, session and
+		// generation. A hold from before this version has no binding and so
+		// matches no caller: it stays held until recovery (C5c) closes it.
+		if err := d.step(`
+ALTER TABLE task_reservations ADD COLUMN bound_user TEXT NOT NULL DEFAULT '';
+ALTER TABLE task_reservations ADD COLUMN bound_mode TEXT NOT NULL DEFAULT '';
+ALTER TABLE task_reservations ADD COLUMN bound_profile TEXT NOT NULL DEFAULT '';
+ALTER TABLE task_reservations ADD COLUMN bound_team TEXT NOT NULL DEFAULT '';
+ALTER TABLE task_reservations ADD COLUMN bound_role TEXT NOT NULL DEFAULT '';
+ALTER TABLE task_reservations ADD COLUMN bound_session TEXT NOT NULL DEFAULT '';
+ALTER TABLE task_reservations ADD COLUMN bound_generation TEXT NOT NULL DEFAULT '';
+UPDATE meta SET value='20' WHERE key='schema_version';`); err != nil {
 			return err
 		}
 	}
