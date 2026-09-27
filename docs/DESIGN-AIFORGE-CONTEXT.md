@@ -139,7 +139,7 @@ E5a implements the client half of slice 3 (task E5a, decisions in E5 seq193). **
 **Commands run by the aicrew client, never by a model.**
 - **`aimem identity proof --peer SERVICE --hub-id HUB --challenge ID`.** It asks the hub for a single-use proof receipt with the individual credential. It writes the receipt to stdout **only when stdout is a pipe**, and checks this before any request, so a terminal or a file is refused and the receipt never reaches a screen, a model's context or a transcript.
 - **`aimem team-session open --service S --team T --session ID`.** It reads the aimem-scoped handle from **stdin only**, never argv, and verifies it online. One team-mode context report must name the same service, team and session. It then writes a private session file under the state root, at `aicrew-sessions/<digest of the session ID>.json`: owner-only on Unix, an owner-only protected DACL on Windows. It prints the file's path.
-- **`refresh ID`** verifies a new handle and replaces the file atomically. **`close ID`** removes it. **`status ID`** shows the binding without the handle.
+- **`refresh ID`** verifies a new handle and replaces the file atomically. **`close ID`** removes it once the hub confirms the session has ended (E5b). **`status ID`** shows the binding without the handle.
 
 The file holds the hub name and URL, the user and token IDs, the service, team and session, the generation, and the handle with its expiry. It never holds the individual token or aicrew's token.
 
