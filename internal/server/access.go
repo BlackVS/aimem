@@ -277,6 +277,10 @@ func (s *Server) accessIdentity(w http.ResponseWriter, r *http.Request) {
 		s.fail(w, 401, fmt.Errorf("bearer authentication required"))
 		return
 	}
+	if tc, ok := teamContextFrom(r.Context()); ok {
+		s.teamContextReport(w, r, id, tc)
+		return
+	}
 	project := r.URL.Query().Get("project")
 	// tasks_enabled is the per-project admin setting, answered to every
 	// credential that names a project: the task page labels the project
