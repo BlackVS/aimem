@@ -162,4 +162,10 @@ E5b completes slice 3 (task E5b; the corrections are in its seq194).
 - **Restart and rotation.** A new `aimem mcp` process restores only the session file and verifies online before its first tool. An expired, ended or unknown session answers `context_stale`, and an incomplete file never reaches the hub.
   - After the individual token rotates, every call answers `context_stale` until aicrew re-proves the session under the new token and runs `aimem team-session refresh`. The refresh may move the token ID and the generation; the pinned binding stays.
 - **Close.** `aimem team-session close` drops the file only after the hub answers `context_stale` for its handle, meaning aicrew has ended the session. An active session, or a hub that cannot answer, keeps the file. A file that cannot be loaded, or that other accounts can read, binds no conversation and is removed.
+- **Overlapping lifecycle commands.** `open`, `refresh` and `close` verify with the hub first. They then take a lock on the state root's `aicrew-sessions/.lock` for the local step alone, and write only if the file still holds what they started from:
+  - `open` writes only if no session file exists yet;
+  - `refresh` replaces only the handle it loaded;
+  - `close` removes only the file it judged.
+
+  A command that finds the file changed meanwhile writes nothing and says so. Whoever the caller is, no command undoes another's newer write. The lock is an OS file lock, released if its holder dies, and it never covers a network call.
 - **Legacy team state.** Aicrew session files live in `aicrew-sessions/`. The legacy team feature keeps `team-sessions/`. Neither side's operations read or write the other's files, and a team conversation's MCP refuses the legacy `team_*` tools.

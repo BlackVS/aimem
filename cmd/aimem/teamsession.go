@@ -208,7 +208,13 @@ func runAicrewSession(args []string, stdin io.Reader, out io.Writer, root string
 		if err != nil {
 			return err
 		}
-		if err := teamsession.Save(path, f); err != nil {
+		err = teamsession.Locked(root, func() error {
+			if _, err := os.Lstat(path); err == nil {
+				return fmt.Errorf("team session %s was opened by another command meanwhile; nothing was written", *session)
+			}
+			return teamsession.Save(path, f)
+		})
+		if err != nil {
 			return err
 		}
 		fmt.Fprintln(out, path)
@@ -233,7 +239,13 @@ func runAicrewSession(args []string, stdin io.Reader, out io.Writer, root string
 		if f.Binding() != old.Binding() {
 			return errors.New("the refreshed handle belongs to another hub or user; the session file was left as it was")
 		}
-		if err := teamsession.Save(path, f); err != nil {
+		err = teamsession.Locked(root, func() error {
+			if cur, err := loadSettled(path); err != nil || cur.Handle != old.Handle {
+				return fmt.Errorf("team session %s was closed or refreshed by another command meanwhile; nothing was written", rest[0])
+			}
+			return teamsession.Save(path, f)
+		})
+		if err != nil {
 			return err
 		}
 		fmt.Fprintf(out, "team session %s refreshed (generation %s)\n", f.SessionID, f.Generation)
@@ -247,14 +259,8 @@ func runAicrewSession(args []string, stdin io.Reader, out io.Writer, root string
 			fmt.Fprintf(out, "team session %s is not open here\n", rest[0])
 			return nil
 		}
-		f, err := teamsession.Load(path)
-		// A conversation re-reading the file can make a load fail for an
-		// instant on Windows; retry before deciding the file is unusable.
-		for i := 0; err != nil && i < 5; i++ {
-			time.Sleep(20 * time.Millisecond)
-			f, err = teamsession.Load(path)
-		}
-		if err == nil {
+		f, loadErr := loadSettled(path)
+		if loadErr == nil {
 			// Local state is dropped only once the hub says the session has
 			// ended: an active session, or a hub that cannot answer, keeps it.
 			if err := confirmEnded(root, f); err != nil {
@@ -263,8 +269,19 @@ func runAicrewSession(args []string, stdin io.Reader, out io.Writer, root string
 		}
 		// A file that cannot be loaded can bind no conversation, and one
 		// readable by other accounts should not keep its handle; either way
-		// it goes.
-		if err := os.Remove(path); err != nil {
+		// it goes. What goes is only the file this command judged: one that
+		// a refresh replaced meanwhile is kept.
+		err := teamsession.Locked(root, func() error {
+			cur, err := loadSettled(path)
+			switch {
+			case errors.Is(err, os.ErrNotExist):
+				return nil
+			case (err == nil) != (loadErr == nil) || (err == nil && cur.Handle != f.Handle):
+				return fmt.Errorf("team session %s was kept: another command changed it meanwhile; run close again", rest[0])
+			}
+			return os.Remove(path)
+		})
+		if err != nil {
 			return err
 		}
 		fmt.Fprintf(out, "team session %s closed\n", rest[0])
@@ -286,6 +303,21 @@ func runAicrewSession(args []string, stdin io.Reader, out io.Writer, root string
 		return nil
 	}
 	return usage
+}
+
+// loadSettled loads a session file, retrying briefly: a conversation
+// re-reading the file can make a load fail for an instant on Windows. A
+// missing file is reported at once, as os.ErrNotExist.
+func loadSettled(path string) (teamsession.File, error) {
+	if _, err := os.Lstat(path); err != nil {
+		return teamsession.File{}, err
+	}
+	f, err := teamsession.Load(path)
+	for i := 0; err != nil && i < 5; i++ {
+		time.Sleep(20 * time.Millisecond)
+		f, err = teamsession.Load(path)
+	}
+	return f, err
 }
 
 // confirmEnded asks the hub whether the session file's handle is still

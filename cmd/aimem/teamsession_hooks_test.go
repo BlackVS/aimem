@@ -162,7 +162,13 @@ func TestAicrewSessionsAndLegacyTeamStateNeverCross(t *testing.T) {
 		t.Fatal("legacy team state operations changed the aicrew session file")
 	}
 	entries, _ := os.ReadDir(teamsession.Dir(g.state))
-	if len(entries) != 1 {
-		t.Fatalf("the aicrew session directory holds %d entries", len(entries))
+	var names []string
+	for _, e := range entries {
+		if e.Name() != ".lock" { // the lifecycle commands' lock file
+			names = append(names, e.Name())
+		}
+	}
+	if len(names) != 1 {
+		t.Fatalf("the aicrew session directory holds %v", names)
 	}
 }
