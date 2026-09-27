@@ -3,6 +3,7 @@ package access
 import (
 	"database/sql"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
@@ -84,11 +85,12 @@ func TestTeamProfileGrantIsSeparateAndLive(t *testing.T) {
 	if err := s.SetGrant("admin", "personal", "user", u.ID, true); err != nil {
 		t.Fatal(err)
 	}
+	registerTestPeer(t, s, "service-1")
 	p, err := s.CreateTeamProfile("admin", "service-1", "team-1")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.CreateTeamProfile("admin", "service-1", "team-1"); err == nil {
+	if _, err := s.CreateTeamProfile("admin", "service-1", "team-1"); !errors.Is(err, ErrTeamProfileExists) {
 		t.Fatal("duplicate peer/team link accepted")
 	}
 	if err := s.SetTeamGrant("admin", "team-project", p.ID, true); err != nil {
@@ -202,6 +204,7 @@ func TestTeamProfileGrantFollowsProjectInstanceRename(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	registerTestPeer(t, s, "service-1")
 	p, err := s.CreateTeamProfile("admin", "service-1", "team-1")
 	if err != nil {
 		t.Fatal(err)
@@ -243,5 +246,87 @@ func TestTeamProfileGrantFollowsProjectInstanceRename(t *testing.T) {
 	}
 	if _, err := s.TeamProfileByKey("service-2", "team-1"); !errors.Is(err, sql.ErrNoRows) {
 		t.Fatalf("wrong service resolved profile: %v", err)
+	}
+}
+
+// registerTestPeer registers service as this hub's identity peer.
+func registerTestPeer(t *testing.T, s *Store, service string) {
+	t.Helper()
+	hub, err := s.HubID()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.RegisterIdentityPeer("admin", IdentityPeer{ServiceID: service, HubID: hub,
+		Endpoint: "https://aicrew.example/v1/crew/introspect", TLSMode: "ca_dns", TLSValue: "aicrew.example"}); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestTeamProfileCreationAndAudit(t *testing.T) {
+	s := testStore(t)
+	if _, err := s.CreateTeamProfile("admin", "aicrew-example", "team-1"); !errors.Is(err, ErrPeerUnknown) {
+		t.Fatalf("profile for an unregistered service: %v", err)
+	}
+	registerTestPeer(t, s, "aicrew-example")
+	if err := s.SetIdentityPeerDisabled("admin", "aicrew-example", true); err != nil {
+		t.Fatal(err)
+	}
+	for _, bad := range []string{"", "team one", "team/1", strings.Repeat("t", 129), "t\n"} {
+		if _, err := s.CreateTeamProfile("admin", "aicrew-example", bad); !errors.Is(err, ErrInvalidRequest) {
+			t.Errorf("team ID %q accepted: %v", bad, err)
+		}
+	}
+	p, err := s.CreateTeamProfile("admin", "aicrew-example", "team-1")
+	if err != nil {
+		t.Fatalf("a disabled peer must still accept a prepared profile: %v", err)
+	}
+	if _, err := s.CreateTeamProfile("admin", "aicrew-example", "team-1"); !errors.Is(err, ErrTeamProfileExists) {
+		t.Fatalf("duplicate profile: %v", err)
+	}
+	if _, err := s.CreateTeamProfile("admin", "aicrew-example", "team-0"); err != nil {
+		t.Fatal(err)
+	}
+	list, err := s.ListTeamProfiles("aicrew-example")
+	if err != nil || len(list) != 2 || list[0].TeamID != "team-0" || list[1].ID != p.ID {
+		t.Fatalf("list: %+v %v", list, err)
+	}
+	if err := s.SetTeamGrant("admin", "inst-1", p.ID, true); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.SetTeamGrant("admin", "inst-1", p.ID, true); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.SetTeamProfileDisabled("admin", p.ID, true); err != nil {
+		t.Fatal(err)
+	}
+	if got, err := s.TeamGrantInstances(p.ID); err != nil || len(got) != 1 || got[0] != "inst-1" {
+		t.Fatalf("a disabled profile's grants must stay listable: %v %v", got, err)
+	}
+	if err := s.SetTeamGrant("admin", "inst-1", "no-such-profile", true); !errors.Is(err, ErrTeamProfileUnknown) {
+		t.Fatalf("grant to an unknown profile: %v", err)
+	}
+	if err := s.SetTeamProfileDisabled("admin", "no-such-profile", true); !errors.Is(err, ErrTeamProfileUnknown) {
+		t.Fatalf("disable of an unknown profile: %v", err)
+	}
+	snap, err := s.Snapshot()
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := map[string]string{
+		"team_profile.create":        "service=aicrew-example team=team-1 profile=" + p.ID,
+		"team_grant.true":            "service=aicrew-example team=team-1 profile=" + p.ID + " instance=inst-1",
+		"team_profile.disabled.true": "service=aicrew-example team=team-1 profile=" + p.ID,
+	}
+	grants := 0
+	for _, ev := range snap.Audit {
+		if ev.Action == "team_grant.true" {
+			grants++
+		}
+		if w, ok := want[ev.Action]; ok && ev.Subject == w && ev.Actor == "admin" {
+			delete(want, ev.Action)
+		}
+	}
+	if len(want) != 0 || grants != 2 {
+		t.Fatalf("missing audit records %v; grant records %d (a no-op grant is audited too)", want, grants)
 	}
 }

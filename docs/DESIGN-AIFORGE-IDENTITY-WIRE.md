@@ -192,4 +192,20 @@ Where a read resolves its project, the hub then evaluates only that profile's li
 
 Every verified request is audited as `team.verified`. Every team-mode refusal after authentication is audited as `team.refused.<code>`, including the gate's own `invalid_request`, `credential_scope_forbidden` and `team_operation_unsupported`. The actor is the authenticated user, or `credential:<name>` for any other credential. The subject names the session's service, team, session, generation, role and route when the session is known, and otherwise the request line; it always names the reason and the correlation ID, and never the handle. Each of these refusals carries `active_mode: "team"` and that correlation ID. The local socket's refusals are the exception: their caller is the operator, not an authenticated credential, so they are neither audited nor mode-tagged.
 
-Profiles and profile grants have Go methods in `internal/access` but no route or command yet. The operator surface for them is a separate increment, and no real team can be granted access until it exists. Team mode does not require the hub-terminated TLS that the identity routes do. A hub served over plain HTTP carries the bearer and the handle in the clear, exactly as it already does for the bearer, so production hubs should serve TLS.
+**Team profile administration (task 01a0deb1).** The hub admin manages profiles and their grants over the hub's TLS listener only, under the registered peer, with the same admin-only and `tls_required` rules as the peer routes. The `aimem identity team` CLI drives the routes.
+
+| Route | Operation |
+| --- | --- |
+| `GET`, `POST /v1/identity/peers/{service_id}/teams` | List profiles with their grants, or create one from `{team_id}` |
+| `PUT …/teams/{team_id}` | Disable or re-enable a profile with `{disabled}` |
+| `GET …/teams/{team_id}/grants` | List a profile's grants |
+| `PUT`, `DELETE …/teams/{team_id}/grants/{project}` | Grant or revoke a project |
+| `DELETE …/teams/{team_id}/grant-instances/{instance}` | Revoke an orphaned grant by its access instance |
+
+**Rules.**
+- **Creating a profile.** The service must be a peer registered on this hub, enabled or disabled. The team ID is an identity ID (1–128 of `A-Z a-z 0-9 . _ : -`), because that is the shape an introspection reply carries. A duplicate `(service, team)` is 409. There is no delete: the link is immutable, and disabling is the off switch.
+- **Grants.** A grant is stored against the project's access instance, and a grant by name mints the instance if the project has none yet. Reserved, user and group projects and unknown projects are refused. A revoke by name never mints an instance. Both directions are idempotent.
+- **Audit.** Every change is audited under the admin: `team_profile.create`, `team_profile.disabled.<bool>` and `team_grant.<bool>`. Each subject names the service, team, profile and, for grants, the instance. A no-op is audited too.
+- **Effect.** The verifier reads profiles and grants live on every team request, so a change applies from the next request whose check starts after it commits. A revoked grant gives `grant_denied`, and a disabled profile gives `context_stale`.
+
+Team mode does not require the hub-terminated TLS that the identity routes do. A hub served over plain HTTP carries the bearer and the handle in the clear, exactly as it already does for the bearer, so production hubs should serve TLS.

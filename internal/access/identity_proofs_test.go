@@ -171,6 +171,7 @@ func TestSchema4MigrationPreservesSchema3(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	registerTestPeer(t, s, "aicrew-example")
 	profile, err := s.CreateTeamProfile("admin", "aicrew-example", "team-example")
 	if err != nil {
 		t.Fatal(err)

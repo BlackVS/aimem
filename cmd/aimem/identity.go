@@ -43,9 +43,16 @@ const identityUsage = `usage: aimem identity peer list                          
        aimem identity cred issue SERVICE --expires 90d|RFC3339 --secret-file PATH  [hub flags]
        aimem identity cred rotate SERVICE --expires 90d|RFC3339 --secret-file PATH [hub flags]
        aimem identity cred revoke SERVICE CREDENTIAL_ID      [hub flags]
+       aimem identity team list SERVICE                      [hub flags]
+       aimem identity team create SERVICE TEAM               [hub flags]
+       aimem identity team enable SERVICE TEAM               [hub flags]
+       aimem identity team disable SERVICE TEAM              [hub flags]
+       aimem identity team grants SERVICE TEAM               [hub flags]
+       aimem identity team grant SERVICE TEAM PROJECT        [hub flags]
+       aimem identity team revoke SERVICE TEAM (PROJECT | --instance ID) [hub flags]
 
-Manage the aicrew identity peer and its credentials through the hub's TLS
-listener. The local socket is not used: identity routes require TLS
+Manage the aicrew identity peer, its credentials and its team access
+profiles through the hub's TLS listener. The local socket is not used: identity routes require TLS
 terminated by the hub.
 
 Hub flags (after the positional arguments):
@@ -67,6 +74,13 @@ that no session holds and verify the inactive answer. It exits non-zero and
 names the failed step otherwise. The hub reads its introspection credential
 from the private file named by AIMEM_INTROSPECTION_TOKEN_FILE; the credential
 never passes through this command.
+
+team commands link an aicrew team (by aicrew's team ID) to the registered
+peer SERVICE and grant it projects. A team session then reads only the
+projects its profile is granted, checked live on every request: a revoke or
+disable takes effect on the next team request. There is no delete; disable a
+profile instead. revoke --instance removes a grant whose project was renamed
+away or deleted, by the instance ID that team grants lists.
 
 cred issue and cred rotate write the new bearer once to --secret-file, a new
 file only you can read, created before anything is issued; it is never
@@ -175,8 +189,13 @@ func runIdentity(args []string, out io.Writer) error {
 	positional := map[string]int{
 		"peer list": 0, "peer register": 1, "peer enable": 1, "peer disable": 1, "peer check": 1,
 		"cred list": 1, "cred issue": 1, "cred rotate": 1, "cred revoke": 2,
+		"team list": 1, "team create": 2, "team enable": 2, "team disable": 2, "team grants": 2, "team grant": 3, "team revoke": 2,
 	}
 	n, ok := positional[noun+" "+verb]
+	// team revoke names either a project (a third positional) or --instance.
+	if ok && noun+" "+verb == "team revoke" && len(rest) > 2 && !strings.HasPrefix(rest[2], "-") {
+		n = 3
+	}
 	if !ok || len(rest) < n {
 		return usage
 	}
@@ -197,6 +216,7 @@ func runIdentity(args []string, out io.Writer) error {
 	trustPin := fs.String("peer-trust-pin", "", "")
 	expires := fs.String("expires", "", "")
 	secretFile := fs.String("secret-file", "", "")
+	instance := fs.String("instance", "", "")
 	if err := fs.Parse(flags); err != nil {
 		return fmt.Errorf("%v\n\n%s", err, identityUsage)
 	}
@@ -210,6 +230,10 @@ func runIdentity(args []string, out io.Writer) error {
 	case "peer register":
 		if *endpoint == "" || *trustDNS == (*trustPin != "") {
 			return fmt.Errorf("peer register needs --endpoint and exactly one of --peer-trust-dns or --peer-trust-pin")
+		}
+	case "team revoke":
+		if (len(pos) == 3) == (*instance != "") {
+			return fmt.Errorf("team revoke needs exactly one of PROJECT or --instance ID")
 		}
 	case "cred issue", "cred rotate":
 		if *secretFile == "" || *expires == "" {
@@ -245,8 +269,135 @@ func runIdentity(args []string, out io.Writer) error {
 		}
 		fmt.Fprintf(out, "credential %s of %s revoked\n", pos[1], pos[0])
 		return nil
+	case "team list":
+		return c.teamList(pos[0], out)
+	case "team create":
+		return c.teamCreate(pos[0], pos[1], out)
+	case "team enable", "team disable":
+		return c.teamSetDisabled(pos[0], pos[1], verb == "disable", out)
+	case "team grants":
+		return c.teamGrants(pos[0], pos[1], out)
+	case "team grant":
+		return c.teamGrant(pos[0], pos[1], pos[2], out)
+	case "team revoke":
+		if *instance != "" {
+			return c.teamRevokeInstance(pos[0], pos[1], *instance, out)
+		}
+		return c.teamRevoke(pos[0], pos[1], pos[2], out)
 	}
 	return usage
+}
+
+type identityTeam struct {
+	ProfileID string `json:"profile_id"`
+	TeamID    string `json:"team_id"`
+	Disabled  bool   `json:"disabled"`
+	Grants    []struct {
+		Project  string `json:"project"`
+		Instance string `json:"instance"`
+	} `json:"grants"`
+}
+
+func teamPath(service, team string) string {
+	return peerPath(service) + "/teams/" + url.PathEscape(team)
+}
+
+func printTeam(out io.Writer, t identityTeam) {
+	state := "enabled"
+	if t.Disabled {
+		state = "disabled"
+	}
+	fmt.Fprintf(out, "%s  %s  profile %s\n", t.TeamID, state, t.ProfileID)
+	if len(t.Grants) == 0 {
+		fmt.Fprintln(out, "  no project grants")
+	}
+	for _, g := range t.Grants {
+		name := g.Project
+		if name == "" {
+			name = "(project gone; revoke with --instance)"
+		}
+		fmt.Fprintf(out, "  grant %s  instance %s\n", name, g.Instance)
+	}
+}
+
+func (c *identityClient) teamList(service string, out io.Writer) error {
+	var resp struct {
+		Teams []identityTeam `json:"teams"`
+	}
+	if err := c.call("GET", peerPath(service)+"/teams", nil, http.StatusOK, &resp); err != nil {
+		return err
+	}
+	if len(resp.Teams) == 0 {
+		fmt.Fprintf(out, "no team profile for %s\n", service)
+	}
+	for _, t := range resp.Teams {
+		printTeam(out, t)
+	}
+	return nil
+}
+
+func (c *identityClient) teamCreate(service, team string, out io.Writer) error {
+	var t identityTeam
+	if err := c.call("POST", peerPath(service)+"/teams", map[string]string{"team_id": team}, http.StatusCreated, &t); err != nil {
+		return err
+	}
+	fmt.Fprintf(out, "team profile %s created for %s (profile %s); it has no project grants yet\n", team, service, t.ProfileID)
+	return nil
+}
+
+func (c *identityClient) teamSetDisabled(service, team string, disabled bool, out io.Writer) error {
+	if err := c.call("PUT", teamPath(service, team), map[string]bool{"disabled": disabled}, http.StatusOK, nil); err != nil {
+		return err
+	}
+	state := "enabled"
+	if disabled {
+		state = "disabled; its team sessions are refused from the next request"
+	}
+	fmt.Fprintf(out, "team profile %s of %s %s\n", team, service, state)
+	return nil
+}
+
+func (c *identityClient) teamGrants(service, team string, out io.Writer) error {
+	var t identityTeam
+	if err := c.call("GET", teamPath(service, team)+"/grants", nil, http.StatusOK, &t); err != nil {
+		return err
+	}
+	printTeam(out, t)
+	return nil
+}
+
+func (c *identityClient) teamGrant(service, team, project string, out io.Writer) error {
+	var resp struct {
+		Instance string `json:"instance"`
+	}
+	if err := c.call("PUT", teamPath(service, team)+"/grants/"+url.PathEscape(project), nil, http.StatusOK, &resp); err != nil {
+		return err
+	}
+	fmt.Fprintf(out, "project %s (instance %s) granted to team %s of %s\n", project, resp.Instance, team, service)
+	return nil
+}
+
+func (c *identityClient) teamRevoke(service, team, project string, out io.Writer) error {
+	var resp struct {
+		Revoked bool `json:"revoked"`
+	}
+	if err := c.call("DELETE", teamPath(service, team)+"/grants/"+url.PathEscape(project), nil, http.StatusOK, &resp); err != nil {
+		return err
+	}
+	if !resp.Revoked {
+		fmt.Fprintf(out, "project %s has never had an access instance, so team %s of %s holds no grant on it\n", project, team, service)
+		return nil
+	}
+	fmt.Fprintf(out, "project %s revoked from team %s of %s; the next team read of it is refused\n", project, team, service)
+	return nil
+}
+
+func (c *identityClient) teamRevokeInstance(service, team, instance string, out io.Writer) error {
+	if err := c.call("DELETE", teamPath(service, team)+"/grant-instances/"+url.PathEscape(instance), nil, http.StatusOK, nil); err != nil {
+		return err
+	}
+	fmt.Fprintf(out, "instance %s revoked from team %s of %s\n", instance, team, service)
+	return nil
 }
 
 // parseIdentityExpiry accepts "<days>d" or an RFC 3339 time.
