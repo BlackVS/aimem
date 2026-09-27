@@ -3,8 +3,10 @@ package server
 import (
 	"context"
 	"encoding/json"
+	"net"
 	"net/http"
 	"os"
+	"path/filepath"
 	"reflect"
 	"strconv"
 	"strings"
@@ -401,4 +403,92 @@ func TestPersonalModeNeverContactsAicrew(t *testing.T) {
 	if g.fake.Calls() != 0 {
 		t.Fatalf("personal requests made %d introspection calls", g.fake.Calls())
 	}
+}
+
+// TestTeamModeRequiresHubTLS: with a fully operational peer and a granted
+// profile, a team-mode request that did not arrive over TLS this hub
+// terminated is refused with tls_required before any introspection, whatever
+// forwarded headers claim; the local socket keeps its own refusal; and
+// personal mode is unchanged on plain HTTP.
+func TestTeamModeRequiresHubTLS(t *testing.T) {
+	g := newTeamRig(t)
+	paths := append(g.readPaths(true), "/v1/access/identity", "/v1/projects/alpha/tasks")
+	claims := []map[string]string{
+		nil,
+		{"X-Forwarded-Proto": "https"},
+		{"Forwarded": "for=192.0.2.1;proto=https"},
+		{"X-Forwarded-Ssl": "on", "X-Forwarded-Proto": "https", "X-Forwarded-Scheme": "https"},
+	}
+	for _, p := range paths {
+		for _, claim := range claims {
+			h := validHandle(t)
+			g.secrets = append(g.secrets, h)
+			hdr := teamHeader(h)
+			for k, v := range claim {
+				hdr[k] = v
+			}
+			r := g.call(t, g.plain, "GET", p, g.alice, hdr, "", true)
+			if r.status != 403 || r.code() != "tls_required" {
+				t.Errorf("plain HTTP team GET %s claiming %v: %d %s", p, claim, r.status, r.body)
+			}
+			if subject := g.assertRefusalAudited(t, r, "user:"+g.aliceID); !strings.Contains(subject, "request=") {
+				t.Errorf("GET %s: the tls_required audit does not name the request: %q", p, subject)
+			}
+		}
+	}
+	// Even a malformed header or a non-individual credential gets the TLS
+	// answer first, before anything else is judged.
+	if r := g.call(t, g.plain, "GET", "/v1/tasks/"+g.alphaTask, g.alice, teamHeader("garbage"), "", true); r.code() != "tls_required" {
+		t.Errorf("plain HTTP, malformed handle: %d %s", r.status, r.body)
+	}
+	if r := g.call(t, g.plain, "GET", "/v1/tasks/"+g.alphaTask, g.env, teamHeader(validHandle(t)), "", true); r.code() != "tls_required" {
+		t.Errorf("plain HTTP, admin credential: %d %s", r.status, r.body)
+	}
+	// An unauthenticated request keeps invalid_credential.
+	if r := g.call(t, g.plain, "GET", "/v1/tasks/"+g.alphaTask, "", teamHeader(validHandle(t)), "", true); r.status != 401 || r.code() != "invalid_credential" {
+		t.Errorf("plain HTTP without a bearer: %d %s", r.status, r.body)
+	}
+
+	// The local socket keeps its refusal.
+	root := t.TempDir()
+	sock := filepath.Join(root, "t.sock")
+	t.Setenv("AIMEM_SOCKET", sock)
+	srv, ln, err := g.s.ListenAndServe(root)
+	if err != nil {
+		t.Skipf("no unix socket here: %v", err)
+	}
+	defer func() { srv.Close(); ln.Close(); os.Remove(sock) }()
+	client := &http.Client{Transport: &http.Transport{DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
+		return (&net.Dialer{}).DialContext(ctx, "unix", sock)
+	}}}
+	req, _ := http.NewRequest("GET", "http://aimem/v1/tasks/"+g.alphaTask, nil)
+	req.Header.Set(teamContextHeader, validHandle(t))
+	req.Header.Set("X-Forwarded-Proto", "https")
+	resp, err := client.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != 403 {
+		t.Errorf("team request on the local socket: %d", resp.StatusCode)
+	}
+
+	if g.fake.Calls() != 0 {
+		t.Fatalf("%d introspection calls for requests that were not on hub TLS", g.fake.Calls())
+	}
+
+	// Personal mode on plain HTTP is unchanged.
+	for _, p := range paths {
+		if r := g.call(t, g.plain, "GET", p, g.alice, nil, "", true); r.status != 200 || strings.Contains(string(r.body), `"mode":"team"`) {
+			t.Errorf("personal plain HTTP GET %s: %d %s", p, r.status, r.body)
+		}
+	}
+	if g.fake.Calls() != 0 {
+		t.Fatal("personal requests called aicrew")
+	}
+	// Over hub TLS the same team read is served.
+	if r := g.team(t, "GET", "/v1/tasks/"+g.alphaTask); r.status != 200 || g.fake.Calls() != 1 {
+		t.Fatalf("team read over hub TLS: %d after %d calls", r.status, g.fake.Calls())
+	}
+	g.assertNoSecretLeak(t)
 }
