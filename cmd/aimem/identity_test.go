@@ -40,6 +40,7 @@ const identityAdminToken = "env-admin-secret-for-identity-cli-tests"
 // server.TCPHandler (the gate ListenTCP serves), plus the operator's files.
 type identityCLIRig struct {
 	s         *server.Server
+	reg       *store.Registry
 	ts        *httptest.Server
 	caFile    string
 	pin       string
@@ -58,7 +59,7 @@ func newIdentityCLIRig(t *testing.T, wrap func(http.Handler) http.Handler) *iden
 	t.Cleanup(func() { reg.Close() })
 	s := server.New(reg, slog.New(slog.NewTextHandler(io.Discard, nil)))
 	t.Cleanup(func() { s.Close() })
-	g := &identityCLIRig{s: s, dir: filepath.Join(t.TempDir(), hostileDirName())}
+	g := &identityCLIRig{s: s, reg: reg, dir: filepath.Join(t.TempDir(), hostileDirName())}
 	if err := os.Mkdir(g.dir, 0o700); err != nil {
 		t.Fatal(err)
 	}
@@ -799,6 +800,85 @@ func TestIdentityCLIPeerCheck(t *testing.T) {
 		if strings.Contains(o, bearer) || strings.Contains(o, "acs1_") {
 			t.Fatalf("the CLI printed a secret: %q", o)
 		}
+	}
+	g.assertNoSecrets(t)
+}
+
+// TestIdentityCLITeamProfiles drives every team command through a real TLS
+// hub and checks the listing, the revoke forms and the refusals.
+func TestIdentityCLITeamProfiles(t *testing.T) {
+	g := newIdentityCLIRig(t, nil)
+	if _, err := g.run(t, "team", "create", "aicrew-example", "team-1"); err == nil || !strings.Contains(err.Error(), "404") {
+		t.Fatalf("team for an unregistered peer: %v", err)
+	}
+	g.register(t)
+	for _, p := range []string{"alpha", "beta"} {
+		if _, err := g.reg.Open(p); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if out := g.mustRun(t, "team", "create", "aicrew-example", "team-1"); !strings.Contains(out, "team profile team-1 created") {
+		t.Fatalf("create: %s", out)
+	}
+	if _, err := g.run(t, "team", "create", "aicrew-example", "team-1"); err == nil || !strings.Contains(err.Error(), "409") {
+		t.Fatalf("duplicate: %v", err)
+	}
+	if out := g.mustRun(t, "team", "grant", "aicrew-example", "team-1", "alpha"); !strings.Contains(out, "project alpha (instance ") {
+		t.Fatalf("grant: %s", out)
+	}
+	instance, err := g.reg.ExistingProjectAccessID("alpha")
+	if err != nil || instance == "" {
+		t.Fatal(err)
+	}
+	out := g.mustRun(t, "team", "list", "aicrew-example")
+	if !strings.Contains(out, "team-1  enabled") || !strings.Contains(out, "grant alpha  instance "+instance) {
+		t.Fatalf("list: %s", out)
+	}
+	if out := g.mustRun(t, "team", "revoke", "aicrew-example", "team-1", "beta"); !strings.Contains(out, "holds no grant") {
+		t.Fatalf("revoke of a never-granted project: %s", out)
+	}
+	if out := g.mustRun(t, "team", "revoke", "aicrew-example", "team-1", "alpha"); !strings.Contains(out, "project alpha revoked") {
+		t.Fatalf("revoke: %s", out)
+	}
+	g.mustRun(t, "team", "grant", "aicrew-example", "team-1", "alpha")
+	if out := g.mustRun(t, "team", "revoke", "aicrew-example", "team-1", "--instance", instance); !strings.Contains(out, "instance "+instance+" revoked") {
+		t.Fatalf("revoke by instance: %s", out)
+	}
+	if out := g.mustRun(t, "team", "grants", "aicrew-example", "team-1"); !strings.Contains(out, "no project grants") {
+		t.Fatalf("grants after revoking: %s", out)
+	}
+	if out := g.mustRun(t, "team", "disable", "aicrew-example", "team-1"); !strings.Contains(out, "disabled") {
+		t.Fatalf("disable: %s", out)
+	}
+	if out := g.mustRun(t, "team", "list", "aicrew-example"); !strings.Contains(out, "team-1  disabled") {
+		t.Fatalf("list after disable: %s", out)
+	}
+	g.mustRun(t, "team", "enable", "aicrew-example", "team-1")
+	before := g.requests.Load()
+	for _, args := range [][]string{
+		{"team", "revoke", "aicrew-example", "team-1"},
+		{"team", "revoke", "aicrew-example", "team-1", "alpha", "--instance", instance},
+		{"team", "grant", "aicrew-example", "team-1"},
+	} {
+		if _, err := g.run(t, args...); err == nil {
+			t.Errorf("%v was accepted", args)
+		}
+	}
+	if g.requests.Load() != before {
+		t.Fatal("a malformed command reached the hub")
+	}
+	if _, err := g.run(t, "team", "grant", "aicrew-example", "team-1", "missing"); err == nil || !strings.Contains(err.Error(), "404") {
+		t.Fatalf("grant of an unknown project: %v", err)
+	}
+	// "." and ".." are refused as team IDs, by the CLI before any request.
+	before = g.requests.Load()
+	for _, team := range []string{".", ".."} {
+		if _, err := g.run(t, "team", "create", "aicrew-example", team); err == nil || !strings.Contains(err.Error(), "cannot be") {
+			t.Fatalf("team ID %q: %v", team, err)
+		}
+	}
+	if g.requests.Load() != before {
+		t.Fatal("a dot-only team ID reached the hub")
 	}
 	g.assertNoSecrets(t)
 }

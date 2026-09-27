@@ -1419,6 +1419,325 @@
         }
       }
     },
+    "/v1/identity/peers/{service_id}/teams": {
+      "get": {
+        "summary": "List a peer's team access profiles",
+        "description": "Each profile with its team ID, profile ID, disabled flag and grants ({project, instance}; project is omitted for an instance whose project no longer exists). Hub admin only. Requires TLS terminated by this hub: plain HTTP, a TLS-terminating proxy and the unix socket are refused with tls_required, and forwarded headers never count. Not exposed as an MCP tool.",
+        "x-role": "admin",
+        "x-requires-tls": true,
+        "parameters": [
+          {
+            "name": "service_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "{service_id, teams}"
+          },
+          "403": {
+            "description": "Refusal envelope {code, message, retryable, next_action, correlation_id}, or not an admin credential"
+          },
+          "404": {
+            "description": "Unknown identity peer, team profile or project"
+          }
+        }
+      },
+      "post": {
+        "summary": "Create a team access profile",
+        "description": "Links aicrew's team ID to this hub under a registered peer (enabled or disabled). The team ID is 1-128 of A-Z a-z 0-9 . _ : -, and not \".\" or \"..\". The link is immutable: there is no delete; disable it instead. Audited as team_profile.create. Hub admin only. Requires TLS terminated by this hub: plain HTTP, a TLS-terminating proxy and the unix socket are refused with tls_required, and forwarded headers never count. Not exposed as an MCP tool.",
+        "x-role": "admin",
+        "x-requires-tls": true,
+        "parameters": [
+          {
+            "name": "service_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "201": {
+            "description": "The profile"
+          },
+          "400": {
+            "description": "Invalid team ID"
+          },
+          "409": {
+            "description": "A profile for this service and team already exists"
+          },
+          "403": {
+            "description": "Refusal envelope {code, message, retryable, next_action, correlation_id}, or not an admin credential"
+          },
+          "404": {
+            "description": "Unknown identity peer, team profile or project"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "team_id"
+                ],
+                "properties": {
+                  "team_id": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/identity/peers/{service_id}/teams/{team_id}": {
+      "put": {
+        "summary": "Disable or re-enable a team access profile",
+        "description": "A disabled profile serves no team request: the next one is refused with context_stale. Audited as team_profile.disabled.<bool>. Hub admin only. Requires TLS terminated by this hub: plain HTTP, a TLS-terminating proxy and the unix socket are refused with tls_required, and forwarded headers never count. Not exposed as an MCP tool.",
+        "x-role": "admin",
+        "x-requires-tls": true,
+        "parameters": [
+          {
+            "name": "service_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "team_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Updated"
+          },
+          "400": {
+            "description": "Body must be {disabled}"
+          },
+          "403": {
+            "description": "Refusal envelope {code, message, retryable, next_action, correlation_id}, or not an admin credential"
+          },
+          "404": {
+            "description": "Unknown identity peer, team profile or project"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "disabled"
+                ],
+                "properties": {
+                  "disabled": {
+                    "type": "boolean"
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/identity/peers/{service_id}/teams/{team_id}/grants": {
+      "get": {
+        "summary": "List a team profile's project grants",
+        "description": "Grants as {project, instance}, whether or not the profile is enabled. Hub admin only. Requires TLS terminated by this hub: plain HTTP, a TLS-terminating proxy and the unix socket are refused with tls_required, and forwarded headers never count. Not exposed as an MCP tool.",
+        "x-role": "admin",
+        "x-requires-tls": true,
+        "parameters": [
+          {
+            "name": "service_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "team_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The profile with its grants"
+          },
+          "403": {
+            "description": "Refusal envelope {code, message, retryable, next_action, correlation_id}, or not an admin credential"
+          },
+          "404": {
+            "description": "Unknown identity peer, team profile or project"
+          }
+        }
+      }
+    },
+    "/v1/identity/peers/{service_id}/teams/{team_id}/grants/{project}": {
+      "put": {
+        "summary": "Grant a project to a team profile",
+        "description": "Stored against the project's access instance, minted if the project has none yet. Idempotent. Reserved, user and group projects are refused. Takes effect on the next team request. Audited as team_grant.true. Hub admin only. Requires TLS terminated by this hub: plain HTTP, a TLS-terminating proxy and the unix socket are refused with tls_required, and forwarded headers never count. Not exposed as an MCP tool.",
+        "x-role": "admin",
+        "x-requires-tls": true,
+        "parameters": [
+          {
+            "name": "service_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "team_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "project",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "{ok, team_id, project, instance}"
+          },
+          "400": {
+            "description": "Reserved project"
+          },
+          "403": {
+            "description": "Refusal envelope {code, message, retryable, next_action, correlation_id}, or not an admin credential"
+          },
+          "404": {
+            "description": "Unknown identity peer, team profile or project"
+          }
+        }
+      },
+      "delete": {
+        "summary": "Revoke a project from a team profile",
+        "description": "Resolves the project's existing access instance and never mints one; a project without one holds no grant (revoked false). Idempotent. The next team read of it is refused with grant_denied. Audited as team_grant.false. Hub admin only. Requires TLS terminated by this hub: plain HTTP, a TLS-terminating proxy and the unix socket are refused with tls_required, and forwarded headers never count. Not exposed as an MCP tool.",
+        "x-role": "admin",
+        "x-requires-tls": true,
+        "parameters": [
+          {
+            "name": "service_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "team_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "project",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "{ok, team_id, project, instance, revoked}"
+          },
+          "400": {
+            "description": "Reserved project"
+          },
+          "403": {
+            "description": "Refusal envelope {code, message, retryable, next_action, correlation_id}, or not an admin credential"
+          },
+          "404": {
+            "description": "Unknown identity peer, team profile or project"
+          }
+        }
+      }
+    },
+    "/v1/identity/peers/{service_id}/teams/{team_id}/grant-instances/{instance}": {
+      "delete": {
+        "summary": "Revoke a team grant by project access instance",
+        "description": "For a grant whose project was renamed away or deleted. Idempotent. Audited as team_grant.false. Hub admin only. Requires TLS terminated by this hub: plain HTTP, a TLS-terminating proxy and the unix socket are refused with tls_required, and forwarded headers never count. Not exposed as an MCP tool.",
+        "x-role": "admin",
+        "x-requires-tls": true,
+        "parameters": [
+          {
+            "name": "service_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "team_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "instance",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "{ok, team_id, instance, revoked}"
+          },
+          "400": {
+            "description": "Not a project access ID"
+          },
+          "403": {
+            "description": "Refusal envelope {code, message, retryable, next_action, correlation_id}, or not an admin credential"
+          },
+          "404": {
+            "description": "Unknown identity peer, team profile or project"
+          }
+        }
+      }
+    },
     "/": {
       "get": {
         "summary": "Public status page (HTML)",

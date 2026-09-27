@@ -2,10 +2,19 @@ package access
 
 import (
 	"database/sql"
+	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"aimem/internal/uuidv7"
+)
+
+var (
+	// ErrTeamProfileExists refuses a second profile for one (service, team).
+	ErrTeamProfileExists = errors.New("a team profile for this service and team already exists")
+	// ErrTeamProfileUnknown names a profile that does not exist.
+	ErrTeamProfileUnknown = errors.New("unknown team profile")
 )
 
 // HubID is minted once in access schema 3. URLs and project names never
@@ -23,19 +32,49 @@ type TeamProfile struct {
 	Disabled  bool
 }
 
-// Profile administration has no route or command yet: an operator surface
-// that establishes the peer service and team keys is a separate, reviewed
-// increment. Only the team-mode verifier (internal/server/teamcontext.go)
-// and tests call these methods.
-func (s *Store) CreateTeamProfile(actor, serviceID, teamID string) (TeamProfile, error) {
-	if err := validName(serviceID); err != nil {
-		return TeamProfile{}, fmt.Errorf("service ID: %w", err)
+// teamAuditSubject names a profile in the audit: its service, team and ID,
+// plus the project instance for a grant.
+func teamAuditSubject(p TeamProfile, instance string) string {
+	subject := fmt.Sprintf("service=%s team=%s profile=%s", p.ServiceID, p.TeamID, p.ID)
+	if instance != "" {
+		subject += " instance=" + instance
 	}
-	if err := validName(teamID); err != nil {
-		return TeamProfile{}, fmt.Errorf("team ID: %w", err)
+	return subject
+}
+
+// CreateTeamProfile links an aicrew team to this hub. The service must be an
+// identity peer registered on this hub, enabled or not, and both keys must be
+// identity IDs, the shape an introspection reply carries. The link is
+// immutable: there is no delete, and disabling is the off switch. The hub
+// admin reaches it through /v1/identity/peers/{service}/teams.
+func (s *Store) CreateTeamProfile(actor, serviceID, teamID string) (TeamProfile, error) {
+	if !identityIDPattern.MatchString(serviceID) {
+		return TeamProfile{}, fmt.Errorf("%w: service ID", ErrInvalidRequest)
+	}
+	if !identityIDPattern.MatchString(teamID) {
+		return TeamProfile{}, fmt.Errorf("%w: team ID must be 1-128 of A-Z a-z 0-9 . _ : -", ErrInvalidRequest)
+	}
+	// A dot-only ID would be a "." or ".." path segment, which routers clean
+	// away; aicrew generates its team IDs, so no real team is dot-only.
+	if teamID == "." || teamID == ".." {
+		return TeamProfile{}, fmt.Errorf("%w: a team ID cannot be \".\" or \"..\"", ErrInvalidRequest)
 	}
 	p := TeamProfile{ID: uuidv7.New(), ServiceID: serviceID, TeamID: teamID}
-	err := s.change(actor, "team_profile.create", p.ID, func(tx *sql.Tx) error {
+	err := s.change(actor, "team_profile.create", teamAuditSubject(p, ""), func(tx *sql.Tx) error {
+		var peers int
+		if err := tx.QueryRow("SELECT count(*) FROM identity_peers WHERE service_id=?", serviceID).Scan(&peers); err != nil {
+			return err
+		}
+		if peers != 1 {
+			return ErrPeerUnknown
+		}
+		var existing int
+		if err := tx.QueryRow("SELECT count(*) FROM team_access_profiles WHERE service_id=? AND team_id=?", serviceID, teamID).Scan(&existing); err != nil {
+			return err
+		}
+		if existing != 0 {
+			return ErrTeamProfileExists
+		}
 		_, err := tx.Exec("INSERT INTO team_access_profiles(id,service_id,team_id) VALUES(?,?,?)", p.ID, p.ServiceID, p.TeamID)
 		return err
 	})
@@ -43,6 +82,34 @@ func (s *Store) CreateTeamProfile(actor, serviceID, teamID string) (TeamProfile,
 		return TeamProfile{}, err
 	}
 	return p, nil
+}
+
+// ListTeamProfiles returns a service's profiles in team-ID order.
+func (s *Store) ListTeamProfiles(serviceID string) ([]TeamProfile, error) {
+	rows, err := s.db.Query("SELECT id,service_id,team_id,disabled FROM team_access_profiles WHERE service_id=? ORDER BY team_id", serviceID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []TeamProfile
+	for rows.Next() {
+		var p TeamProfile
+		if err := rows.Scan(&p.ID, &p.ServiceID, &p.TeamID, &p.Disabled); err != nil {
+			return nil, err
+		}
+		out = append(out, p)
+	}
+	return out, rows.Err()
+}
+
+func (s *Store) teamProfileByID(id string) (TeamProfile, error) {
+	var p TeamProfile
+	err := s.db.QueryRow("SELECT id,service_id,team_id,disabled FROM team_access_profiles WHERE id=?", id).
+		Scan(&p.ID, &p.ServiceID, &p.TeamID, &p.Disabled)
+	if errors.Is(err, sql.ErrNoRows) {
+		return TeamProfile{}, ErrTeamProfileUnknown
+	}
+	return p, err
 }
 
 func (s *Store) TeamProfileByKey(serviceID, teamID string) (TeamProfile, error) {
@@ -53,7 +120,11 @@ func (s *Store) TeamProfileByKey(serviceID, teamID string) (TeamProfile, error) 
 }
 
 func (s *Store) SetTeamProfileDisabled(actor, profileID string, disabled bool) error {
-	return s.change(actor, fmt.Sprintf("team_profile.disabled.%t", disabled), profileID, func(tx *sql.Tx) error {
+	p, err := s.teamProfileByID(profileID)
+	if err != nil {
+		return err
+	}
+	return s.change(actor, fmt.Sprintf("team_profile.disabled.%t", disabled), teamAuditSubject(p, ""), func(tx *sql.Tx) error {
 		if err := requireRow(tx, "team_access_profiles", profileID); err != nil {
 			return err
 		}
@@ -62,11 +133,17 @@ func (s *Store) SetTeamProfileDisabled(actor, profileID string, disabled bool) e
 	})
 }
 
+// SetTeamGrant grants or revokes one project instance for a profile. Both
+// directions are idempotent and audited, including a no-op.
 func (s *Store) SetTeamGrant(actor, project, profileID string, present bool) error {
-	if project == "" {
-		return fmt.Errorf("project instance is required")
+	if project == "" || strings.ContainsAny(project, " /") {
+		return fmt.Errorf("%w: project instance", ErrInvalidRequest)
 	}
-	return s.change(actor, fmt.Sprintf("team_grant.%t", present), project+"/"+profileID, func(tx *sql.Tx) error {
+	p, err := s.teamProfileByID(profileID)
+	if err != nil {
+		return err
+	}
+	return s.change(actor, fmt.Sprintf("team_grant.%t", present), teamAuditSubject(p, project), func(tx *sql.Tx) error {
 		if err := requireRow(tx, "team_access_profiles", profileID); err != nil {
 			return err
 		}
@@ -123,4 +200,34 @@ WHERE g.profile_id=? ORDER BY g.project`, profileID)
 // the correlation ID; never a handle.
 func (s *Store) RecordTeamRequest(actor, action, subject string) error {
 	return s.change(actor, action, subject, func(*sql.Tx) error { return nil })
+}
+
+// TeamGrantInstances lists every project instance granted to a profile,
+// whether or not the profile is enabled, for the operator's listing.
+func (s *Store) TeamGrantInstances(profileID string) ([]string, error) {
+	rows, err := s.db.Query("SELECT project FROM team_profile_grants WHERE profile_id=? ORDER BY project", profileID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []string
+	for rows.Next() {
+		var p string
+		if err := rows.Scan(&p); err != nil {
+			return nil, err
+		}
+		out = append(out, p)
+	}
+	return out, rows.Err()
+}
+
+// RecordTeamRevokeWithoutInstance audits a revoke by project name for a
+// project that has never had an access instance. Nothing can be granted
+// there, so nothing changes, but the admin's request stays in the audit.
+func (s *Store) RecordTeamRevokeWithoutInstance(actor, profileID, project string) error {
+	p, err := s.teamProfileByID(profileID)
+	if err != nil {
+		return err
+	}
+	return s.change(actor, "team_grant.false", teamAuditSubject(p, "")+" project="+project+" instance=none", func(*sql.Tx) error { return nil })
 }
