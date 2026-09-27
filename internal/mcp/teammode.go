@@ -165,6 +165,10 @@ func (tm *teamMode) verify(ctx context.Context) ([]byte, error) {
 	}
 	rep, body, err := teamsession.Verify(ctx, client, f.URL, cred, f.Handle)
 	if err != nil {
+		// A failed verification, from any tool, withdraws the last one.
+		tm.mu.Lock()
+		tm.ready = false
+		tm.mu.Unlock()
 		return nil, fmt.Errorf("the team context is not verified; team tools refuse until it is: %w", err)
 	}
 	if !tm.pinned.Matches(rep) {

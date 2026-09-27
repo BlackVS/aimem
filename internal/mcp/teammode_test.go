@@ -368,3 +368,28 @@ func TestTeamModeSurvivesRefreshesDuringCalls(t *testing.T) {
 	}
 	<-done
 }
+
+// TestTeamModeRefusedSessionContextWithdrawsVerification: a verified read,
+// then a refused session_context, then a read — the last read must verify
+// again, and stop while verification fails.
+func TestTeamModeRefusedSessionContextWithdrawsVerification(t *testing.T) {
+	h := newTeamHub(t)
+	root := teamRoot(t, h, nil)
+	h.addSession(teamHandle('A'), "sess-1")
+	s := newTeamSrv(writeSession(t, root, h.ts.URL, "sess-1", teamHandle('A')), root, "alpha")
+	if _, isErr := teamCall(t, s, "get_task", map[string]any{"id": "t-1"}); isErr {
+		t.Fatal("the first read failed")
+	}
+	h.mu.Lock()
+	h.stale[teamHandle('A')] = true
+	h.mu.Unlock()
+	if text, isErr := teamCall(t, s, sessionContextTool, map[string]any{}); !isErr || !strings.Contains(text, "context_stale") {
+		t.Fatalf("refused session_context: %v %s", isErr, text)
+	}
+	before := len(h.requests())
+	text, isErr := teamCall(t, s, "get_task", map[string]any{"id": "t-1"})
+	reqs := h.requests()[before:]
+	if !isErr || len(reqs) != 1 || reqs[0].path != "/v1/access/identity" {
+		t.Fatalf("the read after a refused session_context must re-verify and stop: %v %s %+v", isErr, text, reqs)
+	}
+}
