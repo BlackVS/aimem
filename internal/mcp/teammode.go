@@ -19,6 +19,7 @@ import (
 	"net/http"
 	"strings"
 	"sync"
+	"time"
 
 	"aimem/internal/adapter"
 	"aimem/internal/teamsession"
@@ -83,6 +84,13 @@ func (tm *teamMode) current() (teamsession.File, error) {
 		return teamsession.File{}, tm.blocked
 	}
 	f, err := teamsession.Load(tm.path)
+	// A refresh replaces the file by rename; on Windows a read that meets
+	// the rename can fail for an instant. Retry briefly before deciding the
+	// file is gone: a real deletion still blocks within about 100 ms.
+	for i := 0; err != nil && i < 5; i++ {
+		time.Sleep(20 * time.Millisecond)
+		f, err = teamsession.Load(tm.path)
+	}
 	switch {
 	case err != nil:
 		tm.blocked = fmt.Errorf("the team session file is gone or unusable (%v); this conversation is blocked. Restart it through aicrew", err)

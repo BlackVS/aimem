@@ -342,3 +342,29 @@ func TestTeamModeRefusesAnUnverifiedHub(t *testing.T) {
 		}
 	}
 }
+
+// TestTeamModeSurvivesRefreshesDuringCalls: aicrew refreshes the handle while
+// the conversation keeps calling; no call is blocked by the replacement.
+func TestTeamModeSurvivesRefreshesDuringCalls(t *testing.T) {
+	h := newTeamHub(t)
+	root := teamRoot(t, h, nil)
+	handles := []string{teamHandle('A'), teamHandle('B')}
+	for _, hd := range handles {
+		h.addSession(hd, "sess-1")
+	}
+	path := writeSession(t, root, h.ts.URL, "sess-1", handles[0])
+	s := newTeamSrv(path, root, "alpha")
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		for i := 0; i < 40; i++ {
+			writeSession(t, root, h.ts.URL, "sess-1", handles[i%2])
+		}
+	}()
+	for i := 0; i < 40; i++ {
+		if text, isErr := teamCall(t, s, "get_task", map[string]any{"id": "t-1"}); isErr {
+			t.Fatalf("call %d during refreshes: %s", i, text)
+		}
+	}
+	<-done
+}
