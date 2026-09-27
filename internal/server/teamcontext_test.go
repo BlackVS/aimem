@@ -160,12 +160,12 @@ func TestTeamModeRefusalOrder(t *testing.T) {
 	if resp.StatusCode != 400 {
 		t.Fatalf("two team-context headers: %d", resp.StatusCode)
 	}
-	// Plain HTTP is refused the same way; team mode never degrades to
-	// personal mode on any listener.
-	if r := g.call(t, g.plain, "GET", "/v1/tasks/x", g.alice, teamHeader(h), "", true); r.code() != "context_unavailable" {
+	// Plain HTTP is refused before anything else; team mode never
+	// degrades to personal mode on any listener.
+	if r := g.call(t, g.plain, "GET", "/v1/tasks/x", g.alice, teamHeader(h), "", true); r.code() != "tls_required" {
 		t.Fatalf("plain HTTP team read: %d %s", r.status, r.body)
 	}
-	if r := g.call(t, g.plain, "POST", "/v1/projects/alpha/tasks", g.alice, teamHeader(h), "{}", true); r.code() != "team_operation_unsupported" {
+	if r := g.call(t, g.plain, "POST", "/v1/projects/alpha/tasks", g.alice, teamHeader(h), "{}", true); r.code() != "tls_required" {
 		t.Fatalf("plain HTTP team request: %d %s", r.status, r.body)
 	}
 	// Without the header nothing changes.

@@ -157,6 +157,12 @@ func (s *Server) teamGate(w http.ResponseWriter, r *http.Request, id *Identity) 
 	}
 	cid := uuidv7.New()
 	switch {
+	case !identityTLS(r):
+		// Team mode carries the individual bearer and a session handle:
+		// it is served only over TLS this hub terminated itself, whatever
+		// a forwarded header claims (task 01a0e121, decision P5).
+		s.teamDeny(w, *id, "tls_required", teamRequestRoute(r), cid)
+		return teamContext{}, false
 	case !shapeOK:
 		s.teamDeny(w, *id, "invalid_request", teamRequestRoute(r), cid)
 		return teamContext{}, false

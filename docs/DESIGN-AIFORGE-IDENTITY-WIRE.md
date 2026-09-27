@@ -70,7 +70,7 @@ Any failure to reach, authenticate or parse the reply, or a reply that fails the
 
 ## 4. Team-mode request (client → aimem)
 
-The client sends its individual bearer in `Authorization` and the aimem-scoped handle in `X-Aimem-Team-Context`. The local daemon attaches the handle from the connection's fixed context. It never takes the handle from a tool argument and never reads it from a global setting (E5). A request without the header is evaluated in personal mode and never calls aicrew. An operation that exists only in team mode is refused with `context_missing` instead. A handle on a connection bound to personal mode is `invalid_request`.
+The client sends its individual bearer in `Authorization` and the aimem-scoped handle in `X-Aimem-Team-Context`. The local daemon attaches the handle from the connection's fixed context. It never takes the handle from a tool argument and never reads it from a global setting (E5). A request without the header is evaluated in personal mode and never calls aicrew. A request with the header is served only over TLS terminated by the hub (see the E4 implementation boundary). An operation that exists only in team mode is refused with `context_missing` instead. A handle on a connection bound to personal mode is `invalid_request`.
 
 The verifier runs in the order the context contract sets:
 
@@ -208,4 +208,4 @@ Every verified request is audited as `team.verified`. Every team-mode refusal af
 - **Audit.** Every change is audited under the admin: `team_profile.create`, `team_profile.disabled.<bool>` and `team_grant.<bool>`. Each subject names the service, team, profile and, for grants, the instance. A no-op is audited too.
 - **Effect.** The verifier reads profiles and grants live on every team request, so a change applies from the next request whose check starts after it commits. A revoked grant gives `grant_denied`, and a disabled profile gives `context_stale`.
 
-Team mode does not require the hub-terminated TLS that the identity routes do. A hub served over plain HTTP carries the bearer and the handle in the clear, exactly as it already does for the bearer, so production hubs should serve TLS.
+**Team mode requires hub-terminated TLS (task 01a0e121, decision P5).** A team-mode request carries the individual bearer and a session handle, so the gate's first check after authentication refuses one that did not arrive over TLS this hub terminated itself. The refusal is `tls_required`, audited as `team.refused.tls_required`, and it comes before the header, credential and route checks and before any introspection. Forwarded headers (`X-Forwarded-Proto`, `Forwarded`, `X-Forwarded-Ssl`) never count, and neither does a TLS-terminating proxy. The local socket keeps its own refusal. Personal mode is unchanged on every listener. Every team deployment already needs hub TLS, because the proof and redemption routes that link an agent to aicrew refuse anything else.
