@@ -107,6 +107,38 @@ func Active() bool { return os.Getenv(EnvVar) != "" }
 // the two kinds of state never share a directory.
 func Dir(root string) string { return filepath.Join(root, "aicrew-sessions") }
 
+// Locked runs fn while holding the state root's aicrew-session lock, which
+// every lifecycle command takes for its final check-and-write. fn must not
+// wait on the network: the lock only makes "the file still holds what I
+// verified" and the write that follows one step. The OS releases the lock
+// if the process dies, so it is never stale.
+func Locked(root string, fn func() error) error {
+	if err := os.MkdirAll(Dir(root), 0o700); err != nil {
+		return err
+	}
+	lf, err := os.OpenFile(filepath.Join(Dir(root), ".lock"), os.O_RDWR|os.O_CREATE, 0o600)
+	if err != nil {
+		return err
+	}
+	defer lf.Close()
+	deadline := time.Now().Add(10 * time.Second)
+	for {
+		ok, err := tryLock(lf)
+		if err != nil {
+			return err
+		}
+		if ok {
+			break
+		}
+		if time.Now().After(deadline) {
+			return errors.New("another aimem team-session command held the session lock too long; try again")
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	defer unlock(lf)
+	return fn()
+}
+
 // PathFor is the session file for sessionID under the state root. The name
 // is a digest of the ID, so any valid ID is a safe file name on every OS.
 func PathFor(root, sessionID string) string {

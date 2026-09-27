@@ -23,6 +23,21 @@ type aicrewSessions struct {
 	mu      sync.Mutex
 	g       *teamSessionRig
 	entries map[string]aicrewEntry
+	holds   map[string]*aicrewHold
+}
+
+// aicrewHold pauses the fake's answer for one handle: entered closes when a
+// request for it arrives, and the answer is written, from the entry as it
+// is then, once release closes.
+type aicrewHold struct{ entered, release chan struct{} }
+
+// hold pauses the next answer for handle.
+func (a *aicrewSessions) hold(handle string) *aicrewHold {
+	h := &aicrewHold{entered: make(chan struct{}), release: make(chan struct{})}
+	a.mu.Lock()
+	a.holds[handle] = h
+	a.mu.Unlock()
+	return h
 }
 
 type aicrewEntry struct {
@@ -31,8 +46,16 @@ type aicrewEntry struct {
 }
 
 func scriptAicrew(g *teamSessionRig) *aicrewSessions {
-	a := &aicrewSessions{g: g, entries: map[string]aicrewEntry{}}
+	a := &aicrewSessions{g: g, entries: map[string]aicrewEntry{}, holds: map[string]*aicrewHold{}}
 	g.fake.SetAnswer(func(w http.ResponseWriter, got introspecttest.Request) {
+		a.mu.Lock()
+		h := a.holds[got.Handle]
+		delete(a.holds, got.Handle)
+		a.mu.Unlock()
+		if h != nil {
+			close(h.entered)
+			<-h.release
+		}
 		a.mu.Lock()
 		e, ok := a.entries[got.Handle]
 		a.mu.Unlock()
@@ -247,4 +270,88 @@ func TestTeamSessionCloseKeepsActiveState(t *testing.T) {
 	if _, err := os.Stat(pathB); !os.IsNotExist(err) {
 		t.Fatal("an exposed session file was kept")
 	}
+}
+
+// TestTeamSessionLifecycleCommandsNeverUndoEachOther interleaves lifecycle
+// commands for one session deterministically: the fake aicrew holds one
+// command's verification while another completes. Whatever the caller,
+// no command removes or overwrites a file it did not start from.
+func TestTeamSessionLifecycleCommandsNeverUndoEachOther(t *testing.T) {
+	g := newTeamSessionRig(t)
+	a := scriptAicrew(g)
+	run := func(stdin string, args ...string) (string, error) {
+		var out bytes.Buffer
+		err := runAicrewSession(args, strings.NewReader(stdin), &out, g.state)
+		return out.String(), err
+	}
+	type result struct {
+		out string
+		err error
+	}
+	background := func(stdin string, args ...string) chan result {
+		done := make(chan result, 1)
+		go func() {
+			out, err := run(stdin, args...)
+			done <- result{out, err}
+		}()
+		return done
+	}
+	path := teamsession.PathFor(g.state, "sess-A")
+	holding := func(want string) {
+		t.Helper()
+		f, err := teamsession.Load(path)
+		if err != nil || f.Handle != want {
+			t.Fatalf("the session file does not hold the expected handle: %v", err)
+		}
+	}
+
+	// Close waits on the hub for H1 while a refresh writes H2; the stale
+	// answer for H1 must not remove H2.
+	a.set(handleA, aicrewEntry{session: "sess-A", token: g.aliceTk, generation: "4"})
+	g.openSession(t, handleA, "sess-A")
+	h := a.hold(handleA)
+	closing := background("", "close", "sess-A")
+	<-h.entered
+	a.set(handleA2, aicrewEntry{session: "sess-A", token: g.aliceTk, generation: "5"})
+	if out, err := run(handleA2, "refresh", "sess-A"); err != nil {
+		t.Fatalf("refresh during close: %v %s", err, out)
+	}
+	a.set(handleA, aicrewEntry{session: "sess-A", ended: true})
+	close(h.release)
+	if r := <-closing; r.err == nil || !strings.Contains(r.err.Error(), "was kept") {
+		t.Fatalf("close removed a file a refresh wrote meanwhile: %v %s", r.err, r.out)
+	}
+	holding(handleA2)
+
+	// A refresh waits on the hub for H3 while close removes the ended H2
+	// file; the refresh must not bring the closed session back.
+	const handleA3 = "acs1_" + "cccccccccccccccccccccccccccccccccccccccccc3"
+	h = a.hold(handleA3)
+	refreshing := background(handleA3, "refresh", "sess-A")
+	<-h.entered
+	a.set(handleA2, aicrewEntry{session: "sess-A", ended: true})
+	if out, err := run("", "close", "sess-A"); err != nil || !strings.Contains(out, "closed") {
+		t.Fatalf("close during refresh: %v %s", err, out)
+	}
+	a.set(handleA3, aicrewEntry{session: "sess-A", token: g.aliceTk, generation: "6"})
+	close(h.release)
+	if r := <-refreshing; r.err == nil || !strings.Contains(r.err.Error(), "nothing was written") {
+		t.Fatalf("a refresh revived a closed session: %v %s", r.err, r.out)
+	}
+	if _, err := os.Lstat(path); !os.IsNotExist(err) {
+		t.Fatalf("the closed session's file is back: %v", err)
+	}
+
+	// Two opens for one session: the one verified later must not overwrite
+	// the file the other wrote.
+	a.set(handleA, aicrewEntry{session: "sess-A", token: g.aliceTk, generation: "7"})
+	h = a.hold(handleA)
+	opening := background(handleA, "open", "--service", "aicrew-example", "--team", "team-1", "--session", "sess-A")
+	<-h.entered
+	g.openSession(t, handleA3, "sess-A")
+	close(h.release)
+	if r := <-opening; r.err == nil || !strings.Contains(r.err.Error(), "nothing was written") {
+		t.Fatalf("an open overwrote a session opened meanwhile: %v %s", r.err, r.out)
+	}
+	holding(handleA3)
 }
