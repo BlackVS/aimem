@@ -554,7 +554,7 @@
           "holder_mode": {
             "const": "external"
           },
-          "work_ref": {
+          "own_work_ref": {
             "type": "string"
           },
           "task_revision": {

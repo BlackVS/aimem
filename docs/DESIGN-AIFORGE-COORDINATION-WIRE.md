@@ -41,11 +41,12 @@ Aicrew never calls a reservation mutation, and aimem never takes a coordination 
 | Lifetime | at most 15 min, and never longer than the intent stays pending. Once aicrew settles or voids the intent, the proof answers inactive |
 
 **Where the proof may appear.** A proof is a single-use bearer of one step. It may appear only:
+- in aicrew's authenticated **begin response**, which delivers the newly minted proof to the member's client that asked for the step, and to no one else. This is aicrew's session API, authorized by that member's aicrew session token;
 - in the `coordination_proof` field of that step's reservation mutation;
 - in the `proof` field of a `coordination.v1` request;
 - on the standard input of the reservation CLI (§4).
 
-It never appears in argv, a response, a receipt, an audit record, a log or a refusal. aimem and aicrew identify it only by its digest: `p1_` followed by the unpadded base64url SHA-256 of the proof's bytes (46 characters). The `k1_` request-key digest uses the identity.v1 encoding: `k1_` followed by the unpadded base64url SHA-256 of the key's UTF-8 bytes.
+Apart from the begin response, it never appears in argv, a response, a receipt, an audit record, a log or a refusal. In particular, a `coordination.v1` reply, a read-scope receipt and a refusal never echo it. aimem and aicrew identify it only by its digest: `p1_` followed by the unpadded base64url SHA-256 of the proof's bytes (46 characters). The `k1_` request-key digest uses the identity.v1 encoding: `k1_` followed by the unpadded base64url SHA-256 of the key's UTF-8 bytes.
 
 ### Request
 
@@ -83,7 +84,7 @@ Aicrew answers every fact from one snapshot of current state, never from the pro
 | `kind` | `operation` | Acting member (`member.role`) | Also carries | aimem also requires |
 | --- | --- | --- | --- | --- |
 | `offer` | `claim` | the team's current coordinator (`coordinator`) | `offer_ref`, `intended_worker` | request `holder = {mode: external, work_ref: offer_ref}`; aimem records `intended_worker` on the hold |
-| `accepted_attempt` | `transfer` | the intended worker (`worker`), from the session the offer is bound to | `offer_ref`, `attempt_ref` | the hold's current `work_ref` equals `offer_ref`; request `holder.work_ref` equals `attempt_ref`; `member` is the `intended_worker` aimem recorded from the offer fact |
+| `accepted_attempt` | `transfer` | the intended worker (`worker`), from the session the offer is bound to | `offer_ref`, `attempt_ref` | the hold's current `work_ref` equals `offer_ref`; request `holder.work_ref` equals `attempt_ref`; `member` is the `intended_worker` aimem recorded from the offer fact: the same `user_id` **and** `agent_id` |
 | `never_accepted` | `release` | the current coordinator, or a verified successor (`coordinator`) | `offer_ref` | the hold's current `work_ref` equals `offer_ref` |
 | `stopped` | `release` | the holding worker (`worker` or `independent`), after it confirmed the stop | `attempt_ref` | the hold's current `work_ref` equals `attempt_ref`, and the caller is the bound holder |
 | `accepted_for_finalization` | `finalize` | the holder, or the coordinator from the session and generation that recorded the acceptance | `attempt_ref` | the hold's current `work_ref` equals `attempt_ref`; `terminal_evidence` present for `DONE` |
@@ -118,7 +119,7 @@ The answer is used once. aimem takes it before the ledger transaction (C5 decisi
 
 ### Replay
 
-**A replay does not query the fact again.** An identical request with a committed receipt is answered from the receipt after aimem rechecks only the authority it owns: the live token, the grant, the profile, and that the replaying caller is the receipt's holder binding (C5a). It never calls `coordination.v1`, so a settled or expired proof never blocks reconciliation.
+**A replay does not query the fact again.** An identical request with a committed receipt is answered from the receipt after aimem rechecks only the authority it owns: the live token, the grant, the profile, and that the replaying caller is the receipt's **acting member**: the member whose verified binding made the transition and is recorded on the receipt (C5a). For a holder's transition that is the holder (same user, mode, profile and role; the session may have moved on). For a coordinator's finalize it is that coordinator, from the session recorded on the receipt. It never calls `coordination.v1`, so a settled or expired proof never blocks reconciliation.
 
 A retry whose first attempt did **not** commit is not a replay: it is a new attempt, and it verifies the fact again.
 
@@ -132,23 +133,31 @@ aimem records, on every receipt and hold committed under a verified fact, the `s
 
 ### Operations
 
-Both are HTTP-only, over TLS the hub terminated itself, with `X-Aimem-Reservation-Version: 1`. The path `service_id` must be the authenticated peer. The hub's bearer gate confines a `reservation.read` credential to exactly these three route shapes, as it confines the redemption credential to its route, and refuses it everywhere else, including `/mcp`, before any handler runs.
+All three are HTTP-only, over TLS the hub terminated itself, with `X-Aimem-Reservation-Version: 1`. The path `service_id` must be the authenticated peer. The hub's bearer gate confines a `reservation.read` credential to exactly these three route shapes, as it confines the redemption credential to its route, and refuses it everywhere else, including `/mcp`, before any handler runs.
 
 | Operation | Route | Answer |
 | --- | --- | --- |
 | Receipt by proof | `GET /v1/identity/peers/{service_id}/reservation-receipts/{proof_digest}` | `{state: "committed", receipt}` for the transition committed under that proof, or `{state: "none"}` |
 | Receipt by key | `GET /v1/identity/peers/{service_id}/reservations/{task_id}/receipts/{operation}/{request_key_digest}` | `{state: "committed", receipt}` when that transition was made on a reservation this service's proof established (a claim or transfer under its proof), otherwise `{state: "none"}`. This is how aicrew confirms a holder's `update`, which carries no proof |
-| Hold status | `GET /v1/identity/peers/{service_id}/reservations/{task_id}` | `{state: "held", reservation_id, fence, holder_mode: "external", work_ref, task_revision}` when the task's current hold was set under a proof this service issued, otherwise `{state: "none"}` |
+| Hold status | `GET /v1/identity/peers/{service_id}/reservations/{task_id}` | `{state: "held", reservation_id, fence, holder_mode: "external", own_work_ref, task_revision}` (the field names reservation.v1's status uses) when the task's current hold was set under a proof this service issued, otherwise `{state: "none"}` |
 
 The receipt is `{id, operation, task_id, request_key_digest, reservation_id, fence, task_revision, member_user_id, verified_mode: "team", committed_at}`.
 
 **What the scope never returns:** task content, another holder's identity or reference, a hold set under another service's proof or under personal mode, the raw request key, or the proof itself. Every out-of-scope record answers `none`, the same as a missing one.
 
-**When `none` is final.** A committed transition's receipt is durable. But `none` means only that nothing has committed under that proof *yet*: a member's request verified just before may still commit. Aicrew treats `none` as final only after both of these:
+**When `none` is final.** A committed transition's receipt is durable, and it commits in the same transaction as the transition. But `none` means only that nothing has committed *yet*: a member's request may still be on its way. The rule depends on whether the step carries a proof.
+
+*A proof-backed transition* (every kind in the §1 table). Aicrew treats a receipt-by-proof `none` as final only after both of these:
 - it has settled or voided the intent, so `coordination.v1` answers inactive;
 - at least 10 s have passed since then, which covers aimem's 5 s answer age plus the 2 s budget and a margin.
 
 Before that, a `none` is a reason to wait, not an outcome.
+
+*A holder's `update`, which carries no proof.* Voiding an intent and letting time pass fence nothing: aimem checks no fact for an update, so a delayed update can commit at any time while the holder, fence and revision still match. A receipt-by-key `none` for an update therefore stays **unresolved**, however long ago aicrew abandoned the step, until separate evidence rules out a later commit:
+- **The hold moved past the request.** Aicrew first observes the reservation's fence past the request's fence, or the task revision past the request's expected revision. It learns this from hold status, or from a later committed receipt on the same reservation. The request can then never commit: its fence or revision check fails. **Only after that** does aicrew read the receipt by key: `committed` is the outcome, and `none` is now final. The order matters. A receipt read *before* the evidence could miss an update that commits in between and then itself moves the fence.
+- **The same key replays.** The member, or the step driver, resends the identical request with the same key. It is answered from a committed receipt, or it runs as a new attempt whose outcome is then known.
+
+Until one of these, the step stays unresolved, and aicrew sends nothing that depends on it.
 
 **Refusals.**
 

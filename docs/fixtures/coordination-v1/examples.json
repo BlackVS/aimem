@@ -8,6 +8,7 @@
     "aimem_handle": "acs1_SAMPLEhandleSAMPLEhandleSAMPLEhandleSAMPLEX",
     "coordination_credential": "sample-aimem-introspection-credential-not-real",
     "read_credential": "aimem_peer_0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f",
+    "aicrew_session_token": "sample-aicrew-session-token-not-real",
     "proof_offer": "acp1_SAMPLEofferSAMPLEofferSAMPLEofferSAMPLEoffe",
     "proof_accepted_attempt": "acp1_SAMPLEacceptSAMPLEacceptSAMPLEacceptSAMPLEa",
     "proof_never_accepted": "acp1_SAMPLEneverSAMPLEneverSAMPLEneverSAMPLEneve",
@@ -211,6 +212,32 @@
   "no_fact_operations": [
     "update"
   ],
+  "begin_exchange": {
+    "owner": "aicrew",
+    "caller": "member_client",
+    "http": {
+      "method": "POST",
+      "path": "aicrew session API (owned by aicrew)",
+      "headers": {
+        "Authorization": "Bearer {aicrew_session_token}"
+      }
+    },
+    "response": {
+      "status": 200,
+      "body": {
+        "operation": "transfer",
+        "request_key": "accept:attempt-example-7:transfer",
+        "expected_revision": 3,
+        "reservation_id": "01a0e39c-0000-7000-8000-00000000c510",
+        "fence": "1",
+        "holder": {
+          "mode": "external",
+          "work_ref": "attempt-example-7"
+        },
+        "coordination_proof": "{proof_accepted_attempt}"
+      }
+    }
+  },
   "exchanges": [
     {
       "case": "offer",
@@ -825,6 +852,22 @@
       "outcome": "coordination_rejected"
     },
     {
+      "case": "transfer_by_another_user_than_intended",
+      "outcome": "coordination_rejected"
+    },
+    {
+      "case": "transfer_by_another_agent_of_the_intended_user",
+      "outcome": "coordination_rejected",
+      "offer_intended_worker": {
+        "user_id": "user-worker",
+        "agent_id": "agent-worker"
+      },
+      "transfer_member": {
+        "user_id": "user-worker",
+        "agent_id": "agent-worker-2"
+      }
+    },
+    {
       "case": "unreachable_or_timeout",
       "outcome": "context_unavailable"
     },
@@ -862,10 +905,46 @@
         "token",
         "grant",
         "profile",
-        "holder_binding"
+        "acting_member"
       ],
       "result": "recorded_outcome",
       "replayed": true
+    },
+    {
+      "case": "coordinator_finalize_replay",
+      "receipt_state": "committed",
+      "coordination_calls": 0,
+      "acting_member": {
+        "role": "coordinator",
+        "session_id": "sess-coord-1"
+      },
+      "caller_session_id": "sess-coord-1",
+      "rechecks": [
+        "token",
+        "grant",
+        "profile",
+        "acting_member"
+      ],
+      "result": "recorded_outcome",
+      "replayed": true
+    },
+    {
+      "case": "coordinator_finalize_replay_other_session",
+      "receipt_state": "committed",
+      "coordination_calls": 0,
+      "acting_member": {
+        "role": "coordinator",
+        "session_id": "sess-coord-1"
+      },
+      "caller_session_id": "sess-coord-2",
+      "rechecks": [
+        "token",
+        "grant",
+        "profile",
+        "acting_member"
+      ],
+      "result": "reservation_conflict",
+      "replayed": false
     },
     {
       "case": "retry_after_not_committed",
@@ -991,7 +1070,7 @@
             "reservation_id": "01a0e39c-0000-7000-8000-00000000c510",
             "fence": "2",
             "holder_mode": "external",
-            "work_ref": "attempt-example-7",
+            "own_work_ref": "attempt-example-7",
             "task_revision": 3
           }
         }
@@ -1015,9 +1094,90 @@
       }
     ],
     "none_finality": {
-      "rule": "none is final only after aicrew settled or voided the proof's intent and at least read_none_final_after_seconds passed since",
-      "before_final": "wait",
-      "after_final": "not_committed"
+      "proof_backed": {
+        "rule": "a receipt-by-proof none is final only after aicrew settled or voided the proof's intent and at least read_none_final_after_seconds passed since",
+        "before_final": "wait",
+        "after_final": "not_committed"
+      },
+      "proofless_update": {
+        "rule": "a receipt-by-key none for an update stays unresolved until the hold's fence or revision is observed past the request's and the receipt is read after that, or the same key replays",
+        "delayed_update": {
+          "request": {
+            "operation": "update",
+            "request_key_digest": "k1_ZOJxnDmdAtq9L0Vfm5EBYo1xvD9xsW10vDpa44n6gUk",
+            "reservation_id": "01a0e39c-0000-7000-8000-00000000c510",
+            "fence": "2",
+            "expected_revision": 4
+          },
+          "cases": [
+            {
+              "case": "none_long_after_abandoning",
+              "evidence": null,
+              "receipt": "none",
+              "outcome": "unresolved"
+            },
+            {
+              "case": "fence_moved_then_none",
+              "evidence": {
+                "source": "hold_status",
+                "fence": "3"
+              },
+              "receipt_read_after_evidence": true,
+              "receipt": "none",
+              "outcome": "not_committed"
+            },
+            {
+              "case": "revision_moved_then_none",
+              "evidence": {
+                "source": "receipt",
+                "task_revision": 5
+              },
+              "receipt_read_after_evidence": true,
+              "receipt": "none",
+              "outcome": "not_committed"
+            },
+            {
+              "case": "none_read_before_the_evidence",
+              "evidence": {
+                "source": "hold_status",
+                "fence": "3"
+              },
+              "receipt_read_after_evidence": false,
+              "receipt": "none",
+              "outcome": "unresolved"
+            },
+            {
+              "case": "evidence_not_past_the_request",
+              "evidence": {
+                "source": "hold_status",
+                "fence": "2"
+              },
+              "receipt_read_after_evidence": true,
+              "receipt": "none",
+              "outcome": "unresolved"
+            },
+            {
+              "case": "update_committed_late",
+              "evidence": {
+                "source": "hold_status",
+                "fence": "3"
+              },
+              "receipt_read_after_evidence": true,
+              "receipt": "committed",
+              "outcome": "committed"
+            },
+            {
+              "case": "same_key_replay",
+              "evidence": {
+                "source": "same_key_replay",
+                "result": "committed"
+              },
+              "receipt": "none",
+              "outcome": "committed"
+            }
+          ]
+        }
+      }
     },
     "refusals": [
       {
@@ -1109,6 +1269,7 @@
   },
   "secret_locations": {
     "proof": [
+      "begin_exchange.response.body.coordination_proof",
       "exchanges[].request.proof",
       "inactive[].request.proof",
       "exchanges[].member_request.coordination_proof",
@@ -1126,6 +1287,9 @@
     ],
     "aimem_handle": [
       "exchanges[].member_request.http.headers.X-Aimem-Team-Context"
+    ],
+    "aicrew_session_token": [
+      "begin_exchange.http.headers.Authorization"
     ]
   },
   "secret_location_rejections": [
@@ -1158,6 +1322,31 @@
       "case": "proof_in_cli_argument",
       "path": "cli.arguments[]",
       "value": "--proof={proof_offer}"
+    },
+    {
+      "case": "proof_echoed_in_coordination_reply",
+      "path": "exchanges[accepted_attempt].response.body.proof",
+      "value": "{proof_accepted_attempt}"
+    },
+    {
+      "case": "proof_echoed_in_update_receipt",
+      "path": "read_scope.exchanges[update_receipt_by_key].response.body.receipt.coordination_proof",
+      "value": "{proof_accepted_attempt}"
+    },
+    {
+      "case": "proof_in_reservation_refusal",
+      "path": "reservation_refusal.message",
+      "value": "proof {proof_offer} was rejected"
+    },
+    {
+      "case": "begin_proof_outside_its_field",
+      "path": "begin_exchange.response.body.note",
+      "value": "{proof_accepted_attempt}"
+    },
+    {
+      "case": "session_token_in_member_request",
+      "path": "exchanges[].member_request.http.headers.Authorization",
+      "value": "Bearer {aicrew_session_token}"
     }
   ]
 }

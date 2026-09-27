@@ -251,18 +251,22 @@ func TestCoordinationV1Facts(t *testing.T) {
 	}
 	// The transfer's member is the worker the offer named, which aimem
 	// recorded on the hold at the offer claim.
-	var offerWorker, transferMember any
+	// Both the user and the agent must match: another agent of the same user
+	// is not the intended worker.
+	var offerWorker, transferMember [2]any
 	for _, e := range arr(t, ex["exchanges"], "exchanges") {
 		e := obj(t, e, "exchange")
 		fact := obj(t, obj(t, obj(t, e["response"], "r")["body"], "b")["fact"], "fact")
 		switch e["case"] {
 		case "offer":
-			offerWorker = obj(t, fact["intended_worker"], "intended_worker")["user_id"]
+			w := obj(t, fact["intended_worker"], "intended_worker")
+			offerWorker = [2]any{w["user_id"], w["agent_id"]}
 		case "accepted_attempt":
-			transferMember = obj(t, fact["member"], "member")["user_id"]
+			m := obj(t, fact["member"], "member")
+			transferMember = [2]any{m["user_id"], m["agent_id"]}
 		}
 	}
-	if offerWorker == nil || offerWorker != transferMember {
+	if offerWorker[0] == nil || offerWorker[1] == nil || offerWorker != transferMember {
 		t.Errorf("the transfer's member %v is not the offer's intended worker %v", transferMember, offerWorker)
 	}
 	// Inactive replies carry only the nonce: no reason.
@@ -284,7 +288,8 @@ func TestCoordinationV1Facts(t *testing.T) {
 		"member_generation_differs": "coordination_rejected", "member_session_differs": "coordination_rejected",
 		"other_task": "coordination_rejected", "operation_differs": "coordination_rejected", "fact_expired_by_hub_clock": "coordination_rejected",
 		"nonce_mismatch": "context_unavailable", "tls_identity_mismatch": "context_unavailable", "unreachable_or_timeout": "context_unavailable",
-		"reply_over_size_ceiling": "context_unavailable", "unsupported_version_refusal": "context_unavailable"} {
+		"reply_over_size_ceiling": "context_unavailable", "unsupported_version_refusal": "context_unavailable",
+		"transfer_by_another_user_than_intended": "coordination_rejected", "transfer_by_another_agent_of_the_intended_user": "coordination_rejected"} {
 		if outcomes[c] != want {
 			t.Errorf("acceptance %s = %q, want %q", c, outcomes[c], want)
 		}
@@ -292,6 +297,16 @@ func TestCoordinationV1Facts(t *testing.T) {
 	for c, o := range outcomes {
 		if o != "coordination_rejected" && o != "context_unavailable" {
 			t.Errorf("acceptance %s has outcome %q", c, o)
+		}
+	}
+	for _, a := range arr(t, ex["acceptance"], "acceptance") {
+		a := obj(t, a, "acceptance")
+		if a["case"] != "transfer_by_another_agent_of_the_intended_user" {
+			continue
+		}
+		w, m := obj(t, a["offer_intended_worker"], "intended"), obj(t, a["transfer_member"], "member")
+		if w["user_id"] != m["user_id"] || w["agent_id"] == m["agent_id"] {
+			t.Error("the same-user, different-agent case must differ in the agent alone")
 		}
 	}
 	// Version and size.
@@ -336,10 +351,19 @@ func TestCoordinationV1Facts(t *testing.T) {
 			if r["coordination_calls"] != float64(0) || containsAny(checks, "coordination_fact") || r["replayed"] != true {
 				t.Errorf("a replay must recheck only aimem-owned authority: %v", r)
 			}
-			for _, need := range []string{"token", "grant", "profile", "holder_binding"} {
+			for _, need := range []string{"token", "grant", "profile", "acting_member"} {
 				if !containsAny(checks, need) {
 					t.Errorf("a replay skips %s", need)
 				}
+			}
+		case "coordinator_finalize_replay", "coordinator_finalize_replay_other_session":
+			// The reviewing coordinator replays its own finalize, from the
+			// session recorded on the receipt, and never asks aicrew again.
+			acting := obj(t, r["acting_member"], "acting_member")
+			same := acting["session_id"] == r["caller_session_id"]
+			if r["coordination_calls"] != float64(0) || containsAny(checks, "coordination_fact") || !containsAny(checks, "acting_member") ||
+				acting["role"] != "coordinator" || (r["result"] == "recorded_outcome") != same || r["replayed"] != same {
+				t.Errorf("coordinator finalize replay: %v", r)
 			}
 		case "retry_after_not_committed":
 			if r["coordination_calls"] != float64(1) || !containsAny(checks, "coordination_fact") || r["replayed"] != false {
@@ -425,7 +449,7 @@ func TestCoordinationV1ReadScopeAndCLI(t *testing.T) {
 			}
 		case "hold_under_own_proof":
 			if body["state"] != "held" || body["holder_mode"] != "external" || !reflect.DeepEqual(keysOf(body),
-				[]string{"fence", "holder_mode", "reservation_id", "state", "task_revision", "work_ref"}) {
+				[]string{"fence", "holder_mode", "own_work_ref", "reservation_id", "state", "task_revision"}) {
 				t.Errorf("%s: hold fields %v", c, keysOf(body))
 			}
 		default:
@@ -433,8 +457,56 @@ func TestCoordinationV1ReadScopeAndCLI(t *testing.T) {
 		}
 	}
 	nf := obj(t, rs["none_finality"], "none_finality")
-	if nf["before_final"] != "wait" || nf["after_final"] != "not_committed" {
-		t.Errorf("none finality: %v", nf)
+	if pb := obj(t, nf["proof_backed"], "proof_backed"); pb["before_final"] != "wait" || pb["after_final"] != "not_committed" {
+		t.Errorf("proof-backed none finality: %v", pb)
+	}
+	// A holder's update has no proof: a none stays unresolved until the hold
+	// is seen past the request and the receipt is read after that, or the
+	// same key replays.
+	du := obj(t, obj(t, nf["proofless_update"], "proofless_update")["delayed_update"], "delayed_update")
+	req := obj(t, du["request"], "request")
+	if req["operation"] != "update" || !keyDigest.MatchString(str(t, req["request_key_digest"], "digest")) {
+		t.Errorf("delayed update request: %v", req)
+	}
+	fence, rev := atoi(t, str(t, req["fence"], "fence")), int(req["expected_revision"].(float64))
+	outcomesSeen := map[string]bool{}
+	for _, c := range arr(t, du["cases"], "delayed cases") {
+		c := obj(t, c, "delayed case")
+		want := "unresolved"
+		if ev, ok := c["evidence"].(map[string]any); ok && ev["source"] == "same_key_replay" {
+			want = str(t, ev["result"], "replay result")
+		} else if c["receipt"] == "committed" {
+			want = "committed"
+		} else if ok && c["receipt_read_after_evidence"] == true {
+			past := false
+			if f, ok := ev["fence"].(string); ok {
+				past = atoi(t, f) > fence
+			}
+			if r, ok := ev["task_revision"].(float64); ok {
+				past = past || int(r) > rev
+			}
+			if past {
+				want = "not_committed"
+			}
+		}
+		if c["outcome"] != want {
+			t.Errorf("delayed update %v: outcome %v, want %s", c["case"], c["outcome"], want)
+		}
+		outcomesSeen[want] = true
+	}
+	for _, o := range []string{"unresolved", "not_committed", "committed"} {
+		if !outcomesSeen[o] {
+			t.Errorf("no delayed-update case ends %s", o)
+		}
+	}
+	// The begin response is the one response that carries a proof: aicrew
+	// delivering a new proof to the member that asked for the step.
+	begin := obj(t, ex["begin_exchange"], "begin_exchange")
+	bb := obj(t, obj(t, begin["response"], "begin response")["body"], "begin body")
+	if begin["owner"] != "aicrew" || begin["caller"] != "member_client" ||
+		obj(t, obj(t, begin["http"], "begin http")["headers"], "begin headers")["Authorization"] != "Bearer {aicrew_session_token}" ||
+		!strings.HasPrefix(str(t, bb["coordination_proof"], "begin proof"), "{proof_") {
+		t.Errorf("begin exchange: %v", begin)
 	}
 	status := map[string]float64{"unsupported_version": 400, "peer_unauthenticated": 401, "peer_forbidden": 403, "tls_required": 403,
 		"rate_limited": 429, "request_in_progress": 503}
@@ -610,7 +682,8 @@ func TestCoordinationV1IsNotServedAndContractsAgree(t *testing.T) {
 			t.Errorf("the coordination contract does not define %s", kind)
 		}
 	}
-	for _, must := range []string{"coordination_rejected", "reservation.read", "`acp1_`", "`p1_`", "X-Aimem-Coordination-Version", "standard input"} {
+	for _, must := range []string{"coordination_rejected", "reservation.read", "`acp1_`", "`p1_`", "X-Aimem-Coordination-Version", "standard input",
+		"All three are HTTP-only", "own_work_ref", "acting member", "begin response", "stays **unresolved**", "**Only after that**"} {
 		if !strings.Contains(coordination, must) {
 			t.Errorf("the coordination contract lacks %s", must)
 		}
@@ -621,7 +694,10 @@ func TestCoordinationV1IsNotServedAndContractsAgree(t *testing.T) {
 			t.Errorf("the reservation wire still says %q", gone)
 		}
 	}
-	for _, must := range []string{"acting member's own verified connection", "coordination_rejected", "Replay rule", "aimem reservation"} {
+	if strings.Contains(coordination, "Both are HTTP-only") || strings.Contains(wire, "holder binding") {
+		t.Error("the contracts keep wording the operator corrected")
+	}
+	for _, must := range []string{"acting member's own verified connection", "coordination_rejected", "Replay rule", "aimem reservation", "acting member"} {
 		if !strings.Contains(wire, must) {
 			t.Errorf("the reservation wire lacks %q", must)
 		}
@@ -634,6 +710,18 @@ func TestCoordinationV1IsNotServedAndContractsAgree(t *testing.T) {
 			}
 		}
 	}
+}
+
+func atoi(t *testing.T, s string) int {
+	t.Helper()
+	n := 0
+	for _, r := range s {
+		if r < '0' || r > '9' {
+			t.Fatalf("not a decimal: %q", s)
+		}
+		n = n*10 + int(r-'0')
+	}
+	return n
 }
 
 func contains(list []string, s string) bool {
