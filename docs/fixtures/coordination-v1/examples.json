@@ -946,6 +946,35 @@
         }
       },
       {
+        "case": "update_receipt_by_key",
+        "http": {
+          "method": "GET",
+          "path": "/v1/identity/peers/aicrew-example/reservations/01a0e39c-0000-7000-8000-00000000c501/receipts/update/k1_9svAO90Pfq8X2wdd-Oe5mAzACzlWX0HgNAoKiTInH44",
+          "headers": {
+            "Authorization": "Bearer {read_credential}",
+            "X-Aimem-Reservation-Version": "1"
+          }
+        },
+        "response": {
+          "status": 200,
+          "body": {
+            "state": "committed",
+            "receipt": {
+              "id": "receipt-update-7",
+              "operation": "update",
+              "task_id": "01a0e39c-0000-7000-8000-00000000c501",
+              "request_key_digest": "k1_9svAO90Pfq8X2wdd-Oe5mAzACzlWX0HgNAoKiTInH44",
+              "reservation_id": "01a0e39c-0000-7000-8000-00000000c510",
+              "fence": "2",
+              "task_revision": 4,
+              "member_user_id": "user-worker",
+              "verified_mode": "team",
+              "committed_at": "2026-09-27T18:05:40Z"
+            }
+          }
+        }
+      },
+      {
         "case": "hold_under_own_proof",
         "http": {
           "method": "GET",

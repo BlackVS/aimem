@@ -102,6 +102,62 @@
         }
       }
     },
+    "/v1/identity/peers/{service_id}/reservations/{task_id}/receipts/{operation}/{request_key_digest}": {
+      "get": {
+        "x-owner": "aimem",
+        "x-operation": "reservation.read",
+        "x-caller": "aicrew",
+        "security": [
+          {
+            "ReservationReadCredential": []
+          }
+        ],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/ServiceID"
+          },
+          {
+            "$ref": "#/components/parameters/TaskID"
+          },
+          {
+            "$ref": "#/components/parameters/Operation"
+          },
+          {
+            "$ref": "#/components/parameters/RequestKeyDigest"
+          },
+          {
+            "$ref": "#/components/parameters/ReservationVersion"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "committed on a reservation this service's proof established, or none",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReceiptRead"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "unsupported_version"
+          },
+          "401": {
+            "description": "peer_unauthenticated"
+          },
+          "403": {
+            "description": "peer_forbidden or tls_required"
+          },
+          "429": {
+            "description": "rate_limited"
+          },
+          "503": {
+            "description": "request_in_progress"
+          }
+        }
+      }
+    },
     "/v1/identity/peers/{service_id}/reservations/{task_id}": {
       "get": {
         "x-owner": "aimem",
@@ -206,6 +262,29 @@
         "required": true,
         "schema": {
           "type": "string"
+        }
+      },
+      "Operation": {
+        "name": "operation",
+        "in": "path",
+        "required": true,
+        "schema": {
+          "enum": [
+            "claim",
+            "transfer",
+            "update",
+            "release",
+            "finalize"
+          ]
+        }
+      },
+      "RequestKeyDigest": {
+        "name": "request_key_digest",
+        "in": "path",
+        "required": true,
+        "schema": {
+          "type": "string",
+          "pattern": "^k1_[A-Za-z0-9_-]{43}$"
         }
       }
     },

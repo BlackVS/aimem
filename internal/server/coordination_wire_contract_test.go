@@ -410,6 +410,15 @@ func TestCoordinationV1ReadScopeAndCLI(t *testing.T) {
 				receipt["request_key_digest"] != sha256Digest("k1_", "accept:attempt-example-7:transfer") {
 				t.Errorf("%s: receipt does not bind its proof and key", c)
 			}
+		case "update_receipt_by_key":
+			// A holder's update carries no proof: aicrew reads its receipt by
+			// task, operation and key digest, on a hold its proof established.
+			receipt := obj(t, body["receipt"], c)
+			digest := path[strings.LastIndex(path, "/")+1:]
+			if body["state"] != "committed" || receipt["operation"] != "update" || receipt["request_key_digest"] != digest ||
+				!keyDigest.MatchString(digest) || !strings.Contains(path, "/reservations/"+str(t, receipt["task_id"], "task")+"/receipts/update/") {
+				t.Errorf("%s: receipt by key does not bind its task, operation and key", c)
+			}
 		case "receipt_none", "hold_outside_scope":
 			if !reflect.DeepEqual(keysOf(body), []string{"state"}) || body["state"] != "none" {
 				t.Errorf("%s: none carries nothing else: %v", c, body)
@@ -440,8 +449,9 @@ func TestCoordinationV1ReadScopeAndCLI(t *testing.T) {
 	paths := obj(t, spec["paths"], "paths")
 	for p, want := range map[string][2]string{
 		"/v1/crew/coordination": {"aicrew", "crew.coordination"},
-		"/v1/identity/peers/{service_id}/reservation-receipts/{proof_digest}": {"aimem", "reservation.read"},
-		"/v1/identity/peers/{service_id}/reservations/{task_id}":              {"aimem", "reservation.read"},
+		"/v1/identity/peers/{service_id}/reservation-receipts/{proof_digest}":                              {"aimem", "reservation.read"},
+		"/v1/identity/peers/{service_id}/reservations/{task_id}":                                           {"aimem", "reservation.read"},
+		"/v1/identity/peers/{service_id}/reservations/{task_id}/receipts/{operation}/{request_key_digest}": {"aimem", "reservation.read"},
 	} {
 		entry := obj(t, paths[p], p)
 		var op map[string]any
@@ -454,7 +464,7 @@ func TestCoordinationV1ReadScopeAndCLI(t *testing.T) {
 			t.Errorf("%s: owner or operation", p)
 		}
 	}
-	if len(paths) != 3 {
+	if len(paths) != 4 {
 		t.Errorf("proposal paths: %v", keysOf(paths))
 	}
 	// The reservation CLI (C6): every mutation and the receipt, secrets on stdin.

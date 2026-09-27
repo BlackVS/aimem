@@ -132,11 +132,12 @@ aimem records, on every receipt and hold committed under a verified fact, the `s
 
 ### Operations
 
-Both are HTTP-only, over TLS the hub terminated itself, with `X-Aimem-Reservation-Version: 1`. The path `service_id` must be the authenticated peer. The hub's bearer gate confines a `reservation.read` credential to exactly these two route shapes, as it confines the redemption credential to its route, and refuses it everywhere else, including `/mcp`, before any handler runs.
+Both are HTTP-only, over TLS the hub terminated itself, with `X-Aimem-Reservation-Version: 1`. The path `service_id` must be the authenticated peer. The hub's bearer gate confines a `reservation.read` credential to exactly these three route shapes, as it confines the redemption credential to its route, and refuses it everywhere else, including `/mcp`, before any handler runs.
 
 | Operation | Route | Answer |
 | --- | --- | --- |
 | Receipt by proof | `GET /v1/identity/peers/{service_id}/reservation-receipts/{proof_digest}` | `{state: "committed", receipt}` for the transition committed under that proof, or `{state: "none"}` |
+| Receipt by key | `GET /v1/identity/peers/{service_id}/reservations/{task_id}/receipts/{operation}/{request_key_digest}` | `{state: "committed", receipt}` when that transition was made on a reservation this service's proof established (a claim or transfer under its proof), otherwise `{state: "none"}`. This is how aicrew confirms a holder's `update`, which carries no proof |
 | Hold status | `GET /v1/identity/peers/{service_id}/reservations/{task_id}` | `{state: "held", reservation_id, fence, holder_mode: "external", work_ref, task_revision}` when the task's current hold was set under a proof this service issued, otherwise `{state: "none"}` |
 
 The receipt is `{id, operation, task_id, request_key_digest, reservation_id, fence, task_revision, member_user_id, verified_mode: "team", committed_at}`.
