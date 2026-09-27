@@ -280,7 +280,7 @@ func TestTeamModeBlocksOnAChangedOrMissingBinding(t *testing.T) {
 
 	// A missing file blocks at start and on the first call.
 	root2 := teamRoot(t, h, nil)
-	s2 := newTeamSrv(filepath.Join(root2, "team-sessions", "absent.json"), root2, "alpha")
+	s2 := newTeamSrv(filepath.Join(teamsession.Dir(root2), "absent.json"), root2, "alpha")
 	if text, isErr := teamCall(t, s2, "list_tasks", map[string]any{"project": "alpha"}); !isErr || !strings.Contains(text, "cannot be used") {
 		t.Fatalf("missing file: %v %s", isErr, text)
 	}

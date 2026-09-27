@@ -97,11 +97,21 @@ func (f File) validate() error {
 // ValidSessionID reports whether id can name a session.
 func ValidSessionID(id string) bool { return idShape.MatchString(id) }
 
+// Active reports whether this process belongs to a team conversation: the
+// aicrew launcher set EnvVar for its process tree. Hooks consult it to keep
+// knowledge capture and recall off (E5b, D4).
+func Active() bool { return os.Getenv(EnvVar) != "" }
+
+// Dir is where aicrew session files live under the state root. It is not the
+// legacy team feature's directory (internal/teamstate uses team-sessions/):
+// the two kinds of state never share a directory.
+func Dir(root string) string { return filepath.Join(root, "aicrew-sessions") }
+
 // PathFor is the session file for sessionID under the state root. The name
 // is a digest of the ID, so any valid ID is a safe file name on every OS.
 func PathFor(root, sessionID string) string {
 	sum := sha256.Sum256([]byte(sessionID))
-	return filepath.Join(root, "team-sessions", hex.EncodeToString(sum[:16])+".json")
+	return filepath.Join(Dir(root), hex.EncodeToString(sum[:16])+".json")
 }
 
 // Load reads a session file, which must be private (privatefile.Check).

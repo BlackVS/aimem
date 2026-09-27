@@ -242,12 +242,29 @@ func runAicrewSession(args []string, stdin io.Reader, out io.Writer, root string
 		if len(rest) != 1 || !teamsession.ValidSessionID(rest[0]) {
 			return usage
 		}
-		err := os.Remove(teamsession.PathFor(root, rest[0]))
-		if errors.Is(err, os.ErrNotExist) {
+		path := teamsession.PathFor(root, rest[0])
+		if _, err := os.Lstat(path); errors.Is(err, os.ErrNotExist) {
 			fmt.Fprintf(out, "team session %s is not open here\n", rest[0])
 			return nil
 		}
-		if err != nil {
+		f, err := teamsession.Load(path)
+		// A conversation re-reading the file can make a load fail for an
+		// instant on Windows; retry before deciding the file is unusable.
+		for i := 0; err != nil && i < 5; i++ {
+			time.Sleep(20 * time.Millisecond)
+			f, err = teamsession.Load(path)
+		}
+		if err == nil {
+			// Local state is dropped only once the hub says the session has
+			// ended: an active session, or a hub that cannot answer, keeps it.
+			if err := confirmEnded(root, f); err != nil {
+				return fmt.Errorf("team session %s was kept: %w", rest[0], err)
+			}
+		}
+		// A file that cannot be loaded can bind no conversation, and one
+		// readable by other accounts should not keep its handle; either way
+		// it goes.
+		if err := os.Remove(path); err != nil {
 			return err
 		}
 		fmt.Fprintf(out, "team session %s closed\n", rest[0])
@@ -269,4 +286,28 @@ func runAicrewSession(args []string, stdin io.Reader, out io.Writer, root string
 		return nil
 	}
 	return usage
+}
+
+// confirmEnded asks the hub whether the session file's handle is still
+// active. Only a context_stale answer, which aicrew gives once a session has
+// ended, left or expired, confirms that the file may go.
+func confirmEnded(root string, f teamsession.File) error {
+	_, h, cred, client, err := teamHub(root, f.Hub)
+	if err != nil {
+		return fmt.Errorf("the hub cannot be asked whether it has ended (%v)", err)
+	}
+	if strings.TrimRight(h.URL, "/") != f.URL {
+		return errors.New("the hub's configured URL changed since the session was opened; its end cannot be confirmed")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	_, _, err = teamsession.Verify(ctx, client, f.URL, cred, f.Handle)
+	var r *teamsession.Refusal
+	switch {
+	case err == nil:
+		return errors.New("the hub still reports it active; leave it through aicrew first")
+	case errors.As(err, &r) && r.Code == "context_stale":
+		return nil
+	}
+	return fmt.Errorf("the hub could not confirm it has ended (%v); try again once it answers", err)
 }
