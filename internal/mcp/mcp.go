@@ -23,6 +23,7 @@ import (
 	"aimem/internal/ident"
 	"aimem/internal/redact"
 	"aimem/internal/store"
+	"aimem/internal/teamsession"
 )
 
 const protocolVersion = "2024-11-05"
@@ -34,8 +35,14 @@ func Serve(api *http.Client, projectID string, groups []string) error {
 	in := bufio.NewScanner(os.Stdin)
 	in.Buffer(make([]byte, 1024*1024), 16*1024*1024)
 	out := bufio.NewWriter(os.Stdout)
-	s := &srv{api: api, project: projectID, groups: groups, taskSetup: localTaskCaller,
-		taskState: probeTaskState(".", mcpStateRoot(), projectID), local: &localCheckout{dir: ".", root: mcpStateRoot()}}
+	var s *srv
+	if path := os.Getenv(teamsession.EnvVar); path != "" {
+		// A team conversation: nothing personal is probed or served.
+		s = newTeamSrv(path, mcpStateRoot(), projectID)
+	} else {
+		s = &srv{api: api, project: projectID, groups: groups, taskSetup: localTaskCaller,
+			taskState: probeTaskState(".", mcpStateRoot(), projectID), local: &localCheckout{dir: ".", root: mcpStateRoot()}}
+	}
 	for in.Scan() {
 		line := strings.TrimSpace(in.Text())
 		if line == "" {
@@ -73,6 +80,16 @@ type srv struct {
 	// tools (team_setup, team_continue) exist only when it is set. nil on
 	// the hub facade, which has no checkout.
 	local *localCheckout
+	// team is set only in a team conversation (teammode.go); it replaces
+	// every other tool source.
+	team *teamMode
+}
+
+// newTeamSrv is the facade of a team conversation: no local API client, no
+// checkout, the team-mode caller as its only task caller.
+func newTeamSrv(path, root, projectID string) *srv {
+	tm := newTeamMode(path, root)
+	return &srv{project: projectID, tasks: tm.call, team: tm}
 }
 
 type rpcRequest struct {
@@ -118,6 +135,9 @@ func (s *srv) handle(ctx context.Context, raw []byte) []byte {
 	case "ping":
 		return reply(req.ID, map[string]any{}, nil)
 	case "tools/list":
+		if s.team != nil {
+			return reply(req.ID, map[string]any{"tools": teamToolList()}, nil)
+		}
 		// The public team guidance is listed for every caller a facade
 		// admits: it reads nothing but this binary.
 		if s.tasksOnly {
@@ -343,6 +363,8 @@ func (s *srv) toolCall(ctx context.Context, req rpcRequest) []byte {
 	var extra []string // further text blocks after text (delivered content)
 	var err error
 	switch {
+	case s.team != nil:
+		text, err = s.teamToolCall(ctx, head.Name, head.Arguments)
 	case isGuidanceTool(head.Name):
 		text, err = guidanceTool(head.Arguments)
 	case (isTaskTool(head.Name) || isOnboardTool(head.Name) || isProcessTool(head.Name)) && s.taskState == taskStateDisabled:

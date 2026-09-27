@@ -141,6 +141,8 @@ func main() {
 		err = accessCmd(args)
 	case "identity":
 		err = identityCmd(args)
+	case "team-session":
+		err = aicrewSessionCmd(args)
 	case "review":
 		err = reviewCmd(args)
 	case "logs":
@@ -227,7 +229,9 @@ func usage() {
                              portable (no jq/bash), silent if file missing
   state-root                 print the state root path
   access                     manage users, access groups, grants and ordinary tokens
-  identity                   manage the aicrew identity peer and its credentials (hub TLS listener)
+  identity                   manage the aicrew identity peer and its credentials (hub TLS listener);
+                             identity proof is the aicrew client's session-entry command
+  team-session               the aicrew client's binding of one conversation to one team session
                              on the local service (run without args for usage)
   version                    print the binary version
   tui                        interactive dashboard (q quits)

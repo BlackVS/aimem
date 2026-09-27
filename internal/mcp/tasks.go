@@ -24,6 +24,7 @@ import (
 	"aimem/internal/ident"
 	"aimem/internal/store"
 	"aimem/internal/taskcred"
+	"aimem/internal/teamsession"
 	"aimem/internal/teamstate"
 )
 
@@ -345,6 +346,11 @@ func (s *srv) taskTool(ctx context.Context, name string, raw json.RawMessage) (s
 			return "", err
 		}
 		if status/100 != 2 {
+			// A team-mode refusal carries the contract's envelope: pass its
+			// code, message and next step through instead of "HTTP 403".
+			if r := teamsession.ParseRefusal(status, resp); r != nil {
+				return "", r
+			}
 			var e struct {
 				Error   string          `json:"error"`
 				Current json.RawMessage `json:"current"`
