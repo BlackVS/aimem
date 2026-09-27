@@ -548,6 +548,20 @@ AND EXISTS(SELECT 1 FROM grants g WHERE g.project=? AND
 	return n == 1, err
 }
 
+// TokenLive reports whether token is a live, unexpired credential of the
+// enabled user whose scope reaches project. It checks no grant.
+func (s *Store) TokenLive(user, token, project string) (bool, error) {
+	if project == "" {
+		return false, nil
+	}
+	var n int
+	err := s.db.QueryRow(`SELECT count(*) FROM tokens t JOIN users u ON u.id=t.user_id
+WHERE t.id=? AND u.id=? AND u.disabled=0 AND t.revoked=0 AND t.expires_at>?
+AND ((t.scope='user' AND t.project='') OR (t.scope='project' AND t.project=?))`,
+		token, user, time.Now().Unix(), project).Scan(&n)
+	return n == 1, err
+}
+
 // Snapshot is an administrator-only view. Audit is bounded; credentials remain
 // usable regardless of whether their metadata has been listed.
 func (s *Store) Snapshot() (Snapshot, error) {

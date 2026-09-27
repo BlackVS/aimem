@@ -29,6 +29,9 @@ var (
 	ErrReservationStale    = errors.New("reservation ID or fence is stale")
 	ErrReservationOverflow = errors.New("reservation fence exhausted")
 	ErrTaskReserved        = errors.New("task has an active reservation; generic task writes are unavailable")
+	// ErrReservationHolder: the caller is not the verified holder the
+	// reservation, or the receipt, is bound to.
+	ErrReservationHolder = errors.New("reservation is bound to another holder")
 )
 
 func rejectActiveReservation(tx *sql.Tx, taskID string) error {
@@ -49,12 +52,48 @@ type ReservationHolder struct {
 	Ref  string `json:"ref"`
 }
 
+// ReservationBinding is the holder as the hub's authorizer verified it: the
+// individual user, the mode (personal or team) and, in team mode, the
+// profile, team, role, session and generation. The authorizer derives it
+// from the authenticated connection; no request field can name it.
+type ReservationBinding struct {
+	UserID     string `json:"user_id"`
+	Mode       string `json:"mode"`
+	ProfileID  string `json:"profile_id,omitempty"`
+	TeamID     string `json:"team_id,omitempty"`
+	Role       string `json:"role,omitempty"`
+	SessionID  string `json:"session_id,omitempty"`
+	Generation string `json:"generation,omitempty"`
+}
+
+// SameHolder reports whether b and o are the same holder: user, mode,
+// profile and role. The session and generation may move on (a resumed
+// session keeps its hold); a token is never part of the binding, so a
+// rotated credential keeps it too.
+func (b ReservationBinding) SameHolder(o ReservationBinding) bool {
+	return b.UserID != "" && b.Mode != "" &&
+		b.UserID == o.UserID && b.Mode == o.Mode && b.ProfileID == o.ProfileID && b.Role == o.Role
+}
+
+func (b ReservationBinding) validate() error {
+	switch {
+	case b.UserID == "":
+		return invalid(errors.New("reservation binding needs a user"))
+	case b.Mode == "personal" && b.ProfileID == "" && b.TeamID == "" && b.Role == "" && b.SessionID == "" && b.Generation == "":
+		return nil
+	case b.Mode == "team" && b.ProfileID != "" && b.TeamID != "" && b.Role != "" && b.SessionID != "" && b.Generation != "":
+		return nil
+	}
+	return invalid(errors.New("reservation binding is incomplete"))
+}
+
 type TaskReservation struct {
-	TaskID       string            `json:"task_id"`
-	ID           string            `json:"id"`
-	Fence        int64             `json:"fence"`
-	Holder       ReservationHolder `json:"holder"`
-	TaskRevision int64             `json:"task_revision"`
+	TaskID       string             `json:"task_id"`
+	ID           string             `json:"id"`
+	Fence        int64              `json:"fence"`
+	Holder       ReservationHolder  `json:"holder"`
+	Binding      ReservationBinding `json:"binding"`
+	TaskRevision int64              `json:"task_revision"`
 }
 
 type TaskReservationInput struct {
@@ -67,9 +106,13 @@ type TaskReservationInput struct {
 	Reason           string            `json:"reason,omitempty"`
 }
 
+// TaskReservationOutcome is a committed transition, as its receipt records
+// it. Binding is the verified caller that made the transition; a replay or
+// receipt read is served only to that same holder.
 type TaskReservationOutcome struct {
-	Task        Task            `json:"task"`
-	Reservation TaskReservation `json:"reservation"`
+	Task        Task               `json:"task"`
+	Reservation TaskReservation    `json:"reservation"`
+	Binding     ReservationBinding `json:"binding"`
 }
 
 // DependencyEvidence is the authoritative state observed while the claim held
@@ -145,8 +188,12 @@ func validateReservationInput(op ReservationOperation, in *TaskReservationInput)
 
 func readTaskReservation(tx *sql.Tx, taskID string, revision int64) (TaskReservation, error) {
 	r := TaskReservation{TaskID: taskID, TaskRevision: revision}
-	err := tx.QueryRow(`SELECT fence,active_id,holder_mode,holder_ref FROM task_reservations WHERE task_id=?`, taskID).
-		Scan(&r.Fence, &r.ID, &r.Holder.Mode, &r.Holder.Ref)
+	b := &r.Binding
+	err := tx.QueryRow(`SELECT fence,active_id,holder_mode,holder_ref,
+		bound_user,bound_mode,bound_profile,bound_team,bound_role,bound_session,bound_generation
+		FROM task_reservations WHERE task_id=?`, taskID).
+		Scan(&r.Fence, &r.ID, &r.Holder.Mode, &r.Holder.Ref,
+			&b.UserID, &b.Mode, &b.ProfileID, &b.TeamID, &b.Role, &b.SessionID, &b.Generation)
 	if errors.Is(err, sql.ErrNoRows) {
 		return r, nil
 	}
@@ -158,22 +205,30 @@ func advanceReservation(tx *sql.Tx, r *TaskReservation) error {
 		return ErrReservationOverflow
 	}
 	r.Fence++
-	_, err := tx.Exec(`INSERT INTO task_reservations(task_id,fence,active_id,holder_mode,holder_ref)
-		VALUES(?,?,?,?,?) ON CONFLICT(task_id) DO UPDATE SET
+	b := r.Binding
+	_, err := tx.Exec(`INSERT INTO task_reservations(task_id,fence,active_id,holder_mode,holder_ref,
+		bound_user,bound_mode,bound_profile,bound_team,bound_role,bound_session,bound_generation)
+		VALUES(?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(task_id) DO UPDATE SET
 		fence=excluded.fence,active_id=excluded.active_id,
-		holder_mode=excluded.holder_mode,holder_ref=excluded.holder_ref`,
-		r.TaskID, r.Fence, r.ID, r.Holder.Mode, r.Holder.Ref)
+		holder_mode=excluded.holder_mode,holder_ref=excluded.holder_ref,
+		bound_user=excluded.bound_user,bound_mode=excluded.bound_mode,bound_profile=excluded.bound_profile,
+		bound_team=excluded.bound_team,bound_role=excluded.bound_role,bound_session=excluded.bound_session,
+		bound_generation=excluded.bound_generation`,
+		r.TaskID, r.Fence, r.ID, r.Holder.Mode, r.Holder.Ref,
+		b.UserID, b.Mode, b.ProfileID, b.TeamID, b.Role, b.SessionID, b.Generation)
 	return err
 }
 
-func recordReservationEvent(tx *sql.Tx, op ReservationOperation, before, after TaskReservation, actor TaskActor, reason string, deps []DependencyEvidence) error {
+func recordReservationEvent(tx *sql.Tx, op ReservationOperation, before, after TaskReservation, actor TaskActor,
+	binding ReservationBinding, reason string, deps []DependencyEvidence) error {
 	body, err := json.Marshal(struct {
 		Before       TaskReservation      `json:"before"`
 		After        TaskReservation      `json:"after"`
 		Actor        TaskActor            `json:"actor"`
+		Binding      ReservationBinding   `json:"binding"`
 		Reason       string               `json:"reason,omitempty"`
 		Dependencies []DependencyEvidence `json:"dependencies"`
-	}{before, after, actor, reason, deps})
+	}{before, after, actor, binding, reason, deps})
 	if err != nil {
 		return err
 	}
@@ -195,14 +250,14 @@ func reservationPrincipal(actor TaskActor) (string, error) {
 	return "admin/" + actor.Name, nil
 }
 
-func reservationMutation(d *DB, actor TaskActor, op ReservationOperation, in TaskReservationInput, key string,
-	fn func(*sql.Tx) (TaskReservationOutcome, error)) (TaskReservationOutcome, error) {
+func reservationMutation(d *DB, actor TaskActor, binding ReservationBinding, op ReservationOperation, in TaskReservationInput, key string,
+	fn func(*sql.Tx) (TaskReservationOutcome, error), authorize func() error) (TaskReservationOutcome, error) {
 	tx, err := d.sql.Begin()
 	if err != nil {
 		return TaskReservationOutcome{}, err
 	}
 	defer tx.Rollback()
-	out, err := reservationMutationTx(d, tx, actor, op, in, key, fn, nil)
+	out, err := reservationMutationTx(d, tx, actor, binding, op, in, key, fn, authorize)
 	if err != nil {
 		return TaskReservationOutcome{}, err
 	}
@@ -214,10 +269,17 @@ func reservationMutation(d *DB, actor TaskActor, op ReservationOperation, in Tas
 
 // reservationMutationTx lets the registry retain dependency locks through the
 // owner commit. authorize runs on both receipt replay and immediately before
-// commit; it must not access this project's single-connection DB.
-func reservationMutationTx(d *DB, tx *sql.Tx, actor TaskActor, op ReservationOperation, in TaskReservationInput, key string,
+// commit; it must not access this project's single-connection DB. A replay
+// is served only to the holder binding that made the transition.
+func reservationMutationTx(d *DB, tx *sql.Tx, actor TaskActor, binding ReservationBinding, op ReservationOperation, in TaskReservationInput, key string,
 	fn func(*sql.Tx) (TaskReservationOutcome, error), authorize func() error) (TaskReservationOutcome, error) {
 	if err := d.taskScopeOK(); err != nil {
+		return TaskReservationOutcome{}, err
+	}
+	if authorize == nil {
+		return TaskReservationOutcome{}, errors.New("reservation transition without an authorization check")
+	}
+	if err := binding.validate(); err != nil {
 		return TaskReservationOutcome{}, err
 	}
 	principal, err := reservationPrincipal(actor)
@@ -239,13 +301,14 @@ func reservationMutationTx(d *DB, tx *sql.Tx, actor TaskActor, op ReservationOpe
 		if savedDigest != digest {
 			return TaskReservationOutcome{}, ErrTaskRetryConflict
 		}
-		if authorize != nil {
-			if err := authorize(); err != nil {
-				return TaskReservationOutcome{}, err
-			}
-		}
 		var out TaskReservationOutcome
 		if err := json.Unmarshal([]byte(saved), &out); err != nil {
+			return TaskReservationOutcome{}, err
+		}
+		if !out.Binding.SameHolder(binding) {
+			return TaskReservationOutcome{}, ErrReservationHolder
+		}
+		if err := authorize(); err != nil {
 			return TaskReservationOutcome{}, err
 		}
 		return out, nil
@@ -256,6 +319,7 @@ func reservationMutationTx(d *DB, tx *sql.Tx, actor TaskActor, op ReservationOpe
 	if err != nil {
 		return TaskReservationOutcome{}, err
 	}
+	out.Binding = binding
 	result, err := json.Marshal(out)
 	if err != nil {
 		return TaskReservationOutcome{}, err
@@ -264,22 +328,24 @@ func reservationMutationTx(d *DB, tx *sql.Tx, actor TaskActor, op ReservationOpe
 		principal, string(op), in.TaskID, key, digest, string(result)); err != nil {
 		return TaskReservationOutcome{}, err
 	}
-	if authorize != nil {
-		if err := authorize(); err != nil {
-			return TaskReservationOutcome{}, err
-		}
+	if err := authorize(); err != nil {
+		return TaskReservationOutcome{}, err
 	}
 	return out, nil
 }
 
-// ApplyTaskReservation is a store-only transition. TaskActor records trusted
-// attribution and scopes the receipt; it does not grant permission to act on
-// the holder. Caller authorization is deliberately deferred to C4/C5.
-func (d *DB) ApplyTaskReservation(op ReservationOperation, in TaskReservationInput, actor TaskActor, key string) (TaskReservationOutcome, error) {
+// ApplyTaskReservation is a store-only transition, called only by the hub's
+// reservation authorizer. TaskActor records attribution and scopes the
+// receipt; binding is the verified holder. A claim or transfer binds the
+// hold to it; update, release and finalize must come from the bound holder.
+// authorize is the authorizer's recheck, run immediately before commit and
+// on replay; it is required.
+func (d *DB) ApplyTaskReservation(op ReservationOperation, in TaskReservationInput, actor TaskActor,
+	binding ReservationBinding, key string, authorize func() error) (TaskReservationOutcome, error) {
 	if err := validateReservationInput(op, &in); err != nil {
 		return TaskReservationOutcome{}, err
 	}
-	return reservationMutation(d, actor, op, in, key,
+	return reservationMutation(d, actor, binding, op, in, key,
 		func(tx *sql.Tx) (TaskReservationOutcome, error) {
 			t, err := readTask(tx, in.TaskID)
 			if err != nil {
@@ -304,14 +370,17 @@ func (d *DB) ApplyTaskReservation(op ReservationOperation, in TaskReservationInp
 				if managed || r.ID != "" || t.State != "READY" || t.Archived {
 					return TaskReservationOutcome{}, ErrReservationConflict
 				}
-				r.ID, r.Holder = uuidv7.New(), in.Holder
+				r.ID, r.Holder, r.Binding = uuidv7.New(), in.Holder, binding
 			} else {
 				if r.ID == "" || r.ID != in.ID || r.Fence != in.Fence {
 					return TaskReservationOutcome{}, ErrReservationStale
 				}
+				if op != ReservationTransfer && !r.Binding.SameHolder(binding) {
+					return TaskReservationOutcome{}, ErrReservationHolder
+				}
 				switch op {
 				case ReservationTransfer:
-					r.Holder = in.Holder
+					r.Holder, r.Binding = in.Holder, binding
 				case ReservationUpdate, ReservationRelease, ReservationFinalize:
 					if err := checkEpicAssignable(tx, in.Content.Epic, t.Epic); err != nil {
 						return TaskReservationOutcome{}, err
@@ -324,18 +393,18 @@ func (d *DB) ApplyTaskReservation(op ReservationOperation, in TaskReservationInp
 					}
 					r.TaskRevision = t.Revision
 					if op != ReservationUpdate {
-						r.ID, r.Holder = "", ReservationHolder{}
+						r.ID, r.Holder, r.Binding = "", ReservationHolder{}, ReservationBinding{}
 					}
 				}
 			}
 			if err := advanceReservation(tx, &r); err != nil {
 				return TaskReservationOutcome{}, err
 			}
-			if err := recordReservationEvent(tx, op, before, r, actor, in.Reason, nil); err != nil {
+			if err := recordReservationEvent(tx, op, before, r, actor, binding, in.Reason, nil); err != nil {
 				return TaskReservationOutcome{}, err
 			}
 			return TaskReservationOutcome{Task: t, Reservation: r}, nil
-		})
+		}, authorize)
 }
 
 // GetTaskReservation is an internal status read. The caller must supply its
@@ -360,9 +429,14 @@ func (d *DB) GetTaskReservation(taskID string) (TaskReservation, error) {
 }
 
 // GetTaskReservationReceipt reconciles a lost reply with the same input and
-// retry key. It is internal and does not itself authorize disclosure.
-func (d *DB) GetTaskReservationReceipt(op ReservationOperation, in TaskReservationInput, actor TaskActor, key string) (TaskReservationOutcome, bool, error) {
+// retry key. It serves the receipt only to the holder binding that made the
+// transition; the caller must still recheck that holder's current authority.
+func (d *DB) GetTaskReservationReceipt(op ReservationOperation, in TaskReservationInput, actor TaskActor,
+	binding ReservationBinding, key string) (TaskReservationOutcome, bool, error) {
 	if err := d.taskScopeOK(); err != nil {
+		return TaskReservationOutcome{}, false, err
+	}
+	if err := binding.validate(); err != nil {
 		return TaskReservationOutcome{}, false, err
 	}
 	if err := validateReservationInput(op, &in); err != nil {
@@ -394,6 +468,9 @@ func (d *DB) GetTaskReservationReceipt(op ReservationOperation, in TaskReservati
 	var out TaskReservationOutcome
 	if err := json.Unmarshal([]byte(saved), &out); err != nil {
 		return TaskReservationOutcome{}, false, err
+	}
+	if !out.Binding.SameHolder(binding) {
+		return TaskReservationOutcome{}, false, ErrReservationHolder
 	}
 	return out, true, nil
 }

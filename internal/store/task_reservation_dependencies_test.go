@@ -98,13 +98,13 @@ func allowDependencyRead(context.Context, string, string) error { return nil }
 func TestDependencyClaimAndReconcile(t *testing.T) {
 	r, ownerDB, depDB, owner, dep := dependencyFixture(t)
 	in := claimInput(owner, "run")
-	if _, err := ownerDB.ApplyTaskReservation(ReservationClaim, in, aliceActor, "raw"); !errors.Is(err, ErrDependencyUnresolved) {
+	if _, err := ownerDB.ApplyTaskReservation(ReservationClaim, in, aliceActor, testBinding(aliceActor), "raw", allowReservation); !errors.Is(err, ErrDependencyUnresolved) {
 		t.Fatalf("raw claim must refuse dependencies: %v", err)
 	}
-	if _, err := r.ClaimTaskReservation(context.Background(), in, aliceActor, "missing-verifier", nil); !errors.Is(err, ErrDependencyUnresolved) {
+	if _, err := r.ClaimTaskReservation(context.Background(), in, aliceActor, testBinding(aliceActor), "missing-verifier", nil); !errors.Is(err, ErrDependencyUnresolved) {
 		t.Fatalf("missing verifier: %v", err)
 	}
-	if _, err := r.ClaimTaskReservation(context.Background(), in, aliceActor, "denied",
+	if _, err := r.ClaimTaskReservation(context.Background(), in, aliceActor, testBinding(aliceActor), "denied",
 		func(_ context.Context, project, _ string) error {
 			if project == "dependency" {
 				return errors.New("denied")
@@ -113,11 +113,11 @@ func TestDependencyClaimAndReconcile(t *testing.T) {
 		}); !errors.Is(err, ErrDependencyUnresolved) {
 		t.Fatalf("denied read: %v", err)
 	}
-	got, err := r.ClaimTaskReservation(context.Background(), in, aliceActor, "claim", allowDependencyRead)
+	got, err := r.ClaimTaskReservation(context.Background(), in, aliceActor, testBinding(aliceActor), "claim", allowDependencyRead)
 	if err != nil || got.Reservation.ID == "" {
 		t.Fatalf("claim: %+v, %v", got, err)
 	}
-	replayed, err := r.ClaimTaskReservation(context.Background(), in, aliceActor, "claim", allowDependencyRead)
+	replayed, err := r.ClaimTaskReservation(context.Background(), in, aliceActor, testBinding(aliceActor), "claim", allowDependencyRead)
 	if err != nil || replayed.Reservation != got.Reservation {
 		t.Fatalf("replay: %+v, %v", replayed, err)
 	}
@@ -144,7 +144,7 @@ func TestDependencyClaimAndReconcile(t *testing.T) {
 	if hold, err := ownerDB.GetTaskReservation(owner.ID); err != nil || hold.ID != got.Reservation.ID {
 		t.Fatalf("reopen released hold: %+v, %v", hold, err)
 	}
-	if again, err := r.ClaimTaskReservation(context.Background(), in, aliceActor, "claim", allowDependencyRead); err != nil ||
+	if again, err := r.ClaimTaskReservation(context.Background(), in, aliceActor, testBinding(aliceActor), "claim", allowDependencyRead); err != nil ||
 		again.Reservation != got.Reservation {
 		t.Fatalf("replay after reopen changed recorded result: %+v, %v", again, err)
 	}
@@ -155,7 +155,7 @@ func TestDependencyClaimRefusals(t *testing.T) {
 	if err := depDB.SetMeta(TasksMetaKey, "off"); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := r.ClaimTaskReservation(context.Background(), claimInput(owner, "disabled"), aliceActor,
+	if _, err := r.ClaimTaskReservation(context.Background(), claimInput(owner, "disabled"), aliceActor, testBinding(aliceActor),
 		"disabled", allowDependencyRead); !errors.Is(err, ErrDependencyUnresolved) {
 		t.Fatalf("disabled dependency: %v", err)
 	}
@@ -167,7 +167,7 @@ func TestDependencyClaimRefusals(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := r.ClaimTaskReservation(context.Background(), claimInput(missing, "missing"), aliceActor,
+	if _, err := r.ClaimTaskReservation(context.Background(), claimInput(missing, "missing"), aliceActor, testBinding(aliceActor),
 		"missing-claim", allowDependencyRead); !errors.Is(err, ErrDependencyUnresolved) {
 		t.Fatalf("missing dependency: %v", err)
 	}
@@ -176,7 +176,7 @@ func TestDependencyClaimRefusals(t *testing.T) {
 	if _, err := depDB.UpdateTask(dep.ID, content, dep.Revision, aliceActor, "cycle"); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := r.ClaimTaskReservation(context.Background(), claimInput(owner, "cycle"), aliceActor,
+	if _, err := r.ClaimTaskReservation(context.Background(), claimInput(owner, "cycle"), aliceActor, testBinding(aliceActor),
 		"cycle-claim", allowDependencyRead); !errors.Is(err, ErrDependencyUnresolved) {
 		t.Fatalf("dependency cycle: %v", err)
 	}
@@ -190,7 +190,9 @@ func TestDependencyClaimDuplicateSelfAndUnavailable(t *testing.T) {
 		t.Fatal(err)
 	}
 	if _, err := r.ClaimTaskReservation(context.Background(), claimInput(duplicate, "duplicate"),
-		aliceActor, "duplicate-claim", allowDependencyRead); err != nil {
+		aliceActor, testBinding(
+			aliceActor),
+		"duplicate-claim", allowDependencyRead); err != nil {
 		t.Fatalf("duplicate IDs should count once: %v", err)
 	}
 	self, err := ownerDB.CreateTask(TaskContent{Title: "self", State: "READY"}, aliceActor, "self-create")
@@ -204,7 +206,9 @@ func TestDependencyClaimDuplicateSelfAndUnavailable(t *testing.T) {
 		t.Fatal(err)
 	}
 	if _, err := r.ClaimTaskReservation(context.Background(), claimInput(self, "self"),
-		aliceActor, "self-claim", allowDependencyRead); !errors.Is(err, ErrDependencyUnresolved) {
+		aliceActor, testBinding(
+			aliceActor),
+		"self-claim", allowDependencyRead); !errors.Is(err, ErrDependencyUnresolved) {
 		t.Fatalf("self dependency: %v", err)
 	}
 	if err := depDB.sql.Close(); err != nil {
@@ -216,7 +220,9 @@ func TestDependencyClaimDuplicateSelfAndUnavailable(t *testing.T) {
 		t.Fatal(err)
 	}
 	if _, err := r.ClaimTaskReservation(context.Background(), claimInput(unavailable, "unavailable"),
-		aliceActor, "unavailable-claim", allowDependencyRead); !errors.Is(err, ErrDependencyUnresolved) {
+		aliceActor, testBinding(
+			aliceActor),
+		"unavailable-claim", allowDependencyRead); !errors.Is(err, ErrDependencyUnresolved) {
 		t.Fatalf("unavailable partition counted as DONE: %v", err)
 	}
 }
@@ -240,7 +246,10 @@ func TestDependencyReopenBeforeLockedValidation(t *testing.T) {
 	result := make(chan error, 1)
 	go func() {
 		_, err := r.ClaimTaskReservation(context.Background(), claimInput(owner, "racing"),
-			aliceActor, "racing-claim", allowDependencyRead)
+			aliceActor, testBinding(
+				aliceActor),
+			"racing-claim", allowDependencyRead)
+
 		result <- err
 	}()
 	select {
@@ -289,7 +298,7 @@ func TestDependencyClaimCancellationAndRetry(t *testing.T) {
 	defer blocker.Rollback()
 	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
 	defer cancel()
-	_, err = r.ClaimTaskReservation(ctx, claimInput(owner, "cancel"), aliceActor, "retry", allowDependencyRead)
+	_, err = r.ClaimTaskReservation(ctx, claimInput(owner, "cancel"), aliceActor, testBinding(aliceActor), "retry", allowDependencyRead)
 	if !errors.Is(err, context.DeadlineExceeded) && !errors.Is(err, context.Canceled) {
 		t.Fatalf("contended claim did not honor cancellation: %v", err)
 	}
@@ -300,7 +309,10 @@ func TestDependencyClaimCancellationAndRetry(t *testing.T) {
 		t.Fatalf("cancelled claim left hold: %+v, %v", hold, err)
 	}
 	first, err := r.ClaimTaskReservation(context.Background(), claimInput(owner, "cancel"),
-		aliceActor, "retry", allowDependencyRead)
+		aliceActor, testBinding(
+			aliceActor),
+		"retry", allowDependencyRead)
+
 	if err != nil {
 		t.Fatalf("retry after cancellation: %v", err)
 	}
@@ -316,7 +328,10 @@ func TestDependencyClaimLifecycleWaitCancels(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
 	defer cancel()
 	_, err := r.ClaimTaskReservation(ctx, claimInput(owner, "lifecycle-wait"),
-		aliceActor, "lifecycle-wait", allowDependencyRead)
+		aliceActor, testBinding(
+			aliceActor),
+		"lifecycle-wait", allowDependencyRead)
+
 	if !errors.Is(err, context.DeadlineExceeded) {
 		t.Fatalf("lifecycle wait did not cancel: %v", err)
 	}
@@ -393,7 +408,7 @@ func TestDependencyClaimPrecommitVerifierRollback(t *testing.T) {
 	r, ownerDB, _, owner, _ := dependencyFixture(t)
 	in := claimInput(owner, "precommit")
 	calls := 0
-	_, err := r.ClaimTaskReservation(context.Background(), in, aliceActor, "precommit-claim",
+	_, err := r.ClaimTaskReservation(context.Background(), in, aliceActor, testBinding(aliceActor), "precommit-claim",
 		func(context.Context, string, string) error {
 			calls++
 			if calls >= 6 {
@@ -401,19 +416,20 @@ func TestDependencyClaimPrecommitVerifierRollback(t *testing.T) {
 			}
 			return nil
 		})
+
 	if !errors.Is(err, ErrDependencyUnresolved) || calls < 6 {
 		t.Fatalf("precommit verifier did not refuse: calls=%d err=%v", calls, err)
 	}
 	if hold, err := ownerDB.GetTaskReservation(owner.ID); err != nil || hold.ID != "" {
 		t.Fatalf("failed verification left hold: %+v, %v", hold, err)
 	}
-	if _, found, err := ownerDB.GetTaskReservationReceipt(ReservationClaim, in, aliceActor, "precommit-claim"); err != nil || found {
+	if _, found, err := ownerDB.GetTaskReservationReceipt(ReservationClaim, in, aliceActor, testBinding(aliceActor), "precommit-claim"); err != nil || found {
 		t.Fatalf("failed verification left receipt: found=%t err=%v", found, err)
 	}
 	if countRows(t, ownerDB, "task_reservation_events", "task_id=?", owner.ID) != 0 {
 		t.Fatal("failed verification left a claim event")
 	}
-	if _, err := r.ClaimTaskReservation(context.Background(), in, aliceActor, "precommit-claim", allowDependencyRead); err != nil {
+	if _, err := r.ClaimTaskReservation(context.Background(), in, aliceActor, testBinding(aliceActor), "precommit-claim", allowDependencyRead); err != nil {
 		t.Fatalf("same-key retry after rollback: %v", err)
 	}
 }
@@ -437,7 +453,10 @@ func TestDependencyOwnerRevisionReread(t *testing.T) {
 	result := make(chan error, 1)
 	go func() {
 		_, err := r.ClaimTaskReservation(context.Background(), claimInput(owner, "owner-race"),
-			aliceActor, "owner-race", allowDependencyRead)
+			aliceActor, testBinding(
+				aliceActor),
+			"owner-race", allowDependencyRead)
+
 		result <- err
 	}()
 	select {
@@ -477,7 +496,9 @@ func TestDependencyClaimRenameAndLifecycleLock(t *testing.T) {
 	renamedChecks := 0
 	go func() {
 		_, err := r.ClaimTaskReservation(context.Background(), claimInput(owner, "rename"),
-			aliceActor, "rename-claim", func(ctx context.Context, project, accessID string) error {
+			aliceActor, testBinding(
+				aliceActor),
+			"rename-claim", func(ctx context.Context, project, accessID string) error {
 				if project == "renamed" {
 					renamedChecks++
 					if renamedChecks == 3 {
@@ -491,6 +512,7 @@ func TestDependencyClaimRenameAndLifecycleLock(t *testing.T) {
 				}
 				return nil
 			})
+
 		claimResult <- err
 	}()
 	<-entered
@@ -523,7 +545,7 @@ func TestDependencyClaimRenameAndLifecycleLock(t *testing.T) {
 func TestDependencyClaimReceiptAfterRestart(t *testing.T) {
 	r, _, _, owner, _ := dependencyFixture(t)
 	in := claimInput(owner, "restart")
-	first, err := r.ClaimTaskReservation(context.Background(), in, aliceActor, "restart-claim", allowDependencyRead)
+	first, err := r.ClaimTaskReservation(context.Background(), in, aliceActor, testBinding(aliceActor), "restart-claim", allowDependencyRead)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -533,7 +555,7 @@ func TestDependencyClaimReceiptAfterRestart(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer reopened.Close()
-	got, err := reopened.ClaimTaskReservation(context.Background(), in, aliceActor, "restart-claim", allowDependencyRead)
+	got, err := reopened.ClaimTaskReservation(context.Background(), in, aliceActor, testBinding(aliceActor), "restart-claim", allowDependencyRead)
 	if err != nil || got.Reservation != first.Reservation {
 		t.Fatalf("receipt after restart: %+v, %v", got, err)
 	}
@@ -546,7 +568,10 @@ func TestDependencyReconciliationRequiresVerifiedClaimProof(t *testing.T) {
 	r, ownerDB, _, _, dep := dependencyFixture(t)
 	verified := readyReservationTask(t, ownerDB, "empty-verified")
 	hold, err := r.ClaimTaskReservation(context.Background(), claimInput(verified, "empty"),
-		aliceActor, "empty-claim", allowDependencyRead)
+		aliceActor, testBinding(
+			aliceActor),
+		"empty-claim", allowDependencyRead)
+
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -558,7 +583,9 @@ func TestDependencyReconciliationRequiresVerifiedClaimProof(t *testing.T) {
 	if _, err := ownerDB.ApplyTaskReservation(ReservationUpdate, TaskReservationInput{
 		TaskID: verified.ID, ID: hold.Reservation.ID, Fence: hold.Reservation.Fence,
 		ExpectedRevision: verified.Revision, Content: &content,
-	}, aliceActor, "holder-changed-dependencies"); err != nil {
+	}, aliceActor, testBinding(
+
+		aliceActor), "holder-changed-dependencies", allowReservation); err != nil {
 		t.Fatal(err)
 	}
 	if changed, err := r.ReconcileReservationDependencies(context.Background(), verified.ID, allowDependencyRead); !changed ||
@@ -566,8 +593,8 @@ func TestDependencyReconciliationRequiresVerifiedClaimProof(t *testing.T) {
 		t.Fatalf("new dependency lacked claim proof: %t, %v", changed, err)
 	}
 	storeOnly := readyReservationTask(t, ownerDB, "empty-store-only")
-	if _, err := ownerDB.ApplyTaskReservation(ReservationClaim, claimInput(storeOnly, "store-only"),
-		aliceActor, "store-only-claim"); err != nil {
+	if _, err := ownerDB.ApplyTaskReservation(ReservationClaim, claimInput(storeOnly, "store-only"), aliceActor, testBinding(
+		aliceActor), "store-only-claim", allowReservation); err != nil {
 		t.Fatal(err)
 	}
 	if changed, err := r.ReconcileReservationDependencies(context.Background(), storeOnly.ID, allowDependencyRead); !changed ||

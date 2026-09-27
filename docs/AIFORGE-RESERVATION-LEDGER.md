@@ -25,3 +25,30 @@ The registry holds its project lifecycle read lock from resolution through commi
 The claim event records the dependency IDs, project access IDs and task revisions observed under locks. `Registry.ReconcileReservationDependencies` checks that evidence later without releasing an active hold; a reopened, changed, inaccessible or unavailable dependency, or a changed held task dependency list, requires explicit reconciliation. An identical claim retry returns its committed receipt even if a dependency changed afterward, subject to current owner-context verification. A store-only or pre-C3 claim without verified proof is treated as unresolved by reconciliation.
 
 This increment adds no schema or wire change. C1's schema-19 compatibility and rollback limits still apply. The focused tests use separate registry handles and SQLite connections for claim versus reopen ordering, cancellation and retry, project lifecycle, verifier rollback and restart recovery. A pinned-driver test pauses the owner commit and cancels the request to prove the dependency lock lasts until commit completes. C4/C5 still own actor policy, and C6 alone may expose a fully authorized public operation.
+
+## C5a: the reservation authorizer
+
+C5a (task 01a0e39c-8769, from C5 seq196 with operator decisions D2(a), D3(a) and D5(a)) adds the hub's reservation authorizer in `internal/server/reservations.go`. It is the ledger's only production caller, and a source walk in the tests enforces that. It registers no route or MCP tool; C6 adds them on top of it.
+
+**Actor and binding.**
+- The authorizer derives the actor from the authenticated individual credential, and in team mode from the E4-verified team context (user, token, profile, team, role, session, generation). Admin and legacy credentials have no path; recovery is C5c.
+- The request input has no field that can name any of these.
+- Schema 20 adds the holder's verified binding to `task_reservations`: user, mode (`personal` or `team`), profile, team, role, session and generation.
+- A claim or transfer sets the binding, and a release or finalize clears it. Every other transition must come from the same holder: same user, mode, profile and role.
+- A resumed session or new generation keeps the hold, and so does a rotated token, because the token is never part of the binding.
+- Each receipt records the caller's binding. A replay or receipt read is served only to that same holder.
+
+**Pre-commit recheck (D2).**
+- `ApplyTaskReservation` now requires an `authorize` check, and the authorizer always supplies one.
+- The authorizer checks the caller's current authority before the transaction, and again inside it immediately before commit and on replay: a live credential, an enabled user and profile, and the personal write grant or the team profile's grant on the project. The claim path's dependency verifier applies the same check.
+- A team context's online answer is accepted only while it is at most five seconds old.
+- A refusal inside the ledger keeps its wire code; the claim path now wraps the verifier's error rather than flattening it.
+
+**What C5a authorizes:**
+- **Personal context:** claim, update, release and finalize of `standalone` holds, under the caller's personal write grant.
+- **Team context:** only the bound worker's or independent's `update` of its own hold.
+
+  Team claim, transfer, release and finalize need verified aicrew coordination facts and belong to C5b. They are refused with `role_forbidden`.
+- **Status and receipt reads:** they recheck the caller's current authority. Status shows only the caller's own hold, and any other holder's hold reads as `none`.
+
+**Compatibility.** A hold committed before schema 20 has no binding, so no caller matches it. It stays held, with its fence, until the C5c recovery path closes it. The migration is additive, and a schema-19 binary refuses a schema-20 database through the existing newer-schema guard. The C1 rollback limits still apply.

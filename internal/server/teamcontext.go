@@ -90,6 +90,9 @@ type teamContext struct {
 	introspect.Context
 	ProfileID     string
 	CorrelationID string
+	// VerifiedAt is when the online answer was taken. A reservation
+	// transition accepts it only while it is fresh (task C5a, D2).
+	VerifiedAt time.Time
 }
 
 type teamContextKey struct{}
@@ -243,7 +246,7 @@ func (s *Server) verifyTeamContext(w http.ResponseWriter, r *http.Request, id Id
 		s.log.Error("team audit", "err", err)
 		return refuse("identity_unavailable", "audit", detail)
 	}
-	return teamContext{Context: got, ProfileID: profile.ID, CorrelationID: cid}, true
+	return teamContext{Context: got, ProfileID: profile.ID, CorrelationID: cid, VerifiedAt: time.Now()}, true
 }
 
 // teamAuditDetail names what the audit records about a verified session: the

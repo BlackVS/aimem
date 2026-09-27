@@ -14,7 +14,7 @@ func TestReservationGuardsGenericWritesAndReceipts(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	hold, err := db.ApplyTaskReservation(ReservationClaim, claimInput(prior, "work-1"), aliceActor, "guard-claim")
+	hold, err := db.ApplyTaskReservation(ReservationClaim, claimInput(prior, "work-1"), aliceActor, testBinding(aliceActor), "guard-claim", allowReservation)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -57,13 +57,17 @@ func TestReservationGuardsGenericWritesAndReceipts(t *testing.T) {
 	changed := prior.TaskContent
 	changed.State = "IN_PROGRESS"
 	updated, err := db.ApplyTaskReservation(ReservationUpdate, TaskReservationInput{TaskID: task.ID, ID: hold.Reservation.ID,
-		Fence: hold.Reservation.Fence, ExpectedRevision: prior.Revision, Content: &changed}, aliceActor, "fenced-update")
+		Fence: hold.Reservation.Fence, ExpectedRevision: prior.Revision, Content: &changed}, aliceActor, testBinding(
+		aliceActor), "fenced-update", allowReservation)
+
 	if err != nil || updated.Task.State != "IN_PROGRESS" || updated.Task.Revision != prior.Revision+1 {
 		t.Fatalf("fenced holder write failed: %+v, %v", updated, err)
 	}
 	changed.State = "READY"
 	released, err := db.ApplyTaskReservation(ReservationRelease, TaskReservationInput{TaskID: task.ID, ID: updated.Reservation.ID,
-		Fence: updated.Reservation.Fence, ExpectedRevision: updated.Task.Revision, Content: &changed, Reason: "work stopped"}, aliceActor, "guard-release")
+		Fence: updated.Reservation.Fence, ExpectedRevision: updated.Task.Revision, Content: &changed, Reason: "work stopped"}, aliceActor, testBinding(
+		aliceActor), "guard-release", allowReservation)
+
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -82,7 +86,7 @@ func TestReservationClaimVersusGenericUpdate(t *testing.T) {
 		wg.Add(2)
 		go func() {
 			defer wg.Done()
-			claim, claimErr = db.ApplyTaskReservation(ReservationClaim, claimInput(task, "racing-work"), aliceActor, fmt.Sprintf("race-claim-%d", i))
+			claim, claimErr = db.ApplyTaskReservation(ReservationClaim, claimInput(task, "racing-work"), aliceActor, testBinding(aliceActor), fmt.Sprintf("race-claim-%d", i), allowReservation)
 		}()
 		go func() {
 			defer wg.Done()
@@ -111,7 +115,7 @@ func TestReservationUpdateBeforeClaimRechecksRevision(t *testing.T) {
 	if err != nil || updated.Revision != task.Revision+1 {
 		t.Fatalf("ordinary update: %+v, %v", updated, err)
 	}
-	if _, err := db.ApplyTaskReservation(ReservationClaim, claimInput(task, "old-scope"), aliceActor, "claim-stale-scope"); !isTaskConflict(err) {
+	if _, err := db.ApplyTaskReservation(ReservationClaim, claimInput(task, "old-scope"), aliceActor, testBinding(aliceActor), "claim-stale-scope", allowReservation); !isTaskConflict(err) {
 		t.Fatalf("claim did not recheck revised task: %v", err)
 	}
 	if got, err := db.GetTaskReservation(task.ID); err != nil || got.ID != "" || got.Fence != 0 {
@@ -125,7 +129,7 @@ func TestReservationBlocksLegacyOfferTakeover(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	hold, err := db.ApplyTaskReservation(ReservationClaim, claimInput(task, "standalone-work"), a.Actor, "legacy-race-claim")
+	hold, err := db.ApplyTaskReservation(ReservationClaim, claimInput(task, "standalone-work"), a.Actor, testBinding(a.Actor), "legacy-race-claim", allowReservation)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -136,7 +140,9 @@ func TestReservationBlocksLegacyOfferTakeover(t *testing.T) {
 		t.Fatal("refused offer changed legacy ownership")
 	}
 	released, err := db.ApplyTaskReservation(ReservationRelease, TaskReservationInput{TaskID: task.ID, ID: hold.Reservation.ID,
-		Fence: hold.Reservation.Fence, ExpectedRevision: task.Revision, Content: &task.TaskContent, Reason: "standalone stopped"}, a.Actor, "legacy-race-release")
+		Fence: hold.Reservation.Fence, ExpectedRevision: task.Revision, Content: &task.TaskContent, Reason: "standalone stopped"}, a.Actor, testBinding(
+		a.Actor), "legacy-race-release", allowReservation)
+
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -144,7 +150,7 @@ func TestReservationBlocksLegacyOfferTakeover(t *testing.T) {
 	if _, err := db.OfferTeamAssignment(team.ID, offer, a, "legacy-offer", allowAssignmentWorker); err != nil {
 		t.Fatalf("legacy offer after release: %v", err)
 	}
-	if _, err := db.ApplyTaskReservation(ReservationClaim, claimInput(released.Task, "new-work"), a.Actor, "claim-managed"); !errors.Is(err, ErrReservationConflict) {
+	if _, err := db.ApplyTaskReservation(ReservationClaim, claimInput(released.Task, "new-work"), a.Actor, testBinding(a.Actor), "claim-managed", allowReservation); !errors.Is(err, ErrReservationConflict) {
 		t.Fatalf("new ledger claimed legacy managed task: %v", err)
 	}
 }

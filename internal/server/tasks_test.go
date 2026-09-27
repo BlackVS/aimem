@@ -672,8 +672,10 @@ func TestTaskRoutesRejectGenericWritesDuringReservation(t *testing.T) {
 		t.Fatal(err)
 	}
 	hold, err := db.ApplyTaskReservation(store.ReservationClaim, store.TaskReservationInput{TaskID: task.ID, ExpectedRevision: 2,
-		Holder: store.ReservationHolder{Mode: "standalone", Ref: "test-work"}},
-		store.TaskActor{Kind: "user", Name: "Alice", UserID: f.aliceUser, TokenID: f.aliceTokenID}, "reserve-claim")
+		Holder: store.ReservationHolder{Mode: "standalone", Ref: "test-work"}}, store.TaskActor{Kind: "user", Name: "Alice", UserID: f.aliceUser, TokenID: f.aliceTokenID}, testBinding(
+
+		store.TaskActor{Kind: "user", Name: "Alice", UserID: f.aliceUser, TokenID: f.aliceTokenID}), "reserve-claim", allowReservation)
+
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -702,8 +704,9 @@ func TestTaskRoutesRejectGenericWritesDuringReservation(t *testing.T) {
 	}
 	release := current.TaskContent
 	if _, err := db.ApplyTaskReservation(store.ReservationRelease, store.TaskReservationInput{TaskID: task.ID, ID: hold.Reservation.ID,
-		Fence: hold.Reservation.Fence, ExpectedRevision: 2, Content: &release, Reason: "stopped"},
-		store.TaskActor{Kind: "user", Name: "Alice", UserID: f.aliceUser, TokenID: f.aliceTokenID}, "reserve-release"); err != nil {
+		Fence: hold.Reservation.Fence, ExpectedRevision: 2, Content: &release, Reason: "stopped"}, store.TaskActor{Kind: "user", Name: "Alice", UserID: f.aliceUser, TokenID: f.aliceTokenID}, testBinding(
+
+		store.TaskActor{Kind: "user", Name: "Alice", UserID: f.aliceUser, TokenID: f.aliceTokenID}), "reserve-release", allowReservation); err != nil {
 		t.Fatal(err)
 	}
 	if w := taskReq(t, f.h, "PUT", "/v1/tasks/"+task.ID, f.alice, "reserve-after", `{"title":"ordinary edit","state":"READY","expected_revision":3}`); w.Code != http.StatusOK {
