@@ -6,7 +6,9 @@ package store
 
 import (
 	"context"
+	"crypto/sha256"
 	"database/sql"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -114,6 +116,9 @@ type TaskReservationInput struct {
 	// TerminalEvidence is a finalize's evidence of reviewed delivery and
 	// human merge; DONE requires it (reservation wire).
 	TerminalEvidence []string `json:"terminal_evidence,omitempty"`
+	// Intent is an update's transition intent (C6 decision D6-2a): block,
+	// submit or resume. It is optional and recorded, never interpreted.
+	Intent string `json:"intent,omitempty"`
 }
 
 // TaskReservationOutcome is a committed transition, as its receipt records
@@ -213,6 +218,13 @@ func validateReservationInput(op ReservationOperation, in *TaskReservationInput)
 	if op == ReservationFinalize && in.Content.State == "DONE" && len(in.TerminalEvidence) == 0 {
 		return invalid(errors.New("DONE requires terminal evidence of reviewed delivery and human merge"))
 	}
+	switch {
+	case in.Intent == "":
+	case op != ReservationUpdate:
+		return invalid(errors.New("intent belongs to update"))
+	case in.Intent != "block" && in.Intent != "submit" && in.Intent != "resume":
+		return invalid(errors.New("intent is block, submit or resume"))
+	}
 	return nil
 }
 
@@ -274,9 +286,10 @@ func recordReservationEvent(tx *sql.Tx, op ReservationOperation, before, after T
 		Binding          ReservationBinding   `json:"binding"`
 		Reason           string               `json:"reason,omitempty"`
 		TerminalEvidence []string             `json:"terminal_evidence,omitempty"`
+		Intent           string               `json:"intent,omitempty"`
 		Coordination     *CoordinationRecord  `json:"coordination,omitempty"`
 		Dependencies     []DependencyEvidence `json:"dependencies"`
-	}{before, after, actor, binding, in.Reason, in.TerminalEvidence, coord, deps})
+	}{before, after, actor, binding, in.Reason, in.TerminalEvidence, in.Intent, coord, deps})
 	if err != nil {
 		return err
 	}
@@ -594,4 +607,54 @@ func (d *DB) GetTaskReservationReceipt(op ReservationOperation, in TaskReservati
 		return TaskReservationOutcome{}, false, ErrReservationHolder
 	}
 	return out, true, nil
+}
+
+// TaskReservationReceiptByKey reconciles a lost reply by the original
+// operation and request key alone (the reservation wire's receipt read, which
+// carries no body). It serves the receipt only to the acting member that made
+// the transition; the caller must still recheck that member's current
+// authority. found is false when nothing committed under the key.
+func (d *DB) TaskReservationReceiptByKey(op ReservationOperation, taskID string, actor TaskActor,
+	binding ReservationBinding, key string) (TaskReservationOutcome, bool, error) {
+	if err := d.taskScopeOK(); err != nil {
+		return TaskReservationOutcome{}, false, err
+	}
+	if !validReservationOperation(op) || !taskIDRE.MatchString(taskID) {
+		return TaskReservationOutcome{}, false, invalid(errors.New("unknown operation or task"))
+	}
+	if err := binding.validate(); err != nil {
+		return TaskReservationOutcome{}, false, err
+	}
+	principal, err := reservationPrincipal(actor)
+	if err != nil {
+		return TaskReservationOutcome{}, false, err
+	}
+	if err := taskText(key, MaxTaskKeyBytes, true); err != nil {
+		return TaskReservationOutcome{}, false, invalid(err)
+	}
+	var saved string
+	err = d.sql.QueryRow(`SELECT result FROM task_reservation_requests WHERE principal=? AND operation=? AND task_id=? AND key=?`,
+		principal, string(op), taskID, key).Scan(&saved)
+	if errors.Is(err, sql.ErrNoRows) {
+		return TaskReservationOutcome{}, false, nil
+	}
+	if err != nil {
+		return TaskReservationOutcome{}, false, err
+	}
+	var out TaskReservationOutcome
+	if err := json.Unmarshal([]byte(saved), &out); err != nil {
+		return TaskReservationOutcome{}, false, err
+	}
+	if !actingMember(op, out.Binding, binding) {
+		return TaskReservationOutcome{}, false, ErrReservationHolder
+	}
+	return out, true, nil
+}
+
+// ReservationReceiptID is the stable identity of a member's committed
+// receipt: the digest of its request key's scope (the user principal,
+// operation, task and key), so an identical replay answers with the same ID.
+func ReservationReceiptID(userID string, op ReservationOperation, taskID, key string) string {
+	sum := sha256.Sum256([]byte("user/" + userID + "\x00" + string(op) + "\x00" + taskID + "\x00" + key))
+	return "rcpt_" + base64.RawURLEncoding.EncodeToString(sum[:])
 }

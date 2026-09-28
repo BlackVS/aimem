@@ -465,6 +465,14 @@ func TestPeerCredentialReachesNoOtherRoute(t *testing.T) {
 			}
 			continue
 		}
+		// A member reservation route refuses a peer credential in its own
+		// envelope: it is not an individual's credential (C6a, D4a).
+		if strings.Contains(rt.Pattern, "/reservation") && !strings.HasPrefix(rt.Pattern, recoveryNamespace) {
+			if r.status != 401 || r.code() != "invalid_credential" {
+				t.Errorf("%s %s reachable with a peer credential: %d %s", rt.Method, rt.Pattern, r.status, r.body)
+			}
+			continue
+		}
 		if r.status != 403 {
 			t.Errorf("%s %s reachable with a peer credential: %d %s", rt.Method, rt.Pattern, r.status, r.body)
 		}

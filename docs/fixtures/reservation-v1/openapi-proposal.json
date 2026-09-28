@@ -99,7 +99,7 @@
           "reservation_id": {"type": "string"},
           "fence": {"type": "string", "pattern": "^[1-9][0-9]*$"},
           "holder": {"type": "object", "required": ["mode", "work_ref"], "properties": {"mode": {"enum": ["standalone", "external"]}, "work_ref": {"type": "string"}}},
-          "intent": {"type": "string"},
+          "intent": {"enum": ["block", "submit", "resume"], "description": "Optional on update only (C6 decision D6-2a); recorded, never interpreted"},
           "content": {"type": "object", "description": "Complete TaskContent, validated by the task contract"},
           "reason": {"type": "string"},
           "terminal_evidence": {"type": "array", "items": {"type": "string"}},

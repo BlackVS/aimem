@@ -68,6 +68,15 @@ var taskRoutes = map[string]bool{
 	"POST /v1/projects/{p}/epics":                                          true,
 	"GET /v1/projects/{p}/epics/{e}":                                       true,
 	"PUT /v1/projects/{p}/epics/{e}":                                       true,
+	// The member reservation routes (C6a): the C5 authorizer derives the
+	// actor from the individual credential and refuses every other kind.
+	"POST /v1/projects/{p}/tasks/{task_id}/reservation/claim":                             true,
+	"POST /v1/projects/{p}/tasks/{task_id}/reservation/transfer":                          true,
+	"POST /v1/projects/{p}/tasks/{task_id}/reservation/update":                            true,
+	"POST /v1/projects/{p}/tasks/{task_id}/reservation/release":                           true,
+	"POST /v1/projects/{p}/tasks/{task_id}/reservation/finalize":                          true,
+	"GET /v1/projects/{p}/tasks/{task_id}/reservation":                                    true,
+	"GET /v1/projects/{p}/tasks/{task_id}/reservation/receipts/{operation}/{request_key}": true,
 }
 
 // ordinaryRoutes is the exact surface an ordinary (scoped user) token may

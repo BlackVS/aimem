@@ -140,12 +140,16 @@ func refusal(t *testing.T, r identityResp) (code, mode, cid string) {
 	return e.Code, e.ActiveMode, e.CorrelationID
 }
 
-// TestTeamRoutesAreTheApprovedMatrix pins teamRoutes to the E4 matrix and to
-// real GET routes of the hub.
+// TestTeamRoutesAreTheApprovedMatrix pins teamRoutes to the E4 matrix plus
+// the C6a member reservation routes, all real routes of the hub.
 func TestTeamRoutesAreTheApprovedMatrix(t *testing.T) {
 	want := []string{
 		"GET /v1/access/identity", "GET /v1/projects/{p}/tasks", "GET /v1/tasks/{id}", "GET /v1/tasks/{id}/history",
 		"GET /v1/tasks/{id}/comments", "GET /v1/tasks/{id}/comments/{c}", "GET /v1/projects/{p}/epics", "GET /v1/projects/{p}/epics/{e}",
+		"POST /v1/projects/{p}/tasks/{task_id}/reservation/claim", "POST /v1/projects/{p}/tasks/{task_id}/reservation/transfer",
+		"POST /v1/projects/{p}/tasks/{task_id}/reservation/update", "POST /v1/projects/{p}/tasks/{task_id}/reservation/release",
+		"POST /v1/projects/{p}/tasks/{task_id}/reservation/finalize", "GET /v1/projects/{p}/tasks/{task_id}/reservation",
+		"GET /v1/projects/{p}/tasks/{task_id}/reservation/receipts/{operation}/{request_key}",
 	}
 	if !reflect.DeepEqual(teamRoutes, want) {
 		t.Fatalf("teamRoutes changed without review: %v", teamRoutes)

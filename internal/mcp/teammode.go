@@ -8,7 +8,8 @@ package mcp
 //   - a changed binding or a missing file blocks the process for good;
 //   - the context is verified online before the first tool and again after
 //     any team refusal; until then every tool refuses;
-//   - the tool list is the hub's team read routes plus session_context.
+//   - the tool list is the hub's team routes: the task and epic reads, the
+//     member reservation tools (C6a), plus session_context.
 // Nothing here ever makes a call without the handle, and nothing falls back
 // to personal mode, the local socket or a checkout's credential.
 
@@ -45,7 +46,7 @@ var sessionContextToolDef = map[string]any{
 func teamToolList() []map[string]any {
 	var out []map[string]any
 	for _, d := range taskToolDefs {
-		if teamReadTools[d["name"].(string)] {
+		if n := d["name"].(string); teamReadTools[n] || reservationTools[n] {
 			out = append(out, d)
 		}
 	}
@@ -207,11 +208,30 @@ func (s *srv) teamToolCall(ctx context.Context, name string, raw []byte) (string
 			return "", err
 		}
 		return string(body), nil
+	case reservationTools[name]:
+		if err := s.team.ensureReady(ctx); err != nil {
+			// A context the hub refused passes through, and the tool
+			// boundary types it with the hub's own code; a blocked
+			// conversation needs a new context; anything else (the hub not
+			// answering) may be retried.
+			var ref *teamsession.Refusal
+			s.team.mu.Lock()
+			blocked := s.team.blocked != nil
+			s.team.mu.Unlock()
+			switch {
+			case errors.As(err, &ref):
+				return "", err
+			case blocked:
+				return "", newReservationRefusal("context_missing", err.Error(), "team", false, "")
+			}
+			return "", newReservationRefusal("context_unavailable", err.Error(), "team", true, "")
+		}
+		return s.taskTool(ctx, name, raw)
 	case teamReadTools[name]:
 		if err := s.team.ensureReady(ctx); err != nil {
 			return "", err
 		}
 		return s.taskTool(ctx, name, raw)
 	}
-	return "", fmt.Errorf("tool %q is not available in a team conversation: team mode serves only the team's task and epic reads and session_context; knowledge and write tools are off", name)
+	return "", fmt.Errorf("tool %q is not available in a team conversation: team mode serves only the team's task and epic reads, the reservation tools and session_context; knowledge and other write tools are off", name)
 }

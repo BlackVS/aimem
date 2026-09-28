@@ -1510,7 +1510,8 @@
       "fence",
       "expected_revision",
       "reason",
-      "terminal_evidence"
+      "terminal_evidence",
+      "intent"
     ],
     "stdin_example": {
       "expected_revision": 3,

@@ -129,3 +129,11 @@ Schema 22 records the offer's intended worker on the hold and clears it on trans
 **`DONE` needs terminal evidence.** Finalizing a reservation hold to `DONE` requires `terminal_evidence` (reviewed delivery and human merge, per the reservation wire), in team **and** personal mode. This applies only to a reservation finalize. An ordinary task edit to `DONE` by a user who holds no reservation is unchanged, and a regression test keeps it so.
 
 **Recovery (seq209).** A recovery on stop evidence now passes the hold it verified (its work reference) to the ledger, which compares it inside the transaction. A transfer that lands during verification makes the recovery `stale_fence` instead of closing the new attempt.
+
+## C6a: the member routes and MCP tools
+
+C6a (task 01a0e8c7-e1af, from C6 seq219 with the seq221 decisions) serves the reservation wire's member surface over the C5 authorizer: seven HTTP routes under `/v1/projects/{p}/tasks/{task_id}/reservation` and the seven `task_reservation_*` MCP tools, in personal and team mode ([reservation wire](DESIGN-AIFORGE-RESERVATION-WIRE.md#what-c6a-serves)).
+
+- **Store.** `TaskReservationInput.Intent` is an optional `block`, `submit` or `resume` on `update` only, recorded in the event (D6-2a). `TaskReservationReceiptByKey` reconciles by operation and key alone, for the acting member only. `ReservationReceiptID` gives a receipt a stable ID. A claim's replay now reports `replayed`, as every other replay does.
+- **Retention (D6-5a).** No request key is pruned in v1.
+- **Surface.** The routes are task routes (ordinary tokens and the in-process MCP dispatcher reach them) and team routes (the first team-mode writes). The live OpenAPI documents them with operation-specific request schemas and the read refusals.

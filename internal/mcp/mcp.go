@@ -370,6 +370,9 @@ func (s *srv) toolCall(ctx context.Context, req rpcRequest) []byte {
 	case (isTaskTool(head.Name) || isOnboardTool(head.Name) || isProcessTool(head.Name)) && s.taskState == taskStateDisabled:
 		// Hidden tools stay hidden when called by name.
 		err = errors.New("tasks are not enabled for this project (as of this session's start); an admin enables them on the hub, then restart the session")
+		if reservationTools[head.Name] {
+			err = newReservationRefusal("task_unavailable", err.Error(), "", false, "")
+		}
 	case isOnboardTool(head.Name):
 		text, extra, err = s.onboardTool(head.Name, head.Arguments)
 	case isProcessTool(head.Name):
@@ -393,9 +396,15 @@ func (s *srv) toolCall(ctx context.Context, req rpcRequest) []byte {
 		text, err = s.run(&p)
 	}
 	if err != nil {
-		// Tool-level errors go back as content with isError, per MCP.
+		// Tool-level errors go back as content with isError, per MCP. A
+		// reservation refusal is the hub's envelope itself, unprefixed, so a
+		// client parses its code and retryable flag (reservation wire).
+		text := "error: " + err.Error()
+		if reservationTools[head.Name] {
+			text = reservationToolError(err).envelope
+		}
 		return reply(req.ID, map[string]any{
-			"content": []map[string]any{{"type": "text", "text": "error: " + err.Error()}},
+			"content": []map[string]any{{"type": "text", "text": text}},
 			"isError": true,
 		}, nil)
 	}
