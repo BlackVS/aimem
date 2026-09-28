@@ -258,9 +258,14 @@ func validateDependencyGraph(ownerID string, nodes map[string]dependencyNode, tx
 // It writes only the owner DB; dependency write-intent transactions remain
 // open until the owner claim and receipt commit. It authorizes no actor role.
 func (r *Registry) ClaimTaskReservation(ctx context.Context, in TaskReservationInput, actor TaskActor,
-	binding ReservationBinding, key string, verify DependencyReadVerifier) (TaskReservationOutcome, error) {
+	binding ReservationBinding, key string, coord *ReservationCoordination, verify DependencyReadVerifier) (TaskReservationOutcome, error) {
 	if err := validateReservationInput(ReservationClaim, &in); err != nil {
 		return TaskReservationOutcome{}, err
+	}
+	if coord != nil {
+		if err := coord.validate(ReservationClaim); err != nil {
+			return TaskReservationOutcome{}, err
+		}
 	}
 	if verify == nil {
 		return TaskReservationOutcome{}, ErrDependencyUnresolved
@@ -377,18 +382,22 @@ func (r *Registry) ClaimTaskReservation(ctx context.Context, in TaskReservationI
 			if managed || hold.ID != "" || current.State != "READY" || current.Archived {
 				return TaskReservationOutcome{}, ErrReservationConflict
 			}
+			if err := checkProcessPin(tx, coord.pin()); err != nil {
+				return TaskReservationOutcome{}, err
+			}
 			before := hold
 			hold.ID, hold.Holder, hold.Binding = uuidv7.New(), in.Holder, binding
+			hold.IntendedWorker = coord.intended()
 			if err := advanceReservation(tx, &hold); err != nil {
 				return TaskReservationOutcome{}, err
 			}
-			if err := recordReservationEvent(tx, ReservationClaim, before, hold, actor, binding, "", evidence); err != nil {
+			if err := recordReservationEvent(tx, ReservationClaim, before, hold, actor, binding, in, coord.record(), evidence); err != nil {
 				return TaskReservationOutcome{}, err
 			}
 			if err := trackServiceReservation(tx, before, hold, ""); err != nil {
 				return TaskReservationOutcome{}, err
 			}
-			return TaskReservationOutcome{Task: current, Reservation: hold}, nil
+			return TaskReservationOutcome{Task: current, Reservation: hold, Coordination: coord.record()}, nil
 		}, authorize)
 	if err != nil {
 		return TaskReservationOutcome{}, err

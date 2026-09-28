@@ -32,6 +32,19 @@ func stoppedFact() map[string]any {
 	}
 }
 
+func testPin() map[string]any {
+	return map[string]any{"repo": "https://git.example/team/process.git", "commit": strings.Repeat("3f", 20), "manifest": "process/manifest.json"}
+}
+
+// offerFact is a valid offer: it names its worker and carries the pin.
+func offerFact(fact map[string]any) {
+	fact["kind"], fact["operation"] = "offer", "claim"
+	delete(fact, "attempt_ref")
+	fact["offer_ref"] = "aicrew-offer-7"
+	fact["intended_worker"] = map[string]any{"user_id": "user-2", "agent_id": "agent-2"}
+	fact["process"] = testPin()
+}
+
 func answerFact(f *fake, edit func(reply, fact map[string]any)) {
 	f.SetCoordination(func(w http.ResponseWriter, got introspecttest.Request) {
 		fact := stoppedFact()
@@ -63,16 +76,64 @@ func TestCoordinateActiveFact(t *testing.T) {
 			t.Fatalf("%s request: %+v", mode, last)
 		}
 	}
-	// The offer fact carries its intended worker.
-	answerFact(f, func(_, fact map[string]any) {
-		fact["kind"], fact["operation"] = "offer", "claim"
-		delete(fact, "attempt_ref")
-		fact["offer_ref"] = "aicrew-offer-7"
-		fact["intended_worker"] = map[string]any{"user_id": "user-2", "agent_id": "agent-2"}
-	})
+	// The offer fact carries its intended worker and its process pin.
+	answerFact(f, func(_, fact map[string]any) { offerFact(fact) })
 	got, err := newClient(t, f).Coordinate(context.Background(), peerOf(f, "ca_dns"), proof(t))
-	if err != nil || got.IntendedWorker == nil || *got.IntendedWorker != (Worker{"user-2", "agent-2"}) || got.OfferRef != "aicrew-offer-7" {
+	want := Process{Repo: "https://git.example/team/process.git", Commit: strings.Repeat("3f", 20), Manifest: "process/manifest.json"}
+	if err != nil || got.IntendedWorker == nil || *got.IntendedWorker != (Worker{"user-2", "agent-2"}) || got.OfferRef != "aicrew-offer-7" ||
+		got.Process == nil || *got.Process != want {
 		t.Fatalf("offer fact: %+v %v", got, err)
+	}
+	// So does an independent claim; a stop carries none.
+	answerFact(f, func(_, fact map[string]any) {
+		fact["kind"], fact["operation"] = "independent_claim", "claim"
+		fact["member"].(map[string]any)["role"] = "independent"
+		fact["process"] = testPin()
+	})
+	if got, err := newClient(t, f).Coordinate(context.Background(), peerOf(f, "ca_dns"), proof(t)); err != nil || got.Process == nil || *got.Process != want {
+		t.Fatalf("independent claim: %+v %v", got, err)
+	}
+}
+
+// A missing, malformed or misplaced pin, or one with another field, is a
+// wrong-shaped reply (C5-w2).
+func TestCoordinateProcessPinShape(t *testing.T) {
+	f := newFake(t)
+	c := newClient(t, f)
+	setPin := func(k string, v any) func(reply, fact map[string]any) {
+		return func(_, fact map[string]any) {
+			offerFact(fact)
+			pin := fact["process"].(map[string]any)
+			if v == nil {
+				delete(pin, k)
+			} else {
+				pin[k] = v
+			}
+		}
+	}
+	for name, edit := range map[string]func(reply, fact map[string]any){
+		"offer without a pin": func(_, fact map[string]any) { offerFact(fact); delete(fact, "process") },
+		"stop with a pin":     func(_, fact map[string]any) { fact["process"] = testPin() },
+		"no commit":           setPin("commit", nil),
+		"short commit":        setPin("commit", "3f2a9c1"),
+		"uppercase commit":    setPin("commit", strings.Repeat("3F", 20)),
+		"plain http repo":     setPin("repo", "http://git.example/team/process.git"),
+		"absolute manifest":   setPin("manifest", "/process/manifest.json"),
+		"escaping manifest":   setPin("manifest", "../manifest.json"),
+		"a branch":            setPin("ref", "main"),
+		"a digest":            setPin("digest", "sha256:"+strings.Repeat("0", 64)),
+		"a number for commit": setPin("commit", 7),
+		"the pin is a string": func(_, fact map[string]any) {
+			offerFact(fact)
+			fact["process"] = "https://git.example/team/process.git"
+		},
+	} {
+		answerFact(f, edit)
+		_, err := c.Coordinate(context.Background(), peerOf(f, "ca_dns"), proof(t))
+		if err == nil {
+			t.Fatalf("%s: accepted", name)
+		}
+		wantFailure(t, err, CodeUnavailable, "malformed")
 	}
 }
 

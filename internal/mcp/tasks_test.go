@@ -122,7 +122,7 @@ func TestMCPGenericTaskWriteRefusedDuringReservation(t *testing.T) {
 	_, err = db.ApplyTaskReservation(store.ReservationClaim, store.TaskReservationInput{TaskID: task.ID, ExpectedRevision: task.Revision,
 		Holder: store.ReservationHolder{Mode: "standalone", Ref: "mcp-work"}}, store.TaskActor{Kind: "user", Name: "Alice", UserID: f.aliceID, TokenID: f.aliceTokenID}, testBinding(
 
-		store.TaskActor{Kind: "user", Name: "Alice", UserID: f.aliceID, TokenID: f.aliceTokenID}), "held-claim", allowReservation)
+		store.TaskActor{Kind: "user", Name: "Alice", UserID: f.aliceID, TokenID: f.aliceTokenID}), "held-claim", nil, allowReservation)
 
 	if err != nil {
 		t.Fatal(err)

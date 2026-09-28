@@ -49,7 +49,7 @@ C5a (task 01a0e39c-8769, from C5 seq196 with operator decisions D2(a), D3(a) and
 - **Personal context:** claim, update, release and finalize of `standalone` holds, under the caller's personal write grant.
 - **Team context:** only the bound worker's or independent's `update` of its own hold.
 
-  Team claim, transfer, release and finalize need verified aicrew coordination facts and belong to C5b. They are refused with `role_forbidden`.
+  Team claim, transfer, release and finalize need verified aicrew coordination facts and belong to C5b (below).
 - **Status and receipt reads:** they recheck the caller's current authority. Status shows only the caller's own hold, and any other holder's hold reads as `none`.
 
 **Compatibility (C5a).** A hold committed before schema 20 has no binding, so no caller matches it. It stays held, with its fence, until the C5c recovery path closes it. The migration is additive, and a schema-19 binary refuses a schema-20 database through the existing newer-schema guard. The C1 rollback limits still apply.
@@ -85,3 +85,47 @@ The `aimem reservation recover release|cancel|status|receipt` CLI drives them wi
 - C6 wires it to aicrew's read-scope route.
 
 **The ledger's callers.** The member authorizer (`reservations.go`) and the recovery routes (`recovery.go`) are its only production callers, and the source walk in the tests enforces that.
+
+## C5b: coordination-backed transitions
+
+C5b (task 01a0e39c-db9a, criteria in its seq213 and seq215) authorizes every team transition other than a holder's `update`. Each is backed by one `coordination.v1` fact ([coordination contract](DESIGN-AIFORGE-COORDINATION-WIRE.md)), including the C5-w2 process pin.
+
+**The actor rules**, per operation and verified role:
+
+| Operation | Role | Fact |
+| --- | --- | --- |
+| claim | coordinator | `offer` |
+| claim | independent | `independent_claim` |
+| transfer | worker | `accepted_attempt` |
+| release | coordinator | `never_accepted` |
+| release | worker or independent | `stopped` |
+| finalize | coordinator, worker or independent | `accepted_for_finalization` |
+
+- Any other combination is `role_forbidden`.
+- A permitted team transition without its `coordination_proof` is `invalid_request`, as is a personal transition or an `update` that carries one.
+
+**Verifying the fact.** The hub asks aicrew once, before the ledger transaction (D2a), through the operational identity peer, which must be the caller's team profile service. It binds the answer to this request:
+- the kind and operation;
+- the task;
+- the `k1_` digest of this request's key;
+- the member, which must equal the caller's verified context: user, agent, team, role, session and generation;
+- the request's holder: `external`, on the offer's or attempt's reference.
+
+A fact aicrew does not vouch for, or that fails any of these checks, is `coordination_rejected`. An unreachable or wrong-shaped answer, including a missing or malformed pin, is `context_unavailable`. The answer commits only while it is at most 5 s old.
+
+**The ledger checks, inside the committing transaction:**
+- The hold's current work reference is the one the fact names. Otherwise `coordination_rejected`.
+- A transfer goes only to the worker the offer named, same user and agent, of the hold's service and team.
+- The never-accepted release and the coordinator's finalize take a narrow non-holder path: a coordinator of the hold's service and team. Every other transition needs the bound holder.
+- **Last, the process pin**, on an `offer`, `accepted_attempt` or `independent_claim`. It is compared byte for byte with the project's current selection. A mismatch, or no selection, is `process_mismatch` (409).
+
+Schema 22 records the offer's intended worker on the hold and clears it on transfer or close.
+
+**Replay.**
+- A committed transition is answered from its receipt before any coordination call (the replay rule), after the hub rechecks only aimem-owned authority and the acting member.
+- A coordinator's finalize replays only for that coordinator's recorded session.
+- The receipt and event record the fact kind and the proof's `p1_` digest, never the proof.
+
+**`DONE` needs terminal evidence.** Finalizing a reservation hold to `DONE` requires `terminal_evidence` (reviewed delivery and human merge, per the reservation wire), in team **and** personal mode. This applies only to a reservation finalize. An ordinary task edit to `DONE` by a user who holds no reservation is unchanged, and a regression test keeps it so.
+
+**Recovery (seq209).** A recovery on stop evidence now passes the hold it verified (its work reference) to the ledger, which compares it inside the transaction. A transfer that lands during verification makes the recovery `stale_fence` instead of closing the new attempt.

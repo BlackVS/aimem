@@ -41,6 +41,11 @@ type RecoveryEvidence struct {
 	Kind      string `json:"kind"`
 	Ref       string `json:"ref"`
 	Statement string `json:"statement,omitempty"`
+	// HolderRef is, for stop evidence, the work reference of the hold the
+	// hub verified the stop against. The recovery closes that hold only:
+	// the ledger compares it inside the transaction (C5b, seq209). It is
+	// not request input, so no receipt digest covers it.
+	HolderRef string `json:"-"`
 }
 
 func (e RecoveryEvidence) validate() error {
@@ -78,6 +83,9 @@ func (r *Registry) RecoverTaskReservation(ctx context.Context, op RecoveryOperat
 	if err := validateRecovery(op, &in, evidence, actor); err != nil {
 		return TaskReservationOutcome{}, err
 	}
+	if evidence.Kind == "stop_evidence" && evidence.HolderRef == "" {
+		return TaskReservationOutcome{}, invalid(errors.New("stop evidence names the hold it was verified against"))
+	}
 	ctx, cancel := context.WithTimeout(ctx, dependencyClaimTimeout)
 	defer cancel()
 	if err := r.lockClaimLifecycle(ctx); err != nil {
@@ -103,6 +111,11 @@ func (r *Registry) RecoverTaskReservation(ctx context.Context, op RecoveryOperat
 				return TaskReservationOutcome{}, err
 			}
 			if hold.ID == "" || hold.ID != in.ID || hold.Fence != in.Fence {
+				return TaskReservationOutcome{}, ErrReservationStale
+			}
+			// Stop evidence closes only the hold it was verified against: a
+			// transfer since then keeps the ID and moves the work reference.
+			if evidence.Kind == "stop_evidence" && hold.Holder.Ref != evidence.HolderRef {
 				return TaskReservationOutcome{}, ErrReservationStale
 			}
 			affected := hold.Binding
@@ -152,6 +165,9 @@ func validateRecovery(op RecoveryOperation, in *TaskReservationInput, evidence R
 		}
 	default:
 		return invalid(errors.New("unknown recovery operation"))
+	}
+	if in.TerminalEvidence != nil {
+		return invalid(errors.New("a recovery carries no terminal evidence"))
 	}
 	if err := evidence.validate(); err != nil {
 		return err

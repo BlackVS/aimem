@@ -53,14 +53,14 @@ func TestTaskReservationFenceAndReceiptsSurviveRestart(t *testing.T) {
 	}
 	task := readyReservationTask(t, db, "create-fence")
 	claim := claimInput(task, "run-1")
-	first, err := db.ApplyTaskReservation(ReservationClaim, claim, aliceActor, testBinding(aliceActor), "claim-1", allowReservation)
+	first, err := db.ApplyTaskReservation(ReservationClaim, claim, aliceActor, testBinding(aliceActor), "claim-1", nil, allowReservation)
 	if err != nil || first.Reservation.Fence != 1 || first.Reservation.ID == "" {
 		t.Fatalf("first claim: %+v, %v", first, err)
 	}
 	if first.Task.Revision != task.Revision || countRows(t, db, "task_history", "task_id=?", task.ID) != 1 {
 		t.Fatal("pure claim changed task revision or history")
 	}
-	replayed, err := db.ApplyTaskReservation(ReservationClaim, claim, aliceActor, testBinding(aliceActor), "claim-1", allowReservation)
+	replayed, err := db.ApplyTaskReservation(ReservationClaim, claim, aliceActor, testBinding(aliceActor), "claim-1", nil, allowReservation)
 	if err != nil || replayed.Reservation != first.Reservation {
 		t.Fatalf("claim replay: %+v, %v", replayed, err)
 	}
@@ -69,16 +69,16 @@ func TestTaskReservationFenceAndReceiptsSurviveRestart(t *testing.T) {
 	}
 	rotated := aliceActor
 	rotated.TokenID = uuidv7.New()
-	if receipt, err := db.ApplyTaskReservation(ReservationClaim, claim, rotated, testBinding(rotated), "claim-1", allowReservation); err != nil || receipt.Reservation != first.Reservation {
+	if receipt, err := db.ApplyTaskReservation(ReservationClaim, claim, rotated, testBinding(rotated), "claim-1", nil, allowReservation); err != nil || receipt.Reservation != first.Reservation {
 		t.Fatalf("stable actor replay after token rotation: %+v, %v", receipt, err)
 	}
 	changed := claimInput(task, "changed-holder")
-	if _, err := db.ApplyTaskReservation(ReservationClaim, changed, aliceActor, testBinding(aliceActor), "claim-1", allowReservation); !errors.Is(err, ErrTaskRetryConflict) {
+	if _, err := db.ApplyTaskReservation(ReservationClaim, changed, aliceActor, testBinding(aliceActor), "claim-1", nil, allowReservation); !errors.Is(err, ErrTaskRetryConflict) {
 		t.Fatalf("changed input reused key: %v", err)
 	}
 	release := TaskReservationInput{TaskID: task.ID, ID: first.Reservation.ID, Fence: first.Reservation.Fence,
 		ExpectedRevision: task.Revision, Content: &task.TaskContent, Reason: "offer declined"}
-	released, err := db.ApplyTaskReservation(ReservationRelease, release, aliceActor, testBinding(aliceActor), "release-1", allowReservation)
+	released, err := db.ApplyTaskReservation(ReservationRelease, release, aliceActor, testBinding(aliceActor), "release-1", nil, allowReservation)
 	if err != nil || released.Reservation.ID != "" || released.Reservation.Fence != 2 || released.Task.Revision != 2 {
 		t.Fatalf("release: %+v, %v", released, err)
 	}
@@ -100,11 +100,11 @@ func TestTaskReservationFenceAndReceiptsSurviveRestart(t *testing.T) {
 		t.Fatalf("released status after restart: %+v, %v", status, err)
 	}
 	secondClaim := claimInput(released.Task, "run-2")
-	second, err := db.ApplyTaskReservation(ReservationClaim, secondClaim, aliceActor, testBinding(aliceActor), "claim-2", allowReservation)
+	second, err := db.ApplyTaskReservation(ReservationClaim, secondClaim, aliceActor, testBinding(aliceActor), "claim-2", nil, allowReservation)
 	if err != nil || second.Reservation.Fence != 3 || second.Reservation.ID == first.Reservation.ID {
 		t.Fatalf("reclaim after restart: %+v, %v", second, err)
 	}
-	if _, err := db.ApplyTaskReservation(ReservationRelease, release, aliceActor, testBinding(aliceActor), "stale-release", allowReservation); !errors.Is(err, ErrTaskRetryConflict) && !errors.Is(err, ErrReservationStale) && !isTaskConflict(err) {
+	if _, err := db.ApplyTaskReservation(ReservationRelease, release, aliceActor, testBinding(aliceActor), "stale-release", nil, allowReservation); !errors.Is(err, ErrTaskRetryConflict) && !errors.Is(err, ErrReservationStale) && !isTaskConflict(err) {
 		t.Fatalf("old holder accepted: %v", err)
 	}
 	if receipt, found, err := db.GetTaskReservationReceipt(ReservationRelease, release, aliceActor, testBinding(aliceActor), "release-1"); err != nil || !found || receipt.Reservation.Fence != 2 {
@@ -128,7 +128,7 @@ func TestTaskReservationCompetingClaimsAndTransfer(t *testing.T) {
 		wg.Add(1)
 		go func(i int) {
 			defer wg.Done()
-			results[i], errs[i] = db.ApplyTaskReservation(ReservationClaim, claimInput(task, fmt.Sprintf("run-%d", i)), actors[i], testBinding(actors[i]), fmt.Sprintf("claim-%d", i), allowReservation)
+			results[i], errs[i] = db.ApplyTaskReservation(ReservationClaim, claimInput(task, fmt.Sprintf("run-%d", i)), actors[i], testBinding(actors[i]), fmt.Sprintf("claim-%d", i), nil, allowReservation)
 		}(i)
 	}
 	wg.Wait()
@@ -147,27 +147,27 @@ func TestTaskReservationCompetingClaimsAndTransfer(t *testing.T) {
 		t.Fatalf("claim count: winner %d, errors %v", winner, errs)
 	}
 	first := results[winner]
+	// A transfer without a verified coordination fact is refused (C5b);
+	// TestCoordinatedOfferTransferAndFinalize covers the coordinated path.
 	transfer := TaskReservationInput{TaskID: task.ID, ID: first.Reservation.ID, Fence: first.Reservation.Fence,
 		ExpectedRevision: task.Revision, Holder: ReservationHolder{Mode: "external", Ref: "attempt-1"}}
-	moved, err := db.ApplyTaskReservation(ReservationTransfer, transfer, actors[winner], testBinding(actors[winner]), "transfer", allowReservation)
-	if err != nil || moved.Reservation.Fence != 2 || moved.Reservation.Holder.Ref != "attempt-1" || moved.Task.Revision != task.Revision {
-		t.Fatalf("transfer: %+v, %v", moved, err)
+	if _, err := db.ApplyTaskReservation(ReservationTransfer, transfer, actors[winner], testBinding(actors[winner]), "transfer", nil, allowReservation); !errors.Is(err, ErrReservationHolder) {
+		t.Fatalf("an uncoordinated transfer: %v", err)
 	}
 	stale := TaskReservationInput{TaskID: task.ID, ID: first.Reservation.ID, Fence: first.Reservation.Fence,
 		ExpectedRevision: task.Revision, Content: &TaskContent{Title: task.Title, State: "IN_PROGRESS"}}
-	if _, err := db.ApplyTaskReservation(ReservationUpdate, stale, actors[winner], testBinding(actors[winner]), "old-update", allowReservation); !errors.Is(err, ErrReservationStale) {
-		t.Fatalf("old fence wrote after transfer: %v", err)
-	}
-	current := stale
-	current.Fence = moved.Reservation.Fence
-	updated, err := db.ApplyTaskReservation(ReservationUpdate, current, actors[winner], testBinding(actors[winner]), "new-update", allowReservation)
-	if err != nil || updated.Task.Revision != task.Revision+1 || updated.Reservation.Fence != 3 {
+	updated, err := db.ApplyTaskReservation(ReservationUpdate, stale, actors[winner], testBinding(actors[winner]), "new-update", nil, allowReservation)
+	if err != nil || updated.Task.Revision != task.Revision+1 || updated.Reservation.Fence != 2 {
 		t.Fatalf("fenced update: %+v, %v", updated, err)
 	}
-	final := TaskReservationInput{TaskID: task.ID, ID: moved.Reservation.ID, Fence: updated.Reservation.Fence,
-		ExpectedRevision: updated.Task.Revision, Content: &TaskContent{Title: task.Title, State: "DONE"}, Reason: "reviewed delivery"}
-	closed, err := db.ApplyTaskReservation(ReservationFinalize, final, actors[winner], testBinding(actors[winner]), "finalize", allowReservation)
-	if err != nil || closed.Task.State != "DONE" || closed.Reservation.ID != "" || closed.Reservation.Fence != 4 {
+	if _, err := db.ApplyTaskReservation(ReservationUpdate, stale, actors[winner], testBinding(actors[winner]), "old-update", nil, allowReservation); !errors.Is(err, ErrReservationStale) && !isTaskConflict(err) {
+		t.Fatalf("old fence wrote after an update: %v", err)
+	}
+	final := TaskReservationInput{TaskID: task.ID, ID: first.Reservation.ID, Fence: updated.Reservation.Fence,
+		ExpectedRevision: updated.Task.Revision, Content: &TaskContent{Title: task.Title, State: "DONE"}, Reason: "reviewed delivery",
+		TerminalEvidence: []string{"review-head-example", "human-merge-example"}}
+	closed, err := db.ApplyTaskReservation(ReservationFinalize, final, actors[winner], testBinding(actors[winner]), "finalize", nil, allowReservation)
+	if err != nil || closed.Task.State != "DONE" || closed.Reservation.ID != "" || closed.Reservation.Fence != 3 {
 		t.Fatalf("finalize: %+v, %v", closed, err)
 	}
 	if countRows(t, db, "task_history", "task_id=?", task.ID) != 3 {
@@ -182,7 +182,7 @@ func TestTaskReservationTransitionAndReceiptRollbackTogether(t *testing.T) {
 	if _, err := db.sql.Exec(`CREATE TRIGGER reject_reservation_receipt BEFORE INSERT ON task_reservation_requests BEGIN SELECT RAISE(ABORT,'test receipt failure'); END`); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := db.ApplyTaskReservation(ReservationClaim, claim, aliceActor, testBinding(aliceActor), "retry-after-receipt-failure", allowReservation); err == nil {
+	if _, err := db.ApplyTaskReservation(ReservationClaim, claim, aliceActor, testBinding(aliceActor), "retry-after-receipt-failure", nil, allowReservation); err == nil {
 		t.Fatal("claim succeeded despite receipt failure")
 	}
 	if countRows(t, db, "task_reservations", "task_id=?", task.ID) != 0 || countRows(t, db, "task_reservation_events", "task_id=?", task.ID) != 0 {
@@ -194,7 +194,7 @@ func TestTaskReservationTransitionAndReceiptRollbackTogether(t *testing.T) {
 	if _, err := db.sql.Exec(`CREATE TRIGGER reject_reservation_event BEFORE INSERT ON task_reservation_events BEGIN SELECT RAISE(ABORT,'test event failure'); END`); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := db.ApplyTaskReservation(ReservationClaim, claim, aliceActor, testBinding(aliceActor), "retry-after-rollback", allowReservation); err == nil {
+	if _, err := db.ApplyTaskReservation(ReservationClaim, claim, aliceActor, testBinding(aliceActor), "retry-after-rollback", nil, allowReservation); err == nil {
 		t.Fatal("claim succeeded despite event failure")
 	}
 	if countRows(t, db, "task_reservations", "task_id=?", task.ID) != 0 || countRows(t, db, "task_reservation_requests", "operation=? AND task_id=?", "claim", task.ID) != 0 {
@@ -203,7 +203,7 @@ func TestTaskReservationTransitionAndReceiptRollbackTogether(t *testing.T) {
 	if _, err := db.sql.Exec(`DROP TRIGGER reject_reservation_event`); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := db.ApplyTaskReservation(ReservationClaim, claim, aliceActor, testBinding(aliceActor), "retry-after-rollback", allowReservation); err != nil {
+	if _, err := db.ApplyTaskReservation(ReservationClaim, claim, aliceActor, testBinding(aliceActor), "retry-after-rollback", nil, allowReservation); err != nil {
 		t.Fatalf("same key after rollback: %v", err)
 	}
 	status, err := db.GetTaskReservation(task.ID)
@@ -215,7 +215,7 @@ func TestTaskReservationTransitionAndReceiptRollbackTogether(t *testing.T) {
 	}
 	release := TaskReservationInput{TaskID: task.ID, ID: status.ID, Fence: status.Fence,
 		ExpectedRevision: task.Revision, Content: &task.TaskContent, Reason: "stopped"}
-	if _, err := db.ApplyTaskReservation(ReservationRelease, release, aliceActor, testBinding(aliceActor), "retry-release", allowReservation); err == nil {
+	if _, err := db.ApplyTaskReservation(ReservationRelease, release, aliceActor, testBinding(aliceActor), "retry-release", nil, allowReservation); err == nil {
 		t.Fatal("release succeeded despite task history failure")
 	}
 	if current, err := db.GetTaskReservation(task.ID); err != nil || current.ID != status.ID || current.Fence != status.Fence {
@@ -227,7 +227,7 @@ func TestTaskReservationTransitionAndReceiptRollbackTogether(t *testing.T) {
 	if _, err := db.sql.Exec(`DROP TRIGGER reject_task_history`); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := db.ApplyTaskReservation(ReservationRelease, release, aliceActor, testBinding(aliceActor), "retry-release", allowReservation); err != nil {
+	if _, err := db.ApplyTaskReservation(ReservationRelease, release, aliceActor, testBinding(aliceActor), "retry-release", nil, allowReservation); err != nil {
 		t.Fatalf("release retry after rollback: %v", err)
 	}
 }
@@ -242,7 +242,7 @@ func TestTaskReservationRefusesLegacyManagedTask(t *testing.T) {
 	if _, err := db.sql.Exec(`INSERT INTO team_managed_tasks(task_id,team_id,managed) VALUES(?,?,1)`, task.ID, teamID); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := db.ApplyTaskReservation(ReservationClaim, claimInput(task, "run"), aliceActor, testBinding(aliceActor), "claim-managed", allowReservation); !errors.Is(err, ErrReservationConflict) {
+	if _, err := db.ApplyTaskReservation(ReservationClaim, claimInput(task, "run"), aliceActor, testBinding(aliceActor), "claim-managed", nil, allowReservation); !errors.Is(err, ErrReservationConflict) {
 		t.Fatalf("legacy managed task claimed: %v", err)
 	}
 	if countRows(t, db, "task_reservations", "task_id=?", task.ID) != 0 {
@@ -284,16 +284,16 @@ func TestTaskReservationSchemaPreservesExistingTasks(t *testing.T) {
 	if err != nil || got.Revision != task.Revision || got.Title != task.Title {
 		t.Fatalf("existing task changed: %+v, %v", got, err)
 	}
-	if v, err := db.GetMeta("schema_version"); err != nil || v != "21" {
+	if v, err := db.GetMeta("schema_version"); err != nil || v != "22" {
 		t.Fatalf("schema version: %q, %v", v, err)
 	}
 	if countRows(t, db, "task_requests", "operation=? AND scope=?", "create", "") != 1 {
 		t.Fatal("existing task receipt lost during migration")
 	}
-	if _, err := db.ApplyTaskReservation(ReservationClaim, claimInput(got, "migrated"), aliceActor, testBinding(aliceActor), "migrated-claim", allowReservation); err != nil {
+	if _, err := db.ApplyTaskReservation(ReservationClaim, claimInput(got, "migrated"), aliceActor, testBinding(aliceActor), "migrated-claim", nil, allowReservation); err != nil {
 		t.Fatalf("cannot claim migrated task: %v", err)
 	}
-	if _, err := db.sql.Exec(`UPDATE meta SET value='22' WHERE key='schema_version'`); err != nil {
+	if _, err := db.sql.Exec(`UPDATE meta SET value='23' WHERE key='schema_version'`); err != nil {
 		t.Fatal(err)
 	}
 	r.Close()
@@ -320,7 +320,7 @@ func TestTaskReservationSchema20KeepsUnboundHoldsHeld(t *testing.T) {
 		t.Fatal(err)
 	}
 	task := readyReservationTask(t, db, "create-unbound")
-	held, err := db.ApplyTaskReservation(ReservationClaim, claimInput(task, "old"), aliceActor, testBinding(aliceActor), "old-claim", allowReservation)
+	held, err := db.ApplyTaskReservation(ReservationClaim, claimInput(task, "old"), aliceActor, testBinding(aliceActor), "old-claim", nil, allowReservation)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -361,7 +361,7 @@ func TestTaskReservationSchema20KeepsUnboundHoldsHeld(t *testing.T) {
 	}
 	update := TaskReservationInput{TaskID: task.ID, ID: got.ID, Fence: got.Fence, ExpectedRevision: task.Revision,
 		Content: &TaskContent{Title: task.Title, State: "IN_PROGRESS"}}
-	if _, err := db.ApplyTaskReservation(ReservationUpdate, update, aliceActor, testBinding(aliceActor), "after-migrate", allowReservation); !errors.Is(err, ErrReservationHolder) {
+	if _, err := db.ApplyTaskReservation(ReservationUpdate, update, aliceActor, testBinding(aliceActor), "after-migrate", nil, allowReservation); !errors.Is(err, ErrReservationHolder) {
 		t.Fatalf("an unbound hold was acted on: %v", err)
 	}
 }

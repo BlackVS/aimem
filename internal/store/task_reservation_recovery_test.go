@@ -24,7 +24,7 @@ func teamHold(t *testing.T, db *DB, key string, service string) (Task, TaskReser
 	b.ServiceID = service
 	in := claimInput(task, "attempt-"+key)
 	in.Holder.Mode = "external"
-	held, err := db.ApplyTaskReservation(ReservationClaim, in, aliceActor, b, key, allowReservation)
+	held, err := db.ApplyTaskReservation(ReservationClaim, in, aliceActor, b, key, nil, allowReservation)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -121,7 +121,7 @@ func TestReservationRecoveryReleaseAndCancel(t *testing.T) {
 	// claim of a free task.
 	free := readyReservationTask(t, db, "free")
 	if _, err := db.ApplyTaskReservation(ReservationClaim, claimInput(free, "grab"), recoveryAdmin,
-		ReservationBinding{UserID: "admin-recovery", Mode: "recovery"}, "member-path", allowReservation); err == nil {
+		ReservationBinding{UserID: "admin-recovery", Mode: "recovery"}, "member-path", nil, allowReservation); err == nil {
 		t.Fatal("a recovery binding claimed through the member path")
 	}
 }
@@ -133,7 +133,7 @@ func TestReservationRecoveryUnboundHoldNeedsAttestation(t *testing.T) {
 	if _, err := db.sql.Exec(`UPDATE task_reservations SET bound_user='',bound_mode='',bound_service='',bound_profile='',bound_team='',bound_role='',bound_session='',bound_generation='' WHERE task_id=?`, task.ID); err != nil {
 		t.Fatal(err)
 	}
-	stop := RecoveryEvidence{Kind: "stop_evidence", Ref: "p1_" + strings.Repeat("A", 43)}
+	stop := RecoveryEvidence{Kind: "stop_evidence", Ref: "p1_" + strings.Repeat("A", 43), HolderRef: held.Reservation.Holder.Ref}
 	if _, err := r.RecoverTaskReservation(ctx, RecoveryRelease, closing(task, held, "READY"), stop, recoveryAdmin, "stop", allowReservation); !errors.Is(err, ErrRecoveryEvidence) {
 		t.Fatalf("an unbound hold recovered on stop evidence: %v", err)
 	}
@@ -154,7 +154,7 @@ func TestReservationRecoveryRacesTheHolder(t *testing.T) {
 		defer wg.Done()
 		up := closing(task, held, "IN_PROGRESS")
 		up.Reason = ""
-		_, errs[0] = r.ApplyTaskReservation(context.Background(), ReservationUpdate, up, aliceActor, held.Reservation.Binding, "holder", allowReservation)
+		_, errs[0] = r.ApplyTaskReservation(context.Background(), ReservationUpdate, up, aliceActor, held.Reservation.Binding, "holder", nil, allowReservation)
 	}()
 	go func() {
 		defer wg.Done()
@@ -187,11 +187,13 @@ func TestServiceHoldStatusClosureEvidence(t *testing.T) {
 		close     func(Task, TaskReservationOutcome) error
 	}{
 		{"hr", "holder_release", func(task Task, h TaskReservationOutcome) error {
-			_, err := db.ApplyTaskReservation(ReservationRelease, closing(task, h, "READY"), aliceActor, h.Reservation.Binding, "rel-hr", allowReservation)
+			_, err := db.ApplyTaskReservation(ReservationRelease, closing(task, h, "READY"), aliceActor, h.Reservation.Binding, "rel-hr", nil, allowReservation)
 			return err
 		}},
 		{"hf", "holder_finalize", func(task Task, h TaskReservationOutcome) error {
-			_, err := db.ApplyTaskReservation(ReservationFinalize, closing(task, h, "DONE"), aliceActor, h.Reservation.Binding, "fin-hf", allowReservation)
+			in := closing(task, h, "DONE")
+			in.TerminalEvidence = []string{"review-head-example", "human-merge-example"}
+			_, err := db.ApplyTaskReservation(ReservationFinalize, in, aliceActor, h.Reservation.Binding, "fin-hf", nil, allowReservation)
 			return err
 		}},
 		{"rr", "recovery_release", func(task Task, h TaskReservationOutcome) error {
@@ -222,12 +224,12 @@ func TestServiceHoldStatusClosureEvidence(t *testing.T) {
 	}
 	// Someone else takes the task: the service still sees its own closure.
 	task, held := teamHold(t, db, "taken", "aicrew-example")
-	if _, err := db.ApplyTaskReservation(ReservationRelease, closing(task, held, "READY"), aliceActor, held.Reservation.Binding, "rel-taken", allowReservation); err != nil {
+	if _, err := db.ApplyTaskReservation(ReservationRelease, closing(task, held, "READY"), aliceActor, held.Reservation.Binding, "rel-taken", nil, allowReservation); err != nil {
 		t.Fatal(err)
 	}
 	current, _ := db.GetTask(task.ID)
 	bob := TaskActor{Kind: "user", UserID: "01a0e62c-0000-7000-8000-00000000b0b0", TokenID: "01a0e62c-0000-7000-8000-00000000b0b1", Name: "bob"}
-	personal, err := db.ApplyTaskReservation(ReservationClaim, claimInput(current, "bob-work"), bob, testBinding(bob), "bob-claim", allowReservation)
+	personal, err := db.ApplyTaskReservation(ReservationClaim, claimInput(current, "bob-work"), bob, testBinding(bob), "bob-claim", nil, allowReservation)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -240,11 +242,11 @@ func TestServiceHoldStatusClosureEvidence(t *testing.T) {
 		t.Fatalf("the closed answer describes the new holder: %s", raw)
 	}
 	// A newer reservation by the service replaces the closed one.
-	rel, _ := db.ApplyTaskReservation(ReservationRelease, closing(current, personal, "READY"), bob, testBinding(bob), "bob-rel", allowReservation)
+	rel, _ := db.ApplyTaskReservation(ReservationRelease, closing(current, personal, "READY"), bob, testBinding(bob), "bob-rel", nil, allowReservation)
 	b := teamBinding(aliceActor.UserID, "profile-1", "worker")
 	again := claimInput(rel.Task, "attempt-again")
 	again.Holder.Mode = "external"
-	newer, err := db.ApplyTaskReservation(ReservationClaim, again, aliceActor, b, "claim-again", allowReservation)
+	newer, err := db.ApplyTaskReservation(ReservationClaim, again, aliceActor, b, "claim-again", nil, allowReservation)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -253,7 +255,7 @@ func TestServiceHoldStatusClosureEvidence(t *testing.T) {
 	}
 	// A personal hold is never tracked for any service.
 	ptask := readyReservationTask(t, db, "personal-only")
-	if _, err := db.ApplyTaskReservation(ReservationClaim, claimInput(ptask, "mine"), aliceActor, testBinding(aliceActor), "p", allowReservation); err != nil {
+	if _, err := db.ApplyTaskReservation(ReservationClaim, claimInput(ptask, "mine"), aliceActor, testBinding(aliceActor), "p", nil, allowReservation); err != nil {
 		t.Fatal(err)
 	}
 	if got, _ := db.ServiceHoldStatus(ptask.ID, "aicrew-example"); got.State != "none" {
