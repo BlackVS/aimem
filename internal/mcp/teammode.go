@@ -199,6 +199,28 @@ func (tm *teamMode) ensureReady(ctx context.Context) error {
 	return err
 }
 
+// reservationTeamReady verifies the team context for a reservation call and
+// types a failure: a context the hub refused passes through, and the tool
+// boundary types it with the hub's own code; a blocked conversation needs a
+// new context; anything else (the hub not answering) may be retried.
+func (s *srv) reservationTeamReady(ctx context.Context) error {
+	err := s.team.ensureReady(ctx)
+	if err == nil {
+		return nil
+	}
+	var ref *teamsession.Refusal
+	s.team.mu.Lock()
+	blocked := s.team.blocked != nil
+	s.team.mu.Unlock()
+	switch {
+	case errors.As(err, &ref):
+		return err
+	case blocked:
+		return newReservationRefusal("context_missing", err.Error(), "team", false, "")
+	}
+	return newReservationRefusal("context_unavailable", err.Error(), "team", true, "")
+}
+
 // teamToolCall serves one tool call of a team conversation.
 func (s *srv) teamToolCall(ctx context.Context, name string, raw []byte) (string, error) {
 	switch {
@@ -209,22 +231,8 @@ func (s *srv) teamToolCall(ctx context.Context, name string, raw []byte) (string
 		}
 		return string(body), nil
 	case reservationTools[name]:
-		if err := s.team.ensureReady(ctx); err != nil {
-			// A context the hub refused passes through, and the tool
-			// boundary types it with the hub's own code; a blocked
-			// conversation needs a new context; anything else (the hub not
-			// answering) may be retried.
-			var ref *teamsession.Refusal
-			s.team.mu.Lock()
-			blocked := s.team.blocked != nil
-			s.team.mu.Unlock()
-			switch {
-			case errors.As(err, &ref):
-				return "", err
-			case blocked:
-				return "", newReservationRefusal("context_missing", err.Error(), "team", false, "")
-			}
-			return "", newReservationRefusal("context_unavailable", err.Error(), "team", true, "")
+		if err := s.reservationTeamReady(ctx); err != nil {
+			return "", err
 		}
 		return s.taskTool(ctx, name, raw)
 	case teamReadTools[name]:

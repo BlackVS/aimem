@@ -269,7 +269,7 @@ An unreachable or unparsable `coordination.v1` answer is the existing `context_u
 
 ## 4. Reservation CLI (for C6)
 
-C6 must offer the reservation mutations and the receipt read as `aimem` CLI commands as well as MCP tools, so aicrew's client can drive a step deterministically without a model:
+C6 must offer the reservation mutations and the receipt read as `aimem` CLI commands as well as MCP tools, so aicrew's client can drive a step deterministically without a model (served since task C6c; see the [ledger notes](AIFORGE-RESERVATION-LEDGER.md#c6c-the-member-reservation-cli)):
 
 ```
 aimem reservation claim|transfer|update|release|finalize --task TASK_ID --key REQUEST_KEY

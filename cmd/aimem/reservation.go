@@ -18,6 +18,7 @@ import (
 	"regexp"
 	"strings"
 
+	"aimem/internal/mcp"
 	"aimem/internal/store"
 )
 
@@ -51,6 +52,10 @@ Hub flags (after the other arguments), as for aimem identity:
 var cliKeyDigest = regexp.MustCompile(`^k1_[A-Za-z0-9_-]{43}$`)
 
 func reservationCmd(args []string) error {
+	if len(args) == 0 || args[0] != "recover" {
+		// The member commands (C6c) answer with their own exit codes.
+		os.Exit(runMemberReservation(args, os.Stdin, os.Stdout, os.Stderr, mcp.ReservationCommand))
+	}
 	return runReservation(args, os.Stdin, os.Stdout)
 }
 

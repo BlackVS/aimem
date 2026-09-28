@@ -30,6 +30,9 @@ type teamHub struct {
 	stale    map[string]bool   // handles answered with context_stale
 	log      []recorded
 	caFile   string
+	// custom, when a test sets it, answers a request for a known session
+	// first (returning true) before the default read answer.
+	custom func(w http.ResponseWriter, r *http.Request, session string) bool
 }
 
 type recorded struct{ path, handle, auth string }
@@ -43,12 +46,14 @@ func newTeamHub(t *testing.T) *teamHub {
 		h.log = append(h.log, recorded{r.URL.Path, handle, r.Header.Get("Authorization")})
 		session, known := h.sessions[handle]
 		stale := h.stale[handle]
+		custom := h.custom
 		h.mu.Unlock()
 		w.Header().Set("Content-Type", "application/json")
 		switch {
 		case !known || stale:
 			w.WriteHeader(http.StatusForbidden)
 			w.Write([]byte(`{"code":"context_stale","message":"The team session is no longer current.","active_mode":"team","retryable":false,"next_action":"Revalidate the session through aicrew.","correlation_id":"c-1"}`))
+		case custom != nil && r.URL.Path != "/v1/access/identity" && custom(w, r, session):
 		case r.URL.Path == "/v1/access/identity":
 			json.NewEncoder(w).Encode(map[string]any{"mode": "team", "user_id": "user-1", "token_id": "tok-1",
 				"team":     map[string]string{"service_id": "aicrew-example", "team_id": "team-1", "session_id": session, "generation": "4", "role": "worker"},
