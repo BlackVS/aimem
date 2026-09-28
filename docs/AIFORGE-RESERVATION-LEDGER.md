@@ -137,3 +137,17 @@ C6a (task 01a0e8c7-e1af, from C6 seq219 with the seq221 decisions) serves the re
 - **Store.** `TaskReservationInput.Intent` is an optional `block`, `submit` or `resume` on `update` only, recorded in the event (D6-2a). `TaskReservationReceiptByKey` reconciles by operation and key alone, for the acting member only. `ReservationReceiptID` gives a receipt a stable ID. A claim's replay now reports `replayed`, as every other replay does.
 - **Retention (D6-5a).** No request key is pruned in v1.
 - **Surface.** The routes are task routes (ordinary tokens and the in-process MCP dispatcher reach them) and team routes (the first team-mode writes). The live OpenAPI documents them with operation-specific request schemas and the read refusals.
+
+## C6c: the member reservation CLI
+
+C6c (task 01a0e8c7-e1e9) serves the [coordination wire's reservation CLI](DESIGN-AIFORGE-COORDINATION-WIRE.md#4-reservation-cli-for-c6): `aimem reservation claim|transfer|update|release|finalize`, `receipt OPERATION` and `status`, each with `--task`, and `--key` on every command except `status`.
+
+- **One engine.** A command runs its `task_reservation_*` tool exactly as the stdio facade would (`internal/mcp/reservation_cli.go`). It first reads the task, over the same connection, for the project the route path carries.
+- **Context.** With `AIMEM_TEAM_SESSION`, the command is that team conversation. It uses the pinned binding and context header and verifies the context online first. A session that cannot be used blocks with `context_missing` and sends nothing. There is no personal caller to fall back to. Without the variable, the checkout's personal credential is used.
+- **Input.** A mutation's body is one JSON object on standard input, never argv, bounded to 256 KiB. The body is refused if it contains trailing data or a field the arguments set (`version`, `project`, `task_id`, `request_key`, `operation`).
+- **Output and exit.** The command prints one JSON document to standard output: the outcome or the typed refusal envelope. The document never contains the proof. Exit codes:
+  - 0: committed, or a replay;
+  - 3: final refusal;
+  - 4: retryable refusal;
+  - 5: a mutation was sent and no answer came (`receipt_unresolved`); reconcile with `receipt` and the same key;
+  - 2: usage error, reported on standard error.

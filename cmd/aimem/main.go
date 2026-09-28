@@ -234,6 +234,10 @@ func usage() {
   access                     manage users, access groups, grants and ordinary tokens
   identity                   manage the aicrew identity peer and its credentials (hub TLS listener);
                              identity proof is the aicrew client's session-entry command
+  reservation claim|transfer|update|release|finalize|receipt|status
+                             a member's reservation step, as the team session or in
+                             personal mode; body on stdin, exit 0/3/4/5/2 (run without
+                             args for usage)
   reservation recover        operator recovery of a stuck task reservation, and the
                              recovery reader (hub TLS listener, admin token)
   team-session               the aicrew client's binding of one conversation to one team session

@@ -104,7 +104,12 @@ type reservationArgs struct {
 // wire's typed envelope, so a client acts on its code and retryable flag:
 // the hub's own, or one the tool builds for what fails before the hub
 // answers.
-type reservationToolRefusal struct{ envelope string }
+type reservationToolRefusal struct {
+	envelope string
+	// unknownOutcome marks a mutation that was sent and never answered:
+	// the CLI's exit 5 (reconcile with the receipt and the same key).
+	unknownOutcome bool
+}
 
 func (r *reservationToolRefusal) Error() string { return r.envelope }
 
@@ -220,8 +225,10 @@ func callReservationTool(ctx context.Context, tasks TaskCallFunc, defaultProject
 		if method == "POST" {
 			// A transport failure after sending leaves the outcome unknown:
 			// reconcile with task_reservation_receipt and the same key.
-			return "", newReservationRefusal("receipt_unresolved",
+			r := newReservationRefusal("receipt_unresolved",
 				"The hub did not answer; the outcome is unknown. Reconcile with task_reservation_receipt and the same request_key.", "", true, "")
+			r.unknownOutcome = true
+			return "", r
 		}
 		return "", newReservationRefusal("context_unavailable", "The hub did not answer.", "", true, "")
 	}
