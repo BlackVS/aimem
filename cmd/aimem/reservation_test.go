@@ -29,7 +29,7 @@ func heldTask(t *testing.T, g *identityCLIRig) (store.Task, store.TaskReservatio
 	b := store.ReservationBinding{UserID: actor.UserID, Mode: "team", ServiceID: "aicrew-example", ProfileID: "profile-1", TeamID: "team-1",
 		Role: "worker", SessionID: "sess-1", Generation: "4"}
 	held, err := db.ApplyTaskReservation(store.ReservationClaim, store.TaskReservationInput{TaskID: task.ID, ExpectedRevision: task.Revision,
-		Holder: store.ReservationHolder{Mode: "external", Ref: "aicrew-attempt-1"}}, actor, b, "claim-stuck", func() error { return nil })
+		Holder: store.ReservationHolder{Mode: "external", Ref: "aicrew-attempt-1"}}, actor, b, "claim-stuck", nil, func() error { return nil })
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -79,7 +79,7 @@ func TestReservationRecoverCLI(t *testing.T) {
 		b := store.ReservationBinding{UserID: "01a0e62c-0000-7000-8000-0000000000a1", Mode: "personal"}
 		h, err := db.ApplyTaskReservation(store.ReservationClaim, store.TaskReservationInput{TaskID: tk.ID, ExpectedRevision: tk.Revision,
 			Holder: store.ReservationHolder{Mode: "standalone", Ref: "w"}}, store.TaskActor{Kind: "user", UserID: b.UserID,
-			TokenID: "01a0e62c-0000-7000-8000-0000000000a2", Name: "p"}, b, "c2", func() error { return nil })
+			TokenID: "01a0e62c-0000-7000-8000-0000000000a2", Name: "p"}, b, "c2", nil, func() error { return nil })
 		if err != nil {
 			t.Fatal(err)
 		}

@@ -674,7 +674,7 @@ func TestTaskRoutesRejectGenericWritesDuringReservation(t *testing.T) {
 	hold, err := db.ApplyTaskReservation(store.ReservationClaim, store.TaskReservationInput{TaskID: task.ID, ExpectedRevision: 2,
 		Holder: store.ReservationHolder{Mode: "standalone", Ref: "test-work"}}, store.TaskActor{Kind: "user", Name: "Alice", UserID: f.aliceUser, TokenID: f.aliceTokenID}, testBinding(
 
-		store.TaskActor{Kind: "user", Name: "Alice", UserID: f.aliceUser, TokenID: f.aliceTokenID}), "reserve-claim", allowReservation)
+		store.TaskActor{Kind: "user", Name: "Alice", UserID: f.aliceUser, TokenID: f.aliceTokenID}), "reserve-claim", nil, allowReservation)
 
 	if err != nil {
 		t.Fatal(err)
@@ -706,7 +706,7 @@ func TestTaskRoutesRejectGenericWritesDuringReservation(t *testing.T) {
 	if _, err := db.ApplyTaskReservation(store.ReservationRelease, store.TaskReservationInput{TaskID: task.ID, ID: hold.Reservation.ID,
 		Fence: hold.Reservation.Fence, ExpectedRevision: 2, Content: &release, Reason: "stopped"}, store.TaskActor{Kind: "user", Name: "Alice", UserID: f.aliceUser, TokenID: f.aliceTokenID}, testBinding(
 
-		store.TaskActor{Kind: "user", Name: "Alice", UserID: f.aliceUser, TokenID: f.aliceTokenID}), "reserve-release", allowReservation); err != nil {
+		store.TaskActor{Kind: "user", Name: "Alice", UserID: f.aliceUser, TokenID: f.aliceTokenID}), "reserve-release", nil, allowReservation); err != nil {
 		t.Fatal(err)
 	}
 	if w := taskReq(t, f.h, "PUT", "/v1/tasks/"+task.ID, f.alice, "reserve-after", `{"title":"ordinary edit","state":"READY","expected_revision":3}`); w.Code != http.StatusOK {
@@ -1193,5 +1193,21 @@ func TestTypedReferencesOverHTTP(t *testing.T) {
 	w = taskReq(t, f.h, "PUT", "/v1/tasks/"+created.ID, f.alice, "r5", `{"title":"typed","state":"BACKLOG","expected_revision":1,"evidence_refs":[{"kind":"ci","ref":"https://example.com/org/repo/actions/runs/1","note":"green"}]}`)
 	if w.Code != 200 || !strings.Contains(w.Body.String(), `"kind":"ci"`) || strings.Contains(w.Body.String(), `"kind":"pr"`) {
 		t.Fatalf("typed replace: %d %s", w.Code, w.Body)
+	}
+}
+
+// A standalone user's ordinary task edit to DONE, with no reservation, is
+// unchanged by C5b's "DONE requires terminal evidence", which applies to
+// finalizing a reservation hold only.
+func TestPlainPersonalTaskUpdateToDoneIsUnchanged(t *testing.T) {
+	f := newTaskFixture(t)
+	task := decodeTask(t, taskReq(t, f.h, "POST", "/v1/projects/alpha/tasks", f.alice, "k-plain", taskBody))
+	w := taskReq(t, f.h, "PUT", "/v1/tasks/"+task.ID, f.alice, "k-plain-done",
+		`{"title":"done without a hold","state":"DONE","expected_revision":1}`)
+	if w.Code != 200 {
+		t.Fatalf("plain update to DONE: %d %s", w.Code, w.Body)
+	}
+	if got := decodeTask(t, w); got.State != "DONE" || got.Revision != 2 {
+		t.Fatalf("plain update to DONE: %+v", got)
 	}
 }

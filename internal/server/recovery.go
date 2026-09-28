@@ -183,7 +183,7 @@ func (s *Server) recoverReservation(w http.ResponseWriter, r *http.Request, op s
 				return
 			}
 		}
-		ref, code, msg := s.verifyStopEvidence(r.Context(), taskID, key, req.Evidence.Proof)
+		verified, code, msg := s.verifyStopEvidence(r.Context(), taskID, key, req.Evidence.Proof)
 		if code != "" {
 			status := http.StatusForbidden
 			if code == "context_unavailable" {
@@ -192,7 +192,7 @@ func (s *Server) recoverReservation(w http.ResponseWriter, r *http.Request, op s
 			refuse(status, code, msg)
 			return
 		}
-		evidence, verifiedAt = store.RecoveryEvidence{Kind: "stop_evidence", Ref: ref}, time.Now()
+		evidence, verifiedAt = verified, time.Now()
 	default:
 		refuse(http.StatusBadRequest, "invalid_request", "evidence kind must be stop_evidence or attestation")
 		return
@@ -233,45 +233,49 @@ func (s *Server) recoveryAnswer(w http.ResponseWriter, op store.RecoveryOperatio
 // it would close. The acting member is the holder recorded on the hold, not
 // the admin; the session may have moved on, so user, team and role must
 // match, with the attempt, the task and this request's key. It returns the
-// proof's p1_ digest, or a refusal code and message.
-func (s *Server) verifyStopEvidence(ctx context.Context, taskID, key, proof string) (string, string, string) {
+// verified evidence (the proof's p1_ digest and the hold's work reference),
+// or a refusal code and message.
+func (s *Server) verifyStopEvidence(ctx context.Context, taskID, key, proof string) (store.RecoveryEvidence, string, string) {
+	var none store.RecoveryEvidence
 	if !introspect.ValidProof(proof) {
-		return "", "coordination_rejected", "the stop proof is malformed"
+		return none, "coordination_rejected", "the stop proof is malformed"
 	}
 	_, pdb, err := s.reg.LocateTask(taskID)
 	if err != nil {
-		return "", "task_unavailable", "task not found"
+		return none, "task_unavailable", "task not found"
 	}
 	hold, err := pdb.GetTaskReservation(taskID)
 	if err != nil {
-		return "", "task_unavailable", "task not found"
+		return none, "task_unavailable", "task not found"
 	}
 	if hold.ID == "" || hold.Binding.Mode != "team" {
-		return "", "coordination_rejected", "stop evidence applies only to a team hold"
+		return none, "coordination_rejected", "stop evidence applies only to a team hold"
 	}
 	peer, ok := s.operationalPeer()
 	if !ok {
-		return "", "context_unavailable", "no operational aicrew peer"
+		return none, "context_unavailable", "no operational aicrew peer"
 	}
 	if s.introspect == nil {
-		return "", "context_unavailable", "introspection is not configured"
+		return none, "context_unavailable", "introspection is not configured"
 	}
 	fact, err := s.introspect.Coordinate(ctx, toIntrospectPeer(peer), proof)
 	if err != nil {
 		var f *introspect.Failure
 		if errors.As(err, &f) && f.Code == introspect.CodeRejected {
-			return "", "coordination_rejected", "aicrew does not vouch for this stop"
+			return none, "coordination_rejected", "aicrew does not vouch for this stop"
 		}
-		return "", "context_unavailable", "aicrew could not be asked"
+		return none, "context_unavailable", "aicrew could not be asked"
 	}
 	b := hold.Binding
 	switch {
 	case fact.Kind != "stopped", fact.TaskID != taskID, fact.RequestKey != store.RequestKeyDigest(key),
 		fact.AttemptRef != hold.Holder.Ref, fact.ServiceID != b.ServiceID,
 		fact.Member.UserID != b.UserID, fact.Member.TeamID != b.TeamID, fact.Member.Role != b.Role:
-		return "", "coordination_rejected", "the stop evidence is not for this hold"
+		return none, "coordination_rejected", "the stop evidence is not for this hold"
 	}
-	return proofP1Digest(proof), "", ""
+	// The ledger closes only the hold verified here (seq209): a transfer
+	// after this read keeps the reservation ID and moves the work reference.
+	return store.RecoveryEvidence{Kind: "stop_evidence", Ref: proofP1Digest(proof), HolderRef: hold.Holder.Ref}, "", ""
 }
 
 // operationalPeer is the single operational aicrew peer, as the team

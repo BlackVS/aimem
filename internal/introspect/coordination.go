@@ -16,6 +16,8 @@ import (
 	"net/url"
 	"regexp"
 	"time"
+
+	"aimem/internal/process"
 )
 
 const (
@@ -33,6 +35,9 @@ var (
 		"offer": "claim", "accepted_attempt": "transfer", "never_accepted": "release",
 		"stopped": "release", "accepted_for_finalization": "finalize", "independent_claim": "claim",
 	}
+	// pinnedKinds are the facts that start work: they carry the process pin
+	// (C5-w2), and no other kind does.
+	pinnedKinds = map[string]bool{"offer": true, "accepted_attempt": true, "independent_claim": true}
 )
 
 // ValidProof reports whether p has the shape of a coordination proof.
@@ -46,6 +51,10 @@ type Member struct {
 // Worker names an offer's intended worker.
 type Worker struct{ UserID, AgentID string }
 
+// Process is the process version a fact that starts work carries: the
+// reference aicrew recorded, in the forms of the hub's process selection.
+type Process struct{ Repo, Commit, Manifest string }
+
 // Fact is an active coordination fact, exactly as aicrew reported it. The
 // caller binds it to the request, the hold and the verified caller.
 type Fact struct {
@@ -54,6 +63,7 @@ type Fact struct {
 	Member                              Member
 	OfferRef, AttemptRef                string
 	IntendedWorker                      *Worker
+	Process                             *Process
 	ExpiresAt                           time.Time
 }
 
@@ -88,6 +98,11 @@ type coordinationReply struct {
 			UserID  *string `json:"user_id"`
 			AgentID *string `json:"agent_id"`
 		} `json:"intended_worker"`
+		Process *struct {
+			Repo     *string `json:"repo"`
+			Commit   *string `json:"commit"`
+			Manifest *string `json:"manifest"`
+		} `json:"process"`
 		ExpiresAt *string `json:"expires_at"`
 	} `json:"fact"`
 }
@@ -190,6 +205,21 @@ func (c *Client) verifyFact(p Peer, nonce string, data []byte) (Fact, error) {
 			return Fact{}, unavailable("malformed")
 		}
 		got.IntendedWorker = &w
+	}
+	// The pin is exactly on the facts that start work, with exactly its
+	// three fields in the selection's forms; anything else is a wrong shape.
+	if (f.Process != nil) != pinnedKinds[got.Kind] {
+		return Fact{}, unavailable("malformed")
+	}
+	if pin := f.Process; pin != nil {
+		if pin.Repo == nil || pin.Commit == nil || pin.Manifest == nil {
+			return Fact{}, unavailable("malformed")
+		}
+		ref := process.Ref{Repo: *pin.Repo, Commit: *pin.Commit, Manifest: *pin.Manifest}
+		if ref.Validate() != nil {
+			return Fact{}, unavailable("malformed")
+		}
+		got.Process = &Process{Repo: ref.Repo, Commit: ref.Commit, Manifest: ref.Manifest}
 	}
 	exp, err := time.Parse(time.RFC3339, str(f.ExpiresAt))
 	if err != nil {

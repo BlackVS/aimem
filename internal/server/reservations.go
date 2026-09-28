@@ -9,8 +9,9 @@ package server
 //
 // C5a authorizes what needs no aicrew coordination facts: personal
 // standalone holds (claim, update, release, finalize), the team holder's
-// update, and status and receipt reads. Team claim, transfer, release and
-// finalize wait for C5b.
+// update, and status and receipt reads. C5b adds every other team
+// transition, each backed by one coordination.v1 fact the hub verifies
+// online (reservation_coordination.go).
 
 import (
 	"context"
@@ -83,24 +84,38 @@ func reservationCallerFrom(ctx context.Context) (reservationCaller, error) {
 	return c, nil
 }
 
-// reservationPermits applies the operation policy for C5a.
-func reservationPermits(c reservationCaller, op store.ReservationOperation, in store.TaskReservationInput) error {
-	if op == store.ReservationTransfer {
-		return refuseReservation("role_forbidden", "transfer needs verified aicrew coordination")
-	}
+// reservationPermits applies the operation policy. It returns the fact
+// kinds a coordination proof must show for this caller and operation, or
+// none for the transitions that need no fact: every personal one and a team
+// holder's update.
+func reservationPermits(c reservationCaller, op store.ReservationOperation, in store.TaskReservationInput, proof string) ([]string, error) {
 	if c.team == nil {
-		if op == store.ReservationClaim && in.Holder.Mode != "standalone" {
-			return refuseReservation("invalid_request", "a personal claim holds in standalone mode")
+		switch {
+		case op == store.ReservationTransfer:
+			return nil, refuseReservation("role_forbidden", "transfer needs verified aicrew coordination")
+		case op == store.ReservationClaim && in.Holder.Mode != "standalone":
+			return nil, refuseReservation("invalid_request", "a personal claim holds in standalone mode")
+		case proof != "":
+			return nil, refuseReservation("invalid_request", "a personal transition carries no coordination proof")
 		}
-		return nil
+		return nil, nil
 	}
+	kinds := teamFactKinds[op][c.binding.Role]
 	switch {
-	case op != store.ReservationUpdate:
-		return refuseReservation("role_forbidden", "team "+string(op)+" needs verified aicrew coordination")
-	case c.binding.Role != "worker" && c.binding.Role != "independent":
-		return refuseReservation("role_forbidden", "only a worker or independent holder updates its work")
+	case op == store.ReservationUpdate:
+		if c.binding.Role != "worker" && c.binding.Role != "independent" {
+			return nil, refuseReservation("role_forbidden", "only a worker or independent holder updates its work")
+		}
+		if proof != "" {
+			return nil, refuseReservation("invalid_request", "an update carries no coordination proof")
+		}
+		return nil, nil
+	case len(kinds) == 0:
+		return nil, refuseReservation("role_forbidden", "role "+c.binding.Role+" has no "+string(op)+" path")
+	case proof == "":
+		return nil, refuseReservation("invalid_request", "a team "+string(op)+" needs its coordination_proof")
 	}
-	return nil
+	return kinds, nil
 }
 
 // reservationAuthority decides, now, whether the caller may act on project
@@ -162,27 +177,62 @@ func (s *Server) reservationTarget(taskID string) (string, *store.DB, string, er
 	return project, db, instance, nil
 }
 
-// reserve runs one reservation transition for the caller in ctx.
-func (s *Server) reserve(ctx context.Context, op store.ReservationOperation, in store.TaskReservationInput, key string) (store.TaskReservationOutcome, error) {
+// reserve runs one reservation transition for the caller in ctx. proof is
+// the member's coordination_proof: every team transition but a holder's
+// update needs one, and nothing else carries one.
+func (s *Server) reserve(ctx context.Context, op store.ReservationOperation, in store.TaskReservationInput, key, proof string) (store.TaskReservationOutcome, error) {
 	c, err := reservationCallerFrom(ctx)
 	if err != nil {
 		return store.TaskReservationOutcome{}, err
 	}
-	if err := reservationPermits(c, op, in); err != nil {
+	kinds, err := reservationPermits(c, op, in, proof)
+	if err != nil {
 		return store.TaskReservationOutcome{}, err
 	}
-	project, _, instance, err := s.reservationTarget(in.TaskID)
+	project, db, instance, err := s.reservationTarget(in.TaskID)
 	if err != nil {
 		return store.TaskReservationOutcome{}, err
 	}
 	if err := s.reservationAuthority(c, project, instance, true); err != nil {
 		return store.TaskReservationOutcome{}, err
 	}
+	var coord *store.ReservationCoordination
+	var verifiedAt time.Time
+	if kinds != nil {
+		// A committed transition replays from its receipt; aicrew is asked
+		// only about a request that has not committed (the replay rule).
+		prior, found, err := db.GetTaskReservationReceipt(op, in, c.actor, c.binding, key)
+		if err != nil {
+			return store.TaskReservationOutcome{}, reservationError(err)
+		}
+		if found {
+			prior.Replayed = true
+			return prior, nil
+		}
+		if coord, err = s.coordinate(ctx, c, op, in, key, proof, kinds); err != nil {
+			return store.TaskReservationOutcome{}, err
+		}
+		verifiedAt = time.Now()
+	}
+	// fresh is decision D2(a): the coordination answer commits only while it
+	// is at most coordinationAnswerMaxAge old. aimem never asks aicrew inside
+	// the transaction.
+	fresh := func() error {
+		if coord != nil && time.Since(verifiedAt) > coordinationAnswerMaxAge {
+			return refuseReservation("context_unavailable", "the coordination answer is too old")
+		}
+		return nil
+	}
 	var out store.TaskReservationOutcome
 	if op == store.ReservationClaim {
 		verify := func(_ context.Context, p, accessID string) error {
 			if beforeReservationRecheck != nil {
 				beforeReservationRecheck()
+			}
+			if p == project {
+				if err := fresh(); err != nil {
+					return err
+				}
 			}
 			err := s.reservationAuthority(c, p, accessID, p == project)
 			if err != nil && p != project {
@@ -193,11 +243,14 @@ func (s *Server) reserve(ctx context.Context, op store.ReservationOperation, in 
 			}
 			return err
 		}
-		out, err = s.reg.ClaimTaskReservation(ctx, in, c.actor, c.binding, key, verify)
+		out, err = s.reg.ClaimTaskReservation(ctx, in, c.actor, c.binding, key, coord, verify)
 	} else {
-		out, err = s.reg.ApplyTaskReservation(ctx, op, in, c.actor, c.binding, key, func() error {
+		out, err = s.reg.ApplyTaskReservation(ctx, op, in, c.actor, c.binding, key, coord, func() error {
 			if beforeReservationRecheck != nil {
 				beforeReservationRecheck()
+			}
+			if err := fresh(); err != nil {
+				return err
 			}
 			return s.reservationAuthority(c, project, instance, true)
 		})
@@ -274,6 +327,10 @@ func reservationError(err error) error {
 		return refuseReservation("stale_fence", "reservation ID or fence is stale")
 	case errors.Is(err, store.ErrReservationConflict), errors.Is(err, store.ErrReservationHolder):
 		return refuseReservation("reservation_conflict", "the task is not held by this holder")
+	case errors.Is(err, store.ErrCoordinationMismatch):
+		return refuseReservation("coordination_rejected", "the coordination fact does not describe this hold")
+	case errors.Is(err, store.ErrProcessMismatch):
+		return refuseReservation("process_mismatch", "the process pin is not the project's current selection")
 	case errors.Is(err, store.ErrTaskRetryConflict):
 		return refuseReservation("idempotency_conflict", "changed input under a used key")
 	case errors.Is(err, store.ErrDependencyUnresolved):

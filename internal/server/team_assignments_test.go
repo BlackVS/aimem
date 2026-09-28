@@ -152,7 +152,7 @@ func TestAssignmentOfferRefusesActiveTaskReservation(t *testing.T) {
 	hold, err := db.ApplyTaskReservation(store.ReservationClaim, store.TaskReservationInput{TaskID: f.task.ID,
 		ExpectedRevision: f.task.Revision, Holder: store.ReservationHolder{Mode: "standalone", Ref: "private-work"}}, store.TaskActor{Kind: "user", Name: "Alice", UserID: f.aliceUser, TokenID: f.aliceTokenID}, testBinding(
 
-		store.TaskActor{Kind: "user", Name: "Alice", UserID: f.aliceUser, TokenID: f.aliceTokenID}), "offer-held-claim", allowReservation)
+		store.TaskActor{Kind: "user", Name: "Alice", UserID: f.aliceUser, TokenID: f.aliceTokenID}), "offer-held-claim", nil, allowReservation)
 
 	if err != nil {
 		t.Fatal(err)
@@ -169,7 +169,7 @@ func TestAssignmentOfferRefusesActiveTaskReservation(t *testing.T) {
 		ID: hold.Reservation.ID, Fence: hold.Reservation.Fence, ExpectedRevision: f.task.Revision,
 		Content: &content, Reason: "standalone stopped"}, store.TaskActor{Kind: "user", Name: "Alice", UserID: f.aliceUser, TokenID: f.aliceTokenID}, testBinding(
 
-		store.TaskActor{Kind: "user", Name: "Alice", UserID: f.aliceUser, TokenID: f.aliceTokenID}), "offer-held-release", allowReservation)
+		store.TaskActor{Kind: "user", Name: "Alice", UserID: f.aliceUser, TokenID: f.aliceTokenID}), "offer-held-release", nil, allowReservation)
 
 	if err != nil {
 		t.Fatal(err)

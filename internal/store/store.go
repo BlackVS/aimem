@@ -492,7 +492,7 @@ func (r *Registry) Close() {
 	r.dbs = map[string]*DB{}
 }
 
-const currentSchema = 21
+const currentSchema = 22
 
 // SetMeta / GetMeta store small key-value project metadata (e.g. the
 // project's declared knowledge groups, stamped from event pushes so the
@@ -1048,6 +1048,17 @@ CREATE TABLE task_reservation_services(
   task_revision INTEGER NOT NULL DEFAULT 0,
   PRIMARY KEY(task_id, service_id));
 UPDATE meta SET value='21' WHERE key='schema_version';`); err != nil {
+			return err
+		}
+	}
+	if v < 22 {
+		// Coordination-backed transitions (task C5b). An offer's hold records
+		// the worker aicrew named, so only that worker's accepted attempt can
+		// take it over.
+		if err := d.step(`
+ALTER TABLE task_reservations ADD COLUMN intended_user TEXT NOT NULL DEFAULT '';
+ALTER TABLE task_reservations ADD COLUMN intended_agent TEXT NOT NULL DEFAULT '';
+UPDATE meta SET value='22' WHERE key='schema_version';`); err != nil {
 			return err
 		}
 	}
