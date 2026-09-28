@@ -36,6 +36,11 @@ type reservationRig struct {
 func newReservationRig(t *testing.T) *reservationRig {
 	t.Helper()
 	g := &reservationRig{teamRig: newTeamRig(t)}
+	// Contexts the rig verifies are verified at or after this instant, so
+	// they never age; a test that needs an old one sets its VerifiedAt.
+	pinned := time.Now()
+	reservationClock = func() time.Time { return pinned }
+	t.Cleanup(func() { reservationClock = time.Now })
 	var err error
 	if g.alpha, err = g.s.reg.Open("alpha"); err != nil {
 		t.Fatal(err)
@@ -318,7 +323,7 @@ func TestReservationTeamHolderUpdate(t *testing.T) {
 	// An online answer older than the bound is re-verified first.
 	stale := g.team(t, g.aliceIdentity, nil)
 	tc, _ := teamContextFrom(stale)
-	tc.VerifiedAt = time.Now().Add(-2 * reservationVerificationAge)
+	tc.VerifiedAt = reservationClock().Add(-2 * reservationVerificationAge)
 	_, err = g.s.reserve(context.WithValue(stale, teamContextKey{}, tc), store.ReservationUpdate, nextOf(task, out, "IN_PROGRESS"), "stale", "")
 	expectRefusal(t, "old verification", err, "context_unavailable")
 	// Losing the profile or its grant refuses new effects and keeps the hold.

@@ -26,6 +26,11 @@ import (
 // before the transaction, within the claim's own deadline).
 const reservationVerificationAge = 5 * time.Second
 
+// reservationClock is the clock that age is measured on. The reservation
+// test rig pins it, so a slow disk between a verification and the call
+// cannot age a context the test just verified.
+var reservationClock = time.Now
+
 // reservationRefusal is a refusal in the reservation wire's terms. Detail
 // is for the hub's log only; it never names another holder.
 type reservationRefusal struct {
@@ -74,7 +79,7 @@ func reservationCallerFrom(ctx context.Context) (reservationCaller, error) {
 		switch {
 		case tc.UserID != id.UserID || tc.TokenID != id.TokenID:
 			return reservationCaller{}, refuseReservation("identity_mismatch", "team context of another credential")
-		case time.Since(tc.VerifiedAt) > reservationVerificationAge:
+		case reservationClock().Sub(tc.VerifiedAt) > reservationVerificationAge:
 			return reservationCaller{}, refuseReservation("context_unavailable", "team context verification is too old")
 		}
 		c.team = &tc
