@@ -13,8 +13,9 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"io"
+	"net"
 	"os"
-	"strings"
 
 	"aimem/internal/teamsession"
 )
@@ -104,7 +105,7 @@ func (s *srv) reservationProject(ctx context.Context, taskID string) (string, er
 		switch {
 		case errors.As(err, &ref):
 			return "", err
-		case strings.HasPrefix(err.Error(), "hub unreachable"):
+		case hubTransportError(err):
 			return "", newReservationRefusal("context_unavailable", "The hub did not answer.", "", true, "")
 		}
 		return "", newReservationRefusal("task_unavailable", "The task could not be read: "+err.Error(), "", false, "")
@@ -116,6 +117,14 @@ func (s *srv) reservationProject(ctx context.Context, taskID string) (string, er
 		return "", newReservationRefusal("task_unavailable", "The task read named no project.", "", false, "")
 	}
 	return t.Project, nil
+}
+
+// hubTransportError reports a failure to reach the hub or to read its
+// answer, whichever layer wrapped it (the caller, the local credential's
+// check): nothing the hub decided, so the same command may be retried.
+func hubTransportError(err error) bool {
+	var ne net.Error // an *url.Error from the HTTP client is one too
+	return errors.As(err, &ne) || errors.Is(err, io.ErrUnexpectedEOF) || errors.Is(err, context.DeadlineExceeded)
 }
 
 // reservationExit maps a typed refusal to the CLI's exit code.

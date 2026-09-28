@@ -5,13 +5,16 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
 	"strings"
 	"testing"
 
+	"aimem/internal/taskcred"
 	"aimem/internal/teamsession"
 )
 
@@ -127,11 +130,37 @@ func TestReservationCLIPersonal(t *testing.T) {
 		envelopeCode(t, out) != "task_unavailable" {
 		t.Fatalf("an unknown task: %d %s", code, out)
 	}
-	// The hub not answering a read is retryable: exit 4.
-	down := &srv{tasks: fixtureCaller(f, func(string, string) error { return errors.New("hub unreachable: connection refused") })}
-	if out, code = reservationCommand(ctx, down, ReservationRequest{Command: "status", TaskID: task.ID}); code != ExitRetryable ||
-		envelopeCode(t, out) != "context_unavailable" {
-		t.Fatalf("an unreachable hub: %d %s", code, out)
+	// The hub not answering is retryable (exit 4), however the layer that
+	// met it words the error: a real refused connection, as the caller and
+	// the local credential's check wrap it, and a truncated answer.
+	closed := httptest.NewServer(http.NotFoundHandler())
+	closed.Close()
+	_, refused := http.Get(closed.URL)
+	if refused == nil {
+		t.Fatal("a closed server answered")
+	}
+	for _, e := range []error{
+		fmt.Errorf("hub unreachable: %w", refused),
+		fmt.Errorf("cannot validate local task credential: %w", refused),
+		io.ErrUnexpectedEOF,
+		&net.OpError{Op: "read", Net: "tcp", Err: errors.New("connection reset by peer")},
+	} {
+		down := &srv{tasks: fixtureCaller(f, func(string, string) error { return e })}
+		if out, code = reservationCommand(ctx, down, ReservationRequest{Command: "status", TaskID: task.ID}); code != ExitRetryable ||
+			envelopeCode(t, out) != "context_unavailable" {
+			t.Fatalf("an unreachable hub (%v): %d %s", e, code, out)
+		}
+	}
+	// A refusal the caller decided without the hub's answer stays final.
+	for _, e := range []error{
+		&taskcred.Rejected{Status: http.StatusForbidden},
+		errors.New("local task credential must be project-scoped with current write access to this project; no fallback"),
+	} {
+		refusing := &srv{tasks: fixtureCaller(f, func(string, string) error { return e })}
+		if out, code = reservationCommand(ctx, refusing, ReservationRequest{Command: "status", TaskID: task.ID}); code != ExitFinal ||
+			envelopeCode(t, out) != "task_unavailable" {
+			t.Fatalf("a local refusal (%v): %d %s", e, code, out)
+		}
 	}
 	// A mutation sent and never answered: exit 5, reconcile with the key.
 	lost := &srv{tasks: fixtureCaller(f, func(method, _ string) error {
