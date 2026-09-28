@@ -118,6 +118,9 @@ type TaskReservationOutcome struct {
 	Reservation TaskReservation    `json:"reservation"`
 	Binding     ReservationBinding `json:"binding"`
 	Recovery    *RecoveryRecord    `json:"recovery,omitempty"`
+	// Replayed marks an outcome served from its committed receipt rather
+	// than a new transition. It is never stored in the receipt.
+	Replayed bool `json:"-"`
 }
 
 // DependencyEvidence is the authoritative state observed while the claim held
@@ -344,6 +347,7 @@ func reservationMutationTx(d *DB, tx *sql.Tx, actor TaskActor, binding Reservati
 		if err := authorize(); err != nil {
 			return TaskReservationOutcome{}, err
 		}
+		out.Replayed = true
 		return out, nil
 	case !errors.Is(err, sql.ErrNoRows):
 		return TaskReservationOutcome{}, err

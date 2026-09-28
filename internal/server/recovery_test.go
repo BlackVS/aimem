@@ -76,6 +76,74 @@ func (g *recoveryRig) auditText(t *testing.T) string {
 	return string(b)
 }
 
+// auditCount counts the access audit records with this exact action.
+func (g *recoveryRig) auditCount(t *testing.T, action string) int {
+	t.Helper()
+	n := 0
+	for _, e := range g.audit(t) {
+		if e.Action == action {
+			n++
+		}
+	}
+	return n
+}
+
+// recoveryAudits counts every reservation.recovery.* record.
+func (g *recoveryRig) recoveryAudits(t *testing.T) int {
+	t.Helper()
+	n := 0
+	for _, e := range g.audit(t) {
+		if strings.HasPrefix(e.Action, "reservation.recovery.") {
+			n++
+		}
+	}
+	return n
+}
+
+// Every recovery request past the admin gate leaves exactly one
+// reservation.recovery.* record: a mutation, its replay, each read, and each
+// refusal, the reader's included. None carries the attestation's text.
+func TestRecoveryAuditsEveryRequestOnce(t *testing.T) {
+	g := newRecoveryRig(t)
+	body := g.body("READY", attestationEvidence())
+	missing := "01a0ffff-ffff-7000-8000-000000000000"
+	read := func(task, suffix string) func() identityResp {
+		return func() identityResp {
+			return g.call(t, g.tls, "GET", "/v1/admin/reservations/"+task+"/recovery"+suffix, g.env, nil, "", true)
+		}
+	}
+	seed := store.RequestKeyDigest("seed-" + g.task.ID)
+	for _, c := range []struct {
+		name, action string
+		status       int
+		do           func() identityResp
+	}{
+		{"release", "reservation.recovery.release", 200, func() identityResp { return g.recover(t, "release", g.env, "audit-1", body) }},
+		{"its replay", "reservation.recovery.replay.release", 200, func() identityResp { return g.recover(t, "release", g.env, "audit-1", body) }},
+		{"a refused mutation", "reservation.recovery.refused.invalid_request", 400, func() identityResp { return g.recover(t, "release", g.env, "audit-2", "{") }},
+		{"status", "reservation.recovery.read", 200, read(g.task.ID, "")},
+		{"status of a missing task", "reservation.recovery.refused.task_unavailable", 404, read(missing, "")},
+		{"receipts", "reservation.recovery.read", 200, read(g.task.ID, "/receipts/claim/"+seed)},
+		{"receipts of an unknown operation", "reservation.recovery.refused.invalid_request", 400, read(g.task.ID, "/receipts/steal/"+seed)},
+		{"receipts under a malformed digest", "reservation.recovery.refused.invalid_request", 400, read(g.task.ID, "/receipts/claim/k1_short")},
+		{"receipts of a missing task", "reservation.recovery.refused.task_unavailable", 404, read(missing, "/receipts/claim/"+seed)},
+	} {
+		total, same := g.recoveryAudits(t), g.auditCount(t, c.action)
+		if r := c.do(); r.status != c.status {
+			t.Fatalf("%s: %d %s", c.name, r.status, r.body)
+		}
+		if got := g.recoveryAudits(t) - total; got != 1 {
+			t.Fatalf("%s left %d recovery audit records, want 1", c.name, got)
+		}
+		if got := g.auditCount(t, c.action) - same; got != 1 {
+			t.Fatalf("%s: no %s record", c.name, c.action)
+		}
+	}
+	if audit := g.auditText(t); strings.Contains(audit, recoveryStatement) || strings.Contains(audit, "k1_short") {
+		t.Fatalf("the audit quotes the statement or an unvalidated digest: %s", audit)
+	}
+}
+
 func TestRecoveryIsAdminOnlyOverHubTLS(t *testing.T) {
 	g := newRecoveryRig(t)
 	body := g.body("READY", attestationEvidence())
@@ -238,11 +306,18 @@ func TestRecoveryOnStopEvidence(t *testing.T) {
 		introspecttest.WriteJSON(w, introspecttest.InactiveReply(got.Nonce))
 	})
 	calls := g.fake.Calls()
+	total, replays := g.recoveryAudits(t), g.auditCount(t, "reservation.recovery.replay.release")
 	again := g.recover(t, "release", g.env, key, stopBody)
 	var replay recoveryResponse
 	json.Unmarshal(again.body, &replay)
 	if again.status != http.StatusOK || replay != out || g.fake.Calls() != calls {
 		t.Fatalf("stop-evidence replay: %d %s (aicrew calls %d -> %d)", again.status, again.body, calls, g.fake.Calls())
+	}
+	if g.recoveryAudits(t)-total != 1 || g.auditCount(t, "reservation.recovery.replay.release")-replays != 1 {
+		t.Fatal("the stop-evidence replay is not audited exactly once")
+	}
+	if strings.Contains(g.auditText(t), proof) {
+		t.Fatal("the replay audit quotes the proof")
 	}
 }
 

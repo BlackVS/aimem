@@ -198,6 +198,7 @@ func (r *Registry) RecoveryReplay(op RecoveryOperation, in TaskReservationInput,
 	if err := json.Unmarshal([]byte(saved), &out); err != nil {
 		return TaskReservationOutcome{}, false, err
 	}
+	out.Replayed = true
 	return out, true, nil
 }
 

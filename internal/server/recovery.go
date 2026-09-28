@@ -5,7 +5,8 @@ package server
 // release (READY or BLOCKED) or cancel (CANCELLED), never DONE. It gives a
 // reason and exactly one evidence: aicrew stop evidence verified through
 // coordination.v1, or an operator attestation. The same admin is the
-// recovery reader. Every operation is audited as reservation.recovery.*,
+// recovery reader. Every request, including a replay and every refusal after
+// the admin gate, leaves exactly one reservation.recovery.* audit record,
 // never with a proof or an attestation's text.
 
 import (
@@ -84,6 +85,32 @@ func (s *Server) recoveryAdmin(r *http.Request) (Identity, func() bool) {
 	return id, still
 }
 
+// recoveryAuditor is the one audit path of the recovery routes.
+func (s *Server) recoveryAuditor(db *access.Store, admin, taskID string) func(outcome, detail string) {
+	return func(outcome, detail string) {
+		if err := db.RecordTeamRequest("admin:"+admin, "reservation.recovery."+outcome, fmt.Sprintf("task=%s %s", taskID, detail)); err != nil {
+			s.log.Error("recovery audit", "err", err)
+		}
+	}
+}
+
+// recoveryCommitted audits a committed recovery, or its replay, and answers
+// it. The detail names the evidence reference, never the proof or statement.
+func (s *Server) recoveryCommitted(w http.ResponseWriter, audit func(outcome, detail string), op store.RecoveryOperation,
+	key, admin, taskID, reservationID string, out store.TaskReservationOutcome) {
+	outcome := string(op)[len("recovery_"):]
+	if out.Replayed {
+		outcome = "replay." + outcome
+	}
+	detail := fmt.Sprintf("reservation=%s fence=%d", reservationID, out.Reservation.Fence)
+	if rec := out.Recovery; rec != nil {
+		detail += fmt.Sprintf(" affected_user=%s affected_mode=%s evidence=%s ref=%s",
+			rec.Affected.UserID, rec.Affected.Mode, rec.EvidenceKind, rec.EvidenceRef)
+	}
+	audit(outcome, detail)
+	s.recoveryAnswer(w, op, key, admin, taskID, out)
+}
+
 func (s *Server) recoverRelease(w http.ResponseWriter, r *http.Request) {
 	s.recoverReservation(w, r, store.RecoveryRelease)
 }
@@ -99,11 +126,7 @@ func (s *Server) recoverReservation(w http.ResponseWriter, r *http.Request, op s
 	}
 	id, stillAdmin := s.recoveryAdmin(r)
 	taskID := r.PathValue("task_id")
-	audit := func(outcome, detail string) {
-		if err := db.RecordTeamRequest("admin:"+id.Name, "reservation.recovery."+outcome, fmt.Sprintf("task=%s %s", taskID, detail)); err != nil {
-			s.log.Error("recovery audit", "err", err)
-		}
-	}
+	audit := s.recoveryAuditor(db, id.Name, taskID)
 	refuse := func(status int, code, message string) {
 		audit("refused."+code, "operation="+string(op))
 		s.recoveryRefuse(w, status, code, message)
@@ -156,7 +179,7 @@ func (s *Server) recoverReservation(w http.ResponseWriter, r *http.Request, op s
 					refuse(http.StatusUnauthorized, "invalid_credential", "the admin credential is no longer registered")
 					return
 				}
-				s.recoveryAnswer(w, op, key, id.Name, taskID, prior)
+				s.recoveryCommitted(w, audit, op, key, id.Name, taskID, req.ReservationID, prior)
 				return
 			}
 		}
@@ -192,10 +215,7 @@ func (s *Server) recoverReservation(w http.ResponseWriter, r *http.Request, op s
 		refuse(status, code, msg)
 		return
 	}
-	rec := out.Recovery
-	audit(string(op)[len("recovery_"):], fmt.Sprintf("reservation=%s fence=%d affected_user=%s affected_mode=%s evidence=%s ref=%s",
-		req.ReservationID, out.Reservation.Fence, rec.Affected.UserID, rec.Affected.Mode, rec.EvidenceKind, rec.EvidenceRef))
-	s.recoveryAnswer(w, op, key, id.Name, taskID, out)
+	s.recoveryCommitted(w, audit, op, key, id.Name, taskID, req.ReservationID, out)
 }
 
 func (s *Server) recoveryAnswer(w http.ResponseWriter, op store.RecoveryOperation, key, admin, taskID string, out store.TaskReservationOutcome) {
@@ -326,19 +346,20 @@ func (s *Server) recoveryStatus(w http.ResponseWriter, r *http.Request) {
 	}
 	id, _ := s.recoveryAdmin(r)
 	taskID := r.PathValue("task_id")
+	audit := s.recoveryAuditor(db, id.Name, taskID)
 	_, pdb, err := s.reg.LocateTask(taskID)
 	if err != nil {
+		audit("refused.task_unavailable", "operation=read status")
 		s.recoveryRefuse(w, http.StatusNotFound, "task_unavailable", "task not found")
 		return
 	}
 	hold, err := pdb.GetTaskReservation(taskID)
 	if err != nil {
+		audit("refused.task_unavailable", "operation=read status")
 		s.recoveryRefuse(w, http.StatusNotFound, "task_unavailable", "task not found")
 		return
 	}
-	if err := db.RecordTeamRequest("admin:"+id.Name, "reservation.recovery.read", "task="+taskID+" status"); err != nil {
-		s.log.Error("recovery audit", "err", err)
-	}
+	audit("read", "status")
 	out := recoveryHold{TaskID: taskID, TaskRevision: hold.TaskRevision, State: "none", Fence: strconv.FormatInt(hold.Fence, 10)}
 	if hold.ID != "" {
 		out.State, out.ReservationID, out.HolderMode, out.HolderRef, out.Binding = "held", hold.ID, hold.Holder.Mode, hold.Holder.Ref, hold.Binding
@@ -358,23 +379,27 @@ func (s *Server) recoveryReceipts(w http.ResponseWriter, r *http.Request) {
 	}
 	id, _ := s.recoveryAdmin(r)
 	taskID, op, digest := r.PathValue("task_id"), r.PathValue("operation"), r.PathValue("request_key_digest")
+	audit := s.recoveryAuditor(db, id.Name, taskID)
+	refuse := func(status int, code, message string) {
+		// The operation and digest are recorded only once they are known
+		// to be well formed.
+		audit("refused."+code, "operation=read receipts")
+		s.recoveryRefuse(w, status, code, message)
+	}
 	if !recoveryReadOperations[op] || !recoveryKeyDigest.MatchString(digest) {
-		s.recoveryRefuse(w, http.StatusBadRequest, "invalid_request", "unknown operation or malformed key digest")
+		refuse(http.StatusBadRequest, "invalid_request", "unknown operation or malformed key digest")
 		return
 	}
 	_, pdb, err := s.reg.LocateTask(taskID)
 	if err != nil {
-		s.recoveryRefuse(w, http.StatusNotFound, "task_unavailable", "task not found")
+		refuse(http.StatusNotFound, "task_unavailable", "task not found")
 		return
 	}
 	receipts, err := pdb.RecoveryReceipts(taskID, store.ReservationOperation(op), digest)
 	if err != nil {
-		s.recoveryRefuse(w, http.StatusInternalServerError, "internal", "cannot read receipts")
+		refuse(http.StatusInternalServerError, "internal", "cannot read receipts")
 		return
 	}
-	if err := db.RecordTeamRequest("admin:"+id.Name, "reservation.recovery.read",
-		fmt.Sprintf("task=%s receipts operation=%s key=%s found=%d", taskID, op, digest, len(receipts))); err != nil {
-		s.log.Error("recovery audit", "err", err)
-	}
+	audit("read", fmt.Sprintf("receipts operation=%s key=%s found=%d", op, digest, len(receipts)))
 	s.ok(w, map[string]any{"task_id": taskID, "operation": op, "request_key_digest": digest, "receipts": receipts})
 }
