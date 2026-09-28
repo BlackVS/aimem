@@ -75,7 +75,8 @@ The `aimem reservation recover release|cancel|status|receipt` CLI drives them wi
 **Attribution and audit.**
 - The recovery runs as a new `TaskActor` kind `recovery`, with the admin credential's name. Its receipts are scoped to `recovery/<name>`, and a recovery binding can never use the member path.
 - The receipt and the event record the **affected actor**: the hold's stored binding, which never comes from input. The event log also keeps the attestation statement. The receipt and the response carry only the evidence kind and reference: an attestation ID, or the stop proof's `p1_` digest, never the proof.
-- The access audit records `reservation.recovery.release|cancel|read` and `reservation.recovery.refused.<code>`, with the task, the reservation, the fence, the affected user and mode, and the evidence kind and reference. It never records a proof or a statement.
+- The access audit records `reservation.recovery.release|cancel|read`, `reservation.recovery.replay.release|cancel` and `reservation.recovery.refused.<code>`, with the task, the reservation, the fence, the affected user and mode, and the evidence kind and reference. It never records a proof or a statement.
+- Every recovery request that passes the admin gate leaves exactly one of these records. That covers a mutation, a replay served from its receipt (for either evidence kind), a reader read, and every refusal, including the reader's.
 - Inside the transaction, the hub rechecks that the admin is still registered. The host's env admin is valid for the process lifetime. It also rechecks that a stop fact is at most 5 s old.
 
 **Closure evidence (C5c-w).**
