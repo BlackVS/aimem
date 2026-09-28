@@ -17,6 +17,7 @@ import (
 	"strings"
 
 	"aimem/internal/teamsession"
+	"aimem/internal/uuidv7"
 )
 
 // reservationTools are the seven member tools; team mode serves them too.
@@ -99,19 +100,74 @@ type reservationArgs struct {
 	CoordinationProof string          `json:"coordination_proof"`
 }
 
-// reservationRefusal is a hub refusal passed to the tool's caller as the
-// wire's typed envelope, so a client acts on its code and retryable flag.
+// reservationToolRefusal is a refusal passed to the tool's caller as the
+// wire's typed envelope, so a client acts on its code and retryable flag:
+// the hub's own, or one the tool builds for what fails before the hub
+// answers.
 type reservationToolRefusal struct{ envelope string }
 
 func (r *reservationToolRefusal) Error() string { return r.envelope }
 
+// reservationNextActions are the wire's next actions for the codes a tool
+// raises itself.
+var reservationNextActions = map[string]string{
+	"invalid_request":     "Use a reviewed supported version or correct the request.",
+	"context_unavailable": "Retry verification later with the same context and key.",
+	"context_missing":     "Re-prove or resume the team context and reconcile outstanding work.",
+	"receipt_unresolved":  "Reconcile the original receipt; do not send a later transition.",
+	"task_unavailable":    "Verify the task reference with an authorized project reader.",
+}
+
+func newReservationRefusal(code, message, mode string, retryable bool, correlationID string) *reservationToolRefusal {
+	if correlationID == "" {
+		correlationID = uuidv7.New()
+	}
+	b, _ := json.Marshal(struct {
+		Code          string `json:"code"`
+		Message       string `json:"message"`
+		ActiveMode    string `json:"active_mode,omitempty"`
+		Retryable     bool   `json:"retryable"`
+		NextAction    string `json:"next_action"`
+		CorrelationID string `json:"correlation_id"`
+	}{code, message, mode, retryable, reservationNextActions[code], correlationID})
+	return &reservationToolRefusal{envelope: string(b)}
+}
+
+// reservationToolError types any error of a reservation tool as the
+// envelope: the hub's refusal as it came, a team-context refusal with its
+// own code, retryable flag and correlation ID, and anything else as an
+// invalid request.
+func reservationToolError(err error) *reservationToolRefusal {
+	var typed *reservationToolRefusal
+	if errors.As(err, &typed) {
+		return typed
+	}
+	var ref *teamsession.Refusal
+	if errors.As(err, &ref) {
+		t := newReservationRefusal(ref.Code, ref.Message, "team", ref.Retryable, ref.CorrelationID)
+		if ref.NextAction != "" {
+			// The hub's own next action for its code.
+			var m map[string]any
+			json.Unmarshal([]byte(t.envelope), &m)
+			m["next_action"] = ref.NextAction
+			b, _ := json.Marshal(m)
+			t.envelope = string(b)
+		}
+		return t
+	}
+	return newReservationRefusal("invalid_request", err.Error(), "", false, "")
+}
+
 func callReservationTool(ctx context.Context, tasks TaskCallFunc, defaultProject, name string, raw json.RawMessage) (string, error) {
 	var a reservationArgs
+	invalid := func(msg string) (string, error) {
+		return "", newReservationRefusal("invalid_request", msg, "", false, "")
+	}
 	if len(raw) > 0 && string(raw) != "null" {
 		dec := json.NewDecoder(strings.NewReader(string(raw)))
 		dec.DisallowUnknownFields()
 		if err := dec.Decode(&a); err != nil {
-			return "", fmt.Errorf("arguments: %w", err)
+			return invalid("arguments: " + err.Error())
 		}
 	}
 	project := a.Project
@@ -119,7 +175,7 @@ func callReservationTool(ctx context.Context, tasks TaskCallFunc, defaultProject
 		project = defaultProject
 	}
 	if project == "" || a.TaskID == "" {
-		return "", errors.New("project and task_id are required")
+		return invalid("project and task_id are required")
 	}
 	base := "/v1/projects/" + url.PathEscape(project) + "/tasks/" + url.PathEscape(a.TaskID) + "/reservation"
 	// The hub refuses a missing or unsupported version itself; the tool
@@ -132,12 +188,12 @@ func callReservationTool(ctx context.Context, tasks TaskCallFunc, defaultProject
 		method, path = "GET", base
 	case "task_reservation_receipt":
 		if a.Operation == "" || a.RequestKey == "" {
-			return "", errors.New("operation and request_key are required")
+			return invalid("operation and request_key are required")
 		}
 		method, path = "GET", base+"/receipts/"+url.PathEscape(a.Operation)+"/"+url.PathEscape(a.RequestKey)
 	default:
 		if a.RequestKey == "" {
-			return "", errors.New("request_key is required")
+			return invalid("request_key is required")
 		}
 		headers["Idempotency-Key"] = a.RequestKey
 		m := map[string]any{"expected_revision": a.ExpectedRevision}
@@ -161,15 +217,19 @@ func callReservationTool(ctx context.Context, tasks TaskCallFunc, defaultProject
 	}
 	status, resp, err := tasks(ctx, method, path, headers, body)
 	if err != nil {
-		// A transport failure after sending leaves the outcome unknown:
-		// reconcile with task_reservation_receipt and the same key.
-		return "", fmt.Errorf("%w; the outcome is unknown: reconcile with task_reservation_receipt and the same request_key", err)
+		if method == "POST" {
+			// A transport failure after sending leaves the outcome unknown:
+			// reconcile with task_reservation_receipt and the same key.
+			return "", newReservationRefusal("receipt_unresolved",
+				"The hub did not answer; the outcome is unknown. Reconcile with task_reservation_receipt and the same request_key.", "", true, "")
+		}
+		return "", newReservationRefusal("context_unavailable", "The hub did not answer.", "", true, "")
 	}
 	if status/100 != 2 {
 		if teamsession.ParseRefusal(status, resp) != nil {
 			return "", &reservationToolRefusal{envelope: strings.TrimSpace(string(resp))}
 		}
-		return "", fmt.Errorf("HTTP %d", status)
+		return "", newReservationRefusal("context_unavailable", fmt.Sprintf("The hub answered HTTP %d.", status), "", true, "")
 	}
 	return strings.TrimSpace(string(resp)), nil
 }

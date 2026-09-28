@@ -426,3 +426,26 @@ func TestReservationRoutesProjectRenameKeepsTheHold(t *testing.T) {
 		t.Fatalf("update after rename: %+v", upd)
 	}
 }
+
+// Trailing data is refused however the body is padded: a valid claim
+// padded to exactly the body bound and followed by more JSON commits
+// nothing, where a reader that stopped at the bound would have seen EOF.
+func TestReservationRoutesTrailingDataPastTheBound(t *testing.T) {
+	g := newReservationRig(t)
+	task := g.readyTask(t, g.alpha)
+	claim := body(t, map[string]any{"expected_revision": task.Revision, "holder": map[string]any{"mode": "standalone", "work_ref": "pad"}})
+	padded := claim + strings.Repeat(" ", reservationBodyMax-len(claim)) + "{}"
+	r := g.call(t, g.tls, "POST", g.rpath(task.ID, "/claim"), g.alice, rhdr("pad-1", nil), padded, true)
+	wantRefusal(t, "trailing data past the bound", r, 400, "invalid_request", "")
+	if hold, _ := g.alpha.GetTaskReservation(task.ID); hold.ID != "" {
+		t.Fatalf("a padded body committed a hold: %+v", hold)
+	}
+	var rs wireReceiptStatus
+	if r := g.call(t, g.tls, "GET", g.rpath(task.ID, "/receipts/claim/pad-1"), g.alice, rhdr("", nil), "", true); r.status != 200 ||
+		json.Unmarshal(r.body, &rs) != nil || rs.State != "not_committed" {
+		t.Fatalf("a padded body left a receipt: %d %s", r.status, r.body)
+	}
+	// Within the bound, trailing data is refused as before.
+	wantRefusal(t, "trailing data", g.call(t, g.tls, "POST", g.rpath(task.ID, "/claim"), g.alice, rhdr("pad-2", nil), claim+"{}", true),
+		400, "invalid_request", "")
+}

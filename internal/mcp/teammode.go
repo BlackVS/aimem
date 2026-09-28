@@ -208,7 +208,26 @@ func (s *srv) teamToolCall(ctx context.Context, name string, raw []byte) (string
 			return "", err
 		}
 		return string(body), nil
-	case teamReadTools[name], reservationTools[name]:
+	case reservationTools[name]:
+		if err := s.team.ensureReady(ctx); err != nil {
+			// A context the hub refused passes through, and the tool
+			// boundary types it with the hub's own code; a blocked
+			// conversation needs a new context; anything else (the hub not
+			// answering) may be retried.
+			var ref *teamsession.Refusal
+			s.team.mu.Lock()
+			blocked := s.team.blocked != nil
+			s.team.mu.Unlock()
+			switch {
+			case errors.As(err, &ref):
+				return "", err
+			case blocked:
+				return "", newReservationRefusal("context_missing", err.Error(), "team", false, "")
+			}
+			return "", newReservationRefusal("context_unavailable", err.Error(), "team", true, "")
+		}
+		return s.taskTool(ctx, name, raw)
+	case teamReadTools[name]:
 		if err := s.team.ensureReady(ctx); err != nil {
 			return "", err
 		}

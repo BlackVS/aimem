@@ -1,7 +1,9 @@
 package mcp
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
 	"strings"
 	"testing"
 )
@@ -109,4 +111,64 @@ func update2(update map[string]any, key string) map[string]any {
 	out["request_key"] = key
 	out["expected_revision"] = update["expected_revision"].(int64) + 1
 	return out
+}
+
+// wantEnvelope checks that a tool's error text is the typed envelope.
+func wantEnvelope(t *testing.T, what, text string, isErr bool, code string, retryable bool) {
+	t.Helper()
+	var e struct {
+		Code          string `json:"code"`
+		Retryable     *bool  `json:"retryable"`
+		NextAction    string `json:"next_action"`
+		CorrelationID string `json:"correlation_id"`
+	}
+	if !isErr || json.Unmarshal([]byte(text), &e) != nil || e.Code != code || e.Retryable == nil || *e.Retryable != retryable ||
+		e.NextAction == "" || e.CorrelationID == "" {
+		t.Fatalf("%s: want the %s envelope (retryable %v), got %v %s", what, code, retryable, isErr, text)
+	}
+}
+
+// What fails before the hub answers is typed too: a local argument error,
+// and a transport failure (unknown outcome on a mutation).
+func TestReservationToolsTypeLocalFailures(t *testing.T) {
+	f := newHub(t)
+	text, isErr := toolText(f.rpc(t, f.alice, "tools/call", map[string]any{"name": "task_reservation_claim",
+		"arguments": map[string]any{"version": 1, "project": "alpha", "task_id": "t-1", "expected_revision": 1}}))
+	wantEnvelope(t, "a missing request key", text, isErr, "invalid_request", false)
+	down := func(context.Context, string, string, map[string]string, []byte) (int, []byte, error) {
+		return 0, nil, errors.New("connection reset")
+	}
+	_, err := callReservationTool(context.Background(), down, "alpha", "task_reservation_update",
+		json.RawMessage(`{"version":1,"task_id":"t-1","request_key":"k","expected_revision":2}`))
+	wantEnvelope(t, "a mutation the hub never answered", reservationToolError(err).envelope, true, "receipt_unresolved", true)
+	_, err = callReservationTool(context.Background(), down, "alpha", "task_reservation_status", json.RawMessage(`{"version":1,"task_id":"t-1"}`))
+	wantEnvelope(t, "a read the hub never answered", reservationToolError(err).envelope, true, "context_unavailable", true)
+}
+
+// A team conversation's first reservation call on a context the hub
+// refuses returns that refusal typed, with its retryable flag and
+// correlation ID, not a prose error.
+func TestTeamReservationToolContextRefusalIsTyped(t *testing.T) {
+	h := newTeamHub(t)
+	root := teamRoot(t, h, nil)
+	// The hub does not know this session: it answers context_stale.
+	s := newTeamSrv(writeSession(t, root, h.ts.URL, "sess-unknown", teamHandle('Z')), root, "alpha")
+	text, isErr := teamCall(t, s, "task_reservation_status", map[string]any{"version": 1, "task_id": "t-1"})
+	wantEnvelope(t, "the first team reservation call", text, isErr, "context_stale", false)
+	if !strings.Contains(text, `"correlation_id":"c-1"`) || !strings.Contains(text, "Revalidate the session through aicrew") {
+		t.Fatalf("the hub's correlation ID and next action are kept: %s", text)
+	}
+}
+
+// A conversation the hub reports for another session is blocked for good:
+// its reservation calls answer context_missing, which is not retryable.
+func TestTeamReservationToolBlockedConversationIsTyped(t *testing.T) {
+	h := newTeamHub(t)
+	root := teamRoot(t, h, nil)
+	h.addSession(teamHandle('Y'), "sess-other")
+	s := newTeamSrv(writeSession(t, root, h.ts.URL, "sess-1", teamHandle('Y')), root, "alpha")
+	text, isErr := teamCall(t, s, "task_reservation_status", map[string]any{"version": 1, "task_id": "t-1"})
+	wantEnvelope(t, "a blocked conversation", text, isErr, "context_missing", false)
+	text, isErr = teamCall(t, s, "task_reservation_claim", map[string]any{"version": 1, "task_id": "t-1", "request_key": "k", "expected_revision": 1})
+	wantEnvelope(t, "a blocked conversation, again", text, isErr, "context_missing", false)
 }

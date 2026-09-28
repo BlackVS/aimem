@@ -21,6 +21,9 @@ import (
 
 const reservationVersionHeader = "X-Aimem-Reservation-Version"
 
+// reservationBodyMax bounds a mutation body.
+const reservationBodyMax = 1 << 18
+
 // reservationReceiptFault, when a test sets it, replaces the receipt read's
 // result with a storage error, so the unresolved answer can be observed.
 var reservationReceiptFault func() error
@@ -189,7 +192,9 @@ func (s *Server) reservationMutate(op store.ReservationOperation) http.HandlerFu
 			return
 		}
 		var body reservationMutationBody
-		dec := json.NewDecoder(io.LimitReader(r.Body, 1<<18))
+		// MaxBytesReader reports a body past the bound as an error, never as
+		// EOF, so trailing data beyond it cannot pass the check below.
+		dec := json.NewDecoder(http.MaxBytesReader(w, r.Body, reservationBodyMax))
 		dec.DisallowUnknownFields()
 		if err := dec.Decode(&body); err != nil || dec.Decode(&struct{}{}) != io.EOF {
 			s.reservationRefuse(w, r, "invalid_request")
