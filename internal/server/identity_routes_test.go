@@ -37,7 +37,22 @@ type identityRig struct {
 	mcpHits   int
 	mcpMu     sync.Mutex
 	secrets   []string
+	respMu    sync.Mutex
 	responses []string // every response body except the two that carry a secret
+}
+
+// keep records a response body for the leak scan. Redemptions race each
+// other from goroutines, so every append goes through the lock.
+func (g *identityRig) keep(body []byte) {
+	g.respMu.Lock()
+	defer g.respMu.Unlock()
+	g.responses = append(g.responses, string(body))
+}
+
+func (g *identityRig) kept() int {
+	g.respMu.Lock()
+	defer g.respMu.Unlock()
+	return len(g.responses)
 }
 
 type lockedBuffer struct {
@@ -146,7 +161,7 @@ func (g *identityRig) call(t *testing.T, srv *httptest.Server, method, path, bea
 	defer resp.Body.Close()
 	b, _ := io.ReadAll(resp.Body)
 	if keep {
-		g.responses = append(g.responses, string(b))
+		g.keep(b)
 	}
 	return identityResp{resp.StatusCode, b, resp.Header}
 }
@@ -186,7 +201,7 @@ func (g *identityRig) proof(t *testing.T, bearer, service, challenge string) (id
 	r := g.call(t, g.tls, "POST", "/v1/identity/proofs", bearer, v1,
 		`{"peer_service_id":"`+service+`","hub_id":"`+g.hub+`","challenge_id":"`+challenge+`"}`, false)
 	if r.status != 200 {
-		g.responses = append(g.responses, string(r.body))
+		g.keep(r.body)
 		return r, ""
 	}
 	var out struct {
@@ -334,6 +349,7 @@ func TestIdentityRoutesEndToEndWithFakeVerifier(t *testing.T) {
 
 	// Racing keys: exactly one redemption of one receipt succeeds.
 	_, race := g.proof(t, g.alice, "aicrew-example", "challenge-race")
+	before := g.kept()
 	var wg sync.WaitGroup
 	var mu sync.Mutex
 	wins := 0
@@ -354,6 +370,9 @@ func TestIdentityRoutesEndToEndWithFakeVerifier(t *testing.T) {
 	wg.Wait()
 	if wins != 1 {
 		t.Fatalf("%d winners across racing keys", wins)
+	}
+	if n := g.kept() - before; n != 8 {
+		t.Fatalf("the leak scan kept %d of 8 racing responses", n)
 	}
 
 	// Rotation: a second credential overlaps, a third is refused, the old
