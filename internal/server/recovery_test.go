@@ -391,3 +391,30 @@ func TestRecoveryReader(t *testing.T) {
 	}
 	g.held(t, g.task.ID, g.hold.Reservation)
 }
+
+// A recovery body is exactly one JSON object within the bound: trailing
+// data, within the bound or padded past it, is refused as invalid_request,
+// audited once, and recovers nothing (task 01a0e903).
+func TestRecoveryRefusesTrailingData(t *testing.T) {
+	g := newRecoveryRig(t)
+	body := g.body("READY", attestationEvidence())
+	for name, b := range map[string]string{
+		"trailing data":              body + "{}",
+		"padding past the bound":     body + strings.Repeat(" ", reservationBodyMax-len(body)) + "{}",
+		"a second recovery appended": body + body,
+	} {
+		total, refused := g.recoveryAudits(t), g.auditCount(t, "reservation.recovery.refused.invalid_request")
+		r := g.recover(t, "release", g.env, "trail-"+strings.ReplaceAll(name, " ", "-"), b)
+		if r.status != http.StatusBadRequest || recoveryCode(t, r) != "invalid_request" {
+			t.Fatalf("%s: %d %s", name, r.status, r.body)
+		}
+		if g.recoveryAudits(t)-total != 1 || g.auditCount(t, "reservation.recovery.refused.invalid_request")-refused != 1 {
+			t.Fatalf("%s: not audited exactly once as a refusal", name)
+		}
+		g.held(t, g.task.ID, g.hold.Reservation)
+	}
+	// The same body alone still recovers.
+	if r := g.recover(t, "release", g.env, "trail-clean", body); r.status != http.StatusOK {
+		t.Fatalf("a clean body: %d %s", r.status, r.body)
+	}
+}

@@ -137,9 +137,12 @@ func (s *Server) recoverReservation(w http.ResponseWriter, r *http.Request, op s
 		return
 	}
 	var req recoveryRequest
-	dec := json.NewDecoder(io.LimitReader(r.Body, 1<<18))
+	// Exactly one JSON object within the bound: MaxBytesReader reports a
+	// body past it as an error, never as EOF, so trailing data padded past
+	// the bound cannot pass the EOF check (the C6a fix, task 01a0e903).
+	dec := json.NewDecoder(http.MaxBytesReader(w, r.Body, reservationBodyMax))
 	dec.DisallowUnknownFields()
-	if err := dec.Decode(&req); err != nil {
+	if err := dec.Decode(&req); err != nil || dec.Decode(&struct{}{}) != io.EOF {
 		refuse(http.StatusBadRequest, "invalid_request", "the body is not a recovery request")
 		return
 	}
