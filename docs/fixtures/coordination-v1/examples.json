@@ -156,7 +156,8 @@
       ],
       "requires": [
         "offer_ref",
-        "intended_worker"
+        "intended_worker",
+        "process"
       ]
     },
     "accepted_attempt": {
@@ -166,7 +167,8 @@
       ],
       "requires": [
         "offer_ref",
-        "attempt_ref"
+        "attempt_ref",
+        "process"
       ]
     },
     "never_accepted": {
@@ -281,6 +283,11 @@
               "user_id": "user-worker",
               "agent_id": "agent-worker"
             },
+            "process": {
+              "repo": "https://git.example/team/process.git",
+              "commit": "3f2a9c1e5b7d4a6c8e0f1a2b3c4d5e6f7a8b9c0d",
+              "manifest": "process/manifest.json"
+            },
             "expires_at": "2026-09-27T18:15:00Z"
           }
         }
@@ -310,6 +317,14 @@
           "holder": {
             "mode": "external",
             "work_ref": "offer-example-7"
+          },
+          "current_process": {
+            "repo": "https://git.example/team/process.git",
+            "ref": "main",
+            "commit": "3f2a9c1e5b7d4a6c8e0f1a2b3c4d5e6f7a8b9c0d",
+            "manifest": "process/manifest.json",
+            "selected_at": "2026-09-28T06:00:00Z",
+            "selected_by": "user-lead"
           }
         }
       }
@@ -353,6 +368,11 @@
             },
             "offer_ref": "offer-example-7",
             "attempt_ref": "attempt-example-7",
+            "process": {
+              "repo": "https://git.example/team/process.git",
+              "commit": "3f2a9c1e5b7d4a6c8e0f1a2b3c4d5e6f7a8b9c0d",
+              "manifest": "process/manifest.json"
+            },
             "expires_at": "2026-09-27T18:15:00Z"
           }
         }
@@ -383,6 +403,14 @@
           "holder": {
             "mode": "external",
             "work_ref": "attempt-example-7"
+          },
+          "current_process": {
+            "repo": "https://git.example/team/process.git",
+            "ref": "main",
+            "commit": "3f2a9c1e5b7d4a6c8e0f1a2b3c4d5e6f7a8b9c0d",
+            "manifest": "process/manifest.json",
+            "selected_at": "2026-09-28T06:00:00Z",
+            "selected_by": "user-lead"
           }
         }
       }
@@ -893,6 +921,22 @@
     },
     {
       "case": "unsupported_version_refusal",
+      "outcome": "context_unavailable"
+    },
+    {
+      "case": "process_missing_on_offer_or_accepted_attempt",
+      "outcome": "context_unavailable"
+    },
+    {
+      "case": "process_malformed",
+      "outcome": "context_unavailable"
+    },
+    {
+      "case": "process_with_another_field",
+      "outcome": "context_unavailable"
+    },
+    {
+      "case": "process_on_another_kind",
       "outcome": "context_unavailable"
     }
   ],
@@ -1554,5 +1598,300 @@
       "path": "exchanges[].member_request.http.headers.Authorization",
       "value": "Bearer {aicrew_session_token}"
     }
-  ]
+  ],
+  "process_pin": {
+    "decision": "C5-w2, operator option (a), 2026-09-28: aimem checks the process reference (repo, commit, manifest) against the project's current selection; no digest",
+    "kinds": [
+      "offer",
+      "accepted_attempt"
+    ],
+    "fields": [
+      "repo",
+      "commit",
+      "manifest"
+    ],
+    "compared": "byte for byte, in the committing ledger transaction, after every fact check",
+    "refusal": {
+      "code": "process_mismatch",
+      "http_status": 409,
+      "retryable": false,
+      "next_action": "Reload the project's current process, then begin the step again through aicrew under it; never reuse the proof or the key."
+    },
+    "cases": [
+      {
+        "case": "claim_matches_current_selection",
+        "operation": "claim",
+        "fact_process": {
+          "repo": "https://git.example/team/process.git",
+          "commit": "3f2a9c1e5b7d4a6c8e0f1a2b3c4d5e6f7a8b9c0d",
+          "manifest": "process/manifest.json"
+        },
+        "current_selection": {
+          "repo": "https://git.example/team/process.git",
+          "ref": "main",
+          "commit": "3f2a9c1e5b7d4a6c8e0f1a2b3c4d5e6f7a8b9c0d",
+          "manifest": "process/manifest.json",
+          "selected_at": "2026-09-28T06:00:00Z",
+          "selected_by": "user-lead"
+        },
+        "outcome": "committed"
+      },
+      {
+        "case": "transfer_matches_current_selection",
+        "operation": "transfer",
+        "fact_process": {
+          "repo": "https://git.example/team/process.git",
+          "commit": "3f2a9c1e5b7d4a6c8e0f1a2b3c4d5e6f7a8b9c0d",
+          "manifest": "process/manifest.json"
+        },
+        "current_selection": {
+          "repo": "https://git.example/team/process.git",
+          "ref": "main",
+          "commit": "3f2a9c1e5b7d4a6c8e0f1a2b3c4d5e6f7a8b9c0d",
+          "manifest": "process/manifest.json",
+          "selected_at": "2026-09-28T06:00:00Z",
+          "selected_by": "user-lead"
+        },
+        "outcome": "committed"
+      },
+      {
+        "case": "commit_differs",
+        "operation": "claim",
+        "fact_process": {
+          "repo": "https://git.example/team/process.git",
+          "commit": "3f2a9c1e5b7d4a6c8e0f1a2b3c4d5e6f7a8b9c0d",
+          "manifest": "process/manifest.json"
+        },
+        "current_selection": {
+          "repo": "https://git.example/team/process.git",
+          "ref": "main",
+          "commit": "9b8a7c6d5e4f3a2b1c0d9e8f7a6b5c4d3e2f1a0b",
+          "manifest": "process/manifest.json",
+          "selected_at": "2026-09-28T06:10:00Z",
+          "selected_by": "user-lead"
+        },
+        "outcome": "process_mismatch"
+      },
+      {
+        "case": "repo_differs",
+        "operation": "claim",
+        "fact_process": {
+          "repo": "https://git.example/other/process.git",
+          "commit": "3f2a9c1e5b7d4a6c8e0f1a2b3c4d5e6f7a8b9c0d",
+          "manifest": "process/manifest.json"
+        },
+        "current_selection": {
+          "repo": "https://git.example/team/process.git",
+          "ref": "main",
+          "commit": "3f2a9c1e5b7d4a6c8e0f1a2b3c4d5e6f7a8b9c0d",
+          "manifest": "process/manifest.json",
+          "selected_at": "2026-09-28T06:00:00Z",
+          "selected_by": "user-lead"
+        },
+        "outcome": "process_mismatch"
+      },
+      {
+        "case": "manifest_differs",
+        "operation": "claim",
+        "fact_process": {
+          "repo": "https://git.example/team/process.git",
+          "commit": "3f2a9c1e5b7d4a6c8e0f1a2b3c4d5e6f7a8b9c0d",
+          "manifest": "process/other.json"
+        },
+        "current_selection": {
+          "repo": "https://git.example/team/process.git",
+          "ref": "main",
+          "commit": "3f2a9c1e5b7d4a6c8e0f1a2b3c4d5e6f7a8b9c0d",
+          "manifest": "process/manifest.json",
+          "selected_at": "2026-09-28T06:00:00Z",
+          "selected_by": "user-lead"
+        },
+        "outcome": "process_mismatch"
+      },
+      {
+        "case": "another_form_of_the_same_repository",
+        "operation": "claim",
+        "fact_process": {
+          "repo": "https://git.example/team/process",
+          "commit": "3f2a9c1e5b7d4a6c8e0f1a2b3c4d5e6f7a8b9c0d",
+          "manifest": "process/manifest.json"
+        },
+        "current_selection": {
+          "repo": "https://git.example/team/process.git",
+          "ref": "main",
+          "commit": "3f2a9c1e5b7d4a6c8e0f1a2b3c4d5e6f7a8b9c0d",
+          "manifest": "process/manifest.json",
+          "selected_at": "2026-09-28T06:00:00Z",
+          "selected_by": "user-lead"
+        },
+        "outcome": "process_mismatch"
+      },
+      {
+        "case": "no_selection",
+        "operation": "claim",
+        "fact_process": {
+          "repo": "https://git.example/team/process.git",
+          "commit": "3f2a9c1e5b7d4a6c8e0f1a2b3c4d5e6f7a8b9c0d",
+          "manifest": "process/manifest.json"
+        },
+        "current_selection": null,
+        "outcome": "process_mismatch"
+      },
+      {
+        "case": "selection_changed_after_the_answer_before_commit",
+        "operation": "claim",
+        "fact_process": {
+          "repo": "https://git.example/team/process.git",
+          "commit": "3f2a9c1e5b7d4a6c8e0f1a2b3c4d5e6f7a8b9c0d",
+          "manifest": "process/manifest.json"
+        },
+        "current_selection": {
+          "repo": "https://git.example/team/process.git",
+          "ref": "main",
+          "commit": "9b8a7c6d5e4f3a2b1c0d9e8f7a6b5c4d3e2f1a0b",
+          "manifest": "process/manifest.json",
+          "selected_at": "2026-09-28T06:10:00Z",
+          "selected_by": "user-lead"
+        },
+        "outcome": "process_mismatch"
+      },
+      {
+        "case": "selection_changed_between_offer_and_acceptance",
+        "operation": "transfer",
+        "offer_process": {
+          "repo": "https://git.example/team/process.git",
+          "commit": "3f2a9c1e5b7d4a6c8e0f1a2b3c4d5e6f7a8b9c0d",
+          "manifest": "process/manifest.json"
+        },
+        "fact_process": {
+          "repo": "https://git.example/team/process.git",
+          "commit": "3f2a9c1e5b7d4a6c8e0f1a2b3c4d5e6f7a8b9c0d",
+          "manifest": "process/manifest.json"
+        },
+        "current_selection": {
+          "repo": "https://git.example/team/process.git",
+          "ref": "main",
+          "commit": "9b8a7c6d5e4f3a2b1c0d9e8f7a6b5c4d3e2f1a0b",
+          "manifest": "process/manifest.json",
+          "selected_at": "2026-09-28T06:10:00Z",
+          "selected_by": "user-lead"
+        },
+        "outcome": "process_mismatch"
+      },
+      {
+        "case": "failing_fact_is_rejected_before_the_pin",
+        "operation": "claim",
+        "fact_valid": false,
+        "fact_process": {
+          "repo": "https://git.example/team/process.git",
+          "commit": "3f2a9c1e5b7d4a6c8e0f1a2b3c4d5e6f7a8b9c0d",
+          "manifest": "process/manifest.json"
+        },
+        "current_selection": {
+          "repo": "https://git.example/team/process.git",
+          "ref": "main",
+          "commit": "9b8a7c6d5e4f3a2b1c0d9e8f7a6b5c4d3e2f1a0b",
+          "manifest": "process/manifest.json",
+          "selected_at": "2026-09-28T06:10:00Z",
+          "selected_by": "user-lead"
+        },
+        "outcome": "coordination_rejected"
+      },
+      {
+        "case": "replay_after_the_selection_changed",
+        "operation": "claim",
+        "replay": true,
+        "coordination_calls": 0,
+        "fact_process": {
+          "repo": "https://git.example/team/process.git",
+          "commit": "3f2a9c1e5b7d4a6c8e0f1a2b3c4d5e6f7a8b9c0d",
+          "manifest": "process/manifest.json"
+        },
+        "current_selection": {
+          "repo": "https://git.example/team/process.git",
+          "ref": "main",
+          "commit": "9b8a7c6d5e4f3a2b1c0d9e8f7a6b5c4d3e2f1a0b",
+          "manifest": "process/manifest.json",
+          "selected_at": "2026-09-28T06:10:00Z",
+          "selected_by": "user-lead"
+        },
+        "outcome": "recorded_outcome"
+      }
+    ],
+    "malformed": [
+      {
+        "case": "commit_missing",
+        "process": {
+          "repo": "https://git.example/team/process.git",
+          "manifest": "process/manifest.json"
+        }
+      },
+      {
+        "case": "commit_abbreviated",
+        "process": {
+          "repo": "https://git.example/team/process.git",
+          "commit": "3f2a9c1",
+          "manifest": "process/manifest.json"
+        }
+      },
+      {
+        "case": "commit_uppercase",
+        "process": {
+          "repo": "https://git.example/team/process.git",
+          "commit": "3F2A9C1E5B7D4A6C8E0F1A2B3C4D5E6F7A8B9C0D",
+          "manifest": "process/manifest.json"
+        }
+      },
+      {
+        "case": "repo_plain_http",
+        "process": {
+          "repo": "http://git.example/team/process.git",
+          "commit": "3f2a9c1e5b7d4a6c8e0f1a2b3c4d5e6f7a8b9c0d",
+          "manifest": "process/manifest.json"
+        }
+      },
+      {
+        "case": "repo_leading_dash",
+        "process": {
+          "repo": "-uhttps://git.example/team/process.git",
+          "commit": "3f2a9c1e5b7d4a6c8e0f1a2b3c4d5e6f7a8b9c0d",
+          "manifest": "process/manifest.json"
+        }
+      },
+      {
+        "case": "manifest_absolute",
+        "process": {
+          "repo": "https://git.example/team/process.git",
+          "commit": "3f2a9c1e5b7d4a6c8e0f1a2b3c4d5e6f7a8b9c0d",
+          "manifest": "/process/manifest.json"
+        }
+      },
+      {
+        "case": "manifest_leaves_the_repository",
+        "process": {
+          "repo": "https://git.example/team/process.git",
+          "commit": "3f2a9c1e5b7d4a6c8e0f1a2b3c4d5e6f7a8b9c0d",
+          "manifest": "../manifest.json"
+        }
+      },
+      {
+        "case": "carries_a_branch",
+        "process": {
+          "repo": "https://git.example/team/process.git",
+          "commit": "3f2a9c1e5b7d4a6c8e0f1a2b3c4d5e6f7a8b9c0d",
+          "manifest": "process/manifest.json",
+          "ref": "main"
+        }
+      },
+      {
+        "case": "carries_a_digest",
+        "process": {
+          "repo": "https://git.example/team/process.git",
+          "commit": "3f2a9c1e5b7d4a6c8e0f1a2b3c4d5e6f7a8b9c0d",
+          "manifest": "process/manifest.json",
+          "digest": "sha256:0000000000000000000000000000000000000000000000000000000000000000"
+        }
+      }
+    ]
+  }
 }

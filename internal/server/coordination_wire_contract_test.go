@@ -16,6 +16,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"aimem/internal/process"
 )
 
 func readCoordinationFixture(t *testing.T, name string) map[string]any {
@@ -89,8 +91,8 @@ var factKinds = map[string]struct {
 	roles    []string
 	requires []string
 }{
-	"offer":                     {"claim", []string{"coordinator"}, []string{"offer_ref", "intended_worker"}},
-	"accepted_attempt":          {"transfer", []string{"worker"}, []string{"offer_ref", "attempt_ref"}},
+	"offer":                     {"claim", []string{"coordinator"}, []string{"offer_ref", "intended_worker", "process"}},
+	"accepted_attempt":          {"transfer", []string{"worker"}, []string{"offer_ref", "attempt_ref", "process"}},
 	"never_accepted":            {"release", []string{"coordinator"}, []string{"offer_ref"}},
 	"stopped":                   {"release", []string{"worker", "independent"}, []string{"attempt_ref"}},
 	"accepted_for_finalization": {"finalize", []string{"worker", "independent", "coordinator"}, []string{"attempt_ref"}},
@@ -187,7 +189,7 @@ func TestCoordinationV1Facts(t *testing.T) {
 				t.Errorf("%s: fact lacks %s", kind, r)
 			}
 		}
-		for _, r := range []string{"offer_ref", "attempt_ref", "intended_worker"} {
+		for _, r := range []string{"offer_ref", "attempt_ref", "intended_worker", "process"} {
 			if _, ok := fact[r]; ok && !contains(rule.requires, r) {
 				t.Errorf("%s: fact carries %s it does not need", kind, r)
 			}
@@ -289,7 +291,9 @@ func TestCoordinationV1Facts(t *testing.T) {
 		"other_task": "coordination_rejected", "operation_differs": "coordination_rejected", "fact_expired_by_hub_clock": "coordination_rejected",
 		"nonce_mismatch": "context_unavailable", "tls_identity_mismatch": "context_unavailable", "unreachable_or_timeout": "context_unavailable",
 		"reply_over_size_ceiling": "context_unavailable", "unsupported_version_refusal": "context_unavailable",
-		"transfer_by_another_user_than_intended": "coordination_rejected", "transfer_by_another_agent_of_the_intended_user": "coordination_rejected"} {
+		"transfer_by_another_user_than_intended": "coordination_rejected", "transfer_by_another_agent_of_the_intended_user": "coordination_rejected",
+		"process_missing_on_offer_or_accepted_attempt": "context_unavailable", "process_malformed": "context_unavailable",
+		"process_with_another_field": "context_unavailable", "process_on_another_kind": "context_unavailable"} {
 		if outcomes[c] != want {
 			t.Errorf("acceptance %s = %q, want %q", c, outcomes[c], want)
 		}
@@ -372,6 +376,164 @@ func TestCoordinationV1Facts(t *testing.T) {
 		default:
 			t.Errorf("unknown replay case %v", r["case"])
 		}
+	}
+}
+
+// processPin reads a pin as the hub's selection type and reports whether it
+// carries exactly the three pinned fields in the selection's forms.
+func processPin(t *testing.T, v any) (process.Ref, bool) {
+	t.Helper()
+	m, ok := v.(map[string]any)
+	if !ok {
+		return process.Ref{}, false
+	}
+	if !reflect.DeepEqual(keysOf(m), []string{"commit", "manifest", "repo"}) {
+		return process.Ref{}, false
+	}
+	var r process.Ref
+	for k, dst := range map[string]*string{"repo": &r.Repo, "commit": &r.Commit, "manifest": &r.Manifest} {
+		s, ok := m[k].(string)
+		if !ok {
+			return process.Ref{}, false
+		}
+		*dst = s
+	}
+	return r, r.Validate() == nil
+}
+
+// The C5-w2 process pin: offer and accepted_attempt carry the process
+// reference aicrew recorded; aimem compares repo, commit and manifest with
+// the project's current selection in the committing transaction.
+func TestCoordinationV1ProcessPin(t *testing.T) {
+	ex := readCoordinationFixture(t, "examples.json")
+	spec := readCoordinationFixture(t, "openapi-proposal.json")
+	pp := obj(t, ex["process_pin"], "process_pin")
+	if !reflect.DeepEqual(pp["kinds"], []any{"offer", "accepted_attempt"}) || !reflect.DeepEqual(pp["fields"], []any{"repo", "commit", "manifest"}) {
+		t.Fatalf("pinned kinds or fields: %v %v", pp["kinds"], pp["fields"])
+	}
+	pinned := map[string]bool{"offer": true, "accepted_attempt": true}
+	// Exactly the pinned kinds carry a well-formed pin, and the member's
+	// request is checked against the project's selection.
+	for _, e := range arr(t, ex["exchanges"], "exchanges") {
+		e := obj(t, e, "exchange")
+		kind := str(t, e["case"], "case")
+		fact := obj(t, obj(t, obj(t, e["response"], "r")["body"], "b")["fact"], "fact")
+		raw, has := fact["process"]
+		if has != pinned[kind] {
+			t.Errorf("%s: carries a process pin %v, want %v", kind, has, pinned[kind])
+			continue
+		}
+		if !has {
+			continue
+		}
+		pin, ok := processPin(t, raw)
+		if !ok {
+			t.Errorf("%s: the pin is not exactly repo, commit and manifest in the selection's forms: %v", kind, raw)
+		}
+		sel := obj(t, obj(t, obj(t, e["member_request"], "mr")["checks"], "checks")["current_process"], kind+".current_process")
+		if sel["repo"] != pin.Repo || sel["commit"] != pin.Commit || sel["manifest"] != pin.Manifest {
+			t.Errorf("%s: the pin is not the project's current selection", kind)
+		}
+	}
+	// The schema is the pin: three required fields, nothing else, no digest.
+	schemas := obj(t, obj(t, spec["components"], "components")["schemas"], "schemas")
+	if ref := obj(t, obj(t, obj(t, schemas["Fact"], "Fact")["properties"], "props")["process"], "Fact.process")["$ref"]; ref != "#/components/schemas/ProcessPin" {
+		t.Errorf("Fact.process: %v", ref)
+	}
+	ps := obj(t, schemas["ProcessPin"], "ProcessPin")
+	props := obj(t, ps["properties"], "ProcessPin.properties")
+	if ps["additionalProperties"] != false || !reflect.DeepEqual(keysOf(props), []string{"commit", "manifest", "repo"}) ||
+		!reflect.DeepEqual(ps["required"], []any{"repo", "commit", "manifest"}) || obj(t, props["commit"], "commit")["pattern"] != "^[0-9a-f]{40}$" {
+		t.Errorf("ProcessPin schema: %v", ps)
+	}
+	// A malformed pin is a wrong-shaped reply.
+	for _, m := range arr(t, pp["malformed"], "malformed") {
+		m := obj(t, m, "malformed")
+		if _, ok := processPin(t, m["process"]); ok {
+			t.Errorf("malformed pin %v is accepted", m["case"])
+		}
+	}
+	// The comparison: fact checks first, a replay never compares, and then
+	// repo, commit and manifest byte for byte against the full selection.
+	seen := map[string]bool{}
+	for _, c := range arr(t, pp["cases"], "cases") {
+		c := obj(t, c, "case")
+		name := str(t, c["case"], "case")
+		seen[name] = true
+		pin, ok := processPin(t, c["fact_process"])
+		if !ok {
+			t.Errorf("%s: the case's pin is malformed", name)
+		}
+		want := "committed"
+		switch {
+		case c["replay"] == true:
+			want = "recorded_outcome"
+			if c["coordination_calls"] != float64(0) {
+				t.Errorf("%s: a replay asks aicrew again", name)
+			}
+		case c["fact_valid"] == false:
+			want = "coordination_rejected"
+		case c["current_selection"] == nil:
+			want = "process_mismatch"
+		default:
+			sel := obj(t, c["current_selection"], name+".selection")
+			if sel["repo"] != pin.Repo || sel["commit"] != pin.Commit || sel["manifest"] != pin.Manifest {
+				want = "process_mismatch"
+			}
+		}
+		if c["outcome"] != want {
+			t.Errorf("%s: outcome %v, want %s", name, c["outcome"], want)
+		}
+		if op := c["operation"]; op != "claim" && op != "transfer" {
+			t.Errorf("%s: the pin guards claim and transfer only, not %v", name, op)
+		}
+	}
+	for _, need := range []string{"claim_matches_current_selection", "transfer_matches_current_selection", "commit_differs", "repo_differs",
+		"manifest_differs", "another_form_of_the_same_repository", "no_selection", "selection_changed_after_the_answer_before_commit",
+		"selection_changed_between_offer_and_acceptance", "failing_fact_is_rejected_before_the_pin", "replay_after_the_selection_changed"} {
+		if !seen[need] {
+			t.Errorf("missing process pin case %s", need)
+		}
+	}
+	// A matching case compares against a full selection: its ref and
+	// selection metadata play no part.
+	for _, c := range arr(t, pp["cases"], "cases") {
+		c := obj(t, c, "case")
+		if c["case"] == "claim_matches_current_selection" {
+			sel := obj(t, c["current_selection"], "selection")
+			if sel["ref"] == nil || sel["selected_at"] == nil || sel["selected_by"] == nil {
+				t.Error("the matching case must carry a full hub selection")
+			}
+		}
+	}
+	// The refusal is reservation.v1's.
+	r := obj(t, pp["refusal"], "refusal")
+	if r["code"] != "process_mismatch" || r["http_status"] != float64(409) || r["retryable"] != false {
+		t.Errorf("process_mismatch refusal: %v", r)
+	}
+	var reservation struct {
+		Refusals []struct {
+			Code       string `json:"code"`
+			HTTPStatus int    `json:"http_status"`
+			Retryable  bool   `json:"retryable"`
+			NextAction string `json:"next_action"`
+		} `json:"refusals"`
+	}
+	b, err := os.ReadFile(filepath.Join("..", "..", "docs", "fixtures", "reservation-v1", "examples.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := json.Unmarshal(b, &reservation); err != nil {
+		t.Fatal(err)
+	}
+	found := false
+	for _, ref := range reservation.Refusals {
+		if ref.Code == "process_mismatch" {
+			found = ref.HTTPStatus == 409 && !ref.Retryable && ref.NextAction == r["next_action"]
+		}
+	}
+	if !found {
+		t.Error("reservation.v1 does not carry the same process_mismatch refusal")
 	}
 }
 
@@ -751,7 +913,9 @@ func TestCoordinationV1IsNotServedAndContractsAgree(t *testing.T) {
 	}
 	for _, must := range []string{"coordination_rejected", "reservation.read", "`acp1_`", "`p1_`", "X-Aimem-Coordination-Version", "standard input",
 		"All three are HTTP-only", "own_work_ref", "acting member", "begin response", "stays **unresolved**", "**Only after that**",
-		"### Closure evidence", "`recovery_cancel`", "`closing_fence`", "never describes that other holder"} {
+		"### Closure evidence", "`recovery_cancel`", "`closing_fence`", "never describes that other holder",
+		"### Process pin", "`process_mismatch` | 409 | no", "**The commit is the version.**", "inside the ledger transaction that commits the transition",
+		"not against the offer's pin", "is answered from its receipt and does not compare the pin again"} {
 		if !strings.Contains(coordination, must) {
 			t.Errorf("the coordination contract lacks %s", must)
 		}
@@ -765,7 +929,8 @@ func TestCoordinationV1IsNotServedAndContractsAgree(t *testing.T) {
 	if strings.Contains(coordination, "Both are HTTP-only") || strings.Contains(wire, "holder binding") {
 		t.Error("the contracts keep wording the operator corrected")
 	}
-	for _, must := range []string{"acting member's own verified connection", "coordination_rejected", "Replay rule", "aimem reservation", "acting member"} {
+	for _, must := range []string{"acting member's own verified connection", "coordination_rejected", "Replay rule", "aimem reservation", "acting member",
+		"| `process_mismatch` | no |", "process conflicts `409`"} {
 		if !strings.Contains(wire, must) {
 			t.Errorf("the reservation wire lacks %q", must)
 		}
