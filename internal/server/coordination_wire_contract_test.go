@@ -895,7 +895,9 @@ func TestCoordinationV1IsNotServedAndContractsAgree(t *testing.T) {
 		if strings.HasPrefix(path, recoveryNamespace) {
 			continue
 		}
-		if strings.Contains(path, "/v1/crew/") || strings.Contains(path, "reservation") {
+		// The member routes under /reservation are C6a's, pinned exactly by
+		// TestReservationV1FixtureAndProposedSurface; the read scope is C6b's.
+		if strings.Contains(path, "/v1/crew/") || strings.Contains(path, "reservation-receipts") || strings.Contains(path, "/reservations/") {
 			t.Errorf("C5w changed live OpenAPI path %s", path)
 		}
 	}

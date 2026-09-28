@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"reflect"
 	"regexp"
 	"strings"
 	"testing"
@@ -309,10 +310,23 @@ func TestReservationV1FixtureAndProposedSurface(t *testing.T) {
 			t.Errorf("missing %s refusal", name)
 		}
 	}
-	// C6 alone registers the route. A fixture must not accidentally become a
-	// production surface through a copied route or embedded OpenAPI entry.
-	// The one exception is C5c's admin-only recovery namespace (decision
-	// D-c3a), which is not a member reservation route.
+	// C6a serves exactly the proposal's member surface: the same methods and
+	// paths (the path's project parameter is spelled {p}, as every project
+	// route is), none admin-only, and nothing else under /reservation but
+	// C5c's admin-only recovery namespace (decision D-c3a).
+	want := map[string]bool{}
+	for path, ops := range spec.Paths {
+		for method := range ops {
+			if method == "parameters" {
+				continue
+			}
+			want[strings.ToUpper(method)+" "+strings.Replace(path, "{project_id}", "{p}", 1)] = true
+		}
+	}
+	if len(want) != 7 {
+		t.Fatalf("the proposal names %d member operations, want 7", len(want))
+	}
+	served := map[string]bool{}
 	s, _ := testServer(t)
 	for _, route := range s.Routes() {
 		if strings.HasPrefix(route.Pattern, recoveryNamespace) {
@@ -322,18 +336,30 @@ func TestReservationV1FixtureAndProposedSurface(t *testing.T) {
 			continue
 		}
 		if strings.Contains(route.Pattern, "/reservation") {
-			t.Errorf("C4 unexpectedly registered route %s", route.Pattern)
+			served[route.Method+" "+route.Pattern] = true
+			if route.Admin {
+				t.Errorf("member reservation route %s is admin-only", route.Pattern)
+			}
 		}
 	}
+	if !reflect.DeepEqual(served, want) {
+		t.Errorf("served member surface %v, want the proposal's %v", served, want)
+	}
 	var live struct {
-		Paths map[string]json.RawMessage `json:"paths"`
+		Paths map[string]map[string]json.RawMessage `json:"paths"`
 	}
 	if err := json.Unmarshal(openAPISpec, &live); err != nil {
 		t.Fatal(err)
 	}
-	for path := range live.Paths {
+	documented := map[string]bool{}
+	for path, ops := range live.Paths {
 		if strings.Contains(path, "/reservation") && !strings.HasPrefix(path, recoveryNamespace) {
-			t.Errorf("C4 unexpectedly changed live OpenAPI path %s", path)
+			for method := range ops {
+				documented[strings.ToUpper(method)+" "+path] = true
+			}
 		}
+	}
+	if !reflect.DeepEqual(documented, want) {
+		t.Errorf("live OpenAPI documents %v, want the proposal's %v", documented, want)
 	}
 }

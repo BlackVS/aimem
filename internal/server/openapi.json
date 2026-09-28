@@ -1419,6 +1419,2834 @@
         }
       }
     },
+    "/v1/projects/{p}/tasks/{task_id}/reservation/claim": {
+      "post": {
+        "summary": "Claim a READY task: a personal standalone hold, or an external team hold on a verified offer or independent-claim fact",
+        "description": "Member reservation transition (reservation.v1, task C6a). The actor and verified mode derive from the authenticated individual connection, never from the body (decision D4a); the path's project must be the task's. An identical replay under the same Idempotency-Key returns the recorded outcome without asking aicrew again. Refusals use the reservation envelope.",
+        "x-role": "writer",
+        "x-team-mode": "Team mode: with X-Aimem-Team-Context (an aimem-scoped acs1_ handle from aicrew) and a user-scoped individual bearer, over TLS terminated by the hub only (otherwise tls_required, 403), the hub verifies the session online and authorizes the transition against the linked team access profile's live grant, never the caller's personal grants. Every team transition but a holder's update carries a coordination_proof that the hub verifies online through coordination.v1 (C5b).",
+        "parameters": [
+          {
+            "name": "p",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "the task's project"
+          },
+          {
+            "name": "task_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "X-Aimem-Reservation-Version",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "1"
+              ]
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "The request key: scoped to the actor, operation and task; an identical replay returns the recorded outcome"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "expected_revision",
+                  "holder"
+                ],
+                "additionalProperties": false,
+                "properties": {
+                  "expected_revision": {
+                    "type": "integer",
+                    "minimum": 1
+                  },
+                  "holder": {
+                    "type": "object",
+                    "required": [
+                      "mode",
+                      "work_ref"
+                    ],
+                    "additionalProperties": false,
+                    "properties": {
+                      "mode": {
+                        "enum": [
+                          "standalone",
+                          "external"
+                        ]
+                      },
+                      "work_ref": {
+                        "type": "string"
+                      }
+                    }
+                  },
+                  "coordination_proof": {
+                    "type": "string",
+                    "description": "A team transition's acp1_ proof reference, verified online through coordination.v1; required in team mode for every operation but update, and never echoed"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Committed transition, or an identical replay (receipt.replayed)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "receipt",
+                    "task_revision",
+                    "reservation"
+                  ],
+                  "properties": {
+                    "receipt": {
+                      "type": "object",
+                      "required": [
+                        "id",
+                        "state",
+                        "operation",
+                        "request_key",
+                        "replayed",
+                        "actor_id",
+                        "verified_mode"
+                      ],
+                      "properties": {
+                        "id": {
+                          "type": "string"
+                        },
+                        "state": {
+                          "enum": [
+                            "committed"
+                          ]
+                        },
+                        "operation": {
+                          "type": "string"
+                        },
+                        "request_key": {
+                          "type": "string"
+                        },
+                        "replayed": {
+                          "type": "boolean"
+                        },
+                        "actor_id": {
+                          "type": "string"
+                        },
+                        "verified_mode": {
+                          "enum": [
+                            "personal",
+                            "team"
+                          ]
+                        }
+                      }
+                    },
+                    "task_revision": {
+                      "type": "integer",
+                      "minimum": 1
+                    },
+                    "reservation": {
+                      "type": "object",
+                      "required": [
+                        "id",
+                        "fence",
+                        "active"
+                      ],
+                      "properties": {
+                        "id": {
+                          "type": "string",
+                          "description": "Empty after release or finalize"
+                        },
+                        "fence": {
+                          "type": "string",
+                          "pattern": "^[1-9][0-9]*$"
+                        },
+                        "active": {
+                          "type": "boolean"
+                        },
+                        "holder_mode": {
+                          "enum": [
+                            "standalone",
+                            "external"
+                          ]
+                        },
+                        "own_work_ref": {
+                          "type": "string"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "unsupported_version (missing or unsupported X-Aimem-Reservation-Version) or invalid_request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "code",
+                    "message",
+                    "retryable",
+                    "next_action",
+                    "correlation_id"
+                  ],
+                  "additionalProperties": false,
+                  "properties": {
+                    "code": {
+                      "type": "string"
+                    },
+                    "message": {
+                      "type": "string"
+                    },
+                    "active_mode": {
+                      "enum": [
+                        "personal",
+                        "team"
+                      ]
+                    },
+                    "retryable": {
+                      "type": "boolean"
+                    },
+                    "next_action": {
+                      "type": "string"
+                    },
+                    "correlation_id": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "invalid_credential: missing, revoked or not an individual credential",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "code",
+                    "message",
+                    "retryable",
+                    "next_action",
+                    "correlation_id"
+                  ],
+                  "additionalProperties": false,
+                  "properties": {
+                    "code": {
+                      "type": "string"
+                    },
+                    "message": {
+                      "type": "string"
+                    },
+                    "active_mode": {
+                      "enum": [
+                        "personal",
+                        "team"
+                      ]
+                    },
+                    "retryable": {
+                      "type": "boolean"
+                    },
+                    "next_action": {
+                      "type": "string"
+                    },
+                    "correlation_id": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "grant_denied, role_forbidden, coordination_rejected (a coordination fact that does not vouch for this step), identity_mismatch, context_missing, context_stale, or a team-mode gate refusal",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "code",
+                    "message",
+                    "retryable",
+                    "next_action",
+                    "correlation_id"
+                  ],
+                  "additionalProperties": false,
+                  "properties": {
+                    "code": {
+                      "type": "string"
+                    },
+                    "message": {
+                      "type": "string"
+                    },
+                    "active_mode": {
+                      "enum": [
+                        "personal",
+                        "team"
+                      ]
+                    },
+                    "retryable": {
+                      "type": "boolean"
+                    },
+                    "next_action": {
+                      "type": "string"
+                    },
+                    "correlation_id": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "task_unavailable, or dependency_unresolved",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "code",
+                    "message",
+                    "retryable",
+                    "next_action",
+                    "correlation_id"
+                  ],
+                  "additionalProperties": false,
+                  "properties": {
+                    "code": {
+                      "type": "string"
+                    },
+                    "message": {
+                      "type": "string"
+                    },
+                    "active_mode": {
+                      "enum": [
+                        "personal",
+                        "team"
+                      ]
+                    },
+                    "retryable": {
+                      "type": "boolean"
+                    },
+                    "next_action": {
+                      "type": "string"
+                    },
+                    "correlation_id": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "context_unavailable (retryable)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "code",
+                    "message",
+                    "retryable",
+                    "next_action",
+                    "correlation_id"
+                  ],
+                  "additionalProperties": false,
+                  "properties": {
+                    "code": {
+                      "type": "string"
+                    },
+                    "message": {
+                      "type": "string"
+                    },
+                    "active_mode": {
+                      "enum": [
+                        "personal",
+                        "team"
+                      ]
+                    },
+                    "retryable": {
+                      "type": "boolean"
+                    },
+                    "next_action": {
+                      "type": "string"
+                    },
+                    "correlation_id": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "reservation_conflict, revision_conflict, stale_fence, idempotency_conflict, or process_mismatch (the fact's process pin is not the project's current selection)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "code",
+                    "message",
+                    "retryable",
+                    "next_action",
+                    "correlation_id"
+                  ],
+                  "additionalProperties": false,
+                  "properties": {
+                    "code": {
+                      "type": "string"
+                    },
+                    "message": {
+                      "type": "string"
+                    },
+                    "active_mode": {
+                      "enum": [
+                        "personal",
+                        "team"
+                      ]
+                    },
+                    "retryable": {
+                      "type": "boolean"
+                    },
+                    "next_action": {
+                      "type": "string"
+                    },
+                    "correlation_id": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/projects/{p}/tasks/{task_id}/reservation/transfer": {
+      "post": {
+        "summary": "Transfer an offer's hold to the intended worker's accepted attempt (team mode only)",
+        "description": "Member reservation transition (reservation.v1, task C6a). The actor and verified mode derive from the authenticated individual connection, never from the body (decision D4a); the path's project must be the task's. An identical replay under the same Idempotency-Key returns the recorded outcome without asking aicrew again. Refusals use the reservation envelope.",
+        "x-role": "writer",
+        "x-team-mode": "Team mode: with X-Aimem-Team-Context (an aimem-scoped acs1_ handle from aicrew) and a user-scoped individual bearer, over TLS terminated by the hub only (otherwise tls_required, 403), the hub verifies the session online and authorizes the transition against the linked team access profile's live grant, never the caller's personal grants. Every team transition but a holder's update carries a coordination_proof that the hub verifies online through coordination.v1 (C5b).",
+        "parameters": [
+          {
+            "name": "p",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "the task's project"
+          },
+          {
+            "name": "task_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "X-Aimem-Reservation-Version",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "1"
+              ]
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "The request key: scoped to the actor, operation and task; an identical replay returns the recorded outcome"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "expected_revision",
+                  "reservation_id",
+                  "fence",
+                  "holder",
+                  "coordination_proof"
+                ],
+                "additionalProperties": false,
+                "properties": {
+                  "expected_revision": {
+                    "type": "integer",
+                    "minimum": 1
+                  },
+                  "reservation_id": {
+                    "type": "string"
+                  },
+                  "fence": {
+                    "type": "string",
+                    "pattern": "^[1-9][0-9]*$"
+                  },
+                  "holder": {
+                    "type": "object",
+                    "required": [
+                      "mode",
+                      "work_ref"
+                    ],
+                    "additionalProperties": false,
+                    "properties": {
+                      "mode": {
+                        "enum": [
+                          "standalone",
+                          "external"
+                        ]
+                      },
+                      "work_ref": {
+                        "type": "string"
+                      }
+                    }
+                  },
+                  "coordination_proof": {
+                    "type": "string",
+                    "description": "A team transition's acp1_ proof reference, verified online through coordination.v1; required in team mode for every operation but update, and never echoed"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Committed transition, or an identical replay (receipt.replayed)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "receipt",
+                    "task_revision",
+                    "reservation"
+                  ],
+                  "properties": {
+                    "receipt": {
+                      "type": "object",
+                      "required": [
+                        "id",
+                        "state",
+                        "operation",
+                        "request_key",
+                        "replayed",
+                        "actor_id",
+                        "verified_mode"
+                      ],
+                      "properties": {
+                        "id": {
+                          "type": "string"
+                        },
+                        "state": {
+                          "enum": [
+                            "committed"
+                          ]
+                        },
+                        "operation": {
+                          "type": "string"
+                        },
+                        "request_key": {
+                          "type": "string"
+                        },
+                        "replayed": {
+                          "type": "boolean"
+                        },
+                        "actor_id": {
+                          "type": "string"
+                        },
+                        "verified_mode": {
+                          "enum": [
+                            "personal",
+                            "team"
+                          ]
+                        }
+                      }
+                    },
+                    "task_revision": {
+                      "type": "integer",
+                      "minimum": 1
+                    },
+                    "reservation": {
+                      "type": "object",
+                      "required": [
+                        "id",
+                        "fence",
+                        "active"
+                      ],
+                      "properties": {
+                        "id": {
+                          "type": "string",
+                          "description": "Empty after release or finalize"
+                        },
+                        "fence": {
+                          "type": "string",
+                          "pattern": "^[1-9][0-9]*$"
+                        },
+                        "active": {
+                          "type": "boolean"
+                        },
+                        "holder_mode": {
+                          "enum": [
+                            "standalone",
+                            "external"
+                          ]
+                        },
+                        "own_work_ref": {
+                          "type": "string"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "unsupported_version (missing or unsupported X-Aimem-Reservation-Version) or invalid_request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "code",
+                    "message",
+                    "retryable",
+                    "next_action",
+                    "correlation_id"
+                  ],
+                  "additionalProperties": false,
+                  "properties": {
+                    "code": {
+                      "type": "string"
+                    },
+                    "message": {
+                      "type": "string"
+                    },
+                    "active_mode": {
+                      "enum": [
+                        "personal",
+                        "team"
+                      ]
+                    },
+                    "retryable": {
+                      "type": "boolean"
+                    },
+                    "next_action": {
+                      "type": "string"
+                    },
+                    "correlation_id": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "invalid_credential: missing, revoked or not an individual credential",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "code",
+                    "message",
+                    "retryable",
+                    "next_action",
+                    "correlation_id"
+                  ],
+                  "additionalProperties": false,
+                  "properties": {
+                    "code": {
+                      "type": "string"
+                    },
+                    "message": {
+                      "type": "string"
+                    },
+                    "active_mode": {
+                      "enum": [
+                        "personal",
+                        "team"
+                      ]
+                    },
+                    "retryable": {
+                      "type": "boolean"
+                    },
+                    "next_action": {
+                      "type": "string"
+                    },
+                    "correlation_id": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "grant_denied, role_forbidden, coordination_rejected (a coordination fact that does not vouch for this step), identity_mismatch, context_missing, context_stale, or a team-mode gate refusal",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "code",
+                    "message",
+                    "retryable",
+                    "next_action",
+                    "correlation_id"
+                  ],
+                  "additionalProperties": false,
+                  "properties": {
+                    "code": {
+                      "type": "string"
+                    },
+                    "message": {
+                      "type": "string"
+                    },
+                    "active_mode": {
+                      "enum": [
+                        "personal",
+                        "team"
+                      ]
+                    },
+                    "retryable": {
+                      "type": "boolean"
+                    },
+                    "next_action": {
+                      "type": "string"
+                    },
+                    "correlation_id": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "task_unavailable, or dependency_unresolved",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "code",
+                    "message",
+                    "retryable",
+                    "next_action",
+                    "correlation_id"
+                  ],
+                  "additionalProperties": false,
+                  "properties": {
+                    "code": {
+                      "type": "string"
+                    },
+                    "message": {
+                      "type": "string"
+                    },
+                    "active_mode": {
+                      "enum": [
+                        "personal",
+                        "team"
+                      ]
+                    },
+                    "retryable": {
+                      "type": "boolean"
+                    },
+                    "next_action": {
+                      "type": "string"
+                    },
+                    "correlation_id": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "context_unavailable (retryable)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "code",
+                    "message",
+                    "retryable",
+                    "next_action",
+                    "correlation_id"
+                  ],
+                  "additionalProperties": false,
+                  "properties": {
+                    "code": {
+                      "type": "string"
+                    },
+                    "message": {
+                      "type": "string"
+                    },
+                    "active_mode": {
+                      "enum": [
+                        "personal",
+                        "team"
+                      ]
+                    },
+                    "retryable": {
+                      "type": "boolean"
+                    },
+                    "next_action": {
+                      "type": "string"
+                    },
+                    "correlation_id": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "reservation_conflict, revision_conflict, stale_fence, idempotency_conflict, or process_mismatch (the fact's process pin is not the project's current selection)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "code",
+                    "message",
+                    "retryable",
+                    "next_action",
+                    "correlation_id"
+                  ],
+                  "additionalProperties": false,
+                  "properties": {
+                    "code": {
+                      "type": "string"
+                    },
+                    "message": {
+                      "type": "string"
+                    },
+                    "active_mode": {
+                      "enum": [
+                        "personal",
+                        "team"
+                      ]
+                    },
+                    "retryable": {
+                      "type": "boolean"
+                    },
+                    "next_action": {
+                      "type": "string"
+                    },
+                    "correlation_id": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/projects/{p}/tasks/{task_id}/reservation/update": {
+      "post": {
+        "summary": "The holder's fenced update of complete task content; no coordination fact",
+        "description": "Member reservation transition (reservation.v1, task C6a). The actor and verified mode derive from the authenticated individual connection, never from the body (decision D4a); the path's project must be the task's. An identical replay under the same Idempotency-Key returns the recorded outcome without asking aicrew again. Refusals use the reservation envelope.",
+        "x-role": "writer",
+        "x-team-mode": "Team mode: with X-Aimem-Team-Context (an aimem-scoped acs1_ handle from aicrew) and a user-scoped individual bearer, over TLS terminated by the hub only (otherwise tls_required, 403), the hub verifies the session online and authorizes the transition against the linked team access profile's live grant, never the caller's personal grants. Every team transition but a holder's update carries a coordination_proof that the hub verifies online through coordination.v1 (C5b).",
+        "parameters": [
+          {
+            "name": "p",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "the task's project"
+          },
+          {
+            "name": "task_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "X-Aimem-Reservation-Version",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "1"
+              ]
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "The request key: scoped to the actor, operation and task; an identical replay returns the recorded outcome"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "expected_revision",
+                  "reservation_id",
+                  "fence",
+                  "content"
+                ],
+                "additionalProperties": false,
+                "properties": {
+                  "expected_revision": {
+                    "type": "integer",
+                    "minimum": 1
+                  },
+                  "reservation_id": {
+                    "type": "string"
+                  },
+                  "fence": {
+                    "type": "string",
+                    "pattern": "^[1-9][0-9]*$"
+                  },
+                  "content": {
+                    "type": "object",
+                    "description": "Complete TaskContent, validated by the task contract"
+                  },
+                  "intent": {
+                    "enum": [
+                      "block",
+                      "submit",
+                      "resume"
+                    ],
+                    "description": "Optional on update only; recorded, never interpreted"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Committed transition, or an identical replay (receipt.replayed)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "receipt",
+                    "task_revision",
+                    "reservation"
+                  ],
+                  "properties": {
+                    "receipt": {
+                      "type": "object",
+                      "required": [
+                        "id",
+                        "state",
+                        "operation",
+                        "request_key",
+                        "replayed",
+                        "actor_id",
+                        "verified_mode"
+                      ],
+                      "properties": {
+                        "id": {
+                          "type": "string"
+                        },
+                        "state": {
+                          "enum": [
+                            "committed"
+                          ]
+                        },
+                        "operation": {
+                          "type": "string"
+                        },
+                        "request_key": {
+                          "type": "string"
+                        },
+                        "replayed": {
+                          "type": "boolean"
+                        },
+                        "actor_id": {
+                          "type": "string"
+                        },
+                        "verified_mode": {
+                          "enum": [
+                            "personal",
+                            "team"
+                          ]
+                        }
+                      }
+                    },
+                    "task_revision": {
+                      "type": "integer",
+                      "minimum": 1
+                    },
+                    "reservation": {
+                      "type": "object",
+                      "required": [
+                        "id",
+                        "fence",
+                        "active"
+                      ],
+                      "properties": {
+                        "id": {
+                          "type": "string",
+                          "description": "Empty after release or finalize"
+                        },
+                        "fence": {
+                          "type": "string",
+                          "pattern": "^[1-9][0-9]*$"
+                        },
+                        "active": {
+                          "type": "boolean"
+                        },
+                        "holder_mode": {
+                          "enum": [
+                            "standalone",
+                            "external"
+                          ]
+                        },
+                        "own_work_ref": {
+                          "type": "string"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "unsupported_version (missing or unsupported X-Aimem-Reservation-Version) or invalid_request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "code",
+                    "message",
+                    "retryable",
+                    "next_action",
+                    "correlation_id"
+                  ],
+                  "additionalProperties": false,
+                  "properties": {
+                    "code": {
+                      "type": "string"
+                    },
+                    "message": {
+                      "type": "string"
+                    },
+                    "active_mode": {
+                      "enum": [
+                        "personal",
+                        "team"
+                      ]
+                    },
+                    "retryable": {
+                      "type": "boolean"
+                    },
+                    "next_action": {
+                      "type": "string"
+                    },
+                    "correlation_id": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "invalid_credential: missing, revoked or not an individual credential",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "code",
+                    "message",
+                    "retryable",
+                    "next_action",
+                    "correlation_id"
+                  ],
+                  "additionalProperties": false,
+                  "properties": {
+                    "code": {
+                      "type": "string"
+                    },
+                    "message": {
+                      "type": "string"
+                    },
+                    "active_mode": {
+                      "enum": [
+                        "personal",
+                        "team"
+                      ]
+                    },
+                    "retryable": {
+                      "type": "boolean"
+                    },
+                    "next_action": {
+                      "type": "string"
+                    },
+                    "correlation_id": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "grant_denied, role_forbidden, coordination_rejected (a coordination fact that does not vouch for this step), identity_mismatch, context_missing, context_stale, or a team-mode gate refusal",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "code",
+                    "message",
+                    "retryable",
+                    "next_action",
+                    "correlation_id"
+                  ],
+                  "additionalProperties": false,
+                  "properties": {
+                    "code": {
+                      "type": "string"
+                    },
+                    "message": {
+                      "type": "string"
+                    },
+                    "active_mode": {
+                      "enum": [
+                        "personal",
+                        "team"
+                      ]
+                    },
+                    "retryable": {
+                      "type": "boolean"
+                    },
+                    "next_action": {
+                      "type": "string"
+                    },
+                    "correlation_id": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "task_unavailable, or dependency_unresolved",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "code",
+                    "message",
+                    "retryable",
+                    "next_action",
+                    "correlation_id"
+                  ],
+                  "additionalProperties": false,
+                  "properties": {
+                    "code": {
+                      "type": "string"
+                    },
+                    "message": {
+                      "type": "string"
+                    },
+                    "active_mode": {
+                      "enum": [
+                        "personal",
+                        "team"
+                      ]
+                    },
+                    "retryable": {
+                      "type": "boolean"
+                    },
+                    "next_action": {
+                      "type": "string"
+                    },
+                    "correlation_id": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "context_unavailable (retryable)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "code",
+                    "message",
+                    "retryable",
+                    "next_action",
+                    "correlation_id"
+                  ],
+                  "additionalProperties": false,
+                  "properties": {
+                    "code": {
+                      "type": "string"
+                    },
+                    "message": {
+                      "type": "string"
+                    },
+                    "active_mode": {
+                      "enum": [
+                        "personal",
+                        "team"
+                      ]
+                    },
+                    "retryable": {
+                      "type": "boolean"
+                    },
+                    "next_action": {
+                      "type": "string"
+                    },
+                    "correlation_id": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "reservation_conflict, revision_conflict, stale_fence, idempotency_conflict, or process_mismatch (the fact's process pin is not the project's current selection)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "code",
+                    "message",
+                    "retryable",
+                    "next_action",
+                    "correlation_id"
+                  ],
+                  "additionalProperties": false,
+                  "properties": {
+                    "code": {
+                      "type": "string"
+                    },
+                    "message": {
+                      "type": "string"
+                    },
+                    "active_mode": {
+                      "enum": [
+                        "personal",
+                        "team"
+                      ]
+                    },
+                    "retryable": {
+                      "type": "boolean"
+                    },
+                    "next_action": {
+                      "type": "string"
+                    },
+                    "correlation_id": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/projects/{p}/tasks/{task_id}/reservation/release": {
+      "post": {
+        "summary": "Release the hold, leaving the task READY or BLOCKED",
+        "description": "Member reservation transition (reservation.v1, task C6a). The actor and verified mode derive from the authenticated individual connection, never from the body (decision D4a); the path's project must be the task's. An identical replay under the same Idempotency-Key returns the recorded outcome without asking aicrew again. Refusals use the reservation envelope.",
+        "x-role": "writer",
+        "x-team-mode": "Team mode: with X-Aimem-Team-Context (an aimem-scoped acs1_ handle from aicrew) and a user-scoped individual bearer, over TLS terminated by the hub only (otherwise tls_required, 403), the hub verifies the session online and authorizes the transition against the linked team access profile's live grant, never the caller's personal grants. Every team transition but a holder's update carries a coordination_proof that the hub verifies online through coordination.v1 (C5b).",
+        "parameters": [
+          {
+            "name": "p",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "the task's project"
+          },
+          {
+            "name": "task_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "X-Aimem-Reservation-Version",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "1"
+              ]
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "The request key: scoped to the actor, operation and task; an identical replay returns the recorded outcome"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "expected_revision",
+                  "reservation_id",
+                  "fence",
+                  "content",
+                  "reason"
+                ],
+                "additionalProperties": false,
+                "properties": {
+                  "expected_revision": {
+                    "type": "integer",
+                    "minimum": 1
+                  },
+                  "reservation_id": {
+                    "type": "string"
+                  },
+                  "fence": {
+                    "type": "string",
+                    "pattern": "^[1-9][0-9]*$"
+                  },
+                  "content": {
+                    "type": "object",
+                    "description": "Complete TaskContent, validated by the task contract"
+                  },
+                  "reason": {
+                    "type": "string"
+                  },
+                  "coordination_proof": {
+                    "type": "string",
+                    "description": "A team transition's acp1_ proof reference, verified online through coordination.v1; required in team mode for every operation but update, and never echoed"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Committed transition, or an identical replay (receipt.replayed)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "receipt",
+                    "task_revision",
+                    "reservation"
+                  ],
+                  "properties": {
+                    "receipt": {
+                      "type": "object",
+                      "required": [
+                        "id",
+                        "state",
+                        "operation",
+                        "request_key",
+                        "replayed",
+                        "actor_id",
+                        "verified_mode"
+                      ],
+                      "properties": {
+                        "id": {
+                          "type": "string"
+                        },
+                        "state": {
+                          "enum": [
+                            "committed"
+                          ]
+                        },
+                        "operation": {
+                          "type": "string"
+                        },
+                        "request_key": {
+                          "type": "string"
+                        },
+                        "replayed": {
+                          "type": "boolean"
+                        },
+                        "actor_id": {
+                          "type": "string"
+                        },
+                        "verified_mode": {
+                          "enum": [
+                            "personal",
+                            "team"
+                          ]
+                        }
+                      }
+                    },
+                    "task_revision": {
+                      "type": "integer",
+                      "minimum": 1
+                    },
+                    "reservation": {
+                      "type": "object",
+                      "required": [
+                        "id",
+                        "fence",
+                        "active"
+                      ],
+                      "properties": {
+                        "id": {
+                          "type": "string",
+                          "description": "Empty after release or finalize"
+                        },
+                        "fence": {
+                          "type": "string",
+                          "pattern": "^[1-9][0-9]*$"
+                        },
+                        "active": {
+                          "type": "boolean"
+                        },
+                        "holder_mode": {
+                          "enum": [
+                            "standalone",
+                            "external"
+                          ]
+                        },
+                        "own_work_ref": {
+                          "type": "string"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "unsupported_version (missing or unsupported X-Aimem-Reservation-Version) or invalid_request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "code",
+                    "message",
+                    "retryable",
+                    "next_action",
+                    "correlation_id"
+                  ],
+                  "additionalProperties": false,
+                  "properties": {
+                    "code": {
+                      "type": "string"
+                    },
+                    "message": {
+                      "type": "string"
+                    },
+                    "active_mode": {
+                      "enum": [
+                        "personal",
+                        "team"
+                      ]
+                    },
+                    "retryable": {
+                      "type": "boolean"
+                    },
+                    "next_action": {
+                      "type": "string"
+                    },
+                    "correlation_id": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "invalid_credential: missing, revoked or not an individual credential",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "code",
+                    "message",
+                    "retryable",
+                    "next_action",
+                    "correlation_id"
+                  ],
+                  "additionalProperties": false,
+                  "properties": {
+                    "code": {
+                      "type": "string"
+                    },
+                    "message": {
+                      "type": "string"
+                    },
+                    "active_mode": {
+                      "enum": [
+                        "personal",
+                        "team"
+                      ]
+                    },
+                    "retryable": {
+                      "type": "boolean"
+                    },
+                    "next_action": {
+                      "type": "string"
+                    },
+                    "correlation_id": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "grant_denied, role_forbidden, coordination_rejected (a coordination fact that does not vouch for this step), identity_mismatch, context_missing, context_stale, or a team-mode gate refusal",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "code",
+                    "message",
+                    "retryable",
+                    "next_action",
+                    "correlation_id"
+                  ],
+                  "additionalProperties": false,
+                  "properties": {
+                    "code": {
+                      "type": "string"
+                    },
+                    "message": {
+                      "type": "string"
+                    },
+                    "active_mode": {
+                      "enum": [
+                        "personal",
+                        "team"
+                      ]
+                    },
+                    "retryable": {
+                      "type": "boolean"
+                    },
+                    "next_action": {
+                      "type": "string"
+                    },
+                    "correlation_id": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "task_unavailable, or dependency_unresolved",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "code",
+                    "message",
+                    "retryable",
+                    "next_action",
+                    "correlation_id"
+                  ],
+                  "additionalProperties": false,
+                  "properties": {
+                    "code": {
+                      "type": "string"
+                    },
+                    "message": {
+                      "type": "string"
+                    },
+                    "active_mode": {
+                      "enum": [
+                        "personal",
+                        "team"
+                      ]
+                    },
+                    "retryable": {
+                      "type": "boolean"
+                    },
+                    "next_action": {
+                      "type": "string"
+                    },
+                    "correlation_id": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "context_unavailable (retryable)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "code",
+                    "message",
+                    "retryable",
+                    "next_action",
+                    "correlation_id"
+                  ],
+                  "additionalProperties": false,
+                  "properties": {
+                    "code": {
+                      "type": "string"
+                    },
+                    "message": {
+                      "type": "string"
+                    },
+                    "active_mode": {
+                      "enum": [
+                        "personal",
+                        "team"
+                      ]
+                    },
+                    "retryable": {
+                      "type": "boolean"
+                    },
+                    "next_action": {
+                      "type": "string"
+                    },
+                    "correlation_id": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "reservation_conflict, revision_conflict, stale_fence, idempotency_conflict, or process_mismatch (the fact's process pin is not the project's current selection)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "code",
+                    "message",
+                    "retryable",
+                    "next_action",
+                    "correlation_id"
+                  ],
+                  "additionalProperties": false,
+                  "properties": {
+                    "code": {
+                      "type": "string"
+                    },
+                    "message": {
+                      "type": "string"
+                    },
+                    "active_mode": {
+                      "enum": [
+                        "personal",
+                        "team"
+                      ]
+                    },
+                    "retryable": {
+                      "type": "boolean"
+                    },
+                    "next_action": {
+                      "type": "string"
+                    },
+                    "correlation_id": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/projects/{p}/tasks/{task_id}/reservation/finalize": {
+      "post": {
+        "summary": "Finalize the task DONE (with terminal evidence) or CANCELLED and close the hold",
+        "description": "Member reservation transition (reservation.v1, task C6a). The actor and verified mode derive from the authenticated individual connection, never from the body (decision D4a); the path's project must be the task's. An identical replay under the same Idempotency-Key returns the recorded outcome without asking aicrew again. Refusals use the reservation envelope.",
+        "x-role": "writer",
+        "x-team-mode": "Team mode: with X-Aimem-Team-Context (an aimem-scoped acs1_ handle from aicrew) and a user-scoped individual bearer, over TLS terminated by the hub only (otherwise tls_required, 403), the hub verifies the session online and authorizes the transition against the linked team access profile's live grant, never the caller's personal grants. Every team transition but a holder's update carries a coordination_proof that the hub verifies online through coordination.v1 (C5b).",
+        "parameters": [
+          {
+            "name": "p",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "the task's project"
+          },
+          {
+            "name": "task_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "X-Aimem-Reservation-Version",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "1"
+              ]
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "The request key: scoped to the actor, operation and task; an identical replay returns the recorded outcome"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "expected_revision",
+                  "reservation_id",
+                  "fence",
+                  "content",
+                  "reason"
+                ],
+                "additionalProperties": false,
+                "properties": {
+                  "expected_revision": {
+                    "type": "integer",
+                    "minimum": 1
+                  },
+                  "reservation_id": {
+                    "type": "string"
+                  },
+                  "fence": {
+                    "type": "string",
+                    "pattern": "^[1-9][0-9]*$"
+                  },
+                  "content": {
+                    "type": "object",
+                    "description": "Complete TaskContent, validated by the task contract"
+                  },
+                  "reason": {
+                    "type": "string"
+                  },
+                  "terminal_evidence": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    },
+                    "maxItems": 16,
+                    "description": "Reviewed delivery and human-merge evidence; required when content.state is DONE"
+                  },
+                  "coordination_proof": {
+                    "type": "string",
+                    "description": "A team transition's acp1_ proof reference, verified online through coordination.v1; required in team mode for every operation but update, and never echoed"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Committed transition, or an identical replay (receipt.replayed)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "receipt",
+                    "task_revision",
+                    "reservation"
+                  ],
+                  "properties": {
+                    "receipt": {
+                      "type": "object",
+                      "required": [
+                        "id",
+                        "state",
+                        "operation",
+                        "request_key",
+                        "replayed",
+                        "actor_id",
+                        "verified_mode"
+                      ],
+                      "properties": {
+                        "id": {
+                          "type": "string"
+                        },
+                        "state": {
+                          "enum": [
+                            "committed"
+                          ]
+                        },
+                        "operation": {
+                          "type": "string"
+                        },
+                        "request_key": {
+                          "type": "string"
+                        },
+                        "replayed": {
+                          "type": "boolean"
+                        },
+                        "actor_id": {
+                          "type": "string"
+                        },
+                        "verified_mode": {
+                          "enum": [
+                            "personal",
+                            "team"
+                          ]
+                        }
+                      }
+                    },
+                    "task_revision": {
+                      "type": "integer",
+                      "minimum": 1
+                    },
+                    "reservation": {
+                      "type": "object",
+                      "required": [
+                        "id",
+                        "fence",
+                        "active"
+                      ],
+                      "properties": {
+                        "id": {
+                          "type": "string",
+                          "description": "Empty after release or finalize"
+                        },
+                        "fence": {
+                          "type": "string",
+                          "pattern": "^[1-9][0-9]*$"
+                        },
+                        "active": {
+                          "type": "boolean"
+                        },
+                        "holder_mode": {
+                          "enum": [
+                            "standalone",
+                            "external"
+                          ]
+                        },
+                        "own_work_ref": {
+                          "type": "string"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "unsupported_version (missing or unsupported X-Aimem-Reservation-Version) or invalid_request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "code",
+                    "message",
+                    "retryable",
+                    "next_action",
+                    "correlation_id"
+                  ],
+                  "additionalProperties": false,
+                  "properties": {
+                    "code": {
+                      "type": "string"
+                    },
+                    "message": {
+                      "type": "string"
+                    },
+                    "active_mode": {
+                      "enum": [
+                        "personal",
+                        "team"
+                      ]
+                    },
+                    "retryable": {
+                      "type": "boolean"
+                    },
+                    "next_action": {
+                      "type": "string"
+                    },
+                    "correlation_id": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "invalid_credential: missing, revoked or not an individual credential",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "code",
+                    "message",
+                    "retryable",
+                    "next_action",
+                    "correlation_id"
+                  ],
+                  "additionalProperties": false,
+                  "properties": {
+                    "code": {
+                      "type": "string"
+                    },
+                    "message": {
+                      "type": "string"
+                    },
+                    "active_mode": {
+                      "enum": [
+                        "personal",
+                        "team"
+                      ]
+                    },
+                    "retryable": {
+                      "type": "boolean"
+                    },
+                    "next_action": {
+                      "type": "string"
+                    },
+                    "correlation_id": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "grant_denied, role_forbidden, coordination_rejected (a coordination fact that does not vouch for this step), identity_mismatch, context_missing, context_stale, or a team-mode gate refusal",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "code",
+                    "message",
+                    "retryable",
+                    "next_action",
+                    "correlation_id"
+                  ],
+                  "additionalProperties": false,
+                  "properties": {
+                    "code": {
+                      "type": "string"
+                    },
+                    "message": {
+                      "type": "string"
+                    },
+                    "active_mode": {
+                      "enum": [
+                        "personal",
+                        "team"
+                      ]
+                    },
+                    "retryable": {
+                      "type": "boolean"
+                    },
+                    "next_action": {
+                      "type": "string"
+                    },
+                    "correlation_id": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "task_unavailable, or dependency_unresolved",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "code",
+                    "message",
+                    "retryable",
+                    "next_action",
+                    "correlation_id"
+                  ],
+                  "additionalProperties": false,
+                  "properties": {
+                    "code": {
+                      "type": "string"
+                    },
+                    "message": {
+                      "type": "string"
+                    },
+                    "active_mode": {
+                      "enum": [
+                        "personal",
+                        "team"
+                      ]
+                    },
+                    "retryable": {
+                      "type": "boolean"
+                    },
+                    "next_action": {
+                      "type": "string"
+                    },
+                    "correlation_id": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "context_unavailable (retryable)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "code",
+                    "message",
+                    "retryable",
+                    "next_action",
+                    "correlation_id"
+                  ],
+                  "additionalProperties": false,
+                  "properties": {
+                    "code": {
+                      "type": "string"
+                    },
+                    "message": {
+                      "type": "string"
+                    },
+                    "active_mode": {
+                      "enum": [
+                        "personal",
+                        "team"
+                      ]
+                    },
+                    "retryable": {
+                      "type": "boolean"
+                    },
+                    "next_action": {
+                      "type": "string"
+                    },
+                    "correlation_id": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "reservation_conflict, revision_conflict, stale_fence, idempotency_conflict, or process_mismatch (the fact's process pin is not the project's current selection)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "code",
+                    "message",
+                    "retryable",
+                    "next_action",
+                    "correlation_id"
+                  ],
+                  "additionalProperties": false,
+                  "properties": {
+                    "code": {
+                      "type": "string"
+                    },
+                    "message": {
+                      "type": "string"
+                    },
+                    "active_mode": {
+                      "enum": [
+                        "personal",
+                        "team"
+                      ]
+                    },
+                    "retryable": {
+                      "type": "boolean"
+                    },
+                    "next_action": {
+                      "type": "string"
+                    },
+                    "correlation_id": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/projects/{p}/tasks/{task_id}/reservation": {
+      "get": {
+        "summary": "The caller's own reservation status on a task",
+        "description": "Reports only the caller's own hold, or none; another holder's hold reads as none (reservation.v1, task C6a).",
+        "x-role": "writer",
+        "x-team-mode": "Team mode: with X-Aimem-Team-Context (an aimem-scoped acs1_ handle from aicrew) and a user-scoped individual bearer, over TLS terminated by the hub only (otherwise tls_required, 403), the hub verifies the session online and authorizes the transition against the linked team access profile's live grant, never the caller's personal grants. Every team transition but a holder's update carries a coordination_proof that the hub verifies online through coordination.v1 (C5b).",
+        "parameters": [
+          {
+            "name": "p",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "the task's project"
+          },
+          {
+            "name": "task_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "X-Aimem-Reservation-Version",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "1"
+              ]
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Own hold or none",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "state"
+                  ],
+                  "properties": {
+                    "state": {
+                      "enum": [
+                        "none",
+                        "held"
+                      ]
+                    },
+                    "reservation_id": {
+                      "type": "string"
+                    },
+                    "fence": {
+                      "type": "string",
+                      "pattern": "^[1-9][0-9]*$"
+                    },
+                    "own_work_ref": {
+                      "type": "string"
+                    },
+                    "task_revision": {
+                      "type": "integer",
+                      "minimum": 1
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "unsupported_version (missing or unsupported X-Aimem-Reservation-Version) or invalid_request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "code",
+                    "message",
+                    "retryable",
+                    "next_action",
+                    "correlation_id"
+                  ],
+                  "additionalProperties": false,
+                  "properties": {
+                    "code": {
+                      "type": "string"
+                    },
+                    "message": {
+                      "type": "string"
+                    },
+                    "active_mode": {
+                      "enum": [
+                        "personal",
+                        "team"
+                      ]
+                    },
+                    "retryable": {
+                      "type": "boolean"
+                    },
+                    "next_action": {
+                      "type": "string"
+                    },
+                    "correlation_id": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "invalid_credential: missing, revoked or not an individual credential",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "code",
+                    "message",
+                    "retryable",
+                    "next_action",
+                    "correlation_id"
+                  ],
+                  "additionalProperties": false,
+                  "properties": {
+                    "code": {
+                      "type": "string"
+                    },
+                    "message": {
+                      "type": "string"
+                    },
+                    "active_mode": {
+                      "enum": [
+                        "personal",
+                        "team"
+                      ]
+                    },
+                    "retryable": {
+                      "type": "boolean"
+                    },
+                    "next_action": {
+                      "type": "string"
+                    },
+                    "correlation_id": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "grant_denied, role_forbidden, identity_mismatch, context_missing, context_stale, or a team-mode gate refusal",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "code",
+                    "message",
+                    "retryable",
+                    "next_action",
+                    "correlation_id"
+                  ],
+                  "additionalProperties": false,
+                  "properties": {
+                    "code": {
+                      "type": "string"
+                    },
+                    "message": {
+                      "type": "string"
+                    },
+                    "active_mode": {
+                      "enum": [
+                        "personal",
+                        "team"
+                      ]
+                    },
+                    "retryable": {
+                      "type": "boolean"
+                    },
+                    "next_action": {
+                      "type": "string"
+                    },
+                    "correlation_id": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "task_unavailable: the task is not in this project or not readable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "code",
+                    "message",
+                    "retryable",
+                    "next_action",
+                    "correlation_id"
+                  ],
+                  "additionalProperties": false,
+                  "properties": {
+                    "code": {
+                      "type": "string"
+                    },
+                    "message": {
+                      "type": "string"
+                    },
+                    "active_mode": {
+                      "enum": [
+                        "personal",
+                        "team"
+                      ]
+                    },
+                    "retryable": {
+                      "type": "boolean"
+                    },
+                    "next_action": {
+                      "type": "string"
+                    },
+                    "correlation_id": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "context_unavailable (retryable)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "code",
+                    "message",
+                    "retryable",
+                    "next_action",
+                    "correlation_id"
+                  ],
+                  "additionalProperties": false,
+                  "properties": {
+                    "code": {
+                      "type": "string"
+                    },
+                    "message": {
+                      "type": "string"
+                    },
+                    "active_mode": {
+                      "enum": [
+                        "personal",
+                        "team"
+                      ]
+                    },
+                    "retryable": {
+                      "type": "boolean"
+                    },
+                    "next_action": {
+                      "type": "string"
+                    },
+                    "correlation_id": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/projects/{p}/tasks/{task_id}/reservation/receipts/{operation}/{request_key}": {
+      "get": {
+        "summary": "Reconcile a lost reply by the original operation and request key",
+        "description": "Answers committed with the recorded outcome, or not_committed (the same key may be retried). Served only to the acting member that made the transition, after its current authority is rechecked (reservation.v1, task C6a).",
+        "x-role": "writer",
+        "x-team-mode": "Team mode: with X-Aimem-Team-Context (an aimem-scoped acs1_ handle from aicrew) and a user-scoped individual bearer, over TLS terminated by the hub only (otherwise tls_required, 403), the hub verifies the session online and authorizes the transition against the linked team access profile's live grant, never the caller's personal grants. Every team transition but a holder's update carries a coordination_proof that the hub verifies online through coordination.v1 (C5b).",
+        "parameters": [
+          {
+            "name": "p",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "the task's project"
+          },
+          {
+            "name": "task_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "operation",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "enum": [
+                "claim",
+                "transfer",
+                "update",
+                "release",
+                "finalize"
+              ]
+            }
+          },
+          {
+            "name": "request_key",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "X-Aimem-Reservation-Version",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "1"
+              ]
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "committed with the outcome, or not_committed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "state",
+                    "operation",
+                    "request_key"
+                  ],
+                  "properties": {
+                    "state": {
+                      "enum": [
+                        "committed",
+                        "not_committed"
+                      ]
+                    },
+                    "operation": {
+                      "enum": [
+                        "claim",
+                        "transfer",
+                        "update",
+                        "release",
+                        "finalize"
+                      ]
+                    },
+                    "request_key": {
+                      "type": "string"
+                    },
+                    "outcome": {
+                      "type": "object",
+                      "required": [
+                        "receipt",
+                        "task_revision",
+                        "reservation"
+                      ],
+                      "properties": {
+                        "receipt": {
+                          "type": "object",
+                          "required": [
+                            "id",
+                            "state",
+                            "operation",
+                            "request_key",
+                            "replayed",
+                            "actor_id",
+                            "verified_mode"
+                          ],
+                          "properties": {
+                            "id": {
+                              "type": "string"
+                            },
+                            "state": {
+                              "enum": [
+                                "committed"
+                              ]
+                            },
+                            "operation": {
+                              "type": "string"
+                            },
+                            "request_key": {
+                              "type": "string"
+                            },
+                            "replayed": {
+                              "type": "boolean"
+                            },
+                            "actor_id": {
+                              "type": "string"
+                            },
+                            "verified_mode": {
+                              "enum": [
+                                "personal",
+                                "team"
+                              ]
+                            }
+                          }
+                        },
+                        "task_revision": {
+                          "type": "integer",
+                          "minimum": 1
+                        },
+                        "reservation": {
+                          "type": "object",
+                          "required": [
+                            "id",
+                            "fence",
+                            "active"
+                          ],
+                          "properties": {
+                            "id": {
+                              "type": "string",
+                              "description": "Empty after release or finalize"
+                            },
+                            "fence": {
+                              "type": "string",
+                              "pattern": "^[1-9][0-9]*$"
+                            },
+                            "active": {
+                              "type": "boolean"
+                            },
+                            "holder_mode": {
+                              "enum": [
+                                "standalone",
+                                "external"
+                              ]
+                            },
+                            "own_work_ref": {
+                              "type": "string"
+                            }
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "unsupported_version (missing or unsupported X-Aimem-Reservation-Version) or invalid_request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "code",
+                    "message",
+                    "retryable",
+                    "next_action",
+                    "correlation_id"
+                  ],
+                  "additionalProperties": false,
+                  "properties": {
+                    "code": {
+                      "type": "string"
+                    },
+                    "message": {
+                      "type": "string"
+                    },
+                    "active_mode": {
+                      "enum": [
+                        "personal",
+                        "team"
+                      ]
+                    },
+                    "retryable": {
+                      "type": "boolean"
+                    },
+                    "next_action": {
+                      "type": "string"
+                    },
+                    "correlation_id": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "invalid_credential: missing, revoked or not an individual credential",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "code",
+                    "message",
+                    "retryable",
+                    "next_action",
+                    "correlation_id"
+                  ],
+                  "additionalProperties": false,
+                  "properties": {
+                    "code": {
+                      "type": "string"
+                    },
+                    "message": {
+                      "type": "string"
+                    },
+                    "active_mode": {
+                      "enum": [
+                        "personal",
+                        "team"
+                      ]
+                    },
+                    "retryable": {
+                      "type": "boolean"
+                    },
+                    "next_action": {
+                      "type": "string"
+                    },
+                    "correlation_id": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "grant_denied, role_forbidden, identity_mismatch, context_missing, context_stale, or a team-mode gate refusal",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "code",
+                    "message",
+                    "retryable",
+                    "next_action",
+                    "correlation_id"
+                  ],
+                  "additionalProperties": false,
+                  "properties": {
+                    "code": {
+                      "type": "string"
+                    },
+                    "message": {
+                      "type": "string"
+                    },
+                    "active_mode": {
+                      "enum": [
+                        "personal",
+                        "team"
+                      ]
+                    },
+                    "retryable": {
+                      "type": "boolean"
+                    },
+                    "next_action": {
+                      "type": "string"
+                    },
+                    "correlation_id": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "task_unavailable: the task is not in this project or not readable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "code",
+                    "message",
+                    "retryable",
+                    "next_action",
+                    "correlation_id"
+                  ],
+                  "additionalProperties": false,
+                  "properties": {
+                    "code": {
+                      "type": "string"
+                    },
+                    "message": {
+                      "type": "string"
+                    },
+                    "active_mode": {
+                      "enum": [
+                        "personal",
+                        "team"
+                      ]
+                    },
+                    "retryable": {
+                      "type": "boolean"
+                    },
+                    "next_action": {
+                      "type": "string"
+                    },
+                    "correlation_id": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "context_unavailable, or receipt_unresolved: the outcome is unknown; reconcile again with the same key and send no later transition",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "code",
+                    "message",
+                    "retryable",
+                    "next_action",
+                    "correlation_id"
+                  ],
+                  "additionalProperties": false,
+                  "properties": {
+                    "code": {
+                      "type": "string"
+                    },
+                    "message": {
+                      "type": "string"
+                    },
+                    "active_mode": {
+                      "enum": [
+                        "personal",
+                        "team"
+                      ]
+                    },
+                    "retryable": {
+                      "type": "boolean"
+                    },
+                    "next_action": {
+                      "type": "string"
+                    },
+                    "correlation_id": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/v1/admin/reservations/{task_id}/recovery/release": {
       "post": {
         "summary": "Recover a reservation: release its task",

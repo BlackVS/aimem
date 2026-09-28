@@ -277,7 +277,7 @@ aimem reservation receipt OPERATION --task TASK_ID --key REQUEST_KEY
 aimem reservation status --task TASK_ID
 ```
 
-- **Input.** The mutation body (expected revision, reservation ID and fence, holder, complete content, reason, terminal evidence and `coordination_proof`) is read as JSON from **standard input only**, never argv, as E5a reads the session handle. The request key is not a secret and may be an argument.
+- **Input.** The mutation body (expected revision, reservation ID and fence, holder, complete content, an update's optional `intent`, reason, terminal evidence and `coordination_proof`) is read as JSON from **standard input only**, never argv, as E5a reads the session handle. The request key is not a secret and may be an argument.
 - **Context.** The command runs under the process's bound team session (`AIMEM_TEAM_SESSION`, E5a), with the same pinned binding, header and online verification as `aimem mcp`. Without the variable it runs in personal mode. It never falls back from team to personal mode.
 - **Output.** The committed outcome or the refusal envelope goes to standard output as one JSON document, and never includes the proof.
 - **Exit status.**

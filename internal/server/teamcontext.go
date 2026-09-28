@@ -51,10 +51,12 @@ func teamMode(r *http.Request) bool {
 }
 
 // teamRoutes is the complete team-mode surface (E4 seq186, D2): the context
-// report and the task and epic reads. Every other route, including every
-// write, /mcp and the knowledge routes, refuses a team-mode request with
+// report, the task and epic reads, and the member reservation routes (C6a),
+// whose every transition the C5 authorizer checks against a verified
+// coordination fact. Every other route, including every other write, /mcp
+// and the knowledge routes, refuses a team-mode request with
 // team_operation_unsupported before aicrew is contacted.
-var teamRoutes = []string{
+var teamRoutes = append([]string{
 	"GET /v1/access/identity",
 	"GET /v1/projects/{p}/tasks",
 	"GET /v1/tasks/{id}",
@@ -63,7 +65,7 @@ var teamRoutes = []string{
 	"GET /v1/tasks/{id}/comments/{c}",
 	"GET /v1/projects/{p}/epics",
 	"GET /v1/projects/{p}/epics/{e}",
-}
+}, reservationRoutePatterns...)
 
 // teamRouteMux matches teamRoutes by the route mux's own rules.
 var teamRouteMux = func() *http.ServeMux {

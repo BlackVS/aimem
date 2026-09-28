@@ -293,19 +293,19 @@ func (s *Server) reservationStatus(ctx context.Context, taskID string) (reservat
 
 // reservationReceipt reconciles a lost reply: the recorded outcome of the
 // caller's own transition, after its current authority is rechecked.
-func (s *Server) reservationReceipt(ctx context.Context, op store.ReservationOperation, in store.TaskReservationInput, key string) (store.TaskReservationOutcome, bool, error) {
+func (s *Server) reservationReceipt(ctx context.Context, op store.ReservationOperation, taskID, key string) (store.TaskReservationOutcome, bool, error) {
 	c, err := reservationCallerFrom(ctx)
 	if err != nil {
 		return store.TaskReservationOutcome{}, false, err
 	}
-	project, db, instance, err := s.reservationTarget(in.TaskID)
+	project, db, instance, err := s.reservationTarget(taskID)
 	if err != nil {
 		return store.TaskReservationOutcome{}, false, err
 	}
 	if err := s.reservationAuthority(c, project, instance, true); err != nil {
 		return store.TaskReservationOutcome{}, false, err
 	}
-	out, found, err := db.GetTaskReservationReceipt(op, in, c.actor, c.binding, key)
+	out, found, err := db.TaskReservationReceiptByKey(op, taskID, c.actor, c.binding, key)
 	if err != nil {
 		return store.TaskReservationOutcome{}, false, reservationError(err)
 	}

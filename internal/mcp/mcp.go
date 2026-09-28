@@ -393,9 +393,16 @@ func (s *srv) toolCall(ctx context.Context, req rpcRequest) []byte {
 		text, err = s.run(&p)
 	}
 	if err != nil {
-		// Tool-level errors go back as content with isError, per MCP.
+		// Tool-level errors go back as content with isError, per MCP. A
+		// reservation refusal is the hub's envelope itself, unprefixed, so a
+		// client parses its code and retryable flag (reservation wire).
+		text := "error: " + err.Error()
+		var refusal *reservationToolRefusal
+		if errors.As(err, &refusal) {
+			text = refusal.envelope
+		}
 		return reply(req.ID, map[string]any{
-			"content": []map[string]any{{"type": "text", "text": "error: " + err.Error()}},
+			"content": []map[string]any{{"type": "text", "text": text}},
 			"isError": true,
 		}, nil)
 	}

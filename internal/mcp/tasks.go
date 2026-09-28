@@ -154,7 +154,7 @@ var taskToolDefs = append([]map[string]any{
 			"idempotency_key": prop("string", "your unique key for this comment (retry-safe)"),
 		}, "id", "body", "idempotency_key"),
 	},
-}, append(teamToolDefs, teamWorkToolDefs...)...)
+}, append(append(teamToolDefs, teamWorkToolDefs...), reservationToolDefs...)...)
 
 // taskRefProp is the typed reference: kind says what ref holds — task: a
 // task id; doc: a document name; record: <collection>/<record id>;
@@ -327,6 +327,9 @@ func (s *srv) taskTool(ctx context.Context, name string, raw json.RawMessage) (s
 			}
 		}
 		return out, err
+	}
+	if reservationTools[name] {
+		return callReservationTool(ctx, tasks, s.project, name, raw)
 	}
 	a, err := decodeTaskArgs(raw)
 	if err != nil {

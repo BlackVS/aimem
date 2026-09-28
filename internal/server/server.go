@@ -135,6 +135,13 @@ func (s *Server) Routes() []Route {
 		{"PUT", "/v1/identity/peers/{service_id}/teams/{team_id}/grants/{project}", s.grantTeamProject, true},
 		{"DELETE", "/v1/identity/peers/{service_id}/teams/{team_id}/grants/{project}", s.revokeTeamProject, true},
 		{"DELETE", "/v1/identity/peers/{service_id}/teams/{team_id}/grant-instances/{instance}", s.revokeTeamInstance, true},
+		{"POST", "/v1/projects/{p}/tasks/{task_id}/reservation/claim", s.reservationMutate(store.ReservationClaim), false},
+		{"POST", "/v1/projects/{p}/tasks/{task_id}/reservation/transfer", s.reservationMutate(store.ReservationTransfer), false},
+		{"POST", "/v1/projects/{p}/tasks/{task_id}/reservation/update", s.reservationMutate(store.ReservationUpdate), false},
+		{"POST", "/v1/projects/{p}/tasks/{task_id}/reservation/release", s.reservationMutate(store.ReservationRelease), false},
+		{"POST", "/v1/projects/{p}/tasks/{task_id}/reservation/finalize", s.reservationMutate(store.ReservationFinalize), false},
+		{"GET", "/v1/projects/{p}/tasks/{task_id}/reservation", s.reservationStatusRoute, false},
+		{"GET", "/v1/projects/{p}/tasks/{task_id}/reservation/receipts/{operation}/{request_key}", s.reservationReceiptRoute, false},
 		{"POST", "/v1/admin/reservations/{task_id}/recovery/release", s.recoverRelease, true},
 		{"POST", "/v1/admin/reservations/{task_id}/recovery/cancel", s.recoverCancel, true},
 		{"GET", "/v1/admin/reservations/{task_id}/recovery", s.recoveryStatus, true},
@@ -517,6 +524,9 @@ func (s *Server) authWrapper(token string, next http.Handler) http.Handler {
 		// this authentication, by one deadline, and answer every gate
 		// refusal with the contract's refusal envelope.
 		wire := identityWireRoute(r)
+		// The member reservation routes answer every gate refusal with the
+		// reservation envelope (task C6a).
+		resv := reservationRoute(r)
 		if wire != "" {
 			ctx, cancel := context.WithTimeout(r.Context(), identityWait)
 			defer cancel()
@@ -527,6 +537,8 @@ func (s *Server) authWrapper(token string, next http.Handler) http.Handler {
 			switch {
 			case wire != "":
 				s.identityRefuse(w, identityUnauthenticated[wire])
+			case resv:
+				s.reservationRefuse(w, r, "invalid_credential")
 			case team:
 				s.identityRefuse(w, "invalid_credential")
 			default:
@@ -544,6 +556,10 @@ func (s *Server) authWrapper(token string, next http.Handler) http.Handler {
 				s.identityRefuse(w, identityStoreError(err))
 			case wire != "":
 				s.identityRefuse(w, identityUnauthenticated[wire])
+			case resv && !errors.Is(err, errNotAuthenticated):
+				s.reservationRefuse(w, r, "context_unavailable")
+			case resv:
+				s.reservationRefuse(w, r, "invalid_credential")
 			case team:
 				s.identityRefuse(w, "invalid_credential")
 			default:
@@ -579,6 +595,12 @@ func (s *Server) authWrapper(token string, next http.Handler) http.Handler {
 		if id.Role == "peer" && !peerRouteAllowed(r) {
 			if wire == "proof" {
 				s.identityRefuse(w, "credential_scope_forbidden")
+				return
+			}
+			if resv {
+				// A peer credential is not an individual's: aicrew never
+				// mutates a reservation (D4a).
+				s.reservationRefuse(w, r, "invalid_credential")
 				return
 			}
 			s.fail(w, http.StatusForbidden, fmt.Errorf("peer credential is not authorized for this endpoint"))

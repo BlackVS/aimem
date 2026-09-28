@@ -295,6 +295,7 @@ func (r *Registry) ClaimTaskReservation(ctx context.Context, in TaskReservationI
 	if prior, found, err := db.GetTaskReservationReceipt(ReservationClaim, in, actor, binding, key); err != nil {
 		return TaskReservationOutcome{}, err
 	} else if found {
+		prior.Replayed = true
 		return prior, nil
 	}
 	owner, err := db.GetTask(in.TaskID)

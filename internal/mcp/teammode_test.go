@@ -145,6 +145,14 @@ func TestTeamModeToolListMatchesHubTeamRoutes(t *testing.T) {
 		"list_task_comments": "GET /v1/tasks/{id}/comments", "get_task_comment": "GET /v1/tasks/{id}/comments/{c}",
 		"list_epics": "GET /v1/projects/{p}/epics", "get_epic": "GET /v1/projects/{p}/epics/{e}",
 		sessionContextTool: "GET /v1/access/identity",
+		// The member reservation tools (C6a).
+		"task_reservation_claim":    "POST /v1/projects/{p}/tasks/{task_id}/reservation/claim",
+		"task_reservation_transfer": "POST /v1/projects/{p}/tasks/{task_id}/reservation/transfer",
+		"task_reservation_update":   "POST /v1/projects/{p}/tasks/{task_id}/reservation/update",
+		"task_reservation_release":  "POST /v1/projects/{p}/tasks/{task_id}/reservation/release",
+		"task_reservation_finalize": "POST /v1/projects/{p}/tasks/{task_id}/reservation/finalize",
+		"task_reservation_status":   "GET /v1/projects/{p}/tasks/{task_id}/reservation",
+		"task_reservation_receipt":  "GET /v1/projects/{p}/tasks/{task_id}/reservation/receipts/{operation}/{request_key}",
 	}
 	var want []string
 	for n := range toolRoute {

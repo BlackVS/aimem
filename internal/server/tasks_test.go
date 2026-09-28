@@ -397,7 +397,13 @@ func TestOrdinaryTokenGateMatrix(t *testing.T) {
 		"GET /v1/projects/{p}/process",                                                                                                  // the selected process reference (TestProcessReferenceSelection)
 		"GET /v1/projects/{p}/epics", "POST /v1/projects/{p}/epics", "GET /v1/projects/{p}/epics/{e}", "PUT /v1/projects/{p}/epics/{e}", // epics (TestEpicRoutes)
 		"GET /v1/access/directory", // the identity directory (TestAccessDirectory)
-		"POST /v1/identity/proofs"} // identity.v1 proof receipt over TLS only (TestIdentityRoutes*)
+		"POST /v1/identity/proofs", // identity.v1 proof receipt over TLS only (TestIdentityRoutes*)
+		// the member reservation routes; the C5 authorizer refuses every
+		// credential but an individual's (TestReservationRoutes*)
+		"POST /v1/projects/{p}/tasks/{task_id}/reservation/claim", "POST /v1/projects/{p}/tasks/{task_id}/reservation/transfer",
+		"POST /v1/projects/{p}/tasks/{task_id}/reservation/update", "POST /v1/projects/{p}/tasks/{task_id}/reservation/release",
+		"POST /v1/projects/{p}/tasks/{task_id}/reservation/finalize", "GET /v1/projects/{p}/tasks/{task_id}/reservation",
+		"GET /v1/projects/{p}/tasks/{task_id}/reservation/receipts/{operation}/{request_key}"}
 	if len(ordinaryRoutes) != len(want) {
 		t.Fatalf("ordinary surface changed: %v", ordinaryRoutes)
 	}

@@ -181,7 +181,7 @@ func TestReservationPersonalStandaloneLifecycle(t *testing.T) {
 		t.Fatalf("finalize: %+v, %v", final, err)
 	}
 	// The receipt of each transition is the caller's, with its binding.
-	if out, found, err := g.s.reservationReceipt(alice, store.ReservationClaim, claimOf(task), "claim"); err != nil || !found || out.Binding != want {
+	if out, found, err := g.s.reservationReceipt(alice, store.ReservationClaim, task.ID, "claim"); err != nil || !found || out.Binding != want {
 		t.Fatalf("own receipt: %+v %v %v", out, found, err)
 	}
 	// A personal claim holds in standalone mode only.
@@ -230,7 +230,7 @@ func TestReservationActorIsDerivedNeverSupplied(t *testing.T) {
 	if st, err := g.s.reservationStatus(bob, task.ID); err != nil || st.State != "none" || st.Reservation != nil {
 		t.Fatalf("another user's status disclosed the hold: %+v, %v", st, err)
 	}
-	if _, found, err := g.s.reservationReceipt(bob, store.ReservationClaim, claimOf(task), "alice-claim"); err != nil || found {
+	if _, found, err := g.s.reservationReceipt(bob, store.ReservationClaim, task.ID, "alice-claim"); err != nil || found {
 		t.Fatalf("another user read the receipt: %v %v", found, err)
 	}
 	g.held(t, task.ID, claimed.Reservation)
@@ -383,7 +383,7 @@ func TestReservationRevocationAndRotation(t *testing.T) {
 	}
 	_, err = g.s.reserve(alice, store.ReservationUpdate, nextOf(task, hold, "IN_PROGRESS"), "no-grant", "")
 	expectRefusal(t, "revoked grant", err, "grant_denied")
-	_, _, err = g.s.reservationReceipt(alice, store.ReservationClaim, claimOf(task), "claim")
+	_, _, err = g.s.reservationReceipt(alice, store.ReservationClaim, task.ID, "claim")
 	expectRefusal(t, "receipt after the grant was revoked", err, "grant_denied")
 	_, err = g.s.reservationStatus(alice, task.ID)
 	expectRefusal(t, "status after the grant was revoked", err, "grant_denied")
@@ -410,7 +410,7 @@ func TestReservationRevocationAndRotation(t *testing.T) {
 	if err != nil || out.Reservation.ID != hold.Reservation.ID {
 		t.Fatalf("rotated credential: %+v, %v", out, err)
 	}
-	if out, found, err := g.s.reservationReceipt(g.personal(rotated), store.ReservationClaim, claimOf(task), "claim"); err != nil || !found {
+	if out, found, err := g.s.reservationReceipt(g.personal(rotated), store.ReservationClaim, task.ID, "claim"); err != nil || !found {
 		t.Fatalf("rotated credential's receipt: %+v %v %v", out, found, err)
 	}
 }
@@ -457,7 +457,8 @@ func TestReservationPrecommitRecheck(t *testing.T) {
 func TestReservationLedgerHasOneCaller(t *testing.T) {
 	ledger := map[string]bool{"ApplyTaskReservation": true, "ClaimTaskReservation": true,
 		"GetTaskReservation": true, "GetTaskReservationReceipt": true,
-		"RecoverTaskReservation": true, "ServiceHoldStatus": true, "RecoveryReceipts": true, "RecoveryReplay": true}
+		"RecoverTaskReservation": true, "ServiceHoldStatus": true, "RecoveryReceipts": true, "RecoveryReplay": true,
+		"TaskReservationReceiptByKey": true}
 	root, err := filepath.Abs(filepath.Join("..", ".."))
 	if err != nil {
 		t.Fatal(err)
