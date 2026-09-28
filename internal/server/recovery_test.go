@@ -232,6 +232,18 @@ func TestRecoveryOnStopEvidence(t *testing.T) {
 	if last := g.fake.Last(); last.Path != introspecttest.CoordinationPath || last.Body.Proof != proof {
 		t.Fatalf("aicrew was not asked about the proof: %+v", last)
 	}
+	// aicrew settles the proof; the same request replays from its receipt
+	// without asking aicrew again (the replay rule).
+	g.fake.SetCoordination(func(w http.ResponseWriter, got introspecttest.Request) {
+		introspecttest.WriteJSON(w, introspecttest.InactiveReply(got.Nonce))
+	})
+	calls := g.fake.Calls()
+	again := g.recover(t, "release", g.env, key, stopBody)
+	var replay recoveryResponse
+	json.Unmarshal(again.body, &replay)
+	if again.status != http.StatusOK || replay != out || g.fake.Calls() != calls {
+		t.Fatalf("stop-evidence replay: %d %s (aicrew calls %d -> %d)", again.status, again.body, calls, g.fake.Calls())
+	}
 }
 
 // A registry admin removed between authorization and commit cannot commit.

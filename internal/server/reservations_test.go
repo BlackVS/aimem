@@ -450,7 +450,7 @@ func TestReservationPrecommitRecheck(t *testing.T) {
 func TestReservationLedgerHasOneCaller(t *testing.T) {
 	ledger := map[string]bool{"ApplyTaskReservation": true, "ClaimTaskReservation": true,
 		"GetTaskReservation": true, "GetTaskReservationReceipt": true,
-		"RecoverTaskReservation": true, "ServiceHoldStatus": true, "RecoveryReceipts": true}
+		"RecoverTaskReservation": true, "ServiceHoldStatus": true, "RecoveryReceipts": true, "RecoveryReplay": true}
 	root, err := filepath.Abs(filepath.Join("..", ".."))
 	if err != nil {
 		t.Fatal(err)

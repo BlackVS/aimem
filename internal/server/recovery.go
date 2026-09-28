@@ -136,6 +136,25 @@ func (s *Server) recoverReservation(w http.ResponseWriter, r *http.Request, op s
 			refuse(http.StatusBadRequest, "invalid_request", "stop evidence carries only its proof")
 			return
 		}
+		// A committed recovery replays from its receipt; aicrew is asked
+		// only about a request that has not committed (the replay rule).
+		if introspect.ValidProof(req.Evidence.Proof) {
+			replayEvidence := store.RecoveryEvidence{Kind: "stop_evidence", Ref: proofP1Digest(req.Evidence.Proof)}
+			prior, found, err := s.reg.RecoveryReplay(op, in, replayEvidence, store.TaskActor{Kind: "recovery", Name: id.Name}, key)
+			if err != nil {
+				status, code, msg := recoveryErrorStatus(err)
+				refuse(status, code, msg)
+				return
+			}
+			if found {
+				if !stillAdmin() {
+					refuse(http.StatusUnauthorized, "invalid_credential", "the admin credential is no longer registered")
+					return
+				}
+				s.recoveryAnswer(w, op, key, id.Name, taskID, prior)
+				return
+			}
+		}
 		ref, code, msg := s.verifyStopEvidence(r.Context(), taskID, key, req.Evidence.Proof)
 		if code != "" {
 			status := http.StatusForbidden
@@ -171,7 +190,16 @@ func (s *Server) recoverReservation(w http.ResponseWriter, r *http.Request, op s
 	rec := out.Recovery
 	audit(string(op)[len("recovery_"):], fmt.Sprintf("reservation=%s fence=%d affected_user=%s affected_mode=%s evidence=%s ref=%s",
 		req.ReservationID, out.Reservation.Fence, rec.Affected.UserID, rec.Affected.Mode, rec.EvidenceKind, rec.EvidenceRef))
-	s.ok(w, recoveryResponse{Operation: op, RequestKey: key, Principal: "recovery/" + id.Name, TaskID: taskID,
+	s.recoveryAnswer(w, op, key, id.Name, taskID, out)
+}
+
+func (s *Server) recoveryAnswer(w http.ResponseWriter, op store.RecoveryOperation, key, admin, taskID string, out store.TaskReservationOutcome) {
+	rec := out.Recovery
+	if rec == nil {
+		s.recoveryRefuse(w, http.StatusInternalServerError, "internal", "the receipt is not a recovery")
+		return
+	}
+	s.ok(w, recoveryResponse{Operation: op, RequestKey: key, Principal: "recovery/" + admin, TaskID: taskID,
 		TaskState: out.Task.State, TaskRevision: out.Task.Revision, ClosingFence: strconv.FormatInt(out.Reservation.Fence, 10),
 		Affected: rec.Affected, EvidenceKind: rec.EvidenceKind, EvidenceRef: rec.EvidenceRef})
 }

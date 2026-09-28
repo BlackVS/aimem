@@ -75,25 +75,7 @@ type RecoveryRecord struct {
 // route's recheck of that admin, run before commit and on replay.
 func (r *Registry) RecoverTaskReservation(ctx context.Context, op RecoveryOperation, in TaskReservationInput, evidence RecoveryEvidence,
 	actor TaskActor, key string, authorize func() error) (TaskReservationOutcome, error) {
-	switch op {
-	case RecoveryRelease:
-		if err := validateReservationInput(ReservationRelease, &in); err != nil {
-			return TaskReservationOutcome{}, err
-		}
-	case RecoveryCancel:
-		if err := validateReservationInput(ReservationFinalize, &in); err != nil {
-			return TaskReservationOutcome{}, err
-		}
-		if in.Content.State != "CANCELLED" {
-			return TaskReservationOutcome{}, invalid(errors.New("a recovery can cancel a task, never complete it"))
-		}
-	default:
-		return TaskReservationOutcome{}, invalid(errors.New("unknown recovery operation"))
-	}
-	if err := evidence.validate(); err != nil {
-		return TaskReservationOutcome{}, err
-	}
-	if _, err := recoveryPrincipal(actor); err != nil {
+	if err := validateRecovery(op, &in, evidence, actor); err != nil {
 		return TaskReservationOutcome{}, err
 	}
 	ctx, cancel := context.WithTimeout(ctx, dependencyClaimTimeout)
@@ -153,6 +135,70 @@ func (r *Registry) RecoverTaskReservation(ctx context.Context, op RecoveryOperat
 			}
 			return TaskReservationOutcome{Task: t, Reservation: hold, Recovery: record}, nil
 		}, authorize)
+}
+
+func validateRecovery(op RecoveryOperation, in *TaskReservationInput, evidence RecoveryEvidence, actor TaskActor) error {
+	switch op {
+	case RecoveryRelease:
+		if err := validateReservationInput(ReservationRelease, in); err != nil {
+			return err
+		}
+	case RecoveryCancel:
+		if err := validateReservationInput(ReservationFinalize, in); err != nil {
+			return err
+		}
+		if in.Content.State != "CANCELLED" {
+			return invalid(errors.New("a recovery can cancel a task, never complete it"))
+		}
+	default:
+		return invalid(errors.New("unknown recovery operation"))
+	}
+	if err := evidence.validate(); err != nil {
+		return err
+	}
+	_, err := recoveryPrincipal(actor)
+	return err
+}
+
+// RecoveryReplay finds the committed receipt of this exact recovery request
+// (the same principal, operation, task, key, input and evidence) without
+// running it. The route consults it before asking aicrew about a stop proof
+// again: a replay never re-queries a coordination fact (the replay rule). A
+// changed request under a used key is ErrTaskRetryConflict.
+func (r *Registry) RecoveryReplay(op RecoveryOperation, in TaskReservationInput, evidence RecoveryEvidence,
+	actor TaskActor, key string) (TaskReservationOutcome, bool, error) {
+	if err := validateRecovery(op, &in, evidence, actor); err != nil {
+		return TaskReservationOutcome{}, false, err
+	}
+	_, db, err := r.LocateTask(in.TaskID)
+	if err != nil {
+		return TaskReservationOutcome{}, false, err
+	}
+	principal, _ := recoveryPrincipal(actor)
+	digest, err := receiptDigest(struct {
+		In    TaskReservationInput `json:"in"`
+		Extra any                  `json:"extra"`
+	}{in, evidence})
+	if err != nil {
+		return TaskReservationOutcome{}, false, err
+	}
+	var savedDigest, saved string
+	err = db.sql.QueryRow(`SELECT digest,result FROM task_reservation_requests WHERE principal=? AND operation=? AND task_id=? AND key=?`,
+		principal, string(op), in.TaskID, key).Scan(&savedDigest, &saved)
+	if errors.Is(err, sql.ErrNoRows) {
+		return TaskReservationOutcome{}, false, nil
+	}
+	if err != nil {
+		return TaskReservationOutcome{}, false, err
+	}
+	if savedDigest != digest {
+		return TaskReservationOutcome{}, false, ErrTaskRetryConflict
+	}
+	var out TaskReservationOutcome
+	if err := json.Unmarshal([]byte(saved), &out); err != nil {
+		return TaskReservationOutcome{}, false, err
+	}
+	return out, true, nil
 }
 
 // recordRecoveryEvent keeps the full recovery record, including the
