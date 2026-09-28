@@ -398,6 +398,7 @@ func TestCoordinationV1ReadScopeAndCLI(t *testing.T) {
 	}
 	schemas := obj(t, obj(t, spec["components"], "components")["schemas"], "schemas")
 	receiptFields := obj(t, obj(t, obj(t, schemas["ReceiptRead"], "ReceiptRead")["properties"], "p")["receipt"], "receipt")["required"]
+	closedBy := map[string]bool{}
 	for _, e := range arr(t, rs["exchanges"], "read exchanges") {
 		e := obj(t, e, "read exchange")
 		c := str(t, e["case"], "case")
@@ -443,6 +444,30 @@ func TestCoordinationV1ReadScopeAndCLI(t *testing.T) {
 				!keyDigest.MatchString(digest) || !strings.Contains(path, "/reservations/"+str(t, receipt["task_id"], "task")+"/receipts/update/") {
 				t.Errorf("%s: receipt by key does not bind its task, operation and key", c)
 			}
+		case "closed_holder_release", "closed_holder_finalize", "closed_recovery_release", "closed_recovery_cancel", "closed_while_another_holds_the_task":
+			// Positive closure evidence for this service's own reservation: the
+			// closing fence advanced, and nothing about the recovery admin, the
+			// attestation, the reason or any current holder is disclosed.
+			if !reflect.DeepEqual(keysOf(body), []string{"closed_at", "closed_by", "closing_fence", "reservation_id", "state", "task_revision"}) || body["state"] != "closed" {
+				t.Errorf("%s: closed field set %v", c, keysOf(body))
+			}
+			by := str(t, body["closed_by"], "closed_by")
+			if !contains([]string{"holder_release", "holder_finalize", "recovery_release", "recovery_cancel"}, by) {
+				t.Errorf("%s: closed_by %q", c, by)
+			}
+			closedBy[by] = true
+			ctx := obj(t, e["context"], c+".context")
+			if atoi(t, str(t, body["closing_fence"], "closing_fence")) <= atoi(t, str(t, ctx["last_active_fence"], "last fence")) {
+				t.Errorf("%s: the closing fence did not advance past the active fence", c)
+			}
+			if _, err := time.Parse(time.RFC3339, str(t, body["closed_at"], "closed_at")); err != nil {
+				t.Errorf("%s: closed_at: %v", c, err)
+			}
+			for _, k := range []string{"recovery_admin", "attestation", "attestation_id", "reason", "current_holder", "current_holder_ref"} {
+				if v, ok := ctx[k].(string); ok && strings.Contains(string(raw), v) {
+					t.Errorf("%s: closed answer discloses %s", c, k)
+				}
+			}
 		case "receipt_none", "hold_outside_scope":
 			if !reflect.DeepEqual(keysOf(body), []string{"state"}) || body["state"] != "none" {
 				t.Errorf("%s: none carries nothing else: %v", c, body)
@@ -454,6 +479,42 @@ func TestCoordinationV1ReadScopeAndCLI(t *testing.T) {
 			}
 		default:
 			t.Errorf("unknown read case %s", c)
+		}
+	}
+	for _, by := range []string{"holder_release", "holder_finalize", "recovery_release", "recovery_cancel"} {
+		if !closedBy[by] {
+			t.Errorf("no closed example for %s", by)
+		}
+	}
+	// Aicrew closes an attempt only on its exact reservation ID with the fence
+	// advanced; anything else keeps it open.
+	cu := obj(t, rs["closure_use"], "closure_use")
+	actions := map[string]bool{}
+	for _, c := range arr(t, cu["cases"], "closure cases") {
+		c := obj(t, c, "closure case")
+		att, ans := obj(t, c["attempt"], "attempt"), obj(t, c["answer"], "answer")
+		want := "keep_open"
+		if ans["state"] == "closed" && ans["reservation_id"] == att["reservation_id"] &&
+			atoi(t, str(t, ans["closing_fence"], "closing_fence")) > atoi(t, str(t, att["fence"], "fence")) {
+			want = "close"
+		}
+		if c["action"] != want {
+			t.Errorf("closure use %v: action %v, want %s", c["case"], c["action"], want)
+		}
+		actions[want] = true
+	}
+	if !actions["close"] || !actions["keep_open"] {
+		t.Error("closure use needs both a close and a keep-open case")
+	}
+	// The proposal's HoldRead carries the three states and the closure fields.
+	hold := obj(t, obj(t, schemas["HoldRead"], "HoldRead")["properties"], "HoldRead.properties")
+	if !reflect.DeepEqual(obj(t, hold["state"], "state")["enum"], []any{"held", "closed", "none"}) ||
+		!reflect.DeepEqual(obj(t, hold["closed_by"], "closed_by")["enum"], []any{"holder_release", "holder_finalize", "recovery_release", "recovery_cancel"}) {
+		t.Errorf("HoldRead states or closed_by values: %v %v", hold["state"], hold["closed_by"])
+	}
+	for _, f := range []string{"closing_fence", "closed_at"} {
+		if _, ok := hold[f]; !ok {
+			t.Errorf("HoldRead lacks %s", f)
 		}
 	}
 	nf := obj(t, rs["none_finality"], "none_finality")
@@ -683,7 +744,8 @@ func TestCoordinationV1IsNotServedAndContractsAgree(t *testing.T) {
 		}
 	}
 	for _, must := range []string{"coordination_rejected", "reservation.read", "`acp1_`", "`p1_`", "X-Aimem-Coordination-Version", "standard input",
-		"All three are HTTP-only", "own_work_ref", "acting member", "begin response", "stays **unresolved**", "**Only after that**"} {
+		"All three are HTTP-only", "own_work_ref", "acting member", "begin response", "stays **unresolved**", "**Only after that**",
+		"### Closure evidence", "`recovery_cancel`", "`closing_fence`", "never describes that other holder"} {
 		if !strings.Contains(coordination, must) {
 			t.Errorf("the coordination contract lacks %s", must)
 		}

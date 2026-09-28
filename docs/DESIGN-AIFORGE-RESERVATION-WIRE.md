@@ -40,7 +40,7 @@ All mutations carry positive `expected_revision`. `transfer`, `update`, `release
 
 The fact each row needs is the `coordination.v1` kind of the same name: `offer`, `accepted_attempt`, `never_accepted`, `stopped`, `accepted_for_finalization` and `independent_claim`. A holder's `update` needs none.
 
-Operator recovery is a distinct auditable path, not an implicit admin-token override. Its concrete authentication and proof verification belong to C5. A blocked, revoked or unreachable participant cannot be replaced by an arbitrary service call. Receipt/status reads recheck current authority; when the original actor loses access, only the narrow authorized recovery reader can reconcile without granting a new mutation.
+Operator recovery is a distinct auditable path, not an implicit admin-token override. Its concrete authentication and proof verification belong to C5. A reservation that recovery closed is visible to aicrew's read scope as `closed`, with `closed_by: recovery_release` or `recovery_cancel`, as positive closure evidence ([coordination contract](DESIGN-AIFORGE-COORDINATION-WIRE.md#closure-evidence), C5c-w). A blocked, revoked or unreachable participant cannot be replaced by an arbitrary service call. Receipt/status reads recheck current authority; when the original actor loses access, only the narrow authorized recovery reader can reconcile without granting a new mutation.
 
 ## Response, reconciliation and refusal
 
