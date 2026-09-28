@@ -52,6 +52,12 @@ jobs:
           cache: true
       - run: go vet ./...
       - run: go test ./...
+      # The end-to-end identity test races concurrent redemptions against
+      # the rig's shared state. The race detector needs cgo, which the
+      # Ubuntu runner has; 50 runs keep a lost update from passing by luck.
+      - name: identity racing redemptions under the race detector
+        if: matrix.os == 'ubuntu-latest'
+        run: go test -race -count=50 -run '^TestIdentityRoutesEndToEndWithFakeVerifier$' ./internal/server/
 
   build:
     runs-on: ubuntu-latest
