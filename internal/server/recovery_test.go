@@ -246,25 +246,47 @@ func TestRecoveryOnStopEvidence(t *testing.T) {
 	}
 }
 
-// A registry admin removed between authorization and commit cannot commit.
+// A registry admin whose credential is gone by commit cannot commit: not
+// when it is removed, not when it is named "env" like the host's env admin,
+// and not when another credential takes its name.
 func TestRecoveryRechecksTheAdminBeforeCommit(t *testing.T) {
 	g := newRecoveryRig(t)
-	secret, digest, err := NewTokenSecret()
-	if err != nil {
-		t.Fatal(err)
-	}
 	root := g.s.reg.Root()
+	t.Cleanup(func() { beforeReservationRecheck = nil })
+	for _, c := range []struct {
+		name     string
+		replaced func(name string) []TokenEntry
+	}{
+		{"ops-admin", func(string) []TokenEntry { return nil }},
+		{"env", func(string) []TokenEntry { return nil }},
+		{"ops-admin", func(name string) []TokenEntry {
+			_, other, _ := NewTokenSecret()
+			return []TokenEntry{{Name: name, Role: "admin", SHA256: other}}
+		}},
+	} {
+		secret, digest, err := NewTokenSecret()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := SaveTokens(root, []TokenEntry{{Name: c.name, Role: "admin", SHA256: digest}}); err != nil {
+			t.Fatal(err)
+		}
+		beforeReservationRecheck = func() { SaveTokens(root, c.replaced(c.name)) }
+		r := g.recover(t, "release", secret, "admin-gone-"+c.name+strconv.Itoa(len(c.replaced(c.name))), g.body("READY", attestationEvidence()))
+		beforeReservationRecheck = nil
+		if r.status != http.StatusUnauthorized || recoveryCode(t, r) != "invalid_credential" {
+			t.Fatalf("admin %q whose credential is gone committed: %d %s", c.name, r.status, r.body)
+		}
+		g.held(t, g.task.ID, g.hold.Reservation)
+	}
+	// The registry admin whose credential stays registered does commit.
+	secret, digest, _ := NewTokenSecret()
 	if err := SaveTokens(root, []TokenEntry{{Name: "ops-admin", Role: "admin", SHA256: digest}}); err != nil {
 		t.Fatal(err)
 	}
-	beforeReservationRecheck = func() { SaveTokens(root, nil) }
-	t.Cleanup(func() { beforeReservationRecheck = nil })
-	r := g.recover(t, "release", secret, "admin-gone", g.body("READY", attestationEvidence()))
-	beforeReservationRecheck = nil
-	if r.status != http.StatusUnauthorized || recoveryCode(t, r) != "invalid_credential" {
-		t.Fatalf("a removed admin committed: %d %s", r.status, r.body)
+	if r := g.recover(t, "release", secret, "admin-kept", g.body("READY", attestationEvidence())); r.status != http.StatusOK {
+		t.Fatalf("a registered admin was refused: %d %s", r.status, r.body)
 	}
-	g.held(t, g.task.ID, g.hold.Reservation)
 }
 
 func TestRecoveryReader(t *testing.T) {

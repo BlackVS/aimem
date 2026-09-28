@@ -61,17 +61,22 @@ func (s *Server) recoveryRefuse(w http.ResponseWriter, status int, code, message
 }
 
 // recoveryAdmin is the admin behind a recovery request and the recheck of
-// that admin inside the transaction: the host's env admin lasts for the
-// process; a registry admin must still be registered.
+// that admin inside the transaction. The check is about the credential that
+// authenticated the request, never its name: the host's env token lasts for
+// the process, and a registry token must still be registered, as admin,
+// under the same digest. A registry token named "env", or a replacement
+// under a removed token's name, is not the credential that was checked.
 func (s *Server) recoveryAdmin(r *http.Request) (Identity, func() bool) {
 	id, _ := IdentityFrom(r.Context())
 	still := func() bool {
-		if id.Name == "env" {
+		switch id.credSource {
+		case "env":
 			return true
-		}
-		for _, t := range LoadTokens(s.reg.Root()) {
-			if t.Name == id.Name && t.Role == "admin" {
-				return true
+		case "registry":
+			for _, t := range LoadTokens(s.reg.Root()) {
+				if t.SHA256 == id.credDigest && t.Role == "admin" {
+					return true
+				}
 			}
 		}
 		return false
