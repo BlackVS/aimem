@@ -4,11 +4,13 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -572,10 +574,40 @@ func TestSetCursor(t *testing.T) {
 	}
 }
 
+// helperStamp names a file the sleeping helper process writes its start
+// time and PID to, and reads it back: when the helper actually began
+// running, or false if it never ran far enough to write it.
+func helperStamp(t *testing.T, name string) (string, func() (time.Time, int, bool)) {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), name)
+	return path, func() (time.Time, int, bool) {
+		b, err := os.ReadFile(path)
+		if err != nil {
+			return time.Time{}, 0, false
+		}
+		f := strings.Fields(string(b))
+		if len(f) != 2 {
+			t.Fatalf("helper stamp %s: %q", name, b)
+		}
+		ns, err1 := strconv.ParseInt(f[0], 10, 64)
+		pid, err2 := strconv.Atoi(f[1])
+		if err1 != nil || err2 != nil {
+			t.Fatalf("helper stamp %s: %q", name, b)
+		}
+		return time.Unix(0, ns), pid, true
+	}
+}
+
 // TestClaudeExtractorTimeout: a hung CLI must be killed at the bound
 // instead of blocking the hourly sweep forever (arch review S4). Uses
 // the helper-process pattern: the test binary re-runs itself as a
-// "claude" that sleeps past the (shrunk) timeout.
+// "claude" that sleeps 30 s, past the (shrunk) timeout.
+//
+// The bound is measured from when the helper began running, not from
+// before Complete: creating the process is the OS's time, not the kill's,
+// and on a loaded Windows machine it once pushed a wall-clock measure to
+// 8.5 s (task 01a0e686). A helper that never ran was killed at start,
+// which bounds it too; returning before its 30 s sleep is the proof.
 func TestClaudeExtractorTimeout(t *testing.T) {
 	exe, err := os.Executable()
 	if err != nil {
@@ -583,17 +615,25 @@ func TestClaudeExtractorTimeout(t *testing.T) {
 	}
 	t.Setenv("AIMEM_LLM_INTERVAL", "0") // keep llmrate.Wait out of the measured window
 	t.Setenv("GO_AIMEM_HELPER", "sleep")
+	stamp, started := helperStamp(t, "helper-started")
+	t.Setenv("GO_AIMEM_HELPER_STAMP", stamp)
 	c := &ClaudeExtractor{WorkDir: t.TempDir(), Bin: exe, Timeout: 300 * time.Millisecond}
-	start := time.Now()
+	begin := time.Now()
 	_, _, err = c.Complete("prompt")
+	done := time.Now()
 	if err == nil || !strings.Contains(err.Error(), "timed out") {
 		t.Fatalf("want timeout error, got %v", err)
 	}
 	if !errors.Is(err, context.DeadlineExceeded) {
 		t.Fatalf("timeout must wrap context.DeadlineExceeded for callers: %v", err)
 	}
-	if e := time.Since(start); e > 5*time.Second {
-		t.Fatalf("kill took %s — process not bounded", e)
+	if total := done.Sub(begin); total >= 30*time.Second {
+		t.Fatalf("Complete took %s: the hung helper ran to its own exit, it was never killed", total)
+	}
+	if at, _, ok := started(); ok {
+		if ran := done.Sub(at); ran > 5*time.Second {
+			t.Fatalf("kill took %s after the helper started (process start took %s): process not bounded", ran, at.Sub(begin))
+		}
 	}
 }
 
@@ -639,39 +679,61 @@ func TestClaudeExtractorTimeoutWithGrandchild(t *testing.T) {
 	claudeWaitDelay = 1 * time.Second
 	defer func() { claudeWaitDelay = old }()
 
-	c := &ClaudeExtractor{WorkDir: t.TempDir(), Bin: exe, Timeout: 300 * time.Millisecond}
-	start := time.Now()
+	stamp, started := helperStamp(t, "grandchild-started")
+	t.Setenv("GO_AIMEM_HELPER_STAMP", stamp)
+	// The timeout leaves the helper ample time to start and spawn its
+	// grandchild before the kill; the kill still lands long before the
+	// grandchild would let go of the pipe on its own.
+	c := &ClaudeExtractor{WorkDir: t.TempDir(), Bin: exe, Timeout: 3 * time.Second}
 	_, _, err = c.Complete("prompt")
-	elapsed := time.Since(start)
+	done := time.Now()
+	born, pid, ok := started()
+	if ok {
+		// On Windows a live grandchild wedges TempDir removal and the test
+		// binary's deletion; it is ended here rather than slept out.
+		t.Cleanup(func() {
+			if p, err := os.FindProcess(pid); err == nil {
+				p.Kill()
+				p.Wait()
+			}
+		})
+	}
 	if err == nil {
 		t.Fatal("want an error from the killed CLI")
 	}
-	// The LOWER bound is the anti-vacuous check: without a live
-	// grandchild holding the pipe, Output returns right at the 300ms
-	// kill — an elapsed under ~1.1s means the spawn silently failed and
-	// this test proved nothing about WaitDelay. The upper bound is the
-	// point of the test: the grandchild holds the pipe ~4s, and only
-	// WaitDelay's forced close lets Complete return before that.
-	if elapsed < 1100*time.Millisecond {
-		t.Fatalf("returned in %s — grandchild never held the pipe (spawn failed?)", elapsed)
+	// The anti-vacuous check: the grandchild really started and held the
+	// pipe, or this test proved nothing about WaitDelay.
+	if !ok {
+		t.Fatal("the grandchild never started: the helper's spawn failed, and nothing held the pipe")
 	}
-	if elapsed > 3500*time.Millisecond {
-		t.Fatalf("Complete blocked %s — grandchild held the pipe past WaitDelay", elapsed)
+	// The point of the test, measured from the grandchild's own start so
+	// the OS's process-creation time is outside it: the grandchild holds
+	// the pipe for 60 s, and only WaitDelay's forced close lets Complete
+	// return within half of that.
+	if held := done.Sub(born); held >= 30*time.Second {
+		t.Fatalf("Complete blocked %s after the grandchild started: it held the pipe past WaitDelay", held)
 	}
-	// Outlive the grandchild (born ~start+0.3s, sleeps 4s) before test
-	// cleanup: on Windows a live process wedges TempDir removal and the
-	// test binary's deletion.
-	if wait := 5*time.Second - elapsed; wait > 0 {
-		time.Sleep(wait)
+}
+
+// stampHelperStart records, for the timeout tests, when the sleeping helper
+// began running and its PID: GO_AIMEM_HELPER_STAMP names the file. It is
+// written aside and renamed into place, so a kill mid-write leaves no
+// stamp rather than a partial one.
+func stampHelperStart() {
+	if p := os.Getenv("GO_AIMEM_HELPER_STAMP"); p != "" {
+		if os.WriteFile(p+".tmp", []byte(fmt.Sprintf("%d %d", time.Now().UnixNano(), os.Getpid())), 0o600) == nil {
+			os.Rename(p+".tmp", p)
+		}
 	}
 }
 
 // TestMain doubles as the helper process: re-invoked with -p by the
 // tests above it plays a claude CLI that hangs ("sleep": 30s, killed
 // by the ctx), hangs after spawning a stdout-inheriting grandchild
-// ("spawn"; the grandchild sleeps 4s in the system temp dir), or
-// echoes stdin back inside the CLI's JSON wrapper ("echo") — it gates
-// every test run in this package, so keep the guard exact.
+// ("spawn"; the grandchild, "hold", keeps the pipe for 60s from the
+// system temp dir until the test ends it), or echoes stdin back inside
+// the CLI's JSON wrapper ("echo") — it gates every test run in this
+// package, so keep the guard exact.
 func TestMain(m *testing.M) {
 	if mode := os.Getenv("GO_AIMEM_HELPER"); mode != "" && len(os.Args) > 1 && os.Args[1] == "-p" {
 		switch mode {
@@ -684,16 +746,18 @@ func TestMain(m *testing.M) {
 		case "spawn":
 			exe, _ := os.Executable()
 			child := exec.Command(exe, "-p")
-			child.Env = append(os.Environ(), "GO_AIMEM_HELPER=sleep4")
+			child.Env = append(os.Environ(), "GO_AIMEM_HELPER=hold")
 			child.Dir = os.TempDir() // never hold the test's TempDir
 			child.Stdout = os.Stdout // inherit the pipe: the orphan that used to wedge Output()
 			if err := child.Start(); err != nil {
-				os.Exit(3) // loud, immediate: the test's lower bound catches the fast return
+				os.Exit(3) // loud, immediate: no grandchild stamp, and the test says so
 			}
 			time.Sleep(30 * time.Second)
-		case "sleep4":
-			time.Sleep(4 * time.Second)
+		case "hold":
+			stampHelperStart()
+			time.Sleep(60 * time.Second)
 		default: // "sleep"
+			stampHelperStart()
 			time.Sleep(30 * time.Second)
 		}
 		os.Exit(0)
