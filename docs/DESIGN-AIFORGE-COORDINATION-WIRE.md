@@ -12,7 +12,7 @@ The operator decided these on task C5, comment seq201, after aicrew's impact ana
 2. **D5b: aicrew gets a read-only scope, as a prerequisite.** Aicrew can read hold status and receipts, but only for reservations whose `coordination_proof` this aicrew service issued. The scope carries no mutation, shows no other holder, and returns no task content beyond the hold, the receipt and the fence. It is a separate peer credential with one permitted operation, stored as a digest. *Operator's reason: trusting a client's word is just as bad.*
 3. **D1 (a): aimem verifies aicrew's facts online.** It does so through `coordination.v1`, which is shaped like identity.v1 introspection: a pinned peer, a nonce echo, a 2 s bound, no caching, and inactive replies that give no reason.
 4. **Replay rule.** When aimem replays a committed receipt, it rechecks only the authority it owns (token, grant, profile). It does not query the coordination fact again: the fact was verified when the change was made, and a replay has no new effect.
-5. **Process pin, option (a): aimem checks the reference.** Aicrew's integration assessment (aicrew task b, seq165) found that an offer's process version must come from an authoritative aimem source, while under D4(a) and D5b aicrew can read only holds and receipts. The operator decided on 2026-09-28 (task C5-w2) that aimem verifies the pin. The `offer` and `accepted_attempt` facts carry the process reference aicrew recorded, and aimem checks the repository, commit and manifest against the project's current selection before it commits the claim or transfer. It checks no digest. *Operator's reason: the commit hash already pins the content, and it matches how aimem stores the project's selection.*
+5. **Process pin, option (a): aimem checks the reference.** Aicrew's integration assessment (aicrew task b, seq165) found that an offer's process version must come from an authoritative aimem source, while under D4(a) and D5b aicrew can read only holds and receipts. The operator decided on 2026-09-28 (task C5-w2) that aimem verifies the pin. The `offer`, `accepted_attempt` and `independent_claim` facts carry the process reference aicrew recorded, and aimem checks the repository, commit and manifest against the project's current selection before it commits the claim or transfer. It checks no digest. *Operator's reason: the commit hash already pins the content, and it matches how aimem stores the project's selection.* After aicrew's consumer review the operator extended the pin to `independent_claim`: the pin comes from an authoritative aimem check, never from a client, for every claim.
 
 ## How a team step runs
 
@@ -90,7 +90,7 @@ Aicrew answers every fact from one snapshot of current state, never from the pro
 | `never_accepted` | `release` | the current coordinator, or a verified successor (`coordinator`) | `offer_ref` | the hold's current `work_ref` equals `offer_ref` |
 | `stopped` | `release` | the holding worker (`worker` or `independent`), after it confirmed the stop | `attempt_ref` | the hold's current `work_ref` equals `attempt_ref`, and the caller is the bound holder |
 | `accepted_for_finalization` | `finalize` | the holder, or the coordinator from the session and generation that recorded the acceptance | `attempt_ref` | the hold's current `work_ref` equals `attempt_ref`; `terminal_evidence` present for `DONE` |
-| `independent_claim` | `claim` | the claimer (`independent`) | `attempt_ref` | request `holder = {mode: external, work_ref: attempt_ref}` |
+| `independent_claim` | `claim` | the claimer (`independent`) | `attempt_ref`, `process` | request `holder = {mode: external, work_ref: attempt_ref}`; `process` is the project's current selection ([Process pin](#process-pin)) |
 
 A holder's `update` (block, submit, resume) needs no fact. C5a authorizes it from the stored binding alone.
 
@@ -102,9 +102,10 @@ aimem accepts the fact for a recovery release and for a recovery cancel. It refu
 
 ### Process pin
 
-An `offer` fact and an `accepted_attempt` fact carry `process`, the version of the project's process that aicrew recorded for that step:
+An `offer`, an `accepted_attempt` and an `independent_claim` fact carry `process`, the version of the project's process that aicrew recorded for that step:
 - for an offer, the version the coordinator offered the work under;
-- for an acceptance, the version the worker accepted it under. The worker's client keeps the same version locally for its accepted attempt.
+- for an acceptance, the version the worker accepted it under. The worker's client keeps the same version locally for its accepted attempt;
+- for an independent claim, the version the independent worker claims the work under.
 
 Aicrew takes the pin from its own record of the step, never from a read of aimem at that moment. aimem is the authority on whether it is still the project's selection (decision 5).
 
@@ -115,10 +116,10 @@ Aicrew takes the pin from its own record of the step, never from a read of aimem
 | `manifest` | the manifest path at that commit: a clean relative slash path of at most 256 bytes that stays inside the repository |
 
 - **Exactly these three fields.** `process` carries no branch or tag (`ref`), no selection time or selector, and no digest.
-- **Required where it applies.** `process` is required on `offer` and `accepted_attempt` and absent from every other kind. Closing work (`never_accepted`, `stopped`, `accepted_for_finalization`) and a holder's `update` never depend on the selection. An `independent_claim` carries no pin in v1.
+- **Required where it applies.** `process` is required on `offer`, `accepted_attempt` and `independent_claim`, the facts that start work, and absent from every other kind. Closing work (`never_accepted`, `stopped`, `accepted_for_finalization`) and a holder's `update` never depend on the selection.
 - **Shape.** A missing, malformed or misplaced `process`, or one with any other field, makes the reply the wrong shape: `context_unavailable`, like every other shape failure ([Acceptance by aimem](#acceptance-by-aimem)).
 
-**The check.** Before it commits a claim on an `offer` fact or a transfer on an `accepted_attempt` fact, aimem compares `process` with the project's current selection. It reads the selection **inside the ledger transaction that commits the transition**.
+**The check.** Before it commits a claim on an `offer` or `independent_claim` fact, or a transfer on an `accepted_attempt` fact, aimem compares `process` with the project's current selection. It reads the selection **inside the ledger transaction that commits the transition**.
 - `repo`, `commit` and `manifest` must each equal the selection's field, byte for byte. There is no normalization: a trailing `.git`, another letter case or another URL form of the same repository is a mismatch.
 - The selection's `ref`, `selected_at` and `selected_by` play no part.
 - A project with no selected process has nothing to match.
@@ -148,7 +149,7 @@ aimem makes one attempt of at most 2 s (connect, TLS and response), with no redi
 - `fact.request_key_digest` is the `k1_` digest of this request's `Idempotency-Key`. A proof reused under another key, or for another mutation, never matches;
 - `fact.member` equals the caller's verified team context exactly: user, agent, team, role, session and generation;
 - the references match the request and the current hold, as the table requires;
-- on `offer` and `accepted_attempt`, `fact.process` is well formed, and absent on every other kind ([Process pin](#process-pin)). Its comparison with the project's selection comes last, in the committing transaction.
+- on `offer`, `accepted_attempt` and `independent_claim`, `fact.process` is well formed, and absent on every other kind ([Process pin](#process-pin)). Its comparison with the project's selection comes last, in the committing transaction.
 
 **Outcomes.**
 - **Unavailable: about the peer.** Any of these gives `context_unavailable` (retryable):
@@ -310,8 +311,8 @@ These values are fixed by v1. An implementation may tighten them; relaxing any o
   - the `k1_` and `p1_` digests;
   - where secrets may appear;
   - that the hub serves neither `/v1/crew/coordination` nor any read-scope route yet.
-- **C5-w2** amends the `offer` and `accepted_attempt` facts with the process pin and adds `process_mismatch`. The fake-consumer test checks:
-  - that the pin appears exactly on those two kinds, with exactly the three fields, in the hub selection's forms;
+- **C5-w2** amends the `offer`, `accepted_attempt` and `independent_claim` facts with the process pin and adds `process_mismatch`. The fake-consumer test checks:
+  - that the pin appears exactly on those three kinds, with exactly the three fields, in the hub selection's forms;
   - the malformed pins, as `context_unavailable`;
   - the comparison rule against a full hub selection;
   - that a failing fact is rejected before the pin is compared;

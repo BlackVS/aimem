@@ -207,7 +207,8 @@
         "independent"
       ],
       "requires": [
-        "attempt_ref"
+        "attempt_ref",
+        "process"
       ]
     }
   },
@@ -658,6 +659,11 @@
               "generation": "2"
             },
             "attempt_ref": "attempt-example-9",
+            "process": {
+              "repo": "https://git.example/team/process.git",
+              "commit": "3f2a9c1e5b7d4a6c8e0f1a2b3c4d5e6f7a8b9c0d",
+              "manifest": "process/manifest.json"
+            },
             "expires_at": "2026-09-27T18:15:00Z"
           }
         }
@@ -687,6 +693,14 @@
           "holder": {
             "mode": "external",
             "work_ref": "attempt-example-9"
+          },
+          "current_process": {
+            "repo": "https://git.example/team/process.git",
+            "ref": "main",
+            "commit": "3f2a9c1e5b7d4a6c8e0f1a2b3c4d5e6f7a8b9c0d",
+            "manifest": "process/manifest.json",
+            "selected_at": "2026-09-28T06:00:00Z",
+            "selected_by": "user-lead"
           }
         }
       }
@@ -924,7 +938,7 @@
       "outcome": "context_unavailable"
     },
     {
-      "case": "process_missing_on_offer_or_accepted_attempt",
+      "case": "process_missing_on_a_pinned_kind",
       "outcome": "context_unavailable"
     },
     {
@@ -1600,10 +1614,11 @@
     }
   ],
   "process_pin": {
-    "decision": "C5-w2, operator option (a), 2026-09-28: aimem checks the process reference (repo, commit, manifest) against the project's current selection; no digest",
+    "decision": "C5-w2, operator option (a), 2026-09-28: aimem checks the process reference (repo, commit, manifest) against the project's current selection; no digest; extended to independent_claim after aicrew's consumer review (the pin comes from an authoritative aimem check for every claim)",
     "kinds": [
       "offer",
-      "accepted_attempt"
+      "accepted_attempt",
+      "independent_claim"
     ],
     "fields": [
       "repo",
@@ -1653,6 +1668,44 @@
           "selected_by": "user-lead"
         },
         "outcome": "committed"
+      },
+      {
+        "case": "independent_claim_matches_current_selection",
+        "kind": "independent_claim",
+        "operation": "claim",
+        "fact_process": {
+          "repo": "https://git.example/team/process.git",
+          "commit": "3f2a9c1e5b7d4a6c8e0f1a2b3c4d5e6f7a8b9c0d",
+          "manifest": "process/manifest.json"
+        },
+        "current_selection": {
+          "repo": "https://git.example/team/process.git",
+          "ref": "main",
+          "commit": "3f2a9c1e5b7d4a6c8e0f1a2b3c4d5e6f7a8b9c0d",
+          "manifest": "process/manifest.json",
+          "selected_at": "2026-09-28T06:00:00Z",
+          "selected_by": "user-lead"
+        },
+        "outcome": "committed"
+      },
+      {
+        "case": "independent_claim_commit_differs",
+        "kind": "independent_claim",
+        "operation": "claim",
+        "fact_process": {
+          "repo": "https://git.example/team/process.git",
+          "commit": "3f2a9c1e5b7d4a6c8e0f1a2b3c4d5e6f7a8b9c0d",
+          "manifest": "process/manifest.json"
+        },
+        "current_selection": {
+          "repo": "https://git.example/team/process.git",
+          "ref": "main",
+          "commit": "9b8a7c6d5e4f3a2b1c0d9e8f7a6b5c4d3e2f1a0b",
+          "manifest": "process/manifest.json",
+          "selected_at": "2026-09-28T06:10:00Z",
+          "selected_by": "user-lead"
+        },
+        "outcome": "process_mismatch"
       },
       {
         "case": "commit_differs",

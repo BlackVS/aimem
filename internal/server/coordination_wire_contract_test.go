@@ -96,7 +96,7 @@ var factKinds = map[string]struct {
 	"never_accepted":            {"release", []string{"coordinator"}, []string{"offer_ref"}},
 	"stopped":                   {"release", []string{"worker", "independent"}, []string{"attempt_ref"}},
 	"accepted_for_finalization": {"finalize", []string{"worker", "independent", "coordinator"}, []string{"attempt_ref"}},
-	"independent_claim":         {"claim", []string{"independent"}, []string{"attempt_ref"}},
+	"independent_claim":         {"claim", []string{"independent"}, []string{"attempt_ref", "process"}},
 }
 
 func TestCoordinationV1Facts(t *testing.T) {
@@ -292,7 +292,7 @@ func TestCoordinationV1Facts(t *testing.T) {
 		"nonce_mismatch": "context_unavailable", "tls_identity_mismatch": "context_unavailable", "unreachable_or_timeout": "context_unavailable",
 		"reply_over_size_ceiling": "context_unavailable", "unsupported_version_refusal": "context_unavailable",
 		"transfer_by_another_user_than_intended": "coordination_rejected", "transfer_by_another_agent_of_the_intended_user": "coordination_rejected",
-		"process_missing_on_offer_or_accepted_attempt": "context_unavailable", "process_malformed": "context_unavailable",
+		"process_missing_on_a_pinned_kind": "context_unavailable", "process_malformed": "context_unavailable",
 		"process_with_another_field": "context_unavailable", "process_on_another_kind": "context_unavailable"} {
 		if outcomes[c] != want {
 			t.Errorf("acceptance %s = %q, want %q", c, outcomes[c], want)
@@ -401,17 +401,17 @@ func processPin(t *testing.T, v any) (process.Ref, bool) {
 	return r, r.Validate() == nil
 }
 
-// The C5-w2 process pin: offer and accepted_attempt carry the process
+// The C5-w2 process pin: offer, accepted_attempt and independent_claim carry the process
 // reference aicrew recorded; aimem compares repo, commit and manifest with
 // the project's current selection in the committing transaction.
 func TestCoordinationV1ProcessPin(t *testing.T) {
 	ex := readCoordinationFixture(t, "examples.json")
 	spec := readCoordinationFixture(t, "openapi-proposal.json")
 	pp := obj(t, ex["process_pin"], "process_pin")
-	if !reflect.DeepEqual(pp["kinds"], []any{"offer", "accepted_attempt"}) || !reflect.DeepEqual(pp["fields"], []any{"repo", "commit", "manifest"}) {
+	if !reflect.DeepEqual(pp["kinds"], []any{"offer", "accepted_attempt", "independent_claim"}) || !reflect.DeepEqual(pp["fields"], []any{"repo", "commit", "manifest"}) {
 		t.Fatalf("pinned kinds or fields: %v %v", pp["kinds"], pp["fields"])
 	}
-	pinned := map[string]bool{"offer": true, "accepted_attempt": true}
+	pinned := map[string]bool{"offer": true, "accepted_attempt": true, "independent_claim": true}
 	// Exactly the pinned kinds carry a well-formed pin, and the member's
 	// request is checked against the project's selection.
 	for _, e := range arr(t, ex["exchanges"], "exchanges") {
@@ -489,6 +489,7 @@ func TestCoordinationV1ProcessPin(t *testing.T) {
 		}
 	}
 	for _, need := range []string{"claim_matches_current_selection", "transfer_matches_current_selection", "commit_differs", "repo_differs",
+		"independent_claim_matches_current_selection", "independent_claim_commit_differs",
 		"manifest_differs", "another_form_of_the_same_repository", "no_selection", "selection_changed_after_the_answer_before_commit",
 		"selection_changed_between_offer_and_acceptance", "failing_fact_is_rejected_before_the_pin", "replay_after_the_selection_changed"} {
 		if !seen[need] {
@@ -915,7 +916,8 @@ func TestCoordinationV1IsNotServedAndContractsAgree(t *testing.T) {
 		"All three are HTTP-only", "own_work_ref", "acting member", "begin response", "stays **unresolved**", "**Only after that**",
 		"### Closure evidence", "`recovery_cancel`", "`closing_fence`", "never describes that other holder",
 		"### Process pin", "`process_mismatch` | 409 | no", "**The commit is the version.**", "inside the ledger transaction that commits the transition",
-		"not against the offer's pin", "is answered from its receipt and does not compare the pin again"} {
+		"not against the offer's pin", "is answered from its receipt and does not compare the pin again",
+		"`process` is required on `offer`, `accepted_attempt` and `independent_claim`"} {
 		if !strings.Contains(coordination, must) {
 			t.Errorf("the coordination contract lacks %s", must)
 		}
@@ -925,6 +927,9 @@ func TestCoordinationV1IsNotServedAndContractsAgree(t *testing.T) {
 		if strings.Contains(wire, gone) {
 			t.Errorf("the reservation wire still says %q", gone)
 		}
+	}
+	if strings.Contains(coordination, "carries no pin") || strings.Contains(coordination, "unpinned") {
+		t.Error("the contract still leaves independent_claim unpinned")
 	}
 	if strings.Contains(coordination, "Both are HTTP-only") || strings.Contains(wire, "holder binding") {
 		t.Error("the contracts keep wording the operator corrected")
