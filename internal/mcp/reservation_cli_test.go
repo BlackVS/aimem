@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -243,5 +244,138 @@ func TestReservationCLITeam(t *testing.T) {
 	}
 	if len(h.requests()) != before {
 		t.Fatal("an unusable team session reached a hub")
+	}
+}
+
+// A mutation that commits at the hub and loses its reply exits 5. The
+// receipt for the same key reports it committed, and the same-key retry
+// replays it without a second mutation. aicrew's step driver reconciles on
+// exactly this path. The test covers a claim, which changes the reservation,
+// and an update, which also advances the task revision.
+func TestReservationCLICommittedReplyLost(t *testing.T) {
+	f := newHub(t)
+	ctx := context.Background()
+	s := &srv{tasks: fixtureCaller(f, nil)}
+	text, isErr := toolText(f.rpc(t, f.alice, "tools/call", map[string]any{"name": "create_task",
+		"arguments": map[string]any{"project": "alpha", "title": "lost reply", "state": "READY", "idempotency_key": "lost-create"}}))
+	if isErr {
+		t.Fatal(text)
+	}
+	var task struct {
+		ID       string `json:"id"`
+		Revision int64  `json:"revision"`
+	}
+	json.Unmarshal([]byte(text), &task)
+
+	// The hub serves each POST in full, and the CLI never sees the answer.
+	var served int
+	lossy := &srv{tasks: func(ctx context.Context, method, path string, headers map[string]string, body []byte) (int, []byte, error) {
+		code, resp, err := fixtureCaller(f, nil)(ctx, method, path, headers, body)
+		if method != "POST" {
+			return code, resp, err
+		}
+		served++
+		if err != nil || code/100 != 2 {
+			t.Fatalf("the lossy POST did not commit: %d %s %v", code, resp, err)
+		}
+		return 0, nil, &net.OpError{Op: "read", Net: "tcp", Err: errors.New("connection reset by peer")}
+	}}
+	type outcome struct {
+		Receipt struct {
+			Replayed bool `json:"replayed"`
+		} `json:"receipt"`
+		TaskRevision int64 `json:"task_revision"`
+		Reservation  struct {
+			ID    string `json:"id"`
+			Fence string `json:"fence"`
+		} `json:"reservation"`
+	}
+	status := func() (state, id, fence string) {
+		t.Helper()
+		out, code := reservationCommand(ctx, s, ReservationRequest{Command: "status", TaskID: task.ID})
+		var st struct {
+			State         string `json:"state"`
+			ReservationID string `json:"reservation_id"`
+			Fence         string `json:"fence"`
+		}
+		if code != ExitCommitted || json.Unmarshal([]byte(out), &st) != nil {
+			t.Fatalf("status: exit %d, %s", code, out)
+		}
+		return st.State, st.ReservationID, st.Fence
+	}
+	revision := func() int64 {
+		t.Helper()
+		text, isErr := toolText(f.rpc(t, f.alice, "tools/call", map[string]any{"name": "get_task", "arguments": map[string]any{"id": task.ID}}))
+		var got struct {
+			Revision int64 `json:"revision"`
+		}
+		if isErr || json.Unmarshal([]byte(text), &got) != nil {
+			t.Fatalf("task read: %s", text)
+		}
+		return got.Revision
+	}
+	// snapshot is the hub's state of the task: its hold and its revision.
+	type snapshot struct {
+		state, id string
+		fence     int64
+		revision  int64
+	}
+	now := func() snapshot {
+		t.Helper()
+		state, id, fence := status()
+		n, _ := strconv.ParseInt(fence, 10, 64) // no hold: no fence, 0
+		return snapshot{state, id, n, revision()}
+	}
+	// lose runs req with its reply lost, reconciles it with the receipt, and
+	// retries it with the same key. The lost step must have committed exactly
+	// once (the fence advanced by one) and the retry must replay it,
+	// changing nothing.
+	lose := func(req ReservationRequest) (outcome, snapshot, snapshot) {
+		t.Helper()
+		before, sent := now(), served
+		out, code := reservationCommand(ctx, lossy, req)
+		if code != ExitUnknown || envelopeCode(t, out) != "receipt_unresolved" || served != sent+1 {
+			t.Fatalf("%s with a lost reply: exit %d, served %d, %s", req.Command, code, served-sent, out)
+		}
+		committed := now()
+		if committed.fence != before.fence+1 {
+			t.Fatalf("%s with a lost reply did not commit once: %+v, then %+v", req.Command, before, committed)
+		}
+		out, code = reservationCommand(ctx, s, ReservationRequest{Command: "receipt", TaskID: task.ID, Key: req.Key, Operation: req.Command})
+		var receipt struct {
+			State      string `json:"state"`
+			RequestKey string `json:"request_key"`
+			Operation  string `json:"operation"`
+		}
+		if code != ExitCommitted || json.Unmarshal([]byte(out), &receipt) != nil ||
+			receipt.State != "committed" || receipt.RequestKey != req.Key || receipt.Operation != req.Command {
+			t.Fatalf("%s receipt after a lost reply: exit %d, %s", req.Command, code, out)
+		}
+		out, code = reservationCommand(ctx, s, req)
+		var o outcome
+		if code != ExitCommitted || json.Unmarshal([]byte(out), &o) != nil || !o.Receipt.Replayed {
+			t.Fatalf("%s same-key retry: exit %d, %s", req.Command, code, out)
+		}
+		if after := now(); after != committed || o.Reservation.ID != committed.id ||
+			o.Reservation.Fence != strconv.FormatInt(committed.fence, 10) || o.TaskRevision != committed.revision {
+			t.Fatalf("%s same-key retry mutated or answered another outcome: committed %+v, after %+v, replay %+v", req.Command, committed, after, o)
+		}
+		return o, before, committed
+	}
+
+	// A claim: the lost step made the hold, and the replay is that hold.
+	claimed, _, held := lose(ReservationRequest{Command: "claim", TaskID: task.ID, Key: "lost-claim",
+		Body: cliBody(map[string]any{"expected_revision": task.Revision, "holder": map[string]any{"mode": "standalone", "work_ref": "lost"}})})
+	if held.state != "held" || held.id == "" {
+		t.Fatalf("after a lost claim: %+v", held)
+	}
+
+	// An update: the lost step advanced the task once, and the replay
+	// leaves it there.
+	_, before, updated := lose(ReservationRequest{Command: "update", TaskID: task.ID, Key: "lost-update", Body: cliBody(map[string]any{
+		"expected_revision": claimed.TaskRevision, "reservation_id": held.id, "fence": claimed.Reservation.Fence,
+		"content": map[string]any{"title": "lost reply", "state": "IN_PROGRESS"}})})
+	if updated.revision != before.revision+1 || updated.id != held.id || updated.state != "held" {
+		t.Fatalf("after a lost update: %+v, then %+v", before, updated)
 	}
 }
