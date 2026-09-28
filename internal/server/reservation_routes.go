@@ -21,6 +21,10 @@ import (
 
 const reservationVersionHeader = "X-Aimem-Reservation-Version"
 
+// reservationReceiptFault, when a test sets it, replaces the receipt read's
+// result with a storage error, so the unresolved answer can be observed.
+var reservationReceiptFault func() error
+
 // reservationRoutePatterns are the member surface, exactly as the wire freezes
 // it. The gate classifies a request with the route mux's own matching.
 var reservationRoutePatterns = []string{
@@ -248,6 +252,9 @@ func (s *Server) reservationReceiptRoute(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	out, found, err := s.reservationReceipt(r.Context(), op, taskID, key)
+	if reservationReceiptFault != nil {
+		err = reservationReceiptFault()
+	}
 	if err != nil {
 		var ref *reservationRefusal
 		if errors.As(err, &ref) {

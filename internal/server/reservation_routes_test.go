@@ -2,6 +2,7 @@ package server
 
 import (
 	"encoding/json"
+	"errors"
 	"net/http"
 	"strings"
 	"sync"
@@ -383,4 +384,45 @@ func TestReservationRoutesCoordinationOutageKeepsTheHold(t *testing.T) {
 		t.Fatalf("an outage released the hold: %+v", hold)
 	}
 	g.assertNoSecretLeak(t)
+}
+
+// A receipt read the store cannot answer is unresolved: the caller must
+// stop and reconcile again, never take it as not committed.
+func TestReservationRoutesUnresolvedReceipt(t *testing.T) {
+	g := newReservationRig(t)
+	task := g.readyTask(t, g.alpha)
+	reservationReceiptFault = func() error { return errors.New("storage unavailable") }
+	t.Cleanup(func() { reservationReceiptFault = nil })
+	r := g.call(t, g.tls, "GET", g.rpath(task.ID, "/receipts/claim/k"), g.alice, rhdr("", nil), "", true)
+	wantRefusal(t, "an unanswerable receipt read", r, 503, "receipt_unresolved", "personal")
+	var e identityRefusalBody
+	if json.Unmarshal(r.body, &e); !e.Retryable {
+		t.Fatalf("an unresolved receipt is retryable: %s", r.body)
+	}
+}
+
+// A project rename keeps the hold: the old path no longer reaches the task,
+// and under the new name the holder still holds it and continues.
+func TestReservationRoutesProjectRenameKeepsTheHold(t *testing.T) {
+	g := newReservationRig(t)
+	task := g.readyTask(t, g.alpha)
+	o := decodeOutcome(t, g.call(t, g.tls, "POST", g.rpath(task.ID, "/claim"), g.alice, rhdr("rn-claim", nil),
+		body(t, map[string]any{"expected_revision": task.Revision, "holder": map[string]any{"mode": "standalone", "work_ref": "rn"}}), true))
+	if err := g.s.reg.Rename("alpha", "alpha-next"); err != nil {
+		t.Fatal(err)
+	}
+	old := g.call(t, g.tls, "GET", g.rpath(task.ID, ""), g.alice, rhdr("", nil), "", true)
+	wantRefusal(t, "the old project path", old, 404, "task_unavailable", "personal")
+	path := "/v1/projects/alpha-next/tasks/" + task.ID + "/reservation"
+	var st wireStatus
+	if r := g.call(t, g.tls, "GET", path, g.alice, rhdr("", nil), "", true); r.status != 200 || json.Unmarshal(r.body, &st) != nil ||
+		st.State != "held" || st.ReservationID != o.Reservation.ID || st.Fence != o.Reservation.Fence {
+		t.Fatalf("status after rename: %d %s", r.status, r.body)
+	}
+	upd := decodeOutcome(t, g.call(t, g.tls, "POST", path+"/update", g.alice, rhdr("rn-upd", nil),
+		body(t, map[string]any{"expected_revision": o.TaskRevision, "reservation_id": o.Reservation.ID, "fence": o.Reservation.Fence,
+			"content": map[string]any{"title": task.Title, "state": "IN_PROGRESS"}}), true))
+	if upd.Reservation.ID != o.Reservation.ID || upd.Reservation.Fence != "2" {
+		t.Fatalf("update after rename: %+v", upd)
+	}
 }
