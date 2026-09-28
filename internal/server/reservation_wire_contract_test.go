@@ -13,6 +13,9 @@ import (
 	"testing"
 )
 
+// recoveryNamespace holds C5c's admin-only recovery routes.
+const recoveryNamespace = "/v1/admin/reservations/"
+
 func readReservationFixture(t *testing.T, name string, out any) {
 	t.Helper()
 	p := filepath.Join("..", "..", "docs", "fixtures", "reservation-v1", name)
@@ -308,8 +311,16 @@ func TestReservationV1FixtureAndProposedSurface(t *testing.T) {
 	}
 	// C6 alone registers the route. A fixture must not accidentally become a
 	// production surface through a copied route or embedded OpenAPI entry.
+	// The one exception is C5c's admin-only recovery namespace (decision
+	// D-c3a), which is not a member reservation route.
 	s, _ := testServer(t)
 	for _, route := range s.Routes() {
+		if strings.HasPrefix(route.Pattern, recoveryNamespace) {
+			if !route.Admin {
+				t.Errorf("recovery route %s is not admin-only", route.Pattern)
+			}
+			continue
+		}
 		if strings.Contains(route.Pattern, "/reservation") {
 			t.Errorf("C4 unexpectedly registered route %s", route.Pattern)
 		}
@@ -321,7 +332,7 @@ func TestReservationV1FixtureAndProposedSurface(t *testing.T) {
 		t.Fatal(err)
 	}
 	for path := range live.Paths {
-		if strings.Contains(path, "/reservation") {
+		if strings.Contains(path, "/reservation") && !strings.HasPrefix(path, recoveryNamespace) {
 			t.Errorf("C4 unexpectedly changed live OpenAPI path %s", path)
 		}
 	}

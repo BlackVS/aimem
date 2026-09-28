@@ -142,6 +142,8 @@ func main() {
 		err = accessCmd(args)
 	case "identity":
 		err = identityCmd(args)
+	case "reservation":
+		err = reservationCmd(args)
 	case "team-session":
 		err = aicrewSessionCmd(args)
 	case "review":
@@ -232,6 +234,8 @@ func usage() {
   access                     manage users, access groups, grants and ordinary tokens
   identity                   manage the aicrew identity peer and its credentials (hub TLS listener);
                              identity proof is the aicrew client's session-entry command
+  reservation recover        operator recovery of a stuck task reservation, and the
+                             recovery reader (hub TLS listener, admin token)
   team-session               the aicrew client's binding of one conversation to one team session
                              on the local service (run without args for usage)
   version                    print the binary version

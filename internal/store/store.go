@@ -492,7 +492,7 @@ func (r *Registry) Close() {
 	r.dbs = map[string]*DB{}
 }
 
-const currentSchema = 20
+const currentSchema = 21
 
 // SetMeta / GetMeta store small key-value project metadata (e.g. the
 // project's declared knowledge groups, stamped from event pushes so the
@@ -1027,6 +1027,27 @@ ALTER TABLE task_reservations ADD COLUMN bound_role TEXT NOT NULL DEFAULT '';
 ALTER TABLE task_reservations ADD COLUMN bound_session TEXT NOT NULL DEFAULT '';
 ALTER TABLE task_reservations ADD COLUMN bound_generation TEXT NOT NULL DEFAULT '';
 UPDATE meta SET value='20' WHERE key='schema_version';`); err != nil {
+			return err
+		}
+	}
+	if v < 21 {
+		// Recovery and closure evidence (tasks C5c and C5c-w). The service
+		// whose verified team context set the hold, and, per task and
+		// service, the last reservation that service established and how it
+		// closed, so aicrew's read scope can answer "closed" after someone
+		// else takes the task.
+		if err := d.step(`
+ALTER TABLE task_reservations ADD COLUMN bound_service TEXT NOT NULL DEFAULT '';
+CREATE TABLE task_reservation_services(
+  task_id TEXT NOT NULL REFERENCES tasks(id),
+  service_id TEXT NOT NULL,
+  reservation_id TEXT NOT NULL,
+  closing_fence INTEGER NOT NULL DEFAULT 0,
+  closed_by TEXT NOT NULL DEFAULT '',
+  closed_at TEXT NOT NULL DEFAULT '',
+  task_revision INTEGER NOT NULL DEFAULT 0,
+  PRIMARY KEY(task_id, service_id));
+UPDATE meta SET value='21' WHERE key='schema_version';`); err != nil {
 			return err
 		}
 	}

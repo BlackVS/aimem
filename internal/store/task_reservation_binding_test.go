@@ -8,7 +8,7 @@ import (
 )
 
 func teamBinding(user, profile, role string) ReservationBinding {
-	return ReservationBinding{UserID: user, Mode: "team", ProfileID: profile, TeamID: "team-1", Role: role,
+	return ReservationBinding{UserID: user, Mode: "team", ServiceID: "aicrew-example", ProfileID: profile, TeamID: "team-1", Role: role,
 		SessionID: "sess-1", Generation: "4"}
 }
 

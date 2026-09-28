@@ -25,8 +25,12 @@ import (
 	"time"
 )
 
-// Path is aicrew's introspection route.
-const Path = "/v1/crew/introspect"
+// Path is aicrew's introspection route; CoordinationPath its coordination
+// facts route (coordination.v1).
+const (
+	Path             = "/v1/crew/introspect"
+	CoordinationPath = "/v1/crew/coordination"
+)
 
 // CA is a throwaway certificate authority.
 type CA struct {
@@ -90,7 +94,8 @@ type Request struct {
 	Version int    `json:"version"`
 	HubID   string `json:"hub_id"`
 	Nonce   string `json:"nonce"`
-	Handle  string `json:"handle"`
+	Handle  string `json:"handle,omitempty"`
+	Proof   string `json:"proof,omitempty"`
 }
 
 // Seen is one request as the fake received it.
@@ -109,11 +114,12 @@ type Fake struct {
 	CA  *CA
 	Pin string
 
-	calls     atomic.Int32
-	mu        sync.Mutex
-	answer    Answer
-	last      *Seen
-	abandoned chan struct{}
+	calls       atomic.Int32
+	mu          sync.Mutex
+	answer      Answer
+	coordinated Answer
+	last        *Seen
+	abandoned   chan struct{}
 }
 
 // New starts a fake that, until SetAnswer, answers every request as an
@@ -124,6 +130,7 @@ func New(t testing.TB, service, hub string) *Fake {
 	var cert tls.Certificate
 	cert, f.Pin = f.CA.Leaf(t)
 	f.answer = func(w http.ResponseWriter, got Request) { WriteJSON(w, ActiveReply(got.Nonce, service, hub)) }
+	f.coordinated = func(w http.ResponseWriter, got Request) { WriteJSON(w, InactiveReply(got.Nonce)) }
 	f.Srv = httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		f.calls.Add(1)
 		var got Request
@@ -132,6 +139,9 @@ func New(t testing.TB, service, hub string) *Fake {
 		f.mu.Lock()
 		f.last = &Seen{r.Header.Clone(), r.URL.Path, got}
 		answer, abandoned := f.answer, f.abandoned
+		if r.URL.Path == CoordinationPath {
+			answer = f.coordinated
+		}
 		f.abandoned = nil
 		f.mu.Unlock()
 		if abandoned != nil {
@@ -152,6 +162,14 @@ func (f *Fake) SetAnswer(a Answer) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.answer = a
+}
+
+// SetCoordination scripts every later coordination.v1 reply. Until it is
+// set, every proof is answered inactive.
+func (f *Fake) SetCoordination(a Answer) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.coordinated = a
 }
 
 // StallUntilAbandoned makes the next request hang until the caller gives up
@@ -189,6 +207,12 @@ func ActiveReply(nonce, service, hub string) map[string]any {
 		"agent_id": "agent-1", "team_id": "team-1", "role": "worker", "session_id": "sess-1",
 		"generation": "4", "handle_expires_at": time.Now().Add(10 * time.Minute).UTC().Format(time.RFC3339),
 	}
+}
+
+// FactReply is an active coordination.v1 answer to nonce carrying fact, a
+// fact object as the contract shapes it.
+func FactReply(nonce, service, hub string, fact map[string]any) map[string]any {
+	return map[string]any{"nonce": nonce, "active": true, "service_id": service, "hub_id": hub, "fact": fact}
 }
 
 // InactiveReply is the only inactive answer: the nonce and active false.

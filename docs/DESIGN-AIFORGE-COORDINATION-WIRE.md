@@ -92,6 +92,12 @@ Aicrew answers every fact from one snapshot of current state, never from the pro
 
 A holder's `update` (block, submit, resume) needs no fact. C5a authorizes it from the stored binding alone.
 
+**A `stopped` fact behind an operator recovery (C5c).** An operator's recovery may present a `stopped` proof as its stop evidence (C5 decision D3a). aicrew mints that proof for the **recovery request**. aimem then applies the rules above with two differences:
+- `request_key_digest` is the `k1_` digest of the recovery request's `Idempotency-Key`;
+- `member` must be the holder recorded on the hold (the same user, team and role), not the admin who sends the request. That holder's session and generation may have moved on since the claim.
+
+aimem accepts the fact for a recovery release and for a recovery cancel. It refuses stop evidence for a hold that is not a team hold, including a hold from before bindings, which only an operator attestation can recover.
+
 ### Acceptance by aimem
 
 aimem makes one attempt of at most 2 s (connect, TLS and response), with no redirect, no proxy, no retry and no cache. Caller cancellation propagates. It reads at most 16,384 bytes of the reply, and refuses unknown fields and trailing data. It accepts an active reply only if all of these hold:

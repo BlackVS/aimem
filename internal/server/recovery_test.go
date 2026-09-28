@@ -1,0 +1,284 @@
+package server
+
+import (
+	"crypto/rand"
+	"encoding/base64"
+	"encoding/json"
+	"net/http"
+	"strconv"
+	"strings"
+	"testing"
+
+	"aimem/internal/introspect/introspecttest"
+	"aimem/internal/store"
+)
+
+// introspecttestProof is a fresh, well-formed coordination proof.
+func introspecttestProof() (string, error) {
+	var b [32]byte
+	if _, err := rand.Read(b[:]); err != nil {
+		return "", err
+	}
+	return "acp1_" + base64.RawURLEncoding.EncodeToString(b[:]), nil
+}
+
+const recoveryStatement = "worker machine decommissioned; the attempt is abandoned"
+
+type recoveryRig struct {
+	*reservationRig
+	task store.Task
+	hold store.TaskReservationOutcome
+}
+
+// newRecoveryRig holds one alpha task for Alice's verified team context
+// (service aicrew-example, team-1, worker), as a coordination-backed claim
+// will (C5b).
+func newRecoveryRig(t *testing.T) *recoveryRig {
+	t.Helper()
+	g := &recoveryRig{reservationRig: newReservationRig(t)}
+	ctx := g.team(t, g.aliceIdentity, nil)
+	g.task = g.readyTask(t, g.alpha)
+	g.hold = g.seedTeamHold(t, ctx, g.task)
+	return g
+}
+
+func (g *recoveryRig) body(state string, evidence map[string]any) string {
+	b, _ := json.Marshal(map[string]any{
+		"reservation_id": g.hold.Reservation.ID, "fence": strconv.FormatInt(g.hold.Reservation.Fence, 10),
+		"expected_revision": g.hold.Task.Revision, "reason": "the holding worker is gone",
+		"content":  map[string]any{"title": g.task.Title, "state": state},
+		"evidence": evidence,
+	})
+	return string(b)
+}
+
+func attestationEvidence() map[string]any {
+	return map[string]any{"kind": "attestation", "attestation_id": "ticket-4711", "statement": recoveryStatement}
+}
+
+func (g *recoveryRig) recover(t *testing.T, op, bearer, key, body string) identityResp {
+	t.Helper()
+	return g.call(t, g.tls, "POST", "/v1/admin/reservations/"+g.task.ID+"/recovery/"+op, bearer, map[string]string{"Idempotency-Key": key}, body, true)
+}
+
+func recoveryCode(t *testing.T, r identityResp) string {
+	t.Helper()
+	var env struct {
+		Code string `json:"code"`
+	}
+	json.Unmarshal(r.body, &env)
+	return env.Code
+}
+
+func (g *recoveryRig) auditText(t *testing.T) string {
+	t.Helper()
+	b, _ := json.Marshal(g.audit(t))
+	return string(b)
+}
+
+func TestRecoveryIsAdminOnlyOverHubTLS(t *testing.T) {
+	g := newRecoveryRig(t)
+	body := g.body("READY", attestationEvidence())
+	if r := g.recover(t, "release", g.alice, "k1", body); r.status != http.StatusForbidden {
+		t.Fatalf("a user token recovered: %d %s", r.status, r.body)
+	}
+	r := g.call(t, g.plain, "POST", "/v1/admin/reservations/"+g.task.ID+"/recovery/release", g.env, map[string]string{"Idempotency-Key": "k2"}, body, true)
+	if r.status != http.StatusForbidden || !strings.Contains(string(r.body), "tls_required") {
+		t.Fatalf("plain HTTP: %d %s", r.status, r.body)
+	}
+	for _, path := range []string{"/recovery", "/recovery/receipts/claim/k1_" + strings.Repeat("A", 43)} {
+		if r := g.call(t, g.tls, "GET", "/v1/admin/reservations/"+g.task.ID+path, g.alice, nil, "", true); r.status != http.StatusForbidden {
+			t.Fatalf("a user token read %s: %d", path, r.status)
+		}
+	}
+	g.held(t, g.task.ID, g.hold.Reservation)
+}
+
+func TestRecoveryReleaseOnAttestation(t *testing.T) {
+	g := newRecoveryRig(t)
+	body := g.body("READY", attestationEvidence())
+	r := g.recover(t, "release", g.env, "rec-1", body)
+	if r.status != http.StatusOK {
+		t.Fatalf("recovery release: %d %s", r.status, r.body)
+	}
+	var out recoveryResponse
+	json.Unmarshal(r.body, &out)
+	if out.Operation != store.RecoveryRelease || out.TaskState != "READY" || out.Principal != "recovery/env" ||
+		out.Affected != g.hold.Reservation.Binding || out.EvidenceKind != "attestation" || out.EvidenceRef != "ticket-4711" ||
+		out.ClosingFence != strconv.FormatInt(g.hold.Reservation.Fence+1, 10) {
+		t.Fatalf("recovery response: %+v", out)
+	}
+	if strings.Contains(string(r.body), recoveryStatement) {
+		t.Fatal("the response quotes the attestation")
+	}
+	audit := g.auditText(t)
+	if !strings.Contains(audit, "reservation.recovery.release") || !strings.Contains(audit, "affected_user="+g.aliceID) ||
+		strings.Contains(audit, recoveryStatement) {
+		t.Fatalf("audit: %s", audit)
+	}
+	// aicrew's read scope now reads its reservation as closed by recovery.
+	if got, err := g.alpha.ServiceHoldStatus(g.task.ID, "aicrew-example"); err != nil || got.State != "closed" || got.ClosedBy != "recovery_release" ||
+		got.ReservationID != g.hold.Reservation.ID {
+		t.Fatalf("closure evidence: %+v %v", got, err)
+	}
+	// A replay returns the same; a changed body under the key conflicts.
+	if again := g.recover(t, "release", g.env, "rec-1", body); again.status != http.StatusOK {
+		t.Fatalf("replay: %d %s", again.status, again.body)
+	}
+	changed := g.body("BLOCKED", attestationEvidence())
+	if r := g.recover(t, "release", g.env, "rec-1", changed); r.status != http.StatusConflict || recoveryCode(t, r) != "idempotency_conflict" {
+		t.Fatalf("changed replay: %d %s", r.status, r.body)
+	}
+}
+
+func TestRecoveryRefusesDoneAndBadRequests(t *testing.T) {
+	g := newRecoveryRig(t)
+	for name, c := range map[string]struct {
+		op, key, body string
+		status        int
+		code          string
+	}{
+		"cancel to DONE":  {"cancel", "k-done", g.body("DONE", attestationEvidence()), 400, "invalid_request"},
+		"release to DONE": {"release", "k-done2", g.body("DONE", attestationEvidence()), 400, "invalid_request"},
+		"no key":          {"release", "", g.body("READY", attestationEvidence()), 400, "invalid_request"},
+		"no evidence":     {"release", "k-ne", g.body("READY", map[string]any{"kind": "vibes"}), 400, "invalid_request"},
+		"short statement": {"release", "k-ss", g.body("READY", map[string]any{"kind": "attestation", "attestation_id": "t", "statement": "short"}), 400, "invalid_request"},
+		"mixed evidence":  {"release", "k-mx", g.body("READY", map[string]any{"kind": "attestation", "attestation_id": "t", "statement": recoveryStatement, "proof": "acp1_x"}), 400, "invalid_request"},
+		"unknown field":   {"release", "k-uf", strings.Replace(g.body("READY", attestationEvidence()), `"reason"`, `"actor_id":"someone","reason"`, 1), 400, "invalid_request"},
+	} {
+		r := g.recover(t, c.op, g.env, c.key, c.body)
+		if r.status != c.status || recoveryCode(t, r) != c.code {
+			t.Fatalf("%s: %d %s", name, r.status, r.body)
+		}
+	}
+	stale := strings.Replace(g.body("READY", attestationEvidence()), `"fence":"`+strconv.FormatInt(g.hold.Reservation.Fence, 10)+`"`,
+		`"fence":"`+strconv.FormatInt(g.hold.Reservation.Fence+5, 10)+`"`, 1)
+	if r := g.recover(t, "release", g.env, "k-stale", stale); r.status != http.StatusConflict || recoveryCode(t, r) != "stale_fence" {
+		t.Fatalf("stale fence: %d %s", r.status, r.body)
+	}
+	g.held(t, g.task.ID, g.hold.Reservation)
+	// Cancel finalizes CANCELLED and aicrew reads recovery_cancel.
+	if r := g.recover(t, "cancel", g.env, "k-cancel", g.body("CANCELLED", attestationEvidence())); r.status != http.StatusOK {
+		t.Fatalf("cancel: %d %s", r.status, r.body)
+	}
+	if got, _ := g.alpha.ServiceHoldStatus(g.task.ID, "aicrew-example"); got.ClosedBy != "recovery_cancel" {
+		t.Fatalf("cancel closure: %+v", got)
+	}
+}
+
+// Stop evidence is a coordination.v1 stopped fact for this hold, whose
+// member is the holder recorded on the hold.
+func TestRecoveryOnStopEvidence(t *testing.T) {
+	g := newRecoveryRig(t)
+	proof, err := introspecttestProof()
+	if err != nil {
+		t.Fatal(err)
+	}
+	key := "stop-rec-1"
+	answer := func(edit func(fact map[string]any)) {
+		g.fake.SetCoordination(func(w http.ResponseWriter, got introspecttest.Request) {
+			fact := map[string]any{
+				"kind": "stopped", "operation": "release", "task_id": g.task.ID,
+				"request_key_digest": store.RequestKeyDigest(key),
+				"member": map[string]any{"user_id": g.aliceID, "agent_id": "agent-1", "team_id": "team-1", "role": "worker",
+					"session_id": "sess-9", "generation": "7"},
+				"attempt_ref": g.hold.Reservation.Holder.Ref,
+				"expires_at":  "2999-01-01T00:00:00Z",
+			}
+			if edit != nil {
+				edit(fact)
+			}
+			introspecttest.WriteJSON(w, introspecttest.FactReply(got.Nonce, "aicrew-example", g.hub, fact))
+		})
+	}
+	stopBody := g.body("READY", map[string]any{"kind": "stop_evidence", "proof": proof})
+	for name, edit := range map[string]func(map[string]any){
+		"another attempt": func(f map[string]any) { f["attempt_ref"] = "aicrew-attempt-other" },
+		"another member":  func(f map[string]any) { f["member"].(map[string]any)["user_id"] = g.bobID },
+		"another key":     func(f map[string]any) { f["request_key_digest"] = store.RequestKeyDigest("other-key") },
+		"another task":    func(f map[string]any) { f["task_id"] = g.betaTk },
+		"not a stop": func(f map[string]any) {
+			f["kind"], f["operation"] = "never_accepted", "release"
+			delete(f, "attempt_ref")
+			f["offer_ref"] = "o"
+		},
+	} {
+		answer(edit)
+		if r := g.recover(t, "release", g.env, key, stopBody); r.status != http.StatusForbidden || recoveryCode(t, r) != "coordination_rejected" {
+			t.Fatalf("%s: %d %s", name, r.status, r.body)
+		}
+	}
+	g.fake.SetCoordination(func(w http.ResponseWriter, got introspecttest.Request) {
+		introspecttest.WriteJSON(w, introspecttest.InactiveReply(got.Nonce))
+	})
+	if r := g.recover(t, "release", g.env, key, stopBody); r.status != http.StatusForbidden || recoveryCode(t, r) != "coordination_rejected" {
+		t.Fatalf("inactive: %d %s", r.status, r.body)
+	}
+	g.held(t, g.task.ID, g.hold.Reservation)
+	// The matching stop: the session and generation may have moved on.
+	answer(nil)
+	r := g.recover(t, "release", g.env, key, stopBody)
+	if r.status != http.StatusOK {
+		t.Fatalf("stop evidence: %d %s", r.status, r.body)
+	}
+	var out recoveryResponse
+	json.Unmarshal(r.body, &out)
+	if out.EvidenceKind != "stop_evidence" || out.EvidenceRef != proofP1Digest(proof) {
+		t.Fatalf("stop response: %+v", out)
+	}
+	if strings.Contains(string(r.body), proof) || strings.Contains(g.auditText(t), proof) {
+		t.Fatal("the proof reached a response or the audit")
+	}
+	if last := g.fake.Last(); last.Path != introspecttest.CoordinationPath || last.Body.Proof != proof {
+		t.Fatalf("aicrew was not asked about the proof: %+v", last)
+	}
+}
+
+// A registry admin removed between authorization and commit cannot commit.
+func TestRecoveryRechecksTheAdminBeforeCommit(t *testing.T) {
+	g := newRecoveryRig(t)
+	secret, digest, err := NewTokenSecret()
+	if err != nil {
+		t.Fatal(err)
+	}
+	root := g.s.reg.Root()
+	if err := SaveTokens(root, []TokenEntry{{Name: "ops-admin", Role: "admin", SHA256: digest}}); err != nil {
+		t.Fatal(err)
+	}
+	beforeReservationRecheck = func() { SaveTokens(root, nil) }
+	t.Cleanup(func() { beforeReservationRecheck = nil })
+	r := g.recover(t, "release", secret, "admin-gone", g.body("READY", attestationEvidence()))
+	beforeReservationRecheck = nil
+	if r.status != http.StatusUnauthorized || recoveryCode(t, r) != "invalid_credential" {
+		t.Fatalf("a removed admin committed: %d %s", r.status, r.body)
+	}
+	g.held(t, g.task.ID, g.hold.Reservation)
+}
+
+func TestRecoveryReader(t *testing.T) {
+	g := newRecoveryRig(t)
+	r := g.call(t, g.tls, "GET", "/v1/admin/reservations/"+g.task.ID+"/recovery", g.env, nil, "", true)
+	var hold recoveryHold
+	json.Unmarshal(r.body, &hold)
+	if r.status != http.StatusOK || hold.State != "held" || hold.ReservationID != g.hold.Reservation.ID || hold.Binding != g.hold.Reservation.Binding {
+		t.Fatalf("recovery status: %d %s", r.status, r.body)
+	}
+	path := "/v1/admin/reservations/" + g.task.ID + "/recovery/receipts/claim/" + store.RequestKeyDigest("seed-"+g.task.ID)
+	r = g.call(t, g.tls, "GET", path, g.env, nil, "", true)
+	var receipts struct {
+		Receipts []store.RecoveryReceipt `json:"receipts"`
+	}
+	json.Unmarshal(r.body, &receipts)
+	if r.status != http.StatusOK || len(receipts.Receipts) != 1 || receipts.Receipts[0].Principal != "user/"+g.aliceID {
+		t.Fatalf("recovery receipts: %d %s", r.status, r.body)
+	}
+	if r := g.call(t, g.tls, "GET", "/v1/admin/reservations/"+g.task.ID+"/recovery/receipts/steal/"+store.RequestKeyDigest("x"), g.env, nil, "", true); r.status != 400 {
+		t.Fatalf("unknown operation: %d", r.status)
+	}
+	audit := g.auditText(t)
+	if !strings.Contains(audit, "task="+g.task.ID+" status") || !strings.Contains(audit, "receipts operation=claim") ||
+		!strings.Contains(audit, "reservation.recovery.read") {
+		t.Fatalf("reads are not audited: %s", audit)
+	}
+	g.held(t, g.task.ID, g.hold.Reservation)
+}

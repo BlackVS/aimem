@@ -274,61 +274,79 @@ func (c *Client) Introspect(ctx context.Context, p Peer, handle string) (Context
 	if !ValidHandle(handle) {
 		return Context{}, unavailable("handle_shape")
 	}
-	if err := CheckPeer(p); err != nil {
-		return Context{}, unavailable("peer_record")
-	}
-	bearer, err := ReadCredential(c.TokenFile)
+	nonce, err := newNonce()
 	if err != nil {
-		if c.TokenFile == "" {
-			return Context{}, unavailable("not_configured")
-		}
-		return Context{}, unavailable("credential_file")
+		return Context{}, err
 	}
-	cfg, err := c.tlsConfig(p)
-	if err != nil {
-		return Context{}, unavailable("peer_record")
-	}
-	var nb [16]byte
-	if _, err := rand.Read(nb[:]); err != nil {
-		return Context{}, unavailable("nonce")
-	}
-	nonce := "n-" + hex.EncodeToString(nb[:])
 	body, err := json.Marshal(request{Version: 1, HubID: p.HubID, Nonce: nonce, Handle: handle})
 	if err != nil {
 		return Context{}, unavailable("request")
 	}
+	data, err := c.exchange(ctx, p, p.Endpoint, VersionHeader, body)
+	if err != nil {
+		return Context{}, err
+	}
+	return c.verify(p, nonce, data)
+}
 
+func newNonce() (string, error) {
+	var nb [16]byte
+	if _, err := rand.Read(nb[:]); err != nil {
+		return "", unavailable("nonce")
+	}
+	return "n-" + hex.EncodeToString(nb[:]), nil
+}
+
+// exchange makes one call to an aicrew route of p and returns the reply
+// body: the registered peer and credential, the pinned TLS identity, one
+// attempt within Budget, no proxy or redirect, and a reply of at most
+// MaxReply bytes answered 200. Every failure is a *Failure.
+func (c *Client) exchange(ctx context.Context, p Peer, endpoint, versionHeader string, body []byte) ([]byte, error) {
+	if err := CheckPeer(p); err != nil {
+		return nil, unavailable("peer_record")
+	}
+	bearer, err := ReadCredential(c.TokenFile)
+	if err != nil {
+		if c.TokenFile == "" {
+			return nil, unavailable("not_configured")
+		}
+		return nil, unavailable("credential_file")
+	}
+	cfg, err := c.tlsConfig(p)
+	if err != nil {
+		return nil, unavailable("peer_record")
+	}
 	callCtx, cancel := context.WithTimeout(ctx, Budget)
 	defer cancel()
-	req, err := http.NewRequestWithContext(callCtx, http.MethodPost, p.Endpoint, bytes.NewReader(body))
+	req, err := http.NewRequestWithContext(callCtx, http.MethodPost, endpoint, bytes.NewReader(body))
 	if err != nil {
-		return Context{}, unavailable("request")
+		return nil, unavailable("request")
 	}
 	req.Header.Set("Authorization", "Bearer "+bearer)
-	req.Header.Set(VersionHeader, "1")
+	req.Header.Set(versionHeader, "1")
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Accept", "application/json")
 	resp, err := newHTTPClient(cfg).Do(req)
 	if err != nil {
-		return Context{}, transportFailure(ctx, callCtx, err)
+		return nil, transportFailure(ctx, callCtx, err)
 	}
 	defer resp.Body.Close()
 	data, err := io.ReadAll(io.LimitReader(resp.Body, MaxReply+1))
 	if err != nil {
-		return Context{}, transportFailure(ctx, callCtx, err)
+		return nil, transportFailure(ctx, callCtx, err)
 	}
 	if len(data) > MaxReply {
-		return Context{}, unavailable("oversize")
+		return nil, unavailable("oversize")
 	}
 	switch {
 	case resp.StatusCode >= 300 && resp.StatusCode < 400:
-		return Context{}, unavailable("redirect")
+		return nil, unavailable("redirect")
 	case resp.StatusCode == http.StatusBadRequest && refusalCode(data) == "unsupported_version":
-		return Context{}, unavailable("version_rejected")
+		return nil, unavailable("version_rejected")
 	case resp.StatusCode != http.StatusOK:
-		return Context{}, unavailable("status")
+		return nil, unavailable("status")
 	}
-	return c.verify(p, nonce, data)
+	return data, nil
 }
 
 // newHTTPClient is one call's client: no proxy (the proxy environment is
