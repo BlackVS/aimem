@@ -25,6 +25,7 @@ func readyReservationTask(t *testing.T, db *DB, key string) Task {
 func rewindReservationSchema(t *testing.T, db *DB) {
 	t.Helper()
 	for _, stmt := range []string{
+		`DROP TABLE task_reservation_services`,
 		`DROP TABLE task_reservation_requests`,
 		`DROP TABLE task_reservation_events`,
 		`DROP TABLE task_reservations`,
@@ -261,6 +262,7 @@ func TestTaskReservationSchemaPreservesExistingTasks(t *testing.T) {
 	}
 	task := readyReservationTask(t, db, "create-migrate")
 	for _, stmt := range []string{
+		`DROP TABLE task_reservation_services`,
 		`DROP TABLE task_reservation_requests`, `DROP TABLE task_reservation_events`, `DROP TABLE task_reservations`,
 		`UPDATE meta SET value='18' WHERE key='schema_version'`,
 	} {
@@ -282,7 +284,7 @@ func TestTaskReservationSchemaPreservesExistingTasks(t *testing.T) {
 	if err != nil || got.Revision != task.Revision || got.Title != task.Title {
 		t.Fatalf("existing task changed: %+v, %v", got, err)
 	}
-	if v, err := db.GetMeta("schema_version"); err != nil || v != "20" {
+	if v, err := db.GetMeta("schema_version"); err != nil || v != "21" {
 		t.Fatalf("schema version: %q, %v", v, err)
 	}
 	if countRows(t, db, "task_requests", "operation=? AND scope=?", "create", "") != 1 {
@@ -291,7 +293,7 @@ func TestTaskReservationSchemaPreservesExistingTasks(t *testing.T) {
 	if _, err := db.ApplyTaskReservation(ReservationClaim, claimInput(got, "migrated"), aliceActor, testBinding(aliceActor), "migrated-claim", allowReservation); err != nil {
 		t.Fatalf("cannot claim migrated task: %v", err)
 	}
-	if _, err := db.sql.Exec(`UPDATE meta SET value='21' WHERE key='schema_version'`); err != nil {
+	if _, err := db.sql.Exec(`UPDATE meta SET value='22' WHERE key='schema_version'`); err != nil {
 		t.Fatal(err)
 	}
 	r.Close()
@@ -336,6 +338,7 @@ func TestTaskReservationSchema20KeepsUnboundHoldsHeld(t *testing.T) {
          (active_id <> '' AND holder_mode <> '' AND holder_ref <> '')))`,
 		`INSERT INTO task_reservations SELECT * FROM r19`,
 		`DROP TABLE r19`,
+		`DROP TABLE task_reservation_services`,
 		`DELETE FROM task_reservation_requests`,
 		`UPDATE meta SET value='19' WHERE key='schema_version'`,
 	} {

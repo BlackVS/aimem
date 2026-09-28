@@ -77,7 +77,7 @@ func reservationCallerFrom(ctx context.Context) (reservationCaller, error) {
 			return reservationCaller{}, refuseReservation("context_unavailable", "team context verification is too old")
 		}
 		c.team = &tc
-		c.binding = store.ReservationBinding{UserID: id.UserID, Mode: "team", ProfileID: tc.ProfileID, TeamID: tc.TeamID,
+		c.binding = store.ReservationBinding{UserID: id.UserID, Mode: "team", ServiceID: tc.ServiceID, ProfileID: tc.ProfileID, TeamID: tc.TeamID,
 			Role: tc.Role, SessionID: tc.SessionID, Generation: tc.Generation}
 	}
 	return c, nil

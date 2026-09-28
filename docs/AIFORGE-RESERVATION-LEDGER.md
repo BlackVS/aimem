@@ -52,4 +52,35 @@ C5a (task 01a0e39c-8769, from C5 seq196 with operator decisions D2(a), D3(a) and
   Team claim, transfer, release and finalize need verified aicrew coordination facts and belong to C5b. They are refused with `role_forbidden`.
 - **Status and receipt reads:** they recheck the caller's current authority. Status shows only the caller's own hold, and any other holder's hold reads as `none`.
 
-**Compatibility.** A hold committed before schema 20 has no binding, so no caller matches it. It stays held, with its fence, until the C5c recovery path closes it. The migration is additive, and a schema-19 binary refuses a schema-20 database through the existing newer-schema guard. The C1 rollback limits still apply.
+**Compatibility (C5a).** A hold committed before schema 20 has no binding, so no caller matches it. It stays held, with its fence, until the C5c recovery path closes it. The migration is additive, and a schema-19 binary refuses a schema-20 database through the existing newer-schema guard. The C1 rollback limits still apply.
+
+## C5c: recovery, the recovery reader and closure evidence
+
+C5c (task 01a0e39c-dbb9, as frozen in C5 seq205 with the seq206 decisions) adds the operator's recovery path for a hold whose holder cannot close it.
+
+**Where.** It adds four admin-only routes under `/v1/admin/reservations/{task_id}/recovery`, all over TLS the hub terminated itself, with no MCP tool:
+- `POST …/release` and `POST …/cancel`;
+- `GET …` (the recovery reader's hold status);
+- `GET …/receipts/{operation}/{request_key_digest}`.
+
+The `aimem reservation recover release|cancel|status|receipt` CLI drives them with `aimem identity`'s hub trust and admin-token rules. It reads a recovery body from standard input only.
+
+**What a recovery may do.**
+- It needs an `Idempotency-Key`, a reason and exactly one evidence.
+  - An **operator attestation** is an attestation ID plus a statement of 16 to 2048 characters. Decision D-c2a allows it even while aicrew is reachable, and it is the only evidence for a hold from before bindings.
+  - **aicrew stop evidence** is a `coordination.v1` `stopped` proof. It is verified online with the coordination client that C5c adds beside the introspection client, and it must match this hold's attempt reference, task and request key, with the holder recorded on the hold as its member ([coordination contract](DESIGN-AIFORGE-COORDINATION-WIRE.md)).
+- A recovery **releases** the task (to READY or BLOCKED) or **cancels** it (CANCELLED). The store and the route both refuse DONE.
+- The reservation ID, fence and expected revision must match, under the project lifecycle lock. A holder's transition racing a recovery commits exactly one of the two.
+
+**Attribution and audit.**
+- The recovery runs as a new `TaskActor` kind `recovery`, with the admin credential's name. Its receipts are scoped to `recovery/<name>`, and a recovery binding can never use the member path.
+- The receipt and the event record the **affected actor**: the hold's stored binding, which never comes from input. The event log also keeps the attestation statement. The receipt and the response carry only the evidence kind and reference: an attestation ID, or the stop proof's `p1_` digest, never the proof.
+- The access audit records `reservation.recovery.release|cancel|read` and `reservation.recovery.refused.<code>`, with the task, the reservation, the fence, the affected user and mode, and the evidence kind and reference. It never records a proof or a statement.
+- Inside the transaction, the hub rechecks that the admin is still registered. The host's env admin is valid for the process lifetime. It also rechecks that a stop fact is at most 5 s old.
+
+**Closure evidence (C5c-w).**
+- Schema 21 records the service of a team binding (`bound_service`). It also adds `task_reservation_services`, which keeps, per task and service, the last reservation that service's verified team context established, and how it closed: `holder_release`, `holder_finalize`, `recovery_release` or `recovery_cancel`, with the closing fence, time and revision.
+- `DB.ServiceHoldStatus` answers `held`, `closed` or `none` for one service, as the coordination contract's Closure evidence section freezes it. That includes `closed` after someone else took the task, and it never describes another holder.
+- C6 wires it to aicrew's read-scope route.
+
+**The ledger's callers.** The member authorizer (`reservations.go`) and the recovery routes (`recovery.go`) are its only production callers, and the source walk in the tests enforces that.

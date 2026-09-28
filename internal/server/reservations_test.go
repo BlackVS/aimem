@@ -445,15 +445,18 @@ func TestReservationPrecommitRecheck(t *testing.T) {
 	}
 }
 
-// The authorizer is the ledger's only production caller.
+// The member authorizer and the admin recovery path (C5c) are the ledger's
+// only production callers.
 func TestReservationLedgerHasOneCaller(t *testing.T) {
 	ledger := map[string]bool{"ApplyTaskReservation": true, "ClaimTaskReservation": true,
-		"GetTaskReservation": true, "GetTaskReservationReceipt": true}
+		"GetTaskReservation": true, "GetTaskReservationReceipt": true,
+		"RecoverTaskReservation": true, "ServiceHoldStatus": true, "RecoveryReceipts": true, "RecoveryReplay": true}
 	root, err := filepath.Abs(filepath.Join("..", ".."))
 	if err != nil {
 		t.Fatal(err)
 	}
-	allowed := map[string]bool{filepath.Join("internal", "server", "reservations.go"): true}
+	allowed := map[string]bool{filepath.Join("internal", "server", "reservations.go"): true,
+		filepath.Join("internal", "server", "recovery.go"): true}
 	var callers []string
 	err = filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
 		if err != nil {

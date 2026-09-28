@@ -97,6 +97,12 @@ type Identity struct {
 	// Peer is set only for the "peer" role: the registered identity.v1
 	// service and the credential that authenticated it.
 	Peer access.PeerIdentity
+	// credSource and credDigest name the credential that authenticated a
+	// host-managed caller: "env" for the hub's env token, or "registry" and
+	// the entry's digest for a registry token. A recheck asks whether that
+	// exact credential is still valid, whatever its display name.
+	credSource string
+	credDigest string
 }
 
 type identityKey struct{}
@@ -134,7 +140,7 @@ func (s *Server) authenticateContext(ctx context.Context, envToken, presented st
 	id := Identity{}
 	if envToken != "" {
 		if subtle.ConstantTimeCompare(presentedDigest, []byte(HashToken(envToken))) == 1 {
-			id, ok = Identity{Name: "env", Role: "admin"}, true
+			id, ok = Identity{Name: "env", Role: "admin", credSource: "env"}, true
 		}
 	}
 	// Ordinary user credentials never inherit a legacy writer role. Admin
@@ -178,7 +184,7 @@ func (s *Server) authenticateContext(ctx context.Context, envToken, presented st
 			if role != "admin" {
 				role = "writer"
 			}
-			id, ok = Identity{Name: t.Name, Role: role}, true
+			id, ok = Identity{Name: t.Name, Role: role, credSource: "registry", credDigest: t.SHA256}, true
 		}
 	}
 	if !ok {

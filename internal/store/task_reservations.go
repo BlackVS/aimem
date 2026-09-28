@@ -55,11 +55,14 @@ type ReservationHolder struct {
 
 // ReservationBinding is the holder as the hub's authorizer verified it: the
 // individual user, the mode (personal or team) and, in team mode, the
-// profile, team, role, session and generation. The authorizer derives it
-// from the authenticated connection; no request field can name it.
+// service, profile, team, role, session and generation. The authorizer
+// derives it from the authenticated connection; no request field can name
+// it. Mode "recovery" is the binding of a recovery principal (C5c): its
+// UserID is the admin credential's name, and nothing else is set.
 type ReservationBinding struct {
 	UserID     string `json:"user_id"`
 	Mode       string `json:"mode"`
+	ServiceID  string `json:"service_id,omitempty"`
 	ProfileID  string `json:"profile_id,omitempty"`
 	TeamID     string `json:"team_id,omitempty"`
 	Role       string `json:"role,omitempty"`
@@ -80,9 +83,9 @@ func (b ReservationBinding) validate() error {
 	switch {
 	case b.UserID == "":
 		return invalid(errors.New("reservation binding needs a user"))
-	case b.Mode == "personal" && b.ProfileID == "" && b.TeamID == "" && b.Role == "" && b.SessionID == "" && b.Generation == "":
+	case (b.Mode == "personal" || b.Mode == "recovery") && b.ServiceID == "" && b.ProfileID == "" && b.TeamID == "" && b.Role == "" && b.SessionID == "" && b.Generation == "":
 		return nil
-	case b.Mode == "team" && b.ProfileID != "" && b.TeamID != "" && b.Role != "" && b.SessionID != "" && b.Generation != "":
+	case b.Mode == "team" && b.ServiceID != "" && b.ProfileID != "" && b.TeamID != "" && b.Role != "" && b.SessionID != "" && b.Generation != "":
 		return nil
 	}
 	return invalid(errors.New("reservation binding is incomplete"))
@@ -114,6 +117,7 @@ type TaskReservationOutcome struct {
 	Task        Task               `json:"task"`
 	Reservation TaskReservation    `json:"reservation"`
 	Binding     ReservationBinding `json:"binding"`
+	Recovery    *RecoveryRecord    `json:"recovery,omitempty"`
 }
 
 // DependencyEvidence is the authoritative state observed while the claim held
@@ -191,10 +195,10 @@ func readTaskReservation(tx *sql.Tx, taskID string, revision int64) (TaskReserva
 	r := TaskReservation{TaskID: taskID, TaskRevision: revision}
 	b := &r.Binding
 	err := tx.QueryRow(`SELECT fence,active_id,holder_mode,holder_ref,
-		bound_user,bound_mode,bound_profile,bound_team,bound_role,bound_session,bound_generation
+		bound_user,bound_mode,bound_service,bound_profile,bound_team,bound_role,bound_session,bound_generation
 		FROM task_reservations WHERE task_id=?`, taskID).
 		Scan(&r.Fence, &r.ID, &r.Holder.Mode, &r.Holder.Ref,
-			&b.UserID, &b.Mode, &b.ProfileID, &b.TeamID, &b.Role, &b.SessionID, &b.Generation)
+			&b.UserID, &b.Mode, &b.ServiceID, &b.ProfileID, &b.TeamID, &b.Role, &b.SessionID, &b.Generation)
 	if errors.Is(err, sql.ErrNoRows) {
 		return r, nil
 	}
@@ -208,15 +212,15 @@ func advanceReservation(tx *sql.Tx, r *TaskReservation) error {
 	r.Fence++
 	b := r.Binding
 	_, err := tx.Exec(`INSERT INTO task_reservations(task_id,fence,active_id,holder_mode,holder_ref,
-		bound_user,bound_mode,bound_profile,bound_team,bound_role,bound_session,bound_generation)
-		VALUES(?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(task_id) DO UPDATE SET
+		bound_user,bound_mode,bound_service,bound_profile,bound_team,bound_role,bound_session,bound_generation)
+		VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(task_id) DO UPDATE SET
 		fence=excluded.fence,active_id=excluded.active_id,
 		holder_mode=excluded.holder_mode,holder_ref=excluded.holder_ref,
-		bound_user=excluded.bound_user,bound_mode=excluded.bound_mode,bound_profile=excluded.bound_profile,
-		bound_team=excluded.bound_team,bound_role=excluded.bound_role,bound_session=excluded.bound_session,
-		bound_generation=excluded.bound_generation`,
+		bound_user=excluded.bound_user,bound_mode=excluded.bound_mode,bound_service=excluded.bound_service,
+		bound_profile=excluded.bound_profile,bound_team=excluded.bound_team,bound_role=excluded.bound_role,
+		bound_session=excluded.bound_session,bound_generation=excluded.bound_generation`,
 		r.TaskID, r.Fence, r.ID, r.Holder.Mode, r.Holder.Ref,
-		b.UserID, b.Mode, b.ProfileID, b.TeamID, b.Role, b.SessionID, b.Generation)
+		b.UserID, b.Mode, b.ServiceID, b.ProfileID, b.TeamID, b.Role, b.SessionID, b.Generation)
 	return err
 }
 
@@ -251,14 +255,26 @@ func reservationPrincipal(actor TaskActor) (string, error) {
 	return "admin/" + actor.Name, nil
 }
 
+// recoveryPrincipal scopes a recovery principal's receipts. The recovery
+// kind is accepted here only, never by a generic task write.
+func recoveryPrincipal(actor TaskActor) (string, error) {
+	if actor.Kind != "recovery" || actor.UserID != "" || actor.TokenID != "" {
+		return "", errors.New("invalid recovery actor")
+	}
+	if err := taskText(actor.Name, maxTaskActorName, true); err != nil {
+		return "", fmt.Errorf("invalid recovery actor name: %w", err)
+	}
+	return "recovery/" + actor.Name, nil
+}
+
 func reservationMutation(d *DB, actor TaskActor, binding ReservationBinding, op ReservationOperation, in TaskReservationInput, key string,
-	fn func(*sql.Tx) (TaskReservationOutcome, error), authorize func() error) (TaskReservationOutcome, error) {
+	extra any, fn func(*sql.Tx) (TaskReservationOutcome, error), authorize func() error) (TaskReservationOutcome, error) {
 	tx, err := d.sql.Begin()
 	if err != nil {
 		return TaskReservationOutcome{}, err
 	}
 	defer tx.Rollback()
-	out, err := reservationMutationTx(d, tx, actor, binding, op, in, key, fn, authorize)
+	out, err := reservationMutationTx(d, tx, actor, binding, op, in, key, extra, fn, authorize)
 	if err != nil {
 		return TaskReservationOutcome{}, err
 	}
@@ -271,9 +287,11 @@ func reservationMutation(d *DB, actor TaskActor, binding ReservationBinding, op 
 // reservationMutationTx lets the registry retain dependency locks through the
 // owner commit. authorize runs on both receipt replay and immediately before
 // commit; it must not access this project's single-connection DB. A replay
-// is served only to the holder binding that made the transition.
+// is served only to the holder binding that made the transition. extra is
+// further request input the receipt digest covers (a recovery's evidence);
+// nil keeps the digest of in alone.
 func reservationMutationTx(d *DB, tx *sql.Tx, actor TaskActor, binding ReservationBinding, op ReservationOperation, in TaskReservationInput, key string,
-	fn func(*sql.Tx) (TaskReservationOutcome, error), authorize func() error) (TaskReservationOutcome, error) {
+	extra any, fn func(*sql.Tx) (TaskReservationOutcome, error), authorize func() error) (TaskReservationOutcome, error) {
 	if err := d.taskScopeOK(); err != nil {
 		return TaskReservationOutcome{}, err
 	}
@@ -283,14 +301,28 @@ func reservationMutationTx(d *DB, tx *sql.Tx, actor TaskActor, binding Reservati
 	if err := binding.validate(); err != nil {
 		return TaskReservationOutcome{}, err
 	}
-	principal, err := reservationPrincipal(actor)
+	var principal string
+	var err error
+	if binding.Mode == "recovery" {
+		principal, err = recoveryPrincipal(actor)
+	} else {
+		principal, err = reservationPrincipal(actor)
+	}
 	if err != nil {
 		return TaskReservationOutcome{}, err
 	}
 	if err := taskText(key, MaxTaskKeyBytes, true); err != nil {
 		return TaskReservationOutcome{}, invalid(fmt.Errorf("idempotency key: %w", err))
 	}
-	digest, err := receiptDigest(in)
+	var digest string
+	if extra == nil {
+		digest, err = receiptDigest(in)
+	} else {
+		digest, err = receiptDigest(struct {
+			In    TaskReservationInput `json:"in"`
+			Extra any                  `json:"extra"`
+		}{in, extra})
+	}
 	if err != nil {
 		return TaskReservationOutcome{}, err
 	}
@@ -346,7 +378,10 @@ func (d *DB) ApplyTaskReservation(op ReservationOperation, in TaskReservationInp
 	if err := validateReservationInput(op, &in); err != nil {
 		return TaskReservationOutcome{}, err
 	}
-	return reservationMutation(d, actor, binding, op, in, key,
+	if binding.Mode == "recovery" {
+		return TaskReservationOutcome{}, invalid(errors.New("a recovery goes through RecoverTaskReservation"))
+	}
+	return reservationMutation(d, actor, binding, op, in, key, nil,
 		func(tx *sql.Tx) (TaskReservationOutcome, error) {
 			t, err := readTask(tx, in.TaskID)
 			if err != nil {
@@ -402,6 +437,9 @@ func (d *DB) ApplyTaskReservation(op ReservationOperation, in TaskReservationInp
 				return TaskReservationOutcome{}, err
 			}
 			if err := recordReservationEvent(tx, op, before, r, actor, binding, in.Reason, nil); err != nil {
+				return TaskReservationOutcome{}, err
+			}
+			if err := trackServiceReservation(tx, before, r, holderClosedBy(op)); err != nil {
 				return TaskReservationOutcome{}, err
 			}
 			return TaskReservationOutcome{Task: t, Reservation: r}, nil

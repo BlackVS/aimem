@@ -355,7 +355,7 @@ func (r *Registry) ClaimTaskReservation(ctx context.Context, in TaskReservationI
 		}
 		return ctx.Err()
 	}
-	out, err := reservationMutationTx(db, ownerTx, actor, binding, ReservationClaim, in, key,
+	out, err := reservationMutationTx(db, ownerTx, actor, binding, ReservationClaim, in, key, nil,
 		func(tx *sql.Tx) (TaskReservationOutcome, error) {
 			current, deps, err := validateDependencyGraph(in.TaskID, nodes, txs, verify, ctx)
 			if err != nil {
@@ -383,6 +383,9 @@ func (r *Registry) ClaimTaskReservation(ctx context.Context, in TaskReservationI
 				return TaskReservationOutcome{}, err
 			}
 			if err := recordReservationEvent(tx, ReservationClaim, before, hold, actor, binding, "", evidence); err != nil {
+				return TaskReservationOutcome{}, err
+			}
+			if err := trackServiceReservation(tx, before, hold, ""); err != nil {
 				return TaskReservationOutcome{}, err
 			}
 			return TaskReservationOutcome{Task: current, Reservation: hold}, nil

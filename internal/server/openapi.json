@@ -1419,6 +1419,316 @@
         }
       }
     },
+    "/v1/admin/reservations/{task_id}/recovery/release": {
+      "post": {
+        "summary": "Recover a reservation: release its task",
+        "description": "Operator recovery (task C5c): closes a hold its holder cannot close and releases the task to READY or BLOCKED. Needs a reason and exactly one evidence: aicrew stop evidence, a coordination.v1 stopped fact for this hold's attempt whose member is the holder recorded on the hold, or an operator attestation (the only kind for a hold that predates bindings). The reservation ID, fence and expected revision must match; recovery never produces DONE. Recorded under the recovery principal recovery/<admin> with the affected actor; audited as reservation.recovery.release. aicrew's read scope then reads the reservation as closed_by recovery_release. Requires TLS terminated by this hub: plain HTTP, a TLS-terminating proxy and the unix socket are refused with tls_required, and forwarded headers never count. Not exposed as an MCP tool.",
+        "x-role": "admin",
+        "x-requires-tls": true,
+        "parameters": [
+          {
+            "name": "task_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "maxLength": 128
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "reservation_id",
+                  "fence",
+                  "expected_revision",
+                  "content",
+                  "reason",
+                  "evidence"
+                ],
+                "properties": {
+                  "reservation_id": {
+                    "type": "string"
+                  },
+                  "fence": {
+                    "type": "string",
+                    "pattern": "^[1-9][0-9]*$"
+                  },
+                  "expected_revision": {
+                    "type": "integer"
+                  },
+                  "content": {
+                    "type": "object",
+                    "description": "Complete task content: release leaves READY or BLOCKED, cancel leaves CANCELLED; DONE is always refused."
+                  },
+                  "reason": {
+                    "type": "string"
+                  },
+                  "evidence": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": [
+                      "kind"
+                    ],
+                    "properties": {
+                      "kind": {
+                        "enum": [
+                          "stop_evidence",
+                          "attestation"
+                        ]
+                      },
+                      "proof": {
+                        "type": "string",
+                        "description": "stop_evidence only: the acp1_ coordination proof of aicrew's stopped fact for this hold, bound to this request's Idempotency-Key. Never echoed, stored or audited; only its p1_ digest is kept."
+                      },
+                      "attestation_id": {
+                        "type": "string",
+                        "maxLength": 128
+                      },
+                      "statement": {
+                        "type": "string",
+                        "minLength": 16,
+                        "maxLength": 2048
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Committed (or an identical replay): {operation, request_key, principal, task_id, task_state, task_revision, closing_fence, affected, evidence_kind, evidence_ref}. affected is the hold's recorded binding (empty for a hold that predates bindings)."
+          },
+          "400": {
+            "description": "Refusal envelope {code, message, retryable}: invalid_request (missing key, malformed body, bad fence, invalid evidence, DONE)"
+          },
+          "401": {
+            "description": "invalid_credential: the admin credential was removed before commit"
+          },
+          "403": {
+            "description": "tls_required, or coordination_rejected (stop evidence aicrew does not vouch for, or not for this hold)"
+          },
+          "404": {
+            "description": "task_unavailable"
+          },
+          "409": {
+            "description": "stale_fence, revision_conflict or idempotency_conflict; nothing changed"
+          },
+          "503": {
+            "description": "context_unavailable: aicrew could not be asked, or the stop evidence aged past 5 s before commit (retryable)"
+          }
+        }
+      }
+    },
+    "/v1/admin/reservations/{task_id}/recovery/cancel": {
+      "post": {
+        "summary": "Recover a reservation: cancel its task",
+        "description": "As release, but finalizes the task as CANCELLED (never DONE). Audited as reservation.recovery.cancel; aicrew's read scope reads closed_by recovery_cancel. Requires TLS terminated by this hub: plain HTTP, a TLS-terminating proxy and the unix socket are refused with tls_required, and forwarded headers never count. Not exposed as an MCP tool.",
+        "x-role": "admin",
+        "x-requires-tls": true,
+        "parameters": [
+          {
+            "name": "task_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "maxLength": 128
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "reservation_id",
+                  "fence",
+                  "expected_revision",
+                  "content",
+                  "reason",
+                  "evidence"
+                ],
+                "properties": {
+                  "reservation_id": {
+                    "type": "string"
+                  },
+                  "fence": {
+                    "type": "string",
+                    "pattern": "^[1-9][0-9]*$"
+                  },
+                  "expected_revision": {
+                    "type": "integer"
+                  },
+                  "content": {
+                    "type": "object",
+                    "description": "Complete task content: release leaves READY or BLOCKED, cancel leaves CANCELLED; DONE is always refused."
+                  },
+                  "reason": {
+                    "type": "string"
+                  },
+                  "evidence": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": [
+                      "kind"
+                    ],
+                    "properties": {
+                      "kind": {
+                        "enum": [
+                          "stop_evidence",
+                          "attestation"
+                        ]
+                      },
+                      "proof": {
+                        "type": "string",
+                        "description": "stop_evidence only: the acp1_ coordination proof of aicrew's stopped fact for this hold, bound to this request's Idempotency-Key. Never echoed, stored or audited; only its p1_ digest is kept."
+                      },
+                      "attestation_id": {
+                        "type": "string",
+                        "maxLength": 128
+                      },
+                      "statement": {
+                        "type": "string",
+                        "minLength": 16,
+                        "maxLength": 2048
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Committed (or an identical replay): {operation, request_key, principal, task_id, task_state, task_revision, closing_fence, affected, evidence_kind, evidence_ref}. affected is the hold's recorded binding (empty for a hold that predates bindings)."
+          },
+          "400": {
+            "description": "Refusal envelope {code, message, retryable}: invalid_request (missing key, malformed body, bad fence, invalid evidence, DONE)"
+          },
+          "401": {
+            "description": "invalid_credential: the admin credential was removed before commit"
+          },
+          "403": {
+            "description": "tls_required, or coordination_rejected (stop evidence aicrew does not vouch for, or not for this hold)"
+          },
+          "404": {
+            "description": "task_unavailable"
+          },
+          "409": {
+            "description": "stale_fence, revision_conflict or idempotency_conflict; nothing changed"
+          },
+          "503": {
+            "description": "context_unavailable: aicrew could not be asked, or the stop evidence aged past 5 s before commit (retryable)"
+          }
+        }
+      }
+    },
+    "/v1/admin/reservations/{task_id}/recovery": {
+      "get": {
+        "summary": "Recovery reader: any hold on a task",
+        "description": "The recovery reader's view of the task's current hold, whoever holds it: {task_id, task_revision, state (held or none), reservation_id, fence, holder_mode, holder_ref, binding}. Read-only; audited as reservation.recovery.read. Requires TLS terminated by this hub: plain HTTP, a TLS-terminating proxy and the unix socket are refused with tls_required, and forwarded headers never count. Not exposed as an MCP tool.",
+        "x-role": "admin",
+        "x-requires-tls": true,
+        "parameters": [
+          {
+            "name": "task_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The hold"
+          },
+          "403": {
+            "description": "tls_required"
+          },
+          "404": {
+            "description": "task_unavailable"
+          }
+        }
+      }
+    },
+    "/v1/admin/reservations/{task_id}/recovery/receipts/{operation}/{request_key_digest}": {
+      "get": {
+        "summary": "Recovery reader: receipts by key digest",
+        "description": "Every committed reservation receipt for the task, operation (claim, transfer, update, release, finalize, recovery_release, recovery_cancel) and k1_ request-key digest, whoever made it: {receipts: [{principal, outcome}]}. Read-only; audited as reservation.recovery.read. Requires TLS terminated by this hub: plain HTTP, a TLS-terminating proxy and the unix socket are refused with tls_required, and forwarded headers never count. Not exposed as an MCP tool.",
+        "x-role": "admin",
+        "x-requires-tls": true,
+        "parameters": [
+          {
+            "name": "task_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "operation",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "request_key_digest",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^k1_[A-Za-z0-9_-]{43}$"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The receipts"
+          },
+          "400": {
+            "description": "invalid_request"
+          },
+          "403": {
+            "description": "tls_required"
+          },
+          "404": {
+            "description": "task_unavailable"
+          }
+        }
+      }
+    },
     "/v1/identity/peers/{service_id}/teams": {
       "get": {
         "summary": "List a peer's team access profiles",

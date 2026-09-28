@@ -713,6 +713,9 @@ func TestCoordinationV1SecretsStayWherePermitted(t *testing.T) {
 func TestCoordinationV1IsNotServedAndContractsAgree(t *testing.T) {
 	s, _ := testServer(t)
 	for _, route := range s.Routes() {
+		if strings.HasPrefix(route.Pattern, recoveryNamespace) {
+			continue // C5c's admin-only recovery routes, not the read scope
+		}
 		for _, frag := range []string{"/v1/crew/", "reservation-receipts", "/reservations/"} {
 			if strings.Contains(route.Pattern, frag) {
 				t.Errorf("C5w registered route %s", route.Pattern)
@@ -726,6 +729,9 @@ func TestCoordinationV1IsNotServedAndContractsAgree(t *testing.T) {
 		t.Fatal(err)
 	}
 	for path := range live.Paths {
+		if strings.HasPrefix(path, recoveryNamespace) {
+			continue
+		}
 		if strings.Contains(path, "/v1/crew/") || strings.Contains(path, "reservation") {
 			t.Errorf("C5w changed live OpenAPI path %s", path)
 		}
