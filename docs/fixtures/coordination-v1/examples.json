@@ -1076,6 +1076,144 @@
         }
       },
       {
+        "case": "closed_holder_release",
+        "context": {
+          "last_active_fence": "2",
+          "closing_transition": "stop release by the holder"
+        },
+        "http": {
+          "method": "GET",
+          "path": "/v1/identity/peers/aicrew-example/reservations/01a0e39c-0000-7000-8000-00000000c521",
+          "headers": {
+            "Authorization": "Bearer {read_credential}",
+            "X-Aimem-Reservation-Version": "1"
+          }
+        },
+        "response": {
+          "status": 200,
+          "body": {
+            "state": "closed",
+            "reservation_id": "01a0e39c-0000-7000-8000-00000000c531",
+            "closing_fence": "3",
+            "closed_by": "holder_release",
+            "closed_at": "2026-09-28T04:10:00Z",
+            "task_revision": 5
+          }
+        }
+      },
+      {
+        "case": "closed_holder_finalize",
+        "context": {
+          "last_active_fence": "3",
+          "closing_transition": "finalize DONE by the reviewing coordinator"
+        },
+        "http": {
+          "method": "GET",
+          "path": "/v1/identity/peers/aicrew-example/reservations/01a0e39c-0000-7000-8000-00000000c522",
+          "headers": {
+            "Authorization": "Bearer {read_credential}",
+            "X-Aimem-Reservation-Version": "1"
+          }
+        },
+        "response": {
+          "status": 200,
+          "body": {
+            "state": "closed",
+            "reservation_id": "01a0e39c-0000-7000-8000-00000000c532",
+            "closing_fence": "4",
+            "closed_by": "holder_finalize",
+            "closed_at": "2026-09-28T04:11:00Z",
+            "task_revision": 7
+          }
+        }
+      },
+      {
+        "case": "closed_recovery_release",
+        "context": {
+          "last_active_fence": "2",
+          "closing_transition": "recovery release on an operator attestation",
+          "recovery_admin": "admin-recovery-example",
+          "attestation_id": "ticket-4711",
+          "attestation": "worker machine decommissioned; attempt abandoned"
+        },
+        "http": {
+          "method": "GET",
+          "path": "/v1/identity/peers/aicrew-example/reservations/01a0e39c-0000-7000-8000-00000000c523",
+          "headers": {
+            "Authorization": "Bearer {read_credential}",
+            "X-Aimem-Reservation-Version": "1"
+          }
+        },
+        "response": {
+          "status": 200,
+          "body": {
+            "state": "closed",
+            "reservation_id": "01a0e39c-0000-7000-8000-00000000c533",
+            "closing_fence": "3",
+            "closed_by": "recovery_release",
+            "closed_at": "2026-09-28T04:12:00Z",
+            "task_revision": 6
+          }
+        }
+      },
+      {
+        "case": "closed_recovery_cancel",
+        "context": {
+          "last_active_fence": "5",
+          "closing_transition": "recovery finalize CANCELLED on aicrew stop evidence",
+          "recovery_admin": "admin-recovery-example",
+          "reason": "stopped attempt, work abandoned"
+        },
+        "http": {
+          "method": "GET",
+          "path": "/v1/identity/peers/aicrew-example/reservations/01a0e39c-0000-7000-8000-00000000c524",
+          "headers": {
+            "Authorization": "Bearer {read_credential}",
+            "X-Aimem-Reservation-Version": "1"
+          }
+        },
+        "response": {
+          "status": 200,
+          "body": {
+            "state": "closed",
+            "reservation_id": "01a0e39c-0000-7000-8000-00000000c534",
+            "closing_fence": "6",
+            "closed_by": "recovery_cancel",
+            "closed_at": "2026-09-28T04:13:00Z",
+            "task_revision": 9
+          }
+        }
+      },
+      {
+        "case": "closed_while_another_holds_the_task",
+        "context": {
+          "last_active_fence": "2",
+          "closing_transition": "recovery release",
+          "recovery_admin": "admin-recovery-example",
+          "current_holder": "user-personal-other",
+          "current_holder_ref": "work-personal-other"
+        },
+        "http": {
+          "method": "GET",
+          "path": "/v1/identity/peers/aicrew-example/reservations/01a0e39c-0000-7000-8000-00000000c525",
+          "headers": {
+            "Authorization": "Bearer {read_credential}",
+            "X-Aimem-Reservation-Version": "1"
+          }
+        },
+        "response": {
+          "status": 200,
+          "body": {
+            "state": "closed",
+            "reservation_id": "01a0e39c-0000-7000-8000-00000000c535",
+            "closing_fence": "3",
+            "closed_by": "recovery_release",
+            "closed_at": "2026-09-28T04:14:00Z",
+            "task_revision": 6
+          }
+        }
+      },
+      {
         "case": "hold_outside_scope",
         "http": {
           "method": "GET",
@@ -1093,6 +1231,74 @@
         }
       }
     ],
+    "closure_use": {
+      "rule": "close the attempt only when reservation_id equals the attempt's exactly and closing_fence is greater than the attempt's last confirmed fence",
+      "cases": [
+        {
+          "case": "own_reservation_closed",
+          "attempt": {
+            "reservation_id": "r-7",
+            "fence": "2"
+          },
+          "answer": {
+            "state": "closed",
+            "reservation_id": "r-7",
+            "closing_fence": "3"
+          },
+          "action": "close"
+        },
+        {
+          "case": "other_reservation_closed",
+          "attempt": {
+            "reservation_id": "r-7",
+            "fence": "2"
+          },
+          "answer": {
+            "state": "closed",
+            "reservation_id": "r-8",
+            "closing_fence": "9"
+          },
+          "action": "keep_open"
+        },
+        {
+          "case": "fence_not_advanced",
+          "attempt": {
+            "reservation_id": "r-7",
+            "fence": "3"
+          },
+          "answer": {
+            "state": "closed",
+            "reservation_id": "r-7",
+            "closing_fence": "3"
+          },
+          "action": "keep_open"
+        },
+        {
+          "case": "none_is_not_closure",
+          "attempt": {
+            "reservation_id": "r-7",
+            "fence": "2"
+          },
+          "answer": {
+            "state": "none"
+          },
+          "action": "keep_open"
+        },
+        {
+          "case": "held_is_not_closure",
+          "attempt": {
+            "reservation_id": "r-7",
+            "fence": "2"
+          },
+          "answer": {
+            "state": "held",
+            "reservation_id": "r-7",
+            "fence": "2"
+          },
+          "action": "keep_open"
+        }
+      ]
+    },
     "none_finality": {
       "proof_backed": {
         "rule": "a receipt-by-proof none is final only after aicrew settled or voided the proof's intent and at least read_none_final_after_seconds passed since",

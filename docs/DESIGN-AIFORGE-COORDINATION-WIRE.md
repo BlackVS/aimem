@@ -1,6 +1,6 @@
 # AIForge coordination facts and reservation read scope, version 1
 
-Status: reviewed contract candidate (task C5w, 01a0e39c-8786). **Nothing here is implemented.** C5b implements aimem's use of `coordination.v1`, C6 serves the read scope and the reservation CLI, and aicrew's task b0 serves `coordination.v1`. The fixtures live in `docs/fixtures/coordination-v1/`. The live `internal/server/openapi.json` describes only served routes.
+Status: reviewed contract (task C5w, 01a0e39c-8786, merged in #136), amended before any implementation by task C5c-w (01a0e62c-9d60) with the `closed` hold-status answer ([Closure evidence](#closure-evidence)). **Nothing here is implemented.** C5b implements aimem's use of `coordination.v1`, C6 serves the read scope and the reservation CLI, and aicrew's task b0 serves `coordination.v1`. The fixtures live in `docs/fixtures/coordination-v1/`. The live `internal/server/openapi.json` describes only served routes.
 
 This contract completes the [reservation wire contract](DESIGN-AIFORGE-RESERVATION-WIRE.md) (C4) for team transitions. It reuses the shapes and rules of [identity.v1](DESIGN-AIFORGE-IDENTITY-WIRE.md) and composes with aicrew's [crew contract](https://github.com/BlackVS/aicrew/blob/2063838/docs/CREW-CONTRACT.md) ("Attempts and the aimem reservation"). If a parent contract disagrees with this document, the parent wins. Updated 2026-09-27.
 
@@ -139,11 +139,52 @@ All three are HTTP-only, over TLS the hub terminated itself, with `X-Aimem-Reser
 | --- | --- | --- |
 | Receipt by proof | `GET /v1/identity/peers/{service_id}/reservation-receipts/{proof_digest}` | `{state: "committed", receipt}` for the transition committed under that proof, or `{state: "none"}` |
 | Receipt by key | `GET /v1/identity/peers/{service_id}/reservations/{task_id}/receipts/{operation}/{request_key_digest}` | `{state: "committed", receipt}` when that transition was made on a reservation this service's proof established (a claim or transfer under its proof), otherwise `{state: "none"}`. This is how aicrew confirms a holder's `update`, which carries no proof |
-| Hold status | `GET /v1/identity/peers/{service_id}/reservations/{task_id}` | `{state: "held", reservation_id, fence, holder_mode: "external", own_work_ref, task_revision}` (the field names reservation.v1's status uses) when the task's current hold was set under a proof this service issued, otherwise `{state: "none"}` |
+| Hold status | `GET /v1/identity/peers/{service_id}/reservations/{task_id}` | `{state: "held", reservation_id, fence, holder_mode: "external", own_work_ref, task_revision}` (the field names reservation.v1's status uses) when the task's current hold was set under a proof this service issued; `{state: "closed", reservation_id, closing_fence, closed_by, closed_at, task_revision}` when this service's most recent reservation on the task is no longer active ([Closure evidence](#closure-evidence)); otherwise `{state: "none"}` |
 
 The receipt is `{id, operation, task_id, request_key_digest, reservation_id, fence, task_revision, member_user_id, verified_mode: "team", committed_at}`.
 
-**What the scope never returns:** task content, another holder's identity or reference, a hold set under another service's proof or under personal mode, the raw request key, or the proof itself. Every out-of-scope record answers `none`, the same as a missing one.
+### Closure evidence
+
+Operator decision D-c1(a) (C5c seq206) gives aicrew positive evidence that **its own** reservation closed, however it closed. This includes operator recovery, which carries no proof aicrew issued (C5c). The rule replaces task 01a0de38, which it absorbs.
+
+**Which reservation `closed` describes.** Hold status looks first at the task's current hold:
+- If that hold was set under this service's proof, the answer is `held`.
+- Otherwise the answer describes **this service's most recent reservation on the task**, meaning the latest reservation that a claim or transfer under one of its proofs established:
+  - if that reservation is no longer active, the answer is `closed`;
+  - if there is none, the answer is `none`.
+
+`closed` is answered whatever holds the task now: nothing, a personal holder, or another service's hold. It never describes that other holder, neither its identity, mode or reference nor that it exists at all. A service with no reservation of its own on the task still gets `none`.
+
+**Fields.**
+
+| Field | Meaning |
+| --- | --- |
+| `reservation_id` | The closed reservation, exactly as aicrew recorded it from its own receipts |
+| `closing_fence` | The fence the closing transition advanced to. It is always greater than any fence the reservation had while it was active |
+| `closed_by` | One of the four values below |
+| `closed_at` | When the closing transition committed (RFC 3339 UTC) |
+| `task_revision` | The task revision that closing transition left |
+
+**`closed_by` values.**
+
+| Value | The closing transition |
+| --- | --- |
+| `holder_release` | A release by a member over its own verified connection: the holder's stop release, or a coordinator's release of an unaccepted offer (`stopped` or `never_accepted` facts) |
+| `holder_finalize` | A finalize by the holder, or by the reviewing coordinator (`accepted_for_finalization` fact) |
+| `recovery_release` | An operator recovery release (C5c), on aicrew stop evidence or on an operator attestation. Decision D-c2(a) allows an attestation even while aicrew is reachable |
+| `recovery_cancel` | An operator recovery finalize as `CANCELLED` (C5c). Recovery never produces `DONE` |
+
+The answer never names the recovery admin, the attestation, the reason or the evidence. Those stay in aimem's audit and in the recovery reader, which is admin-only.
+
+**How aicrew uses it.** Aicrew closes an attempt as recovered, or confirms a transition it could not settle, only when both of these hold:
+- the answer's `reservation_id` equals the attempt's reservation ID exactly;
+- `closing_fence` is greater than the fence aicrew last confirmed for the attempt.
+
+A `closed` answer for another reservation ID leaves the attempt open. So does a fence that did not advance, or a `none` or `held` answer. This is the crew contract's "Recovery" rule and task 01a0de37's criteria.
+
+`closed` is durable: the same closed reservation reads the same until this service establishes a newer reservation on the task. Then it reads that newer reservation's state instead. A receipt that aicrew holds for the closing transition (its own `holder_release` or `holder_finalize`) still reconciles by key or by proof as before. `closed` adds evidence and replaces nothing.
+
+**What the scope never returns:** task content, another holder's identity, reference or existence, a recovery admin, attestation or reason, a hold set under another service's proof or under personal mode, the raw request key, or the proof itself. Every out-of-scope record answers `none`, the same as a missing one.
 
 **When `none` is final.** A committed transition's receipt is durable, and it commits in the same transaction as the transition. But `none` means only that nothing has committed *yet*: a member's request may still be on its way. The rule depends on whether the step carries a proof.
 
@@ -210,6 +251,7 @@ These values are fixed by v1. An implementation may tighten them; relaxing any o
 - A coordination call gets one attempt of at most 2 s, and its reply may be at most 16,384 bytes.
 - A coordination answer is at most 5 s old when its transition commits.
 - A read-scope `none` is final only 10 s after aicrew voided or settled the proof.
+- A `closed` answer is durable until this service establishes a newer reservation on the task.
 - Read-scope reads are limited to 60 per credential per minute.
 - A `reservation.read` credential lives at most 366 days, with at most two active per peer.
 

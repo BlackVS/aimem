@@ -181,7 +181,7 @@
         ],
         "responses": {
           "200": {
-            "description": "held under own proof, or none",
+            "description": "held under own proof, closed (own most recent reservation no longer active), or none",
             "content": {
               "application/json": {
                 "schema": {
@@ -542,6 +542,7 @@
           "state": {
             "enum": [
               "held",
+              "closed",
               "none"
             ]
           },
@@ -559,6 +560,22 @@
           },
           "task_revision": {
             "type": "integer"
+          },
+          "closing_fence": {
+            "type": "string",
+            "pattern": "^[1-9][0-9]*$"
+          },
+          "closed_by": {
+            "enum": [
+              "holder_release",
+              "holder_finalize",
+              "recovery_release",
+              "recovery_cancel"
+            ]
+          },
+          "closed_at": {
+            "type": "string",
+            "format": "date-time"
           }
         }
       }
