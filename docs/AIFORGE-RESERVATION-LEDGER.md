@@ -172,3 +172,12 @@ C6b (task 01a0e8c7-e212) serves aicrew's read-only reservation scope from the [c
   - By key, a transition is visible when a claim or transfer under the service's proof established its reservation.
   - Hold status is C5c's `ServiceHoldStatus`.
 - **Answers that are never guessed.** Every out-of-scope, missing or malformed record answers `none`. A lookup that cannot vouch for `none` answers the retryable `request_in_progress` instead: an unreadable project during the proof search, or a busy store.
+
+## C5-w3: the evidence digest
+
+C5-w3 (task 01a0eb83-bde1, operator decisions D1 to D4 on its scope) makes a coordination-backed finalize carry exactly the delivery evidence the coordinator confirmed through aicrew ([coordination wire](DESIGN-AIFORGE-COORDINATION-WIRE.md#evidence-digest)).
+
+- **Digest.** `store.EvidenceDigest` is the canonical `e1_` form: each `terminal_evidence` reference in order, as its 4-byte big-endian length and then its UTF-8 bytes, hashed with SHA-256. No normalization.
+- **Fact.** The `accepted_for_finalization` fact must carry `evidence_digest`, and no other kind may. The introspection client refuses any other shape as malformed (`context_unavailable`), and `ReservationCoordination.validate` enforces the same rule in the store.
+- **Check.** `checkEvidenceDigest` runs in the committing transaction, right after `checkProcessPin`, and refuses a mismatch with `ErrEvidenceMismatch` (`evidence_mismatch`, 409, final). The receipt's `CoordinationRecord` keeps the digest.
+- **Unchanged.** A personal finalize or `DONE` edit has no fact and no digest. A replay answers from its receipt without asking aicrew.

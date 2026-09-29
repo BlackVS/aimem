@@ -93,6 +93,7 @@ func (s *Server) coordinate(ctx context.Context, c reservationCaller, op store.R
 		coord.WorkRef = fact.AttemptRef
 	case "accepted_for_finalization":
 		coord.WorkRef, coord.Coordinator = fact.AttemptRef, c.binding.Role == "coordinator"
+		coord.EvidenceDigest = fact.EvidenceDigest
 	}
 	return coord, nil
 }

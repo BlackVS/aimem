@@ -1,6 +1,6 @@
 # AIForge coordination facts and reservation read scope, version 1
 
-Status: reviewed contract (task C5w, 01a0e39c-8786, merged in #136), amended before any implementation by task C5c-w (01a0e62c-9d60) with the `closed` hold-status answer ([Closure evidence](#closure-evidence)), and by task C5-w2 (01a0e6a6-bccc) with the process pin ([Process pin](#process-pin)). **Implementation status.** aimem uses `coordination.v1` since task C5b. It serves the reservation CLI (§4) since task C6c and the read scope (§2) since task C6b. Aicrew's task b0 serves `coordination.v1`. The fixtures live in `docs/fixtures/coordination-v1/`. The live `internal/server/openapi.json` describes only served routes.
+Status: reviewed contract (task C5w, 01a0e39c-8786, merged in #136), amended before any implementation by task C5c-w (01a0e62c-9d60) with the `closed` hold-status answer ([Closure evidence](#closure-evidence)), by task C5-w2 (01a0e6a6-bccc) with the process pin ([Process pin](#process-pin)), and by task C5-w3 (01a0eb83-bde1) with the evidence digest ([Evidence digest](#evidence-digest)). **C5-w3 is the last in-place amendment before the pilot.** After the pilot, a wire change goes through a new version or an optional field, never an in-place amendment. **Implementation status.** aimem uses `coordination.v1` since task C5b. It serves the reservation CLI (§4) since task C6c and the read scope (§2) since task C6b. Aicrew's task b0 serves `coordination.v1`. The fixtures live in `docs/fixtures/coordination-v1/`. The live `internal/server/openapi.json` describes only served routes.
 
 This contract completes the [reservation wire contract](DESIGN-AIFORGE-RESERVATION-WIRE.md) (C4) for team transitions. It reuses the shapes and rules of [identity.v1](DESIGN-AIFORGE-IDENTITY-WIRE.md) and composes with aicrew's [crew contract](https://github.com/BlackVS/aicrew/blob/2063838/docs/CREW-CONTRACT.md) ("Attempts and the aimem reservation"). If a parent contract disagrees with this document, the parent wins. Updated 2026-09-28.
 
@@ -13,6 +13,7 @@ The operator decided these on task C5, comment seq201, after aicrew's impact ana
 3. **D1 (a): aimem verifies aicrew's facts online.** It does so through `coordination.v1`, which is shaped like identity.v1 introspection: a pinned peer, a nonce echo, a 2 s bound, no caching, and inactive replies that give no reason.
 4. **Replay rule.** When aimem replays a committed receipt, it rechecks only the authority it owns (token, grant, profile). It does not query the coordination fact again: the fact was verified when the change was made, and a replay has no new effect.
 5. **Process pin, option (a): aimem checks the reference.** Aicrew's integration assessment (aicrew task b, seq165) found that an offer's process version must come from an authoritative aimem source, while under D4(a) and D5b aicrew can read only holds and receipts. The operator decided on 2026-09-28 (task C5-w2) that aimem verifies the pin. The `offer`, `accepted_attempt` and `independent_claim` facts carry the process reference aicrew recorded, and aimem checks the repository, commit and manifest against the project's current selection before it commits the claim or transfer. It checks no digest. *Operator's reason: the commit hash already pins the content, and it matches how aimem stores the project's selection.* After aicrew's consumer review the operator extended the pin to `independent_claim`: the pin comes from an authoritative aimem check, never from a client, for every claim.
+6. **Evidence digest (task C5-w3, decisions D1 to D4 on its scope).** A team member confirms the delivery (the coordinator, through aicrew's confirm-delivery step), and neither aimem nor aicrew queries a forge. The `accepted_for_finalization` fact therefore binds the `e1_` digest of exactly the delivery evidence the coordinator confirmed, and aimem refuses a finalize whose `terminal_evidence` is anything else with `evidence_mismatch` ([Evidence digest](#evidence-digest)). The digest covers the references only; binding their kinds is a later wire change.
 
 ## How a team step runs
 
@@ -68,6 +69,7 @@ aimem sends no expected member, task, operation or key. Aicrew answers only from
         member: {user_id, agent_id, team_id, role, session_id, generation},
         offer_ref?, attempt_ref?, intended_worker?: {user_id, agent_id},
         process?: {repo, commit, manifest},
+        evidence_digest?: "e1_…",
         expires_at}}
 ```
 
@@ -89,7 +91,7 @@ Aicrew answers every fact from one snapshot of current state, never from the pro
 | `accepted_attempt` | `transfer` | the intended worker (`worker`), from the session the offer is bound to | `offer_ref`, `attempt_ref`, `process` | the hold's current `work_ref` equals `offer_ref`; request `holder.work_ref` equals `attempt_ref`; `member` is the `intended_worker` aimem recorded from the offer fact: the same `user_id` **and** `agent_id`; `process` is the project's current selection ([Process pin](#process-pin)) |
 | `never_accepted` | `release` | the current coordinator, or a verified successor (`coordinator`) | `offer_ref` | the hold's current `work_ref` equals `offer_ref` |
 | `stopped` | `release` | the holding worker (`worker` or `independent`), after it confirmed the stop | `attempt_ref` | the hold's current `work_ref` equals `attempt_ref`, and the caller is the bound holder |
-| `accepted_for_finalization` | `finalize` | the holder, or the coordinator from the session and generation that recorded the acceptance | `attempt_ref` | the hold's current `work_ref` equals `attempt_ref`; `terminal_evidence` present for `DONE` |
+| `accepted_for_finalization` | `finalize` | the holder, or the coordinator from the session and generation that recorded the acceptance | `attempt_ref`, `evidence_digest` | the hold's current `work_ref` equals `attempt_ref`; `terminal_evidence` present for `DONE`, and exactly the evidence `evidence_digest` binds ([Evidence digest](#evidence-digest)) |
 | `independent_claim` | `claim` | the claimer (`independent`) | `attempt_ref`, `process` | request `holder = {mode: external, work_ref: attempt_ref}`; `process` is the project's current selection ([Process pin](#process-pin)) |
 
 A holder's `update` (block, submit, resume) needs no fact. C5a authorizes it from the stored binding alone.
@@ -136,6 +138,24 @@ Because aimem reads the selection in the committing transaction, the timing is e
 
 **Disclosure.** The refusal is the standard reservation envelope. It names neither the current selection nor the pin the fact carried. The member reads the current selection the way it already reads its process context.
 
+### Evidence digest
+
+An `accepted_for_finalization` fact carries `evidence_digest`: the digest of the delivery evidence the coordinator confirmed through aicrew's confirm-delivery step. No other kind carries it. Aicrew computes it over the evidence the finalize will send; aimem recomputes it over the request.
+
+- **What it covers.** The finalize request's `terminal_evidence` references, in their exact order, and nothing else: no evidence kind, no other field.
+- **Canonical form.** For each reference in order: the 4-byte big-endian length of its UTF-8 bytes, then those bytes. SHA-256 over the concatenation, written `e1_` followed by the unpadded base64url digest (46 characters).
+- **No normalization.** No trimming, case or Unicode folding, sorting or deduplication. Reordering, altering, dropping or adding a reference changes the digest. The length prefix keeps `["ab", "c"]` and `["a", "bc"]` apart, and a reference that contains a newline apart from two references.
+- **Shape.** A missing, malformed or misplaced `evidence_digest` makes the reply the wrong shape: `context_unavailable`, as for the process pin.
+- **Vectors.** The fixture's `evidence_digest.vectors` are the canonical encodings both sides test against.
+
+**The check.** Before it commits a finalize on an `accepted_for_finalization` fact, aimem recomputes the digest over the request's `terminal_evidence` **inside the ledger transaction that commits it**, right after the process-pin check. Any difference refuses the finalize with **`evidence_mismatch`** (409, final for this key and this proof) and applies nothing. The check applies to every finalize on that fact, whatever its target state. The committed receipt records the digest with the fact's kind and proof digest.
+
+**Replay.** A replay of a committed finalize is answered from its receipt (the replay rule). The receipt's request digest covers `terminal_evidence`, so other evidence under the same key is `idempotency_conflict`.
+
+**A personal finalize is unchanged.** It carries no proof and no fact, so there is no digest to match. Its `DONE` still requires terminal evidence.
+
+**Disclosure.** The refusal is the standard reservation envelope. It names neither digest.
+
 ### Acceptance by aimem
 
 aimem makes one attempt of at most 2 s (connect, TLS and response), with no redirect, no proxy, no retry and no cache. Caller cancellation propagates. It reads at most 16,384 bytes of the reply, and refuses unknown fields and trailing data. It accepts an active reply only if all of these hold:
@@ -150,16 +170,18 @@ aimem makes one attempt of at most 2 s (connect, TLS and response), with no redi
 - `fact.member` equals the caller's verified team context exactly: user, agent, team, role, session and generation;
 - the references match the request and the current hold, as the table requires;
 - on `offer`, `accepted_attempt` and `independent_claim`, `fact.process` is well formed, and absent on every other kind ([Process pin](#process-pin)). Its comparison with the project's selection comes last, in the committing transaction.
+- on `accepted_for_finalization`, `fact.evidence_digest` is a well-formed `e1_` digest, and absent on every other kind ([Evidence digest](#evidence-digest)). It is compared with the request's `terminal_evidence` in the committing transaction, after the pin.
 
 **Outcomes.**
 - **Unavailable: about the peer.** Any of these gives `context_unavailable` (retryable):
   - a failure to reach, authenticate or parse the reply;
   - a TLS identity, nonce, `service_id` or `hub_id` that does not match;
-  - a reply of the wrong shape, including a missing, malformed or misplaced `process`.
+  - a reply of the wrong shape, including a missing, malformed or misplaced `process` or `evidence_digest`.
 
   The same key may be retried while the proof lives, and nothing is applied.
 - **Rejected: about the fact.** An inactive reply gives `coordination_rejected`, and so does an active one whose fact fails any other check: expiry, operation, kind, task, key digest, member or references. That refusal is final for this key and this proof: the member begins the step again through aicrew.
 - **Mismatched: about the project's process.** A well-formed `process` that differs from the project's current selection, or a project with no selection, gives `process_mismatch`. It is final for this key and this proof: the member reloads the current process and begins the step again through aicrew.
+- **Mismatched: about the delivery evidence.** A finalize whose `terminal_evidence` is not exactly the evidence the fact's `evidence_digest` binds gives `evidence_mismatch`. It is final for this key and this proof: the member finalizes with exactly the confirmed evidence, in its order, or begins the finalize again through aicrew if the confirmation changed.
 
 The answer is used once. aimem takes it before the ledger transaction (C5 decision D2a), and the transaction commits only while the answer is at most 5 s old. The in-transaction recheck is aimem-owned and never queries aicrew.
 
@@ -266,6 +288,7 @@ Reads are rate-limited to 60 per credential per minute (`rate_limited`, 429, ret
 | --- | --- | --- | --- |
 | `coordination_rejected` | 403 | no | Begin the step again through aicrew; never reuse the proof or the key. |
 | `process_mismatch` | 409 | no | Reload the project's current process, then begin the step again through aicrew under it; never reuse the proof or the key. |
+| `evidence_mismatch` | 409 | no | Finalize with exactly the evidence aicrew confirmed, in its order; if the confirmation changed, begin the finalize again through aicrew; never reuse the proof or the key. |
 
 An unreachable or unparsable `coordination.v1` answer is the existing `context_unavailable` (503, retryable).
 
@@ -320,6 +343,15 @@ These values are fixed by v1. An implementation may tighten them; relaxing any o
   - that a failing fact is rejected before the pin is compared;
   - that a replay does not compare the pin again;
   - that the refusal matches the reservation.v1 fixtures.
+- **C5-w3** amends the `accepted_for_finalization` fact with the evidence digest, adds `evidence_mismatch`, and implements the check. It is the last in-place amendment before the pilot. The tests check:
+  - the canonical vectors (`evidence_digest.vectors`) against aimem's digest;
+  - that the digest appears exactly on the finalize fact, over its member request's evidence;
+  - the malformed digests, as `context_unavailable`;
+  - a reordered, altered, dropped or extra reference, as `evidence_mismatch` with nothing applied, through the real routes;
+  - the replay, a changed list under the same key, and a personal `DONE`, which is unchanged;
+  - that the refusal matches the reservation.v1 fixtures and the hub's.
 - **C5b** implements aimem's `coordination.v1` client and the coordination-backed transitions against a fake, including the process-pin check.
 - **C6** serves the read scope, the reservation routes, the MCP tools and the CLI.
-- **Aicrew b0** serves `coordination.v1`, and b3 reconciles through the read scope.
+- **Aicrew b0** serves `coordination.v1`, and b3 reconciles through the read scope. Aicrew's C5-w3 counterpart produces the evidence digest.
+
+**Pilot prerequisite: lockstep deploy.** `evidence_digest` is required on both sides. An aimem with C5-w3 refuses an older aicrew's finalize facts as the wrong shape, and an older aimem refuses a newer aicrew's field the same way. Both refusals are retryable and apply nothing. So aimem and aicrew deploy their C5-w3 changes together, before the pilot.

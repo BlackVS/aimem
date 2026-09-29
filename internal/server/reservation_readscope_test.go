@@ -78,8 +78,11 @@ func (g *readRig) step(t *testing.T, ctx context.Context, op store.ReservationOp
 	key := "rk-" + string(op) + "-" + uuidv7.New()
 	f := fact(ctx, kind, string(op), in.TaskID, key)
 	f["attempt_ref"] = attempt
-	if kind == "independent_claim" {
+	switch kind {
+	case "independent_claim":
 		f["process"] = pinOf(testPin)
+	case "accepted_for_finalization":
+		f["evidence_digest"] = store.EvidenceDigest(in.TerminalEvidence)
 	}
 	g.answerFact(f)
 	proof := testProof(t)

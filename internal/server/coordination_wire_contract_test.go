@@ -18,6 +18,8 @@ import (
 	"time"
 
 	"aimem/internal/process"
+
+	"aimem/internal/store"
 )
 
 func readCoordinationFixture(t *testing.T, name string) map[string]any {
@@ -95,7 +97,7 @@ var factKinds = map[string]struct {
 	"accepted_attempt":          {"transfer", []string{"worker"}, []string{"offer_ref", "attempt_ref", "process"}},
 	"never_accepted":            {"release", []string{"coordinator"}, []string{"offer_ref"}},
 	"stopped":                   {"release", []string{"worker", "independent"}, []string{"attempt_ref"}},
-	"accepted_for_finalization": {"finalize", []string{"worker", "independent", "coordinator"}, []string{"attempt_ref"}},
+	"accepted_for_finalization": {"finalize", []string{"worker", "independent", "coordinator"}, []string{"attempt_ref", "evidence_digest"}},
 	"independent_claim":         {"claim", []string{"independent"}, []string{"attempt_ref", "process"}},
 }
 
@@ -189,7 +191,7 @@ func TestCoordinationV1Facts(t *testing.T) {
 				t.Errorf("%s: fact lacks %s", kind, r)
 			}
 		}
-		for _, r := range []string{"offer_ref", "attempt_ref", "intended_worker", "process"} {
+		for _, r := range []string{"offer_ref", "attempt_ref", "intended_worker", "process", "evidence_digest"} {
 			if _, ok := fact[r]; ok && !contains(rule.requires, r) {
 				t.Errorf("%s: fact carries %s it does not need", kind, r)
 			}
@@ -1016,4 +1018,124 @@ func containsAny(list []any, s string) bool {
 		}
 	}
 	return false
+}
+
+// C5-w3: the finalize fact binds the e1_ digest of exactly the delivery
+// evidence the coordinator confirmed. The fixture's canonical vectors are
+// aimem's EvidenceDigest, the finalize exchange's digest is its member
+// request's evidence, each case's outcome follows from the digest, and the
+// refusal is reservation.v1's and the hub's.
+func TestCoordinationV1EvidenceDigest(t *testing.T) {
+	ex := readCoordinationFixture(t, "examples.json")
+	spec := readCoordinationFixture(t, "openapi-proposal.json")
+	ed := obj(t, ex["evidence_digest"], "evidence_digest")
+	if !reflect.DeepEqual(ed["kinds"], []any{"accepted_for_finalization"}) || ed["field"] != "evidence_digest" {
+		t.Fatalf("kinds or field: %v %v", ed["kinds"], ed["field"])
+	}
+	refs := func(v any, what string) []string {
+		out := []string{}
+		for _, r := range arr(t, v, what) {
+			out = append(out, str(t, r, what))
+		}
+		return out
+	}
+	seen := map[string]string{}
+	for _, v := range arr(t, ed["vectors"], "vectors") {
+		v := obj(t, v, "vector")
+		name := str(t, v["case"], "case")
+		got := store.EvidenceDigest(refs(v["terminal_evidence"], name))
+		if got != v["digest"] {
+			t.Errorf("vector %s: %s, fixture %v", name, got, v["digest"])
+		}
+		if other, dup := seen[got]; dup {
+			t.Errorf("vectors %s and %s share a digest", other, name)
+		}
+		seen[got] = name
+	}
+	for _, need := range []string{"empty", "confirmed", "reordered", "altered_trailing_space", "altered_case", "dropped", "extra",
+		"split_ab_c", "split_a_bc", "newline_inside", "newline_split", "non_ascii"} {
+		found := false
+		for _, name := range seen {
+			found = found || name == need
+		}
+		if !found {
+			t.Errorf("missing vector %s", need)
+		}
+	}
+	// Exactly the finalize exchange carries the digest, over its member
+	// request's evidence.
+	for _, e := range arr(t, ex["exchanges"], "exchanges") {
+		e := obj(t, e, "exchange")
+		kind := str(t, e["case"], "case")
+		fact := obj(t, obj(t, obj(t, e["response"], "r")["body"], "b")["fact"], "fact")
+		digest, has := fact["evidence_digest"]
+		if has != (kind == "accepted_for_finalization") {
+			t.Errorf("%s: carries an evidence digest %v", kind, has)
+			continue
+		}
+		if !has {
+			continue
+		}
+		mr := obj(t, e["member_request"], "member_request")
+		if want := store.EvidenceDigest(refs(mr["terminal_evidence"], "terminal_evidence")); digest != want || ed["confirmed_digest"] != want ||
+			obj(t, mr["checks"], "checks")["evidence_digest"] != true {
+			t.Errorf("finalize exchange digest %v, want %s", digest, want)
+		}
+	}
+	// Each case's outcome follows from the digest; a replay never asks.
+	confirmed := str(t, ed["confirmed_digest"], "confirmed_digest")
+	for _, c := range arr(t, ed["cases"], "cases") {
+		c := obj(t, c, "case")
+		name := str(t, c["case"], "case")
+		want := "evidence_mismatch"
+		switch {
+		case c["replay"] == true:
+			want = "recorded_outcome"
+			if c["coordination_calls"] != float64(0) {
+				t.Errorf("%s: a replay asks aicrew again", name)
+			}
+		case store.EvidenceDigest(refs(c["terminal_evidence"], name)) == confirmed:
+			want = "committed"
+		}
+		if c["outcome"] != want {
+			t.Errorf("%s: outcome %v, want %s", name, c["outcome"], want)
+		}
+	}
+	if ed["malformed_outcome"] != "context_unavailable" {
+		t.Errorf("a malformed digest is a wrong-shaped reply: %v", ed["malformed_outcome"])
+	}
+	// The schema carries the digest's shape.
+	props := obj(t, obj(t, obj(t, obj(t, spec["components"], "components")["schemas"], "schemas")["Fact"], "Fact")["properties"], "props")
+	if obj(t, props["evidence_digest"], "Fact.evidence_digest")["pattern"] != "^e1_[A-Za-z0-9_-]{43}$" {
+		t.Errorf("Fact.evidence_digest: %v", props["evidence_digest"])
+	}
+	// The refusal is reservation.v1's and the hub's.
+	r := obj(t, ed["refusal"], "refusal")
+	if r["code"] != "evidence_mismatch" || r["http_status"] != float64(409) || r["retryable"] != false {
+		t.Errorf("evidence_mismatch refusal: %v", r)
+	}
+	var reservation struct {
+		Refusals []struct {
+			Code       string `json:"code"`
+			HTTPStatus int    `json:"http_status"`
+			Retryable  bool   `json:"retryable"`
+			NextAction string `json:"next_action"`
+		} `json:"refusals"`
+	}
+	b, err := os.ReadFile(filepath.Join("..", "..", "docs", "fixtures", "reservation-v1", "examples.json"))
+	if err != nil || json.Unmarshal(b, &reservation) != nil {
+		t.Fatalf("reservation-v1 fixture: %v", err)
+	}
+	found := false
+	for _, ref := range reservation.Refusals {
+		if ref.Code == "evidence_mismatch" {
+			found = ref.HTTPStatus == 409 && !ref.Retryable && ref.NextAction == r["next_action"]
+		}
+	}
+	if !found {
+		t.Error("reservation.v1 does not carry the same evidence_mismatch refusal")
+	}
+	if hub := reservationRefusals["evidence_mismatch"]; hub.status != 409 || hub.next != r["next_action"] {
+		t.Errorf("the hub's evidence_mismatch: %+v", hub)
+	}
 }

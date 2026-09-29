@@ -336,6 +336,8 @@ func reservationError(err error) error {
 		return refuseReservation("coordination_rejected", "the coordination fact does not describe this hold")
 	case errors.Is(err, store.ErrProcessMismatch):
 		return refuseReservation("process_mismatch", "the process pin is not the project's current selection")
+	case errors.Is(err, store.ErrEvidenceMismatch):
+		return refuseReservation("evidence_mismatch", "the terminal evidence is not the confirmed delivery evidence")
 	case errors.Is(err, store.ErrTaskRetryConflict):
 		return refuseReservation("idempotency_conflict", "changed input under a used key")
 	case errors.Is(err, store.ErrDependencyUnresolved):
