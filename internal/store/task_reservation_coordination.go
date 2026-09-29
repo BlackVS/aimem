@@ -5,13 +5,18 @@ package store
 // fact online, before the transaction, and hands the ledger what it
 // verified. The ledger checks, inside the committing transaction, the parts
 // that can change under it: the hold's work reference, the offer's intended
-// worker, the coordinator path, and last the process pin against the
-// project's current selection.
+// worker, the coordinator path, the process pin against the project's
+// current selection, and last a finalize's terminal evidence against the
+// fact's evidence digest (C5-w3).
 
 import (
+	"crypto/sha256"
 	"database/sql"
+	"encoding/base64"
+	"encoding/binary"
 	"encoding/json"
 	"errors"
+	"regexp"
 )
 
 var (
@@ -21,7 +26,27 @@ var (
 	// ErrProcessMismatch: the fact's process pin is not the project's
 	// current selection, or the project has none.
 	ErrProcessMismatch = errors.New("the process pin is not the project's current selection")
+	// ErrEvidenceMismatch: a finalize's terminal evidence is not exactly
+	// the delivery evidence the fact's digest binds (C5-w3).
+	ErrEvidenceMismatch = errors.New("the terminal evidence is not the confirmed delivery evidence")
+	evidenceDigestRE    = regexp.MustCompile(`^e1_[A-Za-z0-9_-]{43}$`)
 )
+
+// EvidenceDigest is the e1_ digest of a finalize's terminal evidence
+// (coordination wire, "Evidence digest"): each reference in order, as its
+// 4-byte big-endian length and then its UTF-8 bytes, hashed with SHA-256,
+// unpadded base64url. No reference is trimmed, folded, sorted or merged, so
+// reordering, altering, dropping or adding one changes the digest.
+func EvidenceDigest(refs []string) string {
+	h := sha256.New()
+	var n [4]byte
+	for _, ref := range refs {
+		binary.BigEndian.PutUint32(n[:], uint32(len(ref)))
+		h.Write(n[:])
+		h.Write([]byte(ref))
+	}
+	return "e1_" + base64.RawURLEncoding.EncodeToString(h.Sum(nil))
+}
 
 // ReservationWorker names an offer's intended worker: the user and the
 // agent aicrew named. Only that worker's accepted attempt takes the hold.
@@ -44,6 +69,9 @@ type ProcessPin struct {
 type CoordinationRecord struct {
 	Kind        string `json:"kind"`
 	ProofDigest string `json:"proof_digest"`
+	// EvidenceDigest is the e1_ digest of the delivery evidence an
+	// accepted_for_finalization fact binds (C5-w3); empty on other kinds.
+	EvidenceDigest string `json:"evidence_digest,omitempty"`
 }
 
 // ReservationCoordination is what the authorizer verified from one fact.
@@ -84,6 +112,9 @@ func (c *ReservationCoordination) validate(op ReservationOperation) error {
 		return invalid(errors.New("the facts that start work carry the process pin, nothing else"))
 	case c.Coordinator && op != ReservationRelease && op != ReservationFinalize:
 		return invalid(errors.New("the coordinator path is a release or a finalize"))
+	case (c.EvidenceDigest != "") != (c.Kind == "accepted_for_finalization"),
+		c.EvidenceDigest != "" && !evidenceDigestRE.MatchString(c.EvidenceDigest):
+		return invalid(errors.New("the finalize fact, and only it, binds the evidence digest"))
 	}
 	return nil
 }
@@ -147,6 +178,19 @@ func checkCoordinatedHolder(op ReservationOperation, hold TaskReservation, bindi
 		}
 	case !hold.Binding.SameHolder(binding):
 		return ErrReservationHolder
+	}
+	return nil
+}
+
+// checkEvidenceDigest compares a finalize's terminal evidence with the
+// digest its fact binds, in the committing transaction: the evidence must be
+// exactly the delivery evidence the coordinator confirmed, in its order.
+func checkEvidenceDigest(c *ReservationCoordination, evidence []string) error {
+	if c == nil || c.EvidenceDigest == "" {
+		return nil
+	}
+	if EvidenceDigest(evidence) != c.EvidenceDigest {
+		return ErrEvidenceMismatch
 	}
 	return nil
 }

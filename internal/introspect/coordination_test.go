@@ -4,7 +4,10 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/base64"
+	"encoding/json"
 	"net/http"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -193,4 +196,61 @@ func TestCoordinateReplyChecks(t *testing.T) {
 	})
 	_, err := c.Coordinate(context.Background(), peerOf(f, "ca_dns"), proof(t))
 	wantFailure(t, err, CodeUnavailable, "version_rejected")
+}
+
+// finalizeFact is a valid accepted_for_finalization fact: it binds the
+// digest of the confirmed delivery evidence (C5-w3).
+func finalizeFact(fact map[string]any) {
+	fact["kind"], fact["operation"] = "accepted_for_finalization", "finalize"
+	fact["member"].(map[string]any)["role"] = "coordinator"
+	fact["evidence_digest"] = "e1_" + strings.Repeat("E", 43)
+}
+
+// The finalize fact, and only it, carries a well-formed evidence digest;
+// anything else is a wrong-shaped reply, as the fixture's malformed cases
+// list (C5-w3).
+func TestCoordinateEvidenceDigestShape(t *testing.T) {
+	f := newFake(t)
+	c := newClient(t, f)
+	answerFact(f, func(_, fact map[string]any) { finalizeFact(fact) })
+	got, err := c.Coordinate(context.Background(), peerOf(f, "ca_dns"), proof(t))
+	if err != nil || got.EvidenceDigest != "e1_"+strings.Repeat("E", 43) {
+		t.Fatalf("finalize fact: %+v %v", got, err)
+	}
+	b, err := os.ReadFile(filepath.Join("..", "..", "docs", "fixtures", "coordination-v1", "examples.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var ex struct {
+		EvidenceDigest struct {
+			Malformed []struct {
+				Case           string  `json:"case"`
+				Kind           string  `json:"kind"`
+				EvidenceDigest *string `json:"evidence_digest"`
+			} `json:"malformed"`
+		} `json:"evidence_digest"`
+	}
+	if err := json.Unmarshal(b, &ex); err != nil || len(ex.EvidenceDigest.Malformed) == 0 {
+		t.Fatalf("fixture: %v", err)
+	}
+	for _, m := range ex.EvidenceDigest.Malformed {
+		answerFact(f, func(_, fact map[string]any) {
+			if m.Kind == "accepted_for_finalization" {
+				finalizeFact(fact)
+			}
+			delete(fact, "evidence_digest")
+			if m.EvidenceDigest != nil {
+				fact["evidence_digest"] = *m.EvidenceDigest
+			}
+		})
+		_, err := c.Coordinate(context.Background(), peerOf(f, "ca_dns"), proof(t))
+		if err == nil {
+			t.Fatalf("%s: accepted", m.Case)
+		}
+		wantFailure(t, err, CodeUnavailable, "malformed")
+	}
+	answerFact(f, func(_, fact map[string]any) { finalizeFact(fact); fact["evidence_digest"] = 7 })
+	if _, err := c.Coordinate(context.Background(), peerOf(f, "ca_dns"), proof(t)); err == nil {
+		t.Fatal("a number for the digest: accepted")
+	}
 }

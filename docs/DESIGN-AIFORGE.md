@@ -217,6 +217,10 @@ aimem redesign branch is no longer needed. Cross-project task dependencies
 link prerequisites without duplicating the backlog. Production releases and
 migration remain separate operator decisions.
 
+Pilot prerequisite: aimem and aicrew deploy their `coordination.v1` changes in
+lockstep. C5-w3's `evidence_digest` is required on both sides, and it is the
+last in-place amendment of that wire before the pilot.
+
 ## Shared ai-skills on GitHub (later)
 
 Host ai-skills on GitHub so aimem, aicrew and other GitHub projects can link to

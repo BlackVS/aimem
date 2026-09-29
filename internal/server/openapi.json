@@ -3613,6 +3613,7 @@
                   },
                   "terminal_evidence": {
                     "type": "array",
+                    "description": "Evidence references of reviewed delivery. On an accepted_for_finalization fact, exactly the delivery evidence the coordinator confirmed through aicrew, in its order: the fact's evidence_digest binds it, and anything else is evidence_mismatch.",
                     "items": {
                       "type": "string"
                     },
@@ -3926,7 +3927,7 @@
             }
           },
           "409": {
-            "description": "reservation_conflict, revision_conflict, stale_fence, idempotency_conflict, or process_mismatch (the fact's process pin is not the project's current selection)",
+            "description": "reservation_conflict, revision_conflict, stale_fence, idempotency_conflict, process_mismatch (the fact's process pin is not the project's current selection), or evidence_mismatch (terminal_evidence is not exactly, in order, the delivery evidence the accepted_for_finalization fact's evidence_digest binds)",
             "content": {
               "application/json": {
                 "schema": {

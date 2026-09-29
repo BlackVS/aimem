@@ -498,6 +498,9 @@ func (d *DB) ApplyTaskReservation(op ReservationOperation, in TaskReservationInp
 				if err := checkProcessPin(tx, coord.pin()); err != nil {
 					return TaskReservationOutcome{}, err
 				}
+				if err := checkEvidenceDigest(coord, in.TerminalEvidence); err != nil {
+					return TaskReservationOutcome{}, err
+				}
 				switch op {
 				case ReservationTransfer:
 					r.Holder, r.Binding, r.IntendedWorker = in.Holder, binding, nil

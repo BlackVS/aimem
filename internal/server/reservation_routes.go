@@ -85,6 +85,7 @@ var reservationRefusals = map[string]reservationRefusalSpec{
 	"invalid_request":        {http.StatusBadRequest, "Use a reviewed supported version or correct the request."},
 	"coordination_rejected":  {http.StatusForbidden, "Begin the step again through aicrew; never reuse the proof or the key."},
 	"process_mismatch":       {http.StatusConflict, "Reload the project's current process, then begin the step again through aicrew under it; never reuse the proof or the key."},
+	"evidence_mismatch":      {http.StatusConflict, "Finalize with exactly the evidence aicrew confirmed, in its order; if the confirmation changed, begin the finalize again through aicrew; never reuse the proof or the key."},
 }
 
 // reservationMessages are short, nonsecret messages per code. A refusal's
@@ -104,6 +105,7 @@ var reservationMessages = map[string]string{
 	"invalid_request":       "The request is not a valid reservation request.",
 	"coordination_rejected": "The coordination fact does not vouch for this step.",
 	"process_mismatch":      "The process pin is not the project's current selection.",
+	"evidence_mismatch":     "The terminal evidence is not exactly the delivery evidence aicrew confirmed.",
 }
 
 // reservationRefuse answers a refusal in the reservation envelope. The active

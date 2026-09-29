@@ -63,6 +63,7 @@ Every refusal has `{code, message, active_mode, retryable, next_action, correlat
 | `unsupported_version`, `invalid_request` | no | Use a reviewed supported version or correct the request. |
 | `coordination_rejected` | no | Begin the step again through aicrew; never reuse the proof or the key. |
 | `process_mismatch` | no | Reload the project's current process, then begin the step again through aicrew under it; never reuse the proof or the key. |
+| `evidence_mismatch` | no | Finalize with exactly the evidence aicrew confirmed, in its order; if the confirmation changed, begin the finalize again through aicrew; never reuse the proof or the key. |
 
 After an operation begins authorization, concurrent revocation follows the merged in-flight context rule: C5 revalidates immediately before commit; a transition already authorized may complete, with its receipt used for reconciliation. A late dependency reopen after claim commit is surfaced through C3 reconciliation without silent release. No response claims a multi-database transaction.
 

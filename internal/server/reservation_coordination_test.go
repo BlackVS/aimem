@@ -144,6 +144,7 @@ func TestCoordinatedReservationFlow(t *testing.T) {
 	final := nextOf(task, updated, "DONE")
 	finalFact := fact(review, "accepted_for_finalization", "finalize", task.ID, "fin")
 	finalFact["attempt_ref"] = "attempt-7"
+	finalFact["evidence_digest"] = store.EvidenceDigest([]string{"review-head-example", "human-merge-example", "post-merge-ci-example"})
 	g.answerFact(finalFact)
 	_, err = g.s.reserve(review, store.ReservationFinalize, final, "fin", testProof(t))
 	expectRefusal(t, "DONE without evidence", err, "invalid_request")

@@ -30,6 +30,9 @@ const (
 var (
 	proofShape = regexp.MustCompile(`^acp1_[A-Za-z0-9_-]{43}$`)
 	keyDigest  = regexp.MustCompile(`^k1_[A-Za-z0-9_-]{43}$`)
+	// evidenceDigest is the e1_ digest of confirmed delivery evidence
+	// (C5-w3), which only an accepted_for_finalization fact carries.
+	evidenceDigest = regexp.MustCompile(`^e1_[A-Za-z0-9_-]{43}$`)
 	// factKinds maps each fact kind to the operation it vouches for.
 	factKinds = map[string]string{
 		"offer": "claim", "accepted_attempt": "transfer", "never_accepted": "release",
@@ -64,7 +67,10 @@ type Fact struct {
 	OfferRef, AttemptRef                string
 	IntendedWorker                      *Worker
 	Process                             *Process
-	ExpiresAt                           time.Time
+	// EvidenceDigest binds the delivery evidence the coordinator confirmed
+	// (C5-w3); only an accepted_for_finalization fact carries it.
+	EvidenceDigest string
+	ExpiresAt      time.Time
 }
 
 type coordinationRequest struct {
@@ -103,7 +109,8 @@ type coordinationReply struct {
 			Commit   *string `json:"commit"`
 			Manifest *string `json:"manifest"`
 		} `json:"process"`
-		ExpiresAt *string `json:"expires_at"`
+		EvidenceDigest *string `json:"evidence_digest"`
+		ExpiresAt      *string `json:"expires_at"`
 	} `json:"fact"`
 }
 
@@ -221,6 +228,12 @@ func (c *Client) verifyFact(p Peer, nonce string, data []byte) (Fact, error) {
 		}
 		got.Process = &Process{Repo: ref.Repo, Commit: ref.Commit, Manifest: ref.Manifest}
 	}
+	// The evidence digest is exactly on the finalize fact, in its e1_ form.
+	if (f.EvidenceDigest != nil) != (got.Kind == "accepted_for_finalization") ||
+		(f.EvidenceDigest != nil && !evidenceDigest.MatchString(*f.EvidenceDigest)) {
+		return Fact{}, unavailable("malformed")
+	}
+	got.EvidenceDigest = str(f.EvidenceDigest)
 	exp, err := time.Parse(time.RFC3339, str(f.ExpiresAt))
 	if err != nil {
 		return Fact{}, unavailable("malformed")

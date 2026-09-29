@@ -27,7 +27,8 @@
     "invalid_request": 400,
     "dependency_unresolved": [404, 503],
     "coordination_rejected": 403,
-    "process_mismatch": 409
+    "process_mismatch": 409,
+    "evidence_mismatch": 409
   },
   "x-mcp-parity": {
     "claim": "task_reservation_claim",

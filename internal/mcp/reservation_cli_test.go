@@ -379,3 +379,13 @@ func TestReservationCLICommittedReplyLost(t *testing.T) {
 		t.Fatalf("after a lost update: %+v, then %+v", before, updated)
 	}
 }
+
+// A mismatched finalize is final: the CLI exits 3 and a client never
+// retries it with the same key (C5-w3).
+func TestReservationCLIEvidenceMismatchIsFinal(t *testing.T) {
+	// The hub's refusal reaches the tool as its envelope (callReservationTool).
+	r := &reservationToolRefusal{envelope: `{"code":"evidence_mismatch","message":"m","active_mode":"team","retryable":false,"next_action":"n","correlation_id":"c"}`}
+	if code := reservationExit(r); code != ExitFinal {
+		t.Fatalf("evidence_mismatch exits %d", code)
+	}
+}

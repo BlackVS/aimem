@@ -120,7 +120,8 @@ func TestCoordinatedOfferTransferAndFinalize(t *testing.T) {
 	}
 	// The reviewing coordinator finalizes accepted work with evidence.
 	fin := closing(task, moved, "DONE")
-	accepted := &ReservationCoordination{CoordinationRecord: CoordinationRecord{Kind: "accepted_for_finalization", ProofDigest: coordProof}, WorkRef: "attempt-o1", Coordinator: true}
+	accepted := &ReservationCoordination{CoordinationRecord: CoordinationRecord{Kind: "accepted_for_finalization", ProofDigest: coordProof,
+		EvidenceDigest: EvidenceDigest([]string{"review-head-example", "human-merge-example", "post-merge-ci-example"})}, WorkRef: "attempt-o1", Coordinator: true}
 	if _, err := db.ApplyTaskReservation(ReservationFinalize, fin, aliceActor, coordinator(aliceActor.UserID, "sess-review"), "fin-noev", accepted, allowReservation); !errors.Is(err, ErrTaskInvalid) {
 		t.Fatalf("DONE without evidence: %v", err)
 	}
