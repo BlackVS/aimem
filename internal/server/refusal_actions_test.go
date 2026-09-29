@@ -149,16 +149,45 @@ func TestTeamRefusalsNameTheActionAndTheRole(t *testing.T) {
 	g.assertNoSecretLeak(t)
 }
 
-// Every member reservation route names its operation.
+// Every member reservation route names its operation from its route, even
+// when a receipt's request key itself looks like a reservation path.
 func TestReservationActionNames(t *testing.T) {
+	s, _ := testServer(t)
 	base := "/v1/projects/alpha/tasks/" + uuidv7.New() + "/reservation"
-	for path, want := range map[string]string{
-		base: "reservation.status", base + "/claim": "reservation.claim", base + "/transfer": "reservation.transfer",
-		base + "/update": "reservation.update", base + "/release": "reservation.release", base + "/finalize": "reservation.finalize",
-		base + "/receipts/claim/some-key": "reservation.receipt", "/v1/tasks/x": "",
+	for _, c := range []struct{ method, path, want string }{
+		{"GET", base, "reservation.status"},
+		{"POST", base + "/claim", "reservation.claim"},
+		{"POST", base + "/transfer", "reservation.transfer"},
+		{"POST", base + "/update", "reservation.update"},
+		{"POST", base + "/release", "reservation.release"},
+		{"POST", base + "/finalize", "reservation.finalize"},
+		{"GET", base + "/receipts/claim/some-key", "reservation.receipt"},
+		{"GET", base + "/receipts/claim/reservation", "reservation.receipt"},
+		{"GET", base + "/receipts/update/reservation-123", "reservation.receipt"},
+		{"GET", base + "/receipts/claim/reservation%2Fclaim", "reservation.receipt"},
+		{"GET", "/v1/tasks/" + uuidv7.New(), "GET /v1/tasks/{id}"},
+		{"GET", "/v1/admin/reservations/" + uuidv7.New() + "/recovery", "GET /v1/admin/reservations/{task_id}/recovery"},
+		{"GET", "/v1/admin/reservations/" + uuidv7.New() + "/recovery/receipts/claim/k1_" + strings.Repeat("A", 43),
+			"GET /v1/admin/reservations/{task_id}/recovery/receipts/{operation}/{request_key_digest}"},
+		{"GET", "/v1/identity/peers/aicrew-example/reservations/" + uuidv7.New(), "GET /v1/identity/peers/{service_id}/reservations/{task_id}"},
+		{"GET", "/v1/identity/peers/aicrew-example/reservations/" + uuidv7.New() + "/receipts/update/k1_" + strings.Repeat("A", 43),
+			"GET /v1/identity/peers/{service_id}/reservations/{task_id}/receipts/{operation}/{request_key_digest}"},
 	} {
-		if got := reservationAction(httptest.NewRequest("GET", path, nil)); got != want {
-			t.Errorf("%s: %q, want %q", path, got, want)
+		if got := s.deniedContext(httptest.NewRequest(c.method, c.path, nil), "").Action; got != c.want {
+			t.Errorf("%s %s: %q, want %q", c.method, c.path, got, c.want)
+		}
+	}
+}
+
+// A refusal on a receipt read whose key looks like a reservation path still
+// names the receipt read (the route, not the path).
+func TestReceiptRefusalNamesTheReceiptWhateverTheKey(t *testing.T) {
+	g := newReservationRig(t)
+	task := g.readyTask(t, g.alpha)
+	for _, key := range []string{"reservation", "reservation-123"} {
+		r := g.call(t, g.tls, "GET", g.rpath(task.ID, "/receipts/claim/"+key), g.alice, nil, "", true)
+		if e := decodeRefusal(t, r); e.Code != "unsupported_version" || e.DeniedAction != "reservation.receipt" {
+			t.Fatalf("key %q: %d %s", key, r.status, r.body)
 		}
 	}
 }

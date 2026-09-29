@@ -42,22 +42,23 @@ func nextActionFor(code string, rc refusalContext, fallback string) string {
 	return fallback
 }
 
-// reservationAction names a member reservation request's operation:
-// reservation.<op>, reservation.status or reservation.receipt.
-func reservationAction(r *http.Request) string {
-	path := r.URL.Path
-	i := strings.LastIndex(path, "/reservation")
+// reservationAction names a member reservation route's operation from its
+// matched pattern (reservation.<op>, reservation.status or
+// reservation.receipt), never from the request path, whose request key may
+// itself contain "/reservation". "" for any other pattern.
+func reservationAction(pattern string) string {
+	const seg = "/tasks/{task_id}/reservation"
+	i := strings.Index(pattern, seg)
 	if i < 0 {
 		return ""
 	}
-	rest := strings.TrimPrefix(path[i+len("/reservation"):], "/")
-	switch {
+	switch rest := pattern[i+len(seg):]; {
 	case rest == "":
 		return "reservation.status"
-	case strings.HasPrefix(rest, "receipts/"):
+	case strings.HasPrefix(rest, "/receipts/"):
 		return "reservation.receipt"
-	case !strings.Contains(rest, "/"):
-		return "reservation." + rest
+	case strings.Count(rest, "/") == 1:
+		return "reservation." + rest[1:]
 	}
 	return ""
 }
@@ -84,12 +85,9 @@ func (s *Server) routeAction(r *http.Request) string {
 // deniedContext is the refusal context of a request: its operation and, in a
 // verified team context, the caller's role.
 func (s *Server) deniedContext(r *http.Request, role string) refusalContext {
-	action := ""
-	if reservationRoute(r) {
-		action = reservationAction(r)
-	}
-	if action == "" {
-		action = s.routeAction(r)
+	action := s.routeAction(r)
+	if a := reservationAction(action); a != "" {
+		action = a
 	}
 	if tc, ok := teamContextFrom(r.Context()); ok && role == "" {
 		role = tc.Role
