@@ -9,39 +9,216 @@ upgrading a fleet.
 The format follows [Keep a Changelog](https://keepachangelog.com/1.1.0/);
 this project does not yet promise semantic versioning. The on-disk schema
 version is tracked separately (`currentSchema` in `internal/store/store.go`,
-currently 18); a binary refuses a database newer than it understands.
+currently 23); a binary refuses a database newer than it understands.
 
 ## [Unreleased]
 
+AIForge prerequisites: aimem can now serve an aicrew team as a verified,
+separate context next to each member's personal use, with no second agent
+credential and no embedded team scheduler. The work adds:
+- a member's session verified online through aicrew;
+- task reads and a pilot set of knowledge reads under the team's own
+  access profile;
+- reservations that make aimem the single owner record of a task being
+  worked, with fences, receipts, and operator recovery;
+- coordination facts that bind every team step to aicrew's decision.
+
+The wire contracts are in `docs/DESIGN-AIFORGE-*.md`, with fixtures under
+`docs/fixtures/`. This is what a first pilot needs from aimem: one
+coordinator, one worker, one project.
+
+Also: OpenCode 2 support, and `modernc.org/sqlite` 1.58.0 to 1.59.0 (#55).
+Includes PR #55 and #110 to #155.
+
 ### Added
 
-- OpenCode 2 support. The OpenCode plugin (`aimem.ts`) now loads on both
-  OpenCode 1.x and 2.x: OpenCode 2 rejects 1.x plugins, so the same file
-  also carries a 2.x implementation built on the new plugin API. On
-  OpenCode 2 it journals turns, failures and compaction markers, and adds
-  the `AIMEM HANDOFF:` line to compaction summaries, as on 1.x. OpenCode 2
-  accepts but ignores opencode.json `instructions`, so for projects that
-  list `docs/SESSION-STATE.md` there the plugin adds the handoff to each
-  model request itself. OpenCode 2 has no toast API, so the context
-  warning is given to the model instead of the user.
+- **Identity and verified team context** (identity.v1):
+  - The hub serves single-use identity proofs and aicrew's proof redemption.
+  - `aimem identity` manages the aicrew peer, its credentials and team
+    access profiles; `aimem identity proof` asks for a proof.
+  - A request carrying `X-Aimem-Team-Context` is verified online through
+    aicrew introspection, on every request, and served only under the
+    linked team profile's live grant, never the member's personal grants.
+    It is served only on the team routes. Every other route refuses it
+    with `team_operation_unsupported`, and it is never served as a
+    personal request.
+  - `GET /v1/access/identity` in team mode is the context report: the
+    session, the granted projects, `task_write: false` and
+    `knowledge: read`.
+- **Team conversations.**
+  - `aimem team-session open|refresh|close|status` keeps a session file.
+  - An `aimem mcp` started with `AIMEM_TEAM_SESSION` serves that one
+    verified context only:
+    - the task and epic reads;
+    - the reservation tools;
+    - the pilot knowledge reads;
+    - `session_context`.
+  - In a team conversation the capture hooks record nothing, and the
+    session start injects only the checkout's handoff.
+- **Task reservations** (reservation.v1), the single owner record of a
+  task being worked:
+  - Routes: claim, transfer, update, release and finalize, with status and
+    receipt reads, under `/v1/projects/{p}/tasks/{task_id}/reservation`.
+  - Each transition carries a revision, a fence and a request key, and
+    returns a committed receipt. A retry replays it, and a lost reply is
+    reconciled from the receipt.
+  - Generic task writes cannot bypass a hold.
+  - A claim requires every same-hub dependency to be readable and DONE.
+  - MCP tools `task_reservation_*`, and `aimem reservation` for members:
+    the body on standard input; exit codes 0, 3 (final), 4 (retryable)
+    and 5 (outcome unknown).
+- **Coordination** (coordination.v1). Every team transition other than a
+  holder's update is backed by a single-use aicrew proof and verified
+  against aicrew's coordination fact before it commits:
+  - the offer, the worker's accepted attempt, the release of an offer
+    never accepted or of stopped work, and the independent claim;
+  - the acceptance for finalization, whose `evidence_digest` binds the
+    exact delivery evidence the coordinator confirmed;
+  - the fact's process pin, which must be the project's current process
+    selection.
+- **Operator recovery.**
+  - `aimem reservation recover` releases or cancels a hold its holder
+    cannot close, on aicrew stop evidence or an attestation. Every
+    request is audited.
+  - A recovery reader and receipt lookup serve the operator.
+- **aicrew's read-only scope** (a `reservation.read` credential): a
+  receipt by proof, a receipt by request key, and a hold's status with
+  closure evidence (`closed_by`, `closing_fence`, `closed_at`).
+- **Actionable refusals.**
+  - Reservation and team refusals share one envelope: `{code, message,
+    active_mode, denied_action?, active_role?, retryable, next_action,
+    correlation_id}`.
+  - Each refusal gives one next action, chosen by code, role and
+    operation, and never advises another credential, a personal-mode retry
+    or a bypass.
+- **The first pilot's knowledge reads.** `recall_memory`, `list_docs` and
+  `read_doc` (recall, the document list, a document's current revision)
+  are served to ordinary user tokens:
+  - in team mode, under the team profile's live grant;
+  - personally, under the token's own direct or access-group grant.
+
+  In both modes:
+  - the personal store and group spaces are refused;
+  - `?rev=` is refused, since a scoped caller reads the current revision
+    only;
+  - every other knowledge route stays refused.
+
+  In team conversations and on the hub's `/mcp` the three tools use the
+  caller's own authority and refuse any scope but the project.
+- **OpenCode 2 support.**
+  - The OpenCode plugin (`aimem.ts`) now loads on both OpenCode 1.x and
+    2.x. OpenCode 2 rejects 1.x plugins, so the same file also carries a
+    2.x implementation built on the new plugin API.
+  - On OpenCode 2 it journals turns, failures and compaction markers, and
+    adds the `AIMEM HANDOFF:` line to compaction summaries, as on 1.x.
+  - OpenCode 2 accepts but ignores opencode.json `instructions`. For
+    projects that list `docs/SESSION-STATE.md` there, the plugin adds the
+    handoff to each model request itself.
+  - OpenCode 2 has no toast API, so the context warning is given to the
+    model instead of the user.
 
 ### Upgrade notes
 
-- Re-run the user-level install (`install.sh user` / `install.ps1`) to
-  refresh `~/.config/opencode/plugins/aimem.ts`; the previous copy does
-  not load on OpenCode 2. No config change is needed: the existing
-  opencode.json wiring (`instructions`, `mcp.aimem`) works on both
-  generations.
-- `AIMEM_AUTO_COMPACT` works on OpenCode 1.x only; OpenCode 2 plugins
-  cannot request compaction. Use OpenCode 2's own `compaction` settings.
-- On the 1.x line the plugin now supports OpenCode 1.18.0 or newer.
-  Releases before 1.14 cannot load it at all: they call every plugin
-  export as a function and fail on the default object that OpenCode 2
-  requires, and OpenCode itself stops with "Unexpected error" (observed on
-  1.1.4). The user-level installers (`install.sh`, `install.ps1`, and so
-  the one-liners) check `opencode --version` and, below 1.18, keep the
-  installed plugin and print a warning instead of replacing it; upgrade
-  OpenCode, then re-run the install.
+- **Schema migrations, one way.**
+  - Each project database moves from schema 18 to 23: the reservation
+    ledger, its receipts, dependency and coordination records.
+  - The access database moves from 2 to 5: identity proofs, peers and
+    their credentials, team profiles and grants.
+  - A binary refuses a database newer than it understands, so a hub
+    cannot be downgraded after it has run this release. Back up the state
+    root first.
+- **Existing tasks and tokens keep working.** Protected tasks of the
+  legacy team runtime cannot be claimed as reservations. While a
+  reservation holds a task, generic task edits of it are refused
+  (`409`); the holder changes it through the reservation.
+- **Ordinary user tokens gain three reads:** recall, the document list and
+  a document's current revision, in projects they hold a live grant on.
+  Read-only-scope tokens gain nothing. Legacy writer and admin tokens, the
+  local socket and the personal stdio MCP are unchanged.
+- **Reservation transitions obey the project's task switch.** On a project
+  whose tasks are off, every reservation transition is refused with
+  `tasks_disabled`, operator recovery included. Holds survive a switch off
+  and back on unchanged.
+- **Identity routes and team mode require TLS terminated by the hub
+  itself** (`AIMEM_TLS_CERT`, `AIMEM_TLS_KEY`). Plain HTTP and a
+  TLS-terminating proxy get `tls_required`, whatever forwarded headers
+  claim, and the local socket serves neither.
+- **Agent machines need the new binary as well as the hub.** The
+  team-conversation MCP, `aimem team-session` and `aimem reservation` are
+  client-side.
+- **OpenCode 2 plugin:**
+  - Re-run the user-level install (`install.sh user` / `install.ps1`) to
+    refresh `~/.config/opencode/plugins/aimem.ts`; the previous copy does
+    not load on OpenCode 2.
+  - No config change is needed: the existing opencode.json wiring
+    (`instructions`, `mcp.aimem`) works on both generations.
+  - `AIMEM_AUTO_COMPACT` works on OpenCode 1.x only; OpenCode 2 plugins
+    cannot request compaction. Use OpenCode 2's own `compaction` settings.
+  - On the 1.x line the plugin now supports OpenCode 1.18.0 or newer.
+    Releases before 1.14 cannot load it at all. They call every plugin
+    export as a function and fail on the default object that OpenCode 2
+    requires, and OpenCode itself stops with "Unexpected error" (observed
+    on 1.1.4).
+  - The user-level installers (`install.sh`, `install.ps1`, and so the
+    one-liners) check `opencode --version`. Below 1.18 they keep the
+    installed plugin and print a warning instead of replacing it: upgrade
+    OpenCode, then re-run the install.
+
+### Configuration for an aicrew team
+
+Nothing here is on by default: a hub without it serves no team request.
+Run the `aimem identity` commands against the hub's TLS listener with a
+hub-admin token file (`--hub https://HOST:PORT --admin-token-file PATH`).
+
+1. **Register aicrew as the identity peer.**
+   `aimem identity peer register SERVICE --endpoint URL` with
+   `--peer-trust-dns` or `--peer-trust-pin`. `URL` is aicrew's
+   `/v1/crew/introspect` route.
+2. **Give the hub its outbound introspection credential.** aicrew issues
+   it. Put it in a private file and name that file in
+   `AIMEM_INTROSPECTION_TOKEN_FILE` for the hub service. Verify with
+   `aimem identity peer check SERVICE`.
+3. **Issue aicrew's two credentials** with
+   `aimem identity cred issue SERVICE --expires ... --secret-file PATH`:
+   - one with `--operation identity.redeem` (the default) for proof
+     redemption;
+   - one with `--operation reservation.read` for the read-only
+     reservation scope.
+
+   Each bearer is written once to its secret file. Deliver it to aicrew's
+   protected storage, then delete the file.
+4. **Create the team's access profile and grant it the pilot project:**
+   `aimem identity team create SERVICE TEAM`, then
+   `aimem identity team grant SERVICE TEAM PROJECT`. A team session reads
+   only the projects its profile is granted, checked live on every
+   request.
+5. **Give each member a user-scoped token**
+   (`aimem access token-issue-user USER LABEL EXPIRY`), linked to their
+   aicrew membership through a single-use `aimem identity proof`, which
+   aicrew's client drives. A project-scoped or read-only token cannot
+   enter team mode.
+6. **Serve TLS from the hub itself** (`AIMEM_TLS_CERT`, `AIMEM_TLS_KEY`).
+   Team mode refuses TLS terminated by a proxy.
+7. **On the pilot project:**
+   - enable tasks (`aimem tasks on -p PROJECT` on the hub host);
+   - select its process
+     (`aimem process select REPO COMMIT MANIFEST -p PROJECT`): a
+     coordinated claim needs the process pin.
+
+### Lockstep with aicrew
+
+A coordinated finalize now requires `evidence_digest` on aicrew's
+`accepted_for_finalization` fact. This was the last in-place amendment of
+coordination.v1 before the pilot.
+
+- **Newer aimem, older aicrew:** the aicrew fact lacks the digest, so
+  aimem refuses it as the wrong shape (`context_unavailable`) and applies
+  nothing.
+- **Older aimem, newer aicrew:** aimem refuses aicrew's added field.
+
+Deploy this aimem together with an aicrew that sends the digest (aicrew's
+counterpart of C5-w3), or deploy aicrew first. Every other transition is
+unaffected.
 
 ## [0.7.3] — 2026-09-24
 
