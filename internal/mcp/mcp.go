@@ -141,7 +141,8 @@ func (s *srv) handle(ctx context.Context, raw []byte) []byte {
 		// The public team guidance is listed for every caller a facade
 		// admits: it reads nothing but this binary.
 		if s.tasksOnly {
-			return reply(req.ID, map[string]any{"tools": append(append([]map[string]any{}, taskToolDefs...), guidanceToolDefs...)}, nil)
+			tools := append(append([]map[string]any{}, taskToolDefs...), scopedKnowledgeToolDefs...)
+			return reply(req.ID, map[string]any{"tools": append(tools, guidanceToolDefs...)}, nil)
 		}
 		if s.taskState == taskStateDisabled {
 			return reply(req.ID, map[string]any{"tools": append(append([]map[string]any{}, toolDefs...), guidanceToolDefs...)}, nil)
@@ -384,10 +385,13 @@ func (s *srv) toolCall(ctx context.Context, req rpcRequest) []byte {
 			s.noticeShown = true
 			err = fmt.Errorf("%w\nKanban availability changed for this project. Restart the session to refresh its tools and process context.", err)
 		}
+	case s.tasksOnly && scopedKnowledgeTools[head.Name]:
+		// The pilot's knowledge reads, under the caller's own identity.
+		text, err = s.scopedKnowledgeTool(ctx, head.Name, head.Arguments)
 	case s.tasksOnly:
 		// An ordinary token's hidden legacy tools stay hidden when called
 		// by name: they would run with the hub's own trusted local client.
-		err = fmt.Errorf("tool %q is not available to this credential (task tools only)", head.Name)
+		err = fmt.Errorf("tool %q is not available to this credential (task tools and the project knowledge reads only)", head.Name)
 	default:
 		var p toolParams
 		if err := json.Unmarshal(req.Params, &p); err != nil {
@@ -488,13 +492,7 @@ func (s *srv) run(p *toolParams) (string, error) {
 				return "", err
 			}
 			for _, m := range res.Memories {
-				tags := ""
-				if len(m.Tags) > 0 {
-					tags = " #" + strings.Join(m.Tags, " #")
-				}
-				line := fmt.Sprintf("[%s] (%s %s conf=%.1f corroborated %dx since %s%s) %s\n",
-					m.ID, scopeName(proj, s.project), m.Kind, m.Confidence,
-					m.Corroboration, m.CreatedAt[:10], tags, m.Text)
+				line := recallLine(m, scopeName(proj, s.project))
 				t := len(line)/4 + 1
 				if used+t > budget && total > 0 {
 					return b.String(), nil // budget spent; always at least one hit
@@ -684,6 +682,16 @@ func (s *srv) run(p *toolParams) (string, error) {
 		return s.colTool(p)
 	}
 	return "", fmt.Errorf("unknown tool %q", p.Name)
+}
+
+// recallLine is one recalled memory as the tools show it.
+func recallLine(m store.Memory, scope string) string {
+	tags := ""
+	if len(m.Tags) > 0 {
+		tags = " #" + strings.Join(m.Tags, " #")
+	}
+	return fmt.Sprintf("[%s] (%s %s conf=%.1f corroborated %dx since %s%s) %s\n",
+		m.ID, scope, m.Kind, m.Confidence, m.Corroboration, m.CreatedAt[:10], tags, m.Text)
 }
 
 func scopeName(proj, current string) string {

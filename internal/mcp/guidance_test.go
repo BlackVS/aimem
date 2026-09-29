@@ -72,8 +72,8 @@ func TestTeamContextOnTheHubUnderOrdinaryAuthentication(t *testing.T) {
 		}
 	}
 	// Tasks-only filtering is unchanged for everything else.
-	text, isErr = toolText(f.rpc(t, f.stranger, "tools/call", map[string]any{"name": "recall_memory", "arguments": map[string]any{"query": "x", "project": "alpha"}}))
-	if !isErr || !strings.Contains(text, "task tools only") {
+	text, isErr = toolText(f.rpc(t, f.stranger, "tools/call", map[string]any{"name": "remember", "arguments": map[string]any{"text": "x", "project": "alpha"}}))
+	if !isErr || !strings.Contains(text, "task tools and the project knowledge reads only") {
 		t.Errorf("legacy tool by name: %v %q", isErr, text)
 	}
 }

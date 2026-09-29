@@ -340,7 +340,7 @@ func TestTeamConversationsThroughRealMCPProcesses(t *testing.T) {
 		if !strings.Contains(byID[3], g.taskID) || strings.Contains(byID[3], `"isError":true`) {
 			t.Errorf("%s list_tasks: %s", want, byID[3])
 		}
-		if !strings.Contains(byID[4], want) || !strings.Contains(byID[4], `\"knowledge\":\"unavailable\"`) && !strings.Contains(byID[4], "unavailable") {
+		if !strings.Contains(byID[4], want) || !strings.Contains(byID[4], `\"knowledge\":\"read\"`) {
 			t.Errorf("%s session_context: %s", want, byID[4])
 		}
 		for _, id := range []int{5, 6} {

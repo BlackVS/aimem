@@ -81,8 +81,10 @@ var taskRoutes = map[string]bool{
 
 // ordinaryRoutes is the exact surface an ordinary (scoped user) token may
 // reach besides its identity check: the task routes, whose handlers
-// authorize every write themselves; POST /mcp, whose dispatcher hides
-// every legacy tool from such a caller; and the project listing, read
+// authorize every write themselves; the pilot's knowledge reads, whose
+// handlers check the caller's grant themselves (knowledge.go); POST /mcp,
+// whose dispatcher hides every other legacy tool from such a caller; and
+// the project listing, read
 // only, with the reserved stores filtered out for such a caller — an
 // ordinary token may read tasks in every ordinary project already, so the
 // names of those projects are within its view, and the task page needs
@@ -91,6 +93,7 @@ var taskRoutes = map[string]bool{
 // until it is listed here (and Route.Ordinary shows it).
 var ordinaryRoutes = func() map[string]bool {
 	m := maps.Clone(taskRoutes)
+	maps.Copy(m, knowledgeRoute)
 	m["POST /mcp"] = true
 	m["GET /v1/projects"] = true
 	m["GET /v1/projects/{p}/process"] = true // the selected process reference: what an agent needs to find its rules; grants no repository access
@@ -673,8 +676,8 @@ func (s *Server) MCPPrincipal(r *http.Request) (func(ctx context.Context, method
 		if err != nil {
 			return 0, nil, err
 		}
-		if _, pattern := s.ordinaryMux().Handler(req); !canonicalPath(req) || !taskRoutes[pattern] {
-			return 0, nil, errors.New("not a task route")
+		if _, pattern := s.ordinaryMux().Handler(req); !canonicalPath(req) || !(taskRoutes[pattern] || knowledgeRoute[pattern]) {
+			return 0, nil, errors.New("not a task or pilot knowledge route")
 		}
 		req.Header.Set("Content-Type", "application/json")
 		for k, v := range headers {

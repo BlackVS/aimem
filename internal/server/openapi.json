@@ -93,9 +93,9 @@
     },
     "/v1/access/identity": {
       "get": {
-        "x-team-mode": "Team mode: with the optional header X-Aimem-Team-Context (an aimem-scoped acs1_ handle from aicrew) and a user-scoped individual bearer, over TLS terminated by the hub only (otherwise tls_required, 403, whatever forwarded headers claim), the hub verifies the session online through aicrew introspection on every request, matches it to the authenticated user and token, and serves the read only under the linked team access profile's live grant, never the caller's personal grants. Refusals use the envelope with active_mode team: context_unavailable (503, retryable), context_stale, identity_mismatch, grant_denied, role_forbidden (403). In team mode this is the context report: mode, the verified team session (service, team, agent, role, session, generation, handle expiry), the projects the profile currently grants, task_write false and knowledge unavailable; with ?project=<id> it adds project_read for that project.",
+        "x-team-mode": "Team mode: with the optional header X-Aimem-Team-Context (an aimem-scoped acs1_ handle from aicrew) and a user-scoped individual bearer, over TLS terminated by the hub only (otherwise tls_required, 403, whatever forwarded headers claim), the hub verifies the session online through aicrew introspection on every request, matches it to the authenticated user and token, and serves the read only under the linked team access profile's live grant, never the caller's personal grants. Refusals use the envelope with active_mode team: context_unavailable (503, retryable), context_stale, identity_mismatch, grant_denied, role_forbidden (403). In team mode this is the context report: mode, the verified team session (service, team, agent, role, session, generation, handle expiry), the projects the profile currently grants, task_write false and knowledge read (the pilot's recall and shared-document reads on those projects); with ?project=<id> it adds project_read for that project.",
         "summary": "Inspect authenticated identity and current task-write permission for an optional project",
-        "description": "Also available to ordinary user tokens. Ordinary tokens may additionally use the task routes and /mcp task tools; they are refused on every other non-public endpoint. Legacy writer/admin credentials retain their existing rights. With ?project=<id>, every credential also receives tasks_enabled: whether an admin has switched tasks on for that project (task mutations are refused with 403 otherwise).",
+        "description": "Also available to ordinary user tokens. Ordinary tokens may additionally use the task routes, the pilot's knowledge reads (recall, the document list and a document's current revision, under their own grant) and the /mcp task and knowledge-read tools; they are refused on every other non-public endpoint. Legacy writer/admin credentials retain their existing rights. With ?project=<id>, every credential also receives tasks_enabled: whether an admin has switched tasks on for that project (task mutations are refused with 403 otherwise).",
         "x-role": "writer",
         "parameters": [
           {
@@ -5852,7 +5852,9 @@
     },
     "/v1/projects/{p}/memories/recall": {
       "get": {
+        "x-team-mode": "Team mode: with the optional header X-Aimem-Team-Context (an aimem-scoped acs1_ handle from aicrew) and a user-scoped individual bearer, over TLS terminated by the hub only (otherwise tls_required, 403, whatever forwarded headers claim), the hub verifies the session online through aicrew introspection on every request, matches it to the authenticated user and token, and serves the read only under the linked team access profile's live grant, never the caller's personal grants. Refusals use the envelope with active_mode team: context_unavailable (503, retryable), context_stale, identity_mismatch, grant_denied (also for the personal store user and every group-* space, whatever grant exists), role_forbidden (403).",
         "summary": "Hybrid recall: BM25 + cosine fused by RRF, pinned first, token-budget trimmed; query embedding is server-side and fail-open",
+        "description": "Scoped callers (task 19d8, the first pilot's knowledge reads): an ordinary user token reads this route only for an ordinary project it holds a live direct or access-group grant on, with a token scoped to the user or to that project (read-only-scope tokens are refused, 403); the personal store user and group-* spaces are refused (400). An unknown project reads as one without a grant (403). Legacy writer and admin tokens are unchanged. Recall is bounded by its token budget.",
         "x-role": "writer",
         "parameters": [
           {
@@ -6128,7 +6130,9 @@
     },
     "/v1/projects/{p}/docs": {
       "get": {
+        "x-team-mode": "Team mode: with the optional header X-Aimem-Team-Context (an aimem-scoped acs1_ handle from aicrew) and a user-scoped individual bearer, over TLS terminated by the hub only (otherwise tls_required, 403, whatever forwarded headers claim), the hub verifies the session online through aicrew introspection on every request, matches it to the authenticated user and token, and serves the read only under the linked team access profile's live grant, never the caller's personal grants. Refusals use the envelope with active_mode team: context_unavailable (503, retryable), context_stale, identity_mismatch, grant_denied (also for the personal store user and every group-* space, whatever grant exists), role_forbidden (403).",
         "summary": "List shared documents (name, rev, writer; tombstones flagged)",
+        "description": "Scoped callers (task 19d8, the first pilot's knowledge reads): an ordinary user token reads this route only for an ordinary project it holds a live direct or access-group grant on, with a token scoped to the user or to that project (read-only-scope tokens are refused, 403); the personal store user and group-* spaces are refused (400). An unknown project reads as one without a grant (403). Legacy writer and admin tokens are unchanged.",
         "x-role": "writer",
         "parameters": [
           {
@@ -6144,7 +6148,9 @@
     },
     "/v1/projects/{p}/docs/{name}": {
       "get": {
+        "x-team-mode": "Team mode: with the optional header X-Aimem-Team-Context (an aimem-scoped acs1_ handle from aicrew) and a user-scoped individual bearer, over TLS terminated by the hub only (otherwise tls_required, 403, whatever forwarded headers claim), the hub verifies the session online through aicrew introspection on every request, matches it to the authenticated user and token, and serves the read only under the linked team access profile's live grant, never the caller's personal grants. Refusals use the envelope with active_mode team: context_unavailable (503, retryable), context_stale, identity_mismatch, grant_denied (also for the personal store user and every group-* space, whatever grant exists), role_forbidden (403). A team-mode request naming ?rev= is refused with invalid_request (400): the current revision only.",
         "summary": "Read a shared document (current, or ?rev= for a retained revision)",
+        "description": "Scoped callers (task 19d8, the first pilot's knowledge reads): an ordinary user token reads this route only for an ordinary project it holds a live direct or access-group grant on, with a token scoped to the user or to that project (read-only-scope tokens are refused, 403); the personal store user and group-* spaces are refused (400). An unknown project reads as one without a grant (403). Legacy writer and admin tokens are unchanged. A scoped caller reads the current revision only: ?rev= is refused (400).",
         "x-role": "writer",
         "parameters": [
           {

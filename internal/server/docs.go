@@ -33,6 +33,9 @@ func stampWriter(r *http.Request, by string) string {
 }
 
 func (s *Server) listDocs(w http.ResponseWriter, r *http.Request) {
+	if s.knowledgeReadDenied(w, r, false) {
+		return
+	}
 	db := s.withDB(w, r)
 	if db == nil {
 		return
@@ -49,6 +52,9 @@ func (s *Server) listDocs(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) getDoc(w http.ResponseWriter, r *http.Request) {
+	if s.knowledgeReadDenied(w, r, true) {
+		return
+	}
 	db := s.withDB(w, r)
 	if db == nil {
 		return
