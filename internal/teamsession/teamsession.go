@@ -268,9 +268,14 @@ func Credential(h *adapter.HubConfig) (string, error) {
 
 // Refusal is the hub's refusal envelope for a team-mode request.
 type Refusal struct {
-	Status        int    `json:"-"`
-	Code          string `json:"code"`
-	Message       string `json:"message"`
+	Status     int    `json:"-"`
+	Code       string `json:"code"`
+	Message    string `json:"message"`
+	ActiveMode string `json:"active_mode,omitempty"`
+	// DeniedAction and ActiveRole name the caller's own refused operation
+	// and verified role, when the hub reports them.
+	DeniedAction  string `json:"denied_action,omitempty"`
+	ActiveRole    string `json:"active_role,omitempty"`
 	Retryable     bool   `json:"retryable"`
 	NextAction    string `json:"next_action"`
 	CorrelationID string `json:"correlation_id"`

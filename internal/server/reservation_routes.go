@@ -134,8 +134,9 @@ func (s *Server) reservationRefuse(w http.ResponseWriter, r *http.Request, code 
 	w.Header().Set("Content-Type", "application/json")
 	w.Header().Set("Cache-Control", "no-store")
 	w.WriteHeader(spec.status)
-	json.NewEncoder(w).Encode(identityRefusalBody{Code: code, Message: msg, ActiveMode: mode,
-		Retryable: code == "context_unavailable" || code == "receipt_unresolved", NextAction: spec.next, CorrelationID: cid})
+	rc := s.deniedContext(r, "")
+	json.NewEncoder(w).Encode(identityRefusalBody{Code: code, Message: msg, ActiveMode: mode, DeniedAction: rc.Action, ActiveRole: rc.Role,
+		Retryable: code == "context_unavailable" || code == "receipt_unresolved", NextAction: nextActionFor(code, rc, spec.next), CorrelationID: cid})
 }
 
 // reservationFail answers an error from the authorizer.

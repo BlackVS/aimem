@@ -117,6 +117,10 @@ func reservationPermits(c reservationCaller, op store.ReservationOperation, in s
 		return nil, nil
 	case len(kinds) == 0:
 		return nil, refuseReservation("role_forbidden", "role "+c.binding.Role+" has no "+string(op)+" path")
+	case proof == "" && op == store.ReservationClaim && c.binding.Role == "independent":
+		// An independent member claims only through aicrew's independent
+		// claim, which supplies the proof (19f6, R2).
+		return nil, refuseReservation("role_forbidden", "an independent claim comes through aicrew")
 	case proof == "":
 		return nil, refuseReservation("invalid_request", "a team "+string(op)+" needs its coordination_proof")
 	}

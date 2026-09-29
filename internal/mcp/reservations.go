@@ -139,9 +139,9 @@ func newReservationRefusal(code, message, mode string, retryable bool, correlati
 }
 
 // reservationToolError types any error of a reservation tool as the
-// envelope: the hub's refusal as it came, a team-context refusal with its
-// own code, retryable flag and correlation ID, and anything else as an
-// invalid request.
+// envelope: the hub's refusal as it came, a team-context refusal exactly as
+// the hub gave it (its mode, denied action, role, retryable flag, next action
+// and correlation ID), and anything else as an invalid request.
 func reservationToolError(err error) *reservationToolRefusal {
 	var typed *reservationToolRefusal
 	if errors.As(err, &typed) {
@@ -149,16 +149,15 @@ func reservationToolError(err error) *reservationToolRefusal {
 	}
 	var ref *teamsession.Refusal
 	if errors.As(err, &ref) {
-		t := newReservationRefusal(ref.Code, ref.Message, "team", ref.Retryable, ref.CorrelationID)
-		if ref.NextAction != "" {
-			// The hub's own next action for its code.
-			var m map[string]any
-			json.Unmarshal([]byte(t.envelope), &m)
-			m["next_action"] = ref.NextAction
-			b, _ := json.Marshal(m)
-			t.envelope = string(b)
+		env := *ref
+		if env.NextAction == "" {
+			env.NextAction = reservationNextActions[env.Code]
 		}
-		return t
+		if env.CorrelationID == "" {
+			env.CorrelationID = uuidv7.New()
+		}
+		b, _ := json.Marshal(env)
+		return &reservationToolRefusal{envelope: string(b)}
 	}
 	return newReservationRefusal("invalid_request", err.Error(), "", false, "")
 }

@@ -2015,6 +2015,14 @@
                         "team"
                       ]
                     },
+                    "denied_action": {
+                      "type": "string",
+                      "description": "The caller's own refused operation: reservation.<op>, reservation.status, reservation.receipt, or the route pattern"
+                    },
+                    "active_role": {
+                      "type": "string",
+                      "description": "The caller's own verified team role, in team mode once aicrew vouched for the session"
+                    },
                     "retryable": {
                       "type": "boolean"
                     },
@@ -2055,6 +2063,14 @@
                         "personal",
                         "team"
                       ]
+                    },
+                    "denied_action": {
+                      "type": "string",
+                      "description": "The caller's own refused operation: reservation.<op>, reservation.status, reservation.receipt, or the route pattern"
+                    },
+                    "active_role": {
+                      "type": "string",
+                      "description": "The caller's own verified team role, in team mode once aicrew vouched for the session"
                     },
                     "retryable": {
                       "type": "boolean"
@@ -2097,6 +2113,14 @@
                         "team"
                       ]
                     },
+                    "denied_action": {
+                      "type": "string",
+                      "description": "The caller's own refused operation: reservation.<op>, reservation.status, reservation.receipt, or the route pattern"
+                    },
+                    "active_role": {
+                      "type": "string",
+                      "description": "The caller's own verified team role, in team mode once aicrew vouched for the session"
+                    },
                     "retryable": {
                       "type": "boolean"
                     },
@@ -2137,6 +2161,14 @@
                         "personal",
                         "team"
                       ]
+                    },
+                    "denied_action": {
+                      "type": "string",
+                      "description": "The caller's own refused operation: reservation.<op>, reservation.status, reservation.receipt, or the route pattern"
+                    },
+                    "active_role": {
+                      "type": "string",
+                      "description": "The caller's own verified team role, in team mode once aicrew vouched for the session"
                     },
                     "retryable": {
                       "type": "boolean"
@@ -2179,6 +2211,14 @@
                         "team"
                       ]
                     },
+                    "denied_action": {
+                      "type": "string",
+                      "description": "The caller's own refused operation: reservation.<op>, reservation.status, reservation.receipt, or the route pattern"
+                    },
+                    "active_role": {
+                      "type": "string",
+                      "description": "The caller's own verified team role, in team mode once aicrew vouched for the session"
+                    },
                     "retryable": {
                       "type": "boolean"
                     },
@@ -2219,6 +2259,14 @@
                         "personal",
                         "team"
                       ]
+                    },
+                    "denied_action": {
+                      "type": "string",
+                      "description": "The caller's own refused operation: reservation.<op>, reservation.status, reservation.receipt, or the route pattern"
+                    },
+                    "active_role": {
+                      "type": "string",
+                      "description": "The caller's own verified team role, in team mode once aicrew vouched for the session"
                     },
                     "retryable": {
                       "type": "boolean"
@@ -2455,6 +2503,14 @@
                         "team"
                       ]
                     },
+                    "denied_action": {
+                      "type": "string",
+                      "description": "The caller's own refused operation: reservation.<op>, reservation.status, reservation.receipt, or the route pattern"
+                    },
+                    "active_role": {
+                      "type": "string",
+                      "description": "The caller's own verified team role, in team mode once aicrew vouched for the session"
+                    },
                     "retryable": {
                       "type": "boolean"
                     },
@@ -2495,6 +2551,14 @@
                         "personal",
                         "team"
                       ]
+                    },
+                    "denied_action": {
+                      "type": "string",
+                      "description": "The caller's own refused operation: reservation.<op>, reservation.status, reservation.receipt, or the route pattern"
+                    },
+                    "active_role": {
+                      "type": "string",
+                      "description": "The caller's own verified team role, in team mode once aicrew vouched for the session"
                     },
                     "retryable": {
                       "type": "boolean"
@@ -2537,6 +2601,14 @@
                         "team"
                       ]
                     },
+                    "denied_action": {
+                      "type": "string",
+                      "description": "The caller's own refused operation: reservation.<op>, reservation.status, reservation.receipt, or the route pattern"
+                    },
+                    "active_role": {
+                      "type": "string",
+                      "description": "The caller's own verified team role, in team mode once aicrew vouched for the session"
+                    },
                     "retryable": {
                       "type": "boolean"
                     },
@@ -2577,6 +2649,14 @@
                         "personal",
                         "team"
                       ]
+                    },
+                    "denied_action": {
+                      "type": "string",
+                      "description": "The caller's own refused operation: reservation.<op>, reservation.status, reservation.receipt, or the route pattern"
+                    },
+                    "active_role": {
+                      "type": "string",
+                      "description": "The caller's own verified team role, in team mode once aicrew vouched for the session"
                     },
                     "retryable": {
                       "type": "boolean"
@@ -2619,6 +2699,14 @@
                         "team"
                       ]
                     },
+                    "denied_action": {
+                      "type": "string",
+                      "description": "The caller's own refused operation: reservation.<op>, reservation.status, reservation.receipt, or the route pattern"
+                    },
+                    "active_role": {
+                      "type": "string",
+                      "description": "The caller's own verified team role, in team mode once aicrew vouched for the session"
+                    },
                     "retryable": {
                       "type": "boolean"
                     },
@@ -2659,6 +2747,14 @@
                         "personal",
                         "team"
                       ]
+                    },
+                    "denied_action": {
+                      "type": "string",
+                      "description": "The caller's own refused operation: reservation.<op>, reservation.status, reservation.receipt, or the route pattern"
+                    },
+                    "active_role": {
+                      "type": "string",
+                      "description": "The caller's own verified team role, in team mode once aicrew vouched for the session"
                     },
                     "retryable": {
                       "type": "boolean"
@@ -2883,6 +2979,14 @@
                         "team"
                       ]
                     },
+                    "denied_action": {
+                      "type": "string",
+                      "description": "The caller's own refused operation: reservation.<op>, reservation.status, reservation.receipt, or the route pattern"
+                    },
+                    "active_role": {
+                      "type": "string",
+                      "description": "The caller's own verified team role, in team mode once aicrew vouched for the session"
+                    },
                     "retryable": {
                       "type": "boolean"
                     },
@@ -2923,6 +3027,14 @@
                         "personal",
                         "team"
                       ]
+                    },
+                    "denied_action": {
+                      "type": "string",
+                      "description": "The caller's own refused operation: reservation.<op>, reservation.status, reservation.receipt, or the route pattern"
+                    },
+                    "active_role": {
+                      "type": "string",
+                      "description": "The caller's own verified team role, in team mode once aicrew vouched for the session"
                     },
                     "retryable": {
                       "type": "boolean"
@@ -2965,6 +3077,14 @@
                         "team"
                       ]
                     },
+                    "denied_action": {
+                      "type": "string",
+                      "description": "The caller's own refused operation: reservation.<op>, reservation.status, reservation.receipt, or the route pattern"
+                    },
+                    "active_role": {
+                      "type": "string",
+                      "description": "The caller's own verified team role, in team mode once aicrew vouched for the session"
+                    },
                     "retryable": {
                       "type": "boolean"
                     },
@@ -3005,6 +3125,14 @@
                         "personal",
                         "team"
                       ]
+                    },
+                    "denied_action": {
+                      "type": "string",
+                      "description": "The caller's own refused operation: reservation.<op>, reservation.status, reservation.receipt, or the route pattern"
+                    },
+                    "active_role": {
+                      "type": "string",
+                      "description": "The caller's own verified team role, in team mode once aicrew vouched for the session"
                     },
                     "retryable": {
                       "type": "boolean"
@@ -3047,6 +3175,14 @@
                         "team"
                       ]
                     },
+                    "denied_action": {
+                      "type": "string",
+                      "description": "The caller's own refused operation: reservation.<op>, reservation.status, reservation.receipt, or the route pattern"
+                    },
+                    "active_role": {
+                      "type": "string",
+                      "description": "The caller's own verified team role, in team mode once aicrew vouched for the session"
+                    },
                     "retryable": {
                       "type": "boolean"
                     },
@@ -3087,6 +3223,14 @@
                         "personal",
                         "team"
                       ]
+                    },
+                    "denied_action": {
+                      "type": "string",
+                      "description": "The caller's own refused operation: reservation.<op>, reservation.status, reservation.receipt, or the route pattern"
+                    },
+                    "active_role": {
+                      "type": "string",
+                      "description": "The caller's own verified team role, in team mode once aicrew vouched for the session"
                     },
                     "retryable": {
                       "type": "boolean"
@@ -3311,6 +3455,14 @@
                         "team"
                       ]
                     },
+                    "denied_action": {
+                      "type": "string",
+                      "description": "The caller's own refused operation: reservation.<op>, reservation.status, reservation.receipt, or the route pattern"
+                    },
+                    "active_role": {
+                      "type": "string",
+                      "description": "The caller's own verified team role, in team mode once aicrew vouched for the session"
+                    },
                     "retryable": {
                       "type": "boolean"
                     },
@@ -3351,6 +3503,14 @@
                         "personal",
                         "team"
                       ]
+                    },
+                    "denied_action": {
+                      "type": "string",
+                      "description": "The caller's own refused operation: reservation.<op>, reservation.status, reservation.receipt, or the route pattern"
+                    },
+                    "active_role": {
+                      "type": "string",
+                      "description": "The caller's own verified team role, in team mode once aicrew vouched for the session"
                     },
                     "retryable": {
                       "type": "boolean"
@@ -3393,6 +3553,14 @@
                         "team"
                       ]
                     },
+                    "denied_action": {
+                      "type": "string",
+                      "description": "The caller's own refused operation: reservation.<op>, reservation.status, reservation.receipt, or the route pattern"
+                    },
+                    "active_role": {
+                      "type": "string",
+                      "description": "The caller's own verified team role, in team mode once aicrew vouched for the session"
+                    },
                     "retryable": {
                       "type": "boolean"
                     },
@@ -3433,6 +3601,14 @@
                         "personal",
                         "team"
                       ]
+                    },
+                    "denied_action": {
+                      "type": "string",
+                      "description": "The caller's own refused operation: reservation.<op>, reservation.status, reservation.receipt, or the route pattern"
+                    },
+                    "active_role": {
+                      "type": "string",
+                      "description": "The caller's own verified team role, in team mode once aicrew vouched for the session"
                     },
                     "retryable": {
                       "type": "boolean"
@@ -3475,6 +3651,14 @@
                         "team"
                       ]
                     },
+                    "denied_action": {
+                      "type": "string",
+                      "description": "The caller's own refused operation: reservation.<op>, reservation.status, reservation.receipt, or the route pattern"
+                    },
+                    "active_role": {
+                      "type": "string",
+                      "description": "The caller's own verified team role, in team mode once aicrew vouched for the session"
+                    },
                     "retryable": {
                       "type": "boolean"
                     },
@@ -3515,6 +3699,14 @@
                         "personal",
                         "team"
                       ]
+                    },
+                    "denied_action": {
+                      "type": "string",
+                      "description": "The caller's own refused operation: reservation.<op>, reservation.status, reservation.receipt, or the route pattern"
+                    },
+                    "active_role": {
+                      "type": "string",
+                      "description": "The caller's own verified team role, in team mode once aicrew vouched for the session"
                     },
                     "retryable": {
                       "type": "boolean"
@@ -3748,6 +3940,14 @@
                         "team"
                       ]
                     },
+                    "denied_action": {
+                      "type": "string",
+                      "description": "The caller's own refused operation: reservation.<op>, reservation.status, reservation.receipt, or the route pattern"
+                    },
+                    "active_role": {
+                      "type": "string",
+                      "description": "The caller's own verified team role, in team mode once aicrew vouched for the session"
+                    },
                     "retryable": {
                       "type": "boolean"
                     },
@@ -3788,6 +3988,14 @@
                         "personal",
                         "team"
                       ]
+                    },
+                    "denied_action": {
+                      "type": "string",
+                      "description": "The caller's own refused operation: reservation.<op>, reservation.status, reservation.receipt, or the route pattern"
+                    },
+                    "active_role": {
+                      "type": "string",
+                      "description": "The caller's own verified team role, in team mode once aicrew vouched for the session"
                     },
                     "retryable": {
                       "type": "boolean"
@@ -3830,6 +4038,14 @@
                         "team"
                       ]
                     },
+                    "denied_action": {
+                      "type": "string",
+                      "description": "The caller's own refused operation: reservation.<op>, reservation.status, reservation.receipt, or the route pattern"
+                    },
+                    "active_role": {
+                      "type": "string",
+                      "description": "The caller's own verified team role, in team mode once aicrew vouched for the session"
+                    },
                     "retryable": {
                       "type": "boolean"
                     },
@@ -3870,6 +4086,14 @@
                         "personal",
                         "team"
                       ]
+                    },
+                    "denied_action": {
+                      "type": "string",
+                      "description": "The caller's own refused operation: reservation.<op>, reservation.status, reservation.receipt, or the route pattern"
+                    },
+                    "active_role": {
+                      "type": "string",
+                      "description": "The caller's own verified team role, in team mode once aicrew vouched for the session"
                     },
                     "retryable": {
                       "type": "boolean"
@@ -3912,6 +4136,14 @@
                         "team"
                       ]
                     },
+                    "denied_action": {
+                      "type": "string",
+                      "description": "The caller's own refused operation: reservation.<op>, reservation.status, reservation.receipt, or the route pattern"
+                    },
+                    "active_role": {
+                      "type": "string",
+                      "description": "The caller's own verified team role, in team mode once aicrew vouched for the session"
+                    },
                     "retryable": {
                       "type": "boolean"
                     },
@@ -3952,6 +4184,14 @@
                         "personal",
                         "team"
                       ]
+                    },
+                    "denied_action": {
+                      "type": "string",
+                      "description": "The caller's own refused operation: reservation.<op>, reservation.status, reservation.receipt, or the route pattern"
+                    },
+                    "active_role": {
+                      "type": "string",
+                      "description": "The caller's own verified team role, in team mode once aicrew vouched for the session"
                     },
                     "retryable": {
                       "type": "boolean"
@@ -4069,6 +4309,14 @@
                         "team"
                       ]
                     },
+                    "denied_action": {
+                      "type": "string",
+                      "description": "The caller's own refused operation: reservation.<op>, reservation.status, reservation.receipt, or the route pattern"
+                    },
+                    "active_role": {
+                      "type": "string",
+                      "description": "The caller's own verified team role, in team mode once aicrew vouched for the session"
+                    },
                     "retryable": {
                       "type": "boolean"
                     },
@@ -4109,6 +4357,14 @@
                         "personal",
                         "team"
                       ]
+                    },
+                    "denied_action": {
+                      "type": "string",
+                      "description": "The caller's own refused operation: reservation.<op>, reservation.status, reservation.receipt, or the route pattern"
+                    },
+                    "active_role": {
+                      "type": "string",
+                      "description": "The caller's own verified team role, in team mode once aicrew vouched for the session"
                     },
                     "retryable": {
                       "type": "boolean"
@@ -4151,6 +4407,14 @@
                         "team"
                       ]
                     },
+                    "denied_action": {
+                      "type": "string",
+                      "description": "The caller's own refused operation: reservation.<op>, reservation.status, reservation.receipt, or the route pattern"
+                    },
+                    "active_role": {
+                      "type": "string",
+                      "description": "The caller's own verified team role, in team mode once aicrew vouched for the session"
+                    },
                     "retryable": {
                       "type": "boolean"
                     },
@@ -4192,6 +4456,14 @@
                         "team"
                       ]
                     },
+                    "denied_action": {
+                      "type": "string",
+                      "description": "The caller's own refused operation: reservation.<op>, reservation.status, reservation.receipt, or the route pattern"
+                    },
+                    "active_role": {
+                      "type": "string",
+                      "description": "The caller's own verified team role, in team mode once aicrew vouched for the session"
+                    },
                     "retryable": {
                       "type": "boolean"
                     },
@@ -4232,6 +4504,14 @@
                         "personal",
                         "team"
                       ]
+                    },
+                    "denied_action": {
+                      "type": "string",
+                      "description": "The caller's own refused operation: reservation.<op>, reservation.status, reservation.receipt, or the route pattern"
+                    },
+                    "active_role": {
+                      "type": "string",
+                      "description": "The caller's own verified team role, in team mode once aicrew vouched for the session"
                     },
                     "retryable": {
                       "type": "boolean"
@@ -4455,6 +4735,14 @@
                         "team"
                       ]
                     },
+                    "denied_action": {
+                      "type": "string",
+                      "description": "The caller's own refused operation: reservation.<op>, reservation.status, reservation.receipt, or the route pattern"
+                    },
+                    "active_role": {
+                      "type": "string",
+                      "description": "The caller's own verified team role, in team mode once aicrew vouched for the session"
+                    },
                     "retryable": {
                       "type": "boolean"
                     },
@@ -4495,6 +4783,14 @@
                         "personal",
                         "team"
                       ]
+                    },
+                    "denied_action": {
+                      "type": "string",
+                      "description": "The caller's own refused operation: reservation.<op>, reservation.status, reservation.receipt, or the route pattern"
+                    },
+                    "active_role": {
+                      "type": "string",
+                      "description": "The caller's own verified team role, in team mode once aicrew vouched for the session"
                     },
                     "retryable": {
                       "type": "boolean"
@@ -4537,6 +4833,14 @@
                         "team"
                       ]
                     },
+                    "denied_action": {
+                      "type": "string",
+                      "description": "The caller's own refused operation: reservation.<op>, reservation.status, reservation.receipt, or the route pattern"
+                    },
+                    "active_role": {
+                      "type": "string",
+                      "description": "The caller's own verified team role, in team mode once aicrew vouched for the session"
+                    },
                     "retryable": {
                       "type": "boolean"
                     },
@@ -4578,6 +4882,14 @@
                         "team"
                       ]
                     },
+                    "denied_action": {
+                      "type": "string",
+                      "description": "The caller's own refused operation: reservation.<op>, reservation.status, reservation.receipt, or the route pattern"
+                    },
+                    "active_role": {
+                      "type": "string",
+                      "description": "The caller's own verified team role, in team mode once aicrew vouched for the session"
+                    },
                     "retryable": {
                       "type": "boolean"
                     },
@@ -4618,6 +4930,14 @@
                         "personal",
                         "team"
                       ]
+                    },
+                    "denied_action": {
+                      "type": "string",
+                      "description": "The caller's own refused operation: reservation.<op>, reservation.status, reservation.receipt, or the route pattern"
+                    },
+                    "active_role": {
+                      "type": "string",
+                      "description": "The caller's own verified team role, in team mode once aicrew vouched for the session"
                     },
                     "retryable": {
                       "type": "boolean"

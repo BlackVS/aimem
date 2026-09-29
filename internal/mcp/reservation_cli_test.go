@@ -389,3 +389,36 @@ func TestReservationCLIEvidenceMismatchIsFinal(t *testing.T) {
 		t.Fatalf("evidence_mismatch exits %d", code)
 	}
 }
+
+// A team-context refusal reaches the tool exactly as the hub gave it: its
+// mode, denied action and role pass through, and no mode is invented
+// (19f6 R4, folding 01a0e90a-0f3c).
+func TestReservationToolKeepsTheHubsRefusal(t *testing.T) {
+	for _, ref := range []teamsession.Refusal{
+		{Code: "role_forbidden", Message: "m", ActiveMode: "team", DeniedAction: "reservation.claim", ActiveRole: "worker", NextAction: "Check your aicrew inbox.", CorrelationID: "c-1"},
+		{Code: "context_unavailable", Message: "m", Retryable: true, CorrelationID: "c-2"},
+	} {
+		got := reservationToolError(&ref)
+		var env map[string]any
+		if err := json.Unmarshal([]byte(got.envelope), &env); err != nil {
+			t.Fatal(err)
+		}
+		want := map[string]any{"code": ref.Code, "message": "m", "retryable": ref.Retryable, "correlation_id": ref.CorrelationID}
+		if ref.ActiveMode != "" {
+			want["active_mode"], want["denied_action"], want["active_role"] = ref.ActiveMode, ref.DeniedAction, ref.ActiveRole
+		}
+		next := ref.NextAction
+		if next == "" {
+			next = reservationNextActions[ref.Code]
+		}
+		want["next_action"] = next
+		if len(env) != len(want) {
+			t.Fatalf("%s: envelope %v, want %v", ref.Code, env, want)
+		}
+		for k, v := range want {
+			if env[k] != v {
+				t.Fatalf("%s: %s is %v, want %v", ref.Code, k, env[k], v)
+			}
+		}
+	}
+}

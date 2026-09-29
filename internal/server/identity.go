@@ -31,9 +31,13 @@ const identityWait = 5 * time.Second
 // identityRefusal is the context contract's refusal envelope. It never
 // carries a bearer, receipt or another actor's identity.
 type identityRefusalBody struct {
-	Code          string `json:"code"`
-	Message       string `json:"message"`
-	ActiveMode    string `json:"active_mode,omitempty"`
+	Code       string `json:"code"`
+	Message    string `json:"message"`
+	ActiveMode string `json:"active_mode,omitempty"`
+	// DeniedAction and ActiveRole describe only the caller's own request:
+	// the operation refused and, in team mode, its verified role (19f6).
+	DeniedAction  string `json:"denied_action,omitempty"`
+	ActiveRole    string `json:"active_role,omitempty"`
 	Retryable     bool   `json:"retryable"`
 	NextAction    string `json:"next_action"`
 	CorrelationID string `json:"correlation_id"`
@@ -74,15 +78,26 @@ func (s *Server) identityRefuse(w http.ResponseWriter, code string) {
 // identityRefuseWith writes the envelope with a given active mode ("" omits
 // it) and correlation ID, so an audited refusal and its answer share the ID.
 func (s *Server) identityRefuseWith(w http.ResponseWriter, code, mode, correlationID string) {
+	s.identityRefuseIn(w, code, mode, correlationID, refusalContext{})
+}
+
+// identityRefuseIn is identityRefuseWith with the refusal's context: the
+// denied operation, the caller's role, and the next action they select.
+func (s *Server) identityRefuseIn(w http.ResponseWriter, code, mode, correlationID string, rc refusalContext) {
 	ref, ok := identityRefusals[code]
 	if !ok {
 		code, ref = "identity_unavailable", identityRefusals["identity_unavailable"]
+	}
+	next := ref.next
+	if t, ok := teamNextActions[code]; ok && mode == "team" {
+		next = t
 	}
 	s.log.Warn("identity request refused", "code", code, "correlation_id", correlationID)
 	w.Header().Set("Content-Type", "application/json")
 	w.Header().Set("Cache-Control", "no-store")
 	w.WriteHeader(ref.status)
-	json.NewEncoder(w).Encode(identityRefusalBody{Code: code, Message: ref.message, ActiveMode: mode, Retryable: ref.retryable, NextAction: ref.next, CorrelationID: correlationID})
+	json.NewEncoder(w).Encode(identityRefusalBody{Code: code, Message: ref.message, ActiveMode: mode, DeniedAction: rc.Action,
+		ActiveRole: rc.Role, Retryable: ref.retryable, NextAction: nextActionFor(code, rc, next), CorrelationID: correlationID})
 }
 
 // identityTLS reports whether the request arrived over TLS terminated by this
