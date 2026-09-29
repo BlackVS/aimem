@@ -85,6 +85,7 @@ var reservationRefusals = map[string]reservationRefusalSpec{
 	"invalid_request":        {http.StatusBadRequest, "Use a reviewed supported version or correct the request."},
 	"coordination_rejected":  {http.StatusForbidden, "Begin the step again through aicrew; never reuse the proof or the key."},
 	"process_mismatch":       {http.StatusConflict, "Reload the project's current process, then begin the step again through aicrew under it; never reuse the proof or the key."},
+	"tasks_disabled":         {http.StatusForbidden, "An admin enables tasks for this project on the hub."},
 	"evidence_mismatch":      {http.StatusConflict, "Finalize with exactly the evidence aicrew confirmed, in its order; if the confirmation changed, begin the finalize again through aicrew; never reuse the proof or the key."},
 }
 
@@ -106,6 +107,7 @@ var reservationMessages = map[string]string{
 	"coordination_rejected": "The coordination fact does not vouch for this step.",
 	"process_mismatch":      "The process pin is not the project's current selection.",
 	"evidence_mismatch":     "The terminal evidence is not exactly the delivery evidence aicrew confirmed.",
+	"tasks_disabled":        "Tasks are not enabled for this project.",
 }
 
 // reservationRefuse answers a refusal in the reservation envelope. The active

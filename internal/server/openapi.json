@@ -2087,7 +2087,7 @@
             }
           },
           "403": {
-            "description": "grant_denied, role_forbidden, coordination_rejected (a coordination fact that does not vouch for this step), identity_mismatch, context_missing, context_stale, or a team-mode gate refusal",
+            "description": "grant_denied, role_forbidden, coordination_rejected (a coordination fact that does not vouch for this step), tasks_disabled (tasks are not enabled for the task's project; nothing is applied), identity_mismatch, context_missing, context_stale, or a team-mode gate refusal",
             "content": {
               "application/json": {
                 "schema": {
@@ -2575,7 +2575,7 @@
             }
           },
           "403": {
-            "description": "grant_denied, role_forbidden, coordination_rejected (a coordination fact that does not vouch for this step), identity_mismatch, context_missing, context_stale, or a team-mode gate refusal",
+            "description": "grant_denied, role_forbidden, coordination_rejected (a coordination fact that does not vouch for this step), tasks_disabled (tasks are not enabled for the task's project; nothing is applied), identity_mismatch, context_missing, context_stale, or a team-mode gate refusal",
             "content": {
               "application/json": {
                 "schema": {
@@ -3051,7 +3051,7 @@
             }
           },
           "403": {
-            "description": "grant_denied, role_forbidden, coordination_rejected (a coordination fact that does not vouch for this step), identity_mismatch, context_missing, context_stale, or a team-mode gate refusal",
+            "description": "grant_denied, role_forbidden, coordination_rejected (a coordination fact that does not vouch for this step), tasks_disabled (tasks are not enabled for the task's project; nothing is applied), identity_mismatch, context_missing, context_stale, or a team-mode gate refusal",
             "content": {
               "application/json": {
                 "schema": {
@@ -3527,7 +3527,7 @@
             }
           },
           "403": {
-            "description": "grant_denied, role_forbidden, coordination_rejected (a coordination fact that does not vouch for this step), identity_mismatch, context_missing, context_stale, or a team-mode gate refusal",
+            "description": "grant_denied, role_forbidden, coordination_rejected (a coordination fact that does not vouch for this step), tasks_disabled (tasks are not enabled for the task's project; nothing is applied), identity_mismatch, context_missing, context_stale, or a team-mode gate refusal",
             "content": {
               "application/json": {
                 "schema": {
@@ -4012,7 +4012,7 @@
             }
           },
           "403": {
-            "description": "grant_denied, role_forbidden, coordination_rejected (a coordination fact that does not vouch for this step), identity_mismatch, context_missing, context_stale, or a team-mode gate refusal",
+            "description": "grant_denied, role_forbidden, coordination_rejected (a coordination fact that does not vouch for this step), tasks_disabled (tasks are not enabled for the task's project; nothing is applied), identity_mismatch, context_missing, context_stale, or a team-mode gate refusal",
             "content": {
               "application/json": {
                 "schema": {
@@ -5058,7 +5058,7 @@
             "description": "invalid_credential: the admin credential was removed before commit"
           },
           "403": {
-            "description": "tls_required, or coordination_rejected (stop evidence aicrew does not vouch for, or not for this hold)"
+            "description": "tls_required, coordination_rejected (stop evidence aicrew does not vouch for, or not for this hold), or tasks_disabled (tasks are not enabled for the task's project; nothing is applied)"
           },
           "404": {
             "description": "task_unavailable"
@@ -5174,7 +5174,7 @@
             "description": "invalid_credential: the admin credential was removed before commit"
           },
           "403": {
-            "description": "tls_required, or coordination_rejected (stop evidence aicrew does not vouch for, or not for this hold)"
+            "description": "tls_required, coordination_rejected (stop evidence aicrew does not vouch for, or not for this hold), or tasks_disabled (tasks are not enabled for the task's project; nothing is applied)"
           },
           "404": {
             "description": "task_unavailable"

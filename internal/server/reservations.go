@@ -344,6 +344,8 @@ func reservationError(err error) error {
 		return refuseReservation("evidence_mismatch", "the terminal evidence is not the confirmed delivery evidence")
 	case errors.Is(err, store.ErrTaskRetryConflict):
 		return refuseReservation("idempotency_conflict", "changed input under a used key")
+	case errors.Is(err, store.ErrReservationTasksDisabled):
+		return refuseReservation("tasks_disabled", "tasks are not enabled for the task's project")
 	case errors.Is(err, store.ErrDependencyUnresolved):
 		return refuseReservation("dependency_unresolved", "dependency evidence is not readable and done")
 	case errors.Is(err, store.ErrTaskNotFound):

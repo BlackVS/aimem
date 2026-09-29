@@ -323,6 +323,10 @@ func recoveryPrincipal(actor TaskActor) (string, error) {
 	return "recovery/" + actor.Name, nil
 }
 
+// ErrReservationTasksDisabled refuses a reservation transition in a project
+// whose tasks an admin has not enabled.
+var ErrReservationTasksDisabled = errors.New("tasks are not enabled for this project")
+
 func reservationMutation(d *DB, actor TaskActor, binding ReservationBinding, op ReservationOperation, in TaskReservationInput, key string,
 	extra any, fn func(*sql.Tx) (TaskReservationOutcome, error), authorize func() error) (TaskReservationOutcome, error) {
 	tx, err := d.sql.Begin()
@@ -404,6 +408,15 @@ func reservationMutationTx(d *DB, tx *sql.Tx, actor TaskActor, binding Reservati
 		return out, nil
 	case !errors.Is(err, sql.ErrNoRows):
 		return TaskReservationOutcome{}, err
+	}
+	// A new transition needs the owner project's tasks enabled, read in
+	// this transaction, as every generic task write does: no caller's
+	// authority stands in for the admin's decision. A replay above applies
+	// nothing new and is answered like a read (task 01a0eda3).
+	if on, err := tasksEnabledTx(tx); err != nil {
+		return TaskReservationOutcome{}, err
+	} else if !on {
+		return TaskReservationOutcome{}, ErrReservationTasksDisabled
 	}
 	out, err := fn(tx)
 	if err != nil {

@@ -3,9 +3,8 @@ package server
 // Task 01a0ed2f-2fd8: a reservation hold is released only by an explicit,
 // evidenced transition. It survives the holder's disconnect or session end,
 // an expired pre-work offer fact, and tasks being disabled and re-enabled on
-// its project. (Refusing mutations while tasks are off is the separate
-// tasks_disabled task; nothing here asserts that a mutation succeeds while
-// tasks are off.)
+// its project. (Mutations while tasks are off are refused with
+// tasks_disabled: reservation_tasks_disabled_test.go.)
 
 import (
 	"encoding/json"

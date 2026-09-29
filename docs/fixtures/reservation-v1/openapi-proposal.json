@@ -28,7 +28,8 @@
     "dependency_unresolved": [404, 503],
     "coordination_rejected": 403,
     "process_mismatch": 409,
-    "evidence_mismatch": 409
+    "evidence_mismatch": 409,
+    "tasks_disabled": 403
   },
   "x-mcp-parity": {
     "claim": "task_reservation_claim",
