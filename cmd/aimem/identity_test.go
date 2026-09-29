@@ -882,3 +882,34 @@ func TestIdentityCLITeamProfiles(t *testing.T) {
 	}
 	g.assertNoSecrets(t)
 }
+
+// A credential permits one --operation: reservation.read issues aicrew's
+// read-scope credential, the list names each credential's operation, and
+// rotate counts only the named operation's credentials.
+func TestIdentityCLICredentialOperation(t *testing.T) {
+	g := newIdentityCLIRig(t, nil)
+	g.register(t)
+	if _, err := g.run(t, "cred", "issue", "aicrew-example", "--expires", "30d", "--secret-file", g.secretPath("bad"),
+		"--operation", "reservation.write"); err == nil || !strings.Contains(err.Error(), "--operation") {
+		t.Fatalf("an unknown operation: %v", err)
+	}
+	if _, err := os.Stat(g.secretPath("bad")); !os.IsNotExist(err) {
+		t.Fatal("a refused issue created the secret file")
+	}
+	out := g.mustRun(t, "cred", "issue", "aicrew-example", "--expires", "30d", "--secret-file", g.secretPath("read"), "--operation", "reservation.read")
+	if !strings.Contains(out, "(reservation.read)") {
+		t.Fatalf("issue output: %s", out)
+	}
+	// A redemption credential is not a read credential to rotate.
+	g.mustRun(t, "cred", "issue", "aicrew-example", "--expires", "30d", "--secret-file", g.secretPath("redeem"))
+	g.mustRun(t, "cred", "rotate", "aicrew-example", "--expires", "30d", "--secret-file", g.secretPath("read2"), "--operation", "reservation.read")
+	if _, err := g.run(t, "cred", "rotate", "aicrew-example", "--expires", "30d", "--secret-file", g.secretPath("read3"),
+		"--operation", "reservation.read"); err == nil || !strings.Contains(err.Error(), "two active credentials for reservation.read") {
+		t.Fatalf("a third read credential: %v", err)
+	}
+	list := g.mustRun(t, "cred", "list", "aicrew-example")
+	if strings.Count(list, "reservation.read") != 2 || strings.Count(list, "identity.redeem") != 1 {
+		t.Fatalf("list: %s", list)
+	}
+	g.assertNoSecrets(t)
+}

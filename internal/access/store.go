@@ -114,16 +114,19 @@ func OpenExisting(root string) (*Store, error) {
 	return Open(root)
 }
 
+// accessSchema is the access database version this binary writes.
+const accessSchema = 5
+
 func (s *Store) migrate() error {
 	var current int
 	if err := s.db.QueryRow("PRAGMA user_version").Scan(&current); err != nil {
 		return err
 	}
-	if current == 4 {
+	if current == accessSchema {
 		return nil
 	}
-	if current > 4 {
-		return fmt.Errorf("access schema %d is newer than supported schema 4", current)
+	if current > accessSchema {
+		return fmt.Errorf("access schema %d is newer than supported schema %d", current, accessSchema)
 	}
 	tx, err := s.db.Begin()
 	if err != nil {
@@ -134,8 +137,8 @@ func (s *Store) migrate() error {
 	if err := tx.QueryRow("PRAGMA user_version").Scan(&version); err != nil {
 		return err
 	}
-	if version > 4 {
-		return fmt.Errorf("access schema %d is newer than supported schema 4", version)
+	if version > accessSchema {
+		return fmt.Errorf("access schema %d is newer than supported schema %d", version, accessSchema)
 	}
 	if version == 0 {
 		_, err = tx.Exec(`
@@ -232,6 +235,18 @@ CREATE TABLE identity_redemptions(
  PRIMARY KEY(service_id,request_key)
 );
 PRAGMA user_version=4;`); err != nil {
+			return err
+		}
+		version = 4
+	}
+	if version == 4 {
+		// A peer credential permits one operation (task C6b, D6-3a): the
+		// redemption credentials issued so far keep identity.redeem, and
+		// aicrew's read scope gets its own reservation.read credentials.
+		if _, err := tx.Exec(`
+ALTER TABLE identity_peer_credentials ADD COLUMN operation TEXT NOT NULL DEFAULT 'identity.redeem'
+ CHECK(operation IN ('identity.redeem','reservation.read'));
+PRAGMA user_version=5;`); err != nil {
 			return err
 		}
 	}

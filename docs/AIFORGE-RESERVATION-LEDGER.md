@@ -151,3 +151,24 @@ C6c (task 01a0e8c7-e1e9) serves the [coordination wire's reservation CLI](DESIGN
   - 4: retryable refusal;
   - 5: a mutation was sent and no answer came (`receipt_unresolved`); reconcile with `receipt` and the same key;
   - 2: usage error, reported on standard error.
+
+## C6b: aicrew's read scope
+
+C6b (task 01a0e8c7-e212) serves aicrew's read-only reservation scope from the [coordination wire](DESIGN-AIFORGE-COORDINATION-WIRE.md#2-aicrews-read-scope-aicrew--aimem) §2 (D5b). Aicrew's reconciliation (its task b3) reads it.
+
+- **Credential (D6-3a).** Access schema 5 adds an `operation` to peer credentials: `identity.redeem` or `reservation.read`. Credentials that already exist keep `identity.redeem`. The admin issue route and `aimem identity cred issue|rotate --operation` choose the operation.
+  - At most two credentials are active per peer and operation.
+  - Issuing is audited as `identity_peer.credential.issue.<operation>`.
+  - A `reservation.read` credential never redeems: the gate refuses it on the redemption route with `peer_forbidden`, and so does the store if it gets that far. A redemption credential cannot read.
+- **Recording (D6-4).** Schema 23 adds four columns to every receipt:
+  - `reservation_id`: the reservation the transition acted on (for a claim, the new one);
+  - `committed_at`;
+  - `service_id` and the proof's `p1_` digest, written only for a transition made on a verified coordination fact. The service is always the caller's team service, which answered the fact.
+
+  A receipt from before schema 23 reads as none.
+- **Routes.** Three GETs under `/v1/identity/peers/{service_id}/`: `reservation-receipts/{proof_digest}`, `reservations/{task_id}/receipts/{operation}/{request_key_digest}` and `reservations/{task_id}`.
+  - The bearer gate classifies them as identity wire routes and confines each peer credential to its own operation's routes. `/mcp` and every other route refuse it.
+  - A route answers only over hub-terminated TLS, with `X-Aimem-Reservation-Version: 1`, for the path's own service. Reads are limited to 60 per credential per minute.
+  - By key, a transition is visible when a claim or transfer under the service's proof established its reservation.
+  - Hold status is C5c's `ServiceHoldStatus`.
+- **Answers that are never guessed.** Every out-of-scope, missing or malformed record answers `none`. A lookup that cannot vouch for `none` answers the retryable `request_in_progress` instead: an unreadable project during the proof search, or a busy store.

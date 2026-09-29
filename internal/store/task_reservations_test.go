@@ -284,7 +284,7 @@ func TestTaskReservationSchemaPreservesExistingTasks(t *testing.T) {
 	if err != nil || got.Revision != task.Revision || got.Title != task.Title {
 		t.Fatalf("existing task changed: %+v, %v", got, err)
 	}
-	if v, err := db.GetMeta("schema_version"); err != nil || v != "22" {
+	if v, err := db.GetMeta("schema_version"); err != nil || v != fmt.Sprint(currentSchema) {
 		t.Fatalf("schema version: %q, %v", v, err)
 	}
 	if countRows(t, db, "task_requests", "operation=? AND scope=?", "create", "") != 1 {
@@ -293,7 +293,7 @@ func TestTaskReservationSchemaPreservesExistingTasks(t *testing.T) {
 	if _, err := db.ApplyTaskReservation(ReservationClaim, claimInput(got, "migrated"), aliceActor, testBinding(aliceActor), "migrated-claim", nil, allowReservation); err != nil {
 		t.Fatalf("cannot claim migrated task: %v", err)
 	}
-	if _, err := db.sql.Exec(`UPDATE meta SET value='23' WHERE key='schema_version'`); err != nil {
+	if _, err := db.sql.Exec(fmt.Sprintf(`UPDATE meta SET value='%d' WHERE key='schema_version'`, currentSchema+1)); err != nil {
 		t.Fatal(err)
 	}
 	r.Close()
@@ -340,6 +340,13 @@ func TestTaskReservationSchema20KeepsUnboundHoldsHeld(t *testing.T) {
 		`DROP TABLE r19`,
 		`DROP TABLE task_reservation_services`,
 		`DELETE FROM task_reservation_requests`,
+		// Schema 23's read-scope columns (C6b) did not exist either.
+		`DROP INDEX idx_task_reservation_requests_proof`,
+		`DROP INDEX idx_task_reservation_requests_task`,
+		`ALTER TABLE task_reservation_requests DROP COLUMN service_id`,
+		`ALTER TABLE task_reservation_requests DROP COLUMN proof_digest`,
+		`ALTER TABLE task_reservation_requests DROP COLUMN reservation_id`,
+		`ALTER TABLE task_reservation_requests DROP COLUMN committed_at`,
 		`UPDATE meta SET value='19' WHERE key='schema_version'`,
 	} {
 		if _, err := db.sql.Exec(stmt); err != nil {

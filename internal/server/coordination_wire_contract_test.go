@@ -871,35 +871,71 @@ func TestCoordinationV1SecretsStayWherePermitted(t *testing.T) {
 	}
 }
 
-// The hub serves none of this yet, and the reservation contracts carry the
+// coordination.v1 is aicrew's route and never served here. The hub serves
+// the read scope (C6b) as exactly the proposal's three GET routes, in the
+// route table and the live OpenAPI, and the reservation contracts carry the
 // operator's D4 correction.
 func TestCoordinationV1IsNotServedAndContractsAgree(t *testing.T) {
 	s, _ := testServer(t)
+	var proposal struct {
+		Paths map[string]map[string]json.RawMessage `json:"paths"`
+	}
+	b, err := os.ReadFile(filepath.Join("..", "..", "docs", "fixtures", "coordination-v1", "openapi-proposal.json"))
+	if err != nil || json.Unmarshal(b, &proposal) != nil {
+		t.Fatalf("proposal: %v", err)
+	}
+	want := map[string]bool{}
+	for path, ops := range proposal.Paths {
+		if strings.HasPrefix(path, "/v1/crew/") {
+			continue // aicrew's
+		}
+		for method := range ops {
+			want[strings.ToUpper(method)+" "+path] = true
+		}
+	}
+	if len(want) != 3 {
+		t.Fatalf("the proposal's read scope: %v", want)
+	}
+	served := map[string]bool{}
 	for _, route := range s.Routes() {
 		if strings.HasPrefix(route.Pattern, recoveryNamespace) {
 			continue // C5c's admin-only recovery routes, not the read scope
 		}
-		for _, frag := range []string{"/v1/crew/", "reservation-receipts", "/reservations/"} {
-			if strings.Contains(route.Pattern, frag) {
-				t.Errorf("C5w registered route %s", route.Pattern)
+		if strings.Contains(route.Pattern, "/v1/crew/") {
+			t.Errorf("the hub registered aicrew's route %s", route.Pattern)
+		}
+		if strings.Contains(route.Pattern, "reservation-receipts") || strings.Contains(route.Pattern, "/reservations/") {
+			served[route.Method+" "+route.Pattern] = true
+			if route.Admin {
+				t.Errorf("read-scope route %s is admin-only", route.Pattern)
 			}
 		}
 	}
+	if !reflect.DeepEqual(served, want) {
+		t.Errorf("served read scope %v, want the proposal's %v", served, want)
+	}
 	var live struct {
-		Paths map[string]json.RawMessage `json:"paths"`
+		Paths map[string]map[string]json.RawMessage `json:"paths"`
 	}
 	if err := json.Unmarshal(openAPISpec, &live); err != nil {
 		t.Fatal(err)
 	}
-	for path := range live.Paths {
+	documented := map[string]bool{}
+	for path, ops := range live.Paths {
 		if strings.HasPrefix(path, recoveryNamespace) {
 			continue
 		}
-		// The member routes under /reservation are C6a's, pinned exactly by
-		// TestReservationV1FixtureAndProposedSurface; the read scope is C6b's.
-		if strings.Contains(path, "/v1/crew/") || strings.Contains(path, "reservation-receipts") || strings.Contains(path, "/reservations/") {
-			t.Errorf("C5w changed live OpenAPI path %s", path)
+		if strings.Contains(path, "/v1/crew/") {
+			t.Errorf("live OpenAPI documents aicrew's route %s", path)
 		}
+		if strings.Contains(path, "reservation-receipts") || strings.Contains(path, "/reservations/") {
+			for method := range ops {
+				documented[strings.ToUpper(method)+" "+path] = true
+			}
+		}
+	}
+	if !reflect.DeepEqual(documented, want) {
+		t.Errorf("live OpenAPI documents the read scope %v, want the proposal's %v", documented, want)
 	}
 	read := func(name string) string {
 		b, err := os.ReadFile(filepath.Join("..", "..", "docs", name))

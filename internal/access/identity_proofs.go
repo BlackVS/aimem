@@ -27,8 +27,13 @@ import (
 // its creator and stored only as a SHA-256 digest; audit subjects carry IDs,
 // never secrets.
 
+// The operations a peer credential permits: exactly one each (D6-3a).
 const (
-	peerOperationRedeem       = "identity.redeem"
+	PeerOperationRedeem          = "identity.redeem"
+	PeerOperationReservationRead = "reservation.read"
+)
+
+const (
 	peerCredentialPrefix      = "aimem_peer_"
 	peerCredentialMaxLife     = 366 * 24 * time.Hour
 	peerCredentialMaxActive   = 2
@@ -43,6 +48,7 @@ var (
 	ErrCredentialScope      = errors.New("credential_scope_forbidden")
 	ErrPeerUnknown          = errors.New("peer_unknown")
 	ErrPeerUnauthenticated  = errors.New("peer_unauthenticated")
+	ErrPeerForbidden        = errors.New("peer_forbidden")
 	ErrPeerCredentialLimit  = errors.New("peer already has the maximum number of active credentials")
 	ErrProofInvalid         = errors.New("proof_invalid")
 	ErrCredentialInactive   = errors.New("credential_inactive")
@@ -65,16 +71,18 @@ type IdentityPeer struct {
 type PeerCredential struct {
 	ID        string
 	ServiceID string
+	Operation string
 	CreatedAt time.Time
 	ExpiresAt time.Time
 	Revoked   bool
 }
 
 // PeerIdentity is what an authenticated peer bearer proves: one registered
-// service, through one credential, for identity.redeem only.
+// service, through one credential, for the one operation it permits.
 type PeerIdentity struct {
 	ServiceID    string
 	CredentialID string
+	Operation    string
 }
 
 type ProofRequest struct {
@@ -161,7 +169,7 @@ func (s *Store) RegisterIdentityPeer(actor string, p IdentityPeer) error {
 			return err
 		}
 		_, err := tx.Exec("INSERT INTO identity_peers(service_id,hub_id,operation,endpoint,tls_mode,tls_value) VALUES(?,?,?,?,?,?)",
-			p.ServiceID, p.HubID, peerOperationRedeem, u.String(), p.TLSMode, p.TLSValue)
+			p.ServiceID, p.HubID, PeerOperationRedeem, u.String(), p.TLSMode, p.TLSValue)
 		return err
 	})
 }
@@ -198,11 +206,15 @@ func (s *Store) SetIdentityPeerDisabled(actor, serviceID string, disabled bool) 
 	})
 }
 
-// IssuePeerCredential mints one peer bearer, shown only in this return value.
-// A lost response is recovered by revoking the unconfirmed credential (its
-// metadata is listed) and issuing another; the secret is never shown again.
-func (s *Store) IssuePeerCredential(actor, serviceID string, expires time.Time) (PeerCredential, string, error) {
+// IssuePeerCredential mints one peer bearer for one operation, shown only in
+// this return value. A lost response is recovered by revoking the
+// unconfirmed credential (its metadata is listed) and issuing another; the
+// secret is never shown again.
+func (s *Store) IssuePeerCredential(actor, serviceID, operation string, expires time.Time) (PeerCredential, string, error) {
 	now := s.now()
+	if operation != PeerOperationRedeem && operation != PeerOperationReservationRead {
+		return PeerCredential{}, "", fmt.Errorf("%w: operation must be %s or %s", ErrInvalidRequest, PeerOperationRedeem, PeerOperationReservationRead)
+	}
 	if !expires.After(now) || expires.After(now.Add(peerCredentialMaxLife)) {
 		return PeerCredential{}, "", fmt.Errorf("%w: expiry must be in the future and within 366 days", ErrInvalidRequest)
 	}
@@ -211,8 +223,9 @@ func (s *Store) IssuePeerCredential(actor, serviceID string, expires time.Time) 
 		return PeerCredential{}, "", err
 	}
 	secret := peerCredentialPrefix + hex.EncodeToString(random[:])
-	c := PeerCredential{ID: uuidv7.New(), ServiceID: serviceID, CreatedAt: now.UTC().Truncate(time.Second), ExpiresAt: expires.UTC().Truncate(time.Second)}
-	err := s.change(actor, "identity_peer.credential.issue", c.ID, func(tx *sql.Tx) error {
+	c := PeerCredential{ID: uuidv7.New(), ServiceID: serviceID, Operation: operation,
+		CreatedAt: now.UTC().Truncate(time.Second), ExpiresAt: expires.UTC().Truncate(time.Second)}
+	err := s.change(actor, "identity_peer.credential.issue."+operation, c.ID, func(tx *sql.Tx) error {
 		var disabled bool
 		if err := tx.QueryRow("SELECT disabled FROM identity_peers WHERE service_id=?", serviceID).Scan(&disabled); err != nil {
 			return fmt.Errorf("unknown identity peer: %w", err)
@@ -221,15 +234,15 @@ func (s *Store) IssuePeerCredential(actor, serviceID string, expires time.Time) 
 			return fmt.Errorf("identity peer is disabled")
 		}
 		var active int
-		if err := tx.QueryRow("SELECT count(*) FROM identity_peer_credentials WHERE service_id=? AND revoked=0 AND expires_at>?",
-			serviceID, s.now().Unix()).Scan(&active); err != nil {
+		if err := tx.QueryRow("SELECT count(*) FROM identity_peer_credentials WHERE service_id=? AND operation=? AND revoked=0 AND expires_at>?",
+			serviceID, operation, s.now().Unix()).Scan(&active); err != nil {
 			return err
 		}
 		if active >= peerCredentialMaxActive {
 			return ErrPeerCredentialLimit
 		}
-		_, err := tx.Exec("INSERT INTO identity_peer_credentials(id,service_id,digest,created_at,expires_at) VALUES(?,?,?,?,?)",
-			c.ID, serviceID, digestHex(secret), c.CreatedAt.Unix(), c.ExpiresAt.Unix())
+		_, err := tx.Exec("INSERT INTO identity_peer_credentials(id,service_id,operation,digest,created_at,expires_at) VALUES(?,?,?,?,?,?)",
+			c.ID, serviceID, operation, digestHex(secret), c.CreatedAt.Unix(), c.ExpiresAt.Unix())
 		return err
 	})
 	if err != nil {
@@ -282,7 +295,7 @@ func (s *Store) ListIdentityPeers() ([]IdentityPeer, error) {
 // ListPeerCredentials returns metadata only, for lost-response recovery and
 // rotation; no digest or secret is exposed.
 func (s *Store) ListPeerCredentials(serviceID string) ([]PeerCredential, error) {
-	rows, err := s.db.Query("SELECT id,service_id,created_at,expires_at,revoked FROM identity_peer_credentials WHERE service_id=? ORDER BY id", serviceID)
+	rows, err := s.db.Query("SELECT id,service_id,operation,created_at,expires_at,revoked FROM identity_peer_credentials WHERE service_id=? ORDER BY id", serviceID)
 	if err != nil {
 		return nil, err
 	}
@@ -291,7 +304,7 @@ func (s *Store) ListPeerCredentials(serviceID string) ([]PeerCredential, error) 
 	for rows.Next() {
 		var c PeerCredential
 		var created, expires int64
-		if err := rows.Scan(&c.ID, &c.ServiceID, &created, &expires, &c.Revoked); err != nil {
+		if err := rows.Scan(&c.ID, &c.ServiceID, &c.Operation, &created, &expires, &c.Revoked); err != nil {
 			return nil, err
 		}
 		c.CreatedAt, c.ExpiresAt = time.Unix(created, 0).UTC(), time.Unix(expires, 0).UTC()
@@ -305,11 +318,11 @@ func (s *Store) lookupPeer(ctx context.Context, secret string) (PeerIdentity, er
 		return PeerIdentity{}, ErrPeerUnauthenticated
 	}
 	var id PeerIdentity
-	err := s.db.QueryRowContext(ctx, `SELECT p.service_id,c.id FROM identity_peer_credentials c
+	err := s.db.QueryRowContext(ctx, `SELECT p.service_id,c.id,c.operation FROM identity_peer_credentials c
 JOIN identity_peers p ON p.service_id=c.service_id
 JOIN hub_identity h ON h.id=p.hub_id
 WHERE c.digest=? AND c.revoked=0 AND c.expires_at>? AND p.disabled=0 AND p.operation=?`,
-		digestHex(secret), s.now().Unix(), peerOperationRedeem).Scan(&id.ServiceID, &id.CredentialID)
+		digestHex(secret), s.now().Unix(), PeerOperationRedeem).Scan(&id.ServiceID, &id.CredentialID, &id.Operation)
 	if errors.Is(err, sql.ErrNoRows) {
 		return PeerIdentity{}, ErrPeerUnauthenticated
 	}
@@ -333,8 +346,8 @@ func peerStillValid(tx *sql.Tx, p PeerIdentity, now time.Time) error {
 	err := tx.QueryRow(`SELECT count(*) FROM identity_peer_credentials c
 JOIN identity_peers p ON p.service_id=c.service_id
 JOIN hub_identity h ON h.id=p.hub_id
-WHERE c.id=? AND c.service_id=? AND c.revoked=0 AND c.expires_at>? AND p.disabled=0 AND p.operation=?`,
-		p.CredentialID, p.ServiceID, now.Unix(), peerOperationRedeem).Scan(&n)
+WHERE c.id=? AND c.service_id=? AND c.operation=? AND c.revoked=0 AND c.expires_at>? AND p.disabled=0 AND p.operation=?`,
+		p.CredentialID, p.ServiceID, p.Operation, now.Unix(), PeerOperationRedeem).Scan(&n)
 	if err != nil {
 		return err
 	}
@@ -407,7 +420,7 @@ func (s *Store) IssueProof(ctx context.Context, userID, tokenID string, req Proo
 	}
 	var peers int
 	if err := tx.QueryRow(`SELECT count(*) FROM identity_peers p JOIN hub_identity h ON h.id=p.hub_id
-WHERE p.service_id=? AND p.hub_id=? AND p.disabled=0 AND p.operation=?`, req.PeerServiceID, req.HubID, peerOperationRedeem).Scan(&peers); err != nil {
+WHERE p.service_id=? AND p.hub_id=? AND p.disabled=0 AND p.operation=?`, req.PeerServiceID, req.HubID, PeerOperationRedeem).Scan(&peers); err != nil {
 		return ProofReceipt{}, err
 	}
 	if peers != 1 {
@@ -451,6 +464,10 @@ VALUES(?,?,?,?,?,?,?,?,?,'live')`, r.ID, digestHex(r.Receipt), r.PeerServiceID, 
 // As in IssueProof, ctx bounds the wait for the store; an identical retry
 // that cannot start in time returns ctx.Err() and changes nothing.
 func (s *Store) RedeemProof(ctx context.Context, peer PeerIdentity, req RedeemRequest) (Redemption, error) {
+	if peer.Operation != PeerOperationRedeem {
+		// A reservation.read credential never redeems (D6-3a).
+		return Redemption{}, ErrPeerForbidden
+	}
 	if !identityRequestKeyShape.MatchString(req.RequestKey) || !identityReceiptShape.MatchString(req.Receipt) ||
 		!identityIDPattern.MatchString(req.ChallengeID) || req.HubID == "" {
 		return Redemption{}, ErrInvalidRequest

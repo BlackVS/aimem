@@ -335,6 +335,9 @@ func TestReservationV1FixtureAndProposedSurface(t *testing.T) {
 			}
 			continue
 		}
+		if strings.HasPrefix(route.Pattern, "/v1/identity/") {
+			continue // aicrew's read scope (C6b), pinned by the coordination-wire test
+		}
 		if strings.Contains(route.Pattern, "/reservation") {
 			served[route.Method+" "+route.Pattern] = true
 			if route.Admin {
@@ -353,7 +356,7 @@ func TestReservationV1FixtureAndProposedSurface(t *testing.T) {
 	}
 	documented := map[string]bool{}
 	for path, ops := range live.Paths {
-		if strings.Contains(path, "/reservation") && !strings.HasPrefix(path, recoveryNamespace) {
+		if strings.Contains(path, "/reservation") && !strings.HasPrefix(path, recoveryNamespace) && !strings.HasPrefix(path, "/v1/identity/") {
 			for method := range ops {
 				documented[strings.ToUpper(method)+" "+path] = true
 			}

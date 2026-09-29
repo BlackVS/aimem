@@ -492,7 +492,7 @@ func (r *Registry) Close() {
 	r.dbs = map[string]*DB{}
 }
 
-const currentSchema = 22
+const currentSchema = 23
 
 // SetMeta / GetMeta store small key-value project metadata (e.g. the
 // project's declared knowledge groups, stamped from event pushes so the
@@ -1059,6 +1059,24 @@ UPDATE meta SET value='21' WHERE key='schema_version';`); err != nil {
 ALTER TABLE task_reservations ADD COLUMN intended_user TEXT NOT NULL DEFAULT '';
 ALTER TABLE task_reservations ADD COLUMN intended_agent TEXT NOT NULL DEFAULT '';
 UPDATE meta SET value='22' WHERE key='schema_version';`); err != nil {
+			return err
+		}
+	}
+	if v < 23 {
+		// Aicrew's read scope (task C6b, decision D6-4). A receipt records the
+		// reservation its transition acted on and when it committed. A
+		// transition committed under a verified coordination fact also records
+		// the service that answered and the proof's p1_ digest. The read scope
+		// sees exactly the records that carry its own service, so a receipt
+		// from before this version reads as none.
+		if err := d.step(`
+ALTER TABLE task_reservation_requests ADD COLUMN service_id TEXT NOT NULL DEFAULT '';
+ALTER TABLE task_reservation_requests ADD COLUMN proof_digest TEXT NOT NULL DEFAULT '';
+ALTER TABLE task_reservation_requests ADD COLUMN reservation_id TEXT NOT NULL DEFAULT '';
+ALTER TABLE task_reservation_requests ADD COLUMN committed_at TEXT NOT NULL DEFAULT '';
+CREATE INDEX idx_task_reservation_requests_proof ON task_reservation_requests(service_id, proof_digest);
+CREATE INDEX idx_task_reservation_requests_task ON task_reservation_requests(task_id, operation);
+UPDATE meta SET value='23' WHERE key='schema_version';`); err != nil {
 			return err
 		}
 	}

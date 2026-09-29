@@ -1,6 +1,7 @@
 package server
 
 import (
+	"context"
 	"crypto/rand"
 	"encoding/base64"
 	"encoding/json"
@@ -185,7 +186,7 @@ func TestRecoveryReleaseOnAttestation(t *testing.T) {
 		t.Fatalf("audit: %s", audit)
 	}
 	// aicrew's read scope now reads its reservation as closed by recovery.
-	if got, err := g.alpha.ServiceHoldStatus(g.task.ID, "aicrew-example"); err != nil || got.State != "closed" || got.ClosedBy != "recovery_release" ||
+	if got, err := g.alpha.ServiceHoldStatus(context.Background(), g.task.ID, "aicrew-example"); err != nil || got.State != "closed" || got.ClosedBy != "recovery_release" ||
 		got.ReservationID != g.hold.Reservation.ID {
 		t.Fatalf("closure evidence: %+v %v", got, err)
 	}
@@ -229,7 +230,7 @@ func TestRecoveryRefusesDoneAndBadRequests(t *testing.T) {
 	if r := g.recover(t, "cancel", g.env, "k-cancel", g.body("CANCELLED", attestationEvidence())); r.status != http.StatusOK {
 		t.Fatalf("cancel: %d %s", r.status, r.body)
 	}
-	if got, _ := g.alpha.ServiceHoldStatus(g.task.ID, "aicrew-example"); got.ClosedBy != "recovery_cancel" {
+	if got, _ := g.alpha.ServiceHoldStatus(context.Background(), g.task.ID, "aicrew-example"); got.ClosedBy != "recovery_cancel" {
 		t.Fatalf("cancel closure: %+v", got)
 	}
 }

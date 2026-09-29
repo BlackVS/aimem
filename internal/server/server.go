@@ -54,6 +54,8 @@ type Server struct {
 	pubOnce      sync.Once
 	pub          map[string]http.HandlerFunc // publicGETs, built once
 	introspect   *introspect.Client          // aicrew introspection (teamcontext.go)
+	readOnce     sync.Once
+	readLimit    *readScopeLimiter // aicrew's read scope, per credential (reservation_readscope.go)
 }
 
 func New(reg *store.Registry, log *slog.Logger) *Server {
@@ -121,6 +123,9 @@ func (s *Server) Routes() []Route {
 		{"DELETE", "/v1/access/tokens/{id}", s.revokeAccessToken, true},
 		{"POST", strings.TrimPrefix(identityProofPattern, "POST "), s.identityProof, false},
 		{"POST", strings.TrimPrefix(identityRedeemPattern, "POST "), s.identityRedeem, false},
+		{"GET", strings.TrimPrefix(readReceiptByProofPattern, "GET "), s.readReceiptByProof, false},
+		{"GET", strings.TrimPrefix(readReceiptByKeyPattern, "GET "), s.readReceiptByKey, false},
+		{"GET", strings.TrimPrefix(readHoldPattern, "GET "), s.readHold, false},
 		{"GET", "/v1/identity/peers", s.listIdentityPeers, true},
 		{"POST", "/v1/identity/peers", s.registerIdentityPeer, true},
 		{"PUT", "/v1/identity/peers/{service_id}", s.updateIdentityPeer, true},
@@ -590,11 +595,18 @@ func (s *Server) authWrapper(token string, next http.Handler) http.Handler {
 			s.fail(w, http.StatusForbidden, fmt.Errorf("ordinary token is not authorized for this endpoint"))
 			return
 		}
-		// A peer credential reaches exactly one route shape: identity.v1
-		// redemption. The handler then requires the path peer to be its own.
-		if id.Role == "peer" && !peerRouteAllowed(r) {
-			if wire == "proof" {
+		// A peer credential reaches exactly the route shapes of its one
+		// operation: identity.v1 redemption, or the read scope's three reads
+		// (C6b). The handler then requires the path peer to be its own.
+		if id.Role == "peer" && !peerRouteAllowed(r, id.Peer) {
+			switch wire {
+			case "proof":
 				s.identityRefuse(w, "credential_scope_forbidden")
+				return
+			case "redeem", "read":
+				// The other operation's route: reservation.read never
+				// redeems, and identity.redeem never reads.
+				s.identityRefuse(w, "peer_forbidden")
 				return
 			}
 			if resv {

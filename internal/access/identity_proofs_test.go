@@ -118,7 +118,7 @@ func (e *identityEnv) registerPeer(t *testing.T, service string) {
 
 func (e *identityEnv) issueCredential(t *testing.T, service string) (PeerCredential, string) {
 	t.Helper()
-	c, secret, err := e.s.IssuePeerCredential("admin", service, e.now.Add(30*24*time.Hour))
+	c, secret, err := e.s.IssuePeerCredential("admin", service, PeerOperationRedeem, e.now.Add(30*24*time.Hour))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -193,7 +193,7 @@ func TestSchema4MigrationPreservesSchema3(t *testing.T) {
 			t.Fatal(err)
 		}
 		var version int
-		if err := s.db.QueryRow("PRAGMA user_version").Scan(&version); err != nil || version != 4 {
+		if err := s.db.QueryRow("PRAGMA user_version").Scan(&version); err != nil || version != accessSchema {
 			t.Fatalf("schema version %d: %v", version, err)
 		}
 		if got, err := s.HubID(); err != nil || got != hub {
@@ -263,15 +263,15 @@ func TestPeerCredentialLifecycle(t *testing.T) {
 	if !regexp.MustCompile(`^aimem_peer_[0-9a-f]{64}$`).MatchString(e.peerCred) {
 		t.Fatalf("peer credential format %q", e.peerCred[:len(peerCredentialPrefix)])
 	}
-	if _, _, err := e.s.IssuePeerCredential("admin", "aicrew-example", e.now.Add(367*24*time.Hour)); err == nil {
+	if _, _, err := e.s.IssuePeerCredential("admin", "aicrew-example", PeerOperationRedeem, e.now.Add(367*24*time.Hour)); err == nil {
 		t.Error("credential beyond 366 days accepted")
 	}
-	if _, _, err := e.s.IssuePeerCredential("admin", "aicrew-example", e.now); err == nil {
+	if _, _, err := e.s.IssuePeerCredential("admin", "aicrew-example", PeerOperationRedeem, e.now); err == nil {
 		t.Error("already-expired credential accepted")
 	}
 	// Rotation: a second active credential overlaps; a third is refused.
 	second, secondSecret := e.issueCredential(t, "aicrew-example")
-	if _, _, err := e.s.IssuePeerCredential("admin", "aicrew-example", e.now.Add(time.Hour)); !errors.Is(err, ErrPeerCredentialLimit) {
+	if _, _, err := e.s.IssuePeerCredential("admin", "aicrew-example", PeerOperationRedeem, e.now.Add(time.Hour)); !errors.Is(err, ErrPeerCredentialLimit) {
 		t.Fatalf("third active credential: %v", err)
 	}
 	if p, err := e.s.AuthenticatePeer(secondSecret); err != nil || p.ServiceID != "aicrew-example" || p.CredentialID != second.ID {
@@ -688,7 +688,7 @@ func TestExpiryIsJudgedWhenTheTransactionStarts(t *testing.T) {
 
 	// Peer credential: a one-hour credential replaces the default one.
 	e = newIdentityEnv(t)
-	short, secret, err := e.s.IssuePeerCredential("admin", "aicrew-example", e.clock().Add(time.Hour))
+	short, secret, err := e.s.IssuePeerCredential("admin", "aicrew-example", PeerOperationRedeem, e.clock().Add(time.Hour))
 	if err != nil {
 		t.Fatal(err)
 	}

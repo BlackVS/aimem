@@ -178,8 +178,18 @@ func (g *identityRig) registerPeer(t *testing.T, service string) {
 
 func (g *identityRig) issueCredential(t *testing.T, service string, expires time.Time) (string, string) {
 	t.Helper()
-	r := g.call(t, g.tls, "POST", "/v1/identity/peers/"+service+"/credentials", g.env, nil,
-		`{"expires_at":"`+expires.UTC().Format(time.RFC3339)+`"}`, false)
+	return g.issueCredentialFor(t, service, "", expires)
+}
+
+// issueCredentialFor issues a credential for one operation; "" leaves the
+// body without one, which issues identity.redeem.
+func (g *identityRig) issueCredentialFor(t *testing.T, service, operation string, expires time.Time) (string, string) {
+	t.Helper()
+	body := `{"expires_at":"` + expires.UTC().Format(time.RFC3339) + `"}`
+	if operation != "" {
+		body = `{"expires_at":"` + expires.UTC().Format(time.RFC3339) + `","operation":"` + operation + `"}`
+	}
+	r := g.call(t, g.tls, "POST", "/v1/identity/peers/"+service+"/credentials", g.env, nil, body, false)
 	if r.status != 201 || r.header.Get("Cache-Control") != "no-store" {
 		t.Fatalf("issue credential: %d %s", r.status, r.header.Get("Cache-Control"))
 	}
@@ -439,16 +449,40 @@ func TestPeerCredentialExpiresOverTheWire(t *testing.T) {
 }
 
 // TestPeerCredentialReachesNoOtherRoute sweeps the whole route table and
-// /mcp with a valid peer bearer over TLS: only the redemption route answers
-// with anything but the gate's refusal, and the MCP dispatcher is never hit.
+// /mcp with a valid peer bearer of each operation over TLS: only that
+// operation's routes answer with anything but the gate's refusal (the
+// redemption route for identity.redeem, the three read-scope routes for
+// reservation.read, C6b), the other operation's routes refuse it with
+// peer_forbidden, and the MCP dispatcher is never hit.
 func TestPeerCredentialReachesNoOtherRoute(t *testing.T) {
 	g := newIdentityRig(t)
 	g.registerPeer(t, "aicrew-example")
-	_, peer := g.issueCredential(t, "aicrew-example", time.Now().Add(time.Hour))
+	_, redeem := g.issueCredential(t, "aicrew-example", time.Now().Add(time.Hour))
+	_, read := g.issueCredentialFor(t, "aicrew-example", access.PeerOperationReservationRead, time.Now().Add(time.Hour))
+	for op, peer := range map[string]string{access.PeerOperationRedeem: redeem, access.PeerOperationReservationRead: read} {
+		g.sweepPeerCredential(t, op, peer)
+	}
+	// An ordinary user credential can neither redeem nor read.
+	if r := g.call(t, g.tls, "POST", "/v1/identity/peers/aicrew-example/redemptions", g.alice, v1, "{}", true); r.status != 401 || r.code() != "peer_unauthenticated" {
+		t.Errorf("user token on the redemption route: %d %s", r.status, r.body)
+	}
+	if r := g.call(t, g.tls, "GET", "/v1/identity/peers/aicrew-example/reservations/"+uuidv7.New(), g.alice, readV1, "", true); r.status != 401 || r.code() != "peer_unauthenticated" {
+		t.Errorf("user token on a read-scope route: %d %s", r.status, r.body)
+	}
+	g.assertNoSecretLeak(t)
+}
+
+// readV1 is the read scope's version header.
+var readV1 = map[string]string{"X-Aimem-Reservation-Version": "1"}
+
+func (g *identityRig) sweepPeerCredential(t *testing.T, op, peer string) {
+	t.Helper()
 	fill := strings.NewReplacer("{p}", "alpha", "{id}", uuidv7.New(), "{c}", uuidv7.New(), "{s}", "s1", "{key}", "about",
 		"{name}", "RUNBOOK", "{instance}", "x", "{kind}", "user", "{g}", "g", "{u}", "u", "{id...}", "x", "{$}", "",
 		"{e}", uuidv7.New(), "{team}", "t", "{attempt}", "a", "{task}", uuidv7.New(), "{c...}", "x",
-		"{service_id}", "aicrew-example", "{credential_id}", uuidv7.New())
+		"{service_id}", "aicrew-example", "{credential_id}", uuidv7.New(), "{task_id}", uuidv7.New(), "{operation}", "update",
+		"{proof_digest}", "p1_"+strings.Repeat("A", 43), "{request_key_digest}", "k1_"+strings.Repeat("A", 43))
+	readRoutes := map[string]bool{readReceiptByProofPattern: true, readReceiptByKeyPattern: true, readHoldPattern: true}
 	public := g.s.publicGETs()
 	for _, rt := range g.s.Routes() {
 		path := fill.Replace(rt.Pattern)
@@ -458,10 +492,27 @@ func TestPeerCredentialReachesNoOtherRoute(t *testing.T) {
 		if public[path] != nil {
 			continue
 		}
-		r := g.call(t, g.tls, rt.Method, path, peer, v1, "{}", true)
-		if rt.Method == "POST" && rt.Pattern == "/v1/identity/peers/{service_id}/redemptions" {
+		read := readRoutes[rt.Method+" "+rt.Pattern]
+		headers := v1
+		if read {
+			headers = readV1
+		}
+		r := g.call(t, g.tls, rt.Method, path, peer, headers, "{}", true)
+		switch {
+		case rt.Method == "POST" && rt.Pattern == "/v1/identity/peers/{service_id}/redemptions" && op == access.PeerOperationRedeem:
 			if r.status == 401 || (r.status == 403 && r.code() != "proof_invalid") {
 				t.Errorf("redemption route refused its own peer: %d %s", r.status, r.body)
+			}
+			continue
+		case read && op == access.PeerOperationReservationRead:
+			if r.status != 200 || !strings.Contains(string(r.body), `"state":"none"`) {
+				t.Errorf("%s %s refused its own read credential: %d %s", rt.Method, rt.Pattern, r.status, r.body)
+			}
+			continue
+		case read, rt.Method == "POST" && rt.Pattern == "/v1/identity/peers/{service_id}/redemptions":
+			// The other operation's route (D6-3a).
+			if r.status != 403 || r.code() != "peer_forbidden" {
+				t.Errorf("%s %s with a %s credential: %d %s", rt.Method, rt.Pattern, op, r.status, r.body)
 			}
 			continue
 		}
@@ -474,25 +525,20 @@ func TestPeerCredentialReachesNoOtherRoute(t *testing.T) {
 			continue
 		}
 		if r.status != 403 {
-			t.Errorf("%s %s reachable with a peer credential: %d %s", rt.Method, rt.Pattern, r.status, r.body)
+			t.Errorf("%s %s reachable with a %s peer credential: %d %s", rt.Method, rt.Pattern, op, r.status, r.body)
 		}
 	}
 	for _, method := range []string{"POST", "GET"} {
 		if r := g.call(t, g.tls, method, "/mcp", peer, nil, `{"jsonrpc":"2.0","id":1,"method":"tools/list"}`, true); r.status != 403 {
-			t.Errorf("%s /mcp with a peer credential: %d", method, r.status)
+			t.Errorf("%s /mcp with a %s peer credential: %d", method, op, r.status)
 		}
 	}
 	g.mcpMu.Lock()
 	hits := g.mcpHits
 	g.mcpMu.Unlock()
 	if hits != 0 {
-		t.Fatalf("a peer credential reached the MCP dispatcher %d times", hits)
+		t.Fatalf("a %s peer credential reached the MCP dispatcher %d times", op, hits)
 	}
-	// An ordinary user credential cannot redeem.
-	if r := g.call(t, g.tls, "POST", "/v1/identity/peers/aicrew-example/redemptions", g.alice, v1, "{}", true); r.status != 401 || r.code() != "peer_unauthenticated" {
-		t.Errorf("user token on the redemption route: %d %s", r.status, r.body)
-	}
-	g.assertNoSecretLeak(t)
 }
 
 // assertNoSecretLeak requires that no bearer, peer secret or receipt appears
