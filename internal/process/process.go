@@ -487,8 +487,10 @@ func classify(out []byte, err error) (Status, error) {
 	line := firstLine(out, err)
 	l := strings.ToLower(line)
 	switch {
+	// 403 counts only as git's HTTP status: the line also names the
+	// repository path or URL, whose digits must never read as a denial.
 	case strings.Contains(l, "authentication failed"), strings.Contains(l, "permission denied"),
-		strings.Contains(l, "could not read username"), strings.Contains(l, "403"),
+		strings.Contains(l, "could not read username"), strings.Contains(l, "returned error: 403"),
 		strings.Contains(l, "repository not found"), strings.Contains(l, "terminal prompts disabled"):
 		return StatusDenied, fmt.Errorf("git access denied: %s", line)
 	case strings.Contains(l, "couldn't find remote ref"), strings.Contains(l, "not our ref"),

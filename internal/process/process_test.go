@@ -141,6 +141,13 @@ func TestFetchCachesAndFallsBackToRef(t *testing.T) {
 	if res3 := fetchNoValidate(context.Background(), root, other); res3.Status != StatusUnavailable || res3.Set != nil {
 		t.Fatalf("missing commit: %s %v", res3.Status, res3.Err)
 	}
+	// A repository whose path holds "403" is unavailable when it is gone,
+	// never denied: the classifier reads git's status, not the path.
+	gone := other
+	gone.Repo = "file://" + filepath.ToSlash(filepath.Join(t.TempDir(), "repo-403", "gone"))
+	if res4 := fetchNoValidate(context.Background(), root, gone); res4.Status != StatusUnavailable || res4.Set != nil {
+		t.Fatalf("a missing repository with 403 in its path: %s %v", res4.Status, res4.Err)
+	}
 	// A leftover temporary directory is never a cache entry.
 	tmp := filepath.Join(filepath.Dir(CacheDir(root, other)), ".tmp-"+other.Commit[:12]+"-x")
 	os.MkdirAll(tmp, 0o700)
@@ -164,6 +171,11 @@ func TestClassify(t *testing.T) {
 		"fatal: couldn't find remote ref deadbeef":                                  StatusUnavailable,
 		"fatal: unable to access 'https://x/': Could not resolve host: x":           StatusUnavailable,
 		"something else entirely":                                                   StatusUnavailable,
+		// 403 is a denial only as the HTTP status, never as digits of the
+		// repository's path or URL (task 01a0ee8a).
+		"fatal: unable to access 'https://x/': The requested URL returned error: 403":                               StatusDenied,
+		"fatal: '/tmp/TestFetchCachesAndFallsBackToRef4036054531/001' does not appear to be a git repository":       StatusUnavailable,
+		"fatal: unable to access 'https://git.example.com:4403/r403.git/': Could not resolve host: git.example.com": StatusUnavailable,
 	}
 	for line, want := range cases {
 		if st, err := classify([]byte(line), os.ErrNotExist); st != want || err == nil {
