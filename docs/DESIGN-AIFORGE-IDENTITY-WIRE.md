@@ -133,7 +133,7 @@ The owner approved splitting E3 and made four implementation decisions (E3 task 
 
 **Peer credential lifecycle.**
 - **Format.** A peer credential is `aimem_peer_` followed by 256 random bits in hex. It is returned once, when issued, and stored only as a SHA-256 digest.
-- **Scope.** It is bound to one registered peer and to the `identity.redeem` operation family.
+- **Scope.** It is bound to one registered peer and to the `identity.redeem` operation family. Since task C6b, a peer credential permits exactly one operation. The same peer can also hold `reservation.read` credentials for aicrew's read scope ([coordination contract](DESIGN-AIFORGE-COORDINATION-WIRE.md) §2), which cannot redeem.
 - **Limits.** It lives at most 366 days. A peer has at most two active credentials, so a rotation can overlap.
 - **Lost issuance response.** The bearer cannot be recovered. The admin lists the peer's credential metadata, revokes the credential that was never received, and issues a new one.
 - **Expiry.** An expired credential is refused as if unknown and no longer counts toward the limit of two.

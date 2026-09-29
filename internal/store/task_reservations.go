@@ -414,8 +414,21 @@ func reservationMutationTx(d *DB, tx *sql.Tx, actor TaskActor, binding Reservati
 	if err != nil {
 		return TaskReservationOutcome{}, err
 	}
-	if _, err := tx.Exec(`INSERT INTO task_reservation_requests(principal,operation,task_id,key,digest,result) VALUES(?,?,?,?,?,?)`,
-		principal, string(op), in.TaskID, key, digest, string(result)); err != nil {
+	// The read scope's columns (C6b): the reservation the transition acted
+	// on (a claim's new one), and for a transition made on a verified fact,
+	// the answering service, which is the caller's team service, and the
+	// proof's digest.
+	actedOn := in.ID
+	if op == ReservationClaim {
+		actedOn = out.Reservation.ID
+	}
+	var serviceID, proofDigest string
+	if out.Coordination != nil {
+		serviceID, proofDigest = binding.ServiceID, out.Coordination.ProofDigest
+	}
+	if _, err := tx.Exec(`INSERT INTO task_reservation_requests(principal,operation,task_id,key,digest,result,service_id,proof_digest,reservation_id,committed_at)
+		VALUES(?,?,?,?,?,?,?,?,?,?)`,
+		principal, string(op), in.TaskID, key, digest, string(result), serviceID, proofDigest, actedOn, nowUTC()); err != nil {
 		return TaskReservationOutcome{}, err
 	}
 	if err := authorize(); err != nil {

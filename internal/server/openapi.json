@@ -1068,7 +1068,7 @@
     "/v1/identity/peers/{service_id}/redemptions": {
       "post": {
         "summary": "identity.v1: the registered peer redeems a receipt for the verified hub/user/token",
-        "description": "Only an aimem_peer_ credential for the path's service may call this; a peer credential reaches no other route. Idempotency-Key is k1_ plus the unpadded base64url SHA-256 of aicrew's request key. An identical retry returns the recorded result after rechecking the token. Requires TLS terminated by this hub: plain HTTP, a TLS-terminating proxy and the unix socket are refused with tls_required, and forwarded headers never count. Not exposed as an MCP tool.",
+        "description": "Only an aimem_peer_ credential issued for identity.redeem, for the path's service, may call this; that credential reaches no other route, and a reservation.read credential is refused here with peer_forbidden. Idempotency-Key is k1_ plus the unpadded base64url SHA-256 of aicrew's request key. An identical retry returns the recorded result after rechecking the token. Requires TLS terminated by this hub: plain HTTP, a TLS-terminating proxy and the unix socket are refused with tls_required, and forwarded headers never count. Not exposed as an MCP tool.",
         "x-role": "writer",
         "x-identity-auth": "peer",
         "x-requires-tls": true,
@@ -1148,6 +1148,385 @@
           },
           "503": {
             "description": "Refusal envelope {code, message, retryable, next_action, correlation_id}; never contains a secret"
+          }
+        }
+      }
+    },
+    "/v1/identity/peers/{service_id}/reservation-receipts/{proof_digest}": {
+      "get": {
+        "summary": "Read scope: the receipt of the transition committed under one of this service's proofs",
+        "description": "proof_digest is p1_ plus the unpadded base64url SHA-256 of the proof. Aicrew's read scope (coordination wire section 2). Only an aimem_peer_ credential issued for reservation.read, for the path's own service, may call this; the bearer gate confines that credential to the three read-scope routes and refuses it everywhere else, /mcp included, and a redemption credential is refused here with peer_forbidden. Answers only about records under the service's own proofs: every out-of-scope record reads none, the same as a missing one. No answer carries task content, another holder, a request key or a proof. At most 60 reads per credential per minute (rate_limited). Requires TLS terminated by this hub: plain HTTP, a TLS-terminating proxy and the unix socket are refused with tls_required, and forwarded headers never count. Not exposed as an MCP tool.",
+        "x-role": "writer",
+        "x-identity-auth": "peer",
+        "x-peer-operation": "reservation.read",
+        "x-requires-tls": true,
+        "parameters": [
+          {
+            "name": "service_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "proof_digest",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^p1_[A-Za-z0-9_-]{43}$"
+            }
+          },
+          {
+            "name": "X-Aimem-Reservation-Version",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "const": "1"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "committed or none",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "state"
+                  ],
+                  "additionalProperties": false,
+                  "properties": {
+                    "state": {
+                      "enum": [
+                        "committed",
+                        "none"
+                      ]
+                    },
+                    "receipt": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": [
+                        "id",
+                        "operation",
+                        "task_id",
+                        "request_key_digest",
+                        "reservation_id",
+                        "fence",
+                        "task_revision",
+                        "member_user_id",
+                        "verified_mode",
+                        "committed_at"
+                      ],
+                      "properties": {
+                        "id": {
+                          "type": "string"
+                        },
+                        "operation": {
+                          "type": "string"
+                        },
+                        "task_id": {
+                          "type": "string"
+                        },
+                        "request_key_digest": {
+                          "type": "string"
+                        },
+                        "reservation_id": {
+                          "type": "string"
+                        },
+                        "fence": {
+                          "type": "string"
+                        },
+                        "task_revision": {
+                          "type": "integer"
+                        },
+                        "member_user_id": {
+                          "type": "string"
+                        },
+                        "verified_mode": {
+                          "const": "team"
+                        },
+                        "committed_at": {
+                          "type": "string",
+                          "format": "date-time"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Refusal envelope {code, message, retryable, next_action, correlation_id}; never contains a secret, a proof or a request key (unsupported_version)"
+          },
+          "401": {
+            "description": "Refusal envelope {code, message, retryable, next_action, correlation_id}; never contains a secret, a proof or a request key (peer_unauthenticated)"
+          },
+          "403": {
+            "description": "Refusal envelope {code, message, retryable, next_action, correlation_id}; never contains a secret, a proof or a request key (peer_forbidden or tls_required)"
+          },
+          "429": {
+            "description": "Refusal envelope {code, message, retryable, next_action, correlation_id}; never contains a secret, a proof or a request key (rate_limited)"
+          },
+          "503": {
+            "description": "Refusal envelope {code, message, retryable, next_action, correlation_id}; never contains a secret, a proof or a request key (request_in_progress)"
+          }
+        }
+      }
+    },
+    "/v1/identity/peers/{service_id}/reservations/{task_id}/receipts/{operation}/{request_key_digest}": {
+      "get": {
+        "summary": "Read scope: a member transition's receipt by key, on a reservation this service's proof established",
+        "description": "request_key_digest is k1_ plus the unpadded base64url SHA-256 of the request key. This is how aicrew confirms a holder's update, which carries no proof. Aicrew's read scope (coordination wire section 2). Only an aimem_peer_ credential issued for reservation.read, for the path's own service, may call this; the bearer gate confines that credential to the three read-scope routes and refuses it everywhere else, /mcp included, and a redemption credential is refused here with peer_forbidden. Answers only about records under the service's own proofs: every out-of-scope record reads none, the same as a missing one. No answer carries task content, another holder, a request key or a proof. At most 60 reads per credential per minute (rate_limited). Requires TLS terminated by this hub: plain HTTP, a TLS-terminating proxy and the unix socket are refused with tls_required, and forwarded headers never count. Not exposed as an MCP tool.",
+        "x-role": "writer",
+        "x-identity-auth": "peer",
+        "x-peer-operation": "reservation.read",
+        "x-requires-tls": true,
+        "parameters": [
+          {
+            "name": "service_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "task_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "operation",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "enum": [
+                "claim",
+                "transfer",
+                "update",
+                "release",
+                "finalize"
+              ]
+            }
+          },
+          {
+            "name": "request_key_digest",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^k1_[A-Za-z0-9_-]{43}$"
+            }
+          },
+          {
+            "name": "X-Aimem-Reservation-Version",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "const": "1"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "committed on a reservation this service's proof established, or none",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "state"
+                  ],
+                  "additionalProperties": false,
+                  "properties": {
+                    "state": {
+                      "enum": [
+                        "committed",
+                        "none"
+                      ]
+                    },
+                    "receipt": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": [
+                        "id",
+                        "operation",
+                        "task_id",
+                        "request_key_digest",
+                        "reservation_id",
+                        "fence",
+                        "task_revision",
+                        "member_user_id",
+                        "verified_mode",
+                        "committed_at"
+                      ],
+                      "properties": {
+                        "id": {
+                          "type": "string"
+                        },
+                        "operation": {
+                          "type": "string"
+                        },
+                        "task_id": {
+                          "type": "string"
+                        },
+                        "request_key_digest": {
+                          "type": "string"
+                        },
+                        "reservation_id": {
+                          "type": "string"
+                        },
+                        "fence": {
+                          "type": "string"
+                        },
+                        "task_revision": {
+                          "type": "integer"
+                        },
+                        "member_user_id": {
+                          "type": "string"
+                        },
+                        "verified_mode": {
+                          "const": "team"
+                        },
+                        "committed_at": {
+                          "type": "string",
+                          "format": "date-time"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Refusal envelope {code, message, retryable, next_action, correlation_id}; never contains a secret, a proof or a request key (unsupported_version)"
+          },
+          "401": {
+            "description": "Refusal envelope {code, message, retryable, next_action, correlation_id}; never contains a secret, a proof or a request key (peer_unauthenticated)"
+          },
+          "403": {
+            "description": "Refusal envelope {code, message, retryable, next_action, correlation_id}; never contains a secret, a proof or a request key (peer_forbidden or tls_required)"
+          },
+          "429": {
+            "description": "Refusal envelope {code, message, retryable, next_action, correlation_id}; never contains a secret, a proof or a request key (rate_limited)"
+          },
+          "503": {
+            "description": "Refusal envelope {code, message, retryable, next_action, correlation_id}; never contains a secret, a proof or a request key (request_in_progress)"
+          }
+        }
+      }
+    },
+    "/v1/identity/peers/{service_id}/reservations/{task_id}": {
+      "get": {
+        "summary": "Read scope: this service's hold on a task (held, closed, or none)",
+        "description": "held when the current hold was set under this service's proof; closed when this service's most recent reservation on the task is no longer active (closure evidence), whatever holds the task now; otherwise none. Aicrew's read scope (coordination wire section 2). Only an aimem_peer_ credential issued for reservation.read, for the path's own service, may call this; the bearer gate confines that credential to the three read-scope routes and refuses it everywhere else, /mcp included, and a redemption credential is refused here with peer_forbidden. Answers only about records under the service's own proofs: every out-of-scope record reads none, the same as a missing one. No answer carries task content, another holder, a request key or a proof. At most 60 reads per credential per minute (rate_limited). Requires TLS terminated by this hub: plain HTTP, a TLS-terminating proxy and the unix socket are refused with tls_required, and forwarded headers never count. Not exposed as an MCP tool.",
+        "x-role": "writer",
+        "x-identity-auth": "peer",
+        "x-peer-operation": "reservation.read",
+        "x-requires-tls": true,
+        "parameters": [
+          {
+            "name": "service_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "task_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "X-Aimem-Reservation-Version",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "const": "1"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "held under own proof, closed (own most recent reservation no longer active), or none",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "state"
+                  ],
+                  "additionalProperties": false,
+                  "properties": {
+                    "state": {
+                      "enum": [
+                        "held",
+                        "closed",
+                        "none"
+                      ]
+                    },
+                    "reservation_id": {
+                      "type": "string"
+                    },
+                    "fence": {
+                      "type": "string"
+                    },
+                    "holder_mode": {
+                      "const": "external"
+                    },
+                    "own_work_ref": {
+                      "type": "string"
+                    },
+                    "task_revision": {
+                      "type": "integer"
+                    },
+                    "closing_fence": {
+                      "type": "string",
+                      "pattern": "^[1-9][0-9]*$"
+                    },
+                    "closed_by": {
+                      "enum": [
+                        "holder_release",
+                        "holder_finalize",
+                        "recovery_release",
+                        "recovery_cancel"
+                      ]
+                    },
+                    "closed_at": {
+                      "type": "string",
+                      "format": "date-time"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Refusal envelope {code, message, retryable, next_action, correlation_id}; never contains a secret, a proof or a request key (unsupported_version)"
+          },
+          "401": {
+            "description": "Refusal envelope {code, message, retryable, next_action, correlation_id}; never contains a secret, a proof or a request key (peer_unauthenticated)"
+          },
+          "403": {
+            "description": "Refusal envelope {code, message, retryable, next_action, correlation_id}; never contains a secret, a proof or a request key (peer_forbidden or tls_required)"
+          },
+          "429": {
+            "description": "Refusal envelope {code, message, retryable, next_action, correlation_id}; never contains a secret, a proof or a request key (rate_limited)"
+          },
+          "503": {
+            "description": "Refusal envelope {code, message, retryable, next_action, correlation_id}; never contains a secret, a proof or a request key (request_in_progress)"
           }
         }
       }
@@ -1295,7 +1674,7 @@
         ],
         "responses": {
           "200": {
-            "description": "{credentials: [{id, service_id, created_at, expires_at, revoked}]}"
+            "description": "{credentials: [{id, service_id, operation, created_at, expires_at, revoked}]}"
           },
           "403": {
             "description": "Refusal envelope {code, message, retryable, next_action, correlation_id}; never contains a secret"
@@ -1304,7 +1683,7 @@
       },
       "post": {
         "summary": "Issue a peer credential; the bearer is shown once",
-        "description": "aimem_peer_ plus 256 random bits, stored as a digest, at most 366 days, at most two active per peer. The response is no-store and is never shown again. Requires TLS terminated by this hub: plain HTTP, a TLS-terminating proxy and the unix socket are refused with tls_required, and forwarded headers never count. Not exposed as an MCP tool.",
+        "description": "aimem_peer_ plus 256 random bits for one operation (identity.redeem by default, or reservation.read for aicrew's read scope), stored as a digest, at most 366 days, at most two active per peer and operation, audited. The response is no-store and is never shown again. Requires TLS terminated by this hub: plain HTTP, a TLS-terminating proxy and the unix socket are refused with tls_required, and forwarded headers never count. Not exposed as an MCP tool.",
         "x-role": "admin",
         "x-requires-tls": true,
         "parameters": [
@@ -1331,6 +1710,15 @@
                   "expires_at": {
                     "type": "string",
                     "format": "date-time"
+                  },
+                  "operation": {
+                    "type": "string",
+                    "enum": [
+                      "identity.redeem",
+                      "reservation.read"
+                    ],
+                    "default": "identity.redeem",
+                    "description": "The one operation the credential permits: identity.v1 redemption, or aicrew's read scope. A credential never permits both."
                   }
                 }
               }

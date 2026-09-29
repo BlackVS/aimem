@@ -1,6 +1,6 @@
 # AIForge coordination facts and reservation read scope, version 1
 
-Status: reviewed contract (task C5w, 01a0e39c-8786, merged in #136), amended before any implementation by task C5c-w (01a0e62c-9d60) with the `closed` hold-status answer ([Closure evidence](#closure-evidence)), and by task C5-w2 (01a0e6a6-bccc) with the process pin ([Process pin](#process-pin)). **Nothing here is implemented.** C5b implements aimem's use of `coordination.v1`, C6 serves the read scope and the reservation CLI, and aicrew's task b0 serves `coordination.v1`. The fixtures live in `docs/fixtures/coordination-v1/`. The live `internal/server/openapi.json` describes only served routes.
+Status: reviewed contract (task C5w, 01a0e39c-8786, merged in #136), amended before any implementation by task C5c-w (01a0e62c-9d60) with the `closed` hold-status answer ([Closure evidence](#closure-evidence)), and by task C5-w2 (01a0e6a6-bccc) with the process pin ([Process pin](#process-pin)). **Implementation status.** aimem uses `coordination.v1` since task C5b. It serves the reservation CLI (§4) since task C6c and the read scope (§2) since task C6b. Aicrew's task b0 serves `coordination.v1`. The fixtures live in `docs/fixtures/coordination-v1/`. The live `internal/server/openapi.json` describes only served routes.
 
 This contract completes the [reservation wire contract](DESIGN-AIFORGE-RESERVATION-WIRE.md) (C4) for team transitions. It reuses the shapes and rules of [identity.v1](DESIGN-AIFORGE-IDENTITY-WIRE.md) and composes with aicrew's [crew contract](https://github.com/BlackVS/aicrew/blob/2063838/docs/CREW-CONTRACT.md) ("Attempts and the aimem reservation"). If a parent contract disagrees with this document, the parent wins. Updated 2026-09-28.
 
@@ -170,6 +170,8 @@ The answer is used once. aimem takes it before the ledger transaction (C5 decisi
 A retry whose first attempt did **not** commit is not a replay: it is a new attempt, and it verifies the fact again.
 
 ## 2. Aicrew's read scope (aicrew → aimem)
+
+Served since task C6b; see the [ledger notes](AIFORGE-RESERVATION-LEDGER.md#c6b-aicrews-read-scope).
 
 ### Credential
 

@@ -40,8 +40,10 @@ const identityUsage = `usage: aimem identity peer list                          
        aimem identity peer disable SERVICE                   [hub flags]
        aimem identity peer check SERVICE                     [hub flags]
        aimem identity cred list SERVICE                      [hub flags]
-       aimem identity cred issue SERVICE --expires 90d|RFC3339 --secret-file PATH  [hub flags]
-       aimem identity cred rotate SERVICE --expires 90d|RFC3339 --secret-file PATH [hub flags]
+       aimem identity cred issue SERVICE --expires 90d|RFC3339 --secret-file PATH
+                                 [--operation identity.redeem|reservation.read] [hub flags]
+       aimem identity cred rotate SERVICE --expires 90d|RFC3339 --secret-file PATH
+                                 [--operation identity.redeem|reservation.read] [hub flags]
        aimem identity cred revoke SERVICE CREDENTIAL_ID      [hub flags]
        aimem identity team list SERVICE                      [hub flags]
        aimem identity team create SERVICE TEAM               [hub flags]
@@ -86,11 +88,17 @@ cred issue and cred rotate write the new bearer once to --secret-file, a new
 file only you can read, created before anything is issued; it is never
 printed. Deliver it to aicrew's protected storage, then delete the file.
 cred rotate issues the second credential only; after aicrew has switched to
-it, revoke the old one explicitly with cred revoke.`
+it, revoke the old one explicitly with cred revoke.
+
+A credential permits exactly one --operation: identity.redeem (the default),
+which redeems identity proofs, or reservation.read, aicrew's read-only
+reservation scope. At most two are active per peer and operation, and
+cred rotate counts only credentials of the named operation.`
 
 type identityCred struct {
 	ID        string    `json:"id"`
 	ServiceID string    `json:"service_id"`
+	Operation string    `json:"operation"`
 	CreatedAt time.Time `json:"created_at"`
 	ExpiresAt time.Time `json:"expires_at"`
 	Revoked   bool      `json:"revoked"`
@@ -221,6 +229,7 @@ func runIdentity(args []string, out io.Writer) error {
 	trustPin := fs.String("peer-trust-pin", "", "")
 	expires := fs.String("expires", "", "")
 	secretFile := fs.String("secret-file", "", "")
+	operation := fs.String("operation", "identity.redeem", "")
 	instance := fs.String("instance", "", "")
 	if err := fs.Parse(flags); err != nil {
 		return fmt.Errorf("%v\n\n%s", err, identityUsage)
@@ -248,6 +257,9 @@ func runIdentity(args []string, out io.Writer) error {
 		if *secretFile == "" || *expires == "" {
 			return fmt.Errorf("%s needs --expires and --secret-file", "cred "+verb)
 		}
+		if *operation != "identity.redeem" && *operation != "reservation.read" {
+			return fmt.Errorf("--operation must be identity.redeem or reservation.read")
+		}
 		var err error
 		if expiry, err = parseIdentityExpiry(*expires, time.Now()); err != nil {
 			return err
@@ -269,9 +281,9 @@ func runIdentity(args []string, out io.Writer) error {
 	case "cred list":
 		return c.credList(pos[0], out)
 	case "cred issue":
-		return c.credIssue(pos[0], expiry, *secretFile, false, out)
+		return c.credIssue(pos[0], *operation, expiry, *secretFile, false, out)
 	case "cred rotate":
-		return c.credIssue(pos[0], expiry, *secretFile, true, out)
+		return c.credIssue(pos[0], *operation, expiry, *secretFile, true, out)
 	case "cred revoke":
 		if err := c.credRevoke(pos[0], pos[1]); err != nil {
 			return err
@@ -705,8 +717,8 @@ func (c *identityClient) creds(service string) ([]identityCred, error) {
 
 func printCreds(out io.Writer, creds []identityCred, now time.Time) {
 	for _, cr := range creds {
-		fmt.Fprintf(out, "  %s  %-7s  created %s  expires %s\n", cr.ID, cr.state(now),
-			cr.CreatedAt.Format(time.RFC3339), cr.ExpiresAt.Format(time.RFC3339))
+		fmt.Fprintf(out, "  %s  %-7s  created %s  expires %s  %s\n", cr.ID, cr.state(now),
+			cr.CreatedAt.Format(time.RFC3339), cr.ExpiresAt.Format(time.RFC3339), cr.Operation)
 	}
 }
 
@@ -750,10 +762,10 @@ func reserveSecretFile(path string) (*os.File, error) {
 	return f, nil
 }
 
-// credIssue issues one credential and delivers its bearer only to the
-// reserved secret file. With rotate it first requires exactly one active
-// credential and never revokes anything.
-func (c *identityClient) credIssue(service string, expiry time.Time, secretFile string, rotate bool, out io.Writer) error {
+// credIssue issues one credential for one operation and delivers its bearer
+// only to the reserved secret file. With rotate it first requires exactly
+// one active credential of that operation and never revokes anything.
+func (c *identityClient) credIssue(service, operation string, expiry time.Time, secretFile string, rotate bool, out io.Writer) error {
 	f, err := reserveSecretFile(secretFile)
 	if err != nil {
 		return err
@@ -777,21 +789,21 @@ func (c *identityClient) credIssue(service string, expiry time.Time, secretFile 
 	now := time.Now()
 	for _, cr := range before {
 		known[cr.ID] = true
-		if cr.state(now) == "active" {
+		if cr.state(now) == "active" && cr.Operation == operation {
 			old = append(old, cr)
 		}
 	}
 	if rotate {
 		switch len(old) {
 		case 0:
-			return fmt.Errorf("%s has no active credential to rotate; use cred issue; nothing was issued", service)
+			return fmt.Errorf("%s has no active credential for %s to rotate; use cred issue; nothing was issued", service, operation)
 		case 1:
 		default:
-			return fmt.Errorf("%s already has two active credentials; after aicrew uses the new one, revoke the old one with: %s; nothing was issued",
-				service, c.command("cred", "revoke", service, old[0].ID))
+			return fmt.Errorf("%s already has two active credentials for %s; after aicrew uses the new one, revoke the old one with: %s; nothing was issued",
+				service, operation, c.command("cred", "revoke", service, old[0].ID))
 		}
 	}
-	status, data, err := c.do("POST", peerPath(service)+"/credentials", map[string]any{"expires_at": expiry.UTC().Format(time.RFC3339)})
+	status, data, err := c.do("POST", peerPath(service)+"/credentials", map[string]any{"expires_at": expiry.UTC().Format(time.RFC3339), "operation": operation})
 	switch {
 	case err != nil || status >= 500:
 		cause := err
@@ -817,7 +829,7 @@ func (c *identityClient) credIssue(service string, expiry time.Time, secretFile 
 		return c.undeliverable(service, resp.Credential.ID, secretFile, err)
 	}
 	delivered = true
-	fmt.Fprintf(out, "issued credential %s for %s, expiring %s\n", resp.Credential.ID, service, resp.Credential.ExpiresAt.Format(time.RFC3339))
+	fmt.Fprintf(out, "issued credential %s (%s) for %s, expiring %s\n", resp.Credential.ID, resp.Credential.Operation, service, resp.Credential.ExpiresAt.Format(time.RFC3339))
 	fmt.Fprintf(out, "the bearer was written once to %s (readable only by you); move it into aicrew's protected storage, then delete the file\n", secretFile)
 	if rotate {
 		fmt.Fprintf(out, "next: once aicrew uses the new credential, revoke the old one explicitly:\n  %s\n", c.command("cred", "revoke", service, old[0].ID))
@@ -862,7 +874,7 @@ func (c *identityClient) unknownOutcome(service string, known map[string]bool, c
 	}
 	fmt.Fprintf(out, "unrevoked credentials of %s that did not exist before the request:\n", service)
 	for _, cr := range candidates {
-		fmt.Fprintf(out, "  %s  created %s  expires %s (hub time)\n", cr.ID, cr.CreatedAt.Format(time.RFC3339), cr.ExpiresAt.Format(time.RFC3339))
+		fmt.Fprintf(out, "  %s  created %s  expires %s (hub time)  %s\n", cr.ID, cr.CreatedAt.Format(time.RFC3339), cr.ExpiresAt.Format(time.RFC3339), cr.Operation)
 	}
 	fmt.Fprintln(out, "if no other operator issued a credential in this window, these bearers were never delivered: revoke each with")
 	for _, cr := range candidates {

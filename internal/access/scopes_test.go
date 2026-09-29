@@ -151,7 +151,7 @@ PRAGMA user_version=1;`); err != nil {
 			t.Fatal(err)
 		}
 		var version int
-		if err := s.db.QueryRow("PRAGMA user_version").Scan(&version); err != nil || version != 4 {
+		if err := s.db.QueryRow("PRAGMA user_version").Scan(&version); err != nil || version != accessSchema {
 			t.Fatalf("version %d: %v", version, err)
 		}
 		for _, tc := range []struct {

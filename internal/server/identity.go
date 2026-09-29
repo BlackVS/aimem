@@ -56,7 +56,7 @@ var identityRefusals = map[string]struct {
 	"proof_invalid":              {403, false, "The proof receipt is not valid for this redemption.", "Obtain a new receipt, or begin a new challenge."},
 	"credential_inactive":        {403, false, "The proven credential is no longer active.", "Recover the individual credential; do not link."},
 	"idempotency_conflict":       {409, false, "This request key was used with different input.", "Investigate the changed input; never reuse the key for other input."},
-	"rate_limited":               {429, true, "Too many proof receipts were requested.", "Wait, then request again."},
+	"rate_limited":               {429, true, "Too many requests were made with this credential.", "Wait, then request again."},
 	"request_in_progress":        {503, true, "An identical request is still being processed.", "Retry later with the same key; nothing was applied."},
 	"identity_unavailable":       {503, true, "Identity storage is unavailable.", "Retry later with the same key; nothing was applied."},
 	"team_operation_unsupported": {403, false, "This operation is not available in team mode.", "Use the aicrew flow for this work; team mode does not serve this operation."},
@@ -91,13 +91,14 @@ func identityTLS(r *http.Request) bool {
 	return r.TLS != nil && r.TLS.HandshakeComplete
 }
 
-// identityWireMux holds exactly the two wire patterns, so the gate classifies
-// a request by the same matching the route mux dispatches with, including its
-// segment-by-segment unescaping: every spelling that reaches an identity wire
-// handler (for example /v1/identity/%70roofs) is classified as that route.
+// identityWireMux holds exactly the peer-facing wire patterns, so the gate
+// classifies a request by the same matching the route mux dispatches with,
+// including its segment-by-segment unescaping: every spelling that reaches a
+// wire handler (for example /v1/identity/%70roofs) is classified as that
+// route.
 var identityWireMux = func() *http.ServeMux {
 	m := http.NewServeMux()
-	for _, p := range []string{identityProofPattern, identityRedeemPattern} {
+	for _, p := range []string{identityProofPattern, identityRedeemPattern, readReceiptByProofPattern, readReceiptByKeyPattern, readHoldPattern} {
 		m.HandleFunc(p, func(http.ResponseWriter, *http.Request) {})
 	}
 	return m
@@ -106,10 +107,15 @@ var identityWireMux = func() *http.ServeMux {
 const (
 	identityProofPattern  = "POST /v1/identity/proofs"
 	identityRedeemPattern = "POST /v1/identity/peers/{service_id}/redemptions"
+	// Aicrew's read scope (task C6b; coordination wire §2).
+	readReceiptByProofPattern = "GET /v1/identity/peers/{service_id}/reservation-receipts/{proof_digest}"
+	readReceiptByKeyPattern   = "GET /v1/identity/peers/{service_id}/reservations/{task_id}/receipts/{operation}/{request_key_digest}"
+	readHoldPattern           = "GET /v1/identity/peers/{service_id}/reservations/{task_id}"
 )
 
-// identityWireRoute names the identity.v1 wire route a request targets:
-// "proof", "redeem" or "" for any other request.
+// identityWireRoute names the peer-facing wire route a request targets:
+// "proof", "redeem", "read" (the three read-scope routes) or "" for any
+// other request.
 func identityWireRoute(r *http.Request) string {
 	if !canonicalPath(r) {
 		return ""
@@ -119,6 +125,8 @@ func identityWireRoute(r *http.Request) string {
 		return "proof"
 	case identityRedeemPattern:
 		return "redeem"
+	case readReceiptByProofPattern, readReceiptByKeyPattern, readHoldPattern:
+		return "read"
 	}
 	return ""
 }
@@ -129,11 +137,18 @@ var gateAuthHook func(*http.Request)
 
 // identityUnauthenticated is the envelope code for a wire request whose bearer
 // is missing, unknown, or not the kind of credential the route requires.
-var identityUnauthenticated = map[string]string{"proof": "invalid_credential", "redeem": "peer_unauthenticated"}
+var identityUnauthenticated = map[string]string{"proof": "invalid_credential", "redeem": "peer_unauthenticated", "read": "peer_unauthenticated"}
 
-// peerRouteAllowed is the whole surface of a peer credential: one POST shape.
-// The handler checks that the path names the credential's own peer.
-func peerRouteAllowed(r *http.Request) bool { return identityWireRoute(r) == "redeem" }
+// peerOperationRoutes is the whole surface of a peer credential, by the one
+// operation it permits: redemption's POST shape, or the read scope's three
+// GET shapes. The handler checks that the path names the credential's own
+// peer.
+var peerOperationRoutes = map[string]string{access.PeerOperationRedeem: "redeem", access.PeerOperationReservationRead: "read"}
+
+func peerRouteAllowed(r *http.Request, p access.PeerIdentity) bool {
+	route := peerOperationRoutes[p.Operation]
+	return route != "" && identityWireRoute(r) == route
+}
 
 // identityStoreError maps a ledger error to its stable refusal code. A store
 // that stayed busy past identityWait is an in-flight retry.
@@ -147,6 +162,8 @@ func identityStoreError(err error) string {
 		return "peer_unknown"
 	case errors.Is(err, access.ErrPeerUnauthenticated):
 		return "peer_unauthenticated"
+	case errors.Is(err, access.ErrPeerForbidden):
+		return "peer_forbidden"
 	case errors.Is(err, access.ErrProofInvalid):
 		return "proof_invalid"
 	case errors.Is(err, access.ErrCredentialInactive):
@@ -305,6 +322,7 @@ type peerView struct {
 type peerCredentialView struct {
 	ID        string    `json:"id"`
 	ServiceID string    `json:"service_id"`
+	Operation string    `json:"operation"`
 	CreatedAt time.Time `json:"created_at"`
 	ExpiresAt time.Time `json:"expires_at"`
 	Revoked   bool      `json:"revoked"`
@@ -317,7 +335,7 @@ func toPeerView(p access.IdentityPeer) peerView {
 }
 
 func toCredentialView(c access.PeerCredential) peerCredentialView {
-	return peerCredentialView{ID: c.ID, ServiceID: c.ServiceID, CreatedAt: c.CreatedAt, ExpiresAt: c.ExpiresAt, Revoked: c.Revoked}
+	return peerCredentialView{ID: c.ID, ServiceID: c.ServiceID, Operation: c.Operation, CreatedAt: c.CreatedAt, ExpiresAt: c.ExpiresAt, Revoked: c.Revoked}
 }
 
 // peerAdminStore applies the admin routes' TLS rule and opens the store,
@@ -439,12 +457,18 @@ func (s *Server) issuePeerCredential(w http.ResponseWriter, r *http.Request) {
 	}
 	var req struct {
 		ExpiresAt time.Time `json:"expires_at"`
+		// Operation is the one operation the credential permits; absent,
+		// identity.redeem as before C6b.
+		Operation string `json:"operation"`
 	}
 	if !decodeIdentity(r, w, &req) {
-		s.fail(w, http.StatusBadRequest, fmt.Errorf("body must be {\"expires_at\": RFC 3339 time}"))
+		s.fail(w, http.StatusBadRequest, fmt.Errorf("body must be {\"expires_at\": RFC 3339 time, \"operation\": \"identity.redeem\"|\"reservation.read\"}"))
 		return
 	}
-	cred, secret, err := db.IssuePeerCredential(accessActor(r), r.PathValue("service_id"), req.ExpiresAt)
+	if req.Operation == "" {
+		req.Operation = access.PeerOperationRedeem
+	}
+	cred, secret, err := db.IssuePeerCredential(accessActor(r), r.PathValue("service_id"), req.Operation, req.ExpiresAt)
 	if err != nil {
 		status := http.StatusBadRequest
 		if errors.Is(err, access.ErrPeerCredentialLimit) {
