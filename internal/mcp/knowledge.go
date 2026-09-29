@@ -145,11 +145,13 @@ func (s *srv) scopedKnowledgeRead(ctx context.Context, name string, a knowledgeA
 		if len(res.Memories) == 0 {
 			return "no memories match", nil
 		}
-		var b strings.Builder
+		trim := recallTrim{budget: budget}
 		for _, m := range res.Memories {
-			b.WriteString(recallLine(m, scopeName(project, s.project)))
+			if !trim.add(recallLine(m, scopeName(project, s.project))) {
+				break
+			}
 		}
-		return b.String(), nil
+		return trim.String(), nil
 	case "list_docs":
 		var res struct {
 			Docs []store.Doc `json:"docs"`

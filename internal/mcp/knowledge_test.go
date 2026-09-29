@@ -7,6 +7,7 @@ package mcp
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -133,5 +134,57 @@ func TestTeamModeKnowledgeReadsReachTheHubWithTheContext(t *testing.T) {
 	teamCall(t, s, "list_docs", map[string]any{})
 	if after := h.requests(); len(after) < n+2 || after[n].path != "/v1/access/identity" {
 		t.Fatalf("no re-verification after a refusal: %+v", after[n:])
+	}
+}
+
+// Scoped recall trims its rendered answer to the token budget, as the
+// legacy recall does: the hub trims only by the memory text, and each line
+// adds the ID and provenance. The first hit is always kept (task 01a0edfb).
+func TestScopedRecallKeepsItsRenderedBudget(t *testing.T) {
+	h := newTeamHub(t)
+	h.custom = func(w http.ResponseWriter, r *http.Request, session string) bool {
+		if r.URL.Path != "/v1/projects/alpha/memories/recall" {
+			return false
+		}
+		var mems []map[string]any
+		for i := 0; i < 10; i++ {
+			mems = append(mems, map[string]any{"id": fmt.Sprintf("01a0edfb-9f9a-7000-9baf-%012d", i), "text": "budget",
+				"kind": "fact", "confidence": 0.9, "corroboration": 1, "created_at": "2026-09-01T00:00:00Z"})
+		}
+		json.NewEncoder(w).Encode(map[string]any{"memories": mems})
+		return true
+	}
+	root := teamRoot(t, h, nil)
+	h.addSession(teamHandle('A'), "sess-1")
+	s := newTeamSrv(writeSession(t, root, h.ts.URL, "sess-1", teamHandle('A')), root, "alpha")
+	recall := func(budget int) []string {
+		t.Helper()
+		text, isErr := teamCall(t, s, "recall_memory", map[string]any{"query": "budget", "token_budget": budget})
+		if isErr {
+			t.Fatalf("recall: %s", text)
+		}
+		return strings.SplitAfter(strings.TrimSuffix(text, "\n"), "\n")
+	}
+	for _, budget := range []int{1, 40, 100} {
+		lines := recall(budget)
+		used := 0
+		for _, l := range lines {
+			used += len(l)/4 + 1
+		}
+		if len(lines) == 0 || !strings.Contains(lines[0], "01a0edfb-9f9a-7000-9baf-000000000000") {
+			t.Fatalf("budget %d: the first hit is not kept: %q", budget, lines)
+		}
+		if len(lines) > 1 && used > budget {
+			t.Errorf("budget %d: %d lines use %d tokens", budget, len(lines), used)
+		}
+		if len(lines) == 10 {
+			t.Errorf("budget %d: nothing was trimmed", budget)
+		}
+	}
+	if lines := recall(1); len(lines) != 1 {
+		t.Errorf("budget 1 keeps %d hits, want the first only", len(lines))
+	}
+	if lines := recall(10000); len(lines) != 10 {
+		t.Errorf("a large budget keeps %d of 10 hits", len(lines))
 	}
 }

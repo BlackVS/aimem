@@ -480,8 +480,7 @@ func (s *srv) run(p *toolParams) (string, error) {
 		if budget <= 0 {
 			budget = 1000 // mirror the server-side default
 		}
-		var b strings.Builder
-		total, used := 0, 0
+		trim := recallTrim{budget: budget}
 		for _, proj := range projs {
 			var res struct {
 				Memories []store.Memory `json:"memories"`
@@ -492,20 +491,15 @@ func (s *srv) run(p *toolParams) (string, error) {
 				return "", err
 			}
 			for _, m := range res.Memories {
-				line := recallLine(m, scopeName(proj, s.project))
-				t := len(line)/4 + 1
-				if used+t > budget && total > 0 {
-					return b.String(), nil // budget spent; always at least one hit
+				if !trim.add(recallLine(m, scopeName(proj, s.project))) {
+					return trim.String(), nil
 				}
-				b.WriteString(line)
-				used += t
-				total++
 			}
 		}
-		if total == 0 {
+		if trim.hits == 0 {
 			return "no memories match", nil
 		}
-		return b.String(), nil
+		return trim.String(), nil
 
 	case "remember":
 		if a.Text == "" {
@@ -682,6 +676,27 @@ func (s *srv) run(p *toolParams) (string, error) {
 		return s.colTool(p)
 	}
 	return "", fmt.Errorf("unknown tool %q", p.Name)
+}
+
+// recallTrim holds rendered recall lines within one token budget, at the
+// usual ~4 bytes a token. The hub trims to its own estimate of the memory
+// text; the rendered line also carries the ID and provenance, so the answer
+// is trimmed again here. The first hit is always kept.
+type recallTrim struct {
+	strings.Builder
+	budget, used, hits int
+}
+
+// add appends line unless the budget is spent, and reports whether it did.
+func (r *recallTrim) add(line string) bool {
+	t := len(line)/4 + 1
+	if r.used+t > r.budget && r.hits > 0 {
+		return false
+	}
+	r.WriteString(line)
+	r.used += t
+	r.hits++
+	return true
 }
 
 // recallLine is one recalled memory as the tools show it.
