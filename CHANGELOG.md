@@ -21,14 +21,15 @@ credential and no embedded team scheduler. The work adds:
   access profile;
 - reservations that make aimem the single owner record of a task being
   worked, with fences, receipts, and operator recovery;
-- coordination facts that bind every team step to aicrew's decision.
+- coordination facts that bind every team step except a holder's update
+  to aicrew's decision.
 
 The wire contracts are in `docs/DESIGN-AIFORGE-*.md`, with fixtures under
 `docs/fixtures/`. This is what a first pilot needs from aimem: one
 coordinator, one worker, one project.
 
 Also: OpenCode 2 support, and `modernc.org/sqlite` 1.58.0 to 1.59.0 (#55).
-Includes PR #55 and #110 to #155.
+Includes PR #55 and #110 to #155, except the unmerged #128.
 
 ### Added
 
