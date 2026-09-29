@@ -158,6 +158,10 @@ func TestTeamModeToolListMatchesHubTeamRoutes(t *testing.T) {
 		"task_reservation_finalize": "POST /v1/projects/{p}/tasks/{task_id}/reservation/finalize",
 		"task_reservation_status":   "GET /v1/projects/{p}/tasks/{task_id}/reservation",
 		"task_reservation_receipt":  "GET /v1/projects/{p}/tasks/{task_id}/reservation/receipts/{operation}/{request_key}",
+		// The pilot's knowledge reads (19d8).
+		"recall_memory": "GET /v1/projects/{p}/memories/recall",
+		"list_docs":     "GET /v1/projects/{p}/docs",
+		"read_doc":      "GET /v1/projects/{p}/docs/{name}",
 	}
 	var want []string
 	for n := range toolRoute {
@@ -207,7 +211,7 @@ func TestTeamModeCarriesTheHandleAndVerifiesFirst(t *testing.T) {
 	s := newTeamSrv(path, root, "alpha")
 
 	// Hidden tools are refused and never reach any hub.
-	for _, name := range []string{"remember", "recall_memory", "create_task", "update_task", "add_task_comment", "team_join", "team_context", "process_context", "team_setup"} {
+	for _, name := range []string{"remember", "search_journal", "update_doc", "get_design_doc", "create_task", "update_task", "add_task_comment", "team_join", "team_context", "process_context", "team_setup"} {
 		if text, isErr := teamCall(t, s, name, map[string]any{}); !isErr || !strings.Contains(text, "not available in a team conversation") {
 			t.Errorf("%s in team mode: %v %s", name, isErr, text)
 		}

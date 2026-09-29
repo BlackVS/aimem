@@ -188,19 +188,20 @@ func toolNames(res map[string]any) []string {
 
 func TestRemoteMCPTaskToolsUseTheCallersAuthority(t *testing.T) {
 	f := newHub(t)
-	// An ordinary token sees task tools and the public team guidance only,
-	// and hidden tools stay hidden when called by name.
+	// An ordinary token sees task tools, the pilot's knowledge reads and the
+	// public team guidance only, and hidden tools stay hidden when called by
+	// name.
 	names := toolNames(f.rpc(t, f.alice, "tools/list", nil))
-	if len(names) != len(taskToolDefs)+len(guidanceToolDefs) {
+	if len(names) != len(taskToolDefs)+len(scopedKnowledgeToolDefs)+len(guidanceToolDefs) {
 		t.Fatalf("ordinary token tool list: %v", names)
 	}
 	for _, n := range names {
-		if !isTaskTool(n) && !isGuidanceTool(n) {
+		if !isTaskTool(n) && !isGuidanceTool(n) && !scopedKnowledgeTools[n] {
 			t.Fatalf("legacy tool %q exposed to an ordinary token", n)
 		}
 	}
-	text, isErr := toolText(f.rpc(t, f.alice, "tools/call", map[string]any{"name": "recall_memory", "arguments": map[string]any{"query": "x", "project": "alpha"}}))
-	if !isErr || !strings.Contains(text, "task tools only") {
+	text, isErr := toolText(f.rpc(t, f.alice, "tools/call", map[string]any{"name": "remember", "arguments": map[string]any{"text": "x", "project": "alpha"}}))
+	if !isErr || !strings.Contains(text, "task tools and the project knowledge reads only") {
 		t.Fatalf("hidden tool by name: %q %v", text, isErr)
 	}
 	// The admin sees everything.

@@ -334,6 +334,9 @@ func (s *Server) memories(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) recall(w http.ResponseWriter, r *http.Request) {
+	if s.knowledgeReadDenied(w, r, false) {
+		return
+	}
 	if db := s.withDB(w, r); db != nil {
 		q := strings.TrimSpace(r.URL.Query().Get("q"))
 		if q == "" {
@@ -587,8 +590,9 @@ func (s *Server) authWrapper(token string, next http.Handler) http.Handler {
 		}
 		// Ordinary tokens never get the legacy writer surface. They reach
 		// their identity check, the task routes (which authorize every
-		// write themselves) and POST /mcp (whose dispatcher hides every
-		// legacy tool from them) — exactly the routes in ordinaryRoutes.
+		// write themselves), the pilot's knowledge reads (which check the
+		// grant themselves) and POST /mcp (whose dispatcher hides every
+		// other legacy tool from them) — exactly the routes in ordinaryRoutes.
 		if id.Role == "user" && !(r.Method == "GET" && r.URL.Path == "/v1/access/identity") && !s.ordinaryAllowed(r) {
 			if wire != "" {
 				s.identityRefuse(w, identityUnauthenticated[wire])

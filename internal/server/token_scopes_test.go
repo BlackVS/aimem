@@ -97,7 +97,7 @@ func TestUserScopedTokenHTTPAndMCP(t *testing.T) {
 		t.Fatal(w.Code, w.Body)
 	}
 	check("beta", "b-removed", false)
-	for _, path := range []string{"/v1/access", "/v1/projects/alpha/docs"} {
+	for _, path := range []string{"/v1/access", "/v1/projects/alpha/docs/RUNBOOK/log"} {
 		if w := authedReq(t, f.h, "GET", path, issued.Secret, ""); w.Code != 403 {
 			t.Fatalf("broadened legacy access %s: %d", path, w.Code)
 		}

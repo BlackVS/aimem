@@ -150,6 +150,8 @@ func TestTeamRoutesAreTheApprovedMatrix(t *testing.T) {
 		"POST /v1/projects/{p}/tasks/{task_id}/reservation/update", "POST /v1/projects/{p}/tasks/{task_id}/reservation/release",
 		"POST /v1/projects/{p}/tasks/{task_id}/reservation/finalize", "GET /v1/projects/{p}/tasks/{task_id}/reservation",
 		"GET /v1/projects/{p}/tasks/{task_id}/reservation/receipts/{operation}/{request_key}",
+		// The pilot's knowledge reads (19d8).
+		"GET /v1/projects/{p}/memories/recall", "GET /v1/projects/{p}/docs", "GET /v1/projects/{p}/docs/{name}",
 	}
 	if !reflect.DeepEqual(teamRoutes, want) {
 		t.Fatalf("teamRoutes changed without review: %v", teamRoutes)
@@ -256,7 +258,7 @@ func TestTeamContextReport(t *testing.T) {
 		t.Fatalf("report: %d %s", r.status, r.body)
 	}
 	if out.Mode != "team" || out.UserID != g.aliceID || out.Team["team_id"] != "team-1" || out.Team["session_id"] != "sess-1" ||
-		out.Team["role"] != "worker" || !reflect.DeepEqual(out.Projects, []string{"alpha"}) || out.Knowledge != "unavailable" ||
+		out.Team["role"] != "worker" || !reflect.DeepEqual(out.Projects, []string{"alpha"}) || out.Knowledge != "read" ||
 		out.TaskWrite || out.Project != "beta" || out.Read {
 		t.Fatalf("report: %s", r.body)
 	}

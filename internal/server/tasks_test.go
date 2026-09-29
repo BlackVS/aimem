@@ -195,8 +195,9 @@ func TestTaskRoutesAuthorization(t *testing.T) {
 		t.Fatalf("admin actor stamp: %+v", betaHist.Changes)
 	}
 
-	// Ordinary tokens stay out of the legacy surface.
-	if w := taskReq(t, h, "GET", "/v1/projects/alpha/docs", f.alice, "", ""); w.Code != 403 {
+	// Ordinary tokens stay out of the legacy surface (the pilot's knowledge
+	// reads aside: knowledge_test.go).
+	if w := taskReq(t, h, "GET", "/v1/projects/alpha/memories", f.alice, "", ""); w.Code != 403 {
 		t.Fatalf("ordinary token on legacy route: %d", w.Code)
 	}
 	if w := taskReq(t, h, "GET", "/v1/access/identity?project=alpha", f.alice, "", ""); w.Code != 200 {
@@ -397,6 +398,8 @@ func TestOrdinaryTokenGateMatrix(t *testing.T) {
 		"GET /v1/projects/{p}/process",                                                                                                  // the selected process reference (TestProcessReferenceSelection)
 		"GET /v1/projects/{p}/epics", "POST /v1/projects/{p}/epics", "GET /v1/projects/{p}/epics/{e}", "PUT /v1/projects/{p}/epics/{e}", // epics (TestEpicRoutes)
 		"GET /v1/access/directory", // the identity directory (TestAccessDirectory)
+		// the pilot's knowledge reads, grant-checked in the handler (TestKnowledgeReads*)
+		"GET /v1/projects/{p}/memories/recall", "GET /v1/projects/{p}/docs", "GET /v1/projects/{p}/docs/{name}",
 		"POST /v1/identity/proofs", // identity.v1 proof receipt over TLS only (TestIdentityRoutes*)
 		// the member reservation routes; the C5 authorizer refuses every
 		// credential but an individual's (TestReservationRoutes*)
@@ -1032,8 +1035,15 @@ func TestMCPPrincipalDispatch(t *testing.T) {
 	if status != 403 {
 		t.Fatalf("dispatch is bound to alice's authority: %d %s", status, body)
 	}
-	if _, _, err := call(r.Context(), "GET", "/v1/projects/alpha/docs", nil, nil); err == nil {
-		t.Fatal("non-task route must not be dispatchable")
+	if _, _, err := call(r.Context(), "GET", "/v1/projects/alpha/memories", nil, nil); err == nil {
+		t.Fatal("a route outside the task and pilot knowledge routes must not be dispatchable")
+	}
+	// The pilot's knowledge reads dispatch under alice's own grant.
+	if status, body, err := call(r.Context(), "GET", "/v1/projects/alpha/docs", nil, nil); err != nil || status != 200 {
+		t.Fatalf("dispatch a knowledge read: %d %v %s", status, err, body)
+	}
+	if status, _, err := call(r.Context(), "GET", "/v1/projects/beta/docs", nil, nil); err != nil || status != 403 {
+		t.Fatalf("a knowledge read is bound to alice's grant: %d %v", status, err)
 	}
 	// The identity is bound by the principal, whatever context the
 	// dispatcher passes: a bare context still acts as alice, never as the

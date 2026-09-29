@@ -9,7 +9,8 @@ package mcp
 //   - the context is verified online before the first tool and again after
 //     any team refusal; until then every tool refuses;
 //   - the tool list is the hub's team routes: the task and epic reads, the
-//     member reservation tools (C6a), plus session_context.
+//     member reservation tools (C6a), the pilot's project knowledge reads
+//     (19d8), plus session_context.
 // Nothing here ever makes a call without the handle, and nothing falls back
 // to personal mode, the local socket or a checkout's credential.
 
@@ -38,7 +39,7 @@ const sessionContextTool = "session_context"
 var sessionContextToolDef = map[string]any{
 	"name": sessionContextTool,
 	"description": "Report this conversation's verified aicrew team context: the team, your role, the session and generation, and the projects the team may read. " +
-		"It is verified online with the hub on every call. Knowledge tools are unavailable in a team conversation.",
+		"It is verified online with the hub on every call. The knowledge tools read only those projects' memories and shared documents.",
 	"inputSchema": map[string]any{"type": "object", "properties": map[string]any{}, "additionalProperties": false},
 }
 
@@ -50,6 +51,7 @@ func teamToolList() []map[string]any {
 			out = append(out, d)
 		}
 	}
+	out = append(out, scopedKnowledgeToolDefs...)
 	return append(out, sessionContextToolDef)
 }
 
@@ -240,6 +242,17 @@ func (s *srv) teamToolCall(ctx context.Context, name string, raw []byte) (string
 			return "", err
 		}
 		return s.taskTool(ctx, name, raw)
+	case scopedKnowledgeTools[name]:
+		// The arguments are checked before the context is verified: a
+		// refused scope never reaches the hub.
+		a, err := s.knowledgeArgsOf(raw)
+		if err != nil {
+			return "", err
+		}
+		if err := s.team.ensureReady(ctx); err != nil {
+			return "", err
+		}
+		return s.scopedKnowledgeRead(ctx, name, a)
 	}
-	return "", fmt.Errorf("tool %q is not available in a team conversation: team mode serves only the team's task and epic reads, the reservation tools and session_context; knowledge and other write tools are off", name)
+	return "", fmt.Errorf("tool %q is not available in a team conversation: team mode serves only the team's task and epic reads, the reservation tools, the project knowledge reads (recall_memory, list_docs, read_doc) and session_context; every other knowledge tool and every other write is off", name)
 }

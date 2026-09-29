@@ -51,12 +51,13 @@ func teamMode(r *http.Request) bool {
 }
 
 // teamRoutes is the complete team-mode surface (E4 seq186, D2): the context
-// report, the task and epic reads, and the member reservation routes (C6a),
+// report, the task and epic reads, the member reservation routes (C6a),
 // whose every transition the C5 authorizer checks against a verified
-// coordination fact. Every other route, including every other write, /mcp
-// and the knowledge routes, refuses a team-mode request with
-// team_operation_unsupported before aicrew is contacted.
-var teamRoutes = append([]string{
+// coordination fact, and the pilot's three knowledge reads (19d8). Every
+// other route, including every other write, /mcp and every other knowledge
+// route, refuses a team-mode request with team_operation_unsupported before
+// aicrew is contacted.
+var teamRoutes = append(append([]string{
 	"GET /v1/access/identity",
 	"GET /v1/projects/{p}/tasks",
 	"GET /v1/tasks/{id}",
@@ -65,7 +66,7 @@ var teamRoutes = append([]string{
 	"GET /v1/tasks/{id}/comments/{c}",
 	"GET /v1/projects/{p}/epics",
 	"GET /v1/projects/{p}/epics/{e}",
-}, reservationRoutePatterns...)
+}, reservationRoutePatterns...), knowledgeRoutes...)
 
 // teamRouteMux matches teamRoutes by the route mux's own rules.
 var teamRouteMux = func() *http.ServeMux {
@@ -303,8 +304,8 @@ func (s *Server) teamGrantAllows(id Identity, tc teamContext, project string) (b
 }
 
 // teamContextReport is GET /v1/access/identity in team mode: the verified
-// session and the projects its profile currently grants. Knowledge access is
-// reported unavailable until the knowledge matrix exists.
+// session and the projects its profile currently grants. Knowledge is the
+// pilot's project-scoped reads (19d8) on those projects.
 func (s *Server) teamContextReport(w http.ResponseWriter, r *http.Request, id Identity, tc teamContext) {
 	unavailable := func(reason string) {
 		s.teamDeny(w, r, tc.Role, id, "identity_unavailable", teamAuditDetail(tc.Context, r)+" reason="+reason, tc.CorrelationID)
@@ -345,7 +346,7 @@ func (s *Server) teamContextReport(w http.ResponseWriter, r *http.Request, id Id
 			"session_id": tc.SessionID, "generation": tc.Generation, "handle_expires_at": tc.HandleExpiresAt.Format(time.RFC3339),
 		},
 		"task_read": "granted-projects", "task_write": false, "projects": projects,
-		"knowledge": "unavailable", "correlation_id": tc.CorrelationID,
+		"knowledge": "read", "correlation_id": tc.CorrelationID,
 	}
 	if project := r.URL.Query().Get("project"); project != "" {
 		pdb, err := s.reg.OpenExisting(project)

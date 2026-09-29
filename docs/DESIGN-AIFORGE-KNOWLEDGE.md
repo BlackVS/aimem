@@ -1,6 +1,6 @@
 # AIForge scoped knowledge access for the same agent context
 
-Status: reviewed decisions for task 19a0 (01a0d6d7-19a0). The operator approved K1 to K10 on the task's scope (comments seq229 and seq231). **Nothing here is implemented yet**: task 19d8 (01a0d6d7-19d8) implements the first-pilot set in [The pilot set](#the-pilot-set-for-19d8), and every other row of the matrix stays as it is today. This document is the knowledge matrix the [context contract](DESIGN-AIFORGE-CONTEXT.md) defers to ("Detailed read/contribute permissions … belong to the knowledge access matrix"). If the context contract disagrees with this document, the context contract wins.
+Status: reviewed decisions for task 19a0 (01a0d6d7-19a0). The operator approved K1 to K10 on the task's scope (comments seq229 and seq231). Task 19d8 (01a0d6d7-19d8) implements the first-pilot set in [The pilot set](#the-pilot-set-for-19d8) (`internal/server/knowledge.go`, `internal/mcp/knowledge.go`); every other row of the matrix stays as it is today. This document is the knowledge matrix the [context contract](DESIGN-AIFORGE-CONTEXT.md) defers to ("Detailed read/contribute permissions … belong to the knowledge access matrix"). If the context contract disagrees with this document, the context contract wins.
 
 ## Outcome and boundary
 
@@ -57,10 +57,14 @@ Each cell says what a caller gets **after 19d8**. ✅ allowed · 🟡 the pilot 
    - **Personal.** The token is live, from an enabled user, and scoped to the user or to this project. The user holds a live direct or access-group grant on the project's access instance: `CanWriteToken`'s membership predicate, used here for a read. Legacy `read-only`-scope tokens get no knowledge in v1.
 3. **Answer, or refuse.** The answer is the route's existing response. Recall is bounded by its existing token budget.
 
+**The current revision only (seq232).** A scoped caller reads a document's current revision: `?rev=` on the doc read is refused whatever its value, 400 for a personal token and `invalid_request` in team mode. Retained revisions and the doc history stay legacy-only.
+
+**An unknown project** reads the same as one without a grant (403, or `grant_denied` in team mode), and is never created: a refusal does not tell a scoped caller which projects exist.
+
 Legacy writer and admin tokens keep today's behavior on the same routes (K9).
 
 **Where the tools run.**
-- **In a team conversation** (`AIMEM_TEAM_SESSION`, E5a), the MCP lists the three tools next to the task reads and `session_context`. It calls the hub routes with the pinned context header, never a local answer. `recall_memory` refuses any scope other than `project`.
+- **In a team conversation** (`AIMEM_TEAM_SESSION`, E5a), the MCP lists the three tools next to the task reads, the reservation tools and `session_context`. It calls the hub routes with the pinned context header, never a local answer. Each of the three refuses any scope other than `project` before any hub call, the context verification included. The context report says `knowledge: read`.
 - **On the hub's `/mcp` for an ordinary user token**, the three tools are no longer hidden (`tasksOnly`). They call the scoped routes with the caller's own identity, never the hub's trusted local client.
 - **The local stdio facade in personal mode** is unchanged.
 
@@ -96,6 +100,8 @@ Sync and curation are hub-internal writer paths (`/v1/sync/*`, curate imports, r
 | --- | --- | --- |
 | A knowledge route or tool outside the pilot set | Today's ordinary-token refusal (403) | `team_operation_unsupported` (403), before aicrew is asked, with `denied_action` |
 | A reserved project (`user`, `group-*`) | 400, reserved scope (as the task routes) | `grant_denied` (403): no profile is ever granted a reserved project |
+| `?rev=` on the doc read | 400 | `invalid_request` (400) |
+| An unknown project | 403 | `grant_denied` (403) |
 | No live grant on the project | 403 | `grant_denied` (403), with `active_role` |
 | A `group:` scope or recall scope other than `project` | Refused by the tool, no hub call | Refused by the tool, no hub call |
 | Team context stale, missing or unavailable | n/a | The context contract's codes (`context_stale`, `context_missing`, `context_unavailable`) |
