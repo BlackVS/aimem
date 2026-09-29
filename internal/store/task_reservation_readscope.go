@@ -7,6 +7,7 @@ package store
 // reads as none, the same as a missing one. Hold status is ServiceHoldStatus.
 
 import (
+	"context"
 	"database/sql"
 	"encoding/json"
 	"errors"
@@ -44,8 +45,9 @@ func serviceReceipt(op, taskID, key, result, reservationID, committedAt string) 
 }
 
 // ServiceReceiptByProof returns the transition committed under the proof
-// with that p1_ digest, if serviceID answered it.
-func (d *DB) ServiceReceiptByProof(serviceID, proofDigest string) (ServiceReceipt, bool, error) {
+// with that p1_ digest, if serviceID answered it. ctx bounds the wait for
+// the store.
+func (d *DB) ServiceReceiptByProof(ctx context.Context, serviceID, proofDigest string) (ServiceReceipt, bool, error) {
 	if err := d.taskScopeOK(); err != nil {
 		return ServiceReceipt{}, false, err
 	}
@@ -53,7 +55,7 @@ func (d *DB) ServiceReceiptByProof(serviceID, proofDigest string) (ServiceReceip
 		return ServiceReceipt{}, false, nil
 	}
 	var op, taskID, key, result, reservationID, committedAt string
-	err := d.sql.QueryRow(`SELECT operation,task_id,key,result,reservation_id,committed_at FROM task_reservation_requests
+	err := d.sql.QueryRowContext(ctx, `SELECT operation,task_id,key,result,reservation_id,committed_at FROM task_reservation_requests
 		WHERE service_id=? AND proof_digest=?`, serviceID, proofDigest).Scan(&op, &taskID, &key, &result, &reservationID, &committedAt)
 	if errors.Is(err, sql.ErrNoRows) {
 		return ServiceReceipt{}, false, nil
@@ -70,14 +72,14 @@ func (d *DB) ServiceReceiptByProof(serviceID, proofDigest string) (ServiceReceip
 // a claim or transfer under serviceID's proof established. A receipt names a
 // service only when its transition was made on that service's proof. This is how aicrew
 // confirms a holder's update, which carries no proof.
-func (d *DB) ServiceReceiptByKey(serviceID, taskID string, op ReservationOperation, keyDigest string) (ServiceReceipt, bool, error) {
+func (d *DB) ServiceReceiptByKey(ctx context.Context, serviceID, taskID string, op ReservationOperation, keyDigest string) (ServiceReceipt, bool, error) {
 	if err := d.taskScopeOK(); err != nil {
 		return ServiceReceipt{}, false, err
 	}
 	if serviceID == "" || !taskIDRE.MatchString(taskID) || !memberOperation(op) {
 		return ServiceReceipt{}, false, nil
 	}
-	rows, err := d.sql.Query(`SELECT r.key,r.result,r.reservation_id,r.committed_at FROM task_reservation_requests r
+	rows, err := d.sql.QueryContext(ctx, `SELECT r.key,r.result,r.reservation_id,r.committed_at FROM task_reservation_requests r
 		WHERE r.task_id=? AND r.operation=? AND EXISTS(
 			SELECT 1 FROM task_reservation_requests e WHERE e.task_id=r.task_id AND e.reservation_id=r.reservation_id
 			AND e.service_id=? AND e.operation IN ('claim','transfer'))`,
@@ -128,14 +130,18 @@ func memberOperation(op ReservationOperation) bool {
 
 // ServiceReceiptByProof searches every project for the transition committed
 // under that proof, which the path does not locate. A project that cannot be
-// read makes the answer an error, never none: none must be reliable.
-func (r *Registry) ServiceReceiptByProof(serviceID, proofDigest string) (ServiceReceipt, bool, error) {
+// read makes the answer an error, never none: none must be reliable. ctx
+// bounds the whole search.
+func (r *Registry) ServiceReceiptByProof(ctx context.Context, serviceID, proofDigest string) (ServiceReceipt, bool, error) {
 	projects, err := r.Projects()
 	if err != nil {
 		return ServiceReceipt{}, false, err
 	}
 	var unreadable error
 	for _, p := range projects {
+		if err := ctx.Err(); err != nil {
+			return ServiceReceipt{}, false, err
+		}
 		if IsReservedProject(p) {
 			continue
 		}
@@ -144,7 +150,7 @@ func (r *Registry) ServiceReceiptByProof(serviceID, proofDigest string) (Service
 			unreadable = fmt.Errorf("project %q could not be opened: %w", p, err)
 			continue
 		}
-		rc, found, err := db.ServiceReceiptByProof(serviceID, proofDigest)
+		rc, found, err := db.ServiceReceiptByProof(ctx, serviceID, proofDigest)
 		switch {
 		case err != nil:
 			unreadable = fmt.Errorf("project %q could not be read: %w", p, err)

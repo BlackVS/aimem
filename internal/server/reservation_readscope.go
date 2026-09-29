@@ -9,6 +9,7 @@ package server
 // proof.
 
 import (
+	"context"
 	"errors"
 	"net/http"
 	"strconv"
@@ -93,9 +94,26 @@ func (s *Server) readLimiter() *readScopeLimiter {
 	return s.readLimit
 }
 
+// boundedRead runs one read's lookups within the request's deadline, which
+// the bearer gate set for the wire routes. The store calls it makes take the
+// context, and a lookup that does not (finding the task's project) still
+// cannot hold the answer past the deadline: the read then fails, and
+// readScopeFailed answers the retryable refusal. The abandoned lookup is
+// read-only and ends when the store frees.
+func boundedRead(ctx context.Context, lookup func(context.Context) error) error {
+	done := make(chan error, 1)
+	go func() { done <- lookup(ctx) }()
+	select {
+	case err := <-done:
+		return err
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
+
 // readScopeFailed answers a store that could not give a reliable answer:
-// busy, or a project that could not be read. A none it cannot vouch for is
-// never answered.
+// busy past the deadline, or a project that could not be read. A none it
+// cannot vouch for is never answered.
 func (s *Server) readScopeFailed(w http.ResponseWriter, what string, err error) {
 	s.log.Error("reservation read scope", "read", what, "err", err)
 	s.identityRefuse(w, "request_in_progress")
@@ -139,7 +157,12 @@ func (s *Server) readReceiptByProof(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	rc, found, err := s.reg.ServiceReceiptByProof(service, r.PathValue("proof_digest"))
+	var rc store.ServiceReceipt
+	var found bool
+	err := boundedRead(r.Context(), func(ctx context.Context) (err error) {
+		rc, found, err = s.reg.ServiceReceiptByProof(ctx, service, r.PathValue("proof_digest"))
+		return err
+	})
 	if err != nil {
 		s.readScopeFailed(w, "receipt by proof", err)
 		return
@@ -155,17 +178,21 @@ func (s *Server) readReceiptByKey(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	taskID := r.PathValue("task_id")
-	_, db, err := s.reg.LocateTask(taskID)
+	var rc store.ServiceReceipt
+	var found bool
+	err := boundedRead(r.Context(), func(ctx context.Context) error {
+		_, db, err := s.reg.LocateTask(taskID)
+		if err != nil {
+			return err
+		}
+		rc, found, err = db.ServiceReceiptByKey(ctx, service, taskID, store.ReservationOperation(r.PathValue("operation")), r.PathValue("request_key_digest"))
+		return err
+	})
 	switch {
 	case errors.Is(err, store.ErrTaskNotFound):
 		s.readScopeReceiptOK(w, store.ServiceReceipt{}, false)
 		return
 	case err != nil:
-		s.readScopeFailed(w, "receipt by key", err)
-		return
-	}
-	rc, found, err := db.ServiceReceiptByKey(service, taskID, store.ReservationOperation(r.PathValue("operation")), r.PathValue("request_key_digest"))
-	if err != nil {
 		s.readScopeFailed(w, "receipt by key", err)
 		return
 	}
@@ -193,17 +220,20 @@ func (s *Server) readHold(w http.ResponseWriter, r *http.Request) {
 	}
 	taskID := r.PathValue("task_id")
 	w.Header().Set("Cache-Control", "no-store")
-	_, db, err := s.reg.LocateTask(taskID)
+	var h store.ServiceHold
+	err := boundedRead(r.Context(), func(ctx context.Context) error {
+		_, db, err := s.reg.LocateTask(taskID)
+		if err != nil {
+			return err
+		}
+		h, err = db.ServiceHoldStatus(ctx, taskID, service)
+		return err
+	})
 	switch {
 	case errors.Is(err, store.ErrTaskNotFound):
 		s.ok(w, readScopeHold{State: "none"})
 		return
 	case err != nil:
-		s.readScopeFailed(w, "hold status", err)
-		return
-	}
-	h, err := db.ServiceHoldStatus(taskID, service)
-	if err != nil {
 		s.readScopeFailed(w, "hold status", err)
 		return
 	}

@@ -13,6 +13,7 @@ import (
 	"reflect"
 	"strconv"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -512,4 +513,74 @@ func TestReadScopeRefusals(t *testing.T) {
 		t.Fatalf("a disabled peer's read credential: %d %s", r.status, r.body)
 	}
 	g.assertNoSecretLeak(t)
+}
+
+// A read waits for a busy store no longer than the request's deadline: with
+// a project's only connection held by a transition, every read answers the
+// retryable request_in_progress while the connection is still held, and
+// answers normally once it frees.
+func TestReadScopeBusyStoreRefusesWithinTheDeadline(t *testing.T) {
+	g := newReadRig(t)
+	indep := g.member(t, "independent", "agent-indep", "sess-i")
+	task := g.readyTask(t, g.alpha)
+	_, proof := g.claim(t, indep, task.ID, "attempt-busy")
+	claimKey := g.lastKey
+
+	// A personal update on another task parks inside its transaction (an
+	// update rechecks its authority there), holding alpha's only connection.
+	alice := g.personal(g.aliceIdentity)
+	other := g.readyTask(t, g.alpha)
+	held, err := g.s.reserve(alice, store.ReservationClaim, claimOf(other), "rk-other-"+uuidv7.New(), "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	entered, release := make(chan struct{}), make(chan struct{})
+	var once, freed sync.Once
+	free := func() { freed.Do(func() { close(release) }) }
+	beforeReservationRecheck = func() {
+		once.Do(func() { close(entered) })
+		<-release
+	}
+	// A read that waits on the connection must fail this test, not hang it.
+	safety := time.AfterFunc(15*time.Second, free)
+	defer safety.Stop()
+	t.Cleanup(func() { beforeReservationRecheck = nil })
+	parked := make(chan error, 1)
+	go func() {
+		_, err := g.s.reserve(alice, store.ReservationUpdate, nextOf(other, held, "IN_PROGRESS"), "rk-parked-"+uuidv7.New(), "")
+		parked <- err
+	}()
+	<-entered
+
+	paths := []string{byProof(proof), byKey(task.ID, "claim", claimKey), holdOf(task.ID)}
+	answers := make([]identityResp, len(paths))
+	var wg sync.WaitGroup
+	for i, path := range paths {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			answers[i] = g.call(t, g.tls, "GET", path, g.read, readV1, "", true)
+		}()
+	}
+	wg.Wait()
+	select {
+	case err := <-parked:
+		t.Fatalf("the connection was released before the reads answered: %v", err)
+	default:
+	}
+	for i, r := range answers {
+		if r.status != 503 || r.code() != "request_in_progress" || !strings.Contains(string(r.body), `"retryable":true`) {
+			t.Errorf("GET %s with the store busy: %d %s", paths[i], r.status, r.body)
+		}
+	}
+	free()
+	if err := <-parked; err != nil {
+		t.Fatal(err)
+	}
+	beforeReservationRecheck = nil
+	for _, path := range paths {
+		if got := g.answer(t, path); got["state"] == "none" {
+			t.Fatalf("GET %s after the store freed: %v", path, got)
+		}
+	}
 }

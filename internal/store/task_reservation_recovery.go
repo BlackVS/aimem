@@ -289,15 +289,16 @@ type ServiceHold struct {
 }
 
 // ServiceHoldStatus answers hold status for serviceID. The caller must have
-// authenticated that service's read credential.
-func (d *DB) ServiceHoldStatus(taskID, serviceID string) (ServiceHold, error) {
+// authenticated that service's read credential. ctx bounds the wait for the
+// store.
+func (d *DB) ServiceHoldStatus(ctx context.Context, taskID, serviceID string) (ServiceHold, error) {
 	if err := d.taskScopeOK(); err != nil {
 		return ServiceHold{}, err
 	}
 	if !taskIDRE.MatchString(taskID) || serviceID == "" {
 		return ServiceHold{State: "none"}, nil
 	}
-	tx, err := d.sql.Begin()
+	tx, err := d.sql.BeginTx(ctx, nil)
 	if err != nil {
 		return ServiceHold{}, err
 	}

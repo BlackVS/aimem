@@ -206,17 +206,17 @@ func TestServiceHoldStatusClosureEvidence(t *testing.T) {
 		}},
 	} {
 		task, held := teamHold(t, db, "svc-"+c.key, "aicrew-example")
-		if got, err := db.ServiceHoldStatus(task.ID, "aicrew-example"); err != nil || got.State != "held" || got.ReservationID != held.Reservation.ID ||
+		if got, err := db.ServiceHoldStatus(context.Background(), task.ID, "aicrew-example"); err != nil || got.State != "held" || got.ReservationID != held.Reservation.ID ||
 			got.OwnWorkRef != "attempt-svc-"+c.key || got.HolderMode != "external" {
 			t.Fatalf("%s held: %+v %v", c.key, got, err)
 		}
-		if got, _ := db.ServiceHoldStatus(task.ID, "aicrew-other"); got.State != "none" {
+		if got, _ := db.ServiceHoldStatus(context.Background(), task.ID, "aicrew-other"); got.State != "none" {
 			t.Fatalf("%s: another service sees %+v", c.key, got)
 		}
 		if err := c.close(task, held); err != nil {
 			t.Fatal(err)
 		}
-		got, err := db.ServiceHoldStatus(task.ID, "aicrew-example")
+		got, err := db.ServiceHoldStatus(context.Background(), task.ID, "aicrew-example")
 		if err != nil || got.State != "closed" || got.ReservationID != held.Reservation.ID || got.ClosedBy != c.want ||
 			got.ClosingFence <= held.Reservation.Fence || got.ClosedAt == "" || got.TaskRevision != held.Task.Revision+1 {
 			t.Fatalf("%s closed: %+v %v", c.key, got, err)
@@ -233,7 +233,7 @@ func TestServiceHoldStatusClosureEvidence(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	got, err := db.ServiceHoldStatus(task.ID, "aicrew-example")
+	got, err := db.ServiceHoldStatus(context.Background(), task.ID, "aicrew-example")
 	if err != nil || got.State != "closed" || got.ReservationID != held.Reservation.ID || got.OwnWorkRef != "" || got.HolderMode != "" {
 		t.Fatalf("closed after another holder took the task: %+v %v", got, err)
 	}
@@ -250,7 +250,7 @@ func TestServiceHoldStatusClosureEvidence(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got, _ := db.ServiceHoldStatus(task.ID, "aicrew-example"); got.State != "held" || got.ReservationID != newer.Reservation.ID {
+	if got, _ := db.ServiceHoldStatus(context.Background(), task.ID, "aicrew-example"); got.State != "held" || got.ReservationID != newer.Reservation.ID {
 		t.Fatalf("newer reservation: %+v", got)
 	}
 	// A personal hold is never tracked for any service.
@@ -258,7 +258,7 @@ func TestServiceHoldStatusClosureEvidence(t *testing.T) {
 	if _, err := db.ApplyTaskReservation(ReservationClaim, claimInput(ptask, "mine"), aliceActor, testBinding(aliceActor), "p", nil, allowReservation); err != nil {
 		t.Fatal(err)
 	}
-	if got, _ := db.ServiceHoldStatus(ptask.ID, "aicrew-example"); got.State != "none" {
+	if got, _ := db.ServiceHoldStatus(context.Background(), ptask.ID, "aicrew-example"); got.State != "none" {
 		t.Fatalf("a personal hold reads as %+v", got)
 	}
 }

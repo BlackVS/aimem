@@ -1,6 +1,7 @@
 package store
 
 import (
+	"context"
 	"strings"
 	"testing"
 	"time"
@@ -14,7 +15,7 @@ func TestServiceReceiptsAreScopedToTheAnsweringService(t *testing.T) {
 	selectProcess(t, db, coordPin)
 	task, offer := offerClaim(t, r, db, "offer-k")
 
-	rc, found, err := db.ServiceReceiptByProof("aicrew-example", coordProof)
+	rc, found, err := db.ServiceReceiptByProof(context.Background(), "aicrew-example", coordProof)
 	if err != nil || !found || rc.Operation != ReservationClaim || rc.TaskID != task.ID || rc.ReservationID != offer.Reservation.ID ||
 		rc.Fence != 1 || rc.TaskRevision != offer.Task.Revision || rc.MemberUserID != aliceActor.UserID || rc.VerifiedMode != "team" ||
 		rc.RequestKeyDigest != RequestKeyDigest("offer-k") || rc.ID != ReservationReceiptID(aliceActor.UserID, ReservationClaim, task.ID, "offer-k") {
@@ -23,19 +24,21 @@ func TestServiceReceiptsAreScopedToTheAnsweringService(t *testing.T) {
 	if at, err := time.Parse(time.RFC3339, rc.CommittedAt); err != nil || time.Since(at) > time.Hour {
 		t.Fatalf("committed_at %q", rc.CommittedAt)
 	}
-	if again, found, err := r.ServiceReceiptByProof("aicrew-example", coordProof); err != nil || !found || again != rc {
+	if again, found, err := r.ServiceReceiptByProof(context.Background(), "aicrew-example", coordProof); err != nil || !found || again != rc {
 		t.Fatalf("the registry's proof search: %+v %v %v", again, found, err)
 	}
-	if byKey, found, err := db.ServiceReceiptByKey("aicrew-example", task.ID, ReservationClaim, RequestKeyDigest("offer-k")); err != nil || !found || byKey != rc {
+	if byKey, found, err := db.ServiceReceiptByKey(context.Background(), "aicrew-example", task.ID, ReservationClaim, RequestKeyDigest("offer-k")); err != nil || !found || byKey != rc {
 		t.Fatalf("receipt by key: %+v %v %v", byKey, found, err)
 	}
 	for what, got := range map[string]func() (ServiceReceipt, bool, error){
-		"another service by proof": func() (ServiceReceipt, bool, error) { return db.ServiceReceiptByProof("aicrew-other", coordProof) },
+		"another service by proof": func() (ServiceReceipt, bool, error) {
+			return db.ServiceReceiptByProof(context.Background(), "aicrew-other", coordProof)
+		},
 		"another service by key": func() (ServiceReceipt, bool, error) {
-			return db.ServiceReceiptByKey("aicrew-other", task.ID, ReservationClaim, RequestKeyDigest("offer-k"))
+			return db.ServiceReceiptByKey(context.Background(), "aicrew-other", task.ID, ReservationClaim, RequestKeyDigest("offer-k"))
 		},
 		"another operation by key": func() (ServiceReceipt, bool, error) {
-			return db.ServiceReceiptByKey("aicrew-example", task.ID, ReservationUpdate, RequestKeyDigest("offer-k"))
+			return db.ServiceReceiptByKey(context.Background(), "aicrew-example", task.ID, ReservationUpdate, RequestKeyDigest("offer-k"))
 		},
 	} {
 		if _, found, err := got(); err != nil || found {
@@ -47,10 +50,10 @@ func TestServiceReceiptsAreScopedToTheAnsweringService(t *testing.T) {
 	if _, err := db.sql.Exec(`UPDATE task_reservation_requests SET service_id='',proof_digest='',reservation_id='',committed_at=''`); err != nil {
 		t.Fatal(err)
 	}
-	if _, found, err := db.ServiceReceiptByProof("aicrew-example", coordProof); err != nil || found {
+	if _, found, err := db.ServiceReceiptByProof(context.Background(), "aicrew-example", coordProof); err != nil || found {
 		t.Fatalf("a pre-migration receipt by proof: %v %v", found, err)
 	}
-	if _, found, err := db.ServiceReceiptByKey("aicrew-example", task.ID, ReservationClaim, RequestKeyDigest("offer-k")); err != nil || found {
+	if _, found, err := db.ServiceReceiptByKey(context.Background(), "aicrew-example", task.ID, ReservationClaim, RequestKeyDigest("offer-k")); err != nil || found {
 		t.Fatalf("a pre-migration receipt by key: %v %v", found, err)
 	}
 }
@@ -66,7 +69,7 @@ func TestServiceReceiptByKeyRefusesAnAmbiguousKey(t *testing.T) {
 		FROM task_reservation_requests WHERE key='offer-dup'`); err != nil {
 		t.Fatal(err)
 	}
-	if _, found, err := db.ServiceReceiptByKey("aicrew-example", task.ID, ReservationClaim, RequestKeyDigest("offer-dup")); err == nil || found {
+	if _, found, err := db.ServiceReceiptByKey(context.Background(), "aicrew-example", task.ID, ReservationClaim, RequestKeyDigest("offer-dup")); err == nil || found {
 		t.Fatalf("an ambiguous key: found %v, %v", found, err)
 	}
 }
@@ -85,17 +88,17 @@ func TestServiceReceiptByKeyNeedsTheEstablishingProof(t *testing.T) {
 	if _, err := db.ApplyTaskReservation(ReservationRelease, in, aliceActor, coordinator(aliceActor.UserID, "sess-coord"), "release-est", never, allowReservation); err != nil {
 		t.Fatal(err)
 	}
-	if _, found, err := db.ServiceReceiptByKey("aicrew-example", task.ID, ReservationRelease, RequestKeyDigest("release-est")); err != nil || !found {
+	if _, found, err := db.ServiceReceiptByKey(context.Background(), "aicrew-example", task.ID, ReservationRelease, RequestKeyDigest("release-est")); err != nil || !found {
 		t.Fatalf("the release on the service's reservation: %v %v", found, err)
 	}
 	// The claim that established it predates the read scope.
 	if _, err := db.sql.Exec(`UPDATE task_reservation_requests SET service_id='',proof_digest='' WHERE key='offer-est'`); err != nil {
 		t.Fatal(err)
 	}
-	if _, found, err := db.ServiceReceiptByKey("aicrew-example", task.ID, ReservationRelease, RequestKeyDigest("release-est")); err != nil || found {
+	if _, found, err := db.ServiceReceiptByKey(context.Background(), "aicrew-example", task.ID, ReservationRelease, RequestKeyDigest("release-est")); err != nil || found {
 		t.Fatalf("a reservation the service's proof did not establish: %v %v", found, err)
 	}
-	if _, found, err := db.ServiceReceiptByProof("aicrew-example", never.ProofDigest); err != nil || !found {
+	if _, found, err := db.ServiceReceiptByProof(context.Background(), "aicrew-example", never.ProofDigest); err != nil || !found {
 		t.Fatalf("the release by its own proof: %v %v", found, err)
 	}
 }
@@ -110,7 +113,7 @@ func TestServiceReceiptByProofRefusesAnIncompleteSearch(t *testing.T) {
 		t.Fatal(err)
 	}
 	other.sql.Close()
-	if _, found, err := r.ServiceReceiptByProof("aicrew-example", "p1_"+strings.Repeat("Z", 43)); err == nil || found {
+	if _, found, err := r.ServiceReceiptByProof(context.Background(), "aicrew-example", "p1_"+strings.Repeat("Z", 43)); err == nil || found {
 		t.Fatalf("a search past an unreadable project: %v %v", found, err)
 	}
 }
