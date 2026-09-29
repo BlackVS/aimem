@@ -13,6 +13,7 @@ import (
 
 	"aimem/internal/introspect/introspecttest"
 	"aimem/internal/store"
+	"aimem/internal/uuidv7"
 )
 
 func (g *reservationRig) setTasks(t *testing.T, value string) {
@@ -44,12 +45,18 @@ func unheld(t *testing.T, db *store.DB, taskID string) {
 // A personal holder, through the real routes: claim, update, release and
 // finalize are refused and apply nothing; the status and receipt reads and a
 // replay of a committed update are answered; a claim behind an unresolved
-// dependency names the disabled tasks, not the dependency.
+// or missing dependency names the disabled tasks, not the dependency.
 func TestTasksDisabledRefusesPersonalTransitions(t *testing.T) {
 	g := newReservationRig(t)
 	task, free, dep := g.readyTask(t, g.alpha), g.readyTask(t, g.alpha), g.readyTask(t, g.alpha)
-	blocked, err := g.alpha.CreateTask(store.TaskContent{Title: "blocked", State: "READY", Dependencies: []string{dep.ID}},
-		store.TaskActor{Kind: "admin", Name: "admin"}, "blocked")
+	admin := store.TaskActor{Kind: "admin", Name: "admin"}
+	blocked, err := g.alpha.CreateTask(store.TaskContent{Title: "blocked", State: "READY", Dependencies: []string{dep.ID}}, admin, "blocked")
+	if err != nil {
+		t.Fatal(err)
+	}
+	// A dependency no project holds fails the dependency walk, which runs
+	// before the ledger's transaction.
+	missing, err := g.alpha.CreateTask(store.TaskContent{Title: "missing", State: "READY", Dependencies: []string{uuidv7.New()}}, admin, "missing")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -76,6 +83,7 @@ func TestTasksDisabledRefusesPersonalTransitions(t *testing.T) {
 	g.setTasks(t, "off")
 	wantTasksDisabled(t, "a claim", call("POST", free.ID, "/claim", "c2", claim(free)), "personal")
 	wantTasksDisabled(t, "a claim behind an unresolved dependency", call("POST", blocked.ID, "/claim", "c3", claim(blocked)), "personal")
+	wantTasksDisabled(t, "a claim behind a missing dependency", call("POST", missing.ID, "/claim", "c5", claim(missing)), "personal")
 	wantTasksDisabled(t, "an update", call("POST", task.ID, "/update", "u2", next("2", upd.TaskRevision, "BLOCKED", nil)), "personal")
 	wantTasksDisabled(t, "a release", call("POST", task.ID, "/release", "r1", next("2", upd.TaskRevision, "READY", map[string]any{"reason": "handing it back"})), "personal")
 	wantTasksDisabled(t, "a finalize", call("POST", task.ID, "/finalize", "f1", next("2", upd.TaskRevision, "DONE",
@@ -83,6 +91,7 @@ func TestTasksDisabledRefusesPersonalTransitions(t *testing.T) {
 	g.held(t, task.ID, before)
 	unheld(t, g.alpha, free.ID)
 	unheld(t, g.alpha, blocked.ID)
+	unheld(t, g.alpha, missing.ID)
 	if n := historyLen(t, g.alpha, task.ID); n != hist {
 		t.Fatalf("refused transitions wrote history: %d, then %d", hist, n)
 	}
@@ -105,6 +114,7 @@ func TestTasksDisabledRefusesPersonalTransitions(t *testing.T) {
 		t.Fatalf("the hold after re-enabling: %+v", o)
 	}
 	wantRefusal(t, "the blocked claim after re-enabling", call("POST", blocked.ID, "/claim", "c4", claim(blocked)), http.StatusNotFound, "dependency_unresolved", "personal")
+	wantRefusal(t, "the missing dependency after re-enabling", call("POST", missing.ID, "/claim", "c6", claim(missing)), http.StatusNotFound, "dependency_unresolved", "personal")
 }
 
 // Team members, each with the coordination fact its step needs: the
