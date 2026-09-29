@@ -73,7 +73,7 @@ The local daemon either runs one MCP process per conversation with a fixed prote
 | Team independent worker | Team profile grants only | May claim eligible unreserved work atomically through aimem's reservation contract. Cannot manage aicrew membership or grants. |
 | Aicrew service | No agent knowledge access | Only proof redemption and a read-only view of reservations set under its own coordination proofs; no mutation and no actor selection. |
 
-All team roles remain subject to the project's review and human-merge gates. Detailed read/contribute permissions for memories, raw journals, docs, records, shared groups and sync belong to the knowledge access matrix. Until that matrix and the scoped knowledge route are implemented and tested, a team context must report knowledge access unavailable rather than use legacy broad authority.
+All team roles remain subject to the project's review and human-merge gates. Detailed read/contribute permissions for memories, raw journals, docs, records, shared groups and sync belong to the [knowledge access matrix](DESIGN-AIFORGE-KNOWLEDGE.md) (task 19a0). Until its scoped knowledge routes are implemented and tested (task 19d8), a team context must report knowledge access unavailable rather than use legacy broad authority.
 
 ## Lifecycle, revocation and recovery
 
