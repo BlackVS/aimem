@@ -22,16 +22,19 @@ func TestFinalizeEvidenceDigestThroughTheRoutes(t *testing.T) {
 	held, _ := g.claim(t, indep, task.ID, "attempt-e")
 	digest := store.EvidenceDigest(confirmedEvidence)
 
-	// finalize sends evidence under key, on a fact that binds digest ("" for
-	// a reply without one).
-	finalize := func(key, digest string, evidence []string) identityResp {
-		t.Helper()
+	// answer makes the fake aicrew vouch for a finalize under key with a fact
+	// that binds digest ("" for a reply without one).
+	answer := func(key, digest string) {
 		f := g.factAs("independent", "agent-indep", "sess-i", "accepted_for_finalization", "finalize", task.ID, key)
 		f["attempt_ref"] = "attempt-e"
 		if digest != "" {
 			f["evidence_digest"] = digest
 		}
 		g.answerFact(f)
+	}
+	// post sends a finalize with evidence under key; it sets no answer.
+	post := func(key string, evidence []string) identityResp {
+		t.Helper()
 		proof := testProof(t)
 		g.secrets = append(g.secrets, proof)
 		return g.call(t, g.tls, "POST", g.rpath(task.ID, "/finalize"), g.alice,
@@ -40,6 +43,11 @@ func TestFinalizeEvidenceDigestThroughTheRoutes(t *testing.T) {
 				"fence": strconv.FormatInt(held.Reservation.Fence, 10), "reason": "reviewed delivery",
 				"content": map[string]any{"title": task.Title, "state": "DONE"}, "terminal_evidence": evidence,
 				"coordination_proof": proof}), true)
+	}
+	finalize := func(key, digest string, evidence []string) identityResp {
+		t.Helper()
+		answer(key, digest)
+		return post(key, evidence)
 	}
 	unchanged := func(what string) {
 		t.Helper()
@@ -82,12 +90,18 @@ func TestFinalizeEvidenceDigestThroughTheRoutes(t *testing.T) {
 		t.Fatalf("the receipt does not record the digest: %+v %v", receipts, err)
 	}
 	// The same request replays from its receipt, without asking aicrew for
-	// the fact; a changed list under the same key conflicts.
+	// the fact: with the coordination answer inactive, the replay makes only
+	// the context introspection call (task 01a0eba3). A changed list under
+	// the same key conflicts.
 	g.answerInactive()
-	if again := decodeOutcome(t, finalize(key, digest, confirmedEvidence)); !again.Receipt.Replayed {
+	calls := g.fake.Calls()
+	if again := decodeOutcome(t, post(key, confirmedEvidence)); !again.Receipt.Replayed {
 		t.Fatalf("replay: %+v", again)
 	}
-	wantRefusal(t, "a changed list under the key", finalize(key, digest, []string{e[1], e[0], e[2]}), 409, "idempotency_conflict", "team")
+	if n := g.fake.Calls() - calls; n != 1 {
+		t.Fatalf("the replay made %d aicrew calls; only the context introspection is expected", n)
+	}
+	wantRefusal(t, "a changed list under the key", post(key, []string{e[1], e[0], e[2]}), 409, "idempotency_conflict", "team")
 	g.assertNoSecretLeak(t)
 }
 
