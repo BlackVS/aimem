@@ -46,9 +46,9 @@ Each cell says what a caller gets **after 19d8**. ✅ allowed · 🟡 the pilot 
 
 | Tool | Route | Arguments a scoped caller may use |
 | --- | --- | --- |
-| `recall_memory` | `GET /v1/projects/{p}/memories/recall` | `query`, `token_budget`, `tag`, `kind`; the tool's `scope` must be `project` or absent |
-| `list_docs` | `GET /v1/projects/{p}/docs` | the project scope only |
-| `read_doc` | `GET /v1/projects/{p}/docs/{name}` | the project scope only |
+| `recall_memory` | `GET /v1/projects/{p}/memories/recall` | `query`, `token_budget`, `tag`, `kind`, and `project` (required on the hub, as today); the tool's `scope` must be `project` or absent |
+| `list_docs` | `GET /v1/projects/{p}/docs` | `scope` `project` or absent; `project` on the hub |
+| `read_doc` | `GET /v1/projects/{p}/docs/{name}` | `name`; `scope` `project` or absent; `project` on the hub |
 
 **The scoped read check (K2).** For an ordinary user token, personal or team, each of the three routes checks, on every request:
 1. **The project is ordinary.** `{p}` is not a reserved project: not `user`, the personal store, and not `group-*`, a group space. A reserved project is refused whatever grant exists (K4, K6).
