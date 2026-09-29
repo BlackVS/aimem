@@ -380,13 +380,16 @@ func TestReservationCLICommittedReplyLost(t *testing.T) {
 	}
 }
 
-// A mismatched finalize is final: the CLI exits 3 and a client never
-// retries it with the same key (C5-w3).
-func TestReservationCLIEvidenceMismatchIsFinal(t *testing.T) {
-	// The hub's refusal reaches the tool as its envelope (callReservationTool).
-	r := &reservationToolRefusal{envelope: `{"code":"evidence_mismatch","message":"m","active_mode":"team","retryable":false,"next_action":"n","correlation_id":"c"}`}
-	if code := reservationExit(r); code != ExitFinal {
-		t.Fatalf("evidence_mismatch exits %d", code)
+// A mismatched finalize (C5-w3) and a transition on a project whose tasks
+// are off (01a0eda3) are final: the CLI exits 3 and a client never retries
+// them with the same key.
+func TestReservationCLIFinalRefusals(t *testing.T) {
+	for _, code := range []string{"evidence_mismatch", "tasks_disabled"} {
+		// The hub's refusal reaches the tool as its envelope (callReservationTool).
+		r := &reservationToolRefusal{envelope: `{"code":"` + code + `","message":"m","active_mode":"team","retryable":false,"next_action":"n","correlation_id":"c"}`}
+		if got := reservationExit(r); got != ExitFinal {
+			t.Fatalf("%s exits %d", code, got)
+		}
 	}
 }
 

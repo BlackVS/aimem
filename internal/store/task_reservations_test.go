@@ -10,8 +10,13 @@ import (
 	"aimem/internal/uuidv7"
 )
 
+// readyReservationTask creates a READY task in a project whose tasks are
+// enabled, as every reservation transition requires.
 func readyReservationTask(t *testing.T, db *DB, key string) Task {
 	t.Helper()
+	if err := db.SetMeta(TasksMetaKey, "on"); err != nil {
+		t.Fatal(err)
+	}
 	task, err := db.CreateTask(TaskContent{Title: "reserved work", State: "READY"}, aliceActor, key)
 	if err != nil {
 		t.Fatal(err)

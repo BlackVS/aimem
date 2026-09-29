@@ -298,6 +298,14 @@ func (r *Registry) ClaimTaskReservation(ctx context.Context, in TaskReservationI
 		prior.Replayed = true
 		return prior, nil
 	}
+	// Disabled tasks outrank anything the dependency walk can find: a
+	// missing dependency must not answer for them. The committing
+	// transaction checks again (reservationMutationTx).
+	if on, err := db.TasksEnabled(); err != nil {
+		return TaskReservationOutcome{}, err
+	} else if !on {
+		return TaskReservationOutcome{}, ErrReservationTasksDisabled
+	}
 	owner, err := db.GetTask(in.TaskID)
 	if err != nil {
 		return TaskReservationOutcome{}, err
