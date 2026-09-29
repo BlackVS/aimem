@@ -56,6 +56,8 @@ type Server struct {
 	introspect   *introspect.Client          // aicrew introspection (teamcontext.go)
 	readOnce     sync.Once
 	readLimit    *readScopeLimiter // aicrew's read scope, per credential (reservation_readscope.go)
+	actionOnce   sync.Once
+	actionMux    *http.ServeMux // names a refused request's route (refusal_actions.go)
 }
 
 func New(reg *store.Registry, log *slog.Logger) *Server {

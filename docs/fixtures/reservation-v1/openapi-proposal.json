@@ -121,7 +121,7 @@
         "type": "object",
         "required": ["code", "message", "retryable", "next_action", "correlation_id"],
         "properties": {
-          "code": {"type": "string"}, "message": {"type": "string"}, "active_mode": {"enum": ["personal", "team"]}, "retryable": {"type": "boolean"}, "next_action": {"type": "string"}, "correlation_id": {"type": "string"}
+          "code": {"type": "string"}, "message": {"type": "string"}, "active_mode": {"enum": ["personal", "team"]}, "denied_action": {"type": "string"}, "active_role": {"type": "string"}, "retryable": {"type": "boolean"}, "next_action": {"type": "string"}, "correlation_id": {"type": "string"}
         },
         "additionalProperties": false
       }

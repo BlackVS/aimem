@@ -87,7 +87,7 @@ Aicrew issues the aimem-scoped handle together with its own client-side session 
 
 ## Refusals
 
-Every refusal uses the context contract's envelope: `{code, message, active_mode, retryable, next_action, correlation_id}`. `active_mode` is omitted when revealing it would be unsafe. The `next_action` never tells a caller to switch to personal or broader credentials. HTTP status is fixed by v1.
+Every refusal uses the context contract's envelope: `{code, message, active_mode, retryable, next_action, correlation_id}`. `active_mode` is omitted when revealing it would be unsafe. Since task 19f6 it may also carry two optional fields about the caller's own request. `denied_action` is the refused operation (`reservation.<op>`, `reservation.status`, `reservation.receipt`, or the route pattern, such as `POST /v1/projects/{p}/tasks`). `active_role` is the caller's own verified team role, once aicrew has vouched for the session. Neither names another actor, a project's contents or a secret. The `next_action` never tells a caller to switch to personal or broader credentials. In team mode, `credential_scope_forbidden` directs the caller to start the conversation through aicrew. HTTP status is fixed by v1.
 
 | Code | Status | Retryable | Next action |
 | --- | --- | --- | --- |

@@ -109,7 +109,17 @@ HTTP and MCP must expose the same failure envelope: stable code, short explanati
 | work_outstanding | Leave/rotation transition has unreconciled attempt or request | Reconcile the named attempt through aicrew before switching. |
 | reservation_conflict | Task is held by another fenced owner or the revision changed | Read the current task/reservation and follow the coordination flow. |
 
-A response may identify the caller's active mode, project and own session/attempt reference, but not a secret. Lost replies are resolved through idempotent status/receipt reads before a new mutation. Server denials and client notices must distinguish denied, unavailable, stale and cached state.
+A response may identify the caller's active mode, project and own session/attempt reference, but not a secret.
+
+**Actionable refusals (task 19f6).** Each refusal may carry two optional fields: `denied_action`, the caller's own refused operation, and `active_role`, the caller's own verified team role once aicrew has vouched for the session. Its one next action is chosen by code, role and operation from a fixed table, and every other case keeps the code's own next action:
+
+| Code | Role | Operation | Next action |
+| --- | --- | --- | --- |
+| `role_forbidden` | worker | `reservation.claim` | Check your aicrew inbox and accept the offer; aimem claims for team work come only through aicrew. |
+| `role_forbidden` | independent | `reservation.claim` (without a proof) | Begin the independent claim through aicrew; it supplies the proof aimem requires. |
+| `role_forbidden` | coordinator | `reservation.update` | Work updates belong to the holder; review or reassign the work through aicrew. |
+
+In team mode, `credential_scope_forbidden` directs the caller to start the conversation through aicrew. A test holds every next action a team-mode caller can receive to this rule: it never advises another credential, a personal-mode retry or a bypass. The MCP passes the hub's `active_mode`, `denied_action` and `active_role` through unchanged. Lost replies are resolved through idempotent status/receipt reads before a new mutation. Server denials and client notices must distinguish denied, unavailable, stale and cached state.
 
 ## Verification gates and implementation split
 
