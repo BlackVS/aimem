@@ -34,6 +34,23 @@ This setting applies to projects using that hub unless they require a local
 override. Adding another project grant updates the token's authority on the
 hub without changing this setting. Never use an admin/checkpoint credential.
 
+Check it without showing any part of it:
+
+```sh
+aimem hub credential HUB_NAME          # or --json for a client to read
+```
+
+It prints whether an individual credential is `set` or `none`. When it is
+set, it asks the hub (`GET /v1/access/identity`, over the same verified TLS
+the identity proof uses) and prints the hub's answer:
+- `active`, with the scope and the user and token IDs;
+- `refused`: revoked, expired or unknown to the hub;
+- `unreachable`.
+
+The identity proof of a team session needs `set`, `active` and scope `user`.
+aicrew's client bootstrap runs this check before it spends an invitation
+attempt.
+
 ## Project-local override
 
 Ask the hub administrator for a project-scoped token using the existing

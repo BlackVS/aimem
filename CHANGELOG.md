@@ -106,6 +106,11 @@ Includes PR #55 and #110 to #155, except the unmerged #128.
 
   In team conversations and on the hub's `/mcp` the three tools use the
   caller's own authority and refuse any scope but the project.
+- **`aimem hub credential [<name>] [--json]`** reports whether this
+  installation holds an individual credential for a hub (`set` or `none`),
+  and, when set, the hub's answer for it: `active` with its scope and user
+  and token IDs, `refused`, or `unreachable`. It prints no part of any
+  secret. aicrew's client bootstrap checks it before an invitation attempt.
 - **OpenCode 2 support.**
   - The OpenCode plugin (`aimem.ts`) now loads on both OpenCode 1.x and
     2.x. OpenCode 2 rejects 1.x plugins, so the same file also carries a
