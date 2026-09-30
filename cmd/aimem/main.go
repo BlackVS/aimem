@@ -2242,8 +2242,11 @@ func hubCmd(args []string) error {
        aimem hub add <name> <url> <token> [--sync <ssh-dest>] [--default]
        aimem hub rm <name>
        aimem hub default <name>
-       aimem hub task-token <name> <ordinary-token>   credential the MCP task tools present to this hub`
+       aimem hub task-token <name> <ordinary-token>   credential the MCP task tools present to this hub
+       aimem hub credential [<name>] [--json]         whether an individual credential is set, and the hub's answer for it (no secret)`
 	switch args[0] {
+	case "credential":
+		return hubCredentialCmd(args[1:], os.Stdout)
 	case "task-token":
 		if len(args) != 3 {
 			return fmt.Errorf("%s", usage)
