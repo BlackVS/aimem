@@ -68,13 +68,30 @@ code and survives the session. Only BLOCKER findings return the PR to
 implementation; track follow-ups separately. Blockers are fixed or
 explicitly accepted by the user before merge; the merge click stays the user's.
 
-A review binds to the head it reviewed: a rebase, an "Update branch",
-or any new commit AFTER the posted review makes it stale — re-review
-before merge (a delta review of what changed since the reviewed head
-is enough when the base moved but the diff did not) and post the
-verdict again, naming the new head. Re-review fixes at **high** on the
-delta and re-trigger the external reviewer. Never push while
-`hands-reviewing` is present; wait for the result before changing the head.
+A review binds to the head it reviewed and to your change's patch. A
+new commit, or a base update that changes your own change (a conflict
+resolved with edits, anything you changed), makes the posted reviews
+stale. Re-review at **high** on the delta and post the verdict, naming
+the new head. Restore `WIP:`, clear `hands-reviewed` and re-add
+`review-this`.
+
+A base-only update keeps the existing verdicts (see
+[review gates](https://github.com/BlackVS/aiskills/blob/main/agents/review-gates.md)).
+A base-only update is the branch updated from master, with nothing else
+changed. It qualifies only if your change's patch identity is unchanged.
+Compute the identity before and after the update:
+
+    git diff $(git merge-base origin/master <head>) <head> | git patch-id --stable
+
+- **Same identity:** post a short delta note naming the old head, the
+  new head, both identities and the command. Do not re-add
+  `review-this`, do not restore `WIP:`, and leave `hands-reviewed` in
+  place. The PR stays ready on the existing verdicts. CI must still
+  pass on the new head.
+- **Different identity:** the full flow above.
+
+Never push while `hands-reviewing` is present; wait for the result
+before changing the head.
 Request external reviews with plain `review-this`; model selection belongs
 to the operator. Watch the result and read the comment for the reviewed head.
 
