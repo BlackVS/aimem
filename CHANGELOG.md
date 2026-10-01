@@ -123,6 +123,13 @@ Includes PR #55 and #110 to #155, except the unmerged #128.
   - OpenCode 2 has no toast API, so the context warning is given to the
     model instead of the user.
 
+### Removed
+
+- **`docs/aimem.service`**, an early hand-written systemd user unit that
+  nothing referenced. Its `ExecStart` pointed at a developer's local path,
+  so following its instructions produced a broken unit. The installers
+  (`install.sh`, `install-hub.sh`) write the real units.
+
 ### Upgrade notes
 
 - **Schema migrations, one way.**
