@@ -33,6 +33,20 @@ Includes PR #55 and #110 to #155, except the unmerged #128.
 
 ### Added
 
+- **A hub's private CA or pin from the CLI.** `aimem hub add NAME URL TOKEN
+  --ca-file PATH` (or `--pin sha256-BASE64`) records the hub's trust with
+  its entry; no hand-edited `hub.json`. Every client path to that hub uses
+  it: checkpoint pushes, sync, the MCP server and docs, the read clients,
+  the dashboard and team sessions. A re-add without the flag keeps it, an
+  explicit one replaces it, and an unreadable CA file is refused, naming
+  its path; a trust that cannot be loaded never falls back to the system
+  roots or to skipping verification.
+- **Hub tokens from a file or standard input.** `aimem hub add` and
+  `aimem hub task-token` take the token with `--token-file PATH` (a file
+  only you can read) or `--token-file -` (standard input), so no secret
+  goes on a command line or into shell history. A trailing LF or CRLF is
+  dropped; an unreadable, wider or multi-token file is refused, naming the
+  source, never its content.
 - **Identity and verified team context** (identity.v1):
   - The hub serves single-use identity proofs and aicrew's proof redemption.
   - `aimem identity` manages the aicrew peer, its credentials and team
@@ -209,7 +223,9 @@ hub-admin token file (`--hub https://HOST:PORT --admin-token-file PATH`).
    (`aimem access token-issue-user USER LABEL EXPIRY`), linked to their
    aicrew membership through a single-use `aimem identity proof`, which
    aicrew's client drives. A project-scoped or read-only token cannot
-   enter team mode.
+   enter team mode. When the hub's certificate is not in the system roots,
+   each member records its CA or pin with the hub entry
+   (`aimem hub add NAME URL TOKEN --ca-file PATH` or `--pin`).
 6. **Serve TLS from the hub itself** (`AIMEM_TLS_CERT`, `AIMEM_TLS_KEY`).
    Team mode refuses TLS terminated by a proxy.
 7. **On the pilot project:**

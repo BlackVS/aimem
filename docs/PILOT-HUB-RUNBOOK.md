@@ -28,6 +28,16 @@ What each step means is in [CHANGELOG `[Unreleased]`](../CHANGELOG.md), "Configu
     # add --hub-ca-file PATH or --hub-pin sha256-BASE64 when the hub's
     # certificate is not in the system roots
     ```
+  - **On each member's machine,** add the hub and the member's user-scoped token from files only the member can read, never on a command line. When the hub's certificate is not in the system roots, record its trust with the hub entry too. Do not edit `hub.json` by hand:
+
+    ```sh
+    aimem hub add pilot-hub https://hub.example.test:8443 --token-file writer.token --ca-file hub-ca.pem
+    # or: --pin sha256-BASE64 (the SHA-256 of the certificate's public key)
+    aimem hub task-token pilot-hub --token-file member.token
+    # --token-file - reads the token from standard input
+    ```
+
+    `aimem hub` then lists the hub with `ca-file:` (or `pin:`). Team sessions, the MCP server, docs and sync to that hub all use that trust. A later `hub add` of the same hub keeps it unless you give a new one. An unreadable CA file is refused, naming its path.
   - `aimem tasks`, `aimem process` and `aimem access` run on the hub host itself, against the local service.
 
 ## 1. The hub terminates TLS itself (P5)

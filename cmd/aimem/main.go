@@ -2226,6 +2226,12 @@ func hubCmd(args []string) error {
 			if h.Insecure {
 				line += "  [insecure: self-signed]"
 			}
+			if h.CAFile != "" {
+				line += "  ca-file:" + h.CAFile
+			}
+			if h.Pin != "" {
+				line += "  pin:" + h.Pin
+			}
 			if h.TaskToken != "" {
 				line += "  task-credential:set"
 			} else {
@@ -2239,37 +2245,59 @@ func hubCmd(args []string) error {
 		return nil
 	}
 	usage := `usage: aimem hub <url> <token>                      set/replace the default hub
-       aimem hub add <name> <url> <token> [--sync <ssh-dest>] [--default]
+       aimem hub add <name> <url> (<token> | --token-file PATH|-) [--sync <ssh-dest>] [--default] [--ca-file PATH | --pin sha256-BASE64]
        aimem hub rm <name>
        aimem hub default <name>
-       aimem hub task-token <name> <ordinary-token>   credential the MCP task tools present to this hub
+       aimem hub task-token <name> (<ordinary-token> | --token-file PATH|-)   credential the MCP task tools present to this hub
        aimem hub credential [<name>] [--json]         whether an individual credential is set, and the hub's answer for it (no secret)`
 	switch args[0] {
 	case "credential":
 		return hubCredentialCmd(args[1:], os.Stdout)
 	case "task-token":
-		if len(args) != 3 {
+		var pos []string
+		tokenFile := ""
+		for i := 1; i < len(args); i++ {
+			switch a := args[i]; {
+			case a == "--token-file" || a == "-token-file":
+				if i+1 >= len(args) {
+					return fmt.Errorf("%s", usage)
+				}
+				tokenFile, i = args[i+1], i+1
+			case strings.HasPrefix(a, "--token-file="):
+				tokenFile = strings.TrimPrefix(a, "--token-file=")
+			default:
+				pos = append(pos, a)
+			}
+		}
+		if len(pos) < 1 || len(pos) > 2 {
 			return fmt.Errorf("%s", usage)
 		}
 		hubs, def := adapter.LoadHubs(root)
-		h, ok := hubs[args[1]]
+		h, ok := hubs[pos[0]]
 		if !ok {
-			return fmt.Errorf("no hub named %q", args[1])
+			return fmt.Errorf("no hub named %q", pos[0])
 		}
-		if !strings.HasPrefix(args[2], "aimem_user_") {
+		tok, err := hubTokenArg(pos[1:], tokenFile)
+		if err != nil {
+			return err
+		}
+		if !strings.HasPrefix(tok, "aimem_user_") {
 			return fmt.Errorf("task credential must be an ordinary token issued by the hub admin (aimem access token-issue), not the hub's checkpoint token")
 		}
-		h.TaskToken = args[2]
+		h.TaskToken = tok
 		if err := adapter.SaveHubs(root, hubs, def); err != nil {
 			return err
 		}
-		fmt.Printf("task credential stored for hub %q; MCP task tools use it\n", args[1])
+		fmt.Printf("task credential stored for hub %q; MCP task tools use it\n", pos[0])
 		return nil
 	case "add":
 		fs := flag.NewFlagSet("hub add", flag.ExitOnError)
 		syncDest := fs.String("sync", "", "ssh destination for `aimem sync --hub <name>` (e.g. aimem@hub.example.com)")
 		makeDefault := fs.Bool("default", false, "make this hub the default for unbound projects")
 		insecure := fs.Bool("insecure", false, "skip TLS verification (hub still on its self-signed cert)")
+		caFile := fs.String("ca-file", "", "trust this CA bundle for the hub (a private CA)")
+		pin := fs.String("pin", "", "trust the hub certificate with this SPKI SHA-256 (sha256-BASE64)")
+		tokenFile := fs.String("token-file", "", "read the token from this private file (- for standard input)")
 		rest := args[1:]
 		var pos []string
 		// flag package stops at the first non-flag arg; accept flags after
@@ -2283,18 +2311,27 @@ func hubCmd(args []string) error {
 			pos = append(pos, rest[0])
 			rest = rest[1:]
 		}
-		if len(pos) != 3 {
+		if len(pos) < 2 || len(pos) > 3 {
 			return fmt.Errorf("%s", usage)
+		}
+		token, err := hubTokenArg(pos[2:], *tokenFile)
+		if err != nil {
+			return err
 		}
 		name := pos[0]
 		if _, err := ident.GroupProject(name); err != nil {
 			return fmt.Errorf("invalid hub name %q (want lowercase letters, digits, dashes)", name)
 		}
+		trustCA, trustPin, err := hubTrust(*caFile, *pin, *insecure)
+		if err != nil {
+			return err
+		}
 		hubs, def := adapter.LoadHubs(root)
 		if hubs == nil {
 			hubs = map[string]*adapter.HubConfig{}
 		}
-		hubs[name] = (&adapter.HubConfig{URL: strings.TrimRight(pos[1], "/"), Token: pos[2], Sync: *syncDest, Insecure: *insecure}).Over(hubs[name])
+		hubs[name] = (&adapter.HubConfig{URL: strings.TrimRight(pos[1], "/"), Token: token, Sync: *syncDest, Insecure: *insecure,
+			CAFile: trustCA, Pin: trustPin}).Over(hubs[name])
 		if *makeDefault || def == "" {
 			def = name
 		}

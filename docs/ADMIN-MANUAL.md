@@ -65,9 +65,11 @@ curl -fsSL https://raw.githubusercontent.com/BlackVS/aimem/master/install-hub.sh
 Knobs (env): `AIMEM_HUB_USER` (default sessiond), `AIMEM_HTTP_LISTEN`
 (:8440), `AIMEM_HTTP_TOKEN` (generated if unset — printed at the end),
 `AIMEM_DOMAIN=<fqdn>` (generates a **self-signed** cert for that name
-into `~/.config/aimem/tls/` and serves TLS — clients connect with
-`aimem hub add ... --insecure` until you install a real certificate;
-then drop the flag),
+into `~/.config/aimem/tls/` and serves TLS — clients either record that
+certificate with `aimem hub add ... --ca-file cert.pem` (or its key with
+`--pin sha256-BASE64`) and keep verification on, or connect with
+`aimem hub add ... --insecure` until you install a real certificate and
+then drop the flag; team mode accepts only the first),
 `AIMEM_TLS_CERT`/`AIMEM_TLS_KEY` (explicit cert paths; nothing set =
 plain HTTP), `AIMEM_OPENAI_API_KEY` + `AIMEM_OPENAI_BASE_URL` + models
 (enables the curation timer's LLM work). Idempotent: re-run to upgrade

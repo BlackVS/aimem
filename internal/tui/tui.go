@@ -858,7 +858,7 @@ func collect(root string, selected int) snapshot {
 	if hubs, def := adapter.LoadHubs(root); hubs != nil {
 		for _, name := range slices.Sorted(maps.Keys(hubs)) {
 			h := hubs[name]
-			res, projs, pace, ok := cachedHubHealth(h.URL+"/v1/health", h.Token, h.Insecure)
+			res, projs, pace, ok := cachedHubHealth(h.URL+"/v1/health", h.Token, tuiClient(h))
 			s.Hubs = append(s.Hubs, hubLine{
 				Name: name, URL: h.URL, Sync: h.Sync, Default: name == def,
 				Res: res, Projects: projs, Pace: pace, OK: ok})
@@ -996,16 +996,24 @@ var tuiHubHTTPInsecure = &http.Client{
 	Transport: &http.Transport{TLSClientConfig: &tls.Config{InsecureSkipVerify: true}},
 }
 
-func fetchHubHealth(url, token string, insecure bool) (map[string]any, int, map[string]any, bool) {
+// tuiClient is the dashboard's client for a hub: its ca_file or pin when
+// set, else the self-signed phase or the system roots.
+func tuiClient(h *adapter.HubConfig) *http.Client {
+	switch {
+	case h.CAFile != "" || h.Pin != "":
+		return h.Client(1500 * time.Millisecond)
+	case h.Insecure:
+		return tuiHubHTTPInsecure
+	}
+	return tuiHubHTTP
+}
+
+func fetchHubHealth(url, token string, cl *http.Client) (map[string]any, int, map[string]any, bool) {
 	req, err := http.NewRequest("GET", url, nil)
 	if err != nil {
 		return nil, 0, nil, false
 	}
 	req.Header.Set("Authorization", "Bearer "+token)
-	cl := tuiHubHTTP
-	if insecure {
-		cl = tuiHubHTTPInsecure
-	}
 	resp, err := cl.Do(req)
 	if err != nil {
 		return nil, 0, nil, false
@@ -1184,7 +1192,7 @@ var hubHealthCache struct {
 	by map[string]*hubHealthEntry // keyed by health URL
 }
 
-func cachedHubHealth(url, token string, insecure bool) (map[string]any, int, map[string]any, bool) {
+func cachedHubHealth(url, token string, cl *http.Client) (map[string]any, int, map[string]any, bool) {
 	hubHealthCache.mu.Lock()
 	defer hubHealthCache.mu.Unlock()
 	if hubHealthCache.by == nil {
@@ -1195,7 +1203,7 @@ func cachedHubHealth(url, token string, insecure bool) (map[string]any, int, map
 		return e.res, e.projs, e.pace, e.ok
 	}
 	e = &hubHealthEntry{at: time.Now()}
-	e.res, e.projs, e.pace, e.ok = fetchHubHealth(url, token, insecure)
+	e.res, e.projs, e.pace, e.ok = fetchHubHealth(url, token, cl)
 	hubHealthCache.by[url] = e
 	return e.res, e.projs, e.pace, e.ok
 }

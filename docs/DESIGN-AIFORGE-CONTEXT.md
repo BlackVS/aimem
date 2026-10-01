@@ -155,7 +155,7 @@ The file holds the hub name and URL, the user and token IDs, the service, team a
 
 **Context per process.** Aicrew starts the agent process with `AIMEM_TEAM_SESSION=<path>`. That conversation's `aimem mcp` inherits it, and no host-wide setting exists.
 - At start the process pins the hub, user, service, team and session.
-- Every hub call re-reads the file and carries the handle in `X-Aimem-Team-Context`. It uses the individual credential over verified TLS: the hub's `ca_file` in `hub.json`, or the system roots. A hub configured `insecure` or without https is refused.
+- Every hub call re-reads the file and carries the handle in `X-Aimem-Team-Context`. It uses the individual credential over verified TLS: the hub's `ca_file` or `pin` in `hub.json` (recorded by `aimem hub add … --ca-file` or `--pin`), or the system roots. A hub configured `insecure` or without https is refused.
 - Only the handle, its expiry, the token ID and the generation may change. A changed pinned field, or a missing or unusable file, blocks the process for good.
 - The context is verified online, through the hub's context report, before the first tool and again after any team refusal. Until then every tool refuses with the hub's envelope. Nothing falls back to personal mode, the local socket or a checkout's credential.
 - The tool list is exactly the hub's team read routes plus `session_context`. Every other tool is hidden and refused if called.
