@@ -88,7 +88,7 @@
       "response": {
         "receipt": {"id": "receipt-update-1", "state": "committed", "operation": "update", "request_key": "update-example-1", "replayed": false, "actor_id": "worker-example", "verified_mode": "team"},
         "task_revision": 4,
-        "reservation": {"id": "01a0d755-0000-7000-8000-000000000012", "fence": "2", "active": true, "holder_mode": "external", "own_work_ref": "attempt-example-3"}
+        "reservation": {"id": "01a0d755-0000-7000-8000-000000000012", "fence": "3", "active": true, "holder_mode": "external", "own_work_ref": "attempt-example-3"}
       }
     },
     {
@@ -118,7 +118,7 @@
       "request": {
         "expected_revision": 4,
         "reservation_id": "01a0d755-0000-7000-8000-000000000012",
-        "fence": "2",
+        "fence": "3",
         "reason": "reviewed delivery merged",
         "content": {"title": "Example task", "objective": "Deliver example result", "acceptance_criteria": "Reviewed result", "non_goals": "No deploy", "state": "DONE", "blocker": "", "dependencies": [], "candidate_refs": [{"kind": "commit", "ref": "https://example.invalid/commit/1"}], "evidence_refs": [{"kind": "pr", "ref": "https://example.invalid/pull/1"}], "next_action": "Complete", "archived": false},
         "terminal_evidence": ["review-head-example", "human-merge-example", "post-merge-ci-example"],
@@ -127,7 +127,7 @@
       "response": {
         "receipt": {"id": "receipt-finalize-1", "state": "committed", "operation": "finalize", "request_key": "finalize-example-1", "replayed": false, "actor_id": "reviewing-coordinator-example", "verified_mode": "team"},
         "task_revision": 5,
-        "reservation": {"id": "", "fence": "3", "active": false}
+        "reservation": {"id": "", "fence": "4", "active": false}
       }
     }
   ],
@@ -136,7 +136,7 @@
     {"case": "call_not_committed", "operation": "claim", "request_key": "claim-example-4", "receipt_state": "not_committed", "replayed": false, "next_action": "retry same key"},
     {"case": "ambiguous_commit", "operation": "claim", "request_key": "claim-example-5", "receipt_state": "unresolved", "replayed": false, "next_action": "stop and reconcile same key"}
   ],
-  "status_example": {"state": "held", "reservation_id": "01a0d755-0000-7000-8000-000000000012", "fence": "2", "own_work_ref": "attempt-example-3", "task_revision": 4},
+  "status_example": {"state": "held", "reservation_id": "01a0d755-0000-7000-8000-000000000012", "fence": "3", "own_work_ref": "attempt-example-3", "task_revision": 4},
   "refusal_envelope_example": {"code": "context_unavailable", "message": "The selected team context could not be verified.", "active_mode": "team", "retryable": true, "next_action": "Retry verification later with the same context and key.", "correlation_id": "correlation-example-1"},
   "refusals": [
     {"case": "revoked_token", "code": "invalid_credential", "http_status": 401, "retryable": false, "active_mode": null, "next_action": "Recover the individual credential through the authorized flow."},
