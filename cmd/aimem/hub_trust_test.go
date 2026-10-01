@@ -171,7 +171,7 @@ func TestHubTokenFile(t *testing.T) {
 	before := *storedHub(t, "pilot")
 	missing := filepath.Join(dir, "absent.token")
 	wide := filepath.Join(dir, "wide.token")
-	os.WriteFile(wide, []byte("aimem_user_wide\n"), 0o644)
+	writeWide(t, wide, "aimem_user_wide\n")
 	two := filepath.Join(dir, "two.token")
 	writePrivate(t, two, "aimem_user_a aimem_user_b\n")
 	empty := filepath.Join(dir, "empty.token")
