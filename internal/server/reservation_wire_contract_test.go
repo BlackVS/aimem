@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"regexp"
+	"strconv"
 	"strings"
 	"testing"
 )
@@ -65,9 +66,10 @@ func TestReservationV1FixtureAndProposedSurface(t *testing.T) {
 			SameReceiptID string `json:"same_receipt_id"`
 		} `json:"reconciliation"`
 		StatusExample struct {
-			State      string `json:"state"`
-			Fence      string `json:"fence"`
-			OwnWorkRef string `json:"own_work_ref"`
+			State        string `json:"state"`
+			Fence        string `json:"fence"`
+			OwnWorkRef   string `json:"own_work_ref"`
+			TaskRevision int64  `json:"task_revision"`
 		} `json:"status_example"`
 		RefusalEnvelope struct {
 			Code          string `json:"code"`
@@ -170,6 +172,7 @@ func TestReservationV1FixtureAndProposedSurface(t *testing.T) {
 		Revision  int64
 		ReceiptID string
 	}{}
+	reqFence := map[string]string{} // the fence each mutation presents
 	for _, ex := range examples.Mutations {
 		if !strings.HasPrefix(ex.MCPTool, "task_reservation_") || ex.MCPTool != spec.Parity[ex.Operation] {
 			t.Errorf("%s has no HTTP/MCP parity", ex.ActorCase)
@@ -180,6 +183,19 @@ func TestReservationV1FixtureAndProposedSurface(t *testing.T) {
 			Revision  int64
 			ReceiptID string
 		}{ex.Response.Reservation.Fence, ex.Response.TaskRevision, ex.Response.Receipt.ID}
+		if ex.Operation != "claim" {
+			var f string
+			if err := json.Unmarshal(ex.Request["fence"], &f); err != nil {
+				t.Errorf("%s request fence: %v", ex.ActorCase, err)
+			}
+			reqFence[ex.ActorCase] = f
+			// aimem advances the fence on every mutation (advanceReservation):
+			// the answer is always the presented fence plus one.
+			req, _ := strconv.Atoi(f)
+			if resp, _ := strconv.Atoi(ex.Response.Reservation.Fence); resp != req+1 {
+				t.Errorf("%s answers fence %s for fence %s; every mutation advances it by one", ex.ActorCase, ex.Response.Reservation.Fence, f)
+			}
+		}
 		if ex.RequestKey == "" || ex.Response.Receipt.ID == "" || ex.Response.Receipt.State != "committed" || ex.Response.Receipt.Operation != ex.Operation || ex.Response.Receipt.RequestKey != ex.RequestKey {
 			t.Errorf("%s receipt does not bind original operation/key", ex.ActorCase)
 		}
@@ -246,9 +262,22 @@ func TestReservationV1FixtureAndProposedSurface(t *testing.T) {
 	update := byCase["worker_submit"]
 	finalize := byCase["verified_reviewing_coordinator"]
 	release := byCase["successor_coordinator_unaccepted_offer"]
-	if offer.Fence != "1" || transfer.Fence != "2" || update.Fence != "2" || finalize.Fence != "3" || release.Fence != "2" ||
+	if offer.Fence != "1" || transfer.Fence != "2" || update.Fence != "3" || finalize.Fence != "4" || release.Fence != "2" ||
 		offer.Revision != 3 || transfer.Revision != 3 || update.Revision != 4 || finalize.Revision != 5 || release.Revision != 4 {
 		t.Error("offer, accepted-work, terminal and decline fixture ordering disagree")
+	}
+	// Each step presents the fence the step before it answered; release
+	// forks from the offer.
+	for step, prev := range map[string]string{"accepted_offer_to_worker": offer.Fence, "worker_submit": transfer.Fence,
+		"verified_reviewing_coordinator": update.Fence, "successor_coordinator_unaccepted_offer": offer.Fence} {
+		if reqFence[step] != prev {
+			t.Errorf("%s presents fence %s, but the step before it answered %s", step, reqFence[step], prev)
+		}
+	}
+	// The held status is read after the worker's update.
+	if examples.StatusExample.Fence != update.Fence || examples.StatusExample.TaskRevision != update.Revision {
+		t.Errorf("the held status (fence %s, revision %d) is not the state after the update (fence %s, revision %d)",
+			examples.StatusExample.Fence, examples.StatusExample.TaskRevision, update.Fence, update.Revision)
 	}
 	if !seen["claim"] || len(examples.Reconciliation) < 3 {
 		t.Error("claim/reconciliation examples incomplete")
