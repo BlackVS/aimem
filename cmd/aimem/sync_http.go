@@ -8,7 +8,6 @@ package main
 
 import (
 	"bufio"
-	"crypto/tls"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -97,11 +96,7 @@ func syncHub(name string, h *adapter.HubConfig, def, destOverride string) error 
 // syncHTTPClient allows minutes-long streams (a first sync moves whole
 // journals); the adapter's 5s client is for checkpoint pushes only.
 func syncHTTPClient(h *adapter.HubConfig) *http.Client {
-	c := &http.Client{Timeout: 15 * time.Minute}
-	if h.Insecure {
-		c.Transport = &http.Transport{TLSClientConfig: &tls.Config{InsecureSkipVerify: true}}
-	}
-	return c
+	return h.Client(15 * time.Minute)
 }
 
 func syncDo(h *adapter.HubConfig, method, path string, q url.Values, body io.Reader) (*http.Response, error) {

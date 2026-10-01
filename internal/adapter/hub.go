@@ -61,15 +61,22 @@ type HubConfig struct {
 	// self-signed phase of a fresh hub (still TLS on the wire + bearer
 	// token). Drop it once a real certificate is installed.
 	Insecure bool `json:"insecure,omitempty"`
-	// CAFile, when set, is the PEM bundle a team-mode client trusts for
-	// this hub instead of the system roots (a hub with a private CA). Team
-	// mode never skips verification; personal traffic ignores this field.
+	// CAFile, when set, is the PEM bundle every client path trusts for
+	// this hub instead of the system roots (a hub with a private CA).
+	// `aimem hub add … --ca-file` records it.
 	CAFile string `json:"ca_file,omitempty"`
+	// Pin, when set, is the SHA-256 of the hub certificate's public key
+	// (sha256-BASE64): the hub is trusted by that key alone. At most one of
+	// CAFile and Pin; `aimem hub add … --pin` records it.
+	Pin string `json:"pin,omitempty"`
 }
 
-// HTTPClient returns the client to talk to this hub with, honoring the
-// self-signed phase.
+// HTTPClient returns the client to talk to this hub with: its ca_file or
+// pin when set (TLSConfig), else the self-signed phase or the system roots.
 func (h *HubConfig) HTTPClient() *http.Client {
+	if h.CAFile != "" || h.Pin != "" {
+		return h.cachedClient()
+	}
 	if h.Insecure {
 		return hubHTTPInsecure
 	}
@@ -176,7 +183,8 @@ func SaveHub(root string, c *HubConfig) error {
 
 // Over returns c completed from prev for a re-run of `hub add` / `hub <url>
 // <token>` against the SAME host: the sync destination and the task
-// credential carry over when not restated. A different URL inherits
+// credential carry over when not restated, and so does the hub's trust
+// (ca_file or pin) unless a new one is given. A different URL inherits
 // nothing (a per-user credential must never travel to another host), and
 // the TLS downgrade is never inherited: --insecure is restated or gone.
 func (c *HubConfig) Over(prev *HubConfig) *HubConfig {
@@ -189,6 +197,9 @@ func (c *HubConfig) Over(prev *HubConfig) *HubConfig {
 	}
 	if out.TaskToken == "" {
 		out.TaskToken = prev.TaskToken
+	}
+	if out.CAFile == "" && out.Pin == "" {
+		out.CAFile, out.Pin = prev.CAFile, prev.Pin
 	}
 	return &out
 }

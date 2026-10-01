@@ -16,8 +16,6 @@ import (
 	"bytes"
 	"context"
 	"crypto/sha256"
-	"crypto/tls"
-	"crypto/x509"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -235,19 +233,12 @@ func HubClient(h *adapter.HubConfig) (*http.Client, error) {
 		return nil, errors.New("team mode needs an https hub URL; the hub's own TLS carries the handle")
 	}
 	if h.Insecure {
-		return nil, errors.New("team mode refuses a hub configured with insecure (certificate verification skipped); set its ca_file instead")
+		return nil, errors.New("team mode refuses a hub configured with insecure (certificate verification skipped); " +
+			"record its CA or pin instead (aimem hub add NAME URL TOKEN --ca-file PATH or --pin sha256-BASE64)")
 	}
-	cfg := &tls.Config{MinVersion: tls.VersionTLS12}
-	if h.CAFile != "" {
-		pem, err := os.ReadFile(h.CAFile)
-		if err != nil {
-			return nil, fmt.Errorf("the hub's ca_file: %w", err)
-		}
-		pool := x509.NewCertPool()
-		if !pool.AppendCertsFromPEM(pem) {
-			return nil, errors.New("the hub's ca_file holds no PEM certificate")
-		}
-		cfg.RootCAs = pool
+	cfg, err := h.TLSConfig() // the hub's ca_file or pin; never skips verification here
+	if err != nil {
+		return nil, err
 	}
 	return &http.Client{
 		Timeout:       30 * time.Second,
