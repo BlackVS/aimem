@@ -406,8 +406,10 @@ git tag v0.2.0 && git push origin v0.2.0
 ```
 
 `.github/workflows/release.yml` runs the tests, cross-builds static
-binaries (CGO_ENABLED=0) for linux/darwin amd64+arm64 and windows-amd64
-with `SHA256SUMS`, and publishes them as release assets. `boot.sh` and
+binaries (CGO_ENABLED=0) for linux/darwin amd64+arm64 and windows-amd64.
+It publishes them as release assets with `LICENSE` and a `SHA256SUMS` that
+covers both. The release notes are the tag's CHANGELOG section, followed by
+the license URL and the `Required Notice:` lines from `LICENSE`. `boot.sh` and
 `boot.ps1` always fetch the latest release. `.github/workflows/ci.yml`
 runs vet and tests on Linux, Windows and macOS for every push and pull
 request.

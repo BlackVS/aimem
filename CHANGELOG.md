@@ -136,6 +136,11 @@ Includes PR #55 and #110 to #155, except the unmerged #128.
     handoff to each model request itself.
   - OpenCode 2 has no toast API, so the context warning is given to the
     model instead of the user.
+- **The license travels with every release.** `LICENSE` is attached as a
+  release asset and listed in `SHA256SUMS`. The release notes end with the
+  license URL and the `Required Notice:` lines, and the release workflow
+  stops if `LICENSE` has none. The installers check only their own binary's
+  line in `SHA256SUMS`, so they are unaffected.
 
 ### Removed
 
