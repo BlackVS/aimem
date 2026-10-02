@@ -98,7 +98,9 @@ func TestTeamConversationHooksCaptureAndRecallNothing(t *testing.T) {
 		t.Fatalf("team session-start: %v %s", err, errOut)
 	}
 	if !strings.Contains(out, "HANDOFF-MARKER") || !strings.Contains(out, "aicrew team conversation") ||
-		strings.Contains(out, "Possibly relevant knowledge") || strings.Contains(out, "Process context") {
+		strings.Contains(out, "Possibly relevant knowledge") || strings.Contains(out, "Process context") ||
+		strings.Contains(out, "writing_rule") { // a team reads the rule with its role set
+
 		t.Fatalf("team session-start output: %s", out)
 	}
 	if g.count() != hubBefore {

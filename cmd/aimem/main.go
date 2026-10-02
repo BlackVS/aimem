@@ -47,17 +47,9 @@ import (
 // source builds report "dev".
 var version = "dev"
 
-func stateRoot() string {
-	if v := os.Getenv("AIMEM_STATE_DIR"); v != "" {
-		return v
-	}
-	base := os.Getenv("XDG_STATE_HOME")
-	if base == "" {
-		home, _ := os.UserHomeDir()
-		base = filepath.Join(home, ".local", "state")
-	}
-	return filepath.Join(base, "aimem")
-}
+// stateRoot is the client state root (adapter.StateRoot, which fails closed
+// in tests without an isolated AIMEM_STATE_DIR).
+func stateRoot() string { return adapter.StateRoot() }
 
 func main() {
 	if len(os.Args) < 2 {
@@ -507,9 +499,9 @@ func sessionStartCmd(args []string) error {
 	// availability notice (docs/DESIGN-kanban-docs.md). Bounded; never a
 	// blocked session start.
 	ctx += processNotice()
-	if ctx == "" {
-		return nil
-	}
+	// The rule for kept text (docs/WRITING-PERSISTED-TEXT.md) also covers the
+	// Markdown files an agent saves, which no write tool's description reaches.
+	ctx += writingNotice
 	return json.NewEncoder(os.Stdout).Encode(map[string]any{
 		"hookSpecificOutput": map[string]any{
 			"hookEventName":     "SessionStart",
@@ -517,6 +509,12 @@ func sessionStartCmd(args []string) error {
 		},
 	})
 }
+
+// writingNotice is the session-start line for the rule for kept text. A
+// team conversation reads the same rule as a section of its role set.
+const writingNotice = "\n\naimem: text you keep is read later by people and sessions without this conversation. " +
+	"In the Markdown files you save and in what you send to aimem's write tools, write complete, normally spaced sentences " +
+	"and keep code, paths and IDs exact; the full rule is the writing_rule MCP tool."
 
 // mergePreviewNotice is the offline conflict beacon (DESIGN-doc-collab):
 // a <file>.merge preview left by sync's reconcile means hub and this

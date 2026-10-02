@@ -13,6 +13,57 @@ currently 23); a binary refuses a database newer than it understands.
 
 ## [Unreleased]
 
+### Added
+
+- **One rule keeps the text agents keep readable.**
+  [`docs/WRITING-PERSISTED-TEXT.md`](docs/WRITING-PERSISTED-TEXT.md)
+  covers:
+  - its scope: the exact text sent to a write tool (task fields and
+    comments, documents, memories, records, team messages and reasons)
+    and the Markdown files agents save;
+  - what it requires: complete, normally spaced sentences, named actors,
+    explained abbreviations, and code, paths and IDs kept exact;
+  - that shortening by compression is never allowed, even under time or
+    context pressure;
+  - a quick check before each write, invented examples and a review
+    checklist.
+
+  It complements the `oh-technical-writing` skill instead of competing
+  with it. It is delivered:
+  - by the new `writing_rule` MCP tool, on the personal and hub endpoints
+    and in team conversations. It returns the rule with its version,
+    digest and terminator line.
+  - by one fixed sentence at the end of every write tool's description,
+    pointing to `writing_rule`. A test classifies every listed tool, so a
+    new write tool cannot ship without it.
+  - by one line at session start (Claude Code and Codex) for saved
+    Markdown, which no tool description reaches.
+  - by the team guidance: every role's required set now includes the
+    section `writing`, which changes the guidance digest.
+
+### Changed
+
+- **Tests cannot reach a real hub through the client state root.** The
+  CLI and the MCP server now resolve the state root in one place
+  (`adapter.StateRoot`). In a test binary it fails closed without an
+  isolated `AIMEM_STATE_DIR`, instead of falling back to the developer's
+  home directory. This changes nothing outside tests.
+
+### Upgrade notes
+
+- **Rollout of the writing rule.**
+  - A machine receives the tool and the description sentence when its
+    `aimem` binary is upgraded and the client restarts its MCP server.
+  - It receives the session-start line at the next session after the
+    upgrade; the hook command is unchanged, so no reinstall is needed.
+  - Clients of a hub's `/mcp` endpoint receive the tool when the hub is
+    upgraded.
+  - Team members receive the `writing` section when they read their role
+    set at the new guidance digest. aicrew pins no guidance digest; its
+    interim copy of the rule (in its managed role guidance) can now point
+    to this section instead.
+  - A repository edit alone delivers none of this.
+
 ## [0.7.4] — 2026-10-02
 
 AIForge prerequisites: aimem can now serve an aicrew team as a verified,

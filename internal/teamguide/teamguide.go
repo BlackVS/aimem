@@ -47,6 +47,7 @@ const (
 	MaxUnitBytes    = 128 << 10
 
 	playbookFile = "TEAM-PLAYBOOKS.md"
+	writingFile  = "WRITING-PERSISTED-TEXT.md"
 	examplesDir  = "examples/team"
 	sourcePrefix = "docs/"
 )
@@ -68,11 +69,16 @@ var playbookSections = []struct{ heading, id string }{
 	{"Where the process rules live", "process-authority"},
 }
 
-// roleSections are the playbook sections each role needs before work. The
+// WritingSection is the id of the rule for kept text (docs/WRITING-PERSISTED-TEXT.md),
+// one whole section that every role requires: team members write task
+// comments, submissions and reasons that others read later.
+const WritingSection = "writing"
+
+// roleSections are the sections each role needs before work. The
 // templates those sections link to are added to the set by the build.
 var roleSections = map[string][]string{
-	"coordinator": {"common", "responsiveness", "coordinator", "questions", "escalation", "process-authority"},
-	"worker":      {"common", "responsiveness", "worker", "questions", "escalation", "process-authority"},
+	"coordinator": {"common", "responsiveness", "coordinator", "questions", "escalation", "process-authority", WritingSection},
+	"worker":      {"common", "responsiveness", "worker", "questions", "escalation", "process-authority", WritingSection},
 }
 
 // informative are the relative link targets the unit does not deliver, with
@@ -181,8 +187,13 @@ func Build(fsys fs.FS) (*Unit, error) {
 	if err != nil {
 		return nil, err
 	}
+	writing, err := wholeFile(fsys, writingFile, WritingSection)
+	if err != nil {
+		return nil, err
+	}
+	parts = append(parts, writing)
 	for _, p := range parts {
-		if err := add(p.id, p.title, sourcePrefix+playbookFile, p.body); err != nil {
+		if err := add(p.id, p.title, sourcePrefix+p.source, p.body); err != nil {
 			return nil, err
 		}
 	}
@@ -250,8 +261,22 @@ func Build(fsys fs.FS) (*Unit, error) {
 }
 
 type part struct {
-	id, title string
-	body      []byte
+	id, title, source string
+	body              []byte
+}
+
+// wholeFile is a document delivered as one section, titled by its first
+// heading.
+func wholeFile(fsys fs.FS, name, id string) (part, error) {
+	raw, err := fs.ReadFile(fsys, name)
+	if err != nil {
+		return part{}, fmt.Errorf("team guidance: %w", err)
+	}
+	first, _, _ := strings.Cut(string(raw), "\n")
+	if !strings.HasPrefix(first, "# ") {
+		return part{}, fmt.Errorf("team guidance: %s must start with its title heading", name)
+	}
+	return part{id: id, title: strings.TrimSpace(strings.TrimPrefix(first, "# ")), source: name, body: raw}, nil
 }
 
 // splitPlaybook cuts the playbook at its second-level headings and maps
@@ -265,7 +290,7 @@ func splitPlaybook(raw []byte) ([]part, error) {
 	start, heading := 0, ""
 	title := strings.TrimSpace(strings.TrimPrefix(lines[0], "# "))
 	flush := func(end int) {
-		parts = append(parts, part{title: heading, body: []byte(strings.Join(lines[start:end], ""))})
+		parts = append(parts, part{title: heading, source: playbookFile, body: []byte(strings.Join(lines[start:end], ""))})
 	}
 	for i, l := range lines {
 		if strings.HasPrefix(l, "## ") {

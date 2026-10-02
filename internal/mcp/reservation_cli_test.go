@@ -237,6 +237,7 @@ func TestReservationCLITeam(t *testing.T) {
 	// chooser serves that team conversation, blocked, and sends nothing: no
 	// fallback to the personal credential.
 	before := len(h.requests())
+	t.Setenv("AIMEM_STATE_DIR", t.TempDir()) // the chooser resolves the state root; never the real one
 	t.Setenv(teamsession.EnvVar, filepath.Join(t.TempDir(), "missing-session.json"))
 	if out, code := ReservationCommand(context.Background(), ReservationRequest{Command: "status", TaskID: "t-1"}); code != ExitFinal ||
 		envelopeCode(t, out) != "context_missing" {

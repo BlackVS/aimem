@@ -136,6 +136,13 @@ permission; it accepts no path, URL or command. Every read ends with a
 terminator line naming the unit, version and digest: text without it was
 cut by the client, so read the sections one at a time.
 
+Every role's required set includes the section `writing`: the rule for text
+that is kept (task comments, submissions, reasons, messages and saved
+Markdown), from [WRITING-PERSISTED-TEXT.md](WRITING-PERSISTED-TEXT.md). The
+same rule is the `writing_rule` tool on every endpoint, a team conversation
+included, and each write tool's description ends with a sentence pointing
+to it.
+
 Tools: `team_list` (the teams enrolling your credential, with coordinator
 eligibility and whether a coordinator is active; read only, no session
 needed), `team_join`, `team_members`, `team_profile`, `team_heartbeat`,

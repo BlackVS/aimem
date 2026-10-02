@@ -80,6 +80,11 @@ Recovery from a crash never depends on an LLM being available.
 - **Knowledge groups** let consenting projects share curated facts.
   Sharing is opt-in and physically scoped: each group is its own database,
   and raw journals never cross a project boundary.
+- **Kept text stays readable.** One rule,
+  [WRITING-PERSISTED-TEXT.md](docs/WRITING-PERSISTED-TEXT.md), covers what
+  agents keep: task fields and comments, documents, memories, records and
+  saved Markdown. Agents read it through the `writing_rule` MCP tool. Every
+  write tool's description and the session start point to it.
 
 ### Recall
 

@@ -163,7 +163,9 @@ func TestTeamModeToolListMatchesHubTeamRoutes(t *testing.T) {
 		"list_docs":     "GET /v1/projects/{p}/docs",
 		"read_doc":      "GET /v1/projects/{p}/docs/{name}",
 	}
-	var want []string
+	// Local tools read only this binary and reach no route.
+	localOnly := []string{writingTool}
+	want := append([]string{}, localOnly...)
 	for n := range toolRoute {
 		want = append(want, n)
 	}
@@ -200,6 +202,13 @@ func TestTeamModeToolListMatchesHubTeamRoutes(t *testing.T) {
 	}
 	if len(h.requests()) != 0 {
 		t.Fatal("listing tools called the hub")
+	}
+	// The rule is served in a team conversation without asking any hub.
+	if text, isErr := teamCall(t, s, writingTool, map[string]any{}); isErr || !strings.Contains(text, "=== end aimem-writing-rule") {
+		t.Fatalf("writing_rule in team mode: %v %.200s", isErr, text)
+	}
+	if len(h.requests()) != 0 {
+		t.Fatal("writing_rule called the hub")
 	}
 }
 
