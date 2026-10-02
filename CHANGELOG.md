@@ -59,8 +59,9 @@ currently 23); a binary refuses a database newer than it understands.
   - Clients of a hub's `/mcp` endpoint receive the tool when the hub is
     upgraded.
   - Team members receive the `writing` section when they read their role
-    set at the new guidance digest. A pinned guidance digest (for example
-    in aicrew) must be updated to the new one.
+    set at the new guidance digest. aicrew pins no guidance digest; its
+    interim copy of the rule (in its managed role guidance) can now point
+    to this section instead.
   - A repository edit alone delivers none of this.
 
 ## [0.7.4] — 2026-10-02
