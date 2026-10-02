@@ -367,7 +367,7 @@ func (s *srv) toolCall(ctx context.Context, req rpcRequest) []byte {
 	case s.team != nil:
 		text, err = s.teamToolCall(ctx, head.Name, head.Arguments)
 	case isGuidanceTool(head.Name):
-		text, err = guidanceTool(head.Arguments)
+		text, err = guidanceTool(head.Name, head.Arguments)
 	case (isTaskTool(head.Name) || isOnboardTool(head.Name) || isProcessTool(head.Name)) && s.taskState == taskStateDisabled:
 		// Hidden tools stay hidden when called by name.
 		err = errors.New("tasks are not enabled for this project (as of this session's start); an admin enables them on the hub, then restart the session")
@@ -1034,14 +1034,4 @@ func writeFileAtomic(path string, body []byte) error {
 
 // mcpStateRoot mirrors the CLI's state-root resolution: docs tools reach
 // the hub with the machine's hub config, which lives there.
-func mcpStateRoot() string {
-	if v := os.Getenv("AIMEM_STATE_DIR"); v != "" {
-		return v
-	}
-	base := os.Getenv("XDG_STATE_HOME")
-	if base == "" {
-		home, _ := os.UserHomeDir()
-		base = filepath.Join(home, ".local", "state")
-	}
-	return filepath.Join(base, "aimem")
-}
+func mcpStateRoot() string { return adapter.StateRoot() }

@@ -52,7 +52,9 @@ func teamToolList() []map[string]any {
 		}
 	}
 	out = append(out, scopedKnowledgeToolDefs...)
-	return append(out, sessionContextToolDef)
+	// The reservation writes point to the rule for kept text; it is public
+	// and reads nothing but this binary.
+	return append(out, sessionContextToolDef, writingToolDef)
 }
 
 type teamMode struct {
@@ -226,6 +228,8 @@ func (s *srv) reservationTeamReady(ctx context.Context) error {
 // teamToolCall serves one tool call of a team conversation.
 func (s *srv) teamToolCall(ctx context.Context, name string, raw []byte) (string, error) {
 	switch {
+	case name == writingTool:
+		return writingRuleTool(raw)
 	case name == sessionContextTool:
 		body, err := s.team.verify(ctx)
 		if err != nil {
@@ -254,5 +258,5 @@ func (s *srv) teamToolCall(ctx context.Context, name string, raw []byte) (string
 		}
 		return s.scopedKnowledgeRead(ctx, name, a)
 	}
-	return "", fmt.Errorf("tool %q is not available in a team conversation: team mode serves only the team's task and epic reads, the reservation tools, the project knowledge reads (recall_memory, list_docs, read_doc) and session_context; every other knowledge tool and every other write is off", name)
+	return "", fmt.Errorf("tool %q is not available in a team conversation: team mode serves only the team's task and epic reads, the reservation tools, the project knowledge reads (recall_memory, list_docs, read_doc), session_context and writing_rule; every other knowledge tool and every other write is off", name)
 }

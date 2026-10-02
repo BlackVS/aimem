@@ -142,8 +142,39 @@ func TestEmbeddedMatchesCanonicalFiles(t *testing.T) {
 			t.Errorf("%s: embedded section differs from %s (%v)", id, f, err)
 		}
 	}
-	if n := len(u.Manifest.Sections) - len(playbookSections); n != len(files) {
+	writing, err := os.ReadFile(filepath.Join("..", "..", "docs", writingFile))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, err := u.Section(WritingSection); err != nil || !bytes.Equal(got, writing) {
+		t.Errorf("section %s differs from docs/%s (%v)", WritingSection, writingFile, err)
+	}
+	if n := len(u.Manifest.Sections) - len(playbookSections) - 1; n != len(files) {
 		t.Errorf("%d template sections, %d files", n, len(files))
+	}
+}
+
+// Every role reads the rule for kept text with its required set, and the
+// rule's bytes are part of the digest.
+func TestEveryRoleRequiresTheWritingRule(t *testing.T) {
+	u, err := Embedded()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, role := range Roles {
+		req, err := u.Required(role)
+		if err != nil || !slices.Contains(req, WritingSection) {
+			t.Fatalf("role %s: required %v (%v)", role, req, err)
+		}
+		text, err := u.Role(role, "v-test")
+		if err != nil || !strings.Contains(text, "=== section writing: Writing text that is kept") {
+			t.Fatalf("role %s does not deliver the writing section: %v", role, err)
+		}
+	}
+	m := canonical(t)
+	m[writingFile].Data = bytes.Replace(m[writingFile].Data, []byte("normal spacing"), []byte("normal  spacing"), 1)
+	if c := build(t, m); c.Digest == u.Digest {
+		t.Error("a changed byte of the writing rule kept the digest")
 	}
 }
 
