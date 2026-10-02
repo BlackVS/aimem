@@ -58,6 +58,8 @@ jobs:
           build darwin  amd64 aimem-darwin-amd64
           build darwin  arm64 aimem-darwin-arm64
           build windows amd64 aimem-windows-amd64.exe
+          # The license travels with the binaries, and SHA256SUMS covers it too.
+          cp LICENSE dist/LICENSE
           (cd dist && sha256sum * > SHA256SUMS)
 
       # The release body is the tag's CHANGELOG section — written by a
@@ -76,6 +78,18 @@ jobs:
           if ! grep -q '[^[:space:]]' release_notes.md; then
             echo "See [CHANGELOG.md](https://github.com/${{ github.repository }}/blob/master/CHANGELOG.md) for details." > release_notes.md
           fi
+          # The notes end with the license and its Required Notice lines,
+          # which the license requires to reach everyone who gets a copy.
+          notices=$(grep '^Required Notice:' LICENSE) ||
+            { echo "::error::LICENSE has no 'Required Notice:' line"; exit 1; }
+          {
+            printf '\n---\n\n'
+            echo "Verify a download against SHA256SUMS before running it. LICENSE is attached and listed there."
+            echo
+            echo "Licensed under the PolyForm Noncommercial License 1.0.0: https://polyformproject.org/licenses/noncommercial/1.0.0"
+            echo
+            printf '%s\n' "$notices"
+          } >> release_notes.md
 
       - uses: softprops/action-gh-release@v3
         with:
