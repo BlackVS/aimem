@@ -74,18 +74,29 @@ func New(reg *store.Registry, log *slog.Logger) *Server {
 // WithLogRing exposes ring on /v1/logs for the admin GUI's Log tab.
 func (s *Server) WithLogRing(ring *LogRing) *Server { s.ring = ring; return s }
 
-// SocketPath returns the canonical socket location. Unix socket paths are
-// limited to ~108 bytes, so the state root (which can be arbitrarily deep)
-// is only the last resort: AIMEM_SOCKET wins, then XDG_RUNTIME_DIR.
+// SocketPath returns the canonical socket location: AIMEM_SOCKET when set;
+// otherwise, when the state root was named explicitly (AIMEM_STATE_DIR), the
+// socket inside it, so several installations under one OS user each have
+// their own service; otherwise XDG_RUNTIME_DIR, then the default root.
+// Unix socket paths are limited to about 104 bytes: a deep explicit root
+// needs AIMEM_SOCKET, and the listener says so (ListenAndServe).
 func SocketPath(root string) string {
 	if v := os.Getenv("AIMEM_SOCKET"); v != "" {
 		return v
+	}
+	if os.Getenv("AIMEM_STATE_DIR") != "" {
+		return filepath.Join(root, "aimem.sock")
 	}
 	if rd := os.Getenv("XDG_RUNTIME_DIR"); rd != "" {
 		return filepath.Join(rd, "aimem.sock")
 	}
 	return filepath.Join(root, "aimem.sock")
 }
+
+// maxSocketPath is the longest Unix socket path every supported platform
+// accepts (sun_path is 104 bytes on macOS and BSD, 108 on Linux, NUL
+// included).
+const maxSocketPath = 103
 
 // SentinelPath is the clean-shutdown marker location for a state root.
 func SentinelPath(root string) string { return filepath.Join(root, "clean-shutdown") }
@@ -498,6 +509,9 @@ func (s *Server) ListenAndServe(root string) (*http.Server, net.Listener, error)
 	os.Remove(SentinelPath(root))
 	ln, err := net.Listen("unix", sock)
 	if err != nil {
+		if len(sock) > maxSocketPath {
+			return nil, nil, fmt.Errorf("listen on %s: %w (the path is %d bytes; a Unix socket path allows at most %d: set AIMEM_SOCKET to a shorter path)", sock, err, len(sock), maxSocketPath)
+		}
 		return nil, nil, err
 	}
 	if err := os.Chmod(sock, 0o600); err != nil {
