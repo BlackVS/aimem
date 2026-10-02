@@ -13,6 +13,8 @@ currently 23); a binary refuses a database newer than it understands.
 
 ## [Unreleased]
 
+## [0.7.4] — 2026-10-02
+
 AIForge prerequisites: aimem can now serve an aicrew team as a verified,
 separate context next to each member's personal use, with no second agent
 credential and no embedded team scheduler. The work adds:
@@ -29,7 +31,7 @@ The wire contracts are in `docs/DESIGN-AIFORGE-*.md`, with fixtures under
 coordinator, one worker, one project.
 
 Also: OpenCode 2 support, and `modernc.org/sqlite` 1.58.0 to 1.59.0 (#55).
-Includes PR #55 and #110 to #155, except the unmerged #128.
+Includes PR #55 and #110 to #166, except the unmerged #128.
 
 ### Added
 
@@ -250,9 +252,8 @@ coordination.v1 before the pilot.
   nothing.
 - **Older aimem, newer aicrew:** aimem refuses aicrew's added field.
 
-Deploy this aimem together with an aicrew that sends the digest (aicrew's
-counterpart of C5-w3), or deploy aicrew first. Every other transition is
-unaffected.
+Deploy this aimem together with an aicrew that sends the digest, or deploy
+aicrew first. Every other transition is unaffected.
 
 ## [0.7.3] — 2026-09-24
 
