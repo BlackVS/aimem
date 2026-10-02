@@ -48,8 +48,26 @@ currently 23); a binary refuses a database newer than it understands.
   (`adapter.StateRoot`). In a test binary it fails closed without an
   isolated `AIMEM_STATE_DIR`, instead of falling back to the developer's
   home directory. This changes nothing outside tests.
+- **Several installations under one OS user each get their own socket.**
+  An installation is a state root. With `AIMEM_STATE_DIR` set, the local
+  socket now defaults to `<root>/aimem.sock` instead of `XDG_RUNTIME_DIR`,
+  so two state roots no longer share one service and one journal on Linux.
+  `AIMEM_SOCKET` still wins. A root too deep for a Unix socket path fails
+  with a message naming the length and `AIMEM_SOCKET`.
+  `docs/DESIGN-AIFORGE-CONTEXT.md` describes the layout and the env-file
+  hazard below.
 
 ### Upgrade notes
+
+- **A service started with an explicit `AIMEM_STATE_DIR` moves its socket**
+  into that root on restart.
+  - Clients that set the same `AIMEM_STATE_DIR` follow it automatically.
+  - A client without it still looks in `XDG_RUNTIME_DIR`. Set
+    `AIMEM_SOCKET` on both sides to keep the old place.
+  - Installs that never set `AIMEM_STATE_DIR` are unaffected.
+  - When more than one installation exists, `~/.config/aimem/env` must not
+    set `AIMEM_STATE_DIR` or `AIMEM_SOCKET`: aimem folds that file into
+    every process without its own value.
 
 - **Rollout of the writing rule.**
   - A machine receives the tool and the description sentence when its
