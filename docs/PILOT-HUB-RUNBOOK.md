@@ -28,17 +28,9 @@ What each step means is in [CHANGELOG `[Unreleased]`](../CHANGELOG.md), "Configu
     # add --hub-ca-file PATH or --hub-pin sha256-BASE64 when the hub's
     # certificate is not in the system roots
     ```
-  - **On each member's machine,** add the hub and the member's user-scoped token from files only the member can read, never on a command line. When the hub's certificate is not in the system roots, record its trust with the hub entry too. Do not edit `hub.json` by hand:
-
-    ```sh
-    aimem hub add pilot-hub https://hub.example.test:8443 --token-file writer.token --ca-file hub-ca.pem
-    # or: --pin sha256-BASE64 (the SHA-256 of the certificate's public key)
-    aimem hub task-token pilot-hub --token-file member.token
-    # --token-file - reads the token from standard input
-    ```
-
-    `aimem hub` then lists the hub with `ca-file:` (or `pin:`). Team sessions, the MCP server, docs and sync to that hub all use that trust. A later `hub add` of the same hub keeps it unless you give a new one. An unreadable CA file is refused, naming its path.
+  - **For each member's agent home,** the operator provisions the member's own aimem installation once, as described in step 6. The member sets nothing.
   - `aimem tasks`, `aimem process` and `aimem access` run on the hub host itself, against the local service.
+- **One OS account, one agent home per member.** Both members run under one OS account. Each member has an aicrew agent home that holds the member's own aimem installation at `<home>/aimem`: its own `hub.json`, token, team sessions and spool. The human's installation under the account's default state root is not used by either member. aicrew's launcher and the home's own settings name the home's installation for every process started there.
 
 ## 1. The hub terminates TLS itself (P5)
 
@@ -230,16 +222,59 @@ aimem access user-add pilot-worker
 }
 ```
 
-Issue each user's token straight into a private file: `token-issue-user` prints the secret once, on standard output. Deliver the file to that member's machine only.
+Issue each user's token straight into a private file: `token-issue-user` prints the secret once, on standard output. Use it only to provision that member's home (below), then delete it.
 
 ```sh
 umask 077
 aimem access token-issue-user USER_ID pilot-coordinator 2026-12-28T00:00:00Z > coordinator.token.json
 ```
 
-The file holds `{"secret": "…", "token": {"id": …, "user_id": …, "scope": "user", …}}`. Check that `scope` is `user`.
+The file holds `{"secret": "…", "token": {"id": …, "user_id": …, "scope": "user", …}}`. Check that `scope` is `user`. Extract the secret into its own private file, `coordinator.token`, holding that one line.
 
-**On the member's machine,** verify the token over the hub's TLS without putting the secret on a command line. Keep it in a private header file:
+**Provisioning each member's home.** On the members' machine, once per member, the operator writes the member's hub entry and token into the installation inside that member's agent home. The two variables name that installation for these commands only. The token is read from standard input, never from a command line. It is the member's own user token, used both as the hub entry's token and as the individual credential: a member home runs no aimem service and pushes no checkpoints, so it never needs a hub writer token. Put the hub's CA file inside the home (`<home>/creds/`), so nothing in the home's `hub.json` points outside it. A CA file that cannot be read is refused, naming its path.
+
+Linux or macOS, for the coordinator's home `/srv/agents/coordinator`:
+
+```sh
+export AIMEM_STATE_DIR=/srv/agents/coordinator/aimem
+export AIMEM_SOCKET=/srv/agents/coordinator/aimem/aimem.sock
+mkdir -p -m 700 "$AIMEM_STATE_DIR"
+aimem hub add pilot-hub https://hub.example.test:8443 --token-file - \
+  --ca-file /srv/agents/coordinator/creds/hub-ca.pem < coordinator.token
+aimem hub task-token pilot-hub --token-file - < coordinator.token
+aimem hub credential pilot-hub
+unset AIMEM_STATE_DIR AIMEM_SOCKET
+```
+
+Windows PowerShell, for the coordinator's home `C:\agents\coordinator`:
+
+```powershell
+$env:AIMEM_STATE_DIR = 'C:\agents\coordinator\aimem'
+$env:AIMEM_SOCKET = 'C:\agents\coordinator\aimem\aimem.sock'
+New-Item -ItemType Directory -Force $env:AIMEM_STATE_DIR | Out-Null
+Get-Content coordinator.token -TotalCount 1 | aimem hub add pilot-hub https://hub.example.test:8443 --token-file - --ca-file C:\agents\coordinator\creds\hub-ca.pem
+Get-Content coordinator.token -TotalCount 1 | aimem hub task-token pilot-hub --token-file -
+aimem hub credential pilot-hub
+Remove-Item Env:AIMEM_STATE_DIR, Env:AIMEM_SOCKET
+```
+
+Repeat with the worker's home and `worker.token`. Instead of `--ca-file`, `--pin sha256-BASE64` pins the hub's certificate by its public key.
+
+**Expected:**
+
+```
+hub "pilot-hub" configured (default: pilot-hub)
+task credential stored for hub "pilot-hub"; MCP task tools use it
+hub pilot-hub: individual credential set, active, scope user (user 01a0…-…, token 01a0…-…)
+```
+
+Then delete the token files. Rules for this layout:
+- **Each process names its installation.** `AIMEM_STATE_DIR` names the installation and `AIMEM_SOCKET` its socket. aicrew's launcher and the home's settings set both for every process started in the home, so the member sets nothing. With an aimem release that includes the socket rule (an explicit `AIMEM_STATE_DIR` keeps the socket inside it), the explicit `AIMEM_SOCKET` is a second safeguard; with v0.7.4 it is required on Linux.
+- **The user-wide env file must not name an installation.** `~/.config/aimem/env` belongs to the whole OS account, and aimem folds its `AIMEM_*` values into every process that lacks its own. It must not set `AIMEM_STATE_DIR` or `AIMEM_SOCKET`: a process started without its own value would silently use the installation the file names.
+- **A member home runs no aimem service.** There is no `aimem serve` for a home, so the home's socket is never bound. Team mode needs none, and memory tools in a standalone session started in a home are unavailable.
+- **One account isolates identities, not files.** Both homes belong to one OS account, so each member's processes can read the other member's home, including its `aimem/hub.json` with the token, and reach its step socket. The hub still tells the two members apart. A separate OS account per member is the only host isolation, and needs no change here.
+
+**Verify the token over the hub's TLS** without putting the secret on a command line. Keep it in a private header file:
 
 ```sh
 # coordinator.auth holds one line: Authorization: Bearer <the secret>
@@ -276,6 +311,7 @@ The operator never sees a receipt. `HUB_ID` is the hub ID from `aimem identity p
 | aicrew's two credentials | `aimem identity cred list aicrew-example $HUB` shows `identity.redeem` and `reservation.read` active |
 | Team profile and grant | `aimem identity team grants aicrew-example team-pilot $HUB` lists `pilot` |
 | Member tokens | `GET /v1/access/identity` answers `scope: user` for each member |
+| Member homes | with each home's `AIMEM_STATE_DIR` and `AIMEM_SOCKET`, `aimem hub credential pilot-hub` answers `set` and `active`; `~/.config/aimem/env` sets neither variable |
 | Members linked | a member's session start is audited as `team.verified` |
 
 Secrets never belong in a command line, a shell history, a log, a chat or a task comment. Every secret in this runbook travels in a file only its owner can read.
