@@ -89,7 +89,7 @@ aimem access token-issue-user --user-name pilot-worker --label pilot-worker --ex
 ## 5. One flag per secret intent [6.4]
 
 - **Writing a secret is always `--output <file>`.** It replaces `--secret-file` in `aimem identity cred issue|rotate`, and printing to standard output in `aimem access token-issue` and `token-issue-user`. The file must not exist; it is created readable only by its owner, and the value never reaches the terminal. The old flag and the stdout form keep working for one release with a notice.
-- **Reading a secret is always `--token-file <file|->`,** `-` meaning standard input. It already exists on `aimem hub add` and `aimem hub task-token`, and the hub-admin bearer keeps its specific `--admin-token-file`, since it is a different secret with a different owner.
+- **Reading a secret is always `--token-file <file|->`,** `-` meaning standard input. It already exists on `aimem hub add` and `aimem hub task-token`. Whether the hub-admin bearer's `--admin-token-file` on `aimem identity` also becomes `--token-file` is an open question (section 6).
 
 ## 6. Order and open questions
 
@@ -102,3 +102,4 @@ aimem access token-issue-user --user-name pilot-worker --label pilot-worker --ex
 - **How aicrewd reads a team's grants and each granted project's repository and process pin** [2.3]. The proposal says "through its peer credential". The options are to extend `reservation.read` or to add a `team.read` operation; the second keeps each credential to one purpose and is the recommendation.
 - **Whether a project repository needs a history,** or only the current value plus the audit. Only the current value plus the audit is the recommendation; an offer records the repository it named.
 - **Under option (a), whether triage rights are a property of the role** (coordinator) **or a separate grant on the profile.** A property of the role is simpler, and is the recommendation.
+- **Whether `--admin-token-file` becomes `--token-file`** [6.4]. The one-flag rule says it should. But on `aimem identity` the hub-admin bearer is a second secret next to the ones a command writes with `--output`, and a distinct name says which credential the command acts with. Keeping `--admin-token-file` is the recommendation, as a stated exception to the rule.
