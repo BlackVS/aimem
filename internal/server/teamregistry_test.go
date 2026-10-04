@@ -275,10 +275,15 @@ func TestTeamOperationRefusalsAreAudited(t *testing.T) {
 	const actor = "peer:aicrew-example"
 	regPath := "/v1/identity/peers/aicrew-example/team-registrations/" + teamA
 	// A malformed body.
-	if r := g.call(t, g.tls, "PUT", regPath, g.register, v1, `{"team_name":42}`, true); r.status != 400 || r.code() != "invalid_request" {
+	r := g.call(t, g.tls, "PUT", regPath, g.register, v1, `{"team_name":42}`, true)
+	if r.status != 400 || r.code() != "invalid_request" {
 		t.Fatalf("malformed body: %d %s", r.status, r.body)
 	}
-	g.auditHas(t, "team.register.refused.invalid_request", actor, "credential="+g.registerID, teamA)
+	var env struct {
+		CorrelationID string `json:"correlation_id"`
+	}
+	json.Unmarshal(r.body, &env)
+	g.auditHas(t, "team.register.refused.invalid_request", actor, "credential="+g.registerID, "team="+teamA, "correlation="+env.CorrelationID)
 	// An invalid rename keeps the current name and profile in the record.
 	if r := g.reg(t, g.register, "aicrew-example", teamA, ""); r.status != 400 {
 		t.Fatalf("empty name: %d %s", r.status, r.body)

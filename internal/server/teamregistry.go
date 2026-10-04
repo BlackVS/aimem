@@ -13,10 +13,13 @@ package server
 import (
 	"fmt"
 	"net/http"
+	"regexp"
 	"slices"
+	"strings"
 
 	"aimem/internal/access"
 	"aimem/internal/process"
+	"aimem/internal/uuidv7"
 )
 
 // teamPeer applies the checks both operations share and returns the
@@ -64,14 +67,32 @@ func teamOperation(r *http.Request) string {
 // refusal either way; it is logged.
 func (s *Server) teamOpRefuse(w http.ResponseWriter, r *http.Request, peer access.PeerIdentity, code string) {
 	action := teamOperation(r) + ".refused." + code
-	subject := fmt.Sprintf("service=%s credential=%s path=%q", peer.ServiceID, peer.CredentialID, r.URL.EscapedPath())
+	cid := uuidv7.New()
+	subject := fmt.Sprintf("service=%s credential=%s", peer.ServiceID, peer.CredentialID)
+	if team := pathTeamID(r); team != "" {
+		subject += " team=" + team
+	}
+	subject += fmt.Sprintf(" path=%q correlation=%s", r.URL.EscapedPath(), cid)
 	if db, err := s.openAccess(false); err != nil {
 		s.log.Error("team operation audit", "action", action, "err", err)
 	} else if err := db.RecordTeamRequest("peer:"+peer.ServiceID, action, subject); err != nil {
 		s.log.Error("team operation audit", "action", action, "err", err)
 	}
-	s.identityRefuse(w, code)
+	s.identityRefuseWith(w, code, "", cid)
 }
+
+// pathTeamID is the team UUID a team route names, when its last segment
+// parses as one. The bearer gate refuses before the mux sets path values,
+// so it reads the path itself.
+func pathTeamID(r *http.Request) string {
+	seg := r.URL.Path[strings.LastIndexByte(r.URL.Path, '/')+1:]
+	if teamUUID.MatchString(seg) {
+		return seg
+	}
+	return ""
+}
+
+var teamUUID = regexp.MustCompile(`^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$`)
 
 // teamRegistrationView is team.register's answer.
 type teamRegistrationView struct {

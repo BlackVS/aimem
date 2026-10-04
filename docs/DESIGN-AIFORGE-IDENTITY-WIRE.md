@@ -222,7 +222,7 @@ The first pilot's follow-ups ([DESIGN-AIFORGE-PILOT-1](DESIGN-AIFORGE-PILOT-1.md
 - **Transport.** The hub accepts only TLS it terminated itself (`tls_required` otherwise) and requires `X-Aimem-Identity-Version: 1` (`unsupported_version` otherwise).
 - **Bound.** Both operations share the read scope's bound of 60 calls per minute per credential (`rate_limited`).
 - **Audit.** Every outcome is audited under the actor `peer:<service>`, refusals included, as `team.register.<outcome>` or `team.read[.refused.<code>]`.
-  - A refusal before the store is reached (`tls_required`, `unsupported_version`, `peer_forbidden`, `rate_limited`, or `invalid_request` for a malformed body) names the credential ID and the request path. This includes another operation's credential, which the bearer gate refuses before any handler runs.
+  - A refusal before the store is reached (`tls_required`, `unsupported_version`, `peer_forbidden`, `rate_limited`, or `invalid_request` for a malformed body) names the credential ID, the team UUID when the path carries one, the request path and the correlation ID the caller received. This includes another operation's credential, which the bearer gate refuses before any handler runs.
   - A bearer that is not a peer credential has no peer to attribute and is not audited.
 - **MCP.** Neither operation is exposed as an MCP tool.
 
