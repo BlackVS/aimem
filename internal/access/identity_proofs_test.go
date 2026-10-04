@@ -18,7 +18,9 @@ import (
 
 // dropIdentitySchema4 lets migration tests rebuild an older schema from a
 // current store.
-const dropIdentitySchema4 = `DROP TABLE identity_redemptions;
+const dropIdentitySchema4 = `DROP INDEX team_access_profiles_name;
+ALTER TABLE team_access_profiles DROP COLUMN team_name;
+DROP TABLE identity_redemptions;
 DROP TABLE identity_receipts;
 DROP TABLE identity_peer_credentials;
 DROP TABLE identity_peers;

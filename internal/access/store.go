@@ -115,7 +115,7 @@ func OpenExisting(root string) (*Store, error) {
 }
 
 // accessSchema is the access database version this binary writes.
-const accessSchema = 5
+const accessSchema = 6
 
 func (s *Store) migrate() error {
 	var current int
@@ -247,6 +247,33 @@ PRAGMA user_version=4;`); err != nil {
 ALTER TABLE identity_peer_credentials ADD COLUMN operation TEXT NOT NULL DEFAULT 'identity.redeem'
  CHECK(operation IN ('identity.redeem','reservation.read'));
 PRAGMA user_version=5;`); err != nil {
+			return err
+		}
+		version = 5
+	}
+	if version == 5 {
+		// The first pilot's two peer operations (DESIGN-AIFORGE-PILOT-1 §3):
+		// a column CHECK cannot be widened in place, so the credential table
+		// is rebuilt with every row and its operation kept. Team profiles
+		// gain the name aicrewd registers, unique per peer once set.
+		if _, err := tx.Exec(`
+CREATE TABLE identity_peer_credentials_v6(
+ id TEXT PRIMARY KEY,
+ service_id TEXT NOT NULL REFERENCES identity_peers(service_id),
+ digest TEXT NOT NULL UNIQUE,
+ created_at INTEGER NOT NULL,
+ expires_at INTEGER NOT NULL,
+ revoked INTEGER NOT NULL DEFAULT 0 CHECK(revoked IN (0,1)),
+ operation TEXT NOT NULL DEFAULT 'identity.redeem'
+  CHECK(operation IN ('identity.redeem','reservation.read','team.register','team.read'))
+);
+INSERT INTO identity_peer_credentials_v6(id,service_id,digest,created_at,expires_at,revoked,operation)
+ SELECT id,service_id,digest,created_at,expires_at,revoked,operation FROM identity_peer_credentials;
+DROP TABLE identity_peer_credentials;
+ALTER TABLE identity_peer_credentials_v6 RENAME TO identity_peer_credentials;
+ALTER TABLE team_access_profiles ADD COLUMN team_name TEXT NOT NULL DEFAULT '';
+CREATE UNIQUE INDEX team_access_profiles_name ON team_access_profiles(service_id,team_name) WHERE team_name<>'';
+PRAGMA user_version=6;`); err != nil {
 			return err
 		}
 	}

@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"net/url"
 	"regexp"
+	"slices"
 	"strings"
 	"time"
 
@@ -31,7 +32,14 @@ import (
 const (
 	PeerOperationRedeem          = "identity.redeem"
 	PeerOperationReservationRead = "reservation.read"
+	// The first pilot's peer operations (DESIGN-AIFORGE-PILOT-1 §3): aicrewd
+	// registers its teams' names and reads its own teams' grants.
+	PeerOperationTeamRegister = "team.register"
+	PeerOperationTeamRead     = "team.read"
 )
+
+// PeerOperations lists every operation a peer credential can be issued for.
+var PeerOperations = []string{PeerOperationRedeem, PeerOperationReservationRead, PeerOperationTeamRegister, PeerOperationTeamRead}
 
 const (
 	peerCredentialPrefix      = "aimem_peer_"
@@ -212,8 +220,8 @@ func (s *Store) SetIdentityPeerDisabled(actor, serviceID string, disabled bool) 
 // secret is never shown again.
 func (s *Store) IssuePeerCredential(actor, serviceID, operation string, expires time.Time) (PeerCredential, string, error) {
 	now := s.now()
-	if operation != PeerOperationRedeem && operation != PeerOperationReservationRead {
-		return PeerCredential{}, "", fmt.Errorf("%w: operation must be %s or %s", ErrInvalidRequest, PeerOperationRedeem, PeerOperationReservationRead)
+	if !slices.Contains(PeerOperations, operation) {
+		return PeerCredential{}, "", fmt.Errorf("%w: operation must be one of %s", ErrInvalidRequest, strings.Join(PeerOperations, ", "))
 	}
 	if !expires.After(now) || expires.After(now.Add(peerCredentialMaxLife)) {
 		return PeerCredential{}, "", fmt.Errorf("%w: expiry must be in the future and within 366 days", ErrInvalidRequest)

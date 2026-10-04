@@ -103,7 +103,10 @@ Every refusal uses the context contract's envelope: `{code, message, active_mode
 | `identity_mismatch`, `identity_link_required`, `context_missing`, `context_stale` | 403 | no | Re-prove or resume through aicrew, and reconcile outstanding work. |
 | `grant_denied`, `role_forbidden` | 403 | no | Request an authorized change, or use the role's permitted flow. |
 | `team_operation_unsupported` | 403 | no | Use the aicrew flow for this work; team mode does not serve this operation. |
+| `profile_disabled` | 403 | no | The operator re-enables the profile on the hub; aicrewd does not. |
+| `not_found` | 404 | no | Register the team with `team.register`, or check the team ID. |
 | `idempotency_conflict` | 409 | no | Investigate the changed input; never reuse the key for other input. |
+| `team_name_taken` | 409 | no | Rename the team in aicrew, then register it again. |
 | `rate_limited` | 429 | yes | Wait, then request again. |
 | `request_in_progress`, `identity_unavailable`, `context_unavailable` | 503 | yes | Retry later with the same key or context; nothing was applied. |
 
@@ -133,7 +136,7 @@ The owner approved splitting E3 and made four implementation decisions (E3 task 
 
 **Peer credential lifecycle.**
 - **Format.** A peer credential is `aimem_peer_` followed by 256 random bits in hex. It is returned once, when issued, and stored only as a SHA-256 digest.
-- **Scope.** It is bound to one registered peer and to the `identity.redeem` operation family. Since task C6b, a peer credential permits exactly one operation. The same peer can also hold `reservation.read` credentials for aicrew's read scope ([coordination contract](DESIGN-AIFORGE-COORDINATION-WIRE.md) §2), which cannot redeem.
+- **Scope.** It is bound to one registered peer and to the `identity.redeem` operation family. Since task C6b, a peer credential permits exactly one operation. The same peer can also hold `reservation.read` credentials for aicrew's read scope ([coordination contract](DESIGN-AIFORGE-COORDINATION-WIRE.md) §2), which cannot redeem, and, since the first pilot's follow-ups, `team.register` and `team.read` credentials ([Team registration and read](#team-registration-and-read-teamregister-teamread)). Each reaches only the routes of its own operation.
 - **Limits.** It lives at most 366 days. A peer has at most two active credentials, so a rotation can overlap.
 - **Lost issuance response.** The bearer cannot be recovered. The admin lists the peer's credential metadata, revokes the credential that was never received, and issues a new one.
 - **Expiry.** An expired credential is refused as if unknown and no longer counts toward the limit of two.
@@ -179,7 +182,7 @@ The operator approved splitting E4 into E4a and E4b and decided its open points 
 - **Operator check.** `aimem identity peer check SERVICE` (`POST /v1/identity/peers/{service_id}/check`, hub admin, hub TLS only) has the hub send one introspection with a random handle that no session holds. Only a verified inactive answer is healthy. The answer and the audit record (`identity_peer.check.<outcome>`) name a fixed outcome and never the credential or the handle.
 - **Team-mode gate.** A request carrying `X-Aimem-Team-Context` is in team mode, whatever the header's value. Every such request is refused before any handler runs and before aicrew is contacted. This covers every route on the TCP listener, `/mcp`, the public pages (which then require a bearer) and the local socket. A missing or unknown bearer gets `invalid_credential`. A malformed or repeated header gets `invalid_request`. A credential other than a live, user-scoped individual token, including the operator on the local socket, gets `credential_scope_forbidden`. Otherwise the answer is `team_operation_unsupported`. No team-mode request is ever served as a personal request. Requests without the header behave exactly as before.
 
-**E4b status.** Team mode serves exactly eight routes (`teamRoutes` in `internal/server/teamcontext.go`): `GET /v1/access/identity` as the context report, the five task reads (list, get, history, comment list, comment get) and the two epic reads (list, get). Every other route keeps `team_operation_unsupported`, sent before aicrew is contacted. On a team route the hub runs §4 in order:
+**E4b status.** Team mode serves exactly eight routes (`teamRoutes` in `internal/server/teamcontext.go`): `GET /v1/access/identity` as the context report, the five task reads (list, get, history, comment list, comment get) and the two epic reads (list, get). Later increments added the member reservation routes (C6a), the pilot's knowledge reads (19d8) and the project repository read ([Team registration and read](#team-registration-and-read-teamregister-teamread)). Every other route keeps `team_operation_unsupported`, sent before aicrew is contacted. On a team route the hub runs §4 in order:
 
 1. It authenticates the individual bearer as usual.
 2. It picks the single operational peer; none, or an ambiguous one, is `context_unavailable`.
@@ -203,9 +206,45 @@ Every verified request is audited as `team.verified`. Every team-mode refusal af
 | `DELETE …/teams/{team_id}/grant-instances/{instance}` | Revoke an orphaned grant by its access instance |
 
 **Rules.**
-- **Creating a profile.** The service must be a peer registered on this hub, enabled or disabled. The team ID is an identity ID (1–128 of `A-Z a-z 0-9 . _ : -`), because that is the shape an introspection reply carries. It must not be `.` or `..`: such an ID would be a dot path segment, which HTTP routers clean away. The hub and the CLI both refuse it at creation. Aicrew generates its team IDs, so no real team is dot-only. A duplicate `(service, team)` is 409. There is no delete: the link is immutable, and disabling is the off switch.
+- **Creating a profile.** Since the first pilot's follow-ups, aicrewd creates and names its profiles itself with `team.register` ([Team registration and read](#team-registration-and-read-teamregister-teamread)); the operator's create below is kept for one release. The service must be a peer registered on this hub, enabled or disabled. The team ID is an identity ID (1–128 of `A-Z a-z 0-9 . _ : -`), because that is the shape an introspection reply carries. It must not be `.` or `..`: such an ID would be a dot path segment, which HTTP routers clean away. The hub and the CLI both refuse it at creation. Aicrew generates its team IDs, so no real team is dot-only. A duplicate `(service, team)` is 409. There is no delete: the link is immutable, and disabling is the off switch.
 - **Grants.** A grant is stored against the project's access instance, and a grant by name mints the instance if the project has none yet. Reserved, user and group projects and unknown projects are refused. A revoke by name never mints an instance. Both directions are idempotent.
 - **Audit.** Every change is audited under the admin: `team_profile.create`, `team_profile.disabled.<bool>` and `team_grant.<bool>`. Each subject names the service, team, profile and, for grants, the instance. A no-op is audited too.
 - **Effect.** The verifier reads profiles and grants live on every team request, so a change applies from the next request whose check starts after it commits. A revoked grant gives `grant_denied`, and a disabled profile gives `context_stale`.
 
 **Team mode requires hub-terminated TLS (task 01a0e121, decision P5).** A team-mode request carries the individual bearer and a session handle, so the gate's first check after authentication refuses one that did not arrive over TLS this hub terminated itself. The refusal is `tls_required`, audited as `team.refused.tls_required`, and it comes before the header, credential and route checks and before any introspection. Forwarded headers (`X-Forwarded-Proto`, `Forwarded`, `X-Forwarded-Ssl`) never count, and neither does a TLS-terminating proxy. The local socket keeps its own refusal. Personal mode is unchanged on every listener. Every team deployment already needs hub TLS, because the proof and redemption routes that link an agent to aicrew refuse anything else.
+
+## Team registration and read (`team.register`, `team.read`)
+
+The first pilot's follow-ups ([DESIGN-AIFORGE-PILOT-1](DESIGN-AIFORGE-PILOT-1.md) §2 and §3) give aicrewd two bounded peer operations. aicrewd owns its teams and their names; the hub owns grants, repositories and process pins. Neither operation can attach a project, re-enable a profile, or reach another peer's teams. A compromised aicrewd peer can therefore rename and read its own teams, and nothing more.
+
+**Shared rules.**
+- **Credential.** Each operation needs a peer credential issued for exactly that operation (`aimem identity cred issue --operation team.register|team.read`). It reaches no other route, and no other credential reaches these: another operation's peer credential gets `peer_forbidden`, and any other bearer gets `peer_unauthenticated`. The path's `service_id` must be the credential's own peer, or the answer is `peer_forbidden`.
+- **Transport.** The hub accepts only TLS it terminated itself (`tls_required` otherwise) and requires `X-Aimem-Identity-Version: 1` (`unsupported_version` otherwise).
+- **Bound.** Both operations share the read scope's bound of 60 calls per minute per credential (`rate_limited`).
+- **Audit.** Every outcome is audited under the actor `peer:<service>`, refusals included, as `team.register.<outcome>` or `team.read[.refused.<code>]`.
+  - A refusal before the store is reached (`tls_required`, `unsupported_version`, `peer_forbidden`, `rate_limited`, or `invalid_request` for a malformed body) names the credential ID, the team UUID when the path carries one, the request path and the correlation ID the caller received. This includes another operation's credential, which the bearer gate refuses before any handler runs.
+  - A bearer that is not a peer credential has no peer to attribute and is not audited.
+- **MCP.** Neither operation is exposed as an MCP tool.
+
+**`team.register`: `PUT /v1/identity/peers/{service_id}/team-registrations/{team_id}`** with `{"team_name": "…"}`.
+- **Input rules.** The team ID is aicrew's team UUID in lowercase canonical form; the name follows the hub's name rule (1 to 128 UTF-8 bytes, no surrounding whitespace, no control character). Anything else is `invalid_request`.
+- **Effect.** It creates the peer's profile for that team, or renames it. Renaming to the current name succeeds and changes nothing. It never creates or touches a grant.
+- **Refusals.**
+  - A team UUID that another peer holds is `peer_forbidden`.
+  - A name another team of the same peer holds is `team_name_taken` (409). Names are unique per peer, and the store enforces this with a partial unique index, so two concurrent registrations cannot both take one name.
+  - A profile the operator disabled is `profile_disabled` (403). It stays disabled; only the operator re-enables it.
+- **Answer.** `{profile_id, team_id, team_name, created, previous_name}`.
+- **Audit.** `team.register.created`, `.renamed`, `.unchanged` or `.refused.<code>`, with the service, team, old and new name and profile. A refused rename of an existing profile, an invalid name included, names that profile and its current name.
+- **Grants after a rename.** Grants bind the profile, never the name, so a rename moves no grant. The operator's `aimem identity team grant|revoke` resolve `--team-name` within the peer and print the name and team ID they acted on.
+
+**`team.read`: `GET /v1/identity/peers/{service_id}/team-reads`** (all of the peer's teams, as `{teams: [...]}`) **and `…/team-reads/{team_id}`** (one team).
+- **Answer.** For each of the calling peer's own teams: `team_id`, `team_name`, `enabled` and `projects`. Each granted project carries its `repository` (`kind`, `url`, `host` with the port when the URL names one, `access`; or `null`) and its `process` pin (or `null`).
+- **Disabled profile.** It is answered with `enabled: false` and no projects.
+- **Gone project.** A grant whose project no longer exists is left out.
+- **Unknown team.** An unknown team ID, or another peer's team, is `not_found` (audited as `team.read.refused.not_found`). A successful read is audited as `team.read`.
+- **Never returned.** Tasks, members, knowledge and other peers' teams.
+- **Authority of the answer.** The pin `team.read` returns serves aicrew's `show`, `check` and gap announcements. The pin an offer carries stays in the coordination contract, and the hub rechecks it at commit.
+
+**Team-mode repository read.** Team mode also serves `GET /v1/projects/{p}/repository` under the profile's live grant, as for the other team reads. Without a grant the answer is `grant_denied`, and so it is for a reserved or unknown project; `?history=1` is `invalid_request`.
+
+**Unchanged.** Team operations under a disabled profile keep `context_stale`.

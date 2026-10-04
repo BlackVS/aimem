@@ -7,6 +7,7 @@ package main
 import (
 	"bytes"
 	"io"
+	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
@@ -34,6 +35,10 @@ func TestIdentityCLINamedForms(t *testing.T) {
 	if out := g.mustRun(t, "team", "create", "--peer", "aicrew-example", "--team-id", "team-1"); !strings.Contains(out, "team profile team-1 created") {
 		t.Fatalf("create: %s", out)
 	}
+	if !strings.Contains(notices.String(), "team create is kept for this release") {
+		t.Fatalf("team create notice: %q", notices)
+	}
+	notices.Reset()
 	if out := g.mustRun(t, "team", "grant", "--peer", "aicrew-example", "--team-id", "team-1", "--project", "alpha"); !strings.Contains(out, "project alpha (instance ") {
 		t.Fatalf("grant: %s", out)
 	}
@@ -188,4 +193,67 @@ func between(s, a, b string) string {
 		return s[:j]
 	}
 	return s
+}
+
+// Teams that aicrewd registered by name are named by that name within the
+// peer; every grant and revoke prints the name and the team ID it acted on.
+func TestIdentityCLITeamNames(t *testing.T) {
+	captureNotices(t)
+	g := newIdentityCLIRig(t, nil)
+	g.register(t)
+	if _, err := g.reg.Open("alpha"); err != nil {
+		t.Fatal(err)
+	}
+	// aicrewd's side: a team.register credential issued by the CLI, used on
+	// the wire route.
+	g.mustRun(t, "cred", "issue", "--peer", "aicrew-example", "--operation", "team.register", "--expires", "30d", "--output", g.secretPath("register.secret"))
+	raw, err := os.ReadFile(g.secretPath("register.secret"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	bearer := strings.TrimSpace(string(raw))
+	const team = "0190a1b2-c3d4-7e5f-8a9b-0c1d2e3f4a5b"
+	req, _ := http.NewRequest("PUT", g.ts.URL+"/v1/identity/peers/aicrew-example/team-registrations/"+team, strings.NewReader(`{"team_name":"pilot"}`))
+	req.Header.Set("Authorization", "Bearer "+bearer)
+	req.Header.Set("X-Aimem-Identity-Version", "1")
+	resp, err := g.ts.Client().Do(req)
+	if err != nil || resp.StatusCode != 200 {
+		t.Fatalf("register: %v %v", err, resp)
+	}
+	resp.Body.Close()
+
+	out := g.mustRun(t, "team", "grant", "--peer", "aicrew-example", "--team-name", "pilot", "--project", "alpha")
+	if !strings.Contains(out, "granted to team pilot ("+team+") of aicrew-example") {
+		t.Fatalf("grant by name: %s", out)
+	}
+	if out := g.mustRun(t, "team", "list", "aicrew-example"); !strings.Contains(out, "pilot  "+team+"  enabled") {
+		t.Fatalf("list: %s", out)
+	}
+	if out := g.mustRun(t, "team", "grants", "--peer", "aicrew-example", "--team-id", team); !strings.Contains(out, "pilot  "+team) || !strings.Contains(out, "grant alpha") {
+		t.Fatalf("grants by ID: %s", out)
+	}
+	if out := g.mustRun(t, "team", "revoke", "--peer", "aicrew-example", "--team-name", "pilot", "--project", "alpha"); !strings.Contains(out, "revoked from team pilot ("+team+")") {
+		t.Fatalf("revoke by name: %s", out)
+	}
+	before := g.requests.Load()
+	for _, tc := range []struct {
+		args []string
+		want string
+	}{
+		{[]string{"team", "grant", "--peer", "aicrew-example", "--team-name", "pilot", "--team-id", team, "--project", "alpha"}, "exactly one of --team-id or --team-name"},
+		{[]string{"team", "create", "--peer", "aicrew-example", "--team-name", "pilot"}, "team create takes --team-id only"},
+		{[]string{"cred", "list", "--peer", "aicrew-example", "--team-name", "pilot"}, "--team-name does not apply"},
+		{[]string{"cred", "issue", "--peer", "aicrew-example", "--operation", "team.write", "--expires", "30d", "--output", g.secretPath("x")}, "--operation must be one of"},
+	} {
+		if _, err := g.run(t, tc.args...); err == nil || !strings.Contains(err.Error(), tc.want) {
+			t.Errorf("%v: %v, want %q", tc.args, err, tc.want)
+		}
+	}
+	if g.requests.Load() != before {
+		t.Fatal("a malformed command reached the hub")
+	}
+	if _, err := g.run(t, "team", "grant", "--peer", "aicrew-example", "--team-name", "nobody", "--project", "alpha"); err == nil || !strings.Contains(err.Error(), "unknown team name \"nobody\"; the teams of aicrew-example are: pilot") {
+		t.Fatalf("unknown name: %v", err)
+	}
+	g.assertNoSecrets(t)
 }

@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"regexp"
 	"strings"
 	"time"
 
@@ -15,6 +16,11 @@ var (
 	ErrTeamProfileExists = errors.New("a team profile for this service and team already exists")
 	// ErrTeamProfileUnknown names a profile that does not exist.
 	ErrTeamProfileUnknown = errors.New("unknown team profile")
+	// ErrTeamNameTaken refuses a name another team of the same peer holds.
+	ErrTeamNameTaken = errors.New("team_name_taken")
+	// ErrTeamProfileDisabled refuses a registration of a profile the
+	// operator disabled; only the operator re-enables it.
+	ErrTeamProfileDisabled = errors.New("profile_disabled")
 )
 
 // HubID is minted once in access schema 3. URLs and project names never
@@ -29,7 +35,10 @@ type TeamProfile struct {
 	ID        string
 	ServiceID string
 	TeamID    string
-	Disabled  bool
+	// TeamName mirrors aicrewd's name for the team, set only by its
+	// team.register; empty until the team registers.
+	TeamName string
+	Disabled bool
 }
 
 // teamAuditSubject names a profile in the audit: its service, team and ID,
@@ -86,7 +95,7 @@ func (s *Store) CreateTeamProfile(actor, serviceID, teamID string) (TeamProfile,
 
 // ListTeamProfiles returns a service's profiles in team-ID order.
 func (s *Store) ListTeamProfiles(serviceID string) ([]TeamProfile, error) {
-	rows, err := s.db.Query("SELECT id,service_id,team_id,disabled FROM team_access_profiles WHERE service_id=? ORDER BY team_id", serviceID)
+	rows, err := s.db.Query("SELECT id,service_id,team_id,team_name,disabled FROM team_access_profiles WHERE service_id=? ORDER BY team_id", serviceID)
 	if err != nil {
 		return nil, err
 	}
@@ -94,7 +103,7 @@ func (s *Store) ListTeamProfiles(serviceID string) ([]TeamProfile, error) {
 	var out []TeamProfile
 	for rows.Next() {
 		var p TeamProfile
-		if err := rows.Scan(&p.ID, &p.ServiceID, &p.TeamID, &p.Disabled); err != nil {
+		if err := rows.Scan(&p.ID, &p.ServiceID, &p.TeamID, &p.TeamName, &p.Disabled); err != nil {
 			return nil, err
 		}
 		out = append(out, p)
@@ -104,8 +113,8 @@ func (s *Store) ListTeamProfiles(serviceID string) ([]TeamProfile, error) {
 
 func (s *Store) teamProfileByID(id string) (TeamProfile, error) {
 	var p TeamProfile
-	err := s.db.QueryRow("SELECT id,service_id,team_id,disabled FROM team_access_profiles WHERE id=?", id).
-		Scan(&p.ID, &p.ServiceID, &p.TeamID, &p.Disabled)
+	err := s.db.QueryRow("SELECT id,service_id,team_id,team_name,disabled FROM team_access_profiles WHERE id=?", id).
+		Scan(&p.ID, &p.ServiceID, &p.TeamID, &p.TeamName, &p.Disabled)
 	if errors.Is(err, sql.ErrNoRows) {
 		return TeamProfile{}, ErrTeamProfileUnknown
 	}
@@ -114,8 +123,8 @@ func (s *Store) teamProfileByID(id string) (TeamProfile, error) {
 
 func (s *Store) TeamProfileByKey(serviceID, teamID string) (TeamProfile, error) {
 	var p TeamProfile
-	err := s.db.QueryRow("SELECT id,service_id,team_id,disabled FROM team_access_profiles WHERE service_id=? AND team_id=?", serviceID, teamID).
-		Scan(&p.ID, &p.ServiceID, &p.TeamID, &p.Disabled)
+	err := s.db.QueryRow("SELECT id,service_id,team_id,team_name,disabled FROM team_access_profiles WHERE service_id=? AND team_id=?", serviceID, teamID).
+		Scan(&p.ID, &p.ServiceID, &p.TeamID, &p.TeamName, &p.Disabled)
 	return p, err
 }
 
@@ -230,4 +239,129 @@ func (s *Store) RecordTeamRevokeWithoutInstance(actor, profileID, project string
 		return err
 	}
 	return s.change(actor, "team_grant.false", teamAuditSubject(p, "")+" project="+project+" instance=none", func(*sql.Tx) error { return nil })
+}
+
+// teamUUIDPattern is the canonical lowercase form of the team UUIDs aicrewd
+// generates: registration accepts nothing else, so a team name can never
+// be registered as its ID (the first pilot's mistake).
+var teamUUIDPattern = regexp.MustCompile(`^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$`)
+
+// TeamRegistration is the outcome of one team.register.
+type TeamRegistration struct {
+	Profile TeamProfile
+	OldName string // "" when the profile was created, or had no name
+	Created bool
+}
+
+// RegisterTeam is team.register (DESIGN-AIFORGE-PILOT-1 §3): it creates the
+// calling peer's profile for an aicrew team UUID, or renames it. It acts
+// only on that peer's profiles, never creates or touches a grant and never
+// re-enables a disabled profile. Every outcome, refusals included, is
+// audited under the peer credential's actor.
+func (s *Store) RegisterTeam(actor, serviceID, teamID, name string) (TeamRegistration, error) {
+	var reg TeamRegistration
+	outcome := func(err error) string {
+		switch {
+		case err == nil && reg.Created:
+			return "created"
+		case err == nil && reg.OldName == name:
+			return "unchanged"
+		case err == nil:
+			return "renamed"
+		case errors.Is(err, ErrPeerForbidden):
+			return "refused.peer_forbidden"
+		case errors.Is(err, ErrTeamNameTaken):
+			return "refused.team_name_taken"
+		case errors.Is(err, ErrTeamProfileDisabled):
+			return "refused.profile_disabled"
+		case errors.Is(err, ErrInvalidRequest):
+			return "refused.invalid_request"
+		}
+		return "failed"
+	}
+	subject := func() string {
+		return fmt.Sprintf("service=%s team=%s old_name=%q new_name=%q profile=%s", serviceID, teamID, reg.OldName, name, reg.Profile.ID)
+	}
+	// A refusal names the profile and its current name when one exists, so
+	// the audit of an invalid rename still shows what it would have renamed.
+	if p, err := s.TeamProfileByKey(serviceID, teamID); err == nil {
+		reg.Profile, reg.OldName = p, p.TeamName
+	}
+	if !teamUUIDPattern.MatchString(teamID) {
+		err := fmt.Errorf("%w: team ID must be a lowercase canonical UUID", ErrInvalidRequest)
+		return reg, s.recordRegistration(actor, outcome(err), subject(), err)
+	}
+	if err := validName(name); err != nil {
+		err = fmt.Errorf("%w: team name: %v", ErrInvalidRequest, err)
+		return reg, s.recordRegistration(actor, outcome(err), subject(), err)
+	}
+	tx, err := s.db.Begin()
+	if err != nil {
+		return reg, err
+	}
+	defer tx.Rollback()
+	err = func() error {
+		var others int
+		if err := tx.QueryRow("SELECT count(*) FROM team_access_profiles WHERE team_id=? AND service_id<>?", teamID, serviceID).Scan(&others); err != nil {
+			return err
+		}
+		if others != 0 {
+			return ErrPeerForbidden
+		}
+		p := TeamProfile{ServiceID: serviceID, TeamID: teamID}
+		err := tx.QueryRow("SELECT id,team_name,disabled FROM team_access_profiles WHERE service_id=? AND team_id=?", serviceID, teamID).
+			Scan(&p.ID, &p.TeamName, &p.Disabled)
+		switch {
+		case errors.Is(err, sql.ErrNoRows):
+			p.ID, reg.Created = uuidv7.New(), true
+		case err != nil:
+			return err
+		case p.Disabled:
+			reg.Profile, reg.OldName = p, p.TeamName
+			return ErrTeamProfileDisabled
+		}
+		reg.OldName = p.TeamName
+		var holders int
+		if err := tx.QueryRow("SELECT count(*) FROM team_access_profiles WHERE service_id=? AND team_name=? AND team_id<>?", serviceID, name, teamID).Scan(&holders); err != nil {
+			return err
+		}
+		if holders != 0 {
+			reg.Profile = p
+			return ErrTeamNameTaken
+		}
+		if reg.Created {
+			_, err = tx.Exec("INSERT INTO team_access_profiles(id,service_id,team_id,team_name) VALUES(?,?,?,?)", p.ID, serviceID, teamID, name)
+		} else {
+			_, err = tx.Exec("UPDATE team_access_profiles SET team_name=? WHERE id=?", name, p.ID)
+		}
+		// The partial unique index settles a race between two
+		// registrations that both saw the name free.
+		if err != nil && strings.Contains(err.Error(), "team_access_profiles.team_name") {
+			reg.Profile = p
+			return ErrTeamNameTaken
+		}
+		if err != nil {
+			return err
+		}
+		p.TeamName = name
+		reg.Profile = p
+		return nil
+	}()
+	if err != nil {
+		tx.Rollback()
+		return reg, s.recordRegistration(actor, outcome(err), subject(), err)
+	}
+	if err := audit(tx, actor, "team.register."+outcome(nil), subject()); err != nil {
+		return reg, err
+	}
+	return reg, tx.Commit()
+}
+
+// recordRegistration audits a refused registration outside the refused
+// transaction and returns the refusal.
+func (s *Store) recordRegistration(actor, outcome, subject string, cause error) error {
+	if err := s.change(actor, "team.register."+outcome, subject, func(*sql.Tx) error { return nil }); err != nil {
+		return err
+	}
+	return cause
 }

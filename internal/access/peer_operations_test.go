@@ -111,8 +111,9 @@ func TestAccessSchema5KeepsCredentialsAsRedemption(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	// Back to schema 4: the column did not exist.
-	if _, err := s.db.Exec("ALTER TABLE identity_peer_credentials DROP COLUMN operation; PRAGMA user_version=4;"); err != nil {
+	// Back to schema 4: the column did not exist, nor schema 6's team name.
+	if _, err := s.db.Exec(`DROP INDEX team_access_profiles_name; ALTER TABLE team_access_profiles DROP COLUMN team_name;
+ALTER TABLE identity_peer_credentials DROP COLUMN operation; PRAGMA user_version=4;`); err != nil {
 		t.Fatal(err)
 	}
 	if err := s.Close(); err != nil {
@@ -133,5 +134,100 @@ func TestAccessSchema5KeepsCredentialsAsRedemption(t *testing.T) {
 		if err := s.Close(); err != nil {
 			t.Fatal(err)
 		}
+	}
+}
+
+// Schema 6 widens the operation set by rebuilding the credential table:
+// every schema-5 credential keeps its ID, digest, expiry and operation and
+// still authenticates; team profiles keep their rows and grants and start
+// without a name; the new operations can then be issued.
+func TestAccessSchema6KeepsCredentialsAndProfiles(t *testing.T) {
+	root := t.TempDir()
+	s, err := Open(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	hub, err := s.HubID()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.RegisterIdentityPeer("admin", IdentityPeer{ServiceID: "aicrew-example", HubID: hub,
+		Endpoint: "https://aicrew.example/v1/crew/introspect", TLSMode: "ca_dns", TLSValue: "aicrew.example"}); err != nil {
+		t.Fatal(err)
+	}
+	type issued struct{ id, secret, op string }
+	var creds []issued
+	for _, op := range []string{PeerOperationRedeem, PeerOperationReservationRead} {
+		c, secret, err := s.IssuePeerCredential("admin", "aicrew-example", op, time.Now().Add(time.Hour))
+		if err != nil {
+			t.Fatal(err)
+		}
+		creds = append(creds, issued{c.ID, secret, op})
+	}
+	profile, err := s.CreateTeamProfile("admin", "aicrew-example", "team-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.SetTeamGrant("admin", "instance-1", profile.ID, true); err != nil {
+		t.Fatal(err)
+	}
+	// Back to schema 5: the old CHECK, no team_name.
+	if _, err := s.db.Exec(`
+CREATE TABLE c5(
+ id TEXT PRIMARY KEY,
+ service_id TEXT NOT NULL REFERENCES identity_peers(service_id),
+ digest TEXT NOT NULL UNIQUE,
+ created_at INTEGER NOT NULL,
+ expires_at INTEGER NOT NULL,
+ revoked INTEGER NOT NULL DEFAULT 0 CHECK(revoked IN (0,1)),
+ operation TEXT NOT NULL DEFAULT 'identity.redeem' CHECK(operation IN ('identity.redeem','reservation.read'))
+);
+INSERT INTO c5 SELECT id,service_id,digest,created_at,expires_at,revoked,operation FROM identity_peer_credentials;
+DROP TABLE identity_peer_credentials;
+ALTER TABLE c5 RENAME TO identity_peer_credentials;
+DROP INDEX team_access_profiles_name;
+ALTER TABLE team_access_profiles DROP COLUMN team_name;
+PRAGMA user_version=5;`); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Close(); err != nil {
+		t.Fatal(err)
+	}
+	for range 2 { // migration, then an ordinary reopen
+		if s, err = Open(root); err != nil {
+			t.Fatal(err)
+		}
+		var version int
+		if err := s.db.QueryRow("PRAGMA user_version").Scan(&version); err != nil || version != accessSchema || accessSchema != 6 {
+			t.Fatalf("schema version %d: %v", version, err)
+		}
+		for _, c := range creds {
+			p, err := s.AuthenticatePeer(c.secret)
+			if err != nil || p.CredentialID != c.id || p.Operation != c.op {
+				t.Fatalf("a migrated %s credential: %+v %v", c.op, p, err)
+			}
+		}
+		got, err := s.TeamProfileByKey("aicrew-example", "team-1")
+		if err != nil || got.ID != profile.ID || got.TeamName != "" {
+			t.Fatalf("migrated profile: %+v %v", got, err)
+		}
+		if inst, err := s.TeamGrantInstances(profile.ID); err != nil || len(inst) != 1 || inst[0] != "instance-1" {
+			t.Fatalf("migrated grant: %v %v", inst, err)
+		}
+		if err := s.Close(); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if s, err = Open(root); err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	for _, op := range []string{PeerOperationTeamRegister, PeerOperationTeamRead} {
+		if _, _, err := s.IssuePeerCredential("admin", "aicrew-example", op, time.Now().Add(time.Hour)); err != nil {
+			t.Fatalf("issue %s after the migration: %v", op, err)
+		}
+	}
+	if _, _, err := s.IssuePeerCredential("admin", "aicrew-example", "team.write", time.Now().Add(time.Hour)); !errors.Is(err, ErrInvalidRequest) {
+		t.Fatalf("an unknown operation: %v", err)
 	}
 }

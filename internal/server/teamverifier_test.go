@@ -146,6 +146,8 @@ func TestTeamRoutesAreTheApprovedMatrix(t *testing.T) {
 	want := []string{
 		"GET /v1/access/identity", "GET /v1/projects/{p}/tasks", "GET /v1/tasks/{id}", "GET /v1/tasks/{id}/history",
 		"GET /v1/tasks/{id}/comments", "GET /v1/tasks/{id}/comments/{c}", "GET /v1/projects/{p}/epics", "GET /v1/projects/{p}/epics/{e}",
+		// The project's repository under the profile's grant (DESIGN-AIFORGE-PILOT-1 §1).
+		"GET /v1/projects/{p}/repository",
 		"POST /v1/projects/{p}/tasks/{task_id}/reservation/claim", "POST /v1/projects/{p}/tasks/{task_id}/reservation/transfer",
 		"POST /v1/projects/{p}/tasks/{task_id}/reservation/update", "POST /v1/projects/{p}/tasks/{task_id}/reservation/release",
 		"POST /v1/projects/{p}/tasks/{task_id}/reservation/finalize", "GET /v1/projects/{p}/tasks/{task_id}/reservation",

@@ -229,7 +229,7 @@
     "/v1/projects/{p}/repository": {
       "get": {
         "summary": "The project's repository (kind, clone URL, its host, access)",
-        "description": "The one repository a project's work happens in, a hub property next to the process reference (docs/DESIGN-AIFORGE-PILOT-1.md §1). It holds no secret: the host of the clone URL, with its port when the URL names one (forge.example.org:3000), names the credential a member needs. An ordinary user token needs a live grant on the project (the knowledge-read rule); an unknown project answers as one without a grant. Team mode does not serve this route yet. `repository` is null when none is set. ?history=1 (admin only) adds the recorded changes, newest first, each with its action (project.repository.set or project.repository.clear), time, actor and the values before and after.",
+        "description": "The one repository a project's work happens in, a hub property next to the process reference (docs/DESIGN-AIFORGE-PILOT-1.md §1). It holds no secret: the host of the clone URL, with its port when the URL names one (forge.example.org:3000), names the credential a member needs. An ordinary user token needs a live grant on the project (the knowledge-read rule); an unknown project answers as one without a grant. A team session reads it under its profile's live grant (grant_denied otherwise, ?history refused with invalid_request). `repository` is null when none is set. ?history=1 (admin only) adds the recorded changes, newest first, each with its action (project.repository.set or project.repository.clear), time, actor and the values before and after.",
         "x-role": "writer",
         "parameters": [
           {"name": "p", "in": "path", "required": true, "schema": {"type": "string"}},
@@ -1105,6 +1105,69 @@
           "503": {
             "description": "Refusal envelope {code, message, retryable, next_action, correlation_id}; never contains a secret"
           }
+        }
+      }
+    },
+    "/v1/identity/peers/{service_id}/team-registrations/{team_id}": {
+      "put": {
+        "summary": "identity.v1 team.register: aicrewd names its own team on the hub",
+        "description": "identity.v1 team.register (docs/DESIGN-AIFORGE-PILOT-1.md §3): only an aimem_peer_ credential issued for team.register, for the path's service, may call this; every other credential is refused with peer_forbidden. Creates the peer's profile for an aicrew team UUID (lowercase canonical form), or renames it; renaming to the same name changes nothing. It never creates or touches a grant and never re-enables a disabled profile. Refusals: invalid_request (malformed UUID or name), peer_forbidden (another operation's credential, or a team UUID registered under another peer), team_name_taken (409: another team of this peer holds the name), profile_disabled (403: the operator disabled the profile; only the operator re-enables it). Every outcome, refusals included, is audited with the peer, the team, the old and new name and the outcome. Requires TLS terminated by this hub (plain HTTP, a TLS-terminating proxy and the unix socket are refused with tls_required) and X-Aimem-Identity-Version: 1. Bounded with the read scope at 60 calls per minute per credential (rate_limited). Not exposed as an MCP tool.",
+        "x-role": "writer",
+        "x-identity-auth": "peer",
+        "x-requires-tls": true,
+        "parameters": [
+          {"name": "service_id", "in": "path", "required": true, "schema": {"type": "string"}},
+          {"name": "team_id", "in": "path", "required": true, "schema": {"type": "string"}},
+          {"name": "X-Aimem-Identity-Version", "in": "header", "required": true, "schema": {"type": "string", "enum": ["1"]}}
+        ],
+        "requestBody": {"required": true, "content": {"application/json": {"schema": {"type": "object", "additionalProperties": false, "required": ["team_name"], "properties": {"team_name": {"type": "string"}}}}}},
+        "responses": {
+          "200": {"description": "profile_id, team_id, team_name, created and previous_name"},
+          "400": {"description": "invalid_request or unsupported_version"},
+          "401": {"description": "peer_unauthenticated"},
+          "403": {"description": "tls_required, peer_forbidden or profile_disabled"},
+          "409": {"description": "team_name_taken"},
+          "429": {"description": "rate_limited"}
+        }
+      }
+    },
+    "/v1/identity/peers/{service_id}/team-reads": {
+      "get": {
+        "summary": "identity.v1 team.read: the calling peer's own teams, grants, repositories and process pins",
+        "description": "identity.v1 team.read (docs/DESIGN-AIFORGE-PILOT-1.md §3): only an aimem_peer_ credential issued for team.read, for the path's service, may call this; every other credential is refused with peer_forbidden. Answers the calling peer's own teams only: each team's ID, name and enabled state and its granted projects, each with its repository (kind, url, host, access, or null) and its process pin (or null). A disabled profile is answered with enabled false and no projects; a grant whose project is gone is left out. No tasks, members or knowledge. Audited as team.read. Requires TLS terminated by this hub (plain HTTP, a TLS-terminating proxy and the unix socket are refused with tls_required) and X-Aimem-Identity-Version: 1. Bounded with the read scope at 60 calls per minute per credential (rate_limited). Not exposed as an MCP tool.",
+        "x-role": "writer",
+        "x-identity-auth": "peer",
+        "x-requires-tls": true,
+        "parameters": [
+          {"name": "service_id", "in": "path", "required": true, "schema": {"type": "string"}},
+          {"name": "X-Aimem-Identity-Version", "in": "header", "required": true, "schema": {"type": "string", "enum": ["1"]}}
+        ],
+        "responses": {
+          "200": {"description": "{teams: [...]}"},
+          "401": {"description": "peer_unauthenticated"},
+          "403": {"description": "tls_required or peer_forbidden"},
+          "429": {"description": "rate_limited"}
+        }
+      }
+    },
+    "/v1/identity/peers/{service_id}/team-reads/{team_id}": {
+      "get": {
+        "summary": "identity.v1 team.read for one of the calling peer's teams",
+        "description": "identity.v1 team.read (docs/DESIGN-AIFORGE-PILOT-1.md §3): only an aimem_peer_ credential issued for team.read, for the path's service, may call this; every other credential is refused with peer_forbidden. Answers the calling peer's own teams only: each team's ID, name and enabled state and its granted projects, each with its repository (kind, url, host, access, or null) and its process pin (or null). A disabled profile is answered with enabled false and no projects; a grant whose project is gone is left out. No tasks, members or knowledge. Audited as team.read. Requires TLS terminated by this hub (plain HTTP, a TLS-terminating proxy and the unix socket are refused with tls_required) and X-Aimem-Identity-Version: 1. Bounded with the read scope at 60 calls per minute per credential (rate_limited). Not exposed as an MCP tool. An unknown team ID, or another peer's team, is answered not_found.",
+        "x-role": "writer",
+        "x-identity-auth": "peer",
+        "x-requires-tls": true,
+        "parameters": [
+          {"name": "service_id", "in": "path", "required": true, "schema": {"type": "string"}},
+          {"name": "team_id", "in": "path", "required": true, "schema": {"type": "string"}},
+          {"name": "X-Aimem-Identity-Version", "in": "header", "required": true, "schema": {"type": "string", "enum": ["1"]}}
+        ],
+        "responses": {
+          "200": {"description": "the team"},
+          "401": {"description": "peer_unauthenticated"},
+          "403": {"description": "tls_required or peer_forbidden"},
+          "404": {"description": "not_found"},
+          "429": {"description": "rate_limited"}
         }
       }
     },
