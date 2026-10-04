@@ -362,7 +362,7 @@ func TestIdentityCLIRevokeFailureIsReported(t *testing.T) {
 	_, err := g.run(t, "cred", "issue", "aicrew-example", "--expires", "90d", "--secret-file", g.secretPath("s"))
 	got := g.creds(t)
 	if err == nil || !strings.Contains(err.Error(), "revoking it FAILED") || len(got) != 1 ||
-		!strings.Contains(err.Error(), "aimem identity cred revoke aicrew-example "+strings.Fields(got[0])[0]) {
+		!strings.Contains(err.Error(), "aimem identity cred revoke --peer aicrew-example --credential "+strings.Fields(got[0])[0]) {
 		t.Fatalf("revoke failure: %v (%v)", err, got)
 	}
 	g.assertNoSecrets(t)
@@ -408,7 +408,7 @@ func TestIdentityCLIUnknownOutcomeNeverGuesses(t *testing.T) {
 		}
 	}
 	if !strings.Contains(out, "unknown") || !strings.Contains(out, "nothing was reissued and nothing was revoked") ||
-		!strings.Contains(out, "aimem identity cred revoke aicrew-example "+id) {
+		!strings.Contains(out, "aimem identity cred revoke --peer aicrew-example --credential "+id) {
 		t.Errorf("unknown-outcome guidance: %s", out)
 	}
 	if strings.Contains(out, earlier) {
@@ -447,7 +447,7 @@ func TestIdentityCLIRotationAndRevoke(t *testing.T) {
 	g.mustRun(t, "cred", "issue", "aicrew-example", "--expires", "30d", "--secret-file", g.secretPath("first"))
 	oldID := strings.Fields(g.creds(t)[0])[0]
 	out := g.mustRun(t, "cred", "rotate", "aicrew-example", "--expires", "30d", "--secret-file", g.secretPath("second"))
-	if !strings.Contains(out, "aimem identity cred revoke aicrew-example "+oldID) {
+	if !strings.Contains(out, "aimem identity cred revoke --peer aicrew-example --credential "+oldID) {
 		t.Errorf("rotate does not name the explicit revoke: %s", out)
 	}
 	got := g.creds(t)
@@ -617,19 +617,19 @@ func TestIdentityCLIPrintedRecoveryCommandsRun(t *testing.T) {
 
 	// Unknown outcome: the printed revoke removes the undelivered credential.
 	drop.Store(true)
-	out, _ := g.run(t, "cred", "issue", "aicrew-example", "--expires", "30d", "--secret-file", g.secretPath("u.secret"))
+	out, _ := g.run(t, "cred", "issue", "aicrew-example", "--expires", "30d", "--output", g.secretPath("u.secret"))
 	drop.Store(false)
 	lines := printedLines(out)
 	if len(lines) != 1 {
 		t.Fatalf("unknown outcome printed %q from:\n%s", lines, out)
 	}
 	args := shellParse(t, lines[0])
-	want := []string{"aimem", "identity", "cred", "revoke", "aicrew-example", args[5],
+	want := []string{"aimem", "identity", "cred", "revoke", "--peer", "aicrew-example", "--credential", args[7],
 		"--hub", g.ts.URL, "--admin-token-file", g.tokenFile, "--hub-ca-file", g.caFile}
 	if strings.Join(args, "\x00") != strings.Join(want, "\x00") {
 		t.Fatalf("the shell parsed the printed command as\n%q\nwant\n%q", args, want)
 	}
-	id := args[5]
+	id := args[7]
 	if err := g.runPrinted(t, args); err != nil || !revoked(id) {
 		t.Fatalf("printed unknown-outcome revoke: %v", err)
 	}
@@ -638,7 +638,7 @@ func TestIdentityCLIPrintedRecoveryCommandsRun(t *testing.T) {
 	saved := deliverSecret
 	deliverSecret = func(*os.File, string) error { return errors.New("disk full") }
 	failDelete.Store(true)
-	_, err := g.run(t, "cred", "issue", "aicrew-example", "--expires", "30d", "--secret-file", g.secretPath("f.secret"))
+	_, err := g.run(t, "cred", "issue", "aicrew-example", "--expires", "30d", "--output", g.secretPath("f.secret"))
 	failDelete.Store(false)
 	deliverSecret = saved
 	if err == nil {
@@ -649,7 +649,7 @@ func TestIdentityCLIPrintedRecoveryCommandsRun(t *testing.T) {
 		t.Fatalf("revoke failure printed %q", lines)
 	}
 	args = shellParse(t, lines[0])
-	id = args[5]
+	id = args[7]
 	if revoked(id) {
 		t.Fatal("the failed automatic revoke took effect")
 	}
@@ -658,14 +658,14 @@ func TestIdentityCLIPrintedRecoveryCommandsRun(t *testing.T) {
 	}
 
 	// Rotation: the printed revoke retires the old credential.
-	g.mustRun(t, "cred", "issue", "aicrew-example", "--expires", "30d", "--secret-file", g.secretPath("first.secret"))
-	out = g.mustRun(t, "cred", "rotate", "aicrew-example", "--expires", "30d", "--secret-file", g.secretPath("second.secret"))
+	g.mustRun(t, "cred", "issue", "aicrew-example", "--expires", "30d", "--output", g.secretPath("first.secret"))
+	out = g.mustRun(t, "cred", "rotate", "aicrew-example", "--expires", "30d", "--output", g.secretPath("second.secret"))
 	lines = printedLines(out)
 	if len(lines) != 1 {
 		t.Fatalf("rotation printed %q", lines)
 	}
 	args = shellParse(t, lines[0])
-	id = args[5]
+	id = args[7]
 	if err := g.runPrinted(t, args); err != nil || !revoked(id) {
 		t.Fatalf("printed rotation revoke: %v", err)
 	}

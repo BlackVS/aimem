@@ -53,7 +53,7 @@ when a member lacks a grant or an enrollment.
 
 ## Configuration files
 
-Create access users with `aimem access user-add NAME`, then use their IDs in a
+Create access users with `aimem access user-add --user-name NAME`, then use their IDs in a
 UTF-8 JSON file. Enrollment is separate from project grants: it grants no project
 access, and coordinator eligibility does not create an active coordinator session.
 

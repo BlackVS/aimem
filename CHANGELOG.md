@@ -51,7 +51,9 @@ currently 23); a binary refuses a database newer than it understands.
     the actor and the values before and after (`project.repository.set`,
     `project.repository.clear`).
   - `GET /v1/projects/{p}/repository` answers the repository and its
-    host. An ordinary token reads it under its own current grant on the
+    host, with the port when the URL names one (`forge.example.org:3000`),
+    so two forge instances on one host name two credentials. An ordinary
+    token reads it under its own current grant on the
     project, and a read-only token does not. Team mode does not serve it
     yet.
   - `aimem project show --project <p>` prints the repository, the process
@@ -65,6 +67,30 @@ currently 23); a binary refuses a database newer than it understands.
   alias.
 
 ### Changed
+
+- **`aimem access` and `aimem identity` name every entity by a flag**
+  ([`docs/DESIGN-AIFORGE-PILOT-1.md`](docs/DESIGN-AIFORGE-PILOT-1.md) §5).
+  - Users and groups are named by `--user-name` or `--user-id` and
+    `--group-name` or `--group-id`, exactly one of each. An unknown name
+    is refused with the names that exist, and a name held by several
+    users with their IDs. `user-add` and `group-add` take the name only;
+    `user-set` takes `--user-id` and the new `--user-name`.
+  - `access grant add|rm` takes `--project`; tokens are revoked by
+    `--token-id`; `token-issue` takes `--project` or `--read-only`.
+  - `aimem identity` commands with several entities take `--peer`,
+    `--credential`, `--team-id` and `--project`. A command with one entity
+    (`peer check`, `cred list`, `cred issue`, ...) still takes it as its one
+    argument, or as `--peer`. The revoke commands the CLI prints use the
+    new form.
+  - Each `--help` shows full examples.
+- **An issued secret is written to `--output <file|->`**
+  ([`docs/DESIGN-AIFORGE-PILOT-1.md`](docs/DESIGN-AIFORGE-PILOT-1.md) §6),
+  in `aimem identity cred issue|rotate` and `aimem access token-issue` and
+  `token-issue-user`. A file must not exist and is created readable only
+  by its owner before anything is issued. `-` writes to standard output
+  for a pipe and is refused when standard output is a terminal; every
+  other line then goes to standard error. `token-issue` with `--output`
+  prints the token's record without the secret.
 
 - **Tests cannot reach a real hub through the client state root.** The
   CLI and the MCP server now resolve the state root in one place
@@ -81,6 +107,14 @@ currently 23); a binary refuses a database newer than it understands.
   hazard below.
 
 ### Upgrade notes
+
+- **The old command forms work for this release only.** The positional
+  forms of `aimem access` and of the `aimem identity` commands with
+  several entities, and `--secret-file`, keep working and print a
+  one-line notice on standard error naming the new form. The old
+  `token-issue` and `token-issue-user` forms still print the secret on
+  standard output; a script that reads it there should move to
+  `--output -`.
 
 - **A service started with an explicit `AIMEM_STATE_DIR` moves its socket**
   into that root on restart.

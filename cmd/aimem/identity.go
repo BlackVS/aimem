@@ -24,8 +24,8 @@ import (
 	"net/http"
 	"net/url"
 	"os"
-	"path/filepath"
 	"runtime"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -33,31 +33,35 @@ import (
 	"aimem/internal/privatefile"
 )
 
-const identityUsage = `usage: aimem identity peer list                            [hub flags]
+const identityUsage = `usage: aimem identity peer list                                  [hub flags]
        aimem identity peer register SERVICE --endpoint URL
                                  (--peer-trust-dns | --peer-trust-pin sha256-BASE64) [hub flags]
-       aimem identity peer enable SERVICE                    [hub flags]
-       aimem identity peer disable SERVICE                   [hub flags]
-       aimem identity peer check SERVICE                     [hub flags]
-       aimem identity cred list SERVICE                      [hub flags]
-       aimem identity cred issue SERVICE --expires 90d|RFC3339 --secret-file PATH
+       aimem identity peer enable|disable|check SERVICE            [hub flags]
+       aimem identity cred list SERVICE                            [hub flags]
+       aimem identity cred issue|rotate SERVICE --expires 90d|RFC3339 --output FILE|-
                                  [--operation identity.redeem|reservation.read] [hub flags]
-       aimem identity cred rotate SERVICE --expires 90d|RFC3339 --secret-file PATH
-                                 [--operation identity.redeem|reservation.read] [hub flags]
-       aimem identity cred revoke SERVICE CREDENTIAL_ID      [hub flags]
-       aimem identity team list SERVICE                      [hub flags]
-       aimem identity team create SERVICE TEAM               [hub flags]
-       aimem identity team enable SERVICE TEAM               [hub flags]
-       aimem identity team disable SERVICE TEAM              [hub flags]
-       aimem identity team grants SERVICE TEAM               [hub flags]
-       aimem identity team grant SERVICE TEAM PROJECT        [hub flags]
-       aimem identity team revoke SERVICE TEAM (PROJECT | --instance ID) [hub flags]
+       aimem identity cred revoke --peer SERVICE --credential ID   [hub flags]
+       aimem identity team list SERVICE                            [hub flags]
+       aimem identity team create|enable|disable|grants --peer SERVICE --team-id TEAM [hub flags]
+       aimem identity team grant --peer SERVICE --team-id TEAM --project PROJECT [hub flags]
+       aimem identity team revoke --peer SERVICE --team-id TEAM (--project PROJECT | --instance ID) [hub flags]
+
+A command that names one entity takes it as its one argument or as --peer;
+a command that names several takes each by its flag. The positional forms
+of earlier releases (for example 'team grant SERVICE TEAM PROJECT') keep
+working for this release and print the new form. --secret-file is the old
+name of --output and keeps working for this release.
+
+Examples:
+  aimem identity team grant --peer aicrew-example --team-id TEAM_ID --project example --hub https://hub.example.test:8443 --admin-token-file admin.token
+  aimem identity cred issue aicrew-example --operation reservation.read --expires 90d --output reservation-read.secret --hub https://hub.example.test:8443 --admin-token-file admin.token
+  aimem identity cred revoke --peer aicrew-example --credential CREDENTIAL_ID --hub https://hub.example.test:8443 --admin-token-file admin.token
 
 Manage the aicrew identity peer, its credentials and its team access
 profiles through the hub's TLS listener. The local socket is not used: identity routes require TLS
 terminated by the hub.
 
-Hub flags (after the positional arguments):
+Hub flags (after the arguments):
   --hub https://HOST:PORT    the hub's TLS listener (required; http is refused)
   --admin-token-file PATH    a hub-admin bearer on one line, in a file only you
                              can read (required; there is no other source)
@@ -84,9 +88,11 @@ disable takes effect on the next team request. There is no delete; disable a
 profile instead. revoke --instance removes a grant whose project was renamed
 away or deleted, by the instance ID that team grants lists.
 
-cred issue and cred rotate write the new bearer once to --secret-file, a new
-file only you can read, created before anything is issued; it is never
-printed. Deliver it to aicrew's protected storage, then delete the file.
+cred issue and cred rotate write the new bearer once to --output: a new
+file only you can read, created before anything is issued, or - for
+standard output into a pipe (refused on a terminal; every other line then
+goes to standard error). It is never printed to a screen. Deliver a file
+to aicrew's protected storage, then delete it.
 cred rotate issues the second credential only; after aicrew has switched to
 it, revoke the old one explicitly with cred revoke.
 
@@ -193,32 +199,34 @@ func identityCmd(args []string) error {
 	return runIdentity(args, os.Stdout)
 }
 
+// identitySlots are the entities each command names, in the order of the
+// positional form of earlier releases.
+var identitySlots = map[string][]string{
+	"peer list": nil, "peer register": {"peer"}, "peer enable": {"peer"}, "peer disable": {"peer"}, "peer check": {"peer"},
+	"cred list": {"peer"}, "cred issue": {"peer"}, "cred rotate": {"peer"}, "cred revoke": {"peer", "credential"},
+	"team list": {"peer"}, "team create": {"peer", "team-id"}, "team enable": {"peer", "team-id"}, "team disable": {"peer", "team-id"},
+	"team grants": {"peer", "team-id"}, "team grant": {"peer", "team-id", "project"}, "team revoke": {"peer", "team-id", "project"},
+}
+
 func runIdentity(args []string, out io.Writer) error {
 	usage := fmt.Errorf("%s", identityUsage)
 	if len(args) < 2 {
 		return usage
 	}
 	noun, verb, rest := args[0], args[1], args[2:]
-	positional := map[string]int{
-		"peer list": 0, "peer register": 1, "peer enable": 1, "peer disable": 1, "peer check": 1,
-		"cred list": 1, "cred issue": 1, "cred rotate": 1, "cred revoke": 2,
-		"team list": 1, "team create": 2, "team enable": 2, "team disable": 2, "team grants": 2, "team grant": 3, "team revoke": 2,
-	}
-	n, ok := positional[noun+" "+verb]
-	// team revoke names either a project (a third positional) or --instance.
-	if ok && noun+" "+verb == "team revoke" && len(rest) > 2 && !strings.HasPrefix(rest[2], "-") {
-		n = 3
-	}
-	if !ok || len(rest) < n {
+	cmd := noun + " " + verb
+	slots, ok := identitySlots[cmd]
+	if !ok {
 		return usage
 	}
-	pos, flags := rest[:n], rest[n:]
-	for _, p := range pos {
-		if strings.HasPrefix(p, "-") {
-			return usage
-		}
+	// A command with one entity keeps it as its one positional argument;
+	// the positional form of a command with several entities is kept for
+	// this release with a notice.
+	var pos []string
+	for len(rest) > 0 && !strings.HasPrefix(rest[0], "-") && len(pos) < len(slots) {
+		pos, rest = append(pos, rest[0]), rest[1:]
 	}
-	fs := flag.NewFlagSet("aimem identity "+noun+" "+verb, flag.ContinueOnError)
+	fs := flag.NewFlagSet("aimem identity "+cmd, flag.ContinueOnError)
 	fs.SetOutput(io.Discard)
 	hub := fs.String("hub", "", "")
 	tokenFile := fs.String("admin-token-file", "", "")
@@ -228,34 +236,62 @@ func runIdentity(args []string, out io.Writer) error {
 	trustDNS := fs.Bool("peer-trust-dns", false, "")
 	trustPin := fs.String("peer-trust-pin", "", "")
 	expires := fs.String("expires", "", "")
+	output := fs.String("output", "", "")
 	secretFile := fs.String("secret-file", "", "")
 	operation := fs.String("operation", "identity.redeem", "")
 	instance := fs.String("instance", "", "")
-	if err := fs.Parse(flags); err != nil {
+	named := map[string]*string{
+		"peer": fs.String("peer", "", ""), "credential": fs.String("credential", "", ""),
+		"team-id": fs.String("team-id", "", ""), "project": fs.String("project", "", ""),
+	}
+	fs.StringVar(named["project"], "p", "", "")
+	if err := fs.Parse(rest); err != nil {
 		return fmt.Errorf("%v\n\n%s", err, identityUsage)
 	}
 	if fs.NArg() != 0 {
 		return usage
 	}
+	ent := map[string]string{}
+	for i, slot := range slots {
+		v := *named[slot]
+		if i < len(pos) {
+			if v != "" {
+				return fmt.Errorf("the %s is given twice, as an argument and as --%s", slot, slot)
+			}
+			v = pos[i]
+		}
+		ent[slot] = v
+		if v == "" && !(cmd == "team revoke" && slot == "project") {
+			return fmt.Errorf("%s needs --%s\n\n%s", cmd, slot, identityUsage)
+		}
+	}
+	for name, p := range named {
+		if *p != "" && !slices.Contains(slots, name) {
+			return fmt.Errorf("--%s does not apply to %s", name, cmd)
+		}
+	}
 	// Validate the command's own arguments before touching the network, the
 	// token file or the secret file.
 	var expiry time.Time
-	switch noun + " " + verb {
+	switch cmd {
 	case "peer register":
 		if *endpoint == "" || *trustDNS == (*trustPin != "") {
 			return fmt.Errorf("peer register needs --endpoint and exactly one of --peer-trust-dns or --peer-trust-pin")
 		}
 	case "team create":
-		if pos[1] == "." || pos[1] == ".." {
-			return fmt.Errorf("team ID %q is not allowed: a team ID cannot be \".\" or \"..\"", pos[1])
+		if t := ent["team-id"]; t == "." || t == ".." {
+			return fmt.Errorf("team ID %q is not allowed: a team ID cannot be \".\" or \"..\"", t)
 		}
 	case "team revoke":
-		if (len(pos) == 3) == (*instance != "") {
-			return fmt.Errorf("team revoke needs exactly one of PROJECT or --instance ID")
+		if (ent["project"] != "") == (*instance != "") {
+			return fmt.Errorf("team revoke needs exactly one of --project or --instance ID")
 		}
 	case "cred issue", "cred rotate":
-		if *secretFile == "" || *expires == "" {
-			return fmt.Errorf("%s needs --expires and --secret-file", "cred "+verb)
+		if *output != "" && *secretFile != "" {
+			return fmt.Errorf("--secret-file is the old name of --output; give one of them")
+		}
+		if *output == "" && *secretFile == "" || *expires == "" {
+			return fmt.Errorf("%s needs --expires and --output", cmd)
 		}
 		if *operation != "identity.redeem" && *operation != "reservation.read" {
 			return fmt.Errorf("--operation must be identity.redeem or reservation.read")
@@ -265,48 +301,72 @@ func runIdentity(args []string, out io.Writer) error {
 			return err
 		}
 	}
+	if len(slots) > 1 && len(pos) > 0 {
+		legacyForm(identityNewForm(cmd, slots, ent))
+	}
+	if *secretFile != "" {
+		legacyForm("--output in place of --secret-file")
+		*output = *secretFile
+	}
 	c, err := newIdentityClient(*hub, *tokenFile, *caFile, *pin)
 	if err != nil {
 		return err
 	}
-	switch noun + " " + verb {
+	peer, team := ent["peer"], ent["team-id"]
+	switch cmd {
 	case "peer list":
 		return c.peerList(out)
 	case "peer register":
-		return c.peerRegister(pos[0], *endpoint, *trustDNS, *trustPin, out)
+		return c.peerRegister(peer, *endpoint, *trustDNS, *trustPin, out)
 	case "peer enable", "peer disable":
-		return c.peerSetDisabled(pos[0], verb == "disable", out)
+		return c.peerSetDisabled(peer, verb == "disable", out)
 	case "peer check":
-		return c.peerCheck(pos[0], out)
+		return c.peerCheck(peer, out)
 	case "cred list":
-		return c.credList(pos[0], out)
-	case "cred issue":
-		return c.credIssue(pos[0], *operation, expiry, *secretFile, false, out)
-	case "cred rotate":
-		return c.credIssue(pos[0], *operation, expiry, *secretFile, true, out)
-	case "cred revoke":
-		if err := c.credRevoke(pos[0], pos[1]); err != nil {
+		return c.credList(peer, out)
+	case "cred issue", "cred rotate":
+		sink, err := reserveSecretOutput("--output", *output)
+		if err != nil {
 			return err
 		}
-		fmt.Fprintf(out, "credential %s of %s revoked\n", pos[1], pos[0])
+		if sink.toStdout() {
+			out = noticeOut
+		}
+		return c.credIssue(peer, *operation, expiry, sink, verb == "rotate", out)
+	case "cred revoke":
+		if err := c.credRevoke(peer, ent["credential"]); err != nil {
+			return err
+		}
+		fmt.Fprintf(out, "credential %s of %s revoked\n", ent["credential"], peer)
 		return nil
 	case "team list":
-		return c.teamList(pos[0], out)
+		return c.teamList(peer, out)
 	case "team create":
-		return c.teamCreate(pos[0], pos[1], out)
+		return c.teamCreate(peer, team, out)
 	case "team enable", "team disable":
-		return c.teamSetDisabled(pos[0], pos[1], verb == "disable", out)
+		return c.teamSetDisabled(peer, team, verb == "disable", out)
 	case "team grants":
-		return c.teamGrants(pos[0], pos[1], out)
+		return c.teamGrants(peer, team, out)
 	case "team grant":
-		return c.teamGrant(pos[0], pos[1], pos[2], out)
+		return c.teamGrant(peer, team, ent["project"], out)
 	case "team revoke":
 		if *instance != "" {
-			return c.teamRevokeInstance(pos[0], pos[1], *instance, out)
+			return c.teamRevokeInstance(peer, team, *instance, out)
 		}
-		return c.teamRevoke(pos[0], pos[1], pos[2], out)
+		return c.teamRevoke(peer, team, ent["project"], out)
 	}
 	return usage
+}
+
+// identityNewForm renders the named form of a positional invocation.
+func identityNewForm(cmd string, slots []string, ent map[string]string) string {
+	args := append([]string{"aimem", "identity"}, strings.Fields(cmd)...)
+	for _, s := range slots {
+		if ent[s] != "" {
+			args = append(args, "--"+s, ent[s])
+		}
+	}
+	return shellCommand(runtime.GOOS == "windows", args) + " [hub flags]"
 }
 
 type identityTeam struct {
@@ -740,41 +800,14 @@ func (c *identityClient) credRevoke(service, id string) error {
 	return c.call("DELETE", peerPath(service)+"/credentials/"+url.PathEscape(id), nil, http.StatusOK, nil)
 }
 
-// reserveSecretFile checks the destination before anything is issued: the
-// directory must exist and the path must not, and the file is created
-// exclusively with owner-only access right away.
-func reserveSecretFile(path string) (*os.File, error) {
-	if fi, err := os.Stat(filepath.Dir(path)); err != nil || !fi.IsDir() {
-		return nil, fmt.Errorf("--secret-file %s: its directory does not exist; nothing was issued", path)
-	}
-	if _, err := os.Lstat(path); err == nil {
-		return nil, fmt.Errorf("--secret-file %s already exists and is never overwritten; choose a new path; nothing was issued", path)
-	}
-	f, err := privatefile.Create(path)
-	if err != nil {
-		return nil, fmt.Errorf("--secret-file %s cannot be created (%v); nothing was issued", path, err)
-	}
-	if err := privatefile.Check(path); err != nil {
-		f.Close()
-		os.Remove(path)
-		return nil, fmt.Errorf("--secret-file %s is not private after creation (%v); nothing was issued", path, err)
-	}
-	return f, nil
-}
-
 // credIssue issues one credential for one operation and delivers its bearer
-// only to the reserved secret file. With rotate it first requires exactly
-// one active credential of that operation and never revokes anything.
-func (c *identityClient) credIssue(service, operation string, expiry time.Time, secretFile string, rotate bool, out io.Writer) error {
-	f, err := reserveSecretFile(secretFile)
-	if err != nil {
-		return err
-	}
+// only to the reserved --output destination. With rotate it first requires
+// exactly one active credential of that operation and never revokes anything.
+func (c *identityClient) credIssue(service, operation string, expiry time.Time, sink *secretOutput, rotate bool, out io.Writer) error {
 	delivered := false
 	defer func() {
 		if !delivered {
-			f.Close()
-			os.Remove(secretFile)
+			sink.abandon()
 		}
 	}()
 	// The credentials that exist before the request: after an unknown
@@ -800,7 +833,7 @@ func (c *identityClient) credIssue(service, operation string, expiry time.Time, 
 		case 1:
 		default:
 			return fmt.Errorf("%s already has two active credentials for %s; after aicrew uses the new one, revoke the old one with: %s; nothing was issued",
-				service, operation, c.command("cred", "revoke", service, old[0].ID))
+				service, operation, c.command("cred", "revoke", "--peer", service, "--credential", old[0].ID))
 		}
 	}
 	status, data, err := c.do("POST", peerPath(service)+"/credentials", map[string]any{"expires_at": expiry.UTC().Format(time.RFC3339), "operation": operation})
@@ -823,16 +856,20 @@ func (c *identityClient) credIssue(service, operation string, expiry time.Time, 
 		return c.unknownOutcome(service, known, errors.New("the hub's answer did not name the credential"), out)
 	}
 	if !strings.HasPrefix(resp.Secret, "aimem_peer_") {
-		return c.undeliverable(service, resp.Credential.ID, secretFile, errors.New("the answer carried no bearer"))
+		return c.undeliverable(service, resp.Credential.ID, sink.where(), errors.New("the answer carried no bearer"))
 	}
-	if err := deliverSecret(f, resp.Secret); err != nil {
-		return c.undeliverable(service, resp.Credential.ID, secretFile, err)
+	if err := sink.write(resp.Secret); err != nil {
+		return c.undeliverable(service, resp.Credential.ID, sink.where(), err)
 	}
 	delivered = true
 	fmt.Fprintf(out, "issued credential %s (%s) for %s, expiring %s\n", resp.Credential.ID, resp.Credential.Operation, service, resp.Credential.ExpiresAt.Format(time.RFC3339))
-	fmt.Fprintf(out, "the bearer was written once to %s (readable only by you); move it into aicrew's protected storage, then delete the file\n", secretFile)
+	if sink.toStdout() {
+		fmt.Fprintln(out, "the bearer was written once to standard output")
+	} else {
+		fmt.Fprintf(out, "the bearer was written once to %s; move it into aicrew's protected storage, then delete the file\n", sink.where())
+	}
 	if rotate {
-		fmt.Fprintf(out, "next: once aicrew uses the new credential, revoke the old one explicitly:\n  %s\n", c.command("cred", "revoke", service, old[0].ID))
+		fmt.Fprintf(out, "next: once aicrew uses the new credential, revoke the old one explicitly:\n  %s\n", c.command("cred", "revoke", "--peer", service, "--credential", old[0].ID))
 	}
 	return nil
 }
@@ -840,12 +877,12 @@ func (c *identityClient) credIssue(service, operation string, expiry time.Time, 
 // undeliverable handles a credential the hub confirmed but the bearer of
 // which could not be written: only that exact credential is revoked, and
 // the result of the revocation is reported.
-func (c *identityClient) undeliverable(service, id, secretFile string, cause error) error {
+func (c *identityClient) undeliverable(service, id, where string, cause error) error {
 	if err := c.credRevoke(service, id); err != nil {
 		return fmt.Errorf("credential %s was issued but its bearer could not be written to %s (%v); revoking it FAILED (%v); revoke it now with: %s",
-			id, secretFile, cause, err, c.command("cred", "revoke", service, id))
+			id, where, cause, err, c.command("cred", "revoke", "--peer", service, "--credential", id))
 	}
-	return fmt.Errorf("credential %s was issued but its bearer could not be written to %s (%v); that credential has been revoked, so issue a new one", id, secretFile, cause)
+	return fmt.Errorf("credential %s was issued but its bearer could not be written to %s (%v); that credential has been revoked, so issue a new one", id, where, cause)
 }
 
 // unknownOutcome handles an issue whose result the hub never reported. It
@@ -878,7 +915,7 @@ func (c *identityClient) unknownOutcome(service string, known map[string]bool, c
 	}
 	fmt.Fprintln(out, "if no other operator issued a credential in this window, these bearers were never delivered: revoke each with")
 	for _, cr := range candidates {
-		fmt.Fprintf(out, "  %s\n", c.command("cred", "revoke", service, cr.ID))
+		fmt.Fprintf(out, "  %s\n", c.command("cred", "revoke", "--peer", service, "--credential", cr.ID))
 	}
 	fmt.Fprintln(out, "then issue again.")
 	return fmt.Errorf("issue outcome unknown")

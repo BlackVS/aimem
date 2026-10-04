@@ -83,15 +83,15 @@ Still on the hub as the service user:
 
 ```sh
 aimem access list
-aimem access user-add my-agent
+aimem access user-add --user-name my-agent
 ```
 
-If the intended user already exists, reuse its ID instead of creating
-another. Copy the returned user's `id` into `USER_ID` below:
+If the intended user already exists, reuse it instead of creating
+another. A user is named by `--user-name` or by `--user-id`:
 
 ```sh
-aimem access grant add my-project user USER_ID
-aimem access token-issue-user USER_ID token-my-agent-laptop EXPIRY_RFC3339
+aimem access grant add --project my-project --user-name my-agent
+aimem access token-issue-user --user-name my-agent --label token-my-agent-laptop --expires EXPIRY_RFC3339 --output my-agent.token
 ```
 
 Replace `EXPIRY_RFC3339` with a future UTC timestamp such as
@@ -99,9 +99,11 @@ Replace `EXPIRY_RFC3339` with a future UTC timestamp such as
 This user-scoped token can write to every currently granted project, including
 projects granted later; a long lifetime keeps that evolving authority usable
 longer. The `token-` label identifies the credential, not a second user.
-`USER_ID` is the user's immutable ID; readable-name selectors are backlogged.
-The result includes the token ID and its secret, shown **once**. Save the
-secret privately and retain the ID for revocation. If the secret is lost,
+A name that matches no user, or more than one, is refused with the names
+or IDs that exist. The secret is written **once** to `--output`, a new file
+only you can read (or `-` for standard output into a pipe); the printed
+result holds the token ID without the secret. Keep the file private and
+retain the ID for revocation. If the secret is lost,
 revoke that token and issue another; `access list` cannot recover it.
 
 A write needs all of these: tasks enabled, an enabled user, a current
@@ -114,19 +116,19 @@ For an agent that must write only to this project, issue a project token
 instead and configure the checkout-local override in step 4:
 
 ```sh
-aimem access token-issue USER_ID token-my-project-laptop my-project EXPIRY_RFC3339
+aimem access token-issue --user-name my-agent --label token-my-project-laptop --project my-project --expires EXPIRY_RFC3339 --output my-project.token
 ```
 
 To grant through a group instead:
 
 ```sh
-aimem access group-add developers
-aimem access member add GROUP_ID USER_ID
-aimem access grant add my-project group GROUP_ID
+aimem access group-add --group-name developers
+aimem access member add --group-name developers --user-name my-agent
+aimem access grant add --project my-project --group-name developers
 ```
 
-Tokens are still issued to users, not groups. Use `-` instead of the
-project argument in `token-issue` to issue a read-only ordinary token. Ordinary tokens
+Tokens are still issued to users, not groups. Use `--read-only` instead of
+`--project` in `token-issue` to issue a read-only ordinary token. Ordinary tokens
 can read tasks across ordinary projects; project scope restricts writes,
 not task-read visibility. Do not treat projects as private task tenants.
 
@@ -257,8 +259,8 @@ Run these on the hub as the service user when needed:
 
 ```sh
 aimem tasks off -p my-project
-aimem access token-revoke TOKEN_ID
-aimem access grant rm my-project user USER_ID
+aimem access token-revoke --token-id TOKEN_ID
+aimem access grant rm --project my-project --user-name my-agent
 ```
 
 These are independent actions: disabling tasks stops every task write

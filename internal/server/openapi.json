@@ -229,7 +229,7 @@
     "/v1/projects/{p}/repository": {
       "get": {
         "summary": "The project's repository (kind, clone URL, its host, access)",
-        "description": "The one repository a project's work happens in, a hub property next to the process reference (docs/DESIGN-AIFORGE-PILOT-1.md §1). It holds no secret: the host of the clone URL names the credential a member needs. An ordinary user token needs a live grant on the project (the knowledge-read rule); an unknown project answers as one without a grant. Team mode does not serve this route yet. `repository` is null when none is set. ?history=1 (admin only) adds the recorded changes, newest first, each with its action (project.repository.set or project.repository.clear), time, actor and the values before and after.",
+        "description": "The one repository a project's work happens in, a hub property next to the process reference (docs/DESIGN-AIFORGE-PILOT-1.md §1). It holds no secret: the host of the clone URL, with its port when the URL names one (forge.example.org:3000), names the credential a member needs. An ordinary user token needs a live grant on the project (the knowledge-read rule); an unknown project answers as one without a grant. Team mode does not serve this route yet. `repository` is null when none is set. ?history=1 (admin only) adds the recorded changes, newest first, each with its action (project.repository.set or project.repository.clear), time, actor and the values before and after.",
         "x-role": "writer",
         "parameters": [
           {"name": "p", "in": "path", "required": true, "schema": {"type": "string"}},

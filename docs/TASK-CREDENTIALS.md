@@ -26,7 +26,7 @@ the client does not change their scope. Projects still need Kanban enabled.
 On the hub host, an administrator issues the user-scoped token:
 
 ```sh
-aimem access token-issue-user USER_ID token-agent-workstation EXPIRY_RFC3339
+aimem access token-issue-user --user-name USER_NAME --label token-agent-workstation --expires EXPIRY_RFC3339 --output agent.token
 ```
 
 On the agent machine, configure that token for the existing hub:
@@ -58,8 +58,8 @@ attempt.
 
 ## Project-local override
 
-Ask the hub administrator for a project-scoped token using the existing
-`aimem access token-issue USER_ID TOKEN_LABEL PROJECT EXPIRY_RFC3339` command.
+Ask the hub administrator for a project-scoped token, issued with
+`aimem access token-issue --user-name USER_NAME --label TOKEN_LABEL --project PROJECT --expires EXPIRY_RFC3339 --output FILE`.
 Run the following from the configured project root on the agent machine:
 
 ```sh

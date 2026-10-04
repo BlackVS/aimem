@@ -5,8 +5,9 @@ import "testing"
 func TestHost(t *testing.T) {
 	good := map[string]string{
 		"https://github.com/example/example.git":       "github.com",
-		"https://Forge.Example.org:8443/team/repo":     "forge.example.org",
-		"ssh://git@gitlab.example.org:2222/team/x.git": "gitlab.example.org",
+		"https://Forge.Example.org:8443/team/repo":     "forge.example.org:8443",
+		"https://forge.example.org:3000/team/repo":     "forge.example.org:3000",
+		"ssh://git@gitlab.example.org:2222/team/x.git": "gitlab.example.org:2222",
 		"ssh://gitlab.example.org/team/x.git":          "gitlab.example.org",
 		"git@github.com:example/example.git":           "github.com",
 		"gitea@forge.example.org:team/repo.git":        "forge.example.org",
@@ -20,7 +21,7 @@ func TestHost(t *testing.T) {
 		"", "-https://x/y", "https://x/y z", "http://example.org/x/y", "ftp://example.org/x",
 		"https://user:pw@example.org/x", "https://user@example.org/x", "ssh://git:pw@example.org/x",
 		"https://example.org/x?y=1", "https://example.org/x#y", "https://example.org", "https://example.org/",
-		"https://exa_mple.org/x", "example.org:x/y", "git@:x/y", "git@host:", "git@host://x",
+		"https://exa_mple.org/x", "https://example.org:/x", "https://example.org:0/x", "https://example.org:65536/x", "https://example.org:0443/x", "https://example.org:x/x", "example.org:x/y", "git@:x/y", "git@host:", "git@host://x",
 		"a:b@host:x", `https://example.org/x\y`, "file:///tmp/x",
 	} {
 		if h, err := Host(bad); err == nil {

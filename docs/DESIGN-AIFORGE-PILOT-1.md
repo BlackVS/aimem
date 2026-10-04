@@ -23,7 +23,7 @@ aimem project show --project example
 ```
 
 - `--kind` is `github`, `gitea` or `gitlab`: the API dialect used to verify a credential against that forge.
-- `--url` is the clone URL (`https` or `ssh`), stored as given and never fetched by the hub. **The host of the clone URL identifies the credential a member needs** (`github.com`, `gitea.example.org`), so two projects on two instances of one forge need two credentials. There is no separate credential declaration.
+- `--url` is the clone URL (`https` or `ssh`), stored as given and never fetched by the hub. **The host of the clone URL, with its port when the URL names one, identifies the credential a member needs** (`github.com`, `gitea.example.org`, `gitea.example.org:3000`), so two projects on two instances of one forge need two credentials, including two instances on one host behind different ports. The port is kept as the URL gives it, in step with aicrew's credential name, which encodes the host and port [3.2]. There is no separate credential declaration.
 - `--access` is what members need: `write` (branches and pull requests, the default) or `read` (projects members only consult).
 - **No default branch.** The forge owns the default branch, and the coordinator reads it at offer time [3.5]. A copy on the hub would be a second owner of a forge fact.
 - `project show` prints the repository, the process pin and the project's grants (users, groups and team profiles, with names beside IDs).
