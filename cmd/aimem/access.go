@@ -43,10 +43,17 @@ The positional forms of earlier releases (for example
 'aimem access grant add PROJECT user USER_ID') keep working for this
 release and print the new form.
 
-Examples:
+Examples, one per command:
+  aimem access list
   aimem access user-add --user-name pilot-worker
+  aimem access user-set --user-id 01a0e1f2-0000-7000-8000-000000000001 --user-name pilot-worker-2 --state enabled
+  aimem access group-add --group-name reviewers
+  aimem access member add --group-name reviewers --user-name pilot-worker
   aimem access grant add --project example --group-name reviewers
-  aimem access token-issue-user --user-name pilot-worker --label pilot-worker --expires 2026-12-28T00:00:00Z --output worker.token`
+  aimem access grant-rm-instance --instance 01a0e1f2-0000-7000-8000-000000000002 --user-name pilot-worker
+  aimem access token-issue --user-name pilot-worker --label example-laptop --project example --expires 2026-12-28T00:00:00Z --output example.token
+  aimem access token-issue-user --user-name pilot-worker --label pilot-worker --expires 2026-12-28T00:00:00Z --output worker.token
+  aimem access token-revoke --token-id 01a0e1f2-0000-7000-8000-000000000003`
 
 // accessDirectory resolves user and group names to IDs; accessCmd reads it
 // from the hub, tests supply one.

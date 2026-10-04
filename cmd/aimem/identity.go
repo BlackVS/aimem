@@ -52,10 +52,23 @@ of earlier releases (for example 'team grant SERVICE TEAM PROJECT') keep
 working for this release and print the new form. --secret-file is the old
 name of --output and keeps working for this release.
 
-Examples:
-  aimem identity team grant --peer aicrew-example --team-id TEAM_ID --project example --hub https://hub.example.test:8443 --admin-token-file admin.token
+Examples, one per command:
+  aimem identity peer list --hub https://hub.example.test:8443 --admin-token-file admin.token
+  aimem identity peer register aicrew-example --endpoint https://aicrew.example.test:9443/v1/crew/introspect --peer-trust-dns --hub https://hub.example.test:8443 --admin-token-file admin.token
+  aimem identity peer enable aicrew-example --hub https://hub.example.test:8443 --admin-token-file admin.token
+  aimem identity peer disable aicrew-example --hub https://hub.example.test:8443 --admin-token-file admin.token
+  aimem identity peer check aicrew-example --hub https://hub.example.test:8443 --admin-token-file admin.token
+  aimem identity cred list aicrew-example --hub https://hub.example.test:8443 --admin-token-file admin.token
   aimem identity cred issue aicrew-example --operation reservation.read --expires 90d --output reservation-read.secret --hub https://hub.example.test:8443 --admin-token-file admin.token
-  aimem identity cred revoke --peer aicrew-example --credential CREDENTIAL_ID --hub https://hub.example.test:8443 --admin-token-file admin.token
+  aimem identity cred rotate aicrew-example --expires 90d --output redeem-2.secret --hub https://hub.example.test:8443 --admin-token-file admin.token
+  aimem identity cred revoke --peer aicrew-example --credential 01a0e1f2-0000-7000-8000-000000000004 --hub https://hub.example.test:8443 --admin-token-file admin.token
+  aimem identity team list aicrew-example --hub https://hub.example.test:8443 --admin-token-file admin.token
+  aimem identity team create --peer aicrew-example --team-id TEAM_ID --hub https://hub.example.test:8443 --admin-token-file admin.token
+  aimem identity team enable --peer aicrew-example --team-id TEAM_ID --hub https://hub.example.test:8443 --admin-token-file admin.token
+  aimem identity team disable --peer aicrew-example --team-id TEAM_ID --hub https://hub.example.test:8443 --admin-token-file admin.token
+  aimem identity team grants --peer aicrew-example --team-id TEAM_ID --hub https://hub.example.test:8443 --admin-token-file admin.token
+  aimem identity team grant --peer aicrew-example --team-id TEAM_ID --project example --hub https://hub.example.test:8443 --admin-token-file admin.token
+  aimem identity team revoke --peer aicrew-example --team-id TEAM_ID --project example --hub https://hub.example.test:8443 --admin-token-file admin.token
 
 Manage the aicrew identity peer, its credentials and its team access
 profiles through the hub's TLS listener. The local socket is not used: identity routes require TLS
