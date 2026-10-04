@@ -139,6 +139,9 @@ func (s *Server) Routes() []Route {
 		{"GET", strings.TrimPrefix(readReceiptByProofPattern, "GET "), s.readReceiptByProof, false},
 		{"GET", strings.TrimPrefix(readReceiptByKeyPattern, "GET "), s.readReceiptByKey, false},
 		{"GET", strings.TrimPrefix(readHoldPattern, "GET "), s.readHold, false},
+		{"PUT", strings.TrimPrefix(teamRegisterPattern, "PUT "), s.registerTeam, false},
+		{"GET", strings.TrimPrefix(teamReadAllPattern, "GET "), s.readTeams, false},
+		{"GET", strings.TrimPrefix(teamReadOnePattern, "GET "), s.readTeams, false},
 		{"GET", "/v1/identity/peers", s.listIdentityPeers, true},
 		{"POST", "/v1/identity/peers", s.registerIdentityPeer, true},
 		{"PUT", "/v1/identity/peers/{service_id}", s.updateIdentityPeer, true},
@@ -626,9 +629,9 @@ func (s *Server) authWrapper(token string, next http.Handler) http.Handler {
 			case "proof":
 				s.identityRefuse(w, "credential_scope_forbidden")
 				return
-			case "redeem", "read":
-				// The other operation's route: reservation.read never
-				// redeems, and identity.redeem never reads.
+			case "redeem", "read", "team_register", "team_read":
+				// Another operation's route: a peer credential reaches
+				// only the routes of the one operation it was issued for.
 				s.identityRefuse(w, "peer_forbidden")
 				return
 			}

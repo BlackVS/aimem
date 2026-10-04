@@ -69,6 +69,9 @@ var identityRefusals = map[string]struct {
 	"identity_mismatch":          {403, false, "The team session belongs to another identity.", "Stop and reconcile the configured identity; there is no automatic rebind."},
 	"grant_denied":               {403, false, "The team has no current grant for this project.", "Request an authorized grant change for the team; do not switch credentials."},
 	"role_forbidden":             {403, false, "The verified team role cannot perform this operation.", "Use the role's permitted aicrew flow."},
+	"team_name_taken":            {409, false, "Another team of this peer holds this name.", "Rename the team in aicrew, then register it again."},
+	"profile_disabled":           {403, false, "The operator disabled this team's profile on the hub.", "The operator re-enables the profile on the hub; aicrewd does not."},
+	"not_found":                  {404, false, "This peer has no team with this ID on the hub.", "Register the team with team.register, or check the team ID."},
 }
 
 func (s *Server) identityRefuse(w http.ResponseWriter, code string) {
@@ -113,7 +116,8 @@ func identityTLS(r *http.Request) bool {
 // route.
 var identityWireMux = func() *http.ServeMux {
 	m := http.NewServeMux()
-	for _, p := range []string{identityProofPattern, identityRedeemPattern, readReceiptByProofPattern, readReceiptByKeyPattern, readHoldPattern} {
+	for _, p := range []string{identityProofPattern, identityRedeemPattern, readReceiptByProofPattern, readReceiptByKeyPattern, readHoldPattern,
+		teamRegisterPattern, teamReadAllPattern, teamReadOnePattern} {
 		m.HandleFunc(p, func(http.ResponseWriter, *http.Request) {})
 	}
 	return m
@@ -126,6 +130,10 @@ const (
 	readReceiptByProofPattern = "GET /v1/identity/peers/{service_id}/reservation-receipts/{proof_digest}"
 	readReceiptByKeyPattern   = "GET /v1/identity/peers/{service_id}/reservations/{task_id}/receipts/{operation}/{request_key_digest}"
 	readHoldPattern           = "GET /v1/identity/peers/{service_id}/reservations/{task_id}"
+	// aicrewd's team operations (DESIGN-AIFORGE-PILOT-1 §3).
+	teamRegisterPattern = "PUT /v1/identity/peers/{service_id}/team-registrations/{team_id}"
+	teamReadAllPattern  = "GET /v1/identity/peers/{service_id}/team-reads"
+	teamReadOnePattern  = "GET /v1/identity/peers/{service_id}/team-reads/{team_id}"
 )
 
 // identityWireRoute names the peer-facing wire route a request targets:
@@ -142,6 +150,10 @@ func identityWireRoute(r *http.Request) string {
 		return "redeem"
 	case readReceiptByProofPattern, readReceiptByKeyPattern, readHoldPattern:
 		return "read"
+	case teamRegisterPattern:
+		return "team_register"
+	case teamReadAllPattern, teamReadOnePattern:
+		return "team_read"
 	}
 	return ""
 }
@@ -152,13 +164,15 @@ var gateAuthHook func(*http.Request)
 
 // identityUnauthenticated is the envelope code for a wire request whose bearer
 // is missing, unknown, or not the kind of credential the route requires.
-var identityUnauthenticated = map[string]string{"proof": "invalid_credential", "redeem": "peer_unauthenticated", "read": "peer_unauthenticated"}
+var identityUnauthenticated = map[string]string{"proof": "invalid_credential", "redeem": "peer_unauthenticated", "read": "peer_unauthenticated",
+	"team_register": "peer_unauthenticated", "team_read": "peer_unauthenticated"}
 
 // peerOperationRoutes is the whole surface of a peer credential, by the one
 // operation it permits: redemption's POST shape, or the read scope's three
 // GET shapes. The handler checks that the path names the credential's own
 // peer.
-var peerOperationRoutes = map[string]string{access.PeerOperationRedeem: "redeem", access.PeerOperationReservationRead: "read"}
+var peerOperationRoutes = map[string]string{access.PeerOperationRedeem: "redeem", access.PeerOperationReservationRead: "read",
+	access.PeerOperationTeamRegister: "team_register", access.PeerOperationTeamRead: "team_read"}
 
 func peerRouteAllowed(r *http.Request, p access.PeerIdentity) bool {
 	route := peerOperationRoutes[p.Operation]
@@ -179,6 +193,10 @@ func identityStoreError(err error) string {
 		return "peer_unauthenticated"
 	case errors.Is(err, access.ErrPeerForbidden):
 		return "peer_forbidden"
+	case errors.Is(err, access.ErrTeamNameTaken):
+		return "team_name_taken"
+	case errors.Is(err, access.ErrTeamProfileDisabled):
+		return "profile_disabled"
 	case errors.Is(err, access.ErrProofInvalid):
 		return "proof_invalid"
 	case errors.Is(err, access.ErrCredentialInactive):
@@ -477,7 +495,7 @@ func (s *Server) issuePeerCredential(w http.ResponseWriter, r *http.Request) {
 		Operation string `json:"operation"`
 	}
 	if !decodeIdentity(r, w, &req) {
-		s.fail(w, http.StatusBadRequest, fmt.Errorf("body must be {\"expires_at\": RFC 3339 time, \"operation\": \"identity.redeem\"|\"reservation.read\"}"))
+		s.fail(w, http.StatusBadRequest, fmt.Errorf("body must be {\"expires_at\": RFC 3339 time, \"operation\": one of %s}", strings.Join(access.PeerOperations, ", ")))
 		return
 	}
 	if req.Operation == "" {

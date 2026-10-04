@@ -2,8 +2,8 @@ package server
 
 // A project's one repository (docs/DESIGN-AIFORGE-PILOT-1.md §1): an admin
 // sets and clears it, every change is recorded with the values before and
-// after, an ordinary token reads it under its own live grant, and team mode
-// does not serve it yet.
+// after, an ordinary token reads it under its own live grant, and a team
+// session reads it under its profile's grant.
 
 import (
 	"encoding/json"
@@ -102,9 +102,20 @@ func TestProjectRepositorySetReadClear(t *testing.T) {
 	if r := get(g.alice, "/v1/projects/alpha/repository?history=1"); r.status != 403 {
 		t.Fatalf("history for an ordinary token: %d %s", r.status, r.body)
 	}
-	// Team mode does not serve the route yet (increment 2 amends identity.v1).
-	if r := g.team(t, "GET", "/v1/projects/alpha/repository"); r.status != 403 || r.code() != "team_operation_unsupported" {
-		t.Fatalf("team mode: %d %s", r.status, r.body)
+	// A team session reads the repository of a project its profile is
+	// granted (alpha), and nothing else: beta has only no profile grant, a
+	// reserved or unknown project reads as ungranted, and the history is
+	// refused.
+	if r := g.team(t, "GET", "/v1/projects/alpha/repository"); r.status != 200 || !strings.Contains(string(r.body), `"host":"github.com"`) {
+		t.Fatalf("team mode, granted: %d %s", r.status, r.body)
+	}
+	for _, path := range []string{"/v1/projects/beta/repository", "/v1/projects/user/repository", "/v1/projects/nope/repository"} {
+		if r := g.team(t, "GET", path); r.status != 403 || r.code() != "grant_denied" || strings.Contains(string(r.body), "forge.example.org") {
+			t.Fatalf("team mode %s: %d %s", path, r.status, r.body)
+		}
+	}
+	if r := g.team(t, "GET", "/v1/projects/alpha/repository?history=1"); r.status != 400 || r.code() != "invalid_request" {
+		t.Fatalf("team mode history: %d %s", r.status, r.body)
 	}
 	// Change, then clear: the history records both with the values before and after.
 	if r := put(g.env, "alpha", `{"kind":"gitlab","url":"ssh://git@gitlab.example.org:2222/team/alpha.git","access":"read"}`); r.status != 200 || !strings.Contains(string(r.body), `"previous":{"kind":"github"`) ||

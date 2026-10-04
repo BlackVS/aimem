@@ -32,6 +32,7 @@ type teamProfileView struct {
 	ProfileID string          `json:"profile_id"`
 	ServiceID string          `json:"service_id"`
 	TeamID    string          `json:"team_id"`
+	TeamName  string          `json:"team_name"`
 	Disabled  bool            `json:"disabled"`
 	Grants    []teamGrantView `json:"grants"`
 }
@@ -57,7 +58,7 @@ func (s *Server) teamProfileView(db *access.Store, p access.TeamProfile, names m
 	if err != nil {
 		return teamProfileView{}, err
 	}
-	v := teamProfileView{ProfileID: p.ID, ServiceID: p.ServiceID, TeamID: p.TeamID, Disabled: p.Disabled, Grants: []teamGrantView{}}
+	v := teamProfileView{ProfileID: p.ID, ServiceID: p.ServiceID, TeamID: p.TeamID, TeamName: p.TeamName, Disabled: p.Disabled, Grants: []teamGrantView{}}
 	for _, i := range instances {
 		v.Grants = append(v.Grants, teamGrantView{Project: names[i], Instance: i})
 	}

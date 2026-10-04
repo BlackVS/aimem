@@ -55,10 +55,34 @@ func decodeRepository(v string) (*projectrepo.Repository, error) {
 // as one without a grant. Admin credentials and the local socket pass.
 func (s *Server) repositoryReadDenied(w http.ResponseWriter, r *http.Request) bool {
 	id, ok := IdentityFrom(r.Context())
+	p := r.PathValue("p")
+	if tc, team := teamContextFrom(r.Context()); team {
+		// A team session reads the repository of a project its profile is
+		// granted, and nothing else: no history, no reserved store, and an
+		// unknown project reads as one without a grant.
+		detail := teamAuditDetail(tc.Context, r) + fmt.Sprintf(" project=%q", p)
+		switch {
+		case r.URL.Query().Get("history") != "":
+			s.teamDeny(w, r, tc.Role, id, "invalid_request", detail+" reason=history", tc.CorrelationID)
+			return true
+		case store.IsReservedProject(p):
+			s.teamDeny(w, r, tc.Role, id, "grant_denied", detail+" reason=reserved", tc.CorrelationID)
+			return true
+		}
+		instance, err := s.knowledgeInstance(p)
+		switch {
+		case err != nil:
+			s.teamDeny(w, r, tc.Role, id, "identity_unavailable", detail+" reason=grant_store", tc.CorrelationID)
+			return true
+		case instance == "":
+			s.teamDeny(w, r, tc.Role, id, "grant_denied", detail, tc.CorrelationID)
+			return true
+		}
+		return s.teamGrantDenied(w, r, p)
+	}
 	if !ok || id.Role != "user" {
 		return false
 	}
-	p := r.PathValue("p")
 	if store.IsReservedProject(p) {
 		s.fail(w, http.StatusBadRequest, store.ErrTaskReservedScope)
 		return true

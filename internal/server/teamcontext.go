@@ -66,6 +66,8 @@ var teamRoutes = append(append([]string{
 	"GET /v1/tasks/{id}/comments/{c}",
 	"GET /v1/projects/{p}/epics",
 	"GET /v1/projects/{p}/epics/{e}",
+	// The project's repository under the profile's grant (DESIGN-AIFORGE-PILOT-1 §1).
+	"GET /v1/projects/{p}/repository",
 }, reservationRoutePatterns...), knowledgeRoutes...)
 
 // teamRouteMux matches teamRoutes by the route mux's own rules.

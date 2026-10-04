@@ -1,6 +1,6 @@
 # First pilot: aimem's side of the proposal
 
-Status: proposal, 2026-10-04, for review. Nothing here is implemented; the tasks below follow the merged text. It is the aimem counterpart of the aicrew proposal *What the first pilot changes in aicrew and aimem*, revision 9: aicrew `docs/proposals/` (aicrew PR #85), until then the hub document `PROPOSAL-PILOT-1` in project aicrew. Section numbers in brackets, such as [2.3], refer to that document, and the two texts move in step. Section 9 lists the only places where this text may differ from it. The aimem work is tracked by tasks 01a102f8-bb79 (project repository, team registration and reads, readable commands, secret flags) and 01a102d9-440b (coordinator triage), both on the aicrew board.
+Status: accepted 2026-10-04. Sections 1, 5 and 6 are implemented (increment 1, aimem PRs #173 and #174); sections 2 and 3 with the team-mode repository read (increment 2); section 4 (triage) is pending. It is the aimem counterpart of the aicrew proposal *What the first pilot changes in aicrew and aimem*, revision 9: aicrew `docs/proposals/` (aicrew PR #85), until then the hub document `PROPOSAL-PILOT-1` in project aicrew. Section numbers in brackets, such as [2.3], refer to that document, and the two texts move in step. Section 9 lists the only places where this text may differ from it. The aimem work is tracked by tasks 01a102f8-bb79 (project repository, team registration and reads, readable commands, secret flags) and 01a102d9-440b (coordinator triage), both on the aicrew board.
 
 The first pilot (2026-10-03) proved the identity chain and the attempt protocol and stopped at the accept step on mechanisms that did not exist yet. On the aimem side four things were missing:
 - a project did not know its repository;
@@ -179,7 +179,7 @@ Each row names the aimem document it amends and the section of this text that ne
 
 **coordination.v1 is unchanged.** Option (b) would have amended it, and it was not chosen.
 
-**Correction found in implementation (increment 1).** Section 1 opens the repository read to a team session whose profile is granted the project, but the team-mode surface is a closed list in identity.v1's E4 boundary, and the table above has no row that amends it. Increment 1 therefore serves the read to an ordinary token with a grant on the project (the knowledge-read rule) and to the hub admin; team mode refuses it with `team_operation_unsupported` for now. The team-session read joins the identity.v1 row above and lands with `team.register` and `team.read`, which return the repository to aicrewd in any case.
+**Correction found in implementation (increment 1).** Section 1 opens the repository read to a team session whose profile is granted the project, but the team-mode surface is a closed list in identity.v1's E4 boundary, and the table above has no row that amends it. Increment 1 therefore serves the read to an ordinary token with a grant on the project (the knowledge-read rule) and to the hub admin; team mode refuses it with `team_operation_unsupported` for now. The team-session read joins the identity.v1 row above and lands with `team.register` and `team.read`, which return the repository to aicrewd in any case. Resolved in increment 2: identity.v1's team-mode surface now serves the repository read under the profile's grant.
 
 ## 8. Failure modes
 

@@ -60,6 +60,34 @@ currently 23); a binary refuses a database newer than it understands.
     pin and the project's grants (users, groups and team profiles) with
     names beside IDs, from the new admin route
     `GET /v1/projects/{p}/grants`.
+- **aicrewd registers and reads its own teams**
+  ([`docs/DESIGN-AIFORGE-PILOT-1.md`](docs/DESIGN-AIFORGE-PILOT-1.md) §2,
+  §3; identity.v1 "Team registration and read").
+  - `team.register` (`PUT /v1/identity/peers/{service}/team-registrations/{team_id}`):
+    - creates or renames the calling peer's profile for an aicrew team
+      UUID, with a name unique per peer;
+    - never touches a grant and never re-enables a disabled profile;
+    - refuses with `peer_forbidden` (another peer's team),
+      `team_name_taken` (409), `profile_disabled` (403) or
+      `invalid_request`;
+    - is audited with the old and new name for every outcome.
+  - `team.read` (`GET …/team-reads` and `…/team-reads/{team_id}`) returns
+    the peer's own teams with their granted projects, each with its
+    repository and process pin.
+    - A disabled profile reads as `enabled: false` with no projects.
+    - An unknown or foreign team is `not_found` (404).
+  - Each operation needs a peer credential issued for it
+    (`aimem identity cred issue --operation team.register|team.read`), over
+    hub-terminated TLS. Both share the read scope's 60 calls per minute
+    per credential.
+  - A team session now reads `GET /v1/projects/{p}/repository` under its
+    profile's grant.
+  - `aimem identity team` commands name a team by `--team-name` (resolved
+    within `--peer`) or `--team-id`. Grant and revoke print the name and
+    team ID they acted on, and listings and `aimem project show` print the
+    registered name.
+  - `aimem identity team create` is kept for this release with a notice:
+    aicrewd now creates and names profiles itself.
 - **The `aimem project` namespace and `--project`.** `aimem project list`,
   `project id` and `project drop` are the namespace forms of `projects`,
   `project-id` and `drop-project`, which keep working unchanged. Every
@@ -107,6 +135,13 @@ currently 23); a binary refuses a database newer than it understands.
   hazard below.
 
 ### Upgrade notes
+
+- **Access schema 6.** On first start the hub rebuilds the peer credential
+  table to allow the two new operations. Every credential keeps its ID,
+  digest, expiry and operation. Team profiles gain an empty `team_name`
+  until aicrewd registers them. An older binary refuses the migrated store
+  (schema 6 is newer than it understands), so roll a hub back only from a
+  backup taken before the upgrade.
 
 - **The old command forms work for this release only.** The positional
   forms of `aimem access` and of the `aimem identity` commands with

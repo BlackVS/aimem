@@ -197,9 +197,13 @@ func projectShowCmd(args []string) error {
 		}
 		switch g.Kind {
 		case "team_profile":
-			// Team profiles carry no name on the hub yet: the service and
-			// aicrew's team ID identify them.
-			fmt.Fprintf(w, "  team profile %s (service %s, team %s)%s\n", g.ID, g.ServiceID, g.TeamID, state)
+			// The name is the one aicrewd registered (team.register); the
+			// service and aicrew's team ID identify the profile either way.
+			name := g.Name
+			if name == "" {
+				name = "(no name registered)"
+			}
+			fmt.Fprintf(w, "  team         %s (profile %s, service %s, team %s)%s\n", name, g.ID, g.ServiceID, g.TeamID, state)
 		default:
 			fmt.Fprintf(w, "  %-12s %s (%s)%s\n", g.Kind, g.Name, g.ID, state)
 		}

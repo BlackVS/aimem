@@ -39,12 +39,14 @@ const identityUsage = `usage: aimem identity peer list                          
        aimem identity peer enable|disable|check SERVICE            [hub flags]
        aimem identity cred list SERVICE                            [hub flags]
        aimem identity cred issue|rotate SERVICE --expires 90d|RFC3339 --output FILE|-
-                                 [--operation identity.redeem|reservation.read] [hub flags]
+                                 [--operation identity.redeem|reservation.read|team.register|team.read] [hub flags]
        aimem identity cred revoke --peer SERVICE --credential ID   [hub flags]
        aimem identity team list SERVICE                            [hub flags]
-       aimem identity team create|enable|disable|grants --peer SERVICE --team-id TEAM [hub flags]
-       aimem identity team grant --peer SERVICE --team-id TEAM --project PROJECT [hub flags]
-       aimem identity team revoke --peer SERVICE --team-id TEAM (--project PROJECT | --instance ID) [hub flags]
+       aimem identity team enable|disable|grants --peer SERVICE (--team-name NAME | --team-id TEAM) [hub flags]
+       aimem identity team grant --peer SERVICE (--team-name NAME | --team-id TEAM) --project PROJECT [hub flags]
+       aimem identity team revoke --peer SERVICE (--team-name NAME | --team-id TEAM)
+                                 (--project PROJECT | --instance ID) [hub flags]
+       aimem identity team create --peer SERVICE --team-id TEAM    [hub flags] (kept for this release)
 
 A command that names one entity takes it as its one argument or as --peer;
 a command that names several takes each by its flag. The positional forms
@@ -63,12 +65,12 @@ Examples, one per command:
   aimem identity cred rotate aicrew-example --expires 90d --output redeem-2.secret --hub https://hub.example.test:8443 --admin-token-file admin.token
   aimem identity cred revoke --peer aicrew-example --credential 01a0e1f2-0000-7000-8000-000000000004 --hub https://hub.example.test:8443 --admin-token-file admin.token
   aimem identity team list aicrew-example --hub https://hub.example.test:8443 --admin-token-file admin.token
-  aimem identity team create --peer aicrew-example --team-id TEAM_ID --hub https://hub.example.test:8443 --admin-token-file admin.token
-  aimem identity team enable --peer aicrew-example --team-id TEAM_ID --hub https://hub.example.test:8443 --admin-token-file admin.token
-  aimem identity team disable --peer aicrew-example --team-id TEAM_ID --hub https://hub.example.test:8443 --admin-token-file admin.token
-  aimem identity team grants --peer aicrew-example --team-id TEAM_ID --hub https://hub.example.test:8443 --admin-token-file admin.token
-  aimem identity team grant --peer aicrew-example --team-id TEAM_ID --project example --hub https://hub.example.test:8443 --admin-token-file admin.token
-  aimem identity team revoke --peer aicrew-example --team-id TEAM_ID --project example --hub https://hub.example.test:8443 --admin-token-file admin.token
+  aimem identity team create --peer aicrew-example --team-id 0190a1b2-c3d4-7e5f-8a9b-0c1d2e3f4a5b --hub https://hub.example.test:8443 --admin-token-file admin.token
+  aimem identity team enable --peer aicrew-example --team-name pilot --hub https://hub.example.test:8443 --admin-token-file admin.token
+  aimem identity team disable --peer aicrew-example --team-name pilot --hub https://hub.example.test:8443 --admin-token-file admin.token
+  aimem identity team grants --peer aicrew-example --team-name pilot --hub https://hub.example.test:8443 --admin-token-file admin.token
+  aimem identity team grant --peer aicrew-example --team-name pilot --project example --hub https://hub.example.test:8443 --admin-token-file admin.token
+  aimem identity team revoke --peer aicrew-example --team-id 0190a1b2-c3d4-7e5f-8a9b-0c1d2e3f4a5b --project example --hub https://hub.example.test:8443 --admin-token-file admin.token
 
 Manage the aicrew identity peer, its credentials and its team access
 profiles through the hub's TLS listener. The local socket is not used: identity routes require TLS
@@ -94,8 +96,11 @@ names the failed step otherwise. The hub reads its introspection credential
 from the private file named by AIMEM_INTROSPECTION_TOKEN_FILE; the credential
 never passes through this command.
 
-team commands link an aicrew team (by aicrew's team ID) to the registered
-peer SERVICE and grant it projects. A team session then reads only the
+team commands grant an aicrew team's profile projects. aicrewd creates and
+names each profile itself (team.register); the operator names a team by
+that name, resolved within --peer, or by aicrew's team ID, and every grant
+binds the ID, which the command prints. team create, the operator's way of
+creating a profile by ID, is kept for this release only. A team session then reads only the
 projects its profile is granted, checked live on every request: a revoke or
 disable takes effect on the next team request. There is no delete; disable a
 profile instead. revoke --instance removes a grant whose project was renamed
@@ -110,9 +115,11 @@ cred rotate issues the second credential only; after aicrew has switched to
 it, revoke the old one explicitly with cred revoke.
 
 A credential permits exactly one --operation: identity.redeem (the default),
-which redeems identity proofs, or reservation.read, aicrew's read-only
-reservation scope. At most two are active per peer and operation, and
-cred rotate counts only credentials of the named operation.`
+which redeems identity proofs; reservation.read, aicrew's read-only
+reservation scope; team.register, with which aicrewd names its own teams; or
+team.read, with which aicrewd reads its own teams' grants, repositories and
+process pins. At most two are active per peer and operation, and cred
+rotate counts only credentials of the named operation.`
 
 type identityCred struct {
 	ID        string    `json:"id"`
@@ -258,6 +265,7 @@ func runIdentity(args []string, out io.Writer) error {
 		"team-id": fs.String("team-id", "", ""), "project": fs.String("project", "", ""),
 	}
 	fs.StringVar(named["project"], "p", "", "")
+	teamName := fs.String("team-name", "", "")
 	if err := fs.Parse(rest); err != nil {
 		return fmt.Errorf("%v\n\n%s", err, identityUsage)
 	}
@@ -274,6 +282,17 @@ func runIdentity(args []string, out io.Writer) error {
 			v = pos[i]
 		}
 		ent[slot] = v
+		// A team is named by its ID or, once aicrewd registered it, by its
+		// name within the peer: exactly one of them.
+		if slot == "team-id" && *teamName != "" {
+			if v != "" {
+				return fmt.Errorf("name the team by exactly one of --team-id or --team-name")
+			}
+			if cmd == "team create" {
+				return fmt.Errorf("team create takes --team-id only: a team's name is registered by aicrewd (team.register)")
+			}
+			continue
+		}
 		if v == "" && !(cmd == "team revoke" && slot == "project") {
 			return fmt.Errorf("%s needs --%s\n\n%s", cmd, slot, identityUsage)
 		}
@@ -282,6 +301,9 @@ func runIdentity(args []string, out io.Writer) error {
 		if *p != "" && !slices.Contains(slots, name) {
 			return fmt.Errorf("--%s does not apply to %s", name, cmd)
 		}
+	}
+	if *teamName != "" && !slices.Contains(slots, "team-id") {
+		return fmt.Errorf("--team-name does not apply to %s", cmd)
 	}
 	// Validate the command's own arguments before touching the network, the
 	// token file or the secret file.
@@ -306,8 +328,8 @@ func runIdentity(args []string, out io.Writer) error {
 		if *output == "" && *secretFile == "" || *expires == "" {
 			return fmt.Errorf("%s needs --expires and --output", cmd)
 		}
-		if *operation != "identity.redeem" && *operation != "reservation.read" {
-			return fmt.Errorf("--operation must be identity.redeem or reservation.read")
+		if !slices.Contains(identityOperations, *operation) {
+			return fmt.Errorf("--operation must be one of %s", strings.Join(identityOperations, ", "))
 		}
 		var err error
 		if expiry, err = parseIdentityExpiry(*expires, time.Now()); err != nil {
@@ -321,11 +343,20 @@ func runIdentity(args []string, out io.Writer) error {
 		legacyForm("--output in place of --secret-file")
 		*output = *secretFile
 	}
+	if cmd == "team create" {
+		fmt.Fprintln(noticeOut, "aimem: team create is kept for this release; aicrewd creates and names team profiles itself (team.register)")
+	}
 	c, err := newIdentityClient(*hub, *tokenFile, *caFile, *pin)
 	if err != nil {
 		return err
 	}
-	peer, team := ent["peer"], ent["team-id"]
+	peer := ent["peer"]
+	var team teamRef
+	if slices.Contains(slots, "team-id") && cmd != "team create" {
+		if team, err = c.resolveTeam(peer, ent["team-id"], *teamName); err != nil {
+			return err
+		}
+	}
 	switch cmd {
 	case "peer list":
 		return c.peerList(out)
@@ -355,7 +386,7 @@ func runIdentity(args []string, out io.Writer) error {
 	case "team list":
 		return c.teamList(peer, out)
 	case "team create":
-		return c.teamCreate(peer, team, out)
+		return c.teamCreate(peer, ent["team-id"], out)
 	case "team enable", "team disable":
 		return c.teamSetDisabled(peer, team, verb == "disable", out)
 	case "team grants":
@@ -382,9 +413,13 @@ func identityNewForm(cmd string, slots []string, ent map[string]string) string {
 	return shellCommand(runtime.GOOS == "windows", args) + " [hub flags]"
 }
 
+// identityOperations are the operations a peer credential can be issued for.
+var identityOperations = []string{"identity.redeem", "reservation.read", "team.register", "team.read"}
+
 type identityTeam struct {
 	ProfileID string `json:"profile_id"`
 	TeamID    string `json:"team_id"`
+	TeamName  string `json:"team_name"`
 	Disabled  bool   `json:"disabled"`
 	Grants    []struct {
 		Project  string `json:"project"`
@@ -396,12 +431,56 @@ func teamPath(service, team string) string {
 	return peerPath(service) + "/teams/" + url.PathEscape(team)
 }
 
+// teamRef is one team as the operator named it, with its name and ID both
+// known, so every message prints the ID the command acted on.
+type teamRef struct{ ID, Name string }
+
+func (t teamRef) String() string {
+	if t.Name == "" {
+		return t.ID
+	}
+	return fmt.Sprintf("%s (%s)", t.Name, t.ID)
+}
+
+// resolveTeam finds the peer's team by its ID or by the name aicrewd
+// registered. An unknown name is refused with the peer's team names; an
+// unknown ID is passed on, so the hub answers for it.
+func (c *identityClient) resolveTeam(service, id, name string) (teamRef, error) {
+	var resp struct {
+		Teams []identityTeam `json:"teams"`
+	}
+	if err := c.call("GET", peerPath(service)+"/teams", nil, http.StatusOK, &resp); err != nil {
+		return teamRef{}, err
+	}
+	var names []string
+	for _, t := range resp.Teams {
+		if (id != "" && t.TeamID == id) || (name != "" && t.TeamName == name) {
+			return teamRef{t.TeamID, t.TeamName}, nil
+		}
+		if t.TeamName != "" {
+			names = append(names, t.TeamName)
+		}
+	}
+	if name == "" {
+		return teamRef{ID: id}, nil
+	}
+	if len(names) == 0 {
+		return teamRef{}, fmt.Errorf("unknown team name %q: no team of %s has registered a name", name, service)
+	}
+	slices.Sort(names)
+	return teamRef{}, fmt.Errorf("unknown team name %q; the teams of %s are: %s", name, service, strings.Join(names, ", "))
+}
+
 func printTeam(out io.Writer, t identityTeam) {
 	state := "enabled"
 	if t.Disabled {
 		state = "disabled"
 	}
-	fmt.Fprintf(out, "%s  %s  profile %s\n", t.TeamID, state, t.ProfileID)
+	name := t.TeamName
+	if name == "" {
+		name = "(no name registered)"
+	}
+	fmt.Fprintf(out, "%s  %s  %s  profile %s\n", name, t.TeamID, state, t.ProfileID)
 	if len(t.Grants) == 0 {
 		fmt.Fprintln(out, "  no project grants")
 	}
@@ -439,8 +518,8 @@ func (c *identityClient) teamCreate(service, team string, out io.Writer) error {
 	return nil
 }
 
-func (c *identityClient) teamSetDisabled(service, team string, disabled bool, out io.Writer) error {
-	if err := c.call("PUT", teamPath(service, team), map[string]bool{"disabled": disabled}, http.StatusOK, nil); err != nil {
+func (c *identityClient) teamSetDisabled(service string, team teamRef, disabled bool, out io.Writer) error {
+	if err := c.call("PUT", teamPath(service, team.ID), map[string]bool{"disabled": disabled}, http.StatusOK, nil); err != nil {
 		return err
 	}
 	state := "enabled"
@@ -451,31 +530,31 @@ func (c *identityClient) teamSetDisabled(service, team string, disabled bool, ou
 	return nil
 }
 
-func (c *identityClient) teamGrants(service, team string, out io.Writer) error {
+func (c *identityClient) teamGrants(service string, team teamRef, out io.Writer) error {
 	var t identityTeam
-	if err := c.call("GET", teamPath(service, team)+"/grants", nil, http.StatusOK, &t); err != nil {
+	if err := c.call("GET", teamPath(service, team.ID)+"/grants", nil, http.StatusOK, &t); err != nil {
 		return err
 	}
 	printTeam(out, t)
 	return nil
 }
 
-func (c *identityClient) teamGrant(service, team, project string, out io.Writer) error {
+func (c *identityClient) teamGrant(service string, team teamRef, project string, out io.Writer) error {
 	var resp struct {
 		Instance string `json:"instance"`
 	}
-	if err := c.call("PUT", teamPath(service, team)+"/grants/"+url.PathEscape(project), nil, http.StatusOK, &resp); err != nil {
+	if err := c.call("PUT", teamPath(service, team.ID)+"/grants/"+url.PathEscape(project), nil, http.StatusOK, &resp); err != nil {
 		return err
 	}
 	fmt.Fprintf(out, "project %s (instance %s) granted to team %s of %s\n", project, resp.Instance, team, service)
 	return nil
 }
 
-func (c *identityClient) teamRevoke(service, team, project string, out io.Writer) error {
+func (c *identityClient) teamRevoke(service string, team teamRef, project string, out io.Writer) error {
 	var resp struct {
 		Revoked bool `json:"revoked"`
 	}
-	if err := c.call("DELETE", teamPath(service, team)+"/grants/"+url.PathEscape(project), nil, http.StatusOK, &resp); err != nil {
+	if err := c.call("DELETE", teamPath(service, team.ID)+"/grants/"+url.PathEscape(project), nil, http.StatusOK, &resp); err != nil {
 		return err
 	}
 	if !resp.Revoked {
@@ -486,8 +565,8 @@ func (c *identityClient) teamRevoke(service, team, project string, out io.Writer
 	return nil
 }
 
-func (c *identityClient) teamRevokeInstance(service, team, instance string, out io.Writer) error {
-	if err := c.call("DELETE", teamPath(service, team)+"/grant-instances/"+url.PathEscape(instance), nil, http.StatusOK, nil); err != nil {
+func (c *identityClient) teamRevokeInstance(service string, team teamRef, instance string, out io.Writer) error {
+	if err := c.call("DELETE", teamPath(service, team.ID)+"/grant-instances/"+url.PathEscape(instance), nil, http.StatusOK, nil); err != nil {
 		return err
 	}
 	fmt.Fprintf(out, "instance %s revoked from team %s of %s\n", instance, team, service)
