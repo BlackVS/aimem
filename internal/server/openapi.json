@@ -226,6 +226,49 @@
         }
       }
     },
+    "/v1/projects/{p}/repository": {
+      "get": {
+        "summary": "The project's repository (kind, clone URL, its host, access)",
+        "description": "The one repository a project's work happens in, a hub property next to the process reference (docs/DESIGN-AIFORGE-PILOT-1.md §1). It holds no secret: the host of the clone URL names the credential a member needs. An ordinary user token needs a live grant on the project (the knowledge-read rule); an unknown project answers as one without a grant. Team mode does not serve this route yet. `repository` is null when none is set. ?history=1 (admin only) adds the recorded changes, newest first, each with its action (project.repository.set or project.repository.clear), time, actor and the values before and after.",
+        "x-role": "writer",
+        "parameters": [
+          {"name": "p", "in": "path", "required": true, "schema": {"type": "string"}},
+          {"name": "history", "in": "query", "required": false, "schema": {"type": "string"}}
+        ],
+        "responses": {
+          "200": {"description": "the repository, or null (and the history)"},
+          "403": {"description": "an ordinary token without a live grant on the project, or asking for the history"},
+          "404": {"description": "unknown project (admin)"}
+        }
+      },
+      "put": {
+        "summary": "Set or clear the project's repository (admin)",
+        "description": "Body: kind (github, gitea or gitlab: the API dialect a credential is verified against), url (https://host/path, ssh://host/path or user@host:path; stored as given, never fetched; no password, no user name on https, no query or fragment), optional access (write, the default, or read). {\"clear\":true} clears. No default branch is stored: the forge owns it. Every change is recorded in the project's repository history in the same storage step.",
+        "x-role": "admin",
+        "parameters": [
+          {"name": "p", "in": "path", "required": true, "schema": {"type": "string"}}
+        ],
+        "responses": {
+          "200": {"description": "the action, the new repository and the previous one"},
+          "400": {"description": "malformed repository"},
+          "404": {"description": "unknown project, or clear with no repository set"}
+        }
+      }
+    },
+    "/v1/projects/{p}/grants": {
+      "get": {
+        "summary": "Who is granted the project: users, groups and team profiles (admin)",
+        "description": "Each grantee with its kind (user, group or team_profile), ID and the name the hub holds; a team profile carries its service and team IDs, and a disabled user or profile is marked. A project never granted has no access instance and lists nobody.",
+        "x-role": "admin",
+        "parameters": [
+          {"name": "p", "in": "path", "required": true, "schema": {"type": "string"}}
+        ],
+        "responses": {
+          "200": {"description": "project, access instance and grants"},
+          "404": {"description": "unknown project"}
+        }
+      }
+    },
     "/v1/projects/{p}/tasks": {
       "get": {
         "x-team-mode": "Team mode: with the optional header X-Aimem-Team-Context (an aimem-scoped acs1_ handle from aicrew) and a user-scoped individual bearer, over TLS terminated by the hub only (otherwise tls_required, 403, whatever forwarded headers claim), the hub verifies the session online through aicrew introspection on every request, matches it to the authenticated user and token, and serves the read only under the linked team access profile's live grant, never the caller's personal grants. Refusals use the envelope with active_mode team: context_unavailable (503, retryable), context_stale, identity_mismatch, grant_denied, role_forbidden (403).",

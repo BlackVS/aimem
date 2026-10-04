@@ -21,7 +21,7 @@ import (
 func reviewCmd(args []string) error {
 	if len(args) > 0 && args[0] == "confirm" {
 		fs := flag.NewFlagSet("review confirm", flag.ExitOnError)
-		p := fs.String("p", "", "project id (default: derived from the current directory)")
+		p := projectFlag(fs, "project id (default: derived from the current directory)")
 		fs.Parse(args[1:])
 		if fs.NArg() != 1 {
 			return fmt.Errorf("usage: aimem review confirm [-p <project>] <memory-id>")
@@ -40,7 +40,7 @@ func reviewCmd(args []string) error {
 	}
 
 	fs := flag.NewFlagSet("review", flag.ExitOnError)
-	p := fs.String("p", "", "project id (default: derived from the current directory)")
+	p := projectFlag(fs, "project id (default: derived from the current directory)")
 	days := fs.Int("days", store.DefaultReviewAgeDays, "age window: only facts untouched this long")
 	maxCorr := fs.Int("max-corroboration", store.DefaultReviewMaxCorroboration, "only facts with at most this many sources")
 	limit := fs.Int("limit", 50, "maximum queue entries")

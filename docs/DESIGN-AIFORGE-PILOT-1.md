@@ -179,6 +179,8 @@ Each row names the aimem document it amends and the section of this text that ne
 
 **coordination.v1 is unchanged.** Option (b) would have amended it, and it was not chosen.
 
+**Correction found in implementation (increment 1).** Section 1 opens the repository read to a team session whose profile is granted the project, but the team-mode surface is a closed list in identity.v1's E4 boundary, and the table above has no row that amends it. Increment 1 therefore serves the read to an ordinary token with a grant on the project (the knowledge-read rule) and to the hub admin; team mode refuses it with `team_operation_unsupported` for now. The team-session read joins the identity.v1 row above and lands with `team.register` and `team.read`, which return the repository to aicrewd in any case.
+
 ## 8. Failure modes
 
 These are aimem's rows of [11]. aicrew's rows (offers, deposits, enrollment and capabilities) are in the aicrew text.

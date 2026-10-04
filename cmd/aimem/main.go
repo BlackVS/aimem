@@ -100,6 +100,8 @@ func main() {
 		err = curateCmd(args)
 	case "embed":
 		err = embedCmd(args)
+	case "project":
+		err = projectNamespaceCmd(args)
 	case "project-id":
 		err = projectID(args)
 	case "session-start":
@@ -167,6 +169,8 @@ func main() {
 func usage() {
 	fmt.Fprint(os.Stderr, `usage: aimem <command> [flags]
 
+  -p is the alias of --project on every command that takes a project.
+
   serve                      run the service on the Unix socket
   append                     read {"project_id","event"} JSON on stdin, submit (no spool)
   submit                     like append but redacts adapter-side and spools
@@ -186,6 +190,11 @@ func usage() {
                              --all-hubs every hub with a sync destination
   health                     service health
   projects                   list project IDs
+  project repo set|clear --project <p> [--kind --url --access]
+                             a project's one repository (hub host, admin)
+  project show --project <p> repository, process pin and grants (hub host)
+  project list|id|drop       the namespace forms of projects, project-id
+                             and drop-project
   sessions   -p <project>    list sessions in a project
   timeline   -p -s [-n]      session event timeline
   latest     -p -s           latest session checkpoint
@@ -406,7 +415,7 @@ func appendCmd(_ []string) error {
 
 func projectCmd(cmd string, args []string) error {
 	fs := flag.NewFlagSet(cmd, flag.ExitOnError)
-	p := fs.String("p", "", "project id")
+	p := projectFlag(fs, "project id")
 	s := fs.String("s", "", "session id")
 	q := fs.String("q", "", "search query")
 	n := fs.Int("n", 0, "limit")
@@ -581,7 +590,7 @@ func hubHandoffNotice(localBody string) string {
 // metaCmd prints a project meta value (ops/debug; e.g. `meta -p <id> groups`).
 func metaCmd(args []string) error {
 	fs := flag.NewFlagSet("meta", flag.ExitOnError)
-	p := fs.String("p", "", "project id (default: current directory's project)")
+	p := projectFlag(fs, "project id (default: current directory's project)")
 	fs.Parse(args)
 	key := fs.Arg(0)
 	if key == "" {
@@ -621,7 +630,7 @@ func tasksCmd(args []string) error {
 		return fmt.Errorf("%s", usage)
 	}
 	fs := flag.NewFlagSet("tasks", flag.ExitOnError)
-	p := fs.String("p", "", "project id (default: current directory's project)")
+	p := projectFlag(fs, "project id (default: current directory's project)")
 	fs.Parse(args[1:])
 	proj := *p
 	if proj == "" {
@@ -848,7 +857,7 @@ func (m *multiFlag) Set(v string) error { *m = append(*m, v); return nil }
 // (retention runs this itself after VACUUM; see store.RebuildFTS).
 func ftsRebuildCmd(args []string) error {
 	fs := flag.NewFlagSet("fts-rebuild", flag.ExitOnError)
-	p := fs.String("p", "", "project id")
+	p := projectFlag(fs, "project id")
 	all := fs.Bool("all", false, "rebuild every database in the registry (projects, user, groups)")
 	fs.Parse(args)
 	if (*p == "") == !*all {
@@ -883,7 +892,7 @@ func ftsRebuildCmd(args []string) error {
 // service is up. Destructive: demands the exact id plus --yes.
 func dropProjectCmd(args []string) error {
 	fs := flag.NewFlagSet("drop-project", flag.ExitOnError)
-	p := fs.String("p", "", "project id to delete (exact)")
+	p := projectFlag(fs, "project id to delete (exact)")
 	yes := fs.Bool("yes", false, "confirm deletion")
 	fs.Parse(args)
 	if *p == "" || !*yes {
@@ -922,7 +931,7 @@ func dropProjectCmd(args []string) error {
 // in (feature "doc") and whose facts changed since the stored doc.
 func docCmd(args []string) error {
 	fs := flag.NewFlagSet("doc", flag.ExitOnError)
-	p := fs.String("p", "", "KB project id (or pass a bare group name as the first argument)")
+	p := projectFlag(fs, "KB project id (or pass a bare group name as the first argument)")
 	all := fs.Bool("all", false, "regenerate every group KB with feature \"doc\" enabled")
 	force := fs.Bool("force", false, "regenerate even when the doc is newer than every fact")
 	show := fs.Bool("show", false, "print the stored document instead of regenerating")
@@ -1034,7 +1043,7 @@ func docCmd(args []string) error {
 // only guards NEW facts; twins from before v0.1.33 stay until swept).
 func dedupCmd(args []string) error {
 	fs := flag.NewFlagSet("dedup", flag.ExitOnError)
-	p := fs.String("p", "", "project id (default: current directory's project)")
+	p := projectFlag(fs, "project id (default: current directory's project)")
 	all := fs.Bool("all", false, "sweep every project, including user/group memory DBs")
 	sim := fs.Float64("sim", 0.90, "cosine similarity threshold")
 	dry := fs.Bool("dry-run", false, "report pairs without folding")
@@ -1203,7 +1212,7 @@ func parseCapValue(v string) (*curate.Cap, error) {
 // override that counts only that project.
 func budgetCmd(args []string) error {
 	fs := flag.NewFlagSet("budget", flag.ExitOnError)
-	p := fs.String("p", "", "project id: set/show a per-project override (default: global)")
+	p := projectFlag(fs, "project id: set/show a per-project override (default: global)")
 	daily := fs.String("daily", "", "daily cap: tokens (500k) or USD ($2); 0=clear")
 	weekly := fs.String("weekly", "", "weekly cap")
 	monthly := fs.String("monthly", "", "monthly cap")
@@ -1365,7 +1374,7 @@ func submitCodexCmd() error {
 // not the service is running.
 func exportEventsCmd(args []string) error {
 	fs := flag.NewFlagSet("export-events", flag.ExitOnError)
-	p := fs.String("p", "", "project id (default: all projects)")
+	p := projectFlag(fs, "project id (default: all projects)")
 	only := fs.String("projects", "", "comma-separated project ids to export (hub-partitioned sync)")
 	since := fs.String("since", "", "only events with id greater than this cursor")
 	fs.Parse(args)
@@ -1701,7 +1710,7 @@ func memoryScope(p string, user bool) (string, error) {
 
 func memoryCmd(cmd string, args []string) error {
 	fs := flag.NewFlagSet(cmd, flag.ExitOnError)
-	p := fs.String("p", "", "project id (default: current directory's project)")
+	p := projectFlag(fs, "project id (default: current directory's project)")
 	u := fs.Bool("u", false, "user scope (cross-project)")
 	q := fs.String("q", "", "recall query")
 	id := fs.String("id", "", "memory id")
@@ -1777,7 +1786,7 @@ func memoryCmd(cmd string, args []string) error {
 
 func exportMemoriesCmd(args []string) error {
 	fs := flag.NewFlagSet("export-memories", flag.ExitOnError)
-	p := fs.String("p", "", "project id (default: all projects)")
+	p := projectFlag(fs, "project id (default: all projects)")
 	only := fs.String("projects", "", "comma-separated project ids to export (hub-partitioned sync)")
 	fs.Parse(args)
 	reg, err := store.NewRegistry(stateRoot())
@@ -1885,7 +1894,7 @@ func postJSONQuiet(path string, body any) error {
 
 func mcpCmd(args []string) error {
 	fs := flag.NewFlagSet("mcp", flag.ExitOnError)
-	p := fs.String("p", "", "project id (default: derived from cwd)")
+	p := projectFlag(fs, "project id (default: derived from cwd)")
 	fs.Parse(args)
 	proj := *p
 	var groups []string
@@ -1910,7 +1919,7 @@ func clipLine(s string) string {
 
 func curateCmd(args []string) error {
 	fs := flag.NewFlagSet("curate", flag.ExitOnError)
-	p := fs.String("p", "", "project id (default: current directory's project)")
+	p := projectFlag(fs, "project id (default: current directory's project)")
 	dry := fs.Bool("dry-run", false, "print proposals without writing or advancing the cursor")
 	maxFacts := fs.Int("max", 10, "max facts per run")
 	maxEvents := fs.Int("events", 50, "max journal events consumed per run")
@@ -2106,7 +2115,7 @@ func curateCmd(args []string) error {
 // semantic recall (the query is embedded at recall time by the server).
 func embedCmd(args []string) error {
 	fs := flag.NewFlagSet("embed", flag.ExitOnError)
-	p := fs.String("p", "", "project id (default: current directory's project)")
+	p := projectFlag(fs, "project id (default: current directory's project)")
 	all := fs.Bool("all", false, "embed every project, including user/group memory DBs")
 	batch := fs.Int("batch", 64, "texts per embeddings request")
 	fs.Parse(args)
