@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"net/url"
 	"slices"
+	"strconv"
 	"strings"
 )
 
@@ -59,7 +60,9 @@ func (r Repository) Validate() error {
 	return err
 }
 
-// Host is the lowercase host name of a clone URL: https://host/path,
+// Host is the lowercase host of a clone URL, with its port when the URL
+// names one (forge.example.org:3000): two forge instances on one host name
+// two credentials. The URL forms are https://host[:port]/path,
 // ssh://[user@]host[:port]/path or the scp form user@host:path. It refuses
 // anything else, and any URL that could carry a secret (a password, or a
 // user name on an https URL), a query or a fragment.
@@ -103,10 +106,10 @@ func Host(raw string) (string, error) {
 	if u.Path == "" || u.Path == "/" {
 		return "", errors.New("url must name a repository path")
 	}
-	if !validHost(u.Hostname()) {
+	if !validHost(u.Hostname()) || !validPort(u.Port(), u.Host) {
 		return "", errors.New("url has an invalid host")
 	}
-	return strings.ToLower(u.Hostname()), nil
+	return strings.ToLower(u.Host), nil
 }
 
 func validHost(h string) bool {
@@ -121,4 +124,14 @@ func validHost(h string) bool {
 		}
 	}
 	return !strings.HasPrefix(h, "-") && !strings.HasPrefix(h, ".")
+}
+
+// validPort accepts no port, or 1 to 65535 in decimal without a leading
+// zero; host is the URL's host[:port] as given, so "host:" is refused.
+func validPort(port, host string) bool {
+	if port == "" {
+		return !strings.HasSuffix(host, ":")
+	}
+	n, err := strconv.Atoi(port)
+	return err == nil && n >= 1 && n <= 65535 && strconv.Itoa(n) == port
 }

@@ -38,9 +38,13 @@ dialect, the host of --url names the credential a member needs, and
 --access is what members need (write, the default, or read). The hub
 stores no default branch: the forge owns it.
 
-Example:
+Examples, one per command:
   aimem project repo set --project example --kind github --url https://github.com/example/example.git
-  aimem project show --project example`
+  aimem project repo clear --project example
+  aimem project show --project example
+  aimem project list
+  aimem project id /path/to/checkout
+  aimem project drop --project example --yes`
 
 func projectNamespaceCmd(args []string) error {
 	if len(args) == 0 {

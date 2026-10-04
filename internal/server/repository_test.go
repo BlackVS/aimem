@@ -107,7 +107,8 @@ func TestProjectRepositorySetReadClear(t *testing.T) {
 		t.Fatalf("team mode: %d %s", r.status, r.body)
 	}
 	// Change, then clear: the history records both with the values before and after.
-	if r := put(g.env, "alpha", `{"kind":"gitlab","url":"ssh://git@gitlab.example.org:2222/team/alpha.git","access":"read"}`); r.status != 200 || !strings.Contains(string(r.body), `"previous":{"kind":"github"`) {
+	if r := put(g.env, "alpha", `{"kind":"gitlab","url":"ssh://git@gitlab.example.org:2222/team/alpha.git","access":"read"}`); r.status != 200 || !strings.Contains(string(r.body), `"previous":{"kind":"github"`) ||
+		!strings.Contains(string(r.body), `"host":"gitlab.example.org:2222"`) {
 		t.Fatalf("change: %d %s", r.status, r.body)
 	}
 	if r := put(g.env, "alpha", `{"clear":true}`); r.status != 200 || !strings.Contains(string(r.body), `"repository":null`) {

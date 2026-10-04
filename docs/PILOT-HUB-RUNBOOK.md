@@ -86,7 +86,7 @@ aimem process select https://git.example.test/org/process.git 0123456789abcdef01
 
 Use the real process repository, a full 40-character commit and the manifest path. A selection must be `https`, `ssh` or `git@`.
 
-Set the project's repository: the one repository the pilot's work happens in. `--kind` is the forge's API dialect (`github`, `gitea` or `gitlab`), and the host of `--url` names the credential a member needs. `--access` is `write` (the default) or `read`. The hub stores the URL as given, never fetches it and stores no default branch. A URL carrying a user name on `https`, or any password, is refused.
+Set the project's repository: the one repository the pilot's work happens in. `--kind` is the forge's API dialect (`github`, `gitea` or `gitlab`), and the host of `--url`, with its port when the URL names one, names the credential a member needs. `--access` is `write` (the default) or `read`. The hub stores the URL as given, never fetches it and stores no default branch. A URL carrying a user name on `https`, or any password, is refused.
 
 ```sh
 aimem project repo set --project pilot --kind gitea --url https://git.example.test/org/pilot.git
@@ -155,8 +155,8 @@ aimem: identity peer aicrew-example introspection check failed: not_configured (
 **aicrew's two credentials.** One redeems identity proofs; the other reads the reservation scope. Each bearer is written once, to a new file only you can read; it is never printed.
 
 ```sh
-aimem identity cred issue aicrew-example --expires 90d --secret-file redeem.secret $HUB
-aimem identity cred issue aicrew-example --expires 90d --secret-file read.secret --operation reservation.read $HUB
+aimem identity cred issue aicrew-example --expires 90d --output redeem.secret $HUB
+aimem identity cred issue aicrew-example --expires 90d --output read.secret --operation reservation.read $HUB
 ```
 
 **Expected:**
@@ -182,15 +182,15 @@ credentials of aicrew-example:
   01a0…-…  active   created …  expires …  reservation.read
 ```
 
-**Rotation:** `aimem identity cred rotate ... --operation ...` issues the second credential of that operation. After aicrew has switched to it, revoke the old one with `aimem identity cred revoke aicrew-example CREDENTIAL_ID $HUB`.
+**Rotation:** `aimem identity cred rotate ... --operation ...` issues the second credential of that operation. After aicrew has switched to it, revoke the old one with `aimem identity cred revoke --peer aicrew-example --credential CREDENTIAL_ID $HUB`. `--output -` writes a bearer to standard output for a pipe into aicrew's own command instead of a file; it is refused when standard output is a terminal.
 
 ## 5. The team's access profile and its grant
 
 The profile links aicrew's team to this hub. A team session reads only the projects its profile is granted, checked live on every request. It never uses a member's personal grants.
 
 ```sh
-aimem identity team create aicrew-example team-pilot $HUB
-aimem identity team grant aicrew-example team-pilot pilot $HUB
+aimem identity team create --peer aicrew-example --team-id team-pilot $HUB
+aimem identity team grant --peer aicrew-example --team-id team-pilot --project pilot $HUB
 ```
 
 **Expected:**
@@ -203,7 +203,7 @@ project pilot (instance 01a0…-…) granted to team team-pilot of aicrew-exampl
 A grant for a project that does not exist yet is refused with `hub answered 404: unknown project`: run step 2 first. Verify:
 
 ```sh
-aimem identity team grants aicrew-example team-pilot $HUB
+aimem identity team grants --peer aicrew-example --team-id team-pilot $HUB
 ```
 
 **Expected:**
@@ -214,7 +214,7 @@ team-pilot  enabled  profile 01a0…-…
 ```
 
 **Revoking:**
-- `aimem identity team revoke aicrew-example team-pilot pilot $HUB` removes the grant.
+- `aimem identity team revoke --peer aicrew-example --team-id team-pilot --project pilot $HUB` removes the grant.
 - `aimem identity team disable ...` stops the whole profile.
 
 Both take effect on the next team request.
@@ -224,8 +224,8 @@ Both take effect on the next team request.
 On the hub host. Each member (the coordinator and the worker) is an aimem user with a user-scoped token. A project-scoped or read-only token cannot enter team mode.
 
 ```sh
-aimem access user-add pilot-coordinator
-aimem access user-add pilot-worker
+aimem access user-add --user-name pilot-coordinator
+aimem access user-add --user-name pilot-worker
 ```
 
 **Expected (one per user):**
@@ -238,14 +238,29 @@ aimem access user-add pilot-worker
 }
 ```
 
-Issue each user's token straight into a private file: `token-issue-user` prints the secret once, on standard output. Use it only to provision that member's home (below), then delete it.
+Issue each user's token straight into a private file: `token-issue-user` writes the secret once to `--output`, a new file only you can read, and prints the token's record without it. Use the file only to provision that member's home (below), then delete it.
 
 ```sh
-umask 077
-aimem access token-issue-user USER_ID pilot-coordinator 2026-12-28T00:00:00Z > coordinator.token.json
+aimem access token-issue-user --user-name pilot-coordinator --label pilot-coordinator --expires 2026-12-28T00:00:00Z --output coordinator.token
 ```
 
-The file holds `{"secret": "…", "token": {"id": …, "user_id": …, "scope": "user", …}}`. Check that `scope` is `user`. Extract the secret into its own private file, `coordinator.token`, holding that one line.
+**Expected:**
+
+```
+{
+  "token": {
+    "id": "01a0…-…",
+    "user_id": "01a0…-…",
+    "label": "pilot-coordinator",
+    "scope": "user",
+    "expires_at": "2026-12-28T00:00:00Z",
+    "revoked": false
+  }
+}
+the secret was written once to coordinator.token (readable only by you)
+```
+
+Check that `scope` is `user`. `coordinator.token` holds the secret on one line.
 
 **Provisioning each member's home.** On the members' machine, once per member, the operator writes the member's hub entry and token into the installation inside that member's agent home. The two variables name that installation for these commands only. The token is read from standard input, never from a command line. It is the member's own user token, used both as the hub entry's token and as the individual credential: a member home runs no aimem service and pushes no checkpoints, so it never needs a hub writer token. Put the hub's CA file inside the home (`<home>/creds/`), so nothing in the home's `hub.json` points outside it. A CA file that cannot be read is refused, naming its path.
 
@@ -303,7 +318,7 @@ curl -s -H @coordinator.auth "https://hub.example.test:8443/v1/access/identity?p
 {"name":"pilot-coordinator","project":"pilot","role":"user","scope":"user","task_read":"all-projects","task_write":false,"tasks_enabled":true,"token_id":"…","user_id":"…"}
 ```
 
-`task_write: false` is expected. The member has no personal grant on the project, and in team mode only the profile's grant counts. Give a personal grant (`aimem access grant add pilot user USER_ID`) only if the member should also work in the project outside the team.
+`task_write: false` is expected. The member has no personal grant on the project, and in team mode only the profile's grant counts. Give a personal grant (`aimem access grant add --project pilot --user-name NAME`) only if the member should also work in the project outside the team.
 
 ## 7. Linking each member through an identity proof
 
@@ -325,7 +340,7 @@ The operator never sees a receipt. `HUB_ID` is the hub ID from `aimem identity p
 | aicrew peer | `aimem identity peer list $HUB` shows it `enabled` |
 | Introspection credential | `aimem identity peer check aicrew-example $HUB` says it works |
 | aicrew's two credentials | `aimem identity cred list aicrew-example $HUB` shows `identity.redeem` and `reservation.read` active |
-| Team profile and grant | `aimem identity team grants aicrew-example team-pilot $HUB` lists `pilot` |
+| Team profile and grant | `aimem identity team grants --peer aicrew-example --team-id team-pilot $HUB` lists `pilot` |
 | Member tokens | `GET /v1/access/identity` answers `scope: user` for each member |
 | Member homes | with each home's `AIMEM_STATE_DIR` and `AIMEM_SOCKET`, `aimem hub credential pilot-hub` answers `set` and `active`; `~/.config/aimem/env` sets neither variable |
 | Members linked | a member's session start is audited as `team.verified` |
