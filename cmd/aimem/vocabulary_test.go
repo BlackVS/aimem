@@ -257,3 +257,47 @@ func TestIdentityCLITeamNames(t *testing.T) {
 	}
 	g.assertNoSecrets(t)
 }
+
+// Every legacy form's notice names a new form that runs: parsed by the
+// operator shell and run without hub flags, it passes the command's own
+// argument checks and stops only at the missing --hub. Before the fix the
+// team revoke --instance notice dropped --instance and failed the
+// exactly-one-of-project-or-instance check.
+func TestIdentityLegacyNoticesRun(t *testing.T) {
+	notices := captureNotices(t)
+	const team = "0190a1b2-c3d4-7e5f-8a9b-0c1d2e3f4a5b"
+	for _, legacy := range [][]string{
+		{"team", "revoke", "aicrew-example", team, "--instance", "01a0e1f2-0000-7000-8000-000000000002"},
+		{"team", "revoke", "aicrew-example", team, "example"},
+		{"team", "revoke", "aicrew-example", team, "--project", "example"},
+		{"team", "grant", "aicrew-example", team, "example"},
+		{"team", "grants", "aicrew-example", team},
+		{"team", "enable", "aicrew-example", team},
+		{"team", "disable", "aicrew-example", team},
+		{"cred", "revoke", "aicrew-example", "01a0e1f2-0000-7000-8000-000000000004"},
+		// A stray boolean flag survives the round trip as one argument.
+		{"team", "grants", "aicrew-example", team, "--peer-trust-dns"},
+	} {
+		notices.Reset()
+		if err := runIdentity(legacy, io.Discard); err == nil || !strings.Contains(err.Error(), "--hub must be") {
+			t.Fatalf("%v: %v", legacy, err)
+		}
+		line := strings.TrimSpace(notices.String())
+		cmd, ok := strings.CutPrefix(line, "aimem: this form is kept for one release; use: ")
+		if !ok {
+			t.Fatalf("%v: notice %q", legacy, line)
+		}
+		cmd = strings.TrimSuffix(cmd, " [hub flags]")
+		args := shellParse(t, cmd)
+		if strings.Count(cmd, "--instance") != strings.Count(strings.Join(legacy, " "), "--instance") {
+			t.Fatalf("%v: the notice changed --instance: %s", legacy, cmd)
+		}
+		notices.Reset()
+		if err := runIdentity(args[2:], io.Discard); err == nil || !strings.Contains(err.Error(), "--hub must be") {
+			t.Fatalf("the printed new form %q does not pass its own checks: %v", cmd, err)
+		}
+		if notices.Len() != 0 {
+			t.Fatalf("the printed new form %q is itself a legacy form: %s", cmd, notices)
+		}
+	}
+}
