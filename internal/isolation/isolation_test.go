@@ -8,6 +8,7 @@ import (
 )
 
 func TestUnderTemp(t *testing.T) {
+	// os.TempDir may end in a separator (macOS's TMPDIR does).
 	tmp := os.TempDir()
 	for _, p := range []string{tmp, filepath.Join(tmp, "a"), filepath.Join(tmp, "a", "b", "aimem.sock"), t.TempDir()} {
 		if !UnderTemp(p) {
@@ -15,7 +16,7 @@ func TestUnderTemp(t *testing.T) {
 		}
 	}
 	outside := filepath.Join(filepath.Dir(filepath.Clean(tmp)), "elsewhere")
-	for _, p := range []string{"", "relative/aimem.sock", outside, filepath.Join(tmp, "..", "x"), tmp + "-sibling"} {
+	for _, p := range []string{"", "relative/aimem.sock", outside, filepath.Join(tmp, "..", "x"), filepath.Clean(tmp) + "-sibling"} {
 		if UnderTemp(p) {
 			t.Errorf("%q counted as under %s", p, tmp)
 		}
