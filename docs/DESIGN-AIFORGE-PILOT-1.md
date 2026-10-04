@@ -1,6 +1,6 @@
 # First pilot: aimem's side of the proposal
 
-Status: proposal, 2026-10-04, for review. Nothing here is implemented; the tasks below follow the merged text. It is the aimem counterpart of the aicrew proposal *What the first pilot changes in aicrew and aimem*, revision 8: aicrew `docs/proposals/` (aicrew PR #85), until then the hub document `PROPOSAL-PILOT-1` in project aicrew. Section numbers in brackets, such as [2.3], refer to that document, and the two texts move in step. Section 9 lists the only places where this text may differ from it. The aimem work is tracked by tasks 01a102f8-bb79 (project repository, team registration and reads, readable commands, secret flags) and 01a102d9-440b (coordinator triage), both on the aicrew board.
+Status: proposal, 2026-10-04, for review. Nothing here is implemented; the tasks below follow the merged text. It is the aimem counterpart of the aicrew proposal *What the first pilot changes in aicrew and aimem*, revision 9: aicrew `docs/proposals/` (aicrew PR #85), until then the hub document `PROPOSAL-PILOT-1` in project aicrew. Section numbers in brackets, such as [2.3], refer to that document, and the two texts move in step. Section 9 lists the only places where this text may differ from it. The aimem work is tracked by tasks 01a102f8-bb79 (project repository, team registration and reads, readable commands, secret flags) and 01a102d9-440b (coordinator triage), both on the aicrew board.
 
 The first pilot (2026-10-03) proved the identity chain and the attempt protocol and stopped at the accept step on mechanisms that did not exist yet. On the aimem side four things were missing:
 - a project did not know its repository;
@@ -154,11 +154,12 @@ Routes on the wire keep their names; only the CLI and its output change. The run
 
 ## 6. One flag per intent and per secret kind [6.4]
 
-- **Writing a secret is always `--output <file>`.** It replaces `--secret-file` in `aimem identity cred issue|rotate`, and printing to standard output in `aimem access token-issue` and `token-issue-user`. The file must not exist; it is created readable only by its owner, and the value never goes to the terminal.
+- **Writing a secret is always `--output <file|->`.** It replaces `--secret-file` in `aimem identity cred issue|rotate`, and printing to standard output in `aimem access token-issue` and `token-issue-user`. A file must not exist and is created readable only by its owner. `-` writes to standard output for a pipe, and is refused when standard output is a terminal, so the value never goes to the terminal. `aimem identity enroll issue --output -` is the pipe's source (section 7).
 - **Reading a secret: one flag per kind,** the same in every command that reads that kind. aimem reads these kinds:
   - the tool's own credential, the hub-admin token: `--admin-token-file`, as today, on every hub-admin command;
-  - a hub token installed into an aimem installation (`aimem hub add`, `aimem hub task-token`): `--token-file`, as today (section 9);
-  - the enrollment subcode file of D1: `--bundle <file>`.
+  - a hub token installed into an aimem installation (`aimem hub add`, `aimem hub task-token`): `--token-file <file|->`, as today.
+
+  The enrollment subcode record that `enroll issue --output -` writes is read by aicrew's console client as `--bundle -`, from standard input only. A file is refused, because D1 keeps subcodes out of files, so the subcode exists only in the memory of the two processes in the pipe.
 - **`-` reads standard input everywhere.** A hidden prompt when standard input is a terminal is a nicety, not a requirement.
 - **Old names** keep working for one release with a notice.
 
@@ -173,7 +174,7 @@ Each row names the aimem document it amends and the section of this text that ne
 | DESIGN-AIFORGE-IDENTITY-WIRE (identity.v1) | two new single-purpose peer operations, `team.register` and `team.read`, with their routes, inputs, outputs, audit and refusals (`peer_forbidden`, `team_name_taken`, `profile_disabled`, `not_found`, and the existing `invalid_request`); `cred issue` accepts them as operations; the operator's team-profile create by name is replaced by registration; grant and revoke resolve `--team-name` per peer and print the UUID. Team operations under a disabled profile keep `context_stale` (unchanged) | 2, 3, 8 |
 | reservation.v1 §3 (refusals, in DESIGN-AIFORGE-COORDINATION-WIRE) | `task_not_ready` (409, `retryable: no`; next action: triage, then a new step through aicrew) replaces `reservation_conflict` for a coordinated claim on a not-READY task; `task_held` (409, `retryable: no` while the hold stands) for a triage write on a held task | 4 |
 | Task API (OpenAPI parity, TASK-CREDENTIALS) | a partial task update or dedicated state transition that leaves unnamed fields untouched; the team-mode triage capability in the access profile | 4 |
-| DESIGN-AIFORGE-ENROLLMENT (D1) | one change: the composed onboarding envelope may be written by the issuing console client to an owner-only file on the operator's machine for the private hand-off, and the operator deletes it after sending. The member side is unchanged (hidden prompt, process memory). Also the CLI surface D1 implies: `aimem identity enroll issue\|revoke` with `--purpose`, `--hub`, `--expires`, `--output` and, for revoke, `--bundle` | 6 |
+| DESIGN-AIFORGE-ENROLLMENT (D1) | one change: the composed onboarding envelope may be written by the issuing console client to an owner-only file on the operator's machine for the private hand-off, and the operator deletes it after sending. The member side is unchanged (hidden prompt, process memory), and no subcode file exists. The CLI surface D1 implies: `aimem identity enroll issue` with `--purpose`, `--hub`, `--expires` and `--output -` (standard output for a pipe, refused on a terminal), consumed by `aicrew invitation issue --bundle -`; `aimem identity enroll revoke --bundle <id>` by the non-secret bundle ID, run by the operator | 6, 8 |
 | aimem CLI (TASK-CREDENTIALS, PILOT-HUB-RUNBOOK, admin docs) | the flag vocabulary of sections 5 and 6, with the one-release notice | 5, 6 |
 
 **coordination.v1 is unchanged.** Option (b) would have amended it, and it was not chosen.
@@ -190,6 +191,8 @@ These are aimem's rows of [11]. aicrew's rows (offers, deposits, enrollment and 
 | `team.register` with a name another team of the peer holds | refused, `team_name_taken`; the team exists in aicrewd without a hub registration | `aicrew team rename`, then re-register |
 | Triage write on a held task | refused, `task_held` | after the release, or the coordinator withdraws the attempt first |
 | Coordinated claim on a not-READY task | refused, `task_not_ready`, not retryable (the proof and key are spent) | the coordinator triages to READY and offers again: a new step |
+| `enroll issue` succeeded, then aicrew's console refuses the invitation | nothing is revealed and no file is written; the console prints the bundle ID and the revoke command | the operator runs `aimem identity enroll revoke --bundle <id>`, then retries the pipeline with a new bundle |
+| An enrollment subcode leaks alone, before composition | at most a `new_user` with no grants and no membership, created by whoever redeems it | the operator revokes by bundle ID; if it was already redeemed, the operator disables that user and revokes its credential, since revoking a spent code does not revoke the token it issued (D1) |
 | Repository of a project changed while an attempt is running | the attempt keeps the repository fields recorded at offer; new offers take the new repository | none for the running attempt; the coordinator decides whether to withdraw it |
 
 **The repository of a running attempt** is aicrew's guarantee, not aimem's. aimem binds no repository to a hold: a claim and its coordination fact carry the process pin, never a repository. The offer records the repository fields, and aicrew keeps them for the attempt's lifetime [3.5].
@@ -200,7 +203,7 @@ This text may differ from the aicrew proposal only in the places [6.5] names:
 - **`aimem project repo show`** may exist as a narrower alias of `project show`; this text does not add it.
 - **`--token-file -` reads standard input,** consistent with [6.4].
 
-`--admin-token-file` is no longer a difference: under [6.4] it is aimem's flag for the tool's own credential (section 6). The operator rename of a team profile is withdrawn [2.2]. Any other difference is a defect in one of the two texts.
+`--admin-token-file` and aimem's `--token-file` are not differences: under [6.4] they are aimem's flags for the tool's own credential and for a hub token (section 6). The operator rename of a team profile is withdrawn [2.2]. Any other difference is a defect in one of the two texts.
 
 ## 10. Order
 
