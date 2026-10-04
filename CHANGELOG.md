@@ -96,6 +96,20 @@ currently 23); a binary refuses a database newer than it understands.
 
 ### Changed
 
+- **Tests cannot reach a real aimem service or stop one.**
+  - In a test binary, the local socket must lie in the temporary
+    directory as the state root already must, or the test panics.
+  - The test packages that reach the socket clear an inherited
+    `AIMEM_SOCKET`, `AIMEM_STATE_DIR` or `XDG_RUNTIME_DIR` that points
+    elsewhere. Before this, an inherited socket or Linux's runtime
+    directory routed some tests to the developer's own service.
+  - CI refuses process stops by name (`pkill`, `killall`,
+    `taskkill /IM`, `Stop-Process -Name`) in tests, scripts and workflows.
+  - [`docs/DEVELOPMENT.md`](docs/DEVELOPMENT.md) records the rules and the
+    2026-10-04 incident behind them, when a stop by name ended a
+    developer's installed service.
+  - Nothing changes outside tests.
+
 - **`aimem access` and `aimem identity` name every entity by a flag**
   ([`docs/DESIGN-AIFORGE-PILOT-1.md`](docs/DESIGN-AIFORGE-PILOT-1.md) §5).
   - Users and groups are named by `--user-name` or `--user-id` and
