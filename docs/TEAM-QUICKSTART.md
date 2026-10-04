@@ -76,15 +76,15 @@ chmod 700 ~/.local/state/aimem/team-delivery
 Choose a future expiry appropriate for the work; the date below is an example.
 
 ```sh
-aimem teams provision create my-project --team Builders --coordinator team-coordinator --create-user --label token-team-coordinator --expiry 2026-12-31T00:00:00Z --secret-file ~/.local/state/aimem/team-delivery/coordinator.token
+aimem teams provision create my-project --team Builders --coordinator team-coordinator --create-user --label token-team-coordinator --expiry 2026-12-31T00:00:00Z --output ~/.local/state/aimem/team-delivery/coordinator.token
 ```
 
 ```sh
-aimem teams provision add my-project --team Builders --member team-worker-1 --role worker --create-user --label token-team-worker-1 --expiry 2026-12-31T00:00:00Z --secret-file ~/.local/state/aimem/team-delivery/worker-1.token
+aimem teams provision add my-project --team Builders --member team-worker-1 --role worker --create-user --label token-team-worker-1 --expiry 2026-12-31T00:00:00Z --output ~/.local/state/aimem/team-delivery/worker-1.token
 ```
 
 ```sh
-aimem teams provision add my-project --team Builders --member team-worker-2 --role worker --create-user --label token-team-worker-2 --expiry 2026-12-31T00:00:00Z --secret-file ~/.local/state/aimem/team-delivery/worker-2.token
+aimem teams provision add my-project --team Builders --member team-worker-2 --role worker --create-user --label token-team-worker-2 --expiry 2026-12-31T00:00:00Z --output ~/.local/state/aimem/team-delivery/worker-2.token
 ```
 
 Each command creates or reuses a user, grants project access, enrolls the
@@ -92,7 +92,7 @@ user and issues a project-scoped token. Enrollment does not start an agent
 session. Note the team ID from the output.
 
 For an existing user with a valid credential, use `--no-token` instead of
-the label, expiry and secret-file options. A rerun does not recover a lost
+the label, expiry and output options. A rerun does not recover a lost
 secret or silently replace a live token with the same label. Follow the
 reported repair instructions; see [provisioning details](TEAM-SETUP.md#guided-provisioning).
 

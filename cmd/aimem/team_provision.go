@@ -26,8 +26,10 @@ path for the team an agent joins with /join_team. create makes the team
 with its first coordinator; add enrolls one more member (or grants an
 enrolled one the coordinator flag). Both resolve USER by exact name or ID,
 grant the project, enroll, and issue that member one project-scoped token
-labelled team-<team>-<user>, whose secret is shown once, at the end, on its
-own line (or written to --secret-file, mode 0600, and not shown). Every
+labelled team-<team>-<user>, whose secret is written once to --output: a
+new file only you can read, created before any step runs, or - for
+standard output into a pipe (refused on a terminal; every other line then
+goes to standard error). Every
 step is idempotent and reported: an existing user, grant, team or
 enrollment is reused, never duplicated; a live token with the same label
 is never reissued (choose another --label to issue a new one). A rerun
@@ -38,8 +40,15 @@ existed. Creating an enrollment creates no session: the member joins with
   --create-user        create USER when no user of that exact name exists
   --label L            token label (default team-<team>-<user>)
   --no-token           enroll without issuing a token (the member has one)
-  --secret-file PATH   write the secret there (new file, 0600) instead of stdout
+  --output FILE|-      where the secret is written once (required to issue a token)
   --description TEXT   team description (create only)
+--secret-file is the old name of --output, and printing the secret on
+standard output without --output is the old behavior; both keep working
+for this release and print a notice.
+
+Example:
+  aimem teams provision add example --team Builders --member team-worker-1 --role worker \
+    --create-user --expiry 2026-12-31T00:00:00Z --output worker-1.token
 Ordinary member tokens cannot run this; agents get the operator handoff
 from aimem teams setup instead.`
 
@@ -76,9 +85,9 @@ func teamProvisionCmd(args []string) error {
 }
 
 type provisionOptions struct {
-	verb, project, team, user, role, label, secretFile, description string
-	expiry                                                          time.Time
-	createUser, noToken                                             bool
+	verb, project, team, user, role, label, output, secretFile, description string
+	expiry                                                                  time.Time
+	createUser, noToken                                                     bool
 }
 
 func parseTeamProvisionArgs(args []string) (*provisionOptions, error) {
@@ -95,6 +104,7 @@ func parseTeamProvisionArgs(args []string) (*provisionOptions, error) {
 	fs.StringVar(&o.role, "role", "", "")
 	fs.StringVar(&expiry, "expiry", "", "")
 	fs.StringVar(&o.label, "label", "", "")
+	fs.StringVar(&o.output, "output", "", "")
 	fs.StringVar(&o.secretFile, "secret-file", "", "")
 	fs.StringVar(&o.description, "description", "", "")
 	fs.BoolVar(&o.createUser, "create-user", false, "")
@@ -121,10 +131,11 @@ func parseTeamProvisionArgs(args []string) (*provisionOptions, error) {
 		}
 		o.expiry = t
 	}
-	if o.secretFile != "" {
-		if _, err := os.Lstat(o.secretFile); err == nil {
-			return nil, errors.New("--secret-file must name a new file; an existing one is never overwritten")
-		}
+	if o.output != "" && o.secretFile != "" {
+		return nil, errors.New("--secret-file is the old name of --output; give one of them")
+	}
+	if o.noToken && (o.output != "" || o.secretFile != "") {
+		return nil, errors.New("--no-token issues no secret, so it takes no --output")
 	}
 	return o, nil
 }
@@ -135,6 +146,25 @@ func runTeamProvision(args []string, call operatorCall, stdout io.Writer) error 
 		return err
 	}
 	p := &provisioner{o: o, call: call, out: stdout}
+	if o.secretFile != "" {
+		legacyForm("--output in place of --secret-file")
+		o.output, o.secretFile = o.secretFile, ""
+	}
+	// The destination is claimed before any step runs, so a refused
+	// --output changes nothing on the hub.
+	if o.output != "" {
+		if p.sink, err = reserveSecretOutput("--output", o.output); err != nil {
+			return err
+		}
+		defer func() {
+			if !p.delivered {
+				p.sink.abandon()
+			}
+		}()
+		if p.sink.toStdout() {
+			p.out, stdout = noticeOut, noticeOut
+		}
+	}
 	if err := p.run(); err != nil {
 		if len(p.done) > 0 {
 			fmt.Fprintln(stdout, "stopped after: "+strings.Join(p.done, "; ")+". Re-running repeats the idempotent steps and reports what already exists.")
@@ -145,11 +175,13 @@ func runTeamProvision(args []string, call operatorCall, stdout io.Writer) error 
 }
 
 type provisioner struct {
-	o        *provisionOptions
-	call     operatorCall
-	out      io.Writer
-	done     []string
-	instance string // the target project's instance, from the grant reply
+	o         *provisionOptions
+	call      operatorCall
+	out       io.Writer
+	sink      *secretOutput // the reserved --output, or nil
+	delivered bool
+	done      []string
+	instance  string // the target project's instance, from the grant reply
 }
 
 func (p *provisioner) say(format string, a ...any) {
@@ -435,19 +467,15 @@ func (p *provisioner) token(snap access.Snapshot, u access.User, team *store.Tea
 	}
 	p.say("token %s: issued for %s (id %s, project-scoped, expires %s)", label, u.Name, res.Token.ID, res.Token.ExpiresAt.UTC().Format(time.RFC3339))
 	install := "in the member's checkout: printf '%s' \"$SECRET\" | aimem task-token set   (then /join_team " + team.Name + " " + p.o.role + ")"
-	if p.o.secretFile != "" {
-		f, err := os.OpenFile(p.o.secretFile, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
-		if err != nil {
-			return fmt.Errorf("token issued but the secret could not be written to %s: %w; it is lost, revoke token %s and issue another with a new --label", p.o.secretFile, err, res.Token.ID)
+	if p.sink != nil {
+		if err := p.sink.write(res.Secret); err != nil {
+			return fmt.Errorf("token issued but the secret could not be written to %s: %w; it is lost, revoke it with aimem access token-revoke --token-id %s and issue another with a new --label", p.sink.where(), err, res.Token.ID)
 		}
-		if _, err := f.WriteString(res.Secret + "\n"); err != nil {
-			f.Close()
-			return fmt.Errorf("token issued but the secret could not be written to %s: %w; revoke token %s and issue another with a new --label", p.o.secretFile, err, res.Token.ID)
-		}
-		f.Close()
-		fmt.Fprintf(p.out, "secret written once to %s (mode 0600); deliver it to the member and delete the file; install %s\n", p.o.secretFile, install)
+		p.delivered = true
+		fmt.Fprintf(p.out, "secret written once to %s; deliver it to the member, then delete any file; install %s\n", p.sink.where(), install)
 		return nil
 	}
+	legacyForm("--output FILE|- to write the secret; printing it here is kept for this release")
 	fmt.Fprintf(p.out, "one-time secret for %s (shown once, never again; install %s):\n%s\n", u.Name, install, res.Secret)
 	return nil
 }

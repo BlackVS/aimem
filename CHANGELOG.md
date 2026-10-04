@@ -133,6 +133,9 @@ currently 23); a binary refuses a database newer than it understands.
   for a pipe and is refused when standard output is a terminal; every
   other line then goes to standard error. `token-issue` with `--output`
   prints the token's record without the secret.
+  `aimem teams provision create|add` take `--output` too, for the member
+  token they issue; the file is claimed before any step runs, and a run
+  that issues no token removes it again.
 
 - **Tests cannot reach a real hub through the client state root.** The
   CLI and the MCP server now resolve the state root in one place
@@ -159,8 +162,10 @@ currently 23); a binary refuses a database newer than it understands.
 
 - **The old command forms work for this release only.** The positional
   forms of `aimem access` and of the `aimem identity` commands with
-  several entities, and `--secret-file`, keep working and print a
-  one-line notice on standard error naming the new form. The old
+  several entities, and `--secret-file` (in `identity cred` and
+  `teams provision`), keep working and print a one-line notice on
+  standard error naming the new form. So does `teams provision` printing
+  the secret on standard output without `--output`. The old
   `token-issue` and `token-issue-user` forms still print the secret on
   standard output; a script that reads it there should move to
   `--output -`.
