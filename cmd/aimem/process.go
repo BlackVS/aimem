@@ -37,7 +37,7 @@ what the session-start hook injects for this project.`
 	switch args[0] {
 	case "select", "clear":
 		fs := flag.NewFlagSet("process "+args[0], flag.ExitOnError)
-		p := fs.String("p", "", "project id (default: current directory's project)")
+		p := projectFlag(fs, "project id (default: current directory's project)")
 		ref := fs.String("ref", "", "branch or tag to fetch when the server refuses fetch-by-hash")
 		expect := fs.String("expect", "", "the commit currently selected (compare-and-swap); empty when none")
 		var pos []string
@@ -86,7 +86,7 @@ what the session-start hook injects for this project.`
 		return nil
 	case "show":
 		fs := flag.NewFlagSet("process show", flag.ExitOnError)
-		p := fs.String("p", "", "project id (default: current directory's project)")
+		p := projectFlag(fs, "project id (default: current directory's project)")
 		tmpl := fs.String("template", "", "print this template from the process set instead of the bootstrap")
 		full := fs.Bool("full", false, "print the whole unit regardless of the manifest's injection budget")
 		fs.Parse(args[1:])

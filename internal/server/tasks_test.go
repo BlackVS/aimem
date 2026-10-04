@@ -396,6 +396,7 @@ func TestOrdinaryTokenGateMatrix(t *testing.T) {
 		"GET /v1/tasks/{id}/history", "GET /v1/tasks/{id}/comments", "POST /v1/tasks/{id}/comments", "GET /v1/tasks/{id}/comments/{c}", "POST /mcp",
 		"GET /v1/projects",                                                                                                              // the listing, read only, reserved stores filtered (TestProjectListForOrdinaryTokens)
 		"GET /v1/projects/{p}/process",                                                                                                  // the selected process reference (TestProcessReferenceSelection)
+		"GET /v1/projects/{p}/repository",                                                                                               // the project's repository, grant-checked in the handler (TestProjectRepository*)
 		"GET /v1/projects/{p}/epics", "POST /v1/projects/{p}/epics", "GET /v1/projects/{p}/epics/{e}", "PUT /v1/projects/{p}/epics/{e}", // epics (TestEpicRoutes)
 		"GET /v1/access/directory", // the identity directory (TestAccessDirectory)
 		// the pilot's knowledge reads, grant-checked in the handler (TestKnowledgeReads*)

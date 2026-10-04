@@ -58,12 +58,12 @@ The CLI itself refuses a plain `http://` hub:
 aimem: --hub must be the hub's TLS listener as https://HOST:PORT (plain http is refused)
 ```
 
-## 2. The pilot project: tasks on, process selected
+## 2. The pilot project: tasks on, process selected, repository set
 
 On the hub host. `tasks on` creates the project if it does not exist yet: the grant in step 5 needs an existing project, so run this first.
 
 ```sh
-aimem tasks on -p pilot
+aimem tasks on --project pilot
 ```
 
 **Expected:**
@@ -75,7 +75,7 @@ tasks on for project "pilot"
 Select the project's process: a coordinated claim needs the process pin. The reference is recorded as given; it is not fetched here.
 
 ```sh
-aimem process select https://git.example.test/org/process.git 0123456789abcdef0123456789abcdef01234567 process/manifest.json -p pilot
+aimem process select https://git.example.test/org/process.git 0123456789abcdef0123456789abcdef01234567 process/manifest.json --project pilot
 ```
 
 **Expected:**
@@ -85,6 +85,22 @@ aimem process select https://git.example.test/org/process.git 0123456789abcdef01
 ```
 
 Use the real process repository, a full 40-character commit and the manifest path. A selection must be `https`, `ssh` or `git@`.
+
+Set the project's repository: the one repository the pilot's work happens in. `--kind` is the forge's API dialect (`github`, `gitea` or `gitlab`), and the host of `--url` names the credential a member needs. `--access` is `write` (the default) or `read`. The hub stores the URL as given, never fetches it and stores no default branch. A URL carrying a user name on `https`, or any password, is refused.
+
+```sh
+aimem project repo set --project pilot --kind gitea --url https://git.example.test/org/pilot.git
+```
+
+**Expected:**
+
+```
+project.repository.set for project "pilot"
+  previous: (none)
+  now:      gitea https://git.example.test/org/pilot.git (host git.example.test, access write)
+```
+
+`aimem project show --project pilot` prints the repository, the process pin and the project's grants with names beside IDs. Run it again after step 5 to see the team profile's grant. `aimem project repo clear --project pilot` removes the repository; every set and clear is kept in the project's repository history with the values before and after.
 
 ## 3. Register aicrew as the identity peer
 
@@ -305,7 +321,7 @@ The operator never sees a receipt. `HUB_ID` is the hub ID from `aimem identity p
 | Step | Verified by |
 | --- | --- |
 | TLS terminated by the hub | `aimem identity peer list $HUB` answers; no `tls_required` |
-| Pilot project | `aimem tasks on -p pilot`; `aimem process select …` echoes the selection |
+| Pilot project | `aimem tasks on --project pilot`; `aimem process select …` echoes the selection; `aimem project show --project pilot` prints the repository and the pin |
 | aicrew peer | `aimem identity peer list $HUB` shows it `enabled` |
 | Introspection credential | `aimem identity peer check aicrew-example $HUB` says it works |
 | aicrew's two credentials | `aimem identity cred list aicrew-example $HUB` shows `identity.redeem` and `reservation.read` active |

@@ -40,6 +40,29 @@ currently 23); a binary refuses a database newer than it understands.
     Markdown, which no tool description reaches.
   - by the team guidance: every role's required set now includes the
     section `writing`, which changes the guidance digest.
+- **A project owns its one repository**
+  ([`docs/DESIGN-AIFORGE-PILOT-1.md`](docs/DESIGN-AIFORGE-PILOT-1.md) §1).
+  - On the hub host, `aimem project repo set --project <p> --kind
+    github|gitea|gitlab --url <clone URL> [--access write|read]` sets it,
+    and `aimem project repo clear` removes it. The URL is stored as given
+    and never fetched, and no default branch is stored. A URL that could
+    carry a secret is refused: any password, or a user name on `https`.
+  - Every set and clear is kept in the project's repository history, with
+    the actor and the values before and after (`project.repository.set`,
+    `project.repository.clear`).
+  - `GET /v1/projects/{p}/repository` answers the repository and its
+    host. An ordinary token reads it under its own current grant on the
+    project, and a read-only token does not. Team mode does not serve it
+    yet.
+  - `aimem project show --project <p>` prints the repository, the process
+    pin and the project's grants (users, groups and team profiles) with
+    names beside IDs, from the new admin route
+    `GET /v1/projects/{p}/grants`.
+- **The `aimem project` namespace and `--project`.** `aimem project list`,
+  `project id` and `project drop` are the namespace forms of `projects`,
+  `project-id` and `drop-project`, which keep working unchanged. Every
+  command that takes `-p` now also takes `--project`; `-p` stays as its
+  alias.
 
 ### Changed
 

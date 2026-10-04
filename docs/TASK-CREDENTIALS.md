@@ -6,6 +6,11 @@ expiry appropriate to the token's access to all currently granted projects.
 Project-scoped tokens restrict writes to one project instance and still
 require a current grant. Read-only tokens never permit writes.
 
+The same rule reads a project's repository, the property an administrator
+sets with `aimem project repo set`: a user-scoped or project-scoped token
+with a current grant on the project reads it, and a read-only token does
+not. The repository names a clone URL and its host, never a credential.
+
 The client chooses one credential:
 
 1. A required project-local override, when `.aimem.json` contains
