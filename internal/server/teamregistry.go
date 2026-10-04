@@ -11,6 +11,7 @@ package server
 // the read scope's per-credential bound.
 
 import (
+	"fmt"
 	"net/http"
 	"slices"
 
@@ -19,24 +20,57 @@ import (
 )
 
 // teamPeer applies the checks both operations share and returns the
-// credential's peer. It has answered the refusal when it returns false.
+// credential's peer. It has answered the refusal when it returns false;
+// every refusal of an authenticated peer is audited.
 func (s *Server) teamPeer(w http.ResponseWriter, r *http.Request) (access.PeerIdentity, bool) {
-	if !s.identityWireGate(w, r) {
+	id, ok := IdentityFrom(r.Context())
+	if !ok || id.Role != "peer" {
+		// No peer to attribute the refusal to; the transport checks still
+		// come first, as on the other identity.v1 routes.
+		if s.identityWireGate(w, r) {
+			s.identityRefuse(w, "peer_unauthenticated")
+		}
 		return access.PeerIdentity{}, false
 	}
-	id, ok := IdentityFrom(r.Context())
+	code := ""
 	switch {
-	case !ok || id.Role != "peer":
-		s.identityRefuse(w, "peer_unauthenticated")
-		return access.PeerIdentity{}, false
+	case !identityTLS(r):
+		code = "tls_required"
+	case r.Header.Get(identityVersionHeader) != "1":
+		code = "unsupported_version"
 	case !peerRouteAllowed(r, id.Peer), r.PathValue("service_id") != id.Peer.ServiceID:
-		s.identityRefuse(w, "peer_forbidden")
-		return access.PeerIdentity{}, false
+		code = "peer_forbidden"
 	case !s.readLimiter().allow(id.Peer.CredentialID):
-		s.identityRefuse(w, "rate_limited")
+		code = "rate_limited"
+	}
+	if code != "" {
+		s.teamOpRefuse(w, r, id.Peer, code)
 		return access.PeerIdentity{}, false
 	}
 	return id.Peer, true
+}
+
+// teamOperation names the team operation a request targets, for its audit.
+func teamOperation(r *http.Request) string {
+	if identityWireRoute(r) == "team_register" {
+		return "team.register"
+	}
+	return "team.read"
+}
+
+// teamOpRefuse audits an authenticated peer's refused team operation under
+// peer:<service>, naming the refusal and the request path, and answers it.
+// An audit that cannot be written does not change the answer, which is a
+// refusal either way; it is logged.
+func (s *Server) teamOpRefuse(w http.ResponseWriter, r *http.Request, peer access.PeerIdentity, code string) {
+	action := teamOperation(r) + ".refused." + code
+	subject := fmt.Sprintf("service=%s credential=%s path=%q", peer.ServiceID, peer.CredentialID, r.URL.EscapedPath())
+	if db, err := s.openAccess(false); err != nil {
+		s.log.Error("team operation audit", "action", action, "err", err)
+	} else if err := db.RecordTeamRequest("peer:"+peer.ServiceID, action, subject); err != nil {
+		s.log.Error("team operation audit", "action", action, "err", err)
+	}
+	s.identityRefuse(w, code)
 }
 
 // teamRegistrationView is team.register's answer.
@@ -58,7 +92,7 @@ func (s *Server) registerTeam(w http.ResponseWriter, r *http.Request) {
 		TeamName string `json:"team_name"`
 	}
 	if !decodeIdentity(r, w, &req) {
-		s.identityRefuse(w, "invalid_request")
+		s.teamOpRefuse(w, r, peer, "invalid_request")
 		return
 	}
 	db, err := s.openAccess(false)

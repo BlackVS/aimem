@@ -221,7 +221,9 @@ The first pilot's follow-ups ([DESIGN-AIFORGE-PILOT-1](DESIGN-AIFORGE-PILOT-1.md
 - **Credential.** Each operation needs a peer credential issued for exactly that operation (`aimem identity cred issue --operation team.register|team.read`). It reaches no other route, and no other credential reaches these: another operation's peer credential gets `peer_forbidden`, and any other bearer gets `peer_unauthenticated`. The path's `service_id` must be the credential's own peer, or the answer is `peer_forbidden`.
 - **Transport.** The hub accepts only TLS it terminated itself (`tls_required` otherwise) and requires `X-Aimem-Identity-Version: 1` (`unsupported_version` otherwise).
 - **Bound.** Both operations share the read scope's bound of 60 calls per minute per credential (`rate_limited`).
-- **Audit.** Every outcome is audited under the actor `peer:<service>`, refusals included.
+- **Audit.** Every outcome is audited under the actor `peer:<service>`, refusals included, as `team.register.<outcome>` or `team.read[.refused.<code>]`.
+  - A refusal before the store is reached (`tls_required`, `unsupported_version`, `peer_forbidden`, `rate_limited`, or `invalid_request` for a malformed body) names the credential ID and the request path. This includes another operation's credential, which the bearer gate refuses before any handler runs.
+  - A bearer that is not a peer credential has no peer to attribute and is not audited.
 - **MCP.** Neither operation is exposed as an MCP tool.
 
 **`team.register`: `PUT /v1/identity/peers/{service_id}/team-registrations/{team_id}`** with `{"team_name": "…"}`.
@@ -232,7 +234,7 @@ The first pilot's follow-ups ([DESIGN-AIFORGE-PILOT-1](DESIGN-AIFORGE-PILOT-1.md
   - A name another team of the same peer holds is `team_name_taken` (409). Names are unique per peer, and the store enforces this with a partial unique index, so two concurrent registrations cannot both take one name.
   - A profile the operator disabled is `profile_disabled` (403). It stays disabled; only the operator re-enables it.
 - **Answer.** `{profile_id, team_id, team_name, created, previous_name}`.
-- **Audit.** `team.register.created`, `.renamed`, `.unchanged` or `.refused.<code>`, with the service, team, old and new name and profile.
+- **Audit.** `team.register.created`, `.renamed`, `.unchanged` or `.refused.<code>`, with the service, team, old and new name and profile. A refused rename of an existing profile, an invalid name included, names that profile and its current name.
 - **Grants after a rename.** Grants bind the profile, never the name, so a rename moves no grant. The operator's `aimem identity team grant|revoke` resolve `--team-name` within the peer and print the name and team ID they acted on.
 
 **`team.read`: `GET /v1/identity/peers/{service_id}/team-reads`** (all of the peer's teams, as `{teams: [...]}`) **and `…/team-reads/{team_id}`** (one team).

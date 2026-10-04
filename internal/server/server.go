@@ -629,7 +629,12 @@ func (s *Server) authWrapper(token string, next http.Handler) http.Handler {
 			case "proof":
 				s.identityRefuse(w, "credential_scope_forbidden")
 				return
-			case "redeem", "read", "team_register", "team_read":
+			case "team_register", "team_read":
+				// Another operation's credential on a team operation's
+				// route: refused and audited under its peer.
+				s.teamOpRefuse(w, r, id.Peer, "peer_forbidden")
+				return
+			case "redeem", "read":
 				// Another operation's route: a peer credential reaches
 				// only the routes of the one operation it was issued for.
 				s.identityRefuse(w, "peer_forbidden")

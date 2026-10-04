@@ -282,6 +282,11 @@ func (s *Store) RegisterTeam(actor, serviceID, teamID, name string) (TeamRegistr
 	subject := func() string {
 		return fmt.Sprintf("service=%s team=%s old_name=%q new_name=%q profile=%s", serviceID, teamID, reg.OldName, name, reg.Profile.ID)
 	}
+	// A refusal names the profile and its current name when one exists, so
+	// the audit of an invalid rename still shows what it would have renamed.
+	if p, err := s.TeamProfileByKey(serviceID, teamID); err == nil {
+		reg.Profile, reg.OldName = p, p.TeamName
+	}
 	if !teamUUIDPattern.MatchString(teamID) {
 		err := fmt.Errorf("%w: team ID must be a lowercase canonical UUID", ErrInvalidRequest)
 		return reg, s.recordRegistration(actor, outcome(err), subject(), err)

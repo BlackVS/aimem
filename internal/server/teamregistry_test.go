@@ -19,6 +19,7 @@ const (
 type teamRegRig struct {
 	*identityRig
 	register, read, redeem string // peer bearers, one per operation
+	registerID, readID     string // their credential IDs
 }
 
 func newTeamRegRig(t *testing.T) *teamRegRig {
@@ -35,8 +36,8 @@ func newTeamRegRig(t *testing.T) *teamRegRig {
 	}
 	g.registerPeer(t, "aicrew-example")
 	exp := time.Now().Add(24 * time.Hour)
-	_, g.register = g.issueCredentialFor(t, "aicrew-example", "team.register", exp)
-	_, g.read = g.issueCredentialFor(t, "aicrew-example", "team.read", exp)
+	g.registerID, g.register = g.issueCredentialFor(t, "aicrew-example", "team.register", exp)
+	g.readID, g.read = g.issueCredentialFor(t, "aicrew-example", "team.read", exp)
 	_, g.redeem = g.issueCredentialFor(t, "aicrew-example", "", exp)
 	return g
 }
@@ -261,4 +262,60 @@ func TestTeamReadRateBound(t *testing.T) {
 	if r := g.readAll(t, g.read); r.status != 429 || r.code() != "rate_limited" {
 		t.Fatalf("over the bound: %d %s", r.status, r.body)
 	}
+}
+
+// Every refusal of an authenticated peer is audited under peer:<service>,
+// whichever check refused it, and an invalid rename names the profile's
+// current name.
+func TestTeamOperationRefusalsAreAudited(t *testing.T) {
+	g := newTeamRegRig(t)
+	if r := g.reg(t, g.register, "aicrew-example", teamA, "pilot"); r.status != 200 {
+		t.Fatalf("register: %d %s", r.status, r.body)
+	}
+	const actor = "peer:aicrew-example"
+	regPath := "/v1/identity/peers/aicrew-example/team-registrations/" + teamA
+	// A malformed body.
+	if r := g.call(t, g.tls, "PUT", regPath, g.register, v1, `{"team_name":42}`, true); r.status != 400 || r.code() != "invalid_request" {
+		t.Fatalf("malformed body: %d %s", r.status, r.body)
+	}
+	g.auditHas(t, "team.register.refused.invalid_request", actor, "credential="+g.registerID, teamA)
+	// An invalid rename keeps the current name and profile in the record.
+	if r := g.reg(t, g.register, "aicrew-example", teamA, ""); r.status != 400 {
+		t.Fatalf("empty name: %d %s", r.status, r.body)
+	}
+	g.auditHas(t, "team.register.refused.invalid_request", actor, `old_name="pilot"`, `new_name=""`, "profile=01")
+	// The path names another peer.
+	if r := g.reg(t, g.register, "other-peer", teamA, "x"); r.status != 403 {
+		t.Fatalf("other path: %d %s", r.status, r.body)
+	}
+	g.auditHas(t, "team.register.refused.peer_forbidden", actor, "credential="+g.registerID, "other-peer")
+	// Another operation's credential, refused by the bearer gate.
+	if r := g.reg(t, g.read, "aicrew-example", teamA, "x"); r.status != 403 || r.code() != "peer_forbidden" {
+		t.Fatalf("read credential: %d %s", r.status, r.body)
+	}
+	g.auditHas(t, "team.register.refused.peer_forbidden", actor, "credential="+g.readID)
+	if r := g.readAll(t, g.register); r.status != 403 {
+		t.Fatalf("register credential on read: %d %s", r.status, r.body)
+	}
+	g.auditHas(t, "team.read.refused.peer_forbidden", actor, "credential="+g.registerID)
+	// Plain HTTP and a missing version.
+	if r := g.call(t, g.plain, "PUT", regPath, g.register, v1, `{"team_name":"x"}`, true); r.code() != "tls_required" {
+		t.Fatalf("plain HTTP: %d %s", r.status, r.body)
+	}
+	g.auditHas(t, "team.register.refused.tls_required", actor, "credential="+g.registerID)
+	if r := g.call(t, g.tls, "GET", "/v1/identity/peers/aicrew-example/team-reads", g.read, nil, "", true); r.code() != "unsupported_version" {
+		t.Fatalf("no version: %d %s", r.status, r.body)
+	}
+	g.auditHas(t, "team.read.refused.unsupported_version", actor, "credential="+g.readID)
+	// The rate bound.
+	now := time.Now()
+	g.s.readLimit = &readScopeLimiter{now: func() time.Time { return now }}
+	for i := 0; i < readScopePerMinute; i++ {
+		g.readAll(t, g.read)
+	}
+	if r := g.readAll(t, g.read); r.code() != "rate_limited" {
+		t.Fatalf("over the bound: %d %s", r.status, r.body)
+	}
+	g.auditHas(t, "team.read.refused.rate_limited", actor, "credential="+g.readID)
+	g.assertNoSecretLeak(t)
 }
