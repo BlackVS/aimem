@@ -337,7 +337,17 @@ func runIdentity(args []string, out io.Writer) error {
 		}
 	}
 	if len(slots) > 1 && len(pos) > 0 {
-		legacyForm(identityNewForm(cmd, slots, ent))
+		// The new form keeps every other flag the command was given (for
+		// example team revoke's --instance), so it runs as printed; the hub
+		// flags stay a placeholder.
+		var extra []string
+		fs.Visit(func(f *flag.Flag) {
+			if _, entity := named[f.Name]; !entity && f.Name != "p" && !identityHubFlags[f.Name] {
+				// --name=value, so a boolean flag reads back as one argument.
+				extra = append(extra, "--"+f.Name+"="+f.Value.String())
+			}
+		})
+		legacyForm(identityNewForm(cmd, slots, ent, extra))
 	}
 	if *secretFile != "" {
 		legacyForm("--output in place of --secret-file")
@@ -403,15 +413,20 @@ func runIdentity(args []string, out io.Writer) error {
 }
 
 // identityNewForm renders the named form of a positional invocation.
-func identityNewForm(cmd string, slots []string, ent map[string]string) string {
+func identityNewForm(cmd string, slots []string, ent map[string]string, extra []string) string {
 	args := append([]string{"aimem", "identity"}, strings.Fields(cmd)...)
 	for _, s := range slots {
 		if ent[s] != "" {
 			args = append(args, "--"+s, ent[s])
 		}
 	}
+	args = append(args, extra...)
 	return shellCommand(runtime.GOOS == "windows", args) + " [hub flags]"
 }
+
+// identityHubFlags are the connection flags every identity command takes;
+// a printed new form names them only as "[hub flags]".
+var identityHubFlags = map[string]bool{"hub": true, "admin-token-file": true, "hub-ca-file": true, "hub-pin": true}
 
 // identityOperations are the operations a peer credential can be issued for.
 var identityOperations = []string{"identity.redeem", "reservation.read", "team.register", "team.read"}
