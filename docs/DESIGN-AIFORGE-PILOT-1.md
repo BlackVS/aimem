@@ -1,6 +1,6 @@
 # First pilot: aimem's side of the proposal
 
-Status: proposal, 2026-10-04, for review. Nothing here is implemented; the tasks below follow the merged text. It is the aimem counterpart of the aicrew proposal *What the first pilot changes in aicrew and aimem*, revision 7: aicrew `docs/proposals/` (aicrew PR #85), until then the hub document `PROPOSAL-PILOT-1` in project aicrew. Section numbers in brackets, such as [2.3], refer to that document, and the two texts move in step. Section 9 lists the only places where this text may differ from it. The aimem work is tracked by tasks 01a102f8-bb79 (project repository, team registration and reads, readable commands, secret flags) and 01a102d9-440b (coordinator triage), both on the aicrew board.
+Status: proposal, 2026-10-04, for review. Nothing here is implemented; the tasks below follow the merged text. It is the aimem counterpart of the aicrew proposal *What the first pilot changes in aicrew and aimem*, revision 8: aicrew `docs/proposals/` (aicrew PR #85), until then the hub document `PROPOSAL-PILOT-1` in project aicrew. Section numbers in brackets, such as [2.3], refer to that document, and the two texts move in step. Section 9 lists the only places where this text may differ from it. The aimem work is tracked by tasks 01a102f8-bb79 (project repository, team registration and reads, readable commands, secret flags) and 01a102d9-440b (coordinator triage), both on the aicrew board.
 
 The first pilot (2026-10-03) proved the identity chain and the attempt protocol and stopped at the accept step on mechanisms that did not exist yet. On the aimem side four things were missing:
 - a project did not know its repository;
@@ -22,13 +22,13 @@ aimem project repo clear --project example
 aimem project show --project example
 ```
 
-- `--kind` is `github`, `gitea` or `gitlab`. The credential kind a member needs follows from it; there is no separate credential declaration.
-- `--url` is the clone URL (`https` or `ssh`), stored as given and never fetched by the hub.
+- `--kind` is `github`, `gitea` or `gitlab`: the API dialect used to verify a credential against that forge.
+- `--url` is the clone URL (`https` or `ssh`), stored as given and never fetched by the hub. **The host of the clone URL identifies the credential a member needs** (`github.com`, `gitea.example.org`), so two projects on two instances of one forge need two credentials. There is no separate credential declaration.
 - `--access` is what members need: `write` (branches and pull requests, the default) or `read` (projects members only consult).
 - **No default branch.** The forge owns the default branch, and the coordinator reads it at offer time [3.5]. A copy on the hub would be a second owner of a forge fact.
 - `project show` prints the repository, the process pin and the project's grants (users, groups and team profiles, with names beside IDs).
 - One repository per project. Work across repositories is tasks in each project, with dependencies between them.
-- The process pin stays with `process select`, unchanged.
+- The process pin stays with `process select`, unchanged; the host of its repository adds a read requirement.
 
 **Who sets and reads it.** Setting and clearing are project-admin operations on the hub host, like `process select`. They read the local service. Reading is open to:
 - an ordinary token with a grant on the project;
@@ -65,7 +65,7 @@ aicrewd keeps no project or repository list of its own; it reads them through tw
   - `peer_forbidden`: the credential was not issued for this operation, or the UUID belongs to another peer;
   - `team_name_taken`: another team of this peer holds the name;
   - `profile_disabled`: the operator disabled this profile; the operator re-enables it, aicrewd does not;
-  - `invalid_argument`: a malformed UUID or name.
+  - `invalid_request`: a malformed UUID or name (identity.v1's existing code).
 - **Audit:** peer, UUID, old and new name, outcome.
 
 **`team.read`**
@@ -80,7 +80,9 @@ aicrewd keeps no project or repository list of its own; it reads them through tw
 - **Refusals:** an unknown UUID answers `not_found`; a credential not issued for this operation answers `peer_forbidden`.
 - **Audit:** peer, UUID, outcome.
 
-**How aicrewd uses them [2.3].** aicrewd calls `team.read` at offer time, at `team show`, at `team check` and in its reconciliation loop. The hub's answer at offer time is authoritative; aicrewd's cache serves only `show` and its gap announcements.
+**How aicrewd uses them [2.3].** aicrewd calls `team.read` at offer time, at `team show`, at `team check` and in its reconciliation loop.
+- **At offer time** the hub's answer is authoritative for the grant and the repository; aicrewd's cache serves only `show` and its gap announcements.
+- **The process pin an offer carries does not come from `team.read`.** The coordination contract keeps it from aicrewd's own record of the step, and aimem rechecks it at commit, as today. The pin `team.read` returns serves only `show`, `check` and the gap announcements.
 
 **Rationale.** Neither operation can attach a project or reach beyond the calling peer's own teams. A compromised aicrewd peer can therefore rename and read its own teams, but it cannot grant itself access, read another peer's teams, or see tasks, members or knowledge.
 
@@ -93,7 +95,7 @@ aicrewd keeps no project or repository list of its own; it reads them through tw
 2. **Authority is the grant.** The write is allowed only on tasks of projects granted to the team profile, and only when aicrewd's team-mode context names the member's role as coordinator. A worker's team session keeps `task_write: false`. The role is a fact aicrewd asserts about its own team; the hub trusts the peer for it, as it already does for the coordination facts.
 3. **The actor is the member.** aimem records the coordinator's user ID as the actor, as for every team write, so the task history shows who triaged.
 4. **Partial update.** A triage write never replaces the field set. At the pilot, a full `update_task` cleared `epic` and `candidate_refs`.
-5. **Readable refusal.** A coordinated claim on a not-READY task answers `task_not_ready` (status 409, retryable after triage; next action: the coordinator triages or withdraws) instead of `reservation_conflict`.
+5. **Readable refusal.** A coordinated claim on a not-READY task answers `task_not_ready` instead of `reservation_conflict`. It is status 409 with `retryable: no`, because the refused claim's coordination proof and key are spent, as for every coordination refusal. The next action: the coordinator triages to READY, then begins the step again through aicrew with a new offer.
 
 **The aimem increment** (filed from this text, after it merges):
 - the profile's triage capability for the coordinator role, taken from aicrewd's team-mode context;
@@ -111,6 +113,7 @@ aicrew's side (the role in the context it reports, and `/crew-triage`) is task 0
 | Actor recorded | the coordinator's user ID | the coordinator from the verified fact, as for the claim |
 | Held tasks | refused (`task_held`) | not reachable (a held task is already claimed) |
 | What a compromised coordinator session can do | triage any unheld task of the granted projects: state between BACKLOG and READY, priority, size, next action, comments; no content edits beyond those fields, no held task, no other project | make READY exactly the task its own offer names, inside a fenced claim; nothing else |
+| What a compromised aicrewd can do | assert the coordinator role for any of its own linked members and so enable triage writes on the granted projects, attributed to that real member and made through that member's own session; it holds no member bearer, so it writes nothing itself (the context contract's existing trust in the peer's role assertion) | assert an offer for any task of a granted project, which a member's claim then turns into READY and a hold; the same trust in the peer's facts |
 | What it covers | all of triage: grooming, splitting, priority, returning to BACKLOG, before any offer exists | only "ready for this attempt"; the rest of triage keeps no path in team mode |
 | Contract cost | context matrix coordinator row, team-mode report `task_write`, reservation.v1 `task_held`/`task_not_ready`, task API partial update | coordination.v1 amendment or new version after C5-w3 was declared the last in-place amendment, plus reservation.v1 `task_not_ready` |
 | Board | shows triage as it happens; the board stays authoritative | shows BACKLOG until a claim lands |
@@ -127,7 +130,7 @@ The reach of (a) is bounded by the grant, the hold rule and the field list above
 **Rules** for `aimem identity …`, `aimem access …` and `aimem project …`:
 - **Named flags.** Entity names are named flags: `--peer`, `--team-name` or `--team-id`, `--project`, `--user-name` or `--user-id`, `--group-name` or `--group-id`, `--operation`.
 - **One positional at most.** A positional argument stays only where a command has exactly one entity, such as `aimem identity peer check <service>`.
-- **Selectors.** Looking up an existing entity takes exactly one of its name or its ID. An unknown name is refused with the known names of that scope. `create` and `rename` take the ID plus the new name.
+- **Selectors.** Looking up an existing entity takes exactly one of its name or its ID, and an unknown name is refused with the known names of that scope. A command that creates an entity whose ID the hub generates takes only the name (`access user-add`, `group-add`). A command that renames one takes the ID plus the new name (`access user-set`, and any future rename).
 - **`--project` and `-p`.** `--project` is the long form everywhere, and `-p`, which every project-taking command uses today, stays as its alias.
 - **The `aimem project` namespace.** `aimem project <verb>` is the namespace of the new commands (`repo set`, `repo clear`, `show`). The existing `projects`, `project-id` and `drop-project` stay as they are, and their `aimem project …` forms are added as aliases in the same release.
 - **Groups.** `access grant` subjects that may be a group take `--group-name` or `--group-id`, under the same exclusive rule as users.
@@ -149,11 +152,14 @@ aimem access token-issue-user --user-name pilot-worker --label pilot-worker --ex
 
 Routes on the wire keep their names; only the CLI and its output change. The runbooks (`PILOT-HUB-RUNBOOK.md`) and TASK-CREDENTIALS move to the new form in the same increment.
 
-## 6. One flag per secret intent [6.4]
+## 6. One flag per intent and per secret kind [6.4]
 
 - **Writing a secret is always `--output <file>`.** It replaces `--secret-file` in `aimem identity cred issue|rotate`, and printing to standard output in `aimem access token-issue` and `token-issue-user`. The file must not exist; it is created readable only by its owner, and the value never goes to the terminal.
-- **Reading a secret is always `--token-file <file|->`.** `-` reads standard input; a hidden prompt when standard input is a terminal is a nicety, not a requirement.
-- **The one exception** is `--admin-token-file`, on hub-admin commands that read the admin token beside another token argument (section 9).
+- **Reading a secret: one flag per kind,** the same in every command that reads that kind. aimem reads these kinds:
+  - the tool's own credential, the hub-admin token: `--admin-token-file`, as today, on every hub-admin command;
+  - a hub token installed into an aimem installation (`aimem hub add`, `aimem hub task-token`): `--token-file`, as today (section 9);
+  - the enrollment subcode file of D1: `--bundle <file>`.
+- **`-` reads standard input everywhere.** A hidden prompt when standard input is a terminal is a nicety, not a requirement.
 - **Old names** keep working for one release with a notice.
 
 ## 7. Contract changes
@@ -164,9 +170,10 @@ Each row names the aimem document it amends and the section of this text that ne
 |---|---|---|
 | DESIGN-AIFORGE-CONTEXT, role matrix, `Aicrew service` row | "no mutation" gains one named exception, `team.register`, bounded to the peer's own profiles' identity (UUID, name) and never a grant; the read-only view gains `team.read` over the peer's own teams' grants and project properties | 2, 3 |
 | DESIGN-AIFORGE-CONTEXT, role matrix, `Team coordinator` row; the team-mode report | the coordinator's team session gets `task_write: triage` (state, priority, size, `next_action`, comments) on unheld tasks of granted projects; the worker row is unchanged | 4 |
-| DESIGN-AIFORGE-IDENTITY-WIRE (identity.v1) | two new single-purpose peer operations, `team.register` and `team.read`, with their routes, inputs, outputs, audit and refusals (`peer_forbidden`, `team_name_taken`, `profile_disabled`, `invalid_argument`, `not_found`); `cred issue` accepts them as operations; the operator's team-profile create by name is replaced by registration; grant and revoke resolve `--team-name` per peer and print the UUID | 2, 3 |
-| reservation.v1 §3 (refusals, in DESIGN-AIFORGE-COORDINATION-WIRE) | `task_not_ready` (409, retryable after triage; next action: triage or withdraw) replaces `reservation_conflict` for a claim on a not-READY task; `task_held` (409, not retryable while the hold stands) for a triage write on a held task | 4 |
+| DESIGN-AIFORGE-IDENTITY-WIRE (identity.v1) | two new single-purpose peer operations, `team.register` and `team.read`, with their routes, inputs, outputs, audit and refusals (`peer_forbidden`, `team_name_taken`, `profile_disabled`, `not_found`, and the existing `invalid_request`); `cred issue` accepts them as operations; the operator's team-profile create by name is replaced by registration; grant and revoke resolve `--team-name` per peer and print the UUID. Team operations under a disabled profile keep `context_stale` (unchanged) | 2, 3, 8 |
+| reservation.v1 §3 (refusals, in DESIGN-AIFORGE-COORDINATION-WIRE) | `task_not_ready` (409, `retryable: no`; next action: triage, then a new step through aicrew) replaces `reservation_conflict` for a coordinated claim on a not-READY task; `task_held` (409, `retryable: no` while the hold stands) for a triage write on a held task | 4 |
 | Task API (OpenAPI parity, TASK-CREDENTIALS) | a partial task update or dedicated state transition that leaves unnamed fields untouched; the team-mode triage capability in the access profile | 4 |
+| DESIGN-AIFORGE-ENROLLMENT (D1) | one change: the composed onboarding envelope may be written by the issuing console client to an owner-only file on the operator's machine for the private hand-off, and the operator deletes it after sending. The member side is unchanged (hidden prompt, process memory). Also the CLI surface D1 implies: `aimem identity enroll issue\|revoke` with `--purpose`, `--hub`, `--expires`, `--output` and, for revoke, `--bundle` | 6 |
 | aimem CLI (TASK-CREDENTIALS, PILOT-HUB-RUNBOOK, admin docs) | the flag vocabulary of sections 5 and 6, with the one-release notice | 5, 6 |
 
 **coordination.v1 is unchanged.** Option (b) would have amended it, and it was not chosen.
@@ -178,11 +185,11 @@ These are aimem's rows of [11]. aicrew's rows (offers, deposits, enrollment and 
 | Situation | Outcome | Recovery |
 |---|---|---|
 | Grant revoked while an attempt is running | aimem denies the next affected team operation (DESIGN-AIFORGE-CONTEXT lifecycle); the reservation is not released silently; aicrewd notices in reconciliation and marks the attempt blocked | the operator re-grants, or the attempt is closed under the coordination contract's closure rules; the hold is reconciled, never dropped |
-| Profile disabled while an attempt is running | as above, with `profile_disabled` on the next team operation; `team.read` returns the team with `enabled: false` and no grants | the operator re-enables it on the hub; aicrewd does not |
+| Profile disabled while an attempt is running | the next team operation is refused with identity.v1's existing `context_stale` (the audited reason is the disabled profile); `team.read` returns the team with `enabled: false` and no grants; aicrewd sets the attempt blocked | the operator re-enables it on the hub; aicrewd does not |
 | `team.register` for a UUID the hub knows under another name | the profile is renamed to aicrewd's name (aicrewd owns it); grants, bound to the UUID, do not move; audited with both names | none needed; the operator reads the UUID that `grant` printed |
 | `team.register` with a name another team of the peer holds | refused, `team_name_taken`; the team exists in aicrewd without a hub registration | `aicrew team rename`, then re-register |
 | Triage write on a held task | refused, `task_held` | after the release, or the coordinator withdraws the attempt first |
-| Coordinated claim on a not-READY task | refused, `task_not_ready` | the coordinator triages to READY and re-offers |
+| Coordinated claim on a not-READY task | refused, `task_not_ready`, not retryable (the proof and key are spent) | the coordinator triages to READY and offers again: a new step |
 | Repository of a project changed while an attempt is running | the attempt keeps the repository fields recorded at offer; new offers take the new repository | none for the running attempt; the coordinator decides whether to withdraw it |
 
 **The repository of a running attempt** is aicrew's guarantee, not aimem's. aimem binds no repository to a hold: a claim and its coordination fact carry the process pin, never a repository. The offer records the repository fields, and aicrew keeps them for the attempt's lifetime [3.5].
@@ -190,11 +197,10 @@ These are aimem's rows of [11]. aicrew's rows (offers, deposits, enrollment and 
 ## 9. Differences from the aicrew proposal
 
 This text may differ from the aicrew proposal only in the places [6.5] names:
-- **`--admin-token-file`** stays on hub-admin commands that read the admin token beside another token argument. It is the one exception to the single reading flag of [6.4].
 - **`aimem project repo show`** may exist as a narrower alias of `project show`; this text does not add it.
-- **`--token-file -` reads standard input,** consistent with [6.4] as amended.
+- **`--token-file -` reads standard input,** consistent with [6.4].
 
-The operator rename of a team profile is withdrawn [2.2]. Any other difference is a defect in one of the two texts.
+`--admin-token-file` is no longer a difference: under [6.4] it is aimem's flag for the tool's own credential (section 6). The operator rename of a team profile is withdrawn [2.2]. Any other difference is a defect in one of the two texts.
 
 ## 10. Order
 
