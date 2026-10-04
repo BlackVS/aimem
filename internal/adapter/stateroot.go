@@ -4,6 +4,8 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+
+	"aimem/internal/isolation"
 )
 
 // StateRoot is the client state root, where the hub entries and their
@@ -16,6 +18,7 @@ import (
 // count as isolation there, since a developer's shell may set it for real.
 func StateRoot() string {
 	if v := os.Getenv("AIMEM_STATE_DIR"); v != "" {
+		isolation.Require("state root", v, "set AIMEM_STATE_DIR to a t.TempDir() path")
 		return v
 	}
 	if testing.Testing() {

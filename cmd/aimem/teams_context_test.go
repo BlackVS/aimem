@@ -34,7 +34,7 @@ func runAimem(t *testing.T, dir, state, stdin string, args ...string) (string, s
 	cmd.Dir = dir
 	cmd.Env = append(os.Environ(), "AIMEM_TEST_MAIN=1", "AIMEM_TEST_ARGS="+strings.Join(args, "\x1f"),
 		"AIMEM_STATE_DIR="+state, "XDG_STATE_HOME="+state, "HOME="+home, "USERPROFILE="+home,
-		"AIMEM_HUB_URL=", "AIMEM_HUB_TOKEN=")
+		"AIMEM_HUB_URL=", "AIMEM_HUB_TOKEN=", "AIMEM_SOCKET=")
 	cmd.Stdin = strings.NewReader(stdin)
 	var out, errOut bytes.Buffer
 	cmd.Stdout, cmd.Stderr = &out, &errOut

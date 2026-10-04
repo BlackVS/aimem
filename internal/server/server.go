@@ -24,6 +24,7 @@ import (
 	"aimem/internal/access"
 	"aimem/internal/embed"
 	"aimem/internal/introspect"
+	"aimem/internal/isolation"
 	"aimem/internal/llmrate"
 	"aimem/internal/schema"
 	"aimem/internal/store"
@@ -80,7 +81,17 @@ func (s *Server) WithLogRing(ring *LogRing) *Server { s.ring = ring; return s }
 // their own service; otherwise XDG_RUNTIME_DIR, then the default root.
 // Unix socket paths are limited to about 104 bytes: a deep explicit root
 // needs AIMEM_SOCKET, and the listener says so (ListenAndServe).
+//
+// In a test binary the result must lie in the temporary directory, or it
+// panics (package isolation): an inherited AIMEM_SOCKET or the real
+// XDG_RUNTIME_DIR would otherwise connect a test to the developer's service.
 func SocketPath(root string) string {
+	p := socketPath(root)
+	isolation.Require("local socket", p, "set AIMEM_STATE_DIR or AIMEM_SOCKET to a t.TempDir() path")
+	return p
+}
+
+func socketPath(root string) string {
 	if v := os.Getenv("AIMEM_SOCKET"); v != "" {
 		return v
 	}

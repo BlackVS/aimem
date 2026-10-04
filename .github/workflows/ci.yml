@@ -29,6 +29,10 @@ jobs:
         run: |
           out=$(gofmt -l .)
           if [ -n "$out" ]; then echo "not gofmt'd:"; echo "$out"; exit 1; fi
+      # Tests and scripts stop only the processes they started
+      # (docs/DEVELOPMENT.md, "Processes and state in tests").
+      - name: no process stops by name
+        run: sh scripts/check-process-stops.sh
       # GOTOOLCHAIN inline: these @latest tools may declare a newer Go than
       # our pinned 1.25, and setup-go v7 exports GOTOOLCHAIN=local via
       # GITHUB_ENV, which clobbers workflow/job-level env — only a shell
