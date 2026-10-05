@@ -57,6 +57,8 @@ Every refusal has `{code, message, active_mode, retryable, next_action, correlat
 | `task_unavailable` | no | Verify the task reference with an authorized project reader. |
 | `dependency_unresolved` | yes only for verified transient outage; otherwise no | Verify readable dependency evidence before a same-key retry. |
 | `reservation_conflict`, `revision_conflict`, `stale_fence` | no | Read own authorized status and reconcile; stale holder stops. |
+| `task_not_ready` (409) | no | The coordinator triages the task to READY, then begins the step again through aicrew; never reuse the proof or the key. A claim on a task that is not READY, and is otherwise unheld, unmanaged and not archived, gets this code instead of `reservation_conflict` ([DESIGN-AIFORGE-PILOT-1](DESIGN-AIFORGE-PILOT-1.md) §4). |
+| `task_held` (409) | no, while the hold stands | Triage after the hold is released, or after the attempt is withdrawn; never edit a held task. The refusal of a coordinator's triage write or comment on a task under any reservation. |
 | `idempotency_conflict` | no | Investigate changed input; never replace the original key to force a transition. |
 | `receipt_unresolved` | yes | Reconcile the original receipt; do not send a later transition. |
 | `work_outstanding` | no | Reconcile accepted or stopped work before leaving or rotating. |

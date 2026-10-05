@@ -556,13 +556,24 @@ func (d *DB) GetTask(id string) (Task, error) {
 // transaction as the insert, so an append cannot race an archival. A
 // committed append replays through its receipt even after archival.
 func (d *DB) AddTaskComment(taskID, body string, actor TaskActor, key string) (TaskComment, error) {
+	return d.addTaskComment(taskID, body, actor, key, nil)
+}
+
+// AddTaskCommentUnheld is AddTaskComment for a team coordinator's triage:
+// it refuses a task under an active reservation (ErrTaskReserved), checked
+// in the same transaction as the insert.
+func (d *DB) AddTaskCommentUnheld(taskID, body string, actor TaskActor, key string) (TaskComment, error) {
+	return d.addTaskComment(taskID, body, actor, key, func(tx *sql.Tx) error { return rejectActiveReservation(tx, taskID) })
+}
+
+func (d *DB) addTaskComment(taskID, body string, actor TaskActor, key string, check func(*sql.Tx) error) (TaskComment, error) {
 	if !taskIDRE.MatchString(taskID) {
 		return TaskComment{}, ErrTaskNotFound
 	}
 	if err := taskText(body, MaxTaskCommentBytes, true); err != nil {
 		return TaskComment{}, invalid(fmt.Errorf("comment: %w", err))
 	}
-	return taskMutation(d, actor, "comment", taskID, key, body, func(tx *sql.Tx) (TaskComment, error) {
+	return checkedTaskMutation(d, actor, "comment", taskID, key, body, check, func(tx *sql.Tx) (TaskComment, error) {
 		t, err := readTask(tx, taskID)
 		if err != nil {
 			return TaskComment{}, err

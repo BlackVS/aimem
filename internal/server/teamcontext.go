@@ -68,6 +68,10 @@ var teamRoutes = append(append([]string{
 	"GET /v1/projects/{p}/epics/{e}",
 	// The project's repository under the profile's grant (DESIGN-AIFORGE-PILOT-1 §1).
 	"GET /v1/projects/{p}/repository",
+	// The coordinator's triage writes (DESIGN-AIFORGE-PILOT-1 §4); the
+	// handlers refuse every other role.
+	"POST /v1/tasks/{id}/triage",
+	"POST /v1/tasks/{id}/comments",
 }, reservationRoutePatterns...), knowledgeRoutes...)
 
 // teamRouteMux matches teamRoutes by the route mux's own rules.
@@ -347,7 +351,7 @@ func (s *Server) teamContextReport(w http.ResponseWriter, r *http.Request, id Id
 			"service_id": tc.ServiceID, "team_id": tc.TeamID, "agent_id": tc.AgentID, "role": tc.Role,
 			"session_id": tc.SessionID, "generation": tc.Generation, "handle_expires_at": tc.HandleExpiresAt.Format(time.RFC3339),
 		},
-		"task_read": "granted-projects", "task_write": false, "projects": projects,
+		"task_read": "granted-projects", "task_write": teamTaskWrite(tc.Role), "projects": projects,
 		"knowledge": "read", "correlation_id": tc.CorrelationID,
 	}
 	if project := r.URL.Query().Get("project"); project != "" {
@@ -497,4 +501,13 @@ func (s *Server) probePeer(ctx context.Context, p introspect.Peer) string {
 		return f.Reason
 	}
 	return "transport"
+}
+
+// teamTaskWrite is the team-mode report's task_write: "triage" for the
+// coordinator (DESIGN-AIFORGE-PILOT-1 §4), false for every other role.
+func teamTaskWrite(role string) any {
+	if role == teamTaskWriteRole {
+		return "triage"
+	}
+	return false
 }

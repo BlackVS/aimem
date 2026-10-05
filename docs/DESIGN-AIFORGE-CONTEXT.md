@@ -70,7 +70,7 @@ The local daemon either runs one MCP process per conversation with a fixed prote
 | Mode / role | Knowledge | Task and coordination action |
 | --- | --- | --- |
 | Personal standalone | Personal grants and token cap only | Ordinary task operations subject to the authoritative aimem reservation and project process. No aicrew membership is required. |
-| Team coordinator | Team profile grants only | Plans/offers/reviews through aicrew. Aimem task writes require the reservation contract and resource grant; role is not aimem administration. |
+| Team coordinator | Team profile grants only | Plans/offers/reviews through aicrew. Aimem task writes require the reservation contract and resource grant, with one exception: triage. On unheld tasks of projects the profile is granted, the coordinator moves a task between BACKLOG and READY, sets its `next_action` and comments, as a partial update recorded under its own user (`task_write: triage` in the team-mode report; a held task refuses with `task_held`). Role is not aimem administration. |
 | Team worker | Team profile grants only | Works only on its accepted, generation-fenced attempt. Direct aimem claim/edit cannot bypass an offer or reservation. |
 | Team independent worker | Team profile grants only | May claim eligible unreserved work atomically through aimem's reservation contract. Cannot manage aicrew membership or grants. |
 | Aicrew service | No agent knowledge access | Only proof redemption; a read-only view of reservations set under its own coordination proofs; a read-only view of its own teams, their grants and each granted project's repository and process pin (`team.read`); and one bounded mutation, `team.register`, which creates or renames its own teams' profiles (team ID and name) and never creates or touches a grant or re-enables a profile. No other mutation and no actor selection ([identity.v1](DESIGN-AIFORGE-IDENTITY-WIRE.md#team-registration-and-read-teamregister-teamread)). |
@@ -160,7 +160,7 @@ The file holds the hub name and URL, the user and token IDs, the service, team a
 - Every hub call re-reads the file and carries the handle in `X-Aimem-Team-Context`. It uses the individual credential over verified TLS: the hub's `ca_file` or `pin` in `hub.json` (recorded by `aimem hub add … --ca-file` or `--pin`), or the system roots. A hub configured `insecure` or without https is refused.
 - Only the handle, its expiry, the token ID and the generation may change. A changed pinned field, or a missing or unusable file, blocks the process for good.
 - The context is verified online, through the hub's context report, before the first tool and again after any team refusal. Until then every tool refuses with the hub's envelope. Nothing falls back to personal mode, the local socket or a checkout's credential.
-- The tool list is exactly the hub's team read routes plus `session_context`. Every other tool is hidden and refused if called.
+- The tool list is exactly the hub's team routes plus `session_context` and `writing_rule`: the task and epic reads, the member reservation tools, the project knowledge reads and, since the first pilot's triage, `triage_task` and `add_task_comment`. The hub refuses those two for any role but coordinator (`role_forbidden`). Every other tool is hidden and refused if called.
 
 Without the variable, `aimem mcp` is unchanged.
 

@@ -148,6 +148,8 @@ func TestTeamRoutesAreTheApprovedMatrix(t *testing.T) {
 		"GET /v1/tasks/{id}/comments", "GET /v1/tasks/{id}/comments/{c}", "GET /v1/projects/{p}/epics", "GET /v1/projects/{p}/epics/{e}",
 		// The project's repository under the profile's grant (DESIGN-AIFORGE-PILOT-1 §1).
 		"GET /v1/projects/{p}/repository",
+		// The coordinator's triage writes (DESIGN-AIFORGE-PILOT-1 §4).
+		"POST /v1/tasks/{id}/triage", "POST /v1/tasks/{id}/comments",
 		"POST /v1/projects/{p}/tasks/{task_id}/reservation/claim", "POST /v1/projects/{p}/tasks/{task_id}/reservation/transfer",
 		"POST /v1/projects/{p}/tasks/{task_id}/reservation/update", "POST /v1/projects/{p}/tasks/{task_id}/reservation/release",
 		"POST /v1/projects/{p}/tasks/{task_id}/reservation/finalize", "GET /v1/projects/{p}/tasks/{task_id}/reservation",

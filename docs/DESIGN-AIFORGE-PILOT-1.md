@@ -1,6 +1,6 @@
 # First pilot: aimem's side of the proposal
 
-Status: accepted 2026-10-04. Sections 1, 5 and 6 are implemented (increment 1, aimem PRs #173 and #174); sections 2 and 3 with the team-mode repository read (increment 2); section 4 (triage) is pending. It is the aimem counterpart of the aicrew proposal *What the first pilot changes in aicrew and aimem*, revision 9: aicrew `docs/proposals/` (aicrew PR #85), until then the hub document `PROPOSAL-PILOT-1` in project aicrew. Section numbers in brackets, such as [2.3], refer to that document, and the two texts move in step. Section 9 lists the only places where this text may differ from it. The aimem work is tracked by tasks 01a102f8-bb79 (project repository, team registration and reads, readable commands, secret flags) and 01a102d9-440b (coordinator triage), both on the aicrew board.
+Status: accepted 2026-10-04. Sections 1, 5 and 6 are implemented (increment 1, aimem PRs #173 and #174); sections 2 and 3 with the team-mode repository read (increment 2); section 4 (triage) with the correction in it. It is the aimem counterpart of the aicrew proposal *What the first pilot changes in aicrew and aimem*, revision 9: aicrew `docs/proposals/` (aicrew PR #85), until then the hub document `PROPOSAL-PILOT-1` in project aicrew. Section numbers in brackets, such as [2.3], refer to that document, and the two texts move in step. Section 9 lists the only places where this text may differ from it. The aimem work is tracked by tasks 01a102f8-bb79 (project repository, team registration and reads, readable commands, secret flags) and 01a102d9-440b (coordinator triage), both on the aicrew board.
 
 The first pilot (2026-10-03) proved the identity chain and the attempt protocol and stopped at the accept step on mechanisms that did not exist yet. On the aimem side four things were missing:
 - a project did not know its repository;
@@ -96,6 +96,8 @@ aicrewd keeps no project or repository list of its own; it reads them through tw
 3. **The actor is the member.** aimem records the coordinator's user ID as the actor, as for every team write, so the task history shows who triaged.
 4. **Partial update.** A triage write never replaces the field set. At the pilot, a full `update_task` cleared `epic` and `candidate_refs`.
 5. **Readable refusal.** A coordinated claim on a not-READY task answers `task_not_ready` instead of `reservation_conflict`. It is status 409 with `retryable: no`, because the refused claim's coordination proof and key are spent, as for every coordination refusal. The next action: the coordinator triages to READY, then begins the step again through aicrew with a new offer.
+
+**Correction found in implementation.** Tasks have no priority or size fields: those exist only as a title convention, and editable fields are their own task (01a0c44a-5ce8). Triage therefore covers state BACKLOG↔READY, `next_action` and comments, and gains priority and size when those fields exist. The pilot's path (assess READY, offer, accept) needs only the state. Triage is `POST /v1/tasks/{id}/triage` (a partial update), and the team-mode comment route is served to the coordinator under the same bounds.
 
 **The aimem increment** (filed from this text, after it merges):
 - the profile's triage capability for the coordinator role, taken from aicrewd's team-mode context;

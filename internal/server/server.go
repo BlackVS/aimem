@@ -182,6 +182,7 @@ func (s *Server) Routes() []Route {
 		{"POST", "/v1/projects/{p}/tasks", s.createTask, false},
 		{"GET", "/v1/tasks/{id}", s.getTask, false},
 		{"PUT", "/v1/tasks/{id}", s.updateTask, false},
+		{"POST", "/v1/tasks/{id}/triage", s.triageTask, false},
 		{"GET", "/v1/tasks/{id}/history", s.taskHistory, false},
 		{"GET", "/v1/tasks/{id}/comments", s.listTaskComments, false},
 		{"POST", "/v1/tasks/{id}/comments", s.addTaskComment, false},

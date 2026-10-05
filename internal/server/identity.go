@@ -69,6 +69,7 @@ var identityRefusals = map[string]struct {
 	"identity_mismatch":          {403, false, "The team session belongs to another identity.", "Stop and reconcile the configured identity; there is no automatic rebind."},
 	"grant_denied":               {403, false, "The team has no current grant for this project.", "Request an authorized grant change for the team; do not switch credentials."},
 	"role_forbidden":             {403, false, "The verified team role cannot perform this operation.", "Use the role's permitted aicrew flow."},
+	"task_held":                  {409, false, "The task is under a reservation; triage is not available while it is held.", "Triage after the hold is released, or after the attempt is withdrawn; never edit a held task."},
 	"team_name_taken":            {409, false, "Another team of this peer holds this name.", "Rename the team in aicrew, then register it again."},
 	"profile_disabled":           {403, false, "The operator disabled this team's profile on the hub.", "The operator re-enables the profile on the hub; aicrewd does not."},
 	"not_found":                  {404, false, "This peer has no team with this ID on the hub.", "Register the team with team.register, or check the team ID."},

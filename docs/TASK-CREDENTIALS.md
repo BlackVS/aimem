@@ -11,6 +11,8 @@ sets with `aimem project repo set`: a user-scoped or project-scoped token
 with a current grant on the project reads it, and a read-only token does
 not. The repository names a clone URL and its host, never a credential.
 
+`POST /v1/tasks/{id}/triage` (the `triage_task` MCP tool) is a partial update under the same task-write rule: it moves a task between BACKLOG and READY and sets its `next_action`, and leaves every other field as it is. In a team session it is the coordinator's one task write, with comments, under the team profile's grant; another role gets `role_forbidden`, and a task under a reservation gets `task_held`.
+
 The client chooses one credential:
 
 1. A required project-local override, when `.aimem.json` contains

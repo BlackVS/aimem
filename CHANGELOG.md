@@ -60,6 +60,23 @@ currently 23); a binary refuses a database newer than it understands.
     pin and the project's grants (users, groups and team profiles) with
     names beside IDs, from the new admin route
     `GET /v1/projects/{p}/grants`.
+- **A team's coordinator triages tasks**
+  ([`docs/DESIGN-AIFORGE-PILOT-1.md`](docs/DESIGN-AIFORGE-PILOT-1.md) §4,
+  decision (a)).
+  - `POST /v1/tasks/{id}/triage` (MCP `triage_task`) is a partial update:
+    it moves a task between BACKLOG and READY and sets its `next_action`,
+    and leaves every other field as it is. Ordinary write-authorized
+    callers and the hub admin may use it too.
+  - In team mode, a session whose verified role is coordinator may triage
+    and comment on unheld tasks of projects its profile is granted, under
+    its own user. Another role gets `role_forbidden`; a task under any
+    reservation gets `task_held` (409). The team-mode report says
+    `task_write: triage` for the coordinator.
+  - A claim on a task that is not READY now answers `task_not_ready`
+    (409, not retryable) instead of `reservation_conflict`: the
+    coordinator triages it, then begins the step again through aicrew.
+  - Tasks have no priority or size fields yet; triage gains them when
+    they exist.
 - **aicrewd registers and reads its own teams**
   ([`docs/DESIGN-AIFORGE-PILOT-1.md`](docs/DESIGN-AIFORGE-PILOT-1.md) §2,
   §3; identity.v1 "Team registration and read").

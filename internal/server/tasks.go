@@ -60,6 +60,7 @@ var taskRoutes = map[string]bool{
 	"POST /v1/projects/{p}/tasks":                                          true,
 	"GET /v1/tasks/{id}":                                                   true,
 	"PUT /v1/tasks/{id}":                                                   true,
+	"POST /v1/tasks/{id}/triage":                                           true,
 	"GET /v1/tasks/{id}/history":                                           true,
 	"GET /v1/tasks/{id}/comments":                                          true,
 	"POST /v1/tasks/{id}/comments":                                         true,
@@ -526,9 +527,7 @@ func (s *Server) updateTask(w http.ResponseWriter, r *http.Request) {
 		// every read serves; the caller passed read authorization already.
 		var conflict *store.TaskConflict
 		if errors.As(err, &conflict) {
-			w.Header().Set("Content-Type", "application/json")
-			w.WriteHeader(http.StatusConflict)
-			json.NewEncoder(w).Encode(map[string]any{"error": err.Error(), "current": taskView(project, conflict.Current)})
+			s.taskConflict(w, project, err, conflict)
 			return
 		}
 		s.taskError(w, err)
@@ -536,6 +535,14 @@ func (s *Server) updateTask(w http.ResponseWriter, r *http.Request) {
 	}
 	s.log.Info("task updated", "project", project, "task", task.ID, "revision", task.Revision, "actor", taskActor(r).Name)
 	s.ok(w, taskView(project, task))
+}
+
+// taskConflict answers a stale expected revision with the current task in
+// the shape every read serves; the caller passed read authorization already.
+func (s *Server) taskConflict(w http.ResponseWriter, project string, err error, conflict *store.TaskConflict) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusConflict)
+	json.NewEncoder(w).Encode(map[string]any{"error": err.Error(), "current": taskView(project, conflict.Current)})
 }
 
 func (s *Server) taskHistory(w http.ResponseWriter, r *http.Request) {
@@ -601,7 +608,10 @@ func (s *Server) addTaskComment(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	if !s.authorizeTaskWrite(w, r, project) {
+	// In team mode a comment is a coordinator's triage write: role checked,
+	// and refused on a held task (DESIGN-AIFORGE-PILOT-1 §4).
+	team, ok := s.authorizeTriageWrite(w, r, project)
+	if !ok {
 		return
 	}
 	key, ok := s.idempotencyKey(w, r)
@@ -614,8 +624,16 @@ func (s *Server) addTaskComment(w http.ResponseWriter, r *http.Request) {
 	if !s.decodeTaskBody(w, r, &body) {
 		return
 	}
-	c, err := db.AddTaskComment(r.PathValue("id"), body.Body, taskActor(r), key)
+	add := db.AddTaskComment
+	if team {
+		add = db.AddTaskCommentUnheld
+	}
+	c, err := add(r.PathValue("id"), body.Body, taskActor(r), key)
 	if err != nil {
+		if team && heldTask(err) {
+			s.teamTaskHeld(w, r, project)
+			return
+		}
 		s.taskError(w, err)
 		return
 	}

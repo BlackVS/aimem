@@ -34,6 +34,11 @@ var teamReadTools = map[string]bool{
 	"get_task_comment": true, "list_epics": true, "get_epic": true,
 }
 
+// teamTriageTools are the coordinator's triage writes (DESIGN-AIFORGE-PILOT-1
+// §4). They are listed for every role: the hub refuses a role other than
+// coordinator with role_forbidden, so the role is never decided here.
+var teamTriageTools = map[string]bool{"triage_task": true, "add_task_comment": true}
+
 const sessionContextTool = "session_context"
 
 var sessionContextToolDef = map[string]any{
@@ -47,7 +52,7 @@ var sessionContextToolDef = map[string]any{
 func teamToolList() []map[string]any {
 	var out []map[string]any
 	for _, d := range taskToolDefs {
-		if n := d["name"].(string); teamReadTools[n] || reservationTools[n] {
+		if n := d["name"].(string); teamReadTools[n] || reservationTools[n] || teamTriageTools[n] {
 			out = append(out, d)
 		}
 	}
@@ -241,7 +246,7 @@ func (s *srv) teamToolCall(ctx context.Context, name string, raw []byte) (string
 			return "", err
 		}
 		return s.taskTool(ctx, name, raw)
-	case teamReadTools[name]:
+	case teamReadTools[name], teamTriageTools[name]:
 		if err := s.team.ensureReady(ctx); err != nil {
 			return "", err
 		}
@@ -258,5 +263,5 @@ func (s *srv) teamToolCall(ctx context.Context, name string, raw []byte) (string
 		}
 		return s.scopedKnowledgeRead(ctx, name, a)
 	}
-	return "", fmt.Errorf("tool %q is not available in a team conversation: team mode serves only the team's task and epic reads, the reservation tools, the project knowledge reads (recall_memory, list_docs, read_doc), session_context and writing_rule; every other knowledge tool and every other write is off", name)
+	return "", fmt.Errorf("tool %q is not available in a team conversation: team mode serves only the team's task and epic reads, the coordinator's triage (triage_task, add_task_comment), the reservation tools, the project knowledge reads (recall_memory, list_docs, read_doc), session_context and writing_rule; every other knowledge tool and every other write is off", name)
 }

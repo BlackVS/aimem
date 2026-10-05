@@ -76,6 +76,20 @@ var taskToolDefs = append([]map[string]any{
 		}), "id", "title", "state", "expected_revision", "idempotency_key"),
 	},
 	{
+		"name": "triage_task",
+		"description": "Triage a task: move it between BACKLOG and READY, set its next_action, or both, changing nothing else " +
+			"(a partial update, unlike update_task). Send the expected_revision you read; a stale revision returns the current task. " +
+			"In a team conversation only the coordinator may triage, on a project the team is granted, and a task under a reservation " +
+			"is refused with task_held.",
+		"inputSchema": objSchema(map[string]any{
+			"id":                prop("string", "task id"),
+			"expected_revision": prop("integer", "the revision you read"),
+			"state":             propEnum("BACKLOG or READY (the task must itself be BACKLOG or READY)", "BACKLOG", "READY"),
+			"next_action":       prop("string", "the next concrete step"),
+			"idempotency_key":   prop("string", "your unique key for this triage (retry-safe)"),
+		}, "id", "expected_revision", "idempotency_key"),
+	},
+	{
 		"name":        "get_task_history",
 		"description": "Accepted revisions of a task in order, each with its full snapshot and actor.",
 		"inputSchema": objSchema(map[string]any{
@@ -514,6 +528,29 @@ func (s *srv) taskTool(ctx context.Context, name string, raw json.RawMessage) (s
 		}
 		body["expected_revision"] = a.ExpectedRevision
 		return call("PUT", "/v1/tasks/"+id, body, k)
+	case "triage_task":
+		id, err := taskID(a.ID)
+		if err != nil {
+			return "", err
+		}
+		k, err := key()
+		if err != nil {
+			return "", err
+		}
+		// Only the fields named in the call are sent: an omitted
+		// next_action must stay as it is, not become empty.
+		var named map[string]json.RawMessage
+		if err := json.Unmarshal(raw, &named); err != nil {
+			return "", fmt.Errorf("arguments: %w", err)
+		}
+		body := map[string]any{"expected_revision": a.ExpectedRevision}
+		if _, ok := named["state"]; ok {
+			body["state"] = a.State
+		}
+		if _, ok := named["next_action"]; ok {
+			body["next_action"] = a.NextAction
+		}
+		return call("POST", "/v1/tasks/"+id+"/triage", body, k)
 	case "get_task_history":
 		id, err := taskID(a.ID)
 		if err != nil {
