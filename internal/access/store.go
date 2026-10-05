@@ -115,7 +115,7 @@ func OpenExisting(root string) (*Store, error) {
 }
 
 // accessSchema is the access database version this binary writes.
-const accessSchema = 6
+const accessSchema = 7
 
 func (s *Store) migrate() error {
 	var current int
@@ -274,6 +274,33 @@ ALTER TABLE identity_peer_credentials_v6 RENAME TO identity_peer_credentials;
 ALTER TABLE team_access_profiles ADD COLUMN team_name TEXT NOT NULL DEFAULT '';
 CREATE UNIQUE INDEX team_access_profiles_name ON team_access_profiles(service_id,team_name) WHERE team_name<>'';
 PRAGMA user_version=6;`); err != nil {
+			return err
+		}
+		version = 6
+	}
+	if version == 6 {
+		// The D1 enrollment ledger (enrollment.v1): one row per bundle. The
+		// subcode is kept only as its digest. The redemption columns stay
+		// empty until D1-b serves the redemption route.
+		if _, err := tx.Exec(`
+CREATE TABLE enrollments(
+ bundle_id TEXT PRIMARY KEY,
+ purpose TEXT NOT NULL CHECK(purpose IN ('new_user','existing_user_reissue')),
+ digest TEXT NOT NULL UNIQUE,
+ input_digest TEXT NOT NULL,
+ created_at INTEGER NOT NULL,
+ expires_at INTEGER NOT NULL,
+ issued_by TEXT NOT NULL,
+ user_name TEXT NOT NULL DEFAULT '',
+ revoked_at INTEGER,
+ redeemed_at INTEGER,
+ redeemed_user_id TEXT,
+ redeemed_token_id TEXT,
+ request_key TEXT,
+ redeem_input_digest TEXT,
+ delivery TEXT
+);
+PRAGMA user_version=7;`); err != nil {
 			return err
 		}
 	}

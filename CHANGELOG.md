@@ -13,6 +13,32 @@ currently 23); a binary refuses a database newer than it understands.
 
 ## [Unreleased]
 
+### Added
+
+- **The hub admin issues enrollment bundles** (D1, enrollment.v1:
+  [`docs/DESIGN-AIFORGE-ENROLLMENT-WIRE.md`](docs/DESIGN-AIFORGE-ENROLLMENT-WIRE.md)
+  §1, §2, §4 and §5). Redemption is not served yet: D1 allows no public
+  redemption until the complete path is verified.
+  - `aimem identity enroll issue --purpose new-user --output -` records a
+    new-user bundle on the hub and writes its one-line subcode record to
+    standard output, for a pipe into aicrew's console
+    (`aicrew invitation issue --bundle -`). `--output -` is the only
+    destination, refused on a terminal. The bundle ID and the command
+    that revokes it go to standard error before the hub is asked.
+  - The subcode is `aes1_` and 256 random bits, stored only as a digest.
+    It expires after 24 hours by default (`--expires`, at most 72 hours).
+    The record carries the hub's URL and the trust the issuing command
+    used (pin, CA file or system roots).
+  - `aimem identity enroll revoke --bundle-id ID` revokes a bundle that
+    was not redeemed. A redeemed one names the user and token it issued,
+    which the operator revokes separately. `aimem identity enroll list`
+    shows bundles and their states, never a subcode.
+  - The routes are `POST` and `GET /v1/identity/enrollments` and
+    `POST /v1/identity/enrollments/{bundle_id}/revocation`: hub admin
+    only, over TLS the hub terminates, with `X-Aimem-Enrollment-Version:
+    1`. An ordinary token gets `credential_scope_forbidden`, and a peer
+    credential `peer_forbidden`.
+
 ### Changed
 
 - **Building from source needs Go 1.26.** `go.mod` now says `go 1.26.0`,
@@ -25,6 +51,13 @@ currently 23); a binary refuses a database newer than it understands.
   still needs no Go at all. A source build with an older Go fails under
   `GOTOOLCHAIN=local`, and with the default `GOTOOLCHAIN=auto` it
   downloads Go 1.26 first.
+
+### Upgrade notes
+
+- **Access schema 7.** On first start the hub adds the enrollment ledger
+  (one new table). Nothing else changes, and every existing row is kept.
+  An older binary refuses the migrated store, so roll a hub back only
+  from a backup taken before the upgrade.
 
 ## [0.8.0] — 2026-10-05
 

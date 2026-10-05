@@ -47,6 +47,7 @@ const identityUsage = `usage: aimem identity peer list                          
        aimem identity team revoke --peer SERVICE (--team-name NAME | --team-id TEAM)
                                  (--project PROJECT | --instance ID) [hub flags]
        aimem identity team create --peer SERVICE --team-id TEAM    [hub flags] (kept for this release)
+       aimem identity enroll issue|revoke|list ...                 (aimem identity enroll for its usage)
 
 A command that names one entity takes it as its one argument or as --peer;
 a command that names several takes each by its flag. The positional forms
@@ -230,6 +231,9 @@ var identitySlots = map[string][]string{
 
 func runIdentity(args []string, out io.Writer) error {
 	usage := fmt.Errorf("%s", identityUsage)
+	if len(args) > 0 && args[0] == "enroll" {
+		return runIdentityEnroll(args[1:], out)
+	}
 	if len(args) < 2 {
 		return usage
 	}
@@ -701,6 +705,9 @@ func (c *identityClient) do(method, path string, body any) (int, []byte, error) 
 	}
 	req.Header.Set("Authorization", "Bearer "+c.token)
 	req.Header.Set("Content-Type", "application/json")
+	if strings.HasPrefix(path, enrollmentsPath) {
+		req.Header.Set("X-Aimem-Enrollment-Version", "1")
+	}
 	resp, err := c.http.Do(req)
 	if err != nil {
 		return 0, nil, fmt.Errorf("%w: %v", errIdentityTransport, c.scrub(err.Error()))

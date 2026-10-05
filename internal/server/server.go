@@ -160,6 +160,9 @@ func (s *Server) Routes() []Route {
 		{"POST", "/v1/identity/peers/{service_id}/credentials", s.issuePeerCredential, true},
 		{"DELETE", "/v1/identity/peers/{service_id}/credentials/{credential_id}", s.revokePeerCredential, true},
 		{"POST", "/v1/identity/peers/{service_id}/check", s.checkIdentityPeer, true},
+		{"POST", "/v1/identity/enrollments", s.issueEnrollment, true},
+		{"GET", "/v1/identity/enrollments", s.listEnrollments, true},
+		{"POST", "/v1/identity/enrollments/{bundle_id}/revocation", s.revokeEnrollment, true},
 		{"GET", "/v1/identity/peers/{service_id}/teams", s.listTeamProfiles, true},
 		{"POST", "/v1/identity/peers/{service_id}/teams", s.createTeamProfile, true},
 		{"PUT", "/v1/identity/peers/{service_id}/teams/{team_id}", s.updateTeamProfile, true},
@@ -607,6 +610,11 @@ func (s *Server) authWrapper(token string, next http.Handler) http.Handler {
 			default:
 				w.WriteHeader(http.StatusUnauthorized)
 			}
+			return
+		}
+		// The enrollment admin routes answer a non-admin bearer with
+		// enrollment.v1's envelope before the generic gates below.
+		if !team && s.enrollmentGateRefuse(w, r, id) {
 			return
 		}
 		// Team mode is decided here, before any role check or handler: the
