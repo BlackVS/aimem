@@ -24,7 +24,7 @@ every entity by a flag and write issued secrets to `--output`. Also: the
 reach a developer's real service.
 
 The access schema moves to 6, one way: read the upgrade notes before
-upgrading a hub. Includes PR #168 to #182.
+upgrading a hub. Includes PR #168 to #182, except the unmerged #171.
 
 ### Added
 
