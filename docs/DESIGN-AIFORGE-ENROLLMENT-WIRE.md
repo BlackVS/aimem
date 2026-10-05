@@ -72,7 +72,7 @@ No response body, audit record, log line, task, fixture evidence or error messag
   - records the outcome under the bundle: the request key, the input digest, the user and token IDs and the encrypted delivery;
   - marks the bundle `redeemed`.
 - **Answer.** `200` with `{bundle_id, replayed, hub_id, identity: {user_id, token_id}, delivery: {suite, enc, ciphertext}, redeemed_at}`, with `Cache-Control: no-store`.
-- **Replay.** An identical retry (same subcode, request key and input) within the delivery retention returns the stored answer with `replayed: true`. Before answering, the hub rechecks that the token still exists and is not revoked, and that the user is enabled (D1); otherwise it answers `enrollment_invalid`.
+- **Replay.** An identical retry (same subcode, request key and input) within the delivery retention returns the stored answer with `replayed: true`, also after the subcode's expiry: expiry stops a first redemption, not the replay of a committed one (D1). Before answering, the hub rechecks that the token still exists and is not revoked, and that the user is enabled (D1); otherwise it answers `enrollment_invalid`.
 - **Conflict.** The same subcode with another request key, or the same key with other input, is `enrollment_conflict`. Concurrent first redemptions have exactly one winner; the others get `enrollment_conflict` when their key differs, or wait for the winner and replay when it is the same.
 - **Non-disclosure.** Unknown, expired, revoked, already-redeemed-and-retention-expired and wrong-hub subcodes all answer the same `enrollment_invalid`. The audit keeps the exact reason (`enrollment.redeem.refused.<reason>`).
 - **Audit.** `enrollment.redeemed` with the bundle, user, token and label; `enrollment.redeem.replayed`; never the subcode, the key or the ciphertext.
@@ -116,12 +116,16 @@ The client opens the ciphertext with its private key and the aad it rebuilds fro
 
 **`aimem enroll redeem --hub-name NAME --label LABEL [--json]`**, on the member's machine, reading the subcode record on standard input. aicrew-agent runs it with the home's `AIMEM_STATE_DIR` and `AIMEM_SOCKET`.
 
-1. It validates the record (kind, version, size, expiry against the local clock). If no pending state exists for this bundle and the hub entry `NAME` already holds an individual credential that the hub accepts, it reports `already_enrolled` and exits 0 without sending the subcode, so a rerun of `join` never spends a second code (PILOT-1-FOLLOWUPS §11). A hub entry `NAME` that points to another hub URL is `identity_mismatch`.
-2. It creates or reuses the pending state for this bundle (see [Client protection](#client-protection)): the delivery key pair and the request key. A rerun after a crash reuses them, so the retry is the identical request the hub can replay.
+1. It validates the record (kind, version, size) and reads the pending state for this bundle, if any. What follows depends on that state (see [Client protection](#client-protection)):
+   - **No pending state: a first redemption.** It checks the record's expiry against the local clock. If the hub entry `NAME` already holds an individual credential that the hub accepts, it reports `already_enrolled` and exits 0 without sending the subcode, so a rerun of `join` never spends a second code (PILOT-1-FOLLOWUPS §11).
+   - **Pending state in phase `sending`: a recovery.** A redemption may have committed whose reply was lost. The client does **not** check the subcode's expiry and goes to step 3 with the stored keys; the hub decides, because it replays a committed redemption for 1 hour after it, even past the subcode's expiry (D1).
+   - **Pending state in phase `delivered`: the post-storage recovery.** The delivery was opened, and the bearer may already be stored. If the hub entry `NAME` holds a credential, the client verifies it with `GET /v1/access/identity` (step 6). When the hub reports the user and token recorded in the pending state, it deletes the pending state and reports `already_enrolled`, without contacting the redemption route, so this recovery never depends on the delivery retention. If no credential is stored, it replays the redemption as in the previous case.
+   - A hub entry `NAME` that points to another hub URL is `identity_mismatch` in every case.
+2. For a first redemption, it creates the pending state for this bundle in phase `sending`: the delivery key pair and the request key. Every later run reuses them, so a retry is the identical request the hub can replay.
 3. It connects to `hub.url`, verifying the hub against `hub.trust` only; a hub that fails the check gets nothing.
-4. It sends the redemption. A lost reply or a `5xx` is retried with the same key, up to 5 attempts with backoff, within the subcode's expiry.
-5. It opens the delivery, checks the identity, and writes the hub entry `NAME` with `hub.url`, `hub.trust` and the bearer in the individual-credential slot (today's `task_token`, which `aimem hub credential` reports).
-6. It verifies the stored credential with `GET /v1/access/identity` on the hub, requires the same user and token, then deletes the pending state.
+4. It sends the redemption. A lost reply or a `5xx` is retried with the same key, up to 5 attempts with backoff. A first redemption retries only within the subcode's expiry; a recovery retries until the hub answers, and an answer of `enrollment_invalid` then means the retention has passed.
+5. It opens the delivery and checks the identity. It then records the delivered `user_id` and `token_id` in the pending state and moves it to phase `delivered`, **before** it writes the hub entry `NAME` with `hub.url`, `hub.trust` and the bearer in the individual-credential slot (today's `task_token`, which `aimem hub credential` reports).
+6. It verifies the stored credential with `GET /v1/access/identity` on the hub, requires the user and token the pending state recorded, then deletes the pending state.
 7. It prints `{hub, user_id, token_id, bundle_id}` (with `--json`), never the bearer.
 
 Exit codes follow the member reservation commands: `0` stored (or already enrolled), `3` final refusal (the code is printed), `4` retryable refusal, `5` outcome unknown (the pending state is kept; run the same command again), `2` usage.
@@ -132,7 +136,14 @@ D1 asks the client to protect the delivery key and the pending state in "client-
 
 The reason: the delivery key protects exactly one secret, the bearer, and the bearer is stored in that same slot moments later. Storing the key more strongly than the bearer it unlocks would add no protection. If the installation cannot create such a file, `aimem enroll redeem` refuses with `delivery_unavailable` before it sends anything, so no subcode is spent.
 
-The pending state is `{bundle_id, request_key, private_key, created_at}`. It is deleted once the stored credential is verified, and it is useless after the delivery retention has passed.
+The pending state is `{bundle_id, phase, request_key, private_key, created_at, user_id?, token_id?}`. Each change is written atomically (write a new file, then rename it over the old one), so a crash leaves one phase or the other, never a mix:
+
+| Phase | Written when | A rerun |
+| --- | --- | --- |
+| `sending` | before the first request is sent | replays the redemption with the same keys, even past the subcode's expiry |
+| `delivered` | after the delivery opened and its identity checked, before the bearer is stored; it records `user_id` and `token_id` | verifies a stored credential against the recorded identity and finishes without the redemption route; replays only when no credential was stored |
+
+The pending state is deleted once the stored credential is verified. It never holds the bearer.
 
 ## Refusals
 
@@ -159,7 +170,7 @@ Every refusal uses the context contract's envelope, `{code, message, retryable, 
 The limits below are values fixed by this contract. An implementation may tighten them; relaxing any of them needs a reviewed v2.
 
 - A subcode lives 24 h by default and at most 72 h (D1).
-- A redemption's encrypted delivery is kept for **1 hour** after the first redemption. Within that window an identical retry replays it; after it, a retry is `enrollment_invalid`, and the operator recovers as D1 describes (revoke the issued token, issue a new bundle).
+- A redemption's encrypted delivery is kept for **1 hour** after the first redemption, whether or not the subcode has expired since. Within that window an identical retry replays it; after it, a retry is `enrollment_invalid`, and the operator recovers as D1 describes (revoke the issued token, issue a new bundle). A client that already stored its credential does not need the window (phase `delivered`).
 - Redemption is limited to **10 requests per minute per client address** and **20 per minute per bundle**. The subcode's 256 bits make guessing infeasible, so the limits bound load, not guessing.
 - An issued token expires 365 days after redemption, inside the existing 366-day limit for ordinary tokens.
 - A subcode record is at most 16,384 bytes; a redemption request body at most 4,096 bytes.
