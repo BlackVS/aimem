@@ -76,6 +76,15 @@ var taskToolDefs = append([]map[string]any{
 		}), "id", "title", "state", "expected_revision", "idempotency_key"),
 	},
 	{
+		"name": "project_repository",
+		"description": "The project's one repository: its forge kind, clone URL, host (the credential a member needs is named by it, " +
+			"with the port when the URL has one) and the access members need. Null when none is set. In a team conversation it reads a " +
+			"project the team is granted.",
+		"inputSchema": objSchema(map[string]any{
+			"project": prop("string", "project id (defaults to the current project)"),
+		}),
+	},
+	{
 		"name": "triage_task",
 		"description": "Triage a task: move it between BACKLOG and READY, set its next_action, or both, changing nothing else " +
 			"(a partial update, unlike update_task). Send the expected_revision you read; a stale revision returns the current task. " +
@@ -413,6 +422,12 @@ func (s *srv) taskTool(ctx context.Context, name string, raw json.RawMessage) (s
 		return url.PathEscape(id), nil
 	}
 	switch name {
+	case "project_repository":
+		p, err := project()
+		if err != nil {
+			return "", err
+		}
+		return call("GET", "/v1/projects/"+url.PathEscape(p)+"/repository", nil, "")
 	case "list_tasks":
 		p, err := project()
 		if err != nil {

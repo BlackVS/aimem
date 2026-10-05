@@ -160,7 +160,7 @@ The file holds the hub name and URL, the user and token IDs, the service, team a
 - Every hub call re-reads the file and carries the handle in `X-Aimem-Team-Context`. It uses the individual credential over verified TLS: the hub's `ca_file` or `pin` in `hub.json` (recorded by `aimem hub add … --ca-file` or `--pin`), or the system roots. A hub configured `insecure` or without https is refused.
 - Only the handle, its expiry, the token ID and the generation may change. A changed pinned field, or a missing or unusable file, blocks the process for good.
 - The context is verified online, through the hub's context report, before the first tool and again after any team refusal. Until then every tool refuses with the hub's envelope. Nothing falls back to personal mode, the local socket or a checkout's credential.
-- The tool list is exactly the hub's team routes plus `session_context` and `writing_rule`: the task and epic reads, the member reservation tools, the project knowledge reads and, since the first pilot's triage, `triage_task` and `add_task_comment`. The hub refuses those two for any role but coordinator (`role_forbidden`). Every other tool is hidden and refused if called.
+- The tool list is exactly the hub's team routes plus `session_context` and `writing_rule`: the task and epic reads, the project's repository (`project_repository`), the member reservation tools, the project knowledge reads and, since the first pilot's triage, `triage_task` and `add_task_comment`. The hub refuses those two for any role but coordinator (`role_forbidden`). Every other tool is hidden and refused if called.
 
 Without the variable, `aimem mcp` is unchanged.
 

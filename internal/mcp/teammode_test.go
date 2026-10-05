@@ -158,6 +158,7 @@ func TestTeamModeToolListMatchesHubTeamRoutes(t *testing.T) {
 		"task_reservation_finalize": "POST /v1/projects/{p}/tasks/{task_id}/reservation/finalize",
 		"task_reservation_status":   "GET /v1/projects/{p}/tasks/{task_id}/reservation",
 		"task_reservation_receipt":  "GET /v1/projects/{p}/tasks/{task_id}/reservation/receipts/{operation}/{request_key}",
+		"project_repository":        "GET /v1/projects/{p}/repository",
 		// The coordinator's triage writes (DESIGN-AIFORGE-PILOT-1 §4).
 		"triage_task":      "POST /v1/tasks/{id}/triage",
 		"add_task_comment": "POST /v1/tasks/{id}/comments",

@@ -231,6 +231,7 @@
         "summary": "The project's repository (kind, clone URL, its host, access)",
         "description": "The one repository a project's work happens in, a hub property next to the process reference (docs/DESIGN-AIFORGE-PILOT-1.md §1). It holds no secret: the host of the clone URL, with its port when the URL names one (forge.example.org:3000), names the credential a member needs. An ordinary user token needs a live grant on the project (the knowledge-read rule); an unknown project answers as one without a grant. A team session reads it under its profile's live grant (grant_denied otherwise, ?history refused with invalid_request). `repository` is null when none is set. ?history=1 (admin only) adds the recorded changes, newest first, each with its action (project.repository.set or project.repository.clear), time, actor and the values before and after.",
         "x-role": "writer",
+        "x-team-mode": "Team mode: served to a verified session under the linked team access profile's live grant on the project, over TLS terminated by the hub, never under the caller's personal grants. Refusals use the envelope with active_mode team: grant_denied (no profile grant, a reserved or unknown project), invalid_request (?history=1), context_unavailable (503, retryable), context_stale, identity_mismatch.",
         "parameters": [
           {"name": "p", "in": "path", "required": true, "schema": {"type": "string"}},
           {"name": "history", "in": "query", "required": false, "schema": {"type": "string"}}

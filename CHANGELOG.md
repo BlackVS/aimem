@@ -60,6 +60,10 @@ currently 23); a binary refuses a database newer than it understands.
     pin and the project's grants (users, groups and team profiles) with
     names beside IDs, from the new admin route
     `GET /v1/projects/{p}/grants`.
+- **`project_repository`**, an MCP tool on the local server and the hub's
+  `/mcp`, reads a project's repository (kind, clone URL, host and access)
+  under the caller's own grant. In a team conversation it reads a project
+  the team is granted. OpenAPI marks the repository read `x-team-mode`.
 - **A team's coordinator triages tasks**
   ([`docs/DESIGN-AIFORGE-PILOT-1.md`](docs/DESIGN-AIFORGE-PILOT-1.md) §4,
   decision (a)).

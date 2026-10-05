@@ -32,6 +32,8 @@ import (
 var teamReadTools = map[string]bool{
 	"list_tasks": true, "get_task": true, "get_task_history": true, "list_task_comments": true,
 	"get_task_comment": true, "list_epics": true, "get_epic": true,
+	// The project's repository under the profile's grant (DESIGN-AIFORGE-PILOT-1 §1).
+	"project_repository": true,
 }
 
 // teamTriageTools are the coordinator's triage writes (DESIGN-AIFORGE-PILOT-1
@@ -263,5 +265,5 @@ func (s *srv) teamToolCall(ctx context.Context, name string, raw []byte) (string
 		}
 		return s.scopedKnowledgeRead(ctx, name, a)
 	}
-	return "", fmt.Errorf("tool %q is not available in a team conversation: team mode serves only the team's task and epic reads, the coordinator's triage (triage_task, add_task_comment), the reservation tools, the project knowledge reads (recall_memory, list_docs, read_doc), session_context and writing_rule; every other knowledge tool and every other write is off", name)
+	return "", fmt.Errorf("tool %q is not available in a team conversation: team mode serves only the team's task and epic reads, the project's repository, the coordinator's triage (triage_task, add_task_comment), the reservation tools, the project knowledge reads (recall_memory, list_docs, read_doc), session_context and writing_rule; every other knowledge tool and every other write is off", name)
 }
