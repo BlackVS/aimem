@@ -235,7 +235,7 @@ and just wires the project; `AIMEM_REINSTALL=1` forces a user-level
 refresh, which builds from the checkout's source and therefore needs Go.
 `install.sh project` never touches the user-level install at all.
 
-Building from source needs Go 1.25+. The release binaries are static
+Building from source needs Go 1.26+. The release binaries are static
 (`CGO_ENABLED=0`), so a machine that installs from a release needs no
 toolchain at all.
 

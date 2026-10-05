@@ -10,6 +10,15 @@ go run honnef.co/go/tools/cmd/staticcheck@latest ./...
 sh scripts/check-process-stops.sh
 ```
 
+## Toolchain
+
+aimem needs Go 1.26 (`go 1.26.0` in `go.mod`). The floor moved from 1.25 for the standard library's `crypto/hpke`, which enrollment delivery (D1) will use.
+
+- **CI and the release build on the runner's Go.** Each job installs Go 1.26 with `actions/setup-go` (`go-version: '1.26'` with `check-latest: true`, so the newest patch and its security fixes), which exports `GOTOOLCHAIN=local`. A step then checks that `go env GOTOOLCHAIN` is `local` and that `go version` names 1.26, so a build never uses a toolchain that `go.mod` downloaded.
+- **Only the `@latest` tools may use another Go.** staticcheck and govulncheck run with an inline `GOTOOLCHAIN=auto`, because a tool's own `go.mod` may need a newer Go. Build, vet and test stay on the pinned 1.26.
+- **Raising the floor is its own PR.** Change `go.mod`, every `go-version` in `.github/workflows/`, the toolchain checks, this section, the Go version in `README.md` and `docs/INSTALL-CLIENT.md`, and the CHANGELOG together. Do it only for a feature that needs it, and only to a Go minor release older than seven days (the supply-chain wait). Patch releases within the pinned minor are taken as they appear, because they carry security fixes.
+- **A developer machine** needs Go 1.26 or newer. With an older Go, the default `GOTOOLCHAIN=auto` downloads 1.26 for this module, and `GOTOOLCHAIN=local` stops with an error that names the version.
+
 ## Processes and state in tests
 
 A development machine usually runs an aimem installation of its own: a local service (on Windows the scheduled task `aimem-serve`), its state root, its socket, and one MCP server per open client. A test, a script or a hand-run evidence check shares that machine. It must never reach that installation.

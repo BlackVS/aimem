@@ -38,8 +38,16 @@ jobs:
 
       - uses: actions/setup-go@v7
         with:
-          go-version: '1.25'
+          go-version: '1.26'
+          check-latest: true   # the newest 1.26 patch, with its security fixes
           cache: true
+
+      # Build on the Go that setup-go installed, never a toolchain that
+      # go.mod would download (docs/DEVELOPMENT.md, "Toolchain").
+      - name: Toolchain is the runner's Go 1.26
+        run: |
+          test "$(go env GOTOOLCHAIN)" = local
+          go version | grep -q ' go1\.26'
 
       - name: Test before publishing
         run: go test ./...
