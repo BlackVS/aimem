@@ -13,6 +13,19 @@ currently 23); a binary refuses a database newer than it understands.
 
 ## [Unreleased]
 
+## [0.8.0] — 2026-10-05
+
+The first-pilot prerequisites
+([`docs/DESIGN-AIFORGE-PILOT-1.md`](docs/DESIGN-AIFORGE-PILOT-1.md)):
+a project owns its one repository, aicrewd registers and reads its own
+teams, a team's coordinator triages tasks, and the admin commands name
+every entity by a flag and write issued secrets to `--output`. Also: the
+`writing_rule` tool, one socket per state root, and tests that cannot
+reach a developer's real service.
+
+The access schema moves to 6, one way: read the upgrade notes before
+upgrading a hub. Includes PR #168 to #182, except the unmerged #171.
+
 ### Added
 
 - **One rule keeps the text agents keep readable.**
@@ -54,8 +67,8 @@ currently 23); a binary refuses a database newer than it understands.
     host, with the port when the URL names one (`forge.example.org:3000`),
     so two forge instances on one host name two credentials. An ordinary
     token reads it under its own current grant on the
-    project, and a read-only token does not. Team mode does not serve it
-    yet.
+    project, and a read-only token does not. A team session reads it
+    under its profile's grant (below).
   - `aimem project show --project <p>` prints the repository, the process
     pin and the project's grants (users, groups and team profiles) with
     names beside IDs, from the new admin route
