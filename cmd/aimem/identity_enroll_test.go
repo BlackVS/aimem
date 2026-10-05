@@ -174,3 +174,87 @@ func TestIdentityEnrollRevokeRedeemed(t *testing.T) {
 		t.Fatalf("list redeemed: %q", list)
 	}
 }
+
+// A standard output redirected to a regular file is refused like a
+// terminal: the record exists only in a pipe. Nothing reaches the hub.
+func TestIdentityEnrollRefusesAFileOnStandardOutput(t *testing.T) {
+	captureNotices(t)
+	g := newIdentityCLIRig(t, nil)
+	f, err := os.Create(g.secretPath("redirected"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer f.Close()
+	saved := secretStdout
+	secretStdout = f
+	defer func() { secretStdout = saved }()
+	if _, err := g.run(t, "enroll", "issue", "--purpose", "new-user", "--output", "-"); err == nil || !strings.Contains(err.Error(), "not a pipe") {
+		t.Fatalf("regular file: %v", err)
+	}
+	if fi, _ := f.Stat(); fi.Size() != 0 {
+		t.Fatalf("the redirected file got %d bytes", fi.Size())
+	}
+	if n := g.requests.Load(); n != 0 {
+		t.Fatalf("%d requests reached the hub", n)
+	}
+}
+
+// A record that would exceed enrollment.v1's 16,384 bytes (here, from a
+// large CA bundle) is refused before the hub is asked; a record just under
+// the bound is written.
+func TestIdentityEnrollRecordSizeBound(t *testing.T) {
+	captureNotices(t)
+	g := newIdentityCLIRig(t, nil)
+	ca, err := os.ReadFile(g.caFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	big := g.secretPath("big-ca.pem")
+	if err := os.WriteFile(big, []byte(strings.Repeat(string(ca), enrollRecordMax/len(ca)+1)), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	pipeSecretStdout(t)
+	_, err = g.runRaw(t, "enroll", "issue", "--purpose", "new-user", "--output", "-",
+		"--hub", g.ts.URL, "--admin-token-file", g.tokenFile, "--hub-ca-file", big)
+	if err == nil || !strings.Contains(err.Error(), "more than enrollment.v1's 16384") || !strings.Contains(err.Error(), "nothing was issued") {
+		t.Fatalf("oversized record: %v", err)
+	}
+	if n := g.requests.Load(); n != 0 {
+		t.Fatalf("%d requests reached the hub", n)
+	}
+	// The bound itself: the estimate covers the record actually written.
+	read := pipeSecretStdout(t)
+	g.mustRun(t, "enroll", "issue", "--purpose", "new-user", "--output", "-")
+	written := read()
+	var rec testRecord
+	if err := json.Unmarshal([]byte(written), &rec); err != nil {
+		t.Fatal(err)
+	}
+	trust := map[string]any{"ca_pem": string(ca)}
+	if est := enrollRecordSize("https://"+strings.TrimPrefix(g.ts.URL, "https://"), trust); est < len(written) {
+		t.Fatalf("estimate %d is below the written record's %d bytes", est, len(written))
+	}
+}
+
+// A pipe whose reader has gone (aicrew's console refused) gets nothing, and
+// the bundle is revoked, so its subcode can never be redeemed.
+func TestIdentityEnrollBrokenPipeRevokes(t *testing.T) {
+	captureNotices(t)
+	g := newIdentityCLIRig(t, nil)
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	r.Close()
+	defer w.Close()
+	saved := secretStdout
+	secretStdout = w
+	defer func() { secretStdout = saved }()
+	_, err = g.run(t, "enroll", "issue", "--purpose", "new-user", "--output", "-")
+	if err == nil || !strings.Contains(err.Error(), "could not be written") || !strings.Contains(err.Error(), "was revoked") {
+		t.Fatalf("broken pipe: %v", err)
+	}
+	if list := g.mustRun(t, "enroll", "list", "--state", "revoked"); strings.Count(list, "revoked") != 1 {
+		t.Fatalf("the bundle is not revoked: %q", list)
+	}
+}

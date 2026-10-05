@@ -14,7 +14,10 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"os/signal"
 	"slices"
+	"strings"
+	"syscall"
 	"time"
 
 	"aimem/internal/uuidv7"
@@ -132,12 +135,21 @@ func runIdentityEnroll(args []string, out io.Writer) error {
 		}
 	}
 	var sink *secretOutput
+	var trust map[string]any
 	if verb == "issue" {
 		var err error
 		if sink, err = reserveSecretOutput("--output", "-"); err != nil {
 			return err
 		}
+		// A terminal is refused above; a file that standard output was
+		// redirected to is refused here: the record exists only in a pipe.
+		if err := requireStdoutPipe(); err != nil {
+			return err
+		}
 		out = noticeOut
+		if trust, err = enrollTrust(*caFile, *pin); err != nil {
+			return err
+		}
 	}
 	c, err := newIdentityClient(*hub, *tokenFile, *caFile, *pin)
 	if err != nil {
@@ -145,9 +157,10 @@ func runIdentityEnroll(args []string, out io.Writer) error {
 	}
 	switch verb {
 	case "issue":
-		trust, err := enrollTrust(*caFile, *pin)
-		if err != nil {
-			return err
+		// The record's size is known before the hub is asked: only the
+		// subcode and the hub ID come back, and their sizes are bounded.
+		if n := enrollRecordSize(c.base, trust); n > enrollRecordMax {
+			return fmt.Errorf("the subcode record would be %d bytes, more than enrollment.v1's %d (the --hub-ca-file bundle is too large; use --hub-pin or a smaller CA file); nothing was issued", n, enrollRecordMax)
 		}
 		return c.enrollIssue(uuidv7.New(), time.Now().Add(life), *userName, trust, sink, out)
 	case "revoke":
@@ -156,6 +169,32 @@ func runIdentityEnroll(args []string, out io.Writer) error {
 		return c.enrollList(*state, out)
 	}
 	return usage
+}
+
+// enrollRecordMax is enrollment.v1's bound on a subcode record (§4).
+const enrollRecordMax = 16384
+
+// requireStdoutPipe refuses a standard output that is not a pipe: a file it
+// was redirected to would hold the subcode (enrollment.v1 §5).
+func requireStdoutPipe() error {
+	fi, err := secretStdout.Stat()
+	if err != nil {
+		return fmt.Errorf("--output -: cannot inspect standard output (%v); nothing was issued", err)
+	}
+	if fi.Mode()&os.ModeNamedPipe == 0 {
+		return fmt.Errorf("--output -: standard output is not a pipe; the subcode record goes only into a pipe to the command that reads it, never to a file; nothing was issued")
+	}
+	return nil
+}
+
+// enrollRecordSize is the size of the record this command would write, with
+// the hub's two answers at their largest: a subcode has a fixed length, and
+// the hub ID is given 128 bytes, far more than its UUID needs.
+func enrollRecordSize(base string, trust map[string]any) int {
+	rec, _ := json.Marshal(enrollRecord{Kind: "aimem-enrollment", Version: 1, BundleID: uuidv7.New(), Purpose: "new_user",
+		Subcode: "aes1_" + strings.Repeat("x", 43), ExpiresAt: time.Now().Add(enrollMaxLife),
+		Hub: enrollHub{HubID: strings.Repeat("x", 128), URL: base, Trust: trust}})
+	return len(rec) + 1 // and its newline
 }
 
 // enrollTrust is the trust the client will use for the hub: the same this
@@ -203,7 +242,18 @@ func (c *identityClient) enrollIssue(bundle string, expires time.Time, userName 
 	if err != nil {
 		return err
 	}
-	if err := sink.write(string(rec)); err != nil {
+	// On Unix a write to a standard output whose reader has gone ends the
+	// process with SIGPIPE before the revoke below could run; ignored, the
+	// write returns EPIPE and the bundle is revoked.
+	signal.Ignore(syscall.SIGPIPE)
+	if len(rec)+1 > enrollRecordMax {
+		// Unreachable when the hub answers within the contract; a record a
+		// consumer must refuse is never written, and the bundle is revoked.
+		err = fmt.Errorf("the record would be %d bytes, more than %d", len(rec)+1, enrollRecordMax)
+	} else {
+		err = sink.write(string(rec))
+	}
+	if err != nil {
 		// The subcode exists only in this process now; the bundle is
 		// revoked, so it can never be redeemed.
 		if rerr := c.enrollRevokeQuiet(bundle); rerr != nil {
