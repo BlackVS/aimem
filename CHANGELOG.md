@@ -113,6 +113,12 @@ currently 23); a binary refuses a database newer than it understands.
 
 ### Changed
 
+- **The Windows installer restarts only its own service.** `install.ps1`
+  used to stop every running `aimem.exe serve` before restarting the
+  scheduled task. With several installations under one OS user, that also
+  stopped the others' services. It now stops only the processes running
+  this installation's binary or its parked copies, selected by executable
+  path.
 - **Tests cannot reach a real aimem service or stop one.**
   - In a test binary, the local socket must lie in the temporary
     directory as the state root already must, or the test panics.

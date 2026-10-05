@@ -31,6 +31,25 @@ $SessionStartCmd = 'aimem session-start'
 
 function Say($m) { Write-Host "==> $m" }
 
+# BEGIN Select-ServeProcess
+# Select-ServeProcess picks, from Win32_Process objects, the `aimem serve`
+# processes of THIS installation: the binary at $exe or one of its parked
+# copies ($exe.old-*, which a running service keeps serving after an
+# upgrade renamed it). It never selects by name alone: another
+# installation's service under the same OS user, run from another
+# directory, is left running (docs/DEVELOPMENT.md, "Processes and state in
+# tests"). A process whose path cannot be read is not ours to stop.
+function Select-ServeProcess($exe, $processes) {
+  $full = [IO.Path]::GetFullPath($exe)
+  @($processes | Where-Object {
+    $path = $_.ExecutablePath
+    $path -and ($_.CommandLine -match '\sserve(\s|$)') -and (
+      [string]::Equals($path, $full, [StringComparison]::OrdinalIgnoreCase) -or
+      $path.StartsWith($full + '.old-', [StringComparison]::OrdinalIgnoreCase))
+  })
+}
+# END Select-ServeProcess
+
 # Windows PowerShell 5.1's `-Encoding UTF8` emits a BOM, and Go's
 # encoding/json rejects one. A BOM in .aimem.json therefore silently
 # voids the project's hub binding and group membership — the file parses
@@ -208,10 +227,11 @@ function Install-User {
   # its aimem child, which keeps serving the parked binary through the
   # socket — found live when a service still reported a three-releases-
   # old version after "successful" upgrades. Kill stray serve processes
-  # explicitly.
+  # explicitly, but only this installation's: by executable path (this
+  # binary or its parked copies), never every aimem.exe by name.
   Stop-ScheduledTask 'aimem-serve' -ErrorAction SilentlyContinue
-  Get-CimInstance Win32_Process -Filter "Name='aimem.exe'" |
-    Where-Object { $_.CommandLine -match 'serve' } |
+  $candidates = Get-CimInstance Win32_Process -Filter "Name LIKE 'aimem.exe%'"
+  Select-ServeProcess $Exe $candidates |
     ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
   Start-ScheduledTask 'aimem-serve'
   Start-Sleep -Milliseconds 800
