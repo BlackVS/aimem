@@ -29,17 +29,21 @@ func extract(t *testing.T, name string) string {
 	return s[i+len(begin) : j]
 }
 
+// powershell returns the Windows PowerShell or pwsh to run installer
+// pieces with. The installer runs on Windows only, and its functions work
+// on Windows paths (pwsh elsewhere resolves C:\ paths as relative), so the
+// test runs on Windows, where it is mandatory, and skips elsewhere.
 func powershell(t *testing.T) string {
 	t.Helper()
-	for _, name := range []string{"pwsh", "powershell"} {
+	if runtime.GOOS != "windows" {
+		t.Skip("install.ps1 runs on Windows only; the Windows test job runs this")
+	}
+	for _, name := range []string{"powershell", "pwsh"} {
 		if p, err := exec.LookPath(name); err == nil {
 			return p
 		}
 	}
-	if runtime.GOOS == "windows" {
-		t.Fatal("no PowerShell on a Windows runner")
-	}
-	t.Skip("no PowerShell here; the Windows test job runs this")
+	t.Fatal("no PowerShell on a Windows runner")
 	return ""
 }
 
