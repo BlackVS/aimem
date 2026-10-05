@@ -13,6 +13,19 @@ currently 23); a binary refuses a database newer than it understands.
 
 ## [Unreleased]
 
+### Changed
+
+- **Building from source needs Go 1.26.** `go.mod` now says `go 1.26.0`,
+  and CI and the release workflow build with the newest Go 1.26 patch.
+  Enrollment delivery (D1) will use the standard library's `crypto/hpke`,
+  which Go 1.26 added. Each CI job and the release build check that they
+  run the runner's own Go 1.26, never a toolchain that `go.mod` would
+  download. [`docs/DEVELOPMENT.md`](docs/DEVELOPMENT.md) has the toolchain
+  rules. The release binaries are static, so installing from a release
+  still needs no Go at all. A source build with an older Go fails under
+  `GOTOOLCHAIN=local`, and with the default `GOTOOLCHAIN=auto` it
+  downloads Go 1.26 first.
+
 ## [0.8.0] — 2026-10-05
 
 The first-pilot prerequisites

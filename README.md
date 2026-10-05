@@ -252,7 +252,7 @@ configure one.
 
 ## Building from source
 
-Needs Go 1.25+.
+Needs Go 1.26+.
 
 ```sh
 git clone https://github.com/BlackVS/aimem
