@@ -32,6 +32,10 @@ var (
 	ErrReservationStale    = errors.New("reservation ID or fence is stale")
 	ErrReservationOverflow = errors.New("reservation fence exhausted")
 	ErrTaskReserved        = errors.New("task has an active reservation; generic task writes are unavailable")
+	// ErrTaskNotReady refuses a claim on a task that is not READY but is
+	// otherwise claimable (unheld, unmanaged, not archived): the coordinator
+	// triages it first (DESIGN-AIFORGE-PILOT-1 §4).
+	ErrTaskNotReady = errors.New("task is not READY; it must be triaged to READY before it can be claimed")
 	// ErrReservationHolder: the caller is not the verified holder the
 	// reservation, or the receipt, is bound to.
 	ErrReservationHolder = errors.New("reservation is bound to another holder")
@@ -493,8 +497,11 @@ func (d *DB) ApplyTaskReservation(op ReservationOperation, in TaskReservationInp
 				if err := tx.QueryRow(`SELECT EXISTS(SELECT 1 FROM team_managed_tasks WHERE task_id=? AND managed=1)`, in.TaskID).Scan(&managed); err != nil {
 					return TaskReservationOutcome{}, err
 				}
-				if managed || r.ID != "" || t.State != "READY" || t.Archived {
+				if managed || r.ID != "" || t.Archived {
 					return TaskReservationOutcome{}, ErrReservationConflict
+				}
+				if t.State != "READY" {
+					return TaskReservationOutcome{}, ErrTaskNotReady
 				}
 				if err := checkProcessPin(tx, coord.pin()); err != nil {
 					return TaskReservationOutcome{}, err

@@ -714,3 +714,35 @@ func TestTypedReferencesInToolArgs(t *testing.T) {
 		t.Fatalf("unknown key in a reference: %v", err)
 	}
 }
+
+// triage_task sends only the fields named in the call, so an omitted
+// next_action is kept rather than cleared, and every other field survives.
+func TestMCPTriageTaskIsPartial(t *testing.T) {
+	f := newHub(t)
+	text, isErr := toolText(f.rpc(t, f.alice, "tools/call", map[string]any{"name": "create_task", "arguments": map[string]any{
+		"project": "alpha", "title": "triage me", "state": "BACKLOG", "next_action": "assess", "epic": "",
+		"candidate_refs": []any{map[string]any{"kind": "text", "ref": "kept"}}, "idempotency_key": "tri-create"}}))
+	if isErr {
+		t.Fatalf("create_task: %s", text)
+	}
+	var task struct {
+		ID       string `json:"id"`
+		Revision int64  `json:"revision"`
+	}
+	json.Unmarshal([]byte(text), &task)
+	text, isErr = toolText(f.rpc(t, f.alice, "tools/call", map[string]any{"name": "triage_task", "arguments": map[string]any{
+		"id": task.ID, "state": "READY", "expected_revision": task.Revision, "idempotency_key": "tri-1"}}))
+	var got struct {
+		State         string `json:"state"`
+		NextAction    string `json:"next_action"`
+		CandidateRefs []any  `json:"candidate_refs"`
+	}
+	if isErr || json.Unmarshal([]byte(text), &got) != nil || got.State != "READY" || got.NextAction != "assess" || len(got.CandidateRefs) != 1 {
+		t.Fatalf("triage_task: %v %s", isErr, text)
+	}
+	text, isErr = toolText(f.rpc(t, f.alice, "tools/call", map[string]any{"name": "triage_task", "arguments": map[string]any{
+		"id": task.ID, "state": "DONE", "expected_revision": task.Revision + 1, "idempotency_key": "tri-2"}}))
+	if !isErr || !strings.Contains(text, "BACKLOG and READY") {
+		t.Fatalf("triage to DONE: %v %s", isErr, text)
+	}
+}

@@ -334,6 +334,8 @@ func reservationError(err error) error {
 		return refuseReservation("revision_conflict", "expected revision is stale")
 	case errors.Is(err, store.ErrReservationStale):
 		return refuseReservation("stale_fence", "reservation ID or fence is stale")
+	case errors.Is(err, store.ErrTaskNotReady):
+		return refuseReservation("task_not_ready", "the task is not READY")
 	case errors.Is(err, store.ErrReservationConflict), errors.Is(err, store.ErrReservationHolder):
 		return refuseReservation("reservation_conflict", "the task is not held by this holder")
 	case errors.Is(err, store.ErrCoordinationMismatch):

@@ -15,7 +15,7 @@ const keptTextNote = "Write free text as complete, normally spaced sentences a r
 // evidence.
 var keptTextTools = map[string]bool{
 	"remember": true, "update_doc": true, "put_record": true,
-	"create_task": true, "update_task": true, "add_task_comment": true, "create_epic": true, "update_epic": true,
+	"create_task": true, "update_task": true, "triage_task": true, "add_task_comment": true, "create_epic": true, "update_epic": true,
 	"team_send": true, "team_offer": true, "team_decline": true, "team_withdraw": true, "team_block": true,
 	"team_resume_work": true, "team_cancel": true, "team_stopped": true, "team_close_stop": true,
 	"team_submit": true, "team_review": true, "team_handoff": true, "team_edit": true, "team_finalize": true,

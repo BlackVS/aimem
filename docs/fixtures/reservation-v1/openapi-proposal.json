@@ -18,6 +18,8 @@
     "role_forbidden": 403,
     "task_unavailable": 404,
     "reservation_conflict": 409,
+    "task_not_ready": 409,
+    "task_held": 409,
     "revision_conflict": 409,
     "stale_fence": 409,
     "idempotency_conflict": 409,

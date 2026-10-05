@@ -388,8 +388,11 @@ func (r *Registry) ClaimTaskReservation(ctx context.Context, in TaskReservationI
 				in.TaskID).Scan(&managed); err != nil {
 				return TaskReservationOutcome{}, err
 			}
-			if managed || hold.ID != "" || current.State != "READY" || current.Archived {
+			if managed || hold.ID != "" || current.Archived {
 				return TaskReservationOutcome{}, ErrReservationConflict
+			}
+			if current.State != "READY" {
+				return TaskReservationOutcome{}, ErrTaskNotReady
 			}
 			if err := checkProcessPin(tx, coord.pin()); err != nil {
 				return TaskReservationOutcome{}, err
