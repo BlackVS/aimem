@@ -46,10 +46,22 @@ func (d *DB) TriageTask(id string, patch TaskTriage, expected int64, actor TaskA
 	if err := patch.validate(); err != nil {
 		return Task{}, invalid(err)
 	}
+	// The receipt digest drops empty values, so the input also names the
+	// fields the patch sets: an omitted next_action and an empty one are
+	// different requests, and a reused key with either is refused as
+	// changed input rather than replayed.
+	var named []string
+	if patch.NextAction != nil {
+		named = append(named, "next_action")
+	}
+	if patch.State != nil {
+		named = append(named, "state")
+	}
 	input := struct {
 		Triage   TaskTriage `json:"triage"`
 		Expected int64      `json:"expected"`
-	}{patch, expected}
+		Named    []string   `json:"named"`
+	}{patch, expected, named}
 	check := func(tx *sql.Tx) error {
 		var managed bool
 		if err := tx.QueryRow(`SELECT EXISTS(SELECT 1 FROM team_managed_tasks WHERE task_id=? AND managed=1)`, id).Scan(&managed); err != nil {
