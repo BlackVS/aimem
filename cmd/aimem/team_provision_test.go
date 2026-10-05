@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -252,5 +253,88 @@ func TestTeamProvisionArgsAndHTTPHelpers(t *testing.T) {
 	p := &provisioner{o: o, out: &bytes.Buffer{}}
 	if err := p.hubError(http.StatusForbidden, []byte(`{"error":"nope"}`)); !strings.Contains(err.Error(), "operator authority") {
 		t.Fatal(err)
+	}
+}
+
+// --output writes the member's secret once: to a new owner-only file, or to
+// a pipe with every other line on standard error. It is claimed before any
+// step runs, so a refused --output changes nothing on the hub, and a run
+// that issues no token leaves no empty file behind.
+func TestTeamProvisionOutput(t *testing.T) {
+	notices := captureNotices(t)
+	exp := time.Now().Add(24 * time.Hour).UTC().Format(time.RFC3339)
+	dir := t.TempDir()
+
+	h := newFakeOperatorHub()
+	file := filepath.Join(dir, "alice.token")
+	out, err := runProvision(t, h, "create", "alpha", "--team", "Pilot", "--coordinator", "alice", "--expiry", exp, "--output", file)
+	b, rerr := os.ReadFile(file)
+	if err != nil || rerr != nil || !strings.HasPrefix(string(b), "aimem_user_") || strings.Contains(out, "aimem_user_") || !strings.Contains(out, "secret written once to "+file) {
+		t.Fatalf("file: %v %v %q\n%s", err, rerr, b, out)
+	}
+	if notices.Len() != 0 {
+		t.Fatalf("the --output form printed a notice: %s", notices)
+	}
+	// A rerun issues no token, so its reserved file is removed again.
+	rerun := filepath.Join(dir, "rerun.token")
+	if out, err := runProvision(t, h, "create", "alpha", "--team", "Pilot", "--coordinator", "alice", "--expiry", exp, "--output", rerun); err != nil || !strings.Contains(out, "not reissued") {
+		t.Fatalf("rerun: %v\n%s", err, out)
+	}
+	if _, err := os.Stat(rerun); !os.IsNotExist(err) {
+		t.Fatalf("an unused --output file was left behind: %v", err)
+	}
+
+	// --output -: the pipe gets the secret alone; the report goes to stderr.
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	saved := secretStdout
+	secretStdout = w
+	defer func() { secretStdout = saved }()
+	out, err = runProvision(t, h, "add", "alpha", "--team", "Pilot", "--member", "worker-b", "--role", "worker", "--create-user", "--expiry", exp, "--output", "-")
+	w.Close()
+	piped, _ := io.ReadAll(r)
+	if err != nil || out != "" || !strings.HasPrefix(string(piped), "aimem_user_") || strings.Count(string(piped), "\n") != 1 || !strings.Contains(notices.String(), "secret written once to standard output") {
+		t.Fatalf("pipe: %v stdout %q pipe %q stderr %q", err, out, piped, notices)
+	}
+
+	// A terminal (the null device stands in) is refused before any step.
+	dev, err := os.OpenFile(os.DevNull, os.O_WRONLY, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer dev.Close()
+	secretStdout = dev
+	tokens := len(h.tokens)
+	if _, err := runProvision(t, h, "add", "alpha", "--team", "Pilot", "--member", "carol", "--role", "worker", "--create-user", "--expiry", exp, "--output", "-"); err == nil || !strings.Contains(err.Error(), "standard output is a terminal") {
+		t.Fatalf("terminal: %v", err)
+	}
+	if len(h.tokens) != tokens || h.grants["inst-alpha/u-carol"] {
+		t.Fatal("a refused --output changed the hub")
+	}
+
+	for _, tc := range []struct {
+		args []string
+		want string
+	}{
+		{[]string{"--output", filepath.Join(dir, "a"), "--secret-file", filepath.Join(dir, "b")}, "old name of --output"},
+		{[]string{"--no-token", "--output", filepath.Join(dir, "c")}, "takes no --output"},
+	} {
+		args := append([]string{"add", "alpha", "--team", "Pilot", "--member", "dave", "--role", "worker", "--expiry", exp}, tc.args...)
+		if _, err := runProvision(t, newFakeOperatorHub(), args...); err == nil || !strings.Contains(err.Error(), tc.want) {
+			t.Errorf("%v: %v", tc.args, err)
+		}
+	}
+
+	// The old forms keep working for this release, each with a notice.
+	notices.Reset()
+	out, err = runProvision(t, newFakeOperatorHub(), "create", "alpha", "--team", "Pilot", "--coordinator", "alice", "--expiry", exp)
+	if err != nil || !strings.Contains(out, "one-time secret for alice") || !strings.Contains(notices.String(), "--output FILE|- to write the secret") {
+		t.Fatalf("stdout form: %v %q\n%s", err, notices, out)
+	}
+	notices.Reset()
+	if _, err := runProvision(t, newFakeOperatorHub(), "create", "alpha", "--team", "Pilot", "--coordinator", "alice", "--expiry", exp, "--secret-file", filepath.Join(dir, "legacy.token")); err != nil || !strings.Contains(notices.String(), "--output in place of --secret-file") {
+		t.Fatalf("--secret-file: %v %q", err, notices)
 	}
 }

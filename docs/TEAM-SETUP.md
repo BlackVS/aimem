@@ -34,12 +34,14 @@ the member to the existing team's enrollment at the read revision (one retry
 on a revision conflict; unrelated enrollment and settings are kept; a worker
 request never removes an existing coordinator flag), and issues that member
 one project-scoped token labelled `team-<team>-<user>` (or `--label`). The
-secret is shown once, at the end, on its own line, with the installation
-line for the member's checkout (`printf '%s' "$SECRET" | aimem task-token
-set`); `--secret-file PATH` writes it to a new file with mode 0600 instead
-and prints nothing secret (on Windows the file carries its directory's
-ACL rather than a Unix mode, so keep it in a private directory and delete it
-after delivery). Every step is reported as existing or created, so
+secret is written once to `--output`: a new file only you can read, claimed
+before any step runs so a refused path changes nothing, or `-` for standard
+output into a pipe (refused on a terminal; every other line then goes to
+standard error). The report names the installation line for the member's
+checkout (`printf '%s' "$SECRET" | aimem task-token set`). Deliver the file
+to the member and delete it. `--secret-file PATH`, and printing the secret
+on standard output without `--output`, keep working for this release with
+a notice. Every step is reported as existing or created, so
 a rerun after a partial failure duplicates nothing: an existing user, grant,
 team or enrollment is reused, and a live token with the same label is never
 reissued (a lost secret means revoking that token and issuing another under
