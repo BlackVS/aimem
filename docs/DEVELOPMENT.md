@@ -23,6 +23,10 @@ A development machine usually runs an aimem installation of its own: a local ser
 
 **Rule 3: keep evidence runs by hand to the same rules.** To show a command against a live service for a PR, start a throwaway `aimem serve` with its own `AIMEM_STATE_DIR`, `AIMEM_SOCKET` and `HOME`, keep its PID, and stop that PID. Never stop "every aimem".
 
+**The installers follow the same rule.**
+- `install.ps1`'s restart stops only the `aimem serve` processes of the installation it upgrades. It selects them by executable path, the binary or its parked `aimem.exe.old-*` copies, through `Select-ServeProcess`. `internal/installps` tests that against synthetic processes, including another installation's service under the same OS user.
+- `install.sh` restarts its own systemd user unit.
+
 **Enforcement.** `scripts/check-process-stops.sh` runs in CI's lint job. It refuses a stop by name in Go tests, `scripts/`, the workflows, and shell, PowerShell and JavaScript files.
 
 **Why.** On 2026-10-04 a throwaway service started for a PR's CLI evidence was stopped with `taskkill /F /IM aimem.exe`, a hand-run command and not repository code. It also ended the developer's installed service and every MCP server that depended on it, and the operator had to restart them. The same audit then found tests that would have reached a real service: with an inherited `AIMEM_SOCKET`, or with the real `XDG_RUNTIME_DIR` on Linux, the local socket of several test packages resolved to the developer's own. The guards above close that path.
