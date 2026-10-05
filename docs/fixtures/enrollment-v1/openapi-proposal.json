@@ -1,0 +1,580 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "Aimem enrollment v1 wire contract",
+    "version": "1.0.0",
+    "description": "The enrollment.v1 wire contract (docs/DESIGN-AIFORGE-ENROLLMENT-WIRE.md). Proposed: no route is served yet. D1-a serves the three admin routes; D1-b serves the redemption route. All four are served only over TLS the hub terminates itself. There is no MCP tool."
+  },
+  "x-contract-version": "enrollment.v1",
+  "x-mcp": "none",
+  "x-requires-tls": true,
+  "x-refusal-status": {
+    "invalid_request": 400,
+    "unsupported_version": 400,
+    "tls_required": 403,
+    "credential_scope_forbidden": 403,
+    "peer_forbidden": 403,
+    "enrollment_invalid": 403,
+    "enrollment_conflict": 409,
+    "enrollment_exists": 409,
+    "enrollment_redeemed": 409,
+    "idempotency_conflict": 409,
+    "rate_limited": 429,
+    "enrollment_unavailable": 503,
+    "not_found": 404
+  },
+  "paths": {
+    "/v1/identity/enrollments": {
+      "parameters": [
+        {
+          "$ref": "#/components/parameters/EnrollmentVersion"
+        }
+      ],
+      "post": {
+        "operationId": "enrollmentIssue",
+        "x-operation": "issue",
+        "security": [
+          {
+            "HubAdmin": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/IssueRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Issued; the subcode is shown once (no-store)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IssueResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Refusal"
+          },
+          "401": {
+            "$ref": "#/components/responses/Refusal"
+          },
+          "403": {
+            "$ref": "#/components/responses/Refusal"
+          },
+          "409": {
+            "$ref": "#/components/responses/Refusal"
+          },
+          "503": {
+            "$ref": "#/components/responses/Refusal"
+          }
+        }
+      },
+      "get": {
+        "operationId": "enrollmentList",
+        "x-operation": "list",
+        "security": [
+          {
+            "HubAdmin": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "state",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "issued",
+                "redeemed",
+                "revoked",
+                "expired"
+              ]
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Enrollment records, newest first, without subcodes",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EnrollmentList"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Refusal"
+          },
+          "401": {
+            "$ref": "#/components/responses/Refusal"
+          },
+          "403": {
+            "$ref": "#/components/responses/Refusal"
+          },
+          "503": {
+            "$ref": "#/components/responses/Refusal"
+          }
+        }
+      }
+    },
+    "/v1/identity/enrollments/{bundle_id}/revocation": {
+      "parameters": [
+        {
+          "$ref": "#/components/parameters/EnrollmentVersion"
+        },
+        {
+          "name": "bundle_id",
+          "in": "path",
+          "required": true,
+          "schema": {
+            "type": "string",
+            "format": "uuid"
+          }
+        }
+      ],
+      "post": {
+        "operationId": "enrollmentRevoke",
+        "x-operation": "revoke",
+        "security": [
+          {
+            "HubAdmin": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Revoked, or already revoked or expired",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RevokeResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Refusal"
+          },
+          "401": {
+            "$ref": "#/components/responses/Refusal"
+          },
+          "403": {
+            "$ref": "#/components/responses/Refusal"
+          },
+          "404": {
+            "$ref": "#/components/responses/Refusal"
+          },
+          "409": {
+            "$ref": "#/components/responses/Refusal"
+          },
+          "503": {
+            "$ref": "#/components/responses/Refusal"
+          }
+        }
+      }
+    },
+    "/v1/identity/enrollments/redemptions": {
+      "parameters": [
+        {
+          "$ref": "#/components/parameters/EnrollmentVersion"
+        },
+        {
+          "$ref": "#/components/parameters/IdempotencyKey"
+        }
+      ],
+      "post": {
+        "operationId": "enrollmentRedeem",
+        "x-operation": "redeem",
+        "security": [],
+        "x-authority": "the enrollment subcode in the body; no bearer is evaluated",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RedeemRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The new identity and its encrypted delivery (no-store); replayed for an identical retry",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RedeemResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Refusal"
+          },
+          "403": {
+            "$ref": "#/components/responses/Refusal"
+          },
+          "409": {
+            "$ref": "#/components/responses/Refusal"
+          },
+          "429": {
+            "$ref": "#/components/responses/Refusal"
+          },
+          "503": {
+            "$ref": "#/components/responses/Refusal"
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "securitySchemes": {
+      "HubAdmin": {
+        "type": "http",
+        "scheme": "bearer",
+        "description": "The host-managed hub admin token"
+      }
+    },
+    "parameters": {
+      "EnrollmentVersion": {
+        "name": "X-Aimem-Enrollment-Version",
+        "in": "header",
+        "required": true,
+        "schema": {
+          "type": "string",
+          "const": "1"
+        }
+      },
+      "IdempotencyKey": {
+        "name": "Idempotency-Key",
+        "in": "header",
+        "required": true,
+        "schema": {
+          "type": "string",
+          "pattern": "^k1_[A-Za-z0-9_-]{43}$"
+        }
+      }
+    },
+    "responses": {
+      "Refusal": {
+        "description": "The context contract's refusal envelope",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/Refusal"
+            }
+          }
+        }
+      }
+    },
+    "schemas": {
+      "Refusal": {
+        "type": "object",
+        "required": [
+          "code",
+          "message",
+          "retryable",
+          "next_action",
+          "correlation_id"
+        ],
+        "properties": {
+          "code": {
+            "type": "string"
+          },
+          "message": {
+            "type": "string"
+          },
+          "retryable": {
+            "type": "boolean"
+          },
+          "next_action": {
+            "type": "string"
+          },
+          "correlation_id": {
+            "type": "string"
+          },
+          "redeemed": {
+            "$ref": "#/components/schemas/Identity"
+          }
+        }
+      },
+      "Identity": {
+        "type": "object",
+        "required": [
+          "user_id",
+          "token_id"
+        ],
+        "properties": {
+          "user_id": {
+            "type": "string"
+          },
+          "token_id": {
+            "type": "string"
+          }
+        }
+      },
+      "IssueRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "bundle_id",
+          "purpose",
+          "expires_at"
+        ],
+        "properties": {
+          "bundle_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "purpose": {
+            "type": "string",
+            "enum": [
+              "new_user"
+            ]
+          },
+          "expires_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "user_name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          }
+        }
+      },
+      "IssueResponse": {
+        "type": "object",
+        "required": [
+          "bundle_id",
+          "purpose",
+          "expires_at",
+          "hub_id",
+          "subcode"
+        ],
+        "properties": {
+          "bundle_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "purpose": {
+            "type": "string"
+          },
+          "expires_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "hub_id": {
+            "type": "string"
+          },
+          "subcode": {
+            "type": "string",
+            "pattern": "^aes1_[A-Za-z0-9_-]{43}$"
+          }
+        }
+      },
+      "EnrollmentList": {
+        "type": "object",
+        "required": [
+          "enrollments"
+        ],
+        "properties": {
+          "enrollments": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Enrollment"
+            }
+          }
+        }
+      },
+      "Enrollment": {
+        "type": "object",
+        "required": [
+          "bundle_id",
+          "purpose",
+          "state",
+          "created_at",
+          "expires_at",
+          "issued_by"
+        ],
+        "properties": {
+          "bundle_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "purpose": {
+            "type": "string"
+          },
+          "state": {
+            "type": "string",
+            "enum": [
+              "issued",
+              "redeemed",
+              "revoked",
+              "expired"
+            ]
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "expires_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "issued_by": {
+            "type": "string"
+          },
+          "user_name": {
+            "type": "string"
+          },
+          "redeemed": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "type": "object",
+                "required": [
+                  "user_id",
+                  "token_id",
+                  "at"
+                ],
+                "properties": {
+                  "user_id": {
+                    "type": "string"
+                  },
+                  "token_id": {
+                    "type": "string"
+                  },
+                  "at": {
+                    "type": "string",
+                    "format": "date-time"
+                  }
+                }
+              }
+            ]
+          }
+        }
+      },
+      "RevokeResponse": {
+        "type": "object",
+        "required": [
+          "bundle_id",
+          "state"
+        ],
+        "properties": {
+          "bundle_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "state": {
+            "type": "string",
+            "enum": [
+              "revoked",
+              "expired"
+            ]
+          }
+        }
+      },
+      "RedeemRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "hub_id",
+          "subcode",
+          "label",
+          "delivery"
+        ],
+        "properties": {
+          "hub_id": {
+            "type": "string"
+          },
+          "subcode": {
+            "type": "string",
+            "pattern": "^aes1_[A-Za-z0-9_-]{43}$"
+          },
+          "label": {
+            "type": "string",
+            "pattern": "^[a-z0-9-]{1,64}$"
+          },
+          "delivery": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "suite",
+              "public_key"
+            ],
+            "properties": {
+              "suite": {
+                "type": "string",
+                "const": "hpke-x25519-sha256-chacha20poly1305"
+              },
+              "public_key": {
+                "type": "string",
+                "pattern": "^[A-Za-z0-9_-]{43}$"
+              }
+            }
+          }
+        }
+      },
+      "RedeemResponse": {
+        "type": "object",
+        "required": [
+          "bundle_id",
+          "replayed",
+          "hub_id",
+          "identity",
+          "delivery",
+          "redeemed_at"
+        ],
+        "properties": {
+          "bundle_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "replayed": {
+            "type": "boolean"
+          },
+          "hub_id": {
+            "type": "string"
+          },
+          "identity": {
+            "$ref": "#/components/schemas/Identity"
+          },
+          "delivery": {
+            "type": "object",
+            "required": [
+              "suite",
+              "enc",
+              "ciphertext"
+            ],
+            "properties": {
+              "suite": {
+                "type": "string"
+              },
+              "enc": {
+                "type": "string"
+              },
+              "ciphertext": {
+                "type": "string"
+              }
+            }
+          },
+          "redeemed_at": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      }
+    }
+  }
+}

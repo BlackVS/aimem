@@ -1,0 +1,409 @@
+{
+  "version": 1,
+  "contract": "enrollment.v1",
+  "status": "proposed (D1-w); D1-a adds the fake-consumer test that reads this file",
+  "note": "Every secret here is a sample. A fixture test checks that no sample secret appears in a response other than the issue answer and the subcode record, or in an audit example.",
+  "sample_secrets": {
+    "subcode": "aes1_SAMPLEsubcodeSAMPLEsubcodeSAMPLEsubcodeSAMP",
+    "bearer": "aimem_user_sample-bearer-not-real",
+    "delivery_private_key": "sample-delivery-private-key-not-real"
+  },
+  "bounds": {
+    "subcode_default_lifetime_seconds": 86400,
+    "subcode_max_lifetime_seconds": 259200,
+    "delivery_retention_seconds": 3600,
+    "redemptions_per_minute_per_address": 10,
+    "redemptions_per_minute_per_bundle": 20,
+    "token_lifetime_days": 365,
+    "subcode_record_max_bytes": 16384,
+    "redemption_body_max_bytes": 4096,
+    "client_attempts_per_run": 5,
+    "client_attempt_timeout_seconds": 10
+  },
+  "suite": {
+    "name": "hpke-x25519-sha256-chacha20poly1305",
+    "kem": "0x0020",
+    "kdf": "0x0001",
+    "aead": "0x0003",
+    "info": "aimem enrollment.v1 delivery",
+    "aad_template": "enrollment.v1|<hub_id>|<bundle_id>|<request key, k1_ form>|<user_id>|<token_id>",
+    "plaintext_fields": [
+      "token",
+      "user_id",
+      "token_id",
+      "hub_id"
+    ]
+  },
+  "exchanges": [
+    {
+      "case": "issue",
+      "request": {
+        "method": "POST",
+        "path": "/v1/identity/enrollments",
+        "headers": {
+          "X-Aimem-Enrollment-Version": "1",
+          "Authorization": "Bearer <hub admin token>"
+        },
+        "body": {
+          "bundle_id": "01a10c90-0000-7000-8000-000000000001",
+          "purpose": "new_user",
+          "expires_at": "2026-10-06T12:00:00Z"
+        }
+      },
+      "response": {
+        "status": 201,
+        "headers": {
+          "Cache-Control": "no-store"
+        },
+        "body": {
+          "bundle_id": "01a10c90-0000-7000-8000-000000000001",
+          "purpose": "new_user",
+          "expires_at": "2026-10-06T12:00:00Z",
+          "hub_id": "01a09fc8-0000-7000-8000-00000000a1b2",
+          "subcode": "aes1_SAMPLEsubcodeSAMPLEsubcodeSAMPLEsubcodeSAMP"
+        }
+      },
+      "audit": {
+        "event": "enrollment.issued",
+        "subject": "bundle=01a10c90-0000-7000-8000-000000000001 purpose=new_user expires_at=2026-10-06T12:00:00Z"
+      }
+    },
+    {
+      "case": "issue_lost_reply_retry",
+      "request": {
+        "method": "POST",
+        "path": "/v1/identity/enrollments",
+        "body": {
+          "bundle_id": "01a10c90-0000-7000-8000-000000000001",
+          "purpose": "new_user",
+          "expires_at": "2026-10-06T12:00:00Z"
+        }
+      },
+      "response": {
+        "status": 409,
+        "body": {
+          "code": "enrollment_exists",
+          "retryable": false,
+          "next_action": "Revoke the bundle and issue a new one; its subcode cannot be shown again."
+        }
+      }
+    },
+    {
+      "case": "subcode_record",
+      "stdout_of": "aimem identity enroll issue --purpose new-user --expires 24h --output -",
+      "record": {
+        "kind": "aimem-enrollment",
+        "version": 1,
+        "bundle_id": "01a10c90-0000-7000-8000-000000000001",
+        "purpose": "new_user",
+        "subcode": "aes1_SAMPLEsubcodeSAMPLEsubcodeSAMPLEsubcodeSAMP",
+        "expires_at": "2026-10-06T12:00:00Z",
+        "hub": {
+          "hub_id": "01a09fc8-0000-7000-8000-00000000a1b2",
+          "url": "https://hub.example.test:8443",
+          "trust": {
+            "spki_sha256": "sha256-SAMPLEspkipinSAMPLEspkipinSAMPLEspkipinSAMPLE"
+          }
+        }
+      }
+    },
+    {
+      "case": "redeem",
+      "request": {
+        "method": "POST",
+        "path": "/v1/identity/enrollments/redemptions",
+        "headers": {
+          "X-Aimem-Enrollment-Version": "1",
+          "Idempotency-Key": "k1_OTHERrequestkeyOTHERrequestkeyOTHERrequestk"
+        },
+        "body": {
+          "hub_id": "01a09fc8-0000-7000-8000-00000000a1b2",
+          "subcode": "aes1_SAMPLEsubcodeSAMPLEsubcodeSAMPLEsubcodeSAMP",
+          "label": "member-laptop",
+          "delivery": {
+            "suite": "hpke-x25519-sha256-chacha20poly1305",
+            "public_key": "SAMPLEpublickeySAMPLEpublickeySAMPLEpublick"
+          }
+        }
+      },
+      "response": {
+        "status": 200,
+        "headers": {
+          "Cache-Control": "no-store"
+        },
+        "body": {
+          "bundle_id": "01a10c90-0000-7000-8000-000000000001",
+          "replayed": false,
+          "hub_id": "01a09fc8-0000-7000-8000-00000000a1b2",
+          "identity": {
+            "user_id": "01a10c91-0000-7000-8000-0000000000u1",
+            "token_id": "01a10c91-0000-7000-8000-0000000000t1"
+          },
+          "delivery": {
+            "suite": "hpke-x25519-sha256-chacha20poly1305",
+            "enc": "SAMPLEencSAMPLEencSAMPLEencSAMP",
+            "ciphertext": "SAMPLEsealedSAMPLEsealedSAMPLEs"
+          },
+          "redeemed_at": "2026-10-05T12:05:00Z"
+        }
+      },
+      "audit": {
+        "event": "enrollment.redeemed",
+        "subject": "bundle=01a10c90-0000-7000-8000-000000000001 user=01a10c91-0000-7000-8000-0000000000u1 token=01a10c91-0000-7000-8000-0000000000t1 label=member-laptop"
+      }
+    },
+    {
+      "case": "redeem_identical_retry",
+      "same_request_as": "redeem",
+      "response": {
+        "status": 200,
+        "body_differs_from_redeem_only_in": {
+          "replayed": true
+        }
+      }
+    },
+    {
+      "case": "redeem_replay_after_subcode_expiry",
+      "note": "The first redemption committed at 2026-10-06T11:59:58Z, two seconds before the subcode expired, and its reply was lost. The client's rerun finds pending state in phase sending, skips its own expiry check, and replays at 2026-10-06T12:00:30Z: inside the 1-hour retention, so the hub answers from the committed outcome.",
+      "same_request_as": "redeem",
+      "at": "2026-10-06T12:00:30Z",
+      "subcode_expires_at": "2026-10-06T12:00:00Z",
+      "redeemed_at": "2026-10-06T11:59:58Z",
+      "response": {
+        "status": 200,
+        "body_differs_from_redeem_only_in": {
+          "replayed": true,
+          "redeemed_at": "2026-10-06T11:59:58Z"
+        }
+      }
+    },
+    {
+      "case": "redeem_replay_after_retention",
+      "same_request_as": "redeem",
+      "at": "2026-10-06T13:00:01Z",
+      "redeemed_at": "2026-10-06T11:59:58Z",
+      "response": {
+        "status": 403,
+        "body": {
+          "code": "enrollment_invalid",
+          "retryable": false
+        }
+      }
+    },
+    {
+      "case": "redeem_other_key",
+      "same_request_as": "redeem",
+      "but": {
+        "Idempotency-Key": "k1_SAMPLErequestkeySAMPLErequestkeySAMPLEreque"
+      },
+      "response": {
+        "status": 409,
+        "body": {
+          "code": "enrollment_conflict",
+          "retryable": false
+        }
+      }
+    },
+    {
+      "case": "revoke_issued",
+      "request": {
+        "method": "POST",
+        "path": "/v1/identity/enrollments/01a10c90-0000-7000-8000-000000000002/revocation"
+      },
+      "response": {
+        "status": 200,
+        "body": {
+          "bundle_id": "01a10c90-0000-7000-8000-000000000002",
+          "state": "revoked"
+        }
+      },
+      "audit": {
+        "event": "enrollment.revoked",
+        "subject": "bundle=01a10c90-0000-7000-8000-000000000002"
+      }
+    },
+    {
+      "case": "revoke_redeemed",
+      "request": {
+        "method": "POST",
+        "path": "/v1/identity/enrollments/01a10c90-0000-7000-8000-000000000001/revocation"
+      },
+      "response": {
+        "status": 409,
+        "body": {
+          "code": "enrollment_redeemed",
+          "retryable": false,
+          "redeemed": {
+            "user_id": "01a10c91-0000-7000-8000-0000000000u1",
+            "token_id": "01a10c91-0000-7000-8000-0000000000t1"
+          }
+        }
+      }
+    },
+    {
+      "case": "list",
+      "request": {
+        "method": "GET",
+        "path": "/v1/identity/enrollments?state=redeemed"
+      },
+      "response": {
+        "status": 200,
+        "body": {
+          "enrollments": [
+            {
+              "bundle_id": "01a10c90-0000-7000-8000-000000000001",
+              "purpose": "new_user",
+              "state": "redeemed",
+              "created_at": "2026-10-05T12:00:00Z",
+              "expires_at": "2026-10-06T12:00:00Z",
+              "issued_by": "admin",
+              "user_name": "",
+              "redeemed": {
+                "user_id": "01a10c91-0000-7000-8000-0000000000u1",
+                "token_id": "01a10c91-0000-7000-8000-0000000000t1",
+                "at": "2026-10-05T12:05:00Z"
+              }
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "refusals": [
+    {
+      "case": "bad_version",
+      "code": "unsupported_version",
+      "http_status": 400,
+      "retryable": false
+    },
+    {
+      "case": "malformed_body",
+      "code": "invalid_request",
+      "http_status": 400,
+      "retryable": false
+    },
+    {
+      "case": "plain_http",
+      "code": "tls_required",
+      "http_status": 403,
+      "retryable": false
+    },
+    {
+      "case": "ordinary_token_on_issue",
+      "code": "credential_scope_forbidden",
+      "http_status": 403,
+      "retryable": false
+    },
+    {
+      "case": "peer_credential_on_issue",
+      "code": "peer_forbidden",
+      "http_status": 403,
+      "retryable": false
+    },
+    {
+      "case": "unknown_expired_revoked_or_wrong_hub_subcode",
+      "code": "enrollment_invalid",
+      "http_status": 403,
+      "retryable": false
+    },
+    {
+      "case": "subcode_with_other_key",
+      "code": "enrollment_conflict",
+      "http_status": 409,
+      "retryable": false
+    },
+    {
+      "case": "issue_retry_after_lost_reply",
+      "code": "enrollment_exists",
+      "http_status": 409,
+      "retryable": false
+    },
+    {
+      "case": "revoke_after_redemption",
+      "code": "enrollment_redeemed",
+      "http_status": 409,
+      "retryable": false
+    },
+    {
+      "case": "revoke_unknown_bundle",
+      "code": "not_found",
+      "http_status": 404,
+      "retryable": false
+    },
+    {
+      "case": "bundle_id_with_other_input",
+      "code": "idempotency_conflict",
+      "http_status": 409,
+      "retryable": false
+    },
+    {
+      "case": "too_many_redemptions",
+      "code": "rate_limited",
+      "http_status": 429,
+      "retryable": true
+    },
+    {
+      "case": "store_unavailable",
+      "code": "enrollment_unavailable",
+      "http_status": 503,
+      "retryable": true
+    }
+  ],
+  "client_refusals": [
+    {
+      "code": "identity_mismatch",
+      "exit": 3,
+      "when": "the delivery does not open, or its IDs differ from the answer or the record, or the hub entry names another URL"
+    },
+    {
+      "code": "delivery_unavailable",
+      "exit": 3,
+      "when": "the installation cannot create its owner-only pending state; nothing was sent"
+    }
+  ],
+  "client_state_transitions": [
+    {
+      "case": "first_redemption",
+      "pending_before": null,
+      "credential_stored": false,
+      "client_does": "checks the record's expiry, writes pending {phase: sending, request_key, private_key}, sends the redemption"
+    },
+    {
+      "case": "lost_reply_recovery",
+      "pending_before": {
+        "phase": "sending"
+      },
+      "credential_stored": false,
+      "client_does": "skips the client-side expiry check and replays with the stored keys; the hub answers from the committed outcome within its 1-hour retention, or enrollment_invalid after it"
+    },
+    {
+      "case": "crash_before_storage",
+      "pending_before": {
+        "phase": "delivered",
+        "user_id": "01a10c91-0000-7000-8000-0000000000u1",
+        "token_id": "01a10c91-0000-7000-8000-0000000000t1"
+      },
+      "credential_stored": false,
+      "client_does": "replays the redemption with the stored keys (within the retention) to receive the bearer again"
+    },
+    {
+      "case": "crash_after_storage",
+      "pending_before": {
+        "phase": "delivered",
+        "user_id": "01a10c91-0000-7000-8000-0000000000u1",
+        "token_id": "01a10c91-0000-7000-8000-0000000000t1"
+      },
+      "credential_stored": true,
+      "rerun_at": "2026-10-07T09:00:00Z",
+      "client_does": "verifies the stored credential with GET /v1/access/identity; the hub reports the recorded user and token, so the client deletes the pending state and reports already_enrolled without contacting the redemption route",
+      "exit": 0
+    },
+    {
+      "case": "rerun_after_success",
+      "pending_before": null,
+      "credential_stored": true,
+      "client_does": "reports already_enrolled without sending the subcode",
+      "exit": 0
+    }
+  ]
+}

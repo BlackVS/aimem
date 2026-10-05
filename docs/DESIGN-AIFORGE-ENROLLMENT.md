@@ -1,6 +1,6 @@
 # AIForge clean-client enrollment contract
 
-Status: D1 design candidate for review; the authorization choices in [Operator decisions](#operator-decisions) are approved on task D1. No enrollment operation is implemented by this document.
+Status: D1 design; the authorization choices in [Operator decisions](#operator-decisions) are approved on task D1. No enrollment operation is implemented by this document. The wire is [enrollment.v1](DESIGN-AIFORGE-ENROLLMENT-WIRE.md) (task D1-w), which also records two amendments: the operator-side envelope file of the first pilot, and the client's protected storage (see [Amendments](#amendments)).
 
 This contract extends the [AIForge identity and context contract](DESIGN-AIFORGE-CONTEXT.md) for a new installation that has no individual aimem credential. It composes with the aicrew [onboarding contract at 36f07f0](https://github.com/BlackVS/aicrew/blob/36f07f058fb45493c8607a5f465e8a5657a5a5f0/docs/ONBOARDING-CONTRACT.md), which already defines invitation, proof, link and session behavior. That commit is on the locally tracked aicrew `main` and `origin/main`; the remote was unavailable to a read-only lookup during D1 assessment. If aicrew changes its contract before implementation, reconcile the new head explicitly. The merged aimem context contract remains authority for actor authentication, grants, proof and session context.
 
@@ -71,3 +71,10 @@ The implementation review must also set exact bounds for aimem attempts, respons
 | Client bootstrap | aicrew client child | One command and hidden code entry; split capabilities locally, verify both service scopes, store one aimem credential securely, then use existing invitation/proof flow. Tests cover lost replies, expired/revoked components and fresh/existing identity. |
 
 No row is an implementation authorization from D1 alone. The final clean-client path requires reviewed aimem enrollment and aicrew bootstrap together. E1 remains internal substrate; C5/C6 reservation authorization and public routes are separate and still deferred. This design changes no live credential, service configuration or deployment.
+
+## Amendments
+
+These amend the text above. [enrollment.v1](DESIGN-AIFORGE-ENROLLMENT-WIRE.md#corrections-to-the-parent-texts) gives the reasons.
+
+1. **The operator-side envelope file (first pilot).** The composed onboarding envelope may be written by aicrew's issuing console client to an owner-only file on the operator's machine for the private hand-off, and the operator deletes it after sending ([DESIGN-AIFORGE-PILOT-1](DESIGN-AIFORGE-PILOT-1.md) §7). This replaces "the operator sees both short-lived subcodes only while composing the envelope" for that one file. The member side is unchanged (hidden prompt, process memory), and no subcode file exists: `aimem identity enroll issue --output -` hands the subcode to aicrew's console through a pipe only.
+2. **Protected client storage.** "Client-supported OS credential storage" for the delivery key and the pending state becomes the installation's own owner-only credential slot, the same protection as the bearer the key unlocks.
