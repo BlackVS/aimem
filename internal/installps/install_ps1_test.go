@@ -19,7 +19,8 @@ func extract(t *testing.T, name string) string {
 	if err != nil {
 		t.Fatal(err)
 	}
-	s := string(raw)
+	// .gitattributes checks *.ps1 out with CRLF on Windows.
+	s := strings.ReplaceAll(string(raw), "\r\n", "\n")
 	begin, end := "# BEGIN "+name+"\n", "# END "+name
 	i, j := strings.Index(s, begin), strings.Index(s, end)
 	if i < 0 || j < i {
