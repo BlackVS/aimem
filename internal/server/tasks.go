@@ -92,15 +92,19 @@ var taskRoutes = map[string]bool{
 // them for its project picker. Matched by the mux's own rules against
 // these exact patterns — never by prefix — so a future route is refused
 // until it is listed here (and Route.Ordinary shows it).
+// repositoryReadRoute is the project repository read: on the ordinary
+// surface and, through the project_repository tool, on /mcp.
+const repositoryReadRoute = "GET /v1/projects/{p}/repository"
+
 var ordinaryRoutes = func() map[string]bool {
 	m := maps.Clone(taskRoutes)
 	maps.Copy(m, knowledgeRoute)
 	m["POST /mcp"] = true
 	m["GET /v1/projects"] = true
-	m["GET /v1/projects/{p}/process"] = true    // the selected process reference: what an agent needs to find its rules; grants no repository access
-	m["GET /v1/projects/{p}/repository"] = true // the project's repository; the handler requires a grant on the project
-	m["GET /v1/access/directory"] = true        // id, kind, name, enabled of every user and group: what the board labels assignees with
-	m["POST /v1/identity/proofs"] = true        // identity.v1 proof receipt: the handler requires a live user-scoped token and TLS
+	m["GET /v1/projects/{p}/process"] = true // the selected process reference: what an agent needs to find its rules; grants no repository access
+	m[repositoryReadRoute] = true            // the project's repository; the handler requires a grant on the project
+	m["GET /v1/access/directory"] = true     // id, kind, name, enabled of every user and group: what the board labels assignees with
+	m["POST /v1/identity/proofs"] = true     // identity.v1 proof receipt: the handler requires a live user-scoped token and TLS
 	return m
 }()
 
@@ -695,8 +699,8 @@ func (s *Server) MCPPrincipal(r *http.Request) (func(ctx context.Context, method
 		if err != nil {
 			return 0, nil, err
 		}
-		if _, pattern := s.ordinaryMux().Handler(req); !canonicalPath(req) || !(taskRoutes[pattern] || knowledgeRoute[pattern]) {
-			return 0, nil, errors.New("not a task or pilot knowledge route")
+		if _, pattern := s.ordinaryMux().Handler(req); !canonicalPath(req) || !(taskRoutes[pattern] || knowledgeRoute[pattern] || pattern == repositoryReadRoute) {
+			return 0, nil, errors.New("not a task, project repository or pilot knowledge route")
 		}
 		req.Header.Set("Content-Type", "application/json")
 		for k, v := range headers {

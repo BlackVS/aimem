@@ -746,3 +746,29 @@ func TestMCPTriageTaskIsPartial(t *testing.T) {
 		t.Fatalf("triage to DONE: %v %s", isErr, text)
 	}
 }
+
+// project_repository reads the project's repository under the caller's own
+// grant: the granted user reads it, and a user without a grant is refused
+// with the hub's answer.
+func TestMCPProjectRepository(t *testing.T) {
+	f := newHub(t)
+	req := httptest.NewRequest("PUT", "/v1/projects/alpha/repository", strings.NewReader(`{"kind":"gitea","url":"https://forge.example.org:3000/team/alpha.git"}`))
+	req.Header.Set("Authorization", "Bearer "+f.env)
+	rec := httptest.NewRecorder()
+	f.h.ServeHTTP(rec, req)
+	if rec.Code != 200 {
+		t.Fatalf("set the repository: %d %s", rec.Code, rec.Body)
+	}
+	text, isErr := toolText(f.rpc(t, f.alice, "tools/call", map[string]any{"name": "project_repository", "arguments": map[string]any{"project": "alpha"}}))
+	if isErr || !strings.Contains(text, `"host": "forge.example.org:3000"`) || !strings.Contains(text, `"access": "write"`) {
+		t.Fatalf("granted read: %v %s", isErr, text)
+	}
+	text, isErr = toolText(f.rpc(t, f.stranger, "tools/call", map[string]any{"name": "project_repository", "arguments": map[string]any{"project": "alpha"}}))
+	if !isErr || strings.Contains(text, "forge.example.org") {
+		t.Fatalf("read without a grant: %v %s", isErr, text)
+	}
+	text, isErr = toolText(f.rpc(t, f.alice, "tools/call", map[string]any{"name": "project_repository", "arguments": map[string]any{"project": "beta"}}))
+	if !isErr {
+		t.Fatalf("read of an ungranted project: %s", text)
+	}
+}
