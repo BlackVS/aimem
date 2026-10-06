@@ -179,10 +179,17 @@ func enrollRedeem(root, hubName, label string, stdin io.Reader, stderr io.Writer
 		if !time.Now().Before(rec.ExpiresAt) {
 			return enrollResult{}, refuse(enrollExitFinal, "enrollment_invalid: the onboarding code expired at %s; ask the operator for a new one", rec.ExpiresAt.Format(time.RFC3339))
 		}
-		// A credential already stored and accepted: nothing to spend.
+		// A credential already stored and accepted: nothing to spend. The
+		// code is spent only when the hub has refused the stored credential;
+		// a check that could not finish is retried, never taken as a refusal,
+		// or a passing outage would replace a working identity.
 		if entry != nil && entry.TaskToken != "" {
-			if id, err := enrollWhoAmI(client, rec.Hub.URL, entry.TaskToken); err == nil {
+			id, err := enrollWhoAmI(client, rec.Hub.URL, entry.TaskToken)
+			switch {
+			case err == nil:
 				return done("already_enrolled", id.UserID, id.TokenID)
+			case !errors.Is(err, errCredentialRefused):
+				return enrollResult{}, refuse(enrollExitRetry, "hub %s already holds a credential that could not be checked (%v); nothing was spent; run the same command again", hubName, err)
 			}
 		}
 		if pending, err = newEnrollPending(pendingPath, rec.BundleID); err != nil {
@@ -415,6 +422,10 @@ func enrollSend(client *http.Client, rec enrollRecordIn, label, k1 string, priv 
 	return enrollAnswer{}, refuse(enrollExitUnknown, "no answer from the hub (%v); the redemption may have happened: run the same command again", last)
 }
 
+// errCredentialRefused is the hub refusing a credential (401 or 403), as
+// opposed to a check that could not finish.
+var errCredentialRefused = errors.New("the hub refused the credential")
+
 type enrollIdentity struct {
 	UserID  string `json:"user_id"`
 	TokenID string `json:"token_id"`
@@ -433,7 +444,10 @@ func enrollWhoAmI(client *http.Client, hubURL, bearer string) (enrollIdentity, e
 		return enrollIdentity{}, err
 	}
 	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
+	switch {
+	case resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden:
+		return enrollIdentity{}, fmt.Errorf("%w (HTTP %d)", errCredentialRefused, resp.StatusCode)
+	case resp.StatusCode != http.StatusOK:
 		return enrollIdentity{}, fmt.Errorf("the hub answered %d", resp.StatusCode)
 	}
 	var id enrollIdentity

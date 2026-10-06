@@ -8,6 +8,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"io"
 	"net"
 	"net/http"
 	"sync"
@@ -77,7 +78,14 @@ func (s *Server) redeemEnrollment(w http.ResponseWriter, r *http.Request) {
 	}
 	dec := json.NewDecoder(http.MaxBytesReader(w, r.Body, enrollRedeemBodyMax))
 	dec.DisallowUnknownFields()
-	if err := dec.Decode(&req); err != nil || dec.More() || req.Subcode == "" {
+	// One object and nothing after it: the second decode must reach the
+	// end exactly. A body over the bound surfaces here as the reader's size
+	// error, so an oversized request never reaches the ledger.
+	if err := dec.Decode(&req); err != nil || req.Subcode == "" {
+		s.enrollRefuse(w, "invalid_request", nil)
+		return
+	}
+	if err := dec.Decode(&struct{}{}); err != io.EOF {
 		s.enrollRefuse(w, "invalid_request", nil)
 		return
 	}

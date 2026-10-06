@@ -153,6 +153,18 @@ func TestEnrollmentRedeemRefusals(t *testing.T) {
 	} {
 		checkEnvelope(t, name, g.call(t, g.tls, "POST", "/v1/identity/enrollments/redemptions", "", c.headers(), body, true), 400, "invalid_request")
 	}
+	// A valid object padded past the bound, or followed by stray data, is
+	// refused before the ledger (the reader's size error and trailing
+	// tokens are both caught by the end-of-body check).
+	valid := c.body("m")
+	for name, body := range map[string]string{
+		"padded past 4096": valid + strings.Repeat(" ", enrollRedeemBodyMax+1-len(valid)),
+		"trailing ]":       valid + "]",
+		"trailing }":       valid + "}",
+		"second object":    valid + "{}",
+	} {
+		checkEnvelope(t, name, g.call(t, g.tls, "POST", "/v1/identity/enrollments/redemptions", "", c.headers(), body, true), 400, "invalid_request")
+	}
 	// None of these spent the subcode.
 	if r := g.call(t, g.tls, "POST", "/v1/identity/enrollments/redemptions", "", c.headers(), c.body("m"), true); r.status != 200 {
 		t.Fatalf("after the refusals: %d %s", r.status, r.body)

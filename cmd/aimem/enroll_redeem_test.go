@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"database/sql"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -21,8 +22,9 @@ const redeemPath = "/v1/identity/enrollments/redemptions"
 // the replies of the first ones (the hub commits, the client sees no answer).
 type enrollRig struct {
 	*identityCLIRig
-	redeems atomic.Int64
-	lose    atomic.Int64
+	redeems      atomic.Int64
+	lose         atomic.Int64
+	identityDown atomic.Bool
 }
 
 func newEnrollRig(t *testing.T) *enrollRig {
@@ -34,6 +36,10 @@ func newEnrollRig(t *testing.T) *enrollRig {
 	e := &enrollRig{}
 	e.identityCLIRig = newIdentityCLIRig(t, func(h http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if r.URL.Path == "/v1/access/identity" && e.identityDown.Load() {
+				http.Error(w, "unavailable", http.StatusServiceUnavailable)
+				return
+			}
 			if r.URL.Path == redeemPath {
 				e.redeems.Add(1)
 				if e.lose.Load() > 0 {
@@ -263,5 +269,45 @@ func TestEnrollRedeemRefusals(t *testing.T) {
 	}
 	if run := redeemWith(t, other, live); run.code != enrollExitFinal || !strings.Contains(run.stderr, "identity_mismatch") {
 		t.Fatalf("bound elsewhere: %d %s", run.code, run.stderr)
+	}
+}
+
+// A stored credential whose check cannot finish (the hub answers 503) is
+// never taken as refused: nothing is spent and the credential stays. A
+// credential the hub refuses (revoked) is replaced by a new enrollment.
+func TestEnrollRedeemSpendsOnlyWhenTheStoredCredentialIsRefused(t *testing.T) {
+	e := newEnrollRig(t)
+	root := t.TempDir()
+	if run := redeemWith(t, root, e.issue(t)); run.code != enrollExitOK {
+		t.Fatalf("first enrollment: %d %s", run.code, run.stderr)
+	}
+	hubs, _ := adapter.LoadHubs(root)
+	stored := hubs["pilot"].TaskToken
+	second := e.issue(t)
+	before := e.redeems.Load()
+	e.identityDown.Store(true)
+	run := redeemWith(t, root, second)
+	e.identityDown.Store(false)
+	if run.code != enrollExitRetry || !strings.Contains(run.stderr, "nothing was spent") || e.redeems.Load() != before {
+		t.Fatalf("check unavailable: %d %s, %d redemption requests", run.code, run.stderr, e.redeems.Load()-before)
+	}
+	if hubs, _ := adapter.LoadHubs(root); hubs["pilot"].TaskToken != stored {
+		t.Fatal("the stored credential was replaced")
+	}
+	// Revoke the stored credential on the hub: now the second code is spent.
+	db, err := sql.Open("sqlite", filepath.Join(e.reg.Root(), "access.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	if _, err := db.Exec("UPDATE tokens SET revoked=1"); err != nil {
+		t.Fatal(err)
+	}
+	again := redeemWith(t, root, second)
+	if again.code != enrollExitOK || again.result(t).Outcome != "enrolled" {
+		t.Fatalf("after revocation: %d %s", again.code, again.stderr)
+	}
+	if hubs, _ := adapter.LoadHubs(root); hubs["pilot"].TaskToken == stored {
+		t.Fatal("the refused credential was kept")
 	}
 }
