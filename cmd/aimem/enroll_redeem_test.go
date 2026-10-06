@@ -311,3 +311,157 @@ func TestEnrollRedeemSpendsOnlyWhenTheStoredCredentialIsRefused(t *testing.T) {
 		t.Fatal("the refused credential was kept")
 	}
 }
+
+// Runs that start at once publish one pending state: every one gets the
+// winner's keys, so a redemption that reached the hub stays recoverable.
+func TestNewEnrollPendingPublishedOnce(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "enroll", "01a10c90-0000-7000-8000-000000000001.json")
+	type got struct {
+		p   *enrollPending
+		err error
+	}
+	out := make(chan got, 8)
+	for range 8 {
+		go func() {
+			p, err := newEnrollPending(path, "01a10c90-0000-7000-8000-000000000001")
+			out <- got{p, err}
+		}()
+	}
+	var first *enrollPending
+	for range 8 {
+		g := <-out
+		if g.err != nil {
+			t.Fatal(g.err)
+		}
+		if first == nil {
+			first = g.p
+			continue
+		}
+		if g.p.RequestKey != first.RequestKey || g.p.PrivateKey != first.PrivateKey {
+			t.Fatal("two runs got different keys for one bundle")
+		}
+	}
+	stored, err := loadEnrollPending(path)
+	if err != nil || stored == nil || stored.RequestKey != first.RequestKey {
+		t.Fatalf("stored state: %+v %v", stored, err)
+	}
+	// An empty file (a run that stopped before writing) holds no keys.
+	empty := filepath.Join(t.TempDir(), "empty.json")
+	if err := os.WriteFile(empty, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if p, err := loadEnrollPending(empty); err != nil || p != nil {
+		t.Fatalf("empty state: %+v %v", p, err)
+	}
+}
+
+// A first run stops retrying at the record's expiry with outcome unknown;
+// the rerun is a recovery, which the hub replays past the expiry.
+func TestEnrollRedeemFirstRunStopsAtExpiry(t *testing.T) {
+	e := newEnrollRig(t)
+	enrollBackoff = func(int) time.Duration { return 700 * time.Millisecond }
+	read := pipeSecretStdout(t)
+	e.mustRun(t, "enroll", "issue", "--purpose", "new-user", "--expires", "1s", "--output", "-")
+	record := read()
+	root := t.TempDir()
+	e.lose.Store(5)
+	run := redeemWith(t, root, record)
+	if run.code != enrollExitUnknown || !strings.Contains(run.stderr, "expired while retrying") {
+		t.Fatalf("first run: %d %s", run.code, run.stderr)
+	}
+	if n := e.redeems.Load(); n >= 5 {
+		t.Fatalf("%d attempts: the first run retried past the expiry", n)
+	}
+	e.lose.Store(0)
+	enrollBackoff = func(int) time.Duration { return 0 }
+	again := redeemWith(t, root, record)
+	if again.code != enrollExitOK || again.result(t).Outcome != "enrolled" {
+		t.Fatalf("recovery: %d %s", again.code, again.stderr)
+	}
+}
+
+// `aimem hub repair` rewrites hub.json owner-only and changes nothing else:
+// with no default hub it keeps none, so routing is unchanged.
+func TestHubRepairKeepsRouting(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("AIMEM_STATE_DIR", root)
+	hubs := map[string]*adapter.HubConfig{
+		"work": {URL: "https://work.example.test", Token: "t1"},
+		"home": {URL: "https://home.example.test", Token: "t2", TaskToken: "aimem_user_sample"},
+	}
+	if err := adapter.SaveHubs(root, hubs, ""); err != nil {
+		t.Fatal(err)
+	}
+	if err := hubCmd([]string{"repair"}); err != nil {
+		t.Fatal(err)
+	}
+	got, def := adapter.LoadHubs(root)
+	if def != "" || len(got) != 2 || got["home"].TaskToken != "aimem_user_sample" || got["work"].Token != "t1" {
+		t.Fatalf("after repair: %+v default %q", got, def)
+	}
+	if err := adapter.HubConfigPrivate(root); err != nil {
+		t.Fatalf("not private after repair: %v", err)
+	}
+}
+
+// Run B is overtaken: it starts, A completes the whole enrollment and
+// removes its state, then B publishes fresh keys. B must end as
+// already_enrolled without spending anything, and a state left by such a
+// run must not wedge later reruns.
+func TestEnrollRedeemOvertakenRunFinishesAsEnrolled(t *testing.T) {
+	e := newEnrollRig(t)
+	record := e.issue(t)
+	root := t.TempDir()
+	var calls atomic.Int64
+	paused, release := make(chan struct{}), make(chan struct{})
+	enrollBeforePublish = func() {
+		if calls.Add(1) == 1 { // run B only
+			close(paused)
+			<-release
+		}
+	}
+	t.Cleanup(func() { enrollBeforePublish = nil })
+	bDone := make(chan redeemRun, 1)
+	go func() { bDone <- redeemWith(t, root, record) }()
+	<-paused
+	a := redeemWith(t, root, record)
+	if a.code != enrollExitOK || a.result(t).Outcome != "enrolled" {
+		t.Fatalf("run A: %d %s", a.code, a.stderr)
+	}
+	hubs, _ := adapter.LoadHubs(root)
+	stored := hubs["pilot"].TaskToken
+	before := e.redeems.Load()
+	close(release)
+	b := <-bDone
+	if b.code != enrollExitOK || b.result(t).Outcome != "already_enrolled" || e.redeems.Load() != before {
+		t.Fatalf("run B: %d %s, %d redemption requests", b.code, b.stderr, e.redeems.Load()-before)
+	}
+	if hubs, _ := adapter.LoadHubs(root); hubs["pilot"].TaskToken != stored {
+		t.Fatal("run B replaced run A's credential")
+	}
+	if entries, _ := os.ReadDir(filepath.Join(root, "enroll")); len(entries) != 0 {
+		t.Fatalf("pending state left: %v", entries)
+	}
+
+	// A state left by an overtaken run (fresh keys the hub never accepted):
+	// the rerun meets the conflict, finds the stored credential, and cleans up.
+	var rec struct {
+		BundleID string `json:"bundle_id"`
+	}
+	json.Unmarshal([]byte(record), &rec)
+	left := filepath.Join(root, "enroll", rec.BundleID+".json")
+	if _, err := newEnrollPending(left, rec.BundleID); err != nil {
+		t.Fatal(err)
+	}
+	enrollBeforePublish = nil
+	again := redeemWith(t, root, record)
+	if again.code != enrollExitOK || again.result(t).Outcome != "already_enrolled" {
+		t.Fatalf("rerun over a stale state: %d %s", again.code, again.stderr)
+	}
+	if _, err := os.Stat(left); !os.IsNotExist(err) {
+		t.Fatalf("the stale state was kept: %v", err)
+	}
+	if list := e.mustRun(t, "enroll", "list", "--state", "redeemed"); strings.Count(list, "redeemed: user") != 1 {
+		t.Fatalf("ledger: %q", list)
+	}
+}

@@ -2255,13 +2255,7 @@ func hubCmd(args []string) error {
 			fmt.Println("\nprojects bind to a named hub via .aimem.json {\"hub\":\"<name>\"}; unbound projects use the default (*)")
 		}
 		if err := adapter.HubConfigPrivate(root); err != nil {
-			// Any hub change rewrites the file owner-only; naming the
-			// current default again is a change that alters nothing else.
-			name := def
-			if name == "" {
-				name = slices.Sorted(maps.Keys(hubs))[0]
-			}
-			fmt.Printf("\nwarning: hub.json holds bearers but is not private (%v); rewrite it owner-only with: aimem hub default %s\n", err, name)
+			fmt.Printf("\nwarning: hub.json holds bearers but is not private (%v); rewrite it owner-only with: aimem hub repair\n", err)
 		}
 		return nil
 	}
@@ -2269,6 +2263,7 @@ func hubCmd(args []string) error {
        aimem hub add <name> <url> (<token> | --token-file PATH|-) [--sync <ssh-dest>] [--default] [--ca-file PATH | --pin sha256-BASE64]
        aimem hub rm <name>
        aimem hub default <name>
+       aimem hub repair                                 rewrite hub.json owner-only, changing nothing else
        aimem hub task-token <name> (<ordinary-token> | --token-file PATH|-)   credential the MCP task tools present to this hub
        aimem hub credential [<name>] [--json]         whether an individual credential is set, and the hub's answer for it (no secret)`
 	switch args[0] {
@@ -2385,6 +2380,22 @@ func hubCmd(args []string) error {
 		if len(hubs) > 1 && def == "" {
 			fmt.Println("WARNING: no default hub set — unbound projects will not push; run `aimem hub default <name>`")
 		}
+		return nil
+	case "repair":
+		// Re-save as is: the same hubs and the same default (or none), so
+		// routing is unchanged; the save writes the file owner-only.
+		if len(args) != 1 {
+			return fmt.Errorf("%s", usage)
+		}
+		hubs, def := adapter.LoadHubs(root)
+		if hubs == nil {
+			fmt.Println("no hub configured")
+			return nil
+		}
+		if err := adapter.SaveHubs(root, hubs, def); err != nil {
+			return err
+		}
+		fmt.Println("hub.json rewritten owner-only")
 		return nil
 	case "default":
 		if len(args) != 2 {

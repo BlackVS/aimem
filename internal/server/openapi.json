@@ -85,6 +85,7 @@
         "summary": "Redeem an enrollment subcode for one user-scoped token, delivered encrypted",
         "description": "enrollment.v1 §3 (docs/DESIGN-AIFORGE-ENROLLMENT-WIRE.md). No bearer is evaluated: the subcode in the body is the authority. One transaction creates one user with no grant and one user-scoped token, sealed with HPKE (hpke-x25519-sha256-chacha20poly1305) to the client's public key; the bearer is never sent in clear. An identical retry (same subcode, Idempotency-Key and input) replays for 1 hour after the redemption, also past the subcode's expiry; another key or other input is enrollment_conflict (409). Unknown, expired, revoked, wrong-hub and no-longer-replayable subcodes are all enrollment_invalid (403). At most 10 requests per minute per client address and 20 per subcode (rate_limited, 429). Requires TLS terminated by this hub (tls_required) and X-Aimem-Enrollment-Version: 1. The answer is no-store. Not exposed as an MCP tool.",
         "x-role": "subcode",
+        "security": [],
         "x-requires-tls": true,
         "parameters": [
           {
