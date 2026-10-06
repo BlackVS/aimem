@@ -7,6 +7,7 @@ import (
 	"errors"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -318,5 +319,99 @@ func TestRedeemEnrollmentConcurrently(t *testing.T) {
 	}
 	if wins != 1 || conflicts != 7 || users != 1 {
 		t.Fatalf("wins %d conflicts %d users %d", wins, conflicts, users)
+	}
+}
+
+// settableClock is a store clock a test moves while a redemption waits.
+type settableClock struct{ ns atomic.Int64 }
+
+func (c *settableClock) set(t time.Time) { c.ns.Store(t.UnixNano()) }
+func (c *settableClock) now() time.Time  { return time.Unix(0, c.ns.Load()) }
+
+// redeemAfterWait starts a redemption while the store's one connection is
+// held, moves the clock to after, then releases the connection: the
+// redemption must be judged at the time it runs.
+func redeemAfterWait(t *testing.T, s *Store, clock *settableClock, req EnrollmentRedeemRequest, after time.Time) error {
+	t.Helper()
+	hold, err := s.db.Begin()
+	if err != nil {
+		t.Fatal(err)
+	}
+	done := make(chan error, 1)
+	go func() {
+		_, err := s.RedeemEnrollment(req)
+		done <- err
+	}()
+	time.Sleep(200 * time.Millisecond) // the redemption is now queued for the connection
+	clock.set(after)
+	hold.Rollback()
+	return <-done
+}
+
+// A first redemption queued just before the subcode expires and run just
+// after it is refused, and creates nothing.
+func TestRedeemEnrollmentJudgedWhenItRunsAcrossExpiry(t *testing.T) {
+	s := testStore(t)
+	clock := &settableClock{}
+	base := time.Now()
+	clock.set(base)
+	s.clock = clock.now
+	subcode := issueTestEnrollment(t, s, testBundle, base.Add(time.Hour))
+	clock.set(base.Add(time.Hour - time.Second))
+	err := redeemAfterWait(t, s, clock, newRedeemClient(t, s, subcode, "k").req, base.Add(time.Hour+time.Second))
+	if !errors.Is(err, ErrEnrollmentInvalid) {
+		t.Fatalf("queued across expiry: %v", err)
+	}
+	var users int
+	if err := s.db.QueryRow("SELECT count(*) FROM users").Scan(&users); err != nil || users != 0 {
+		t.Fatalf("users %d %v", users, err)
+	}
+}
+
+// A replay queued just before the retention ends and run just after it is
+// refused.
+func TestRedeemEnrollmentReplayJudgedWhenItRunsAcrossRetention(t *testing.T) {
+	s := testStore(t)
+	clock := &settableClock{}
+	base := time.Now()
+	clock.set(base)
+	s.clock = clock.now
+	subcode := issueTestEnrollment(t, s, testBundle, base.Add(time.Hour))
+	c := newRedeemClient(t, s, subcode, "k")
+	if _, err := s.RedeemEnrollment(c.req); err != nil {
+		t.Fatal(err)
+	}
+	clock.set(base.Add(EnrollmentDeliveryRetention - time.Second))
+	if err := redeemAfterWait(t, s, clock, c.req, base.Add(EnrollmentDeliveryRetention+time.Second)); !errors.Is(err, ErrEnrollmentInvalid) {
+		t.Fatalf("replay queued across the retention: %v", err)
+	}
+}
+
+// Past the retention a spent subcode is enrollment_invalid for any request,
+// conflicting or not, so it cannot be told apart from other invalid ones.
+func TestRedeemEnrollmentAfterRetentionDisclosesNoConflict(t *testing.T) {
+	s := testStore(t)
+	now := time.Now()
+	subcode := issueTestEnrollment(t, s, testBundle, now.Add(time.Hour))
+	c := newRedeemClient(t, s, subcode, "request-1")
+	if _, err := s.RedeemEnrollment(c.req); err != nil {
+		t.Fatal(err)
+	}
+	s.clock = func() time.Time { return now.Add(EnrollmentDeliveryRetention + time.Minute) }
+	relabel := c.req
+	relabel.Label = "other-laptop"
+	for name, req := range map[string]EnrollmentRedeemRequest{
+		"identical":     c.req,
+		"another key":   newRedeemClient(t, s, subcode, "request-2").req,
+		"another label": relabel,
+	} {
+		if _, err := s.RedeemEnrollment(req); !errors.Is(err, ErrEnrollmentInvalid) {
+			t.Errorf("%s: %v", name, err)
+		}
+	}
+	for _, a := range auditActions(t, s, "enrollment.redeem.refused") {
+		if a != "enrollment.redeem.refused.retention_expired" {
+			t.Errorf("audit reason %s", a)
+		}
 	}
 }

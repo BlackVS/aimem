@@ -127,12 +127,15 @@ type enrollmentRow struct {
 
 // redeem returns the answer, or a refusal with its audit reason.
 func (s *Store) redeem(req EnrollmentRedeemRequest, pub *ecdh.PublicKey) (EnrollmentRedeemResult, string, error) {
-	now := s.now()
 	tx, err := s.db.Begin()
 	if err != nil {
 		return EnrollmentRedeemResult{}, "", err
 	}
 	defer tx.Rollback()
+	// The clock is read only once the transaction holds the store: a
+	// redemption that waited for the connection is judged at the time it
+	// runs, never at the time it queued.
+	now := s.now()
 	var hub string
 	if err := tx.QueryRow("SELECT id FROM hub_identity WHERE singleton=1").Scan(&hub); err != nil {
 		return EnrollmentRedeemResult{}, "", err
@@ -206,12 +209,14 @@ func (s *Store) redeem(req EnrollmentRedeemRequest, pub *ecdh.PublicKey) (Enroll
 // replay answers a redeemed bundle: the stored delivery for the identical
 // request within the retention, while the token it delivers is still live.
 func (s *Store) replay(tx *sql.Tx, now time.Time, hub string, req EnrollmentRedeemRequest, r enrollmentRow) (EnrollmentRedeemResult, string, error) {
-	if r.key.String != req.RequestKey || r.input.String != req.inputDigest() {
-		return EnrollmentRedeemResult{BundleID: r.bundle}, "conflict", ErrEnrollmentConflict
-	}
+	// Past the retention a spent subcode is enrollment_invalid whatever the
+	// request: a conflict answer would tell it apart from other invalid ones.
 	at := time.Unix(r.redeemed.Int64, 0).UTC()
 	if !now.Before(at.Add(EnrollmentDeliveryRetention)) {
 		return EnrollmentRedeemResult{BundleID: r.bundle}, "retention_expired", ErrEnrollmentInvalid
+	}
+	if r.key.String != req.RequestKey || r.input.String != req.inputDigest() {
+		return EnrollmentRedeemResult{BundleID: r.bundle}, "conflict", ErrEnrollmentConflict
 	}
 	var revoked, disabled bool
 	var expires int64
