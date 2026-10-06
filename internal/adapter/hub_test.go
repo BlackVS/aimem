@@ -1,6 +1,7 @@
 package adapter
 
 import (
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -178,5 +179,34 @@ func TestUnknownNamedHubNeverFallsBack(t *testing.T) {
 	}
 	if defaultHits != 0 {
 		t.Fatal("default hub was touched during the drain")
+	}
+}
+
+// A hub entry without a checkpoint token (an enrolled installation, D1)
+// gets no push and no spool, and the note says so once per run.
+func TestPushHubSkipsAHubWithoutACheckpointToken(t *testing.T) {
+	root := t.TempDir()
+	hits := 0
+	hub := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hits++
+		w.WriteHeader(200)
+	}))
+	defer hub.Close()
+	if err := SaveHubs(root, map[string]*HubConfig{"pilot": {URL: hub.URL, TaskToken: "aimem_user_sample"}}, "pilot"); err != nil {
+		t.Fatal(err)
+	}
+	c := NewClient(root)
+	for i := range 3 {
+		c.pushHub("pilot", []byte(fmt.Sprintf(`{"x":%d}`, i)))
+	}
+	if hits != 0 {
+		t.Fatalf("%d pushes reached the hub", hits)
+	}
+	if entries, _ := os.ReadDir(filepath.Join(root, "spool")); len(entries) != 0 {
+		t.Fatalf("spooled: %v", entries)
+	}
+	notes, _ := os.ReadFile(filepath.Join(root, "adapter.log"))
+	if n := strings.Count(string(notes), "has no checkpoint token"); n != 1 {
+		t.Fatalf("the note was written %d times", n)
 	}
 }

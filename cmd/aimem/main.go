@@ -136,6 +136,8 @@ func main() {
 		err = accessCmd(args)
 	case "identity":
 		err = identityCmd(args)
+	case "enroll":
+		err = enrollCmd(args)
 	case "reservation":
 		err = reservationCmd(args)
 	case "team-session":
@@ -235,6 +237,9 @@ func usage() {
   access                     manage users, access groups, grants and ordinary tokens
   identity                   manage the aicrew identity peer and its credentials (hub TLS listener);
                              identity proof is the aicrew client's session-entry command
+  enroll redeem --hub-name NAME --label LABEL
+                             redeem an enrollment subcode record (stdin) and store the
+                             delivered credential; aicrew-agent join runs it; exit 0/3/4/5/2
   reservation claim|transfer|update|release|finalize|receipt|status
                              a member's reservation step, as the team session or in
                              personal mode; body on stdin, exit 0/3/4/5/2 (run without

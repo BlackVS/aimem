@@ -14,6 +14,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"sync"
 	"time"
 
 	"aimem/internal/ident"
@@ -83,6 +84,8 @@ func (p *Payload) ResolveProjectID() error {
 type Client struct {
 	root string
 	http *http.Client
+	// pushOff notes, once per run, a hub that has no checkpoint token.
+	pushOff sync.Once
 }
 
 func NewClient(stateRoot string) *Client {

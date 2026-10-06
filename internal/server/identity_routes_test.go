@@ -492,6 +492,11 @@ func (g *identityRig) sweepPeerCredential(t *testing.T, op, peer string) {
 		if public[path] != nil {
 			continue
 		}
+		if rt.Method+" "+rt.Pattern == enrollRedeemPattern {
+			// Bearer-free: the credential is ignored and grants nothing
+			// (enrollment.v1 §3; TestEnrollmentRedeemIgnoresTheBearer).
+			continue
+		}
 		read := readRoutes[rt.Method+" "+rt.Pattern]
 		headers := v1
 		if read {

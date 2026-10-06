@@ -130,9 +130,5 @@ func TestEnrollmentRoutesRefuseOtherCallers(t *testing.T) {
 		checkEnvelope(t, name, g.call(t, g.tls, "POST", "/v1/identity/enrollments", g.env, ev1, b, true), 400, "invalid_request")
 	}
 	checkEnvelope(t, "unknown state", g.call(t, g.tls, "GET", "/v1/identity/enrollments?state=lost", g.env, ev1, "", true), 400, "invalid_request")
-	// D1 serves no public redemption until the whole path is verified (D1-b).
-	if r := g.call(t, g.tls, "POST", "/v1/identity/enrollments/redemptions", g.env, ev1, `{}`, true); r.status != 404 && r.status != 405 {
-		t.Fatalf("redemption route served: %d %s", r.status, r.body)
-	}
 	g.assertNoSecretLeak(t)
 }

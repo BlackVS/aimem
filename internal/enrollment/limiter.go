@@ -20,6 +20,10 @@ type Limiter struct {
 	window time.Duration
 	mu     sync.Mutex
 	seen   map[string][]time.Time
+	// swept is when keys with nothing left in the window were last
+	// forgotten; the sweep runs at most once per window, so its cost is
+	// amortized over every event of that window.
+	swept time.Time
 }
 
 // NewLimiter allows limit events per key in each window.
@@ -44,12 +48,16 @@ func (l *Limiter) Allow(key string, now time.Time) bool {
 		return false
 	}
 	l.seen[key] = append(kept, now)
-	// Forget keys with nothing left in the window, so the map stays bounded
-	// by the keys active in the last window.
-	for k, ts := range l.seen {
-		if len(ts) == 0 || !ts[len(ts)-1].After(cut) {
-			delete(l.seen, k)
+	// Forget keys with nothing left in the window, at most once per window,
+	// so the map stays bounded by the keys active in the last two windows
+	// and each event costs amortized constant work.
+	if now.Sub(l.swept) >= l.window {
+		for k, ts := range l.seen {
+			if len(ts) == 0 || !ts[len(ts)-1].After(cut) {
+				delete(l.seen, k)
+			}
 		}
+		l.swept = now
 	}
 	return true
 }

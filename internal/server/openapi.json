@@ -80,6 +80,105 @@
     }
   ],
   "paths": {
+    "/v1/identity/enrollments/redemptions": {
+      "post": {
+        "summary": "Redeem an enrollment subcode for one user-scoped token, delivered encrypted",
+        "description": "enrollment.v1 §3 (docs/DESIGN-AIFORGE-ENROLLMENT-WIRE.md). No bearer is evaluated: the subcode in the body is the authority. One transaction creates one user with no grant and one user-scoped token, sealed with HPKE (hpke-x25519-sha256-chacha20poly1305) to the client's public key; the bearer is never sent in clear. An identical retry (same subcode, Idempotency-Key and input) replays for 1 hour after the redemption, also past the subcode's expiry; another key or other input is enrollment_conflict (409). Unknown, expired, revoked, wrong-hub and no-longer-replayable subcodes are all enrollment_invalid (403). At most 10 requests per minute per client address and 20 per subcode (rate_limited, 429). Requires TLS terminated by this hub (tls_required) and X-Aimem-Enrollment-Version: 1. The answer is no-store. Not exposed as an MCP tool.",
+        "x-role": "subcode",
+        "x-requires-tls": true,
+        "parameters": [
+          {
+            "name": "X-Aimem-Enrollment-Version",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "1"
+              ]
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^k1_[A-Za-z0-9_-]{43}$"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "hub_id",
+                  "subcode",
+                  "label",
+                  "delivery"
+                ],
+                "properties": {
+                  "hub_id": {
+                    "type": "string"
+                  },
+                  "subcode": {
+                    "type": "string",
+                    "pattern": "^aes1_[A-Za-z0-9_-]{43}$"
+                  },
+                  "label": {
+                    "type": "string",
+                    "pattern": "^[a-z0-9-]{1,64}$"
+                  },
+                  "delivery": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": [
+                      "suite",
+                      "public_key"
+                    ],
+                    "properties": {
+                      "suite": {
+                        "type": "string",
+                        "enum": [
+                          "hpke-x25519-sha256-chacha20poly1305"
+                        ]
+                      },
+                      "public_key": {
+                        "type": "string"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "{bundle_id, replayed, hub_id, identity: {user_id, token_id}, delivery: {suite, enc, ciphertext}, redeemed_at}"
+          },
+          "400": {
+            "description": "Refusal envelope {code, message, retryable, next_action, correlation_id}; never contains a subcode or a bearer"
+          },
+          "403": {
+            "description": "Refusal envelope {code, message, retryable, next_action, correlation_id}; never contains a subcode or a bearer"
+          },
+          "409": {
+            "description": "Refusal envelope {code, message, retryable, next_action, correlation_id}; never contains a subcode or a bearer"
+          },
+          "429": {
+            "description": "Refusal envelope {code, message, retryable, next_action, correlation_id}; never contains a subcode or a bearer"
+          },
+          "503": {
+            "description": "Refusal envelope {code, message, retryable, next_action, correlation_id}; never contains a subcode or a bearer"
+          }
+        }
+      }
+    },
     "/v1/identity/enrollments": {
       "get": {
         "summary": "List enrollment bundles, newest first (never a subcode)",

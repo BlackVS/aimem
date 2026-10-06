@@ -41,6 +41,8 @@ var Version = ""
 
 // Server routes API requests onto a store registry.
 type Server struct {
+	// redeemLimits bound enrollment redemption per address and subcode.
+	redeemLimits redeemLimits
 	reg          *store.Registry
 	log          *slog.Logger
 	emb          *embed.Client // nil = semantic recall off (BM25 only)
@@ -163,6 +165,7 @@ func (s *Server) Routes() []Route {
 		{"POST", "/v1/identity/enrollments", s.issueEnrollment, true},
 		{"GET", "/v1/identity/enrollments", s.listEnrollments, true},
 		{"POST", "/v1/identity/enrollments/{bundle_id}/revocation", s.revokeEnrollment, true},
+		{"POST", "/v1/identity/enrollments/redemptions", s.redeemEnrollment, false},
 		{"GET", "/v1/identity/peers/{service_id}/teams", s.listTeamProfiles, true},
 		{"POST", "/v1/identity/peers/{service_id}/teams", s.createTeamProfile, true},
 		{"PUT", "/v1/identity/peers/{service_id}/teams/{team_id}", s.updateTeamProfile, true},
@@ -564,6 +567,12 @@ func (s *Server) authWrapper(token string, next http.Handler) http.Handler {
 				h(w, r)
 				return
 			}
+		}
+		// Enrollment redemption takes no bearer: its authority is the
+		// subcode in the body, so no Authorization header is evaluated.
+		if !team && bearerFreeRoute(r) {
+			next.ServeHTTP(w, r)
+			return
 		}
 		// The identity.v1 wire routes bound the whole request, including
 		// this authentication, by one deadline, and answer every gate

@@ -17,8 +17,7 @@ currently 23); a binary refuses a database newer than it understands.
 
 - **The hub admin issues enrollment bundles** (D1, enrollment.v1:
   [`docs/DESIGN-AIFORGE-ENROLLMENT-WIRE.md`](docs/DESIGN-AIFORGE-ENROLLMENT-WIRE.md)
-  §1, §2, §4 and §5). Redemption is not served yet: D1 allows no public
-  redemption until the complete path is verified.
+  §1, §2, §4 and §5).
   - `aimem identity enroll issue --purpose new-user --output -` records a
     new-user bundle on the hub and writes its one-line subcode record to
     standard output, for a pipe into aicrew's console
@@ -39,7 +38,35 @@ currently 23); a binary refuses a database newer than it understands.
     1`. An ordinary token gets `credential_scope_forbidden`, and a peer
     credential `peer_forbidden`.
 
+- **A clean installation redeems its enrollment subcode** (D1,
+  enrollment.v1 §3 and §5). `aimem enroll redeem --hub-name NAME --label
+  LABEL`, which aicrew-agent join runs with the subcode record on standard
+  input, stores one user-scoped credential as hub NAME's individual
+  credential.
+  - The hub (`POST /v1/identity/enrollments/redemptions`, hub TLS, no
+    bearer: the subcode is the authority) creates one user with no grant
+    and one user-scoped token in one transaction, and returns it sealed
+    with HPKE (X25519, HKDF-SHA256, ChaCha20-Poly1305) to the client's
+    key. The bearer is stored only as a digest and travels only in the
+    ciphertext.
+  - An identical retry replays for an hour, also past the subcode's
+    expiry; another key is `enrollment_conflict`; every other refusal is
+    the same `enrollment_invalid`. At most 10 requests per minute per
+    address and 20 per subcode (`rate_limited`).
+  - The client verifies the hub only against the record's trust (pin, CA
+    or system roots), keeps its delivery key and request key in owner-only
+    pending state, and resumes after a lost reply or a crash: a rerun
+    replays with the same keys, and one that finds the credential stored
+    verifies it without spending anything. Exit codes 0, 3, 4, 5 and 2, as
+    the reservation commands use them.
+
 ### Changed
+
+- **A hub without a checkpoint token gets no journal push.** An installation
+  enrolled through D1 holds only its individual credential, and journal
+  push needs the hub's checkpoint token. Before this, every checkpoint
+  would be refused and spooled forever. Now the push is skipped, with one
+  note per run. Docs push still needs the checkpoint token too.
 
 - **Building from source needs Go 1.26.** `go.mod` now says `go 1.26.0`,
   and CI and the release workflow build with the newest Go 1.26 patch.

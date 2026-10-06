@@ -282,6 +282,16 @@ func (c *Client) pushHub(hubName string, body []byte) {
 		}
 		return
 	}
+	if hub.Token == "" {
+		// An installation enrolled through D1 holds only its individual
+		// credential; journal push needs the hub's checkpoint token, which
+		// enrollment never delivers. Spooling would only grow a queue that
+		// can never drain, so the push is skipped and said once.
+		c.pushOff.Do(func() {
+			c.note("aimem: hub %q has no checkpoint token, so journal push to it is off (an enrolled installation receives none; add one with aimem hub add)", name)
+		})
+		return
+	}
 	spool := c.hubSpoolPathFor(name)
 	if err := c.hubPost(hub, body); err != nil {
 		if serr := c.spoolTo(spool, body); serr == nil {
