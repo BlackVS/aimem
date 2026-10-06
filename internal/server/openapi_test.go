@@ -14,7 +14,8 @@ import (
 func TestOpenAPIMatchesRouteTable(t *testing.T) {
 	var spec struct {
 		Paths map[string]map[string]struct {
-			XRole string `json:"x-role"`
+			XRole    string `json:"x-role"`
+			Security *[]any `json:"security"`
 		} `json:"paths"`
 	}
 	if err := json.Unmarshal(openAPISpec, &spec); err != nil {
@@ -58,6 +59,11 @@ func TestOpenAPIMatchesRouteTable(t *testing.T) {
 		if op.XRole != want {
 			t.Errorf("%s %s: spec says x-role %q, route table says %q",
 				rt.Method, path, op.XRole, want)
+		}
+		// A route the bearer gate does not authenticate must override the
+		// spec's root bearer requirement, or schema consumers send one.
+		if (want == "public" || want == "subcode") && (op.Security == nil || len(*op.Security) != 0) {
+			t.Errorf("%s %s: x-role %q needs \"security\": [] to override the root bearer requirement", rt.Method, path, want)
 		}
 	}
 	// Reverse: nothing in the spec that the server does not serve.

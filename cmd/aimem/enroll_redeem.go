@@ -174,8 +174,12 @@ func enrollRedeem(root, hubName, label string, stdin io.Reader, stderr io.Writer
 		os.Remove(pendingPath)
 		return enrollResult{Hub: hubName, Outcome: outcome, UserID: user, TokenID: token, BundleID: rec.BundleID}, nil
 	}
+	// A first run retries only within the subcode's expiry; a recovery
+	// retries until the hub answers (enrollment.v1 §5 step 4).
+	var until time.Time
 	switch {
 	case pending == nil:
+		until = rec.ExpiresAt
 		if !time.Now().Before(rec.ExpiresAt) {
 			return enrollResult{}, refuse(enrollExitFinal, "enrollment_invalid: the onboarding code expired at %s; ask the operator for a new one", rec.ExpiresAt.Format(time.RFC3339))
 		}
@@ -217,7 +221,7 @@ func enrollRedeem(root, hubName, label string, stdin io.Reader, stderr io.Writer
 	}
 	sum := sha256.Sum256([]byte(pending.RequestKey))
 	k1 := "k1_" + base64.RawURLEncoding.EncodeToString(sum[:])
-	ans, err := enrollSend(client, rec, label, k1, priv)
+	ans, err := enrollSend(client, rec, label, k1, priv, until)
 	if err != nil {
 		return enrollResult{}, err
 	}
@@ -360,7 +364,7 @@ type enrollAnswer struct {
 
 // enrollSend sends the redemption, retrying a lost reply or a retryable
 // refusal with the same key: the hub replays a committed redemption.
-func enrollSend(client *http.Client, rec enrollRecordIn, label, k1 string, priv *ecdh.PrivateKey) (enrollAnswer, error) {
+func enrollSend(client *http.Client, rec enrollRecordIn, label, k1 string, priv *ecdh.PrivateKey, until time.Time) (enrollAnswer, error) {
 	body, err := json.Marshal(map[string]any{"hub_id": rec.Hub.HubID, "subcode": rec.Subcode, "label": label,
 		"delivery": map[string]string{"suite": enrollment.Suite, "public_key": enrollment.EncodePublicKey(priv.PublicKey())}})
 	if err != nil {
@@ -372,6 +376,12 @@ func enrollSend(client *http.Client, rec enrollRecordIn, label, k1 string, priv 
 	for attempt := range 5 {
 		if attempt > 0 {
 			time.Sleep(enrollBackoff(attempt - 1))
+			if !until.IsZero() && !time.Now().Before(until) {
+				// Stop retrying a first redemption at the expiry. An earlier
+				// attempt may have reached the hub, so the outcome is
+				// unknown: the rerun is a recovery, which the hub replays.
+				return enrollAnswer{}, refuse(enrollExitUnknown, "the onboarding code expired while retrying (%v); run the same command again: it recovers a redemption that reached the hub", last)
+			}
 		}
 		req, err := http.NewRequest("POST", endpoint, bytes.NewReader(body))
 		if err != nil {
@@ -465,6 +475,11 @@ func loadEnrollPending(path string) (*enrollPending, error) {
 	if err != nil {
 		return nil, err
 	}
+	if len(raw) == 0 {
+		// Created and not yet written: either another run is writing it now,
+		// or a run stopped before it sent anything. Neither holds keys.
+		return nil, nil
+	}
 	if err := privatefile.Check(path); err != nil {
 		return nil, fmt.Errorf("the pending state %s is not private: %v", path, err)
 	}
@@ -486,7 +501,43 @@ func newEnrollPending(path, bundle string) (*enrollPending, error) {
 	}
 	p := &enrollPending{BundleID: bundle, Phase: "sending", RequestKey: hex.EncodeToString(rk[:]),
 		PrivateKey: base64.RawURLEncoding.EncodeToString(key.Bytes()), CreatedAt: time.Now().UTC()}
-	return p, writeEnrollPending(path, p)
+	raw, err := json.Marshal(p)
+	if err != nil {
+		return nil, err
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		return nil, err
+	}
+	// The first state is published exclusively: when two runs start at
+	// once, one creates it and the other resumes with the winner's keys, so
+	// the keys of a redemption that reached the hub are never overwritten.
+	f, err := privatefile.Create(path)
+	if errors.Is(err, os.ErrExist) {
+		// The winner may still be writing it (on Windows its handle shares
+		// nothing until closed): wait briefly for its keys.
+		for range 20 {
+			if won, err := loadEnrollPending(path); err == nil && won != nil {
+				return won, nil
+			}
+			time.Sleep(50 * time.Millisecond)
+		}
+		return nil, errors.New("another run is creating the pending state; run the same command again")
+	}
+	if err != nil {
+		return nil, err
+	}
+	_, werr := f.Write(raw)
+	if serr := f.Sync(); werr == nil {
+		werr = serr
+	}
+	if cerr := f.Close(); werr == nil {
+		werr = cerr
+	}
+	if werr != nil {
+		os.Remove(path)
+		return nil, werr
+	}
+	return p, nil
 }
 
 // writeEnrollPending replaces the pending state atomically with an
