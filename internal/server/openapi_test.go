@@ -37,6 +37,10 @@ func TestOpenAPIMatchesRouteTable(t *testing.T) {
 			want = "admin"
 		case public[path]:
 			want = "public"
+		case rt.Method+" "+rt.Pattern == enrollRedeemPattern:
+			// No bearer is evaluated: the enrollment subcode in the body
+			// is the authority (enrollment.v1 §3).
+			want = "subcode"
 		}
 		key := strings.ToLower(rt.Method) + " " + path
 		seen[key] = want

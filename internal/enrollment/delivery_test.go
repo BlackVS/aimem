@@ -3,6 +3,7 @@ package enrollment
 import (
 	"crypto/hpke"
 	"encoding/base64"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -117,5 +118,34 @@ func TestLimiter(t *testing.T) {
 	}
 	if RedemptionsPerAddress != 10 || RedemptionsPerBundle != 20 || RateWindow != time.Minute {
 		t.Fatal("the bounds differ from enrollment.v1")
+	}
+}
+
+// The sweep forgets idle keys at most once per window: many distinct keys
+// cost one sweep, not one scan per event.
+func TestLimiterSweepsIdleKeysOncePerWindow(t *testing.T) {
+	l := NewLimiter(1, time.Minute)
+	now := time.Now()
+	for i := range 1000 {
+		l.Allow(fmt.Sprintf("address-%d", i), now)
+	}
+	if len(l.seen) != 1000 || !l.swept.Equal(now) {
+		t.Fatalf("keys %d swept %v", len(l.seen), l.swept)
+	}
+	l.Allow("late", now.Add(30*time.Second)) // inside the window: no sweep
+	if len(l.seen) != 1001 {
+		t.Fatalf("a sweep ran inside the window: %d keys", len(l.seen))
+	}
+	l.Allow("later", now.Add(time.Minute+time.Second)) // a window later: the idle keys go
+	if len(l.seen) != 2 {
+		t.Fatalf("after the sweep: %d keys", len(l.seen))
+	}
+}
+
+func BenchmarkLimiterDistinctKeys(b *testing.B) {
+	l := NewLimiter(RedemptionsPerAddress, RateWindow)
+	now := time.Now()
+	for i := range b.N {
+		l.Allow(fmt.Sprintf("address-%d", i), now)
 	}
 }

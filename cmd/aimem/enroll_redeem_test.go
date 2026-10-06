@@ -1,0 +1,313 @@
+package main
+
+import (
+	"bytes"
+	"database/sql"
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
+	"os"
+	"path/filepath"
+	"strings"
+	"sync/atomic"
+	"testing"
+	"time"
+
+	"aimem/internal/adapter"
+)
+
+const redeemPath = "/v1/identity/enrollments/redemptions"
+
+// enrollRig is a real TLS hub that counts redemption requests and can lose
+// the replies of the first ones (the hub commits, the client sees no answer).
+type enrollRig struct {
+	*identityCLIRig
+	redeems      atomic.Int64
+	lose         atomic.Int64
+	identityDown atomic.Bool
+}
+
+func newEnrollRig(t *testing.T) *enrollRig {
+	t.Helper()
+	captureNotices(t)
+	saved := enrollBackoff
+	enrollBackoff = func(int) time.Duration { return 0 }
+	t.Cleanup(func() { enrollBackoff = saved; enrollCrashAt = nil })
+	e := &enrollRig{}
+	e.identityCLIRig = newIdentityCLIRig(t, func(h http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if r.URL.Path == "/v1/access/identity" && e.identityDown.Load() {
+				http.Error(w, "unavailable", http.StatusServiceUnavailable)
+				return
+			}
+			if r.URL.Path == redeemPath {
+				e.redeems.Add(1)
+				if e.lose.Load() > 0 {
+					e.lose.Add(-1)
+					h.ServeHTTP(httptest.NewRecorder(), r) // committed on the hub
+					panic(http.ErrAbortHandler)            // the reply is lost
+				}
+			}
+			h.ServeHTTP(w, r)
+		})
+	})
+	return e
+}
+
+// issue runs the real `enroll issue` and returns its record line.
+func (e *enrollRig) issue(t *testing.T) string {
+	t.Helper()
+	read := pipeSecretStdout(t)
+	e.mustRun(t, "enroll", "issue", "--purpose", "new-user", "--output", "-")
+	return read()
+}
+
+type redeemRun struct {
+	code           int
+	stdout, stderr string
+}
+
+func redeemWith(t *testing.T, root, record string, args ...string) redeemRun {
+	t.Helper()
+	if len(args) == 0 {
+		args = []string{"--hub-name", "pilot", "--label", "member-laptop", "--json"}
+	}
+	var out, errb bytes.Buffer
+	code := runEnrollRedeem(args, strings.NewReader(record), &out, &errb, root)
+	return redeemRun{code, out.String(), errb.String()}
+}
+
+func (r redeemRun) result(t *testing.T) enrollResult {
+	t.Helper()
+	var res enrollResult
+	if err := json.Unmarshal([]byte(r.stdout), &res); err != nil {
+		t.Fatalf("result %q (stderr %q): %v", r.stdout, r.stderr, err)
+	}
+	return res
+}
+
+// noSecretOnDisk: the subcode is nowhere under the root, and the bearer is
+// only in hub.json's credential slot.
+func noSecretOnDisk(t *testing.T, root, subcode, bearer string) {
+	t.Helper()
+	filepath.Walk(root, func(path string, fi os.FileInfo, err error) error {
+		if err != nil || fi.IsDir() {
+			return nil
+		}
+		raw, _ := os.ReadFile(path)
+		if strings.Contains(string(raw), subcode) {
+			t.Errorf("%s holds the subcode", path)
+		}
+		if bearer != "" && strings.Contains(string(raw), bearer) && filepath.Base(path) != "hub.json" {
+			t.Errorf("%s holds the bearer", path)
+		}
+		return nil
+	})
+}
+
+func recordSubcode(t *testing.T, record string) string {
+	t.Helper()
+	var rec struct {
+		Subcode string `json:"subcode"`
+	}
+	if err := json.Unmarshal([]byte(record), &rec); err != nil {
+		t.Fatal(err)
+	}
+	return rec.Subcode
+}
+
+// The pipeline end to end: issue on the hub, redeem on a clean
+// installation, the credential stored and accepted, a rerun spends nothing.
+func TestEnrollRedeemEndToEnd(t *testing.T) {
+	e := newEnrollRig(t)
+	record := e.issue(t)
+	root := t.TempDir()
+	run := redeemWith(t, root, record)
+	if run.code != enrollExitOK {
+		t.Fatalf("redeem: %d %s", run.code, run.stderr)
+	}
+	res := run.result(t)
+	if res.Outcome != "enrolled" || res.Hub != "pilot" || res.UserID == "" {
+		t.Fatalf("result: %+v", res)
+	}
+	hubs, def := adapter.LoadHubs(root)
+	h := hubs["pilot"]
+	if h == nil || def != "pilot" || h.URL != e.ts.URL || !strings.HasPrefix(h.TaskToken, "aimem_user_") || h.Token != "" || h.CAFile == "" {
+		t.Fatalf("hub entry: %+v default %q", h, def)
+	}
+	if ca, err := os.ReadFile(h.CAFile); err != nil || !strings.Contains(string(ca), "CERTIFICATE") {
+		t.Fatalf("the CA bundle beside the entry: %v", err)
+	}
+	if entries, _ := os.ReadDir(filepath.Join(root, "enroll")); len(entries) != 0 {
+		t.Fatalf("pending state left: %v", entries)
+	}
+	noSecretOnDisk(t, root, recordSubcode(t, record), h.TaskToken)
+	if list := e.mustRun(t, "enroll", "list", "--state", "redeemed"); !strings.Contains(list, "redeemed: user "+res.UserID) {
+		t.Fatalf("hub ledger: %q", list)
+	}
+	before := e.redeems.Load()
+	again := redeemWith(t, root, record)
+	if again.code != enrollExitOK || again.result(t).Outcome != "already_enrolled" || e.redeems.Load() != before {
+		t.Fatalf("rerun: %d %s, %d redemption requests", again.code, again.stderr, e.redeems.Load()-before)
+	}
+}
+
+// Every reply lost: the run ends with outcome unknown (5) and keeps its
+// keys; the rerun replays the committed redemption.
+func TestEnrollRedeemLostReplies(t *testing.T) {
+	e := newEnrollRig(t)
+	record := e.issue(t)
+	root := t.TempDir()
+	e.lose.Store(5)
+	run := redeemWith(t, root, record)
+	if run.code != enrollExitUnknown || !strings.Contains(run.stderr, "run the same command again") {
+		t.Fatalf("lost replies: %d %s", run.code, run.stderr)
+	}
+	if hubs, _ := adapter.LoadHubs(root); hubs != nil {
+		t.Fatalf("a credential was stored without a delivery: %+v", hubs)
+	}
+	again := redeemWith(t, root, record)
+	if again.code != enrollExitOK || again.result(t).Outcome != "enrolled" {
+		t.Fatalf("rerun: %d %s", again.code, again.stderr)
+	}
+	// One user, however many requests.
+	if list := e.mustRun(t, "enroll", "list", "--state", "redeemed"); strings.Count(list, "redeemed: user") != 1 {
+		t.Fatalf("ledger: %q", list)
+	}
+}
+
+// A crash after the delivery was recorded, before the credential was
+// stored: the rerun replays and stores it.
+func TestEnrollRedeemCrashBeforeStorage(t *testing.T) {
+	e := newEnrollRig(t)
+	record := e.issue(t)
+	root := t.TempDir()
+	enrollCrashAt = func(phase string) bool { return phase == "delivered" }
+	if run := redeemWith(t, root, record); run.code != enrollExitUnknown {
+		t.Fatalf("crash: %d %s", run.code, run.stderr)
+	}
+	enrollCrashAt = nil
+	if hubs, _ := adapter.LoadHubs(root); hubs != nil {
+		t.Fatal("the credential was stored before the crash point")
+	}
+	again := redeemWith(t, root, record)
+	if again.code != enrollExitOK || again.result(t).Outcome != "enrolled" {
+		t.Fatalf("rerun: %d %s", again.code, again.stderr)
+	}
+}
+
+// A crash after the credential was stored: the rerun verifies it against
+// the recorded identity and never calls the redemption route.
+func TestEnrollRedeemCrashAfterStorage(t *testing.T) {
+	e := newEnrollRig(t)
+	record := e.issue(t)
+	root := t.TempDir()
+	enrollCrashAt = func(phase string) bool { return phase == "stored" }
+	first := redeemWith(t, root, record)
+	if first.code != enrollExitUnknown {
+		t.Fatalf("crash: %d %s", first.code, first.stderr)
+	}
+	enrollCrashAt = nil
+	before := e.redeems.Load()
+	again := redeemWith(t, root, record)
+	if again.code != enrollExitOK || again.result(t).Outcome != "already_enrolled" || e.redeems.Load() != before {
+		t.Fatalf("rerun: %d %s, %d redemption requests", again.code, again.stderr, e.redeems.Load()-before)
+	}
+	if entries, _ := os.ReadDir(filepath.Join(root, "enroll")); len(entries) != 0 {
+		t.Fatalf("pending state left: %v", entries)
+	}
+}
+
+func TestEnrollRedeemRefusals(t *testing.T) {
+	e := newEnrollRig(t)
+
+	// A revoked bundle: final, nothing stored.
+	revoked := e.issue(t)
+	var rec map[string]any
+	json.Unmarshal([]byte(revoked), &rec)
+	e.mustRun(t, "enroll", "revoke", "--bundle-id", rec["bundle_id"].(string))
+	root := t.TempDir()
+	if run := redeemWith(t, root, revoked); run.code != enrollExitFinal || !strings.Contains(run.stderr, "enrollment_invalid") {
+		t.Fatalf("revoked: %d %s", run.code, run.stderr)
+	}
+	if hubs, _ := adapter.LoadHubs(root); hubs != nil {
+		t.Fatal("a refused redemption stored a hub entry")
+	}
+
+	// An expired record is refused before any request.
+	live := e.issue(t)
+	before := e.redeems.Load()
+	json.Unmarshal([]byte(live), &rec)
+	rec["expires_at"] = "2001-01-01T00:00:00Z"
+	raw, _ := json.Marshal(rec)
+	expired := string(raw) + "\n"
+	if run := redeemWith(t, t.TempDir(), expired); run.code != enrollExitFinal || !strings.Contains(run.stderr, "expired") {
+		t.Fatalf("expired: %d %s", run.code, run.stderr)
+	}
+
+	// A hub that fails the record's trust gets nothing.
+	json.Unmarshal([]byte(live), &rec)
+	rec["hub"].(map[string]any)["trust"] = map[string]any{"spki_sha256": "sha256-" + strings.Repeat("A", 43) + "="}
+	raw, _ = json.Marshal(rec)
+	if run := redeemWith(t, t.TempDir(), string(raw)); run.code != enrollExitFinal || !strings.Contains(run.stderr, "failed the record's trust check") {
+		t.Fatalf("trust: %d %s", run.code, run.stderr)
+	}
+	if n := e.redeems.Load() - before; n != 0 {
+		t.Fatalf("%d redemption requests for refused records", n)
+	}
+
+	// An oversized record, bad flags, and a hub name already bound elsewhere.
+	if run := redeemWith(t, t.TempDir(), strings.Repeat("x", enrollRecordLimit+1)); run.code != enrollExitFinal {
+		t.Fatalf("oversized: %d %s", run.code, run.stderr)
+	}
+	if run := redeemWith(t, t.TempDir(), live, "--hub-name", "pilot", "--label", "Not A Label"); run.code != enrollExitUsage {
+		t.Fatalf("bad label: %d", run.code)
+	}
+	other := t.TempDir()
+	if err := adapter.SaveHubs(other, map[string]*adapter.HubConfig{"pilot": {URL: "https://elsewhere.example.test:8443", Token: "t"}}, "pilot"); err != nil {
+		t.Fatal(err)
+	}
+	if run := redeemWith(t, other, live); run.code != enrollExitFinal || !strings.Contains(run.stderr, "identity_mismatch") {
+		t.Fatalf("bound elsewhere: %d %s", run.code, run.stderr)
+	}
+}
+
+// A stored credential whose check cannot finish (the hub answers 503) is
+// never taken as refused: nothing is spent and the credential stays. A
+// credential the hub refuses (revoked) is replaced by a new enrollment.
+func TestEnrollRedeemSpendsOnlyWhenTheStoredCredentialIsRefused(t *testing.T) {
+	e := newEnrollRig(t)
+	root := t.TempDir()
+	if run := redeemWith(t, root, e.issue(t)); run.code != enrollExitOK {
+		t.Fatalf("first enrollment: %d %s", run.code, run.stderr)
+	}
+	hubs, _ := adapter.LoadHubs(root)
+	stored := hubs["pilot"].TaskToken
+	second := e.issue(t)
+	before := e.redeems.Load()
+	e.identityDown.Store(true)
+	run := redeemWith(t, root, second)
+	e.identityDown.Store(false)
+	if run.code != enrollExitRetry || !strings.Contains(run.stderr, "nothing was spent") || e.redeems.Load() != before {
+		t.Fatalf("check unavailable: %d %s, %d redemption requests", run.code, run.stderr, e.redeems.Load()-before)
+	}
+	if hubs, _ := adapter.LoadHubs(root); hubs["pilot"].TaskToken != stored {
+		t.Fatal("the stored credential was replaced")
+	}
+	// Revoke the stored credential on the hub: now the second code is spent.
+	db, err := sql.Open("sqlite", filepath.Join(e.reg.Root(), "access.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	if _, err := db.Exec("UPDATE tokens SET revoked=1"); err != nil {
+		t.Fatal(err)
+	}
+	again := redeemWith(t, root, second)
+	if again.code != enrollExitOK || again.result(t).Outcome != "enrolled" {
+		t.Fatalf("after revocation: %d %s", again.code, again.stderr)
+	}
+	if hubs, _ := adapter.LoadHubs(root); hubs["pilot"].TaskToken == stored {
+		t.Fatal("the refused credential was kept")
+	}
+}

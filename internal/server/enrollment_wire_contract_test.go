@@ -149,8 +149,7 @@ func TestEnrollmentContractSecretLocations(t *testing.T) {
 	}
 }
 
-// The three admin routes are served and described; redemption is not served
-// until D1-b.
+// The three admin routes and the redemption route are served.
 func TestEnrollmentContractRoutesServed(t *testing.T) {
 	s, _ := testServer(t)
 	served := map[string]bool{}
@@ -162,9 +161,8 @@ func TestEnrollmentContractRoutesServed(t *testing.T) {
 			t.Errorf("%s: served %v, admin %v", p, ok, admin)
 		}
 	}
-	for route := range served {
-		if strings.Contains(route, "/redemptions") && strings.Contains(route, "enrollments") {
-			t.Errorf("%s is served before D1-b", route)
-		}
+	// Redemption is served without the admin role and without a bearer.
+	if admin, ok := served[enrollRedeemPattern]; !ok || admin {
+		t.Errorf("%s: served %v, admin %v", enrollRedeemPattern, ok, admin)
 	}
 }

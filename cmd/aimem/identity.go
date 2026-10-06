@@ -646,45 +646,68 @@ func newIdentityClient(hub, tokenFile, caFile, pin string) (*identityClient, err
 // roots, a CA bundle, or an SPKI pin. It never follows redirects (the
 // bearer must reach only the named hub) and never uses a proxy.
 func identityHTTPClient(caFile, pin string) (*http.Client, error) {
-	cfg := &tls.Config{MinVersion: tls.VersionTLS12}
-	switch {
-	case caFile != "" && pin != "":
+	if caFile != "" && pin != "" {
 		return nil, fmt.Errorf("use either --hub-ca-file or --hub-pin, not both")
-	case caFile != "":
-		pem, err := os.ReadFile(caFile)
-		if err != nil {
+	}
+	var pem []byte
+	if caFile != "" {
+		var err error
+		if pem, err = os.ReadFile(caFile); err != nil {
 			return nil, fmt.Errorf("--hub-ca-file: %w", err)
 		}
-		pool := x509.NewCertPool()
-		if !pool.AppendCertsFromPEM(pem) {
+	}
+	cfg, err := hubTLSConfig(pem, pin)
+	if err != nil {
+		if caFile != "" {
 			return nil, fmt.Errorf("--hub-ca-file %s holds no PEM certificate", caFile)
 		}
-		cfg.RootCAs = pool
-	case pin != "":
-		b64, ok := strings.CutPrefix(pin, "sha256-")
-		want, err := base64.StdEncoding.DecodeString(b64)
-		if !ok || err != nil || len(want) != sha256.Size {
-			return nil, fmt.Errorf("--hub-pin must be sha256- followed by the base64 SHA-256 of the hub certificate's public key")
-		}
-		// The chain check is replaced by the pin, never dropped: the
-		// connection is refused unless the leaf's SPKI hashes to the pin.
-		cfg.InsecureSkipVerify = true
-		cfg.VerifyConnection = func(cs tls.ConnectionState) error {
-			if len(cs.PeerCertificates) == 0 {
-				return errors.New("the hub presented no certificate")
-			}
-			sum := sha256.Sum256(cs.PeerCertificates[0].RawSubjectPublicKeyInfo)
-			if subtle.ConstantTimeCompare(sum[:], want) != 1 {
-				return errors.New("the hub certificate does not match --hub-pin")
-			}
-			return nil
-		}
+		return nil, fmt.Errorf("--hub-pin must be sha256- followed by the base64 SHA-256 of the hub certificate's public key")
 	}
 	return &http.Client{
 		Timeout:       30 * time.Second,
 		Transport:     &http.Transport{TLSClientConfig: cfg, Proxy: nil},
 		CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse },
 	}, nil
+}
+
+// errHubPin is a hub certificate that does not match the pin it must match.
+var errHubPin = errors.New("the hub certificate does not match the pinned key")
+
+// hubTLSConfig trusts the hub by a CA bundle (pem), an SPKI pin
+// (sha256-BASE64), or, with neither, the system roots. It never disables
+// verification: a pin replaces the chain check, never drops it.
+func hubTLSConfig(pem []byte, pin string) (*tls.Config, error) {
+	cfg := &tls.Config{MinVersion: tls.VersionTLS12}
+	switch {
+	case pem != nil && pin != "":
+		return nil, errors.New("a CA bundle and a pin are exclusive")
+	case pem != nil:
+		pool := x509.NewCertPool()
+		if !pool.AppendCertsFromPEM(pem) {
+			return nil, errors.New("the CA bundle holds no PEM certificate")
+		}
+		cfg.RootCAs = pool
+	case pin != "":
+		b64, ok := strings.CutPrefix(pin, "sha256-")
+		want, err := base64.StdEncoding.DecodeString(b64)
+		if !ok || err != nil || len(want) != sha256.Size {
+			return nil, errors.New("the pin must be sha256- followed by a base64 SHA-256")
+		}
+		// The chain check is replaced by the pin, never dropped: the
+		// connection is refused unless the leaf's SPKI hashes to the pin.
+		cfg.InsecureSkipVerify = true
+		cfg.VerifyConnection = func(cs tls.ConnectionState) error {
+			if len(cs.PeerCertificates) == 0 {
+				return fmt.Errorf("%w: the hub presented no certificate", errHubPin)
+			}
+			sum := sha256.Sum256(cs.PeerCertificates[0].RawSubjectPublicKeyInfo)
+			if subtle.ConstantTimeCompare(sum[:], want) != 1 {
+				return errHubPin
+			}
+			return nil
+		}
+	}
+	return cfg, nil
 }
 
 // errIdentityTransport marks a request whose outcome the hub never reported.

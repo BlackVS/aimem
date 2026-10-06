@@ -60,6 +60,9 @@ var enrollmentRefusals = map[string]struct {
 	"enrollment_exists":          {409, "This bundle was already issued; its subcode cannot be shown again.", "Revoke the bundle and issue a new one; its subcode cannot be shown again."},
 	"enrollment_redeemed":        {409, "This bundle was redeemed; revoking it does not revoke what it issued.", "Revoke the issued token and disable the user if the redemption was not legitimate."},
 	"idempotency_conflict":       {409, "This bundle ID was used with other input.", "Use a new bundle ID for other input."},
+	"enrollment_invalid":         {403, "This onboarding code is not valid.", "Ask the operator for a new onboarding code."},
+	"enrollment_conflict":        {409, "This onboarding code was used by another request.", "Do not retry with another key; ask the operator, who checks the bundle's audit."},
+	"rate_limited":               {429, "Too many redemption requests.", "Wait, then try again with the same key."},
 	"enrollment_unavailable":     {503, "Enrollment storage is unavailable.", "Retry with the same input; nothing was applied."},
 }
 
@@ -86,7 +89,7 @@ func (s *Server) enrollRefuse(w http.ResponseWriter, code string, redeemed *enro
 	w.Header().Set("Cache-Control", "no-store")
 	w.WriteHeader(ref.status)
 	json.NewEncoder(w).Encode(enrollmentRefusal{identityRefusalBody: identityRefusalBody{Code: code, Message: ref.message,
-		Retryable: ref.status == http.StatusServiceUnavailable, NextAction: ref.next, CorrelationID: cid}, Redeemed: redeemed})
+		Retryable: ref.status == http.StatusServiceUnavailable || ref.status == http.StatusTooManyRequests, NextAction: ref.next, CorrelationID: cid}, Redeemed: redeemed})
 }
 
 // enrollmentGateRefuse answers a non-admin bearer on an enrollment route
