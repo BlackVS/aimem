@@ -355,6 +355,99 @@ func TestNewEnrollPendingPublishedOnce(t *testing.T) {
 	}
 }
 
+func TestNewEnrollPendingAbandonedEmpty(t *testing.T) {
+	bundle := "01a10c90-0000-7000-8000-000000000001"
+	dir := filepath.Join(t.TempDir(), "enroll")
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	empty := func(name string, age time.Duration) string {
+		path := filepath.Join(dir, name)
+		if err := os.WriteFile(path, nil, 0o600); err != nil {
+			t.Fatal(err)
+		}
+		at := time.Now().Add(-age)
+		if err := os.Chtimes(path, at, at); err != nil {
+			t.Fatal(err)
+		}
+		return path
+	}
+
+	// A creator that stopped before writing, long ago: the run recovers
+	// with fresh keys and leaves no tombstone behind.
+	old := empty("old.json", 2*enrollAbandonedAfter)
+	p, err := newEnrollPending(old, bundle)
+	if err != nil {
+		t.Fatalf("abandoned empty file not recovered: %v", err)
+	}
+	stored, err := loadEnrollPending(old)
+	if err != nil || stored == nil || stored.RequestKey != p.RequestKey {
+		t.Fatalf("stored state: %+v %v", stored, err)
+	}
+	if left, _ := filepath.Glob(old + ".abandoned-*"); len(left) != 0 {
+		t.Fatalf("tombstones left: %v", left)
+	}
+
+	// A young empty file may belong to a creator still writing it: it is
+	// never touched, and the run asks to be repeated.
+	young := empty("young.json", time.Second)
+	if _, err := newEnrollPending(young, bundle); err == nil || !strings.Contains(err.Error(), "another run is creating") {
+		t.Fatalf("young empty file: %v", err)
+	}
+	if fi, err := os.Stat(young); err != nil || fi.Size() != 0 {
+		t.Fatalf("young empty file was changed: %v %v", fi, err)
+	}
+
+	// An old file that holds keys is never reclaimed.
+	if reclaimAbandonedPending(old) {
+		t.Fatal("reclaimed a written state")
+	}
+}
+
+func TestNewEnrollPendingReclaimedWhileStalled(t *testing.T) {
+	// A creator that stalls past the threshold loses its empty file to a
+	// reclaim; when it resumes it must not return keys that are not the
+	// published state.
+	path := filepath.Join(t.TempDir(), "enroll", "stalled.json")
+	bundle := "01a10c90-0000-7000-8000-000000000001"
+	var other *enrollPending
+	reclaimed := false
+	enrollAfterCreate = func() {
+		enrollAfterCreate = nil
+		at := time.Now().Add(-2 * enrollAbandonedAfter)
+		if err := os.Chtimes(path, at, at); err != nil {
+			t.Error(err)
+			return
+		}
+		// On Windows the stalled creator's handle refuses the rename, so
+		// nothing is reclaimed there and the creator keeps its file.
+		if reclaimed = reclaimAbandonedPending(path); reclaimed {
+			var err error
+			if other, err = newEnrollPending(path, bundle); err != nil {
+				t.Error(err)
+			}
+		}
+	}
+	t.Cleanup(func() { enrollAfterCreate = nil })
+	p, err := newEnrollPending(path, bundle)
+	stored, lerr := loadEnrollPending(path)
+	if lerr != nil || stored == nil {
+		t.Fatalf("stored state: %+v %v", stored, lerr)
+	}
+	if !reclaimed {
+		if err != nil || stored.RequestKey != p.RequestKey {
+			t.Fatalf("unreclaimed creator: %+v %v", p, err)
+		}
+		return
+	}
+	if err == nil || !strings.Contains(err.Error(), "replaced the pending state") {
+		t.Fatalf("stalled creator returned keys that are not published: %+v %v", p, err)
+	}
+	if other == nil || stored.RequestKey != other.RequestKey {
+		t.Fatalf("the reclaiming run's state was not kept: %+v", stored)
+	}
+}
+
 // A first run stops retrying at the record's expiry with outcome unknown;
 // the rerun is a recovery, which the hub replays past the expiry.
 func TestEnrollRedeemFirstRunStopsAtExpiry(t *testing.T) {

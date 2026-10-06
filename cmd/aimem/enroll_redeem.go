@@ -66,6 +66,7 @@ var (
 	enrollBeforePublish func()
 	enrollBackoff       = func(attempt int) time.Duration { return time.Duration(1<<attempt) * time.Second }
 	enrollCrashAt       func(phase string) bool
+	enrollAfterCreate   func()
 )
 
 var (
@@ -552,23 +553,85 @@ func newEnrollPending(path, bundle string) (*enrollPending, error) {
 			}
 			time.Sleep(50 * time.Millisecond)
 		}
-		return nil, errors.New("another run is creating the pending state; run the same command again")
+		if !reclaimAbandonedPending(path) {
+			return nil, errors.New("another run is creating the pending state; run the same command again")
+		}
+		f, err = privatefile.Create(path)
+		if errors.Is(err, os.ErrExist) {
+			return nil, errors.New("another run is creating the pending state; run the same command again")
+		}
 	}
 	if err != nil {
 		return nil, err
 	}
-	_, werr := f.Write(raw)
+	if enrollAfterCreate != nil {
+		enrollAfterCreate()
+	}
+	mine, werr := f.Stat()
+	if werr == nil {
+		_, werr = f.Write(raw)
+	}
 	if serr := f.Sync(); werr == nil {
 		werr = serr
 	}
 	if cerr := f.Close(); werr == nil {
 		werr = cerr
 	}
+	// A run that stalled for longer than enrollAbandonedAfter between the
+	// create and the write may have had its empty file reclaimed: its keys
+	// were never published, so it must not send them, and the file at the
+	// path now is another run's.
+	now, serr := os.Stat(path)
+	ours := serr == nil && mine != nil && os.SameFile(mine, now)
 	if werr != nil {
-		os.Remove(path)
+		if ours {
+			os.Remove(path)
+		}
 		return nil, werr
 	}
+	if !ours {
+		return nil, errors.New("another run replaced the pending state; run the same command again")
+	}
 	return p, nil
+}
+
+// enrollAbandonedAfter is how old an empty pending file must be before a run
+// treats it as abandoned: creating and writing the first state takes
+// milliseconds, so a creator that has not written it in a minute stopped.
+const enrollAbandonedAfter = time.Minute
+
+// reclaimAbandonedPending removes an empty pending file older than
+// enrollAbandonedAfter and reports whether it did. A young empty file belongs
+// to a run that may still be writing it and is never touched. The file is
+// first renamed to a name only this run knows, so two runs reclaiming at once
+// cannot remove a file that another run has just created in its place; on
+// Windows a live creator's handle refuses the rename outright.
+func reclaimAbandonedPending(path string) bool {
+	old, err := os.Stat(path)
+	if err != nil || old.Size() != 0 || time.Since(old.ModTime()) < enrollAbandonedAfter {
+		return false
+	}
+	// On Windows a stat's file identity is read lazily by path: read it now,
+	// while the path still names this file.
+	os.SameFile(old, old)
+	var tag [8]byte
+	if _, err := rand.Read(tag[:]); err != nil {
+		return false
+	}
+	tomb := path + ".abandoned-" + hex.EncodeToString(tag[:])
+	if os.Rename(path, tomb) != nil {
+		return false
+	}
+	got, err := os.Stat(tomb)
+	if err == nil && os.SameFile(old, got) && got.Size() == 0 {
+		return os.Remove(tomb) == nil
+	}
+	// Another run's file took its place between the checks: put it back
+	// without replacing anything that has appeared at the path since.
+	if os.Link(tomb, path) == nil {
+		os.Remove(tomb)
+	}
+	return false
 }
 
 // writeEnrollPending replaces the pending state atomically with an
