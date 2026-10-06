@@ -403,3 +403,65 @@ func TestHubRepairKeepsRouting(t *testing.T) {
 		t.Fatalf("not private after repair: %v", err)
 	}
 }
+
+// Run B is overtaken: it starts, A completes the whole enrollment and
+// removes its state, then B publishes fresh keys. B must end as
+// already_enrolled without spending anything, and a state left by such a
+// run must not wedge later reruns.
+func TestEnrollRedeemOvertakenRunFinishesAsEnrolled(t *testing.T) {
+	e := newEnrollRig(t)
+	record := e.issue(t)
+	root := t.TempDir()
+	var calls atomic.Int64
+	paused, release := make(chan struct{}), make(chan struct{})
+	enrollBeforePublish = func() {
+		if calls.Add(1) == 1 { // run B only
+			close(paused)
+			<-release
+		}
+	}
+	t.Cleanup(func() { enrollBeforePublish = nil })
+	bDone := make(chan redeemRun, 1)
+	go func() { bDone <- redeemWith(t, root, record) }()
+	<-paused
+	a := redeemWith(t, root, record)
+	if a.code != enrollExitOK || a.result(t).Outcome != "enrolled" {
+		t.Fatalf("run A: %d %s", a.code, a.stderr)
+	}
+	hubs, _ := adapter.LoadHubs(root)
+	stored := hubs["pilot"].TaskToken
+	before := e.redeems.Load()
+	close(release)
+	b := <-bDone
+	if b.code != enrollExitOK || b.result(t).Outcome != "already_enrolled" || e.redeems.Load() != before {
+		t.Fatalf("run B: %d %s, %d redemption requests", b.code, b.stderr, e.redeems.Load()-before)
+	}
+	if hubs, _ := adapter.LoadHubs(root); hubs["pilot"].TaskToken != stored {
+		t.Fatal("run B replaced run A's credential")
+	}
+	if entries, _ := os.ReadDir(filepath.Join(root, "enroll")); len(entries) != 0 {
+		t.Fatalf("pending state left: %v", entries)
+	}
+
+	// A state left by an overtaken run (fresh keys the hub never accepted):
+	// the rerun meets the conflict, finds the stored credential, and cleans up.
+	var rec struct {
+		BundleID string `json:"bundle_id"`
+	}
+	json.Unmarshal([]byte(record), &rec)
+	left := filepath.Join(root, "enroll", rec.BundleID+".json")
+	if _, err := newEnrollPending(left, rec.BundleID); err != nil {
+		t.Fatal(err)
+	}
+	enrollBeforePublish = nil
+	again := redeemWith(t, root, record)
+	if again.code != enrollExitOK || again.result(t).Outcome != "already_enrolled" {
+		t.Fatalf("rerun over a stale state: %d %s", again.code, again.stderr)
+	}
+	if _, err := os.Stat(left); !os.IsNotExist(err) {
+		t.Fatalf("the stale state was kept: %v", err)
+	}
+	if list := e.mustRun(t, "enroll", "list", "--state", "redeemed"); strings.Count(list, "redeemed: user") != 1 {
+		t.Fatalf("ledger: %q", list)
+	}
+}

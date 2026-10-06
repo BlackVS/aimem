@@ -60,10 +60,12 @@ const (
 // enrollRecordLimit is enrollment.v1's bound on a subcode record.
 const enrollRecordLimit = 16384
 
-// Test hooks: a test stops the command at a phase, as a crash would.
+// Test hooks: a test stops the command at a phase, as a crash would, or
+// pauses it where another run can overtake it.
 var (
-	enrollBackoff = func(attempt int) time.Duration { return time.Duration(1<<attempt) * time.Second }
-	enrollCrashAt func(phase string) bool
+	enrollBeforePublish func()
+	enrollBackoff       = func(attempt int) time.Duration { return time.Duration(1<<attempt) * time.Second }
+	enrollCrashAt       func(phase string) bool
 )
 
 var (
@@ -174,6 +176,18 @@ func enrollRedeem(root, hubName, label string, stdin io.Reader, stderr io.Writer
 		os.Remove(pendingPath)
 		return enrollResult{Hub: hubName, Outcome: outcome, UserID: user, TokenID: token, BundleID: rec.BundleID}, nil
 	}
+	// storedAccepted re-reads this installation's hub entry: another run of
+	// the same bundle may have stored an accepted credential since this run
+	// started, and then this one has nothing left to spend.
+	storedAccepted := func() (enrollIdentity, bool) {
+		now, _ := adapter.LoadHubs(root)
+		e := now[hubName]
+		if e == nil || e.TaskToken == "" {
+			return enrollIdentity{}, false
+		}
+		id, err := enrollWhoAmI(client, rec.Hub.URL, e.TaskToken)
+		return id, err == nil
+	}
 	// A first run retries only within the subcode's expiry; a recovery
 	// retries until the hub answers (enrollment.v1 §5 step 4).
 	var until time.Time
@@ -196,8 +210,16 @@ func enrollRedeem(root, hubName, label string, stdin io.Reader, stderr io.Writer
 				return enrollResult{}, refuse(enrollExitRetry, "hub %s already holds a credential that could not be checked (%v); nothing was spent; run the same command again", hubName, err)
 			}
 		}
+		if enrollBeforePublish != nil {
+			enrollBeforePublish()
+		}
 		if pending, err = newEnrollPending(pendingPath, rec.BundleID); err != nil {
 			return enrollResult{}, refuse(enrollExitFinal, "delivery_unavailable: the pending state cannot be protected (%v); nothing was sent", err)
+		}
+		// Another run may have finished between this run's first look and
+		// now: its stored credential ends this run before anything is sent.
+		if id, ok := storedAccepted(); ok {
+			return done("already_enrolled", id.UserID, id.TokenID)
 		}
 	case pending.Phase == "delivered" && entry != nil && entry.TaskToken != "":
 		// The bearer was stored before the last run ended: verify it against
@@ -223,6 +245,15 @@ func enrollRedeem(root, hubName, label string, stdin io.Reader, stderr io.Writer
 	k1 := "k1_" + base64.RawURLEncoding.EncodeToString(sum[:])
 	ans, err := enrollSend(client, rec, label, k1, priv, until)
 	if err != nil {
+		// A conflict means another request key redeemed this bundle. If that
+		// was another run here and its credential is stored, the installation
+		// is enrolled: these keys were never used, and their state goes.
+		var r *enrollRefusal
+		if errors.As(err, &r) && strings.HasPrefix(r.msg, "enrollment_conflict") {
+			if id, ok := storedAccepted(); ok {
+				return done("already_enrolled", id.UserID, id.TokenID)
+			}
+		}
 		return enrollResult{}, err
 	}
 	p, err := enrollment.Open(ans.Delivery.Suite, priv, enrollment.AAD(ans.HubID, ans.BundleID, k1, ans.Identity.UserID, ans.Identity.TokenID),
