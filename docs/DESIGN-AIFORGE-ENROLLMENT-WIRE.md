@@ -132,7 +132,7 @@ Exit codes follow the member reservation commands: `0` stored (or already enroll
 
 ## Client protection
 
-D1 asks the client to protect the delivery key and the pending state in "client-supported OS credential storage" before it redeems. This contract places them **in the installation's own credential slot**: an owner-only file in the state root, created exclusively with mode 0600, or with a protected owner-only DACL on Windows, as the hub entries and their bearers already are.
+D1 asks the client to protect the delivery key and the pending state in "client-supported OS credential storage" before it redeems. This contract places them **in the installation's own credential slot**: an owner-only file in the state root, created exclusively with mode 0600, or with a protected owner-only DACL on Windows, as hub.json, which holds the hub entries and their bearers, is written too. (Correction: until task 01a10fdd-f43a, hub.json was written with a file mode only, which on Windows sets no ACL, so it inherited its folder's access, observed on a development installation as a local group's read access. It is now written owner-only and atomically on every platform.)
 
 The reason: the delivery key protects exactly one secret, the bearer, and the bearer is stored in that same slot moments later. Storing the key more strongly than the bearer it unlocks would add no protection. If the installation cannot create such a file, `aimem enroll redeem` refuses with `delivery_unavailable` before it sends anything, so no subcode is spent.
 

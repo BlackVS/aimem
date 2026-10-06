@@ -11,6 +11,7 @@ import (
 	"bytes"
 	"crypto/tls"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/url"
@@ -18,6 +19,8 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+
+	"aimem/internal/privatefile"
 )
 
 // VersionAtLeast parses release-shaped versions ("v0.3.24", plus git
@@ -42,7 +45,7 @@ func VersionAtLeast(v string, major, minor, patch int) bool {
 	return c >= patch
 }
 
-// HubConfig is one hub entry in <state-root>/hub.json (mode 0600 — it
+// HubConfig is one hub entry in <state-root>/hub.json (owner-only — it
 // holds tokens). A machine may know several hubs (e.g. a work hub and a
 // home hub) so that projects on the same machine can keep their data on
 // physically separate servers; a project picks its hub with a
@@ -153,7 +156,49 @@ func SaveHubs(root string, hubs map[string]*HubConfig, def string) error {
 	if err := os.MkdirAll(root, 0o700); err != nil {
 		return err
 	}
-	return os.WriteFile(hubConfigPath(root), append(b, '\n'), 0o600)
+	// hub.json holds bearers, so it is created owner-only (a protected
+	// DACL on Windows, where a file mode alone sets no ACL and the file
+	// would inherit its folder's) and replaced atomically. Every save
+	// rewrites it this way, which also repairs an older file with a broader
+	// ACL.
+	path := hubConfigPath(root)
+	tmp := fmt.Sprintf("%s.%d.tmp", path, time.Now().UnixNano())
+	f, err := privatefile.Create(tmp)
+	if err != nil {
+		return err
+	}
+	if _, err := f.Write(append(b, '\n')); err != nil {
+		f.Close()
+		os.Remove(tmp)
+		return err
+	}
+	if err := f.Close(); err != nil {
+		os.Remove(tmp)
+		return err
+	}
+	// On Windows a rename over a file that another aimem process is reading
+	// at that instant fails; those reads are brief, so a short retry wins.
+	for attempt := 0; ; attempt++ {
+		err = os.Rename(tmp, path)
+		if err == nil {
+			return nil
+		}
+		if attempt == 9 {
+			os.Remove(tmp)
+			return err
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+}
+
+// HubConfigPrivate reports whether hub.json, when it exists, is readable by
+// its owner alone: nil when it is, or when there is no file.
+func HubConfigPrivate(root string) error {
+	path := hubConfigPath(root)
+	if _, err := os.Stat(path); errors.Is(err, os.ErrNotExist) {
+		return nil
+	}
+	return privatefile.Check(path)
 }
 
 // LoadHub returns the default hub, or nil when none is configured. Callers

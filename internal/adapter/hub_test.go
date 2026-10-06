@@ -1,11 +1,13 @@
 package adapter
 
 import (
+	"aimem/internal/privatefile"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -208,5 +210,47 @@ func TestPushHubSkipsAHubWithoutACheckpointToken(t *testing.T) {
 	notes, _ := os.ReadFile(filepath.Join(root, "adapter.log"))
 	if n := strings.Count(string(notes), "has no checkpoint token"); n != 1 {
 		t.Fatalf("the note was written %d times", n)
+	}
+}
+
+// hub.json holds bearers: every save writes it owner-only (a protected DACL
+// on Windows, 0600 on Unix), atomically, and repairs an older file whose
+// access was broader.
+func TestSaveHubsWritesOwnerOnly(t *testing.T) {
+	root := t.TempDir()
+	path := filepath.Join(root, "hub.json")
+	if err := HubConfigPrivate(root); err != nil {
+		t.Fatalf("no file yet: %v", err)
+	}
+	if runtime.GOOS != "windows" {
+		// An older install's file, readable by everyone.
+		if err := os.WriteFile(path, []byte(`{"hubs":{"h":{"url":"https://hub.example.test","token":"t"}}}`), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Chmod(path, 0o644); err != nil {
+			t.Fatal(err)
+		}
+		if err := HubConfigPrivate(root); err == nil {
+			t.Fatal("a world-readable hub.json was reported private")
+		}
+	}
+	if err := SaveHubs(root, map[string]*HubConfig{"h": {URL: "https://hub.example.test", Token: "t", TaskToken: "aimem_user_sample"}}, "h"); err != nil {
+		t.Fatal(err)
+	}
+	if err := privatefile.Check(path); err != nil {
+		t.Fatalf("after a save hub.json is not owner-only: %v", err)
+	}
+	if err := HubConfigPrivate(root); err != nil {
+		t.Fatalf("HubConfigPrivate after a save: %v", err)
+	}
+	hubs, def := LoadHubs(root)
+	if def != "h" || hubs["h"].TaskToken != "aimem_user_sample" {
+		t.Fatalf("round trip: %+v %q", hubs["h"], def)
+	}
+	entries, _ := os.ReadDir(root)
+	for _, e := range entries {
+		if strings.HasSuffix(e.Name(), ".tmp") {
+			t.Fatalf("a temporary file was left: %s", e.Name())
+		}
 	}
 }
