@@ -1,6 +1,6 @@
 # AIForge clean-client enrollment wire contract, version 1
 
-Status: proposed contract (task D1-w, 01a10c7e-e0f5). Nothing here is implemented. D1-a delivers issuance and the ledger, and D1-b delivers redemption and the client command. The contract fixtures live in `docs/fixtures/enrollment-v1/`: `examples.json` and the proposed OpenAPI, `openapi-proposal.json`.
+Status: reviewed contract (task D1-w, 01a10c7e-e0f5). D1-a serves issuance, revocation and listing (§1, §2) with the `aimem identity enroll` commands (§4, §5), over access schema 7. D1-b delivers redemption and the client command; the redemption route is not served yet. The contract fixtures live in `docs/fixtures/enrollment-v1/`: `examples.json` and the proposed OpenAPI, `openapi-proposal.json`.
 
 This contract freezes the wire for the [enrollment contract](DESIGN-AIFORGE-ENROLLMENT.md) (D1): how an aimem operator issues an enrollment subcode, how a clean client redeems it for its individual credential, and how the credential reaches the client's installation without anyone else seeing it. It composes with the [identity wire](DESIGN-AIFORGE-IDENTITY-WIRE.md) (identity.v1), whose TLS, refusal envelope and request-key rules it reuses, and with aicrew's first-pilot text, [PILOT-1-FOLLOWUPS](https://github.com/BlackVS/aicrew/blob/6d97290/docs/proposals/PILOT-1-FOLLOWUPS.md) §3.9, §6.4 and §11, at aicrew `main` 6d97290. If a parent contract disagrees with this document, the parent wins, except for the corrections listed in [Corrections to the parent texts](#corrections-to-the-parent-texts).
 

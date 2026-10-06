@@ -111,8 +111,9 @@ func TestAccessSchema5KeepsCredentialsAsRedemption(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	// Back to schema 4: the column did not exist, nor schema 6's team name.
-	if _, err := s.db.Exec(`DROP INDEX team_access_profiles_name; ALTER TABLE team_access_profiles DROP COLUMN team_name;
+	// Back to schema 4: the column did not exist, nor schema 6's team name
+	// or schema 7's enrollment ledger.
+	if _, err := s.db.Exec(`DROP TABLE enrollments; DROP INDEX team_access_profiles_name; ALTER TABLE team_access_profiles DROP COLUMN team_name;
 ALTER TABLE identity_peer_credentials DROP COLUMN operation; PRAGMA user_version=4;`); err != nil {
 		t.Fatal(err)
 	}
@@ -171,8 +172,9 @@ func TestAccessSchema6KeepsCredentialsAndProfiles(t *testing.T) {
 	if err := s.SetTeamGrant("admin", "instance-1", profile.ID, true); err != nil {
 		t.Fatal(err)
 	}
-	// Back to schema 5: the old CHECK, no team_name.
+	// Back to schema 5: the old CHECK, no team_name, no enrollment ledger.
 	if _, err := s.db.Exec(`
+DROP TABLE enrollments;
 CREATE TABLE c5(
  id TEXT PRIMARY KEY,
  service_id TEXT NOT NULL REFERENCES identity_peers(service_id),
@@ -198,7 +200,7 @@ PRAGMA user_version=5;`); err != nil {
 			t.Fatal(err)
 		}
 		var version int
-		if err := s.db.QueryRow("PRAGMA user_version").Scan(&version); err != nil || version != accessSchema || accessSchema != 6 {
+		if err := s.db.QueryRow("PRAGMA user_version").Scan(&version); err != nil || version != accessSchema {
 			t.Fatalf("schema version %d: %v", version, err)
 		}
 		for _, c := range creds {

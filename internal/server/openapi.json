@@ -80,6 +80,164 @@
     }
   ],
   "paths": {
+    "/v1/identity/enrollments": {
+      "get": {
+        "summary": "List enrollment bundles, newest first (never a subcode)",
+        "description": "Each bundle's non-secret record and state (issued, redeemed, revoked, or expired by the clock), with what a redemption issued. Requires TLS terminated by this hub: plain HTTP, a TLS-terminating proxy and the unix socket are refused with tls_required, and forwarded headers never count. Requires X-Aimem-Enrollment-Version: 1 (unsupported_version otherwise). An ordinary or legacy token gets credential_scope_forbidden and a peer credential peer_forbidden. Not exposed as an MCP tool (enrollment.v1, docs/DESIGN-AIFORGE-ENROLLMENT-WIRE.md).",
+        "x-role": "admin",
+        "x-requires-tls": true,
+        "parameters": [
+          {
+            "name": "X-Aimem-Enrollment-Version",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "1"
+              ]
+            }
+          },
+          {
+            "name": "state",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "issued",
+                "redeemed",
+                "revoked",
+                "expired"
+              ]
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "{enrollments: [{bundle_id, purpose, state, created_at, expires_at, issued_by, user_name, redeemed: {user_id, token_id, at} | null}]}"
+          },
+          "400": {
+            "description": "Refusal envelope {code, message, retryable, next_action, correlation_id}; never contains a subcode"
+          },
+          "403": {
+            "description": "Refusal envelope {code, message, retryable, next_action, correlation_id}; never contains a subcode"
+          }
+        }
+      },
+      "post": {
+        "summary": "Issue an enrollment bundle; the subcode is shown once",
+        "description": "Records a new_user bundle under the caller-chosen bundle_id and returns aes1_ plus 256 random bits, stored only as a digest, expiring at most 72 hours ahead, audited as enrollment.issued. The response is no-store and is never shown again: the same bundle_id with the same input answers enrollment_exists (409), with other input idempotency_conflict (409). Requires TLS terminated by this hub: plain HTTP, a TLS-terminating proxy and the unix socket are refused with tls_required, and forwarded headers never count. Requires X-Aimem-Enrollment-Version: 1 (unsupported_version otherwise). An ordinary or legacy token gets credential_scope_forbidden and a peer credential peer_forbidden. Not exposed as an MCP tool (enrollment.v1, docs/DESIGN-AIFORGE-ENROLLMENT-WIRE.md).",
+        "x-role": "admin",
+        "x-requires-tls": true,
+        "parameters": [
+          {
+            "name": "X-Aimem-Enrollment-Version",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "1"
+              ]
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "bundle_id",
+                  "purpose",
+                  "expires_at"
+                ],
+                "properties": {
+                  "bundle_id": {
+                    "type": "string",
+                    "format": "uuid"
+                  },
+                  "purpose": {
+                    "type": "string",
+                    "enum": [
+                      "new_user"
+                    ]
+                  },
+                  "expires_at": {
+                    "type": "string",
+                    "format": "date-time"
+                  },
+                  "user_name": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "{bundle_id, purpose, expires_at, hub_id, subcode}"
+          },
+          "400": {
+            "description": "Refusal envelope {code, message, retryable, next_action, correlation_id}; never contains a subcode"
+          },
+          "403": {
+            "description": "Refusal envelope {code, message, retryable, next_action, correlation_id}; never contains a subcode"
+          },
+          "409": {
+            "description": "Refusal envelope {code, message, retryable, next_action, correlation_id}; never contains a subcode"
+          }
+        }
+      }
+    },
+    "/v1/identity/enrollments/{bundle_id}/revocation": {
+      "post": {
+        "summary": "Revoke an unredeemed enrollment bundle",
+        "description": "An issued bundle becomes revoked (audited as enrollment.revoked); a revoked or expired one is answered unchanged. A redeemed bundle is enrollment_redeemed (409), audited, and names the user and token it issued: revoking a spent code does not revoke its token. An unknown bundle is not_found (404). Requires TLS terminated by this hub: plain HTTP, a TLS-terminating proxy and the unix socket are refused with tls_required, and forwarded headers never count. Requires X-Aimem-Enrollment-Version: 1 (unsupported_version otherwise). An ordinary or legacy token gets credential_scope_forbidden and a peer credential peer_forbidden. Not exposed as an MCP tool (enrollment.v1, docs/DESIGN-AIFORGE-ENROLLMENT-WIRE.md).",
+        "x-role": "admin",
+        "x-requires-tls": true,
+        "parameters": [
+          {
+            "name": "X-Aimem-Enrollment-Version",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "1"
+              ]
+            }
+          },
+          {
+            "name": "bundle_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "{bundle_id, state}"
+          },
+          "403": {
+            "description": "Refusal envelope {code, message, retryable, next_action, correlation_id}; never contains a subcode"
+          },
+          "404": {
+            "description": "Refusal envelope {code, message, retryable, next_action, correlation_id}; never contains a subcode"
+          },
+          "409": {
+            "description": "Refusal envelope {code, message, retryable, next_action, correlation_id}; never contains a subcode"
+          }
+        }
+      }
+    },
     "/v1/access": {
       "get": {
         "summary": "List users, access groups, membership, grants, ordinary-token metadata and the last 100 administration audit events",
