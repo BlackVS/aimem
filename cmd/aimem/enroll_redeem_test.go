@@ -460,9 +460,12 @@ func TestNewEnrollPendingStalledCreatorKeepsItsFile(t *testing.T) {
 // the rerun is a recovery, which the hub replays past the expiry.
 func TestEnrollRedeemFirstRunStopsAtExpiry(t *testing.T) {
 	e := newEnrollRig(t)
-	enrollBackoff = func(int) time.Duration { return 700 * time.Millisecond }
+	// The wire carries whole seconds and the issuing command truncates, so a
+	// record expires up to a second early: 3s keeps the issue clear of the
+	// hub's "in the future" check, and four 1s backoffs outlast it.
+	enrollBackoff = func(int) time.Duration { return time.Second }
 	read := pipeSecretStdout(t)
-	e.mustRun(t, "enroll", "issue", "--purpose", "new-user", "--expires", "1s", "--output", "-")
+	e.mustRun(t, "enroll", "issue", "--purpose", "new-user", "--expires", "3s", "--output", "-")
 	record := read()
 	root := t.TempDir()
 	e.lose.Store(5)
