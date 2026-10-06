@@ -62,6 +62,14 @@ currently 23); a binary refuses a database newer than it understands.
 
 ### Changed
 
+- **hub.json is owner-only on Windows.** It holds every hub's checkpoint
+  token and individual credential, including an enrolled installation's.
+  It was written with a file mode only, which on Windows sets no ACL, so it
+  inherited its folder's access; a local group's read access was observed
+  on a development installation. Every save now writes it atomically with
+  a protected owner-only DACL (0600 on Unix, as before). `aimem hub` warns
+  when the file is not private.
+
 - **A hub without a checkpoint token gets no journal push.** An installation
   enrolled through D1 holds only its individual credential, and journal
   push needs the hub's checkpoint token. Before this, every checkpoint
@@ -80,6 +88,11 @@ currently 23); a binary refuses a database newer than it understands.
   downloads Go 1.26 first.
 
 ### Upgrade notes
+
+- **Make an existing hub.json private on Windows.** The next hub change
+  rewrites it owner-only; to do it at once, run `aimem hub default NAME`
+  with the current default hub's name, which changes nothing else.
+  `aimem hub` lists the hubs and warns while the file is not private.
 
 - **Access schema 7.** On first start the hub adds the enrollment ledger
   (one new table). Nothing else changes, and every existing row is kept.

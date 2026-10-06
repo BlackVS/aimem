@@ -2254,6 +2254,15 @@ func hubCmd(args []string) error {
 		if len(hubs) > 1 {
 			fmt.Println("\nprojects bind to a named hub via .aimem.json {\"hub\":\"<name>\"}; unbound projects use the default (*)")
 		}
+		if err := adapter.HubConfigPrivate(root); err != nil {
+			// Any hub change rewrites the file owner-only; naming the
+			// current default again is a change that alters nothing else.
+			name := def
+			if name == "" {
+				name = slices.Sorted(maps.Keys(hubs))[0]
+			}
+			fmt.Printf("\nwarning: hub.json holds bearers but is not private (%v); rewrite it owner-only with: aimem hub default %s\n", err, name)
+		}
 		return nil
 	}
 	usage := `usage: aimem hub <url> <token>                      set/replace the default hub
