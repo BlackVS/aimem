@@ -29,6 +29,7 @@ import (
 
 	"aimem/internal/adapter"
 	"aimem/internal/enrollment"
+	"aimem/internal/filelock"
 	"aimem/internal/privatefile"
 )
 
@@ -67,6 +68,7 @@ var (
 	enrollBackoff       = func(attempt int) time.Duration { return time.Duration(1<<attempt) * time.Second }
 	enrollCrashAt       func(phase string) bool
 	enrollAfterCreate   func()
+	enrollLockWait      = 10 * time.Second
 )
 
 var (
@@ -540,98 +542,96 @@ func newEnrollPending(path, bundle string) (*enrollPending, error) {
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		return nil, err
 	}
-	// The first state is published exclusively: when two runs start at
-	// once, one creates it and the other resumes with the winner's keys, so
-	// the keys of a redemption that reached the hub are never overwritten.
-	f, err := privatefile.Create(path)
-	if errors.Is(err, os.ErrExist) {
-		// The winner may still be writing it (on Windows its handle shares
-		// nothing until closed): wait briefly for its keys.
-		for range 20 {
-			if won, err := loadEnrollPending(path); err == nil && won != nil {
-				return won, nil
-			}
-			time.Sleep(50 * time.Millisecond)
+	// The first state is created under a lock that every creating run
+	// takes, so when two runs start at once one creates it and the other
+	// resumes with the winner's keys: the keys of a redemption that reached
+	// the hub are never overwritten. The OS releases the lock if its holder
+	// dies, so an empty file found under the lock was left by a run that
+	// stopped between the create and the write.
+	var out *enrollPending
+	err = enrollCreateLocked(filepath.Dir(path), func() error {
+		won, err := loadEnrollPending(path)
+		if err != nil || won != nil {
+			out = won
+			return err
 		}
-		if !reclaimAbandonedPending(path) {
-			return nil, errors.New("another run is creating the pending state; run the same command again")
+		if err := removeAbandonedPending(path); err != nil {
+			return err
 		}
-		f, err = privatefile.Create(path)
-		if errors.Is(err, os.ErrExist) {
-			return nil, errors.New("another run is creating the pending state; run the same command again")
+		f, err := privatefile.Create(path)
+		if err != nil {
+			return err
 		}
-	}
-	if err != nil {
-		return nil, err
-	}
-	if enrollAfterCreate != nil {
-		enrollAfterCreate()
-	}
-	mine, werr := f.Stat()
-	if werr == nil {
-		_, werr = f.Write(raw)
-	}
-	if serr := f.Sync(); werr == nil {
-		werr = serr
-	}
-	if cerr := f.Close(); werr == nil {
-		werr = cerr
-	}
-	// A run that stalled for longer than enrollAbandonedAfter between the
-	// create and the write may have had its empty file reclaimed: its keys
-	// were never published, so it must not send them, and the file at the
-	// path now is another run's.
-	now, serr := os.Stat(path)
-	ours := serr == nil && mine != nil && os.SameFile(mine, now)
-	if werr != nil {
-		if ours {
+		if enrollAfterCreate != nil {
+			enrollAfterCreate()
+		}
+		_, werr := f.Write(raw)
+		if serr := f.Sync(); werr == nil {
+			werr = serr
+		}
+		if cerr := f.Close(); werr == nil {
+			werr = cerr
+		}
+		if werr != nil {
 			os.Remove(path)
+			return werr
 		}
-		return nil, werr
+		out = p
+		return nil
+	})
+	return out, err
+}
+
+// enrollCreateLocked runs fn while holding the enrollment directory's
+// creation lock. Its holders only read and write a local file, so a run
+// that cannot take it within enrollLockWait asks to be repeated.
+func enrollCreateLocked(dir string, fn func() error) error {
+	lf, err := os.OpenFile(filepath.Join(dir, ".create.lock"), os.O_RDWR|os.O_CREATE, 0o600)
+	if err != nil {
+		return err
 	}
-	if !ours {
-		return nil, errors.New("another run replaced the pending state; run the same command again")
+	defer lf.Close()
+	deadline := time.Now().Add(enrollLockWait)
+	for {
+		ok, err := filelock.TryLock(lf)
+		if err != nil {
+			return err
+		}
+		if ok {
+			break
+		}
+		if !time.Now().Before(deadline) {
+			return errors.New("another run is creating the pending state; run the same command again")
+		}
+		time.Sleep(10 * time.Millisecond)
 	}
-	return p, nil
+	defer filelock.Unlock(lf)
+	return fn()
 }
 
 // enrollAbandonedAfter is how old an empty pending file must be before a run
-// treats it as abandoned: creating and writing the first state takes
-// milliseconds, so a creator that has not written it in a minute stopped.
+// recovers it. Under the creation lock an empty file has no live writer, but
+// a young one is still left alone: the run that left it stopped moments ago,
+// and the rerun a minute later recovers it.
 const enrollAbandonedAfter = time.Minute
 
-// reclaimAbandonedPending removes an empty pending file older than
-// enrollAbandonedAfter and reports whether it did. A young empty file belongs
-// to a run that may still be writing it and is never touched. The file is
-// first renamed to a name only this run knows, so two runs reclaiming at once
-// cannot remove a file that another run has just created in its place; on
-// Windows a live creator's handle refuses the rename outright.
-func reclaimAbandonedPending(path string) bool {
-	old, err := os.Stat(path)
-	if err != nil || old.Size() != 0 || time.Since(old.ModTime()) < enrollAbandonedAfter {
-		return false
+// removeAbandonedPending removes an empty pending file older than
+// enrollAbandonedAfter. The caller holds the creation lock.
+func removeAbandonedPending(path string) error {
+	fi, err := os.Stat(path)
+	if errors.Is(err, os.ErrNotExist) {
+		return nil
 	}
-	// On Windows a stat's file identity is read lazily by path: read it now,
-	// while the path still names this file.
-	os.SameFile(old, old)
-	var tag [8]byte
-	if _, err := rand.Read(tag[:]); err != nil {
-		return false
+	if err != nil {
+		return err
 	}
-	tomb := path + ".abandoned-" + hex.EncodeToString(tag[:])
-	if os.Rename(path, tomb) != nil {
-		return false
+	if fi.Size() != 0 {
+		return fmt.Errorf("the pending state %s changed while it was read; run the same command again", path)
 	}
-	got, err := os.Stat(tomb)
-	if err == nil && os.SameFile(old, got) && got.Size() == 0 {
-		return os.Remove(tomb) == nil
+	if time.Since(fi.ModTime()) < enrollAbandonedAfter {
+		return errors.New("a run stopped while creating the pending state moments ago; run the same command again in a minute")
 	}
-	// Another run's file took its place between the checks: put it back
-	// without replacing anything that has appeared at the path since.
-	if os.Link(tomb, path) == nil {
-		os.Remove(tomb)
-	}
-	return false
+	return os.Remove(path)
 }
 
 // writeEnrollPending replaces the pending state atomically with an
