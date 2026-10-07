@@ -11,7 +11,7 @@ Works with **Claude Code** and **OpenCode**. One static Go binary, no
 runtime dependencies, no external database, no cloud service.
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/BlackVS/aimem/master/boot.sh | bash
+curl -fsSL https://raw.githubusercontent.com/BlackVS/aimem/v0.9.0/boot.sh | bash
 ```
 
 ---
@@ -158,18 +158,22 @@ each useful on their own.
 
 ```sh
 # Linux / macOS
-curl -fsSL https://raw.githubusercontent.com/BlackVS/aimem/master/boot.sh | bash
+curl -fsSL https://raw.githubusercontent.com/BlackVS/aimem/v0.9.0/boot.sh | bash
 ```
 
 ```powershell
 # Windows
-powershell -NoProfile -ExecutionPolicy Bypass -Command "irm https://raw.githubusercontent.com/BlackVS/aimem/master/boot.ps1 | iex"
+powershell -NoProfile -ExecutionPolicy Bypass -Command "irm https://raw.githubusercontent.com/BlackVS/aimem/v0.9.0/boot.ps1 | iex"
 ```
 
 Then restart any running Claude Code or OpenCode session. The first run
 installs the binary, hooks, plugin and background service; every run wires
-the project you are standing in. Prebuilt static binaries come from the
-latest release, so no Go toolchain is needed.
+the project you are standing in. The one-liner names a release, and the
+prebuilt static binary comes from that release, checked against its
+SHA256SUMS, so no Go toolchain is needed. To upgrade, run the one-liner of
+the newer release: it backs up the state root first and rolls back if the
+new release does not come up
+([ADMIN-MANUAL](docs/ADMIN-MANUAL.md#upgrades)).
 
 The one-liner needs the raw script to arrive intact. If the Windows form
 fails with `Cannot bind argument to parameter 'Command' because it is an
@@ -194,7 +198,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\install.ps1 -Target C:\pat
 **Hub** (optional) — on a fresh Debian or Ubuntu host, as root:
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/BlackVS/aimem/master/install-hub.sh | bash
+curl -fsSL https://raw.githubusercontent.com/BlackVS/aimem/v0.9.0/install-hub.sh | bash
 ```
 
 Full detail: **[INSTALL-CLIENT.md](docs/INSTALL-CLIENT.md)** ·

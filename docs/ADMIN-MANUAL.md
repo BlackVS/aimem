@@ -10,18 +10,21 @@ One-liner in any project directory (installs the binary if missing, then
 wires the project):
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/BlackVS/aimem/master/boot.sh | bash
+curl -fsSL https://raw.githubusercontent.com/BlackVS/aimem/v0.9.0/boot.sh | bash
 ```
 
 Windows (PowerShell; supported, tested less than Linux):
 
 ```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -Command "irm https://raw.githubusercontent.com/BlackVS/aimem/master/boot.ps1 | iex"
+powershell -NoProfile -ExecutionPolicy Bypass -Command "irm https://raw.githubusercontent.com/BlackVS/aimem/v0.9.0/boot.ps1 | iex"
 ```
 
 Environment knobs for the boot script:
 
-- `AIMEM_VERSION=vX.Y.Z` — pin a release instead of taking the latest.
+- `AIMEM_VERSION=vX.Y.Z` — install another release than the one the
+  one-liner names (the boot script still comes from the URL's tag).
+- `AIMEM_UPGRADE_WAIT=30` — seconds an upgrade waits for health at the new
+  version before it rolls back.
 - `AIMEM_REPO=owner/name` — install from a fork.
 - `AIMEM_HUB_URL` / `AIMEM_HUB_TOKEN` — configure hub push at install time.
 - `AIMEM_REINSTALL=1` — force reinstall of the user-level binary. Not needed
@@ -48,6 +51,40 @@ Important: checkpoint hooks live at **user level only**. Never add
 Stop/StopFailure/PreCompact hooks to a project's `.claude/settings.json` —
 duplicate registration produces duplicate journal events.
 
+### Upgrades
+
+Upgrade with the same one-liner, naming the newer release; do not swap
+binaries by hand. Each one-liner fetches its boot script from a release
+tag, and the script installs that release's binary, refusing one whose
+hash is not in the release's `SHA256SUMS`. On an existing installation
+the installer:
+
+1. reads the installed version and asks the running service for its
+   state root;
+2. stops only this installation's service (the systemd user unit, or on
+   Windows the `aimem-serve` task and the serve processes of this
+   binary), and the sync job that opens the same databases;
+3. copies the state root, without the socket, to
+   **`<state root>.backup-<UTC time>`** beside it: by default
+   `~/.local/state/aimem.backup-20261007T170945Z`, on Windows
+   `%USERPROFILE%\.local\state\aimem.backup-…`, on a hub
+   `~sessiond/.local/state/aimem.backup-…`;
+4. swaps the binary, starts the service, and waits for health at the new
+   version (`AIMEM_UPGRADE_WAIT`, 30 seconds);
+5. if the new release does not answer at its version in time, stops it,
+   puts the previous binary back, moves the state it left to
+   `<state root>.failed-<UTC time>`, restores the copy, starts the
+   previous release, and exits with an error that says so.
+
+A schema move is one-way (a binary refuses a database newer than it
+understands), which is why the copy is taken before the new release
+first opens the state. The backup stays after a successful upgrade.
+It holds everything the state root holds, credentials included, with
+the same permissions; remove it once the new release has proved itself.
+Without a service manager (macOS, or `AIMEM_NO_SYSTEMD=1`) the installer
+still takes the backup and swaps, but it refuses to run while an
+unmanaged `aimem serve` answers, and leaves starting the service to you.
+
 ## 2. Hub setup
 
 The hub is the same binary run as a server. Throughout this manual
@@ -59,7 +96,7 @@ Fresh host (Debian/Ubuntu LXC or VM), as root — one command does user,
 binary, env, units, timers:
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/BlackVS/aimem/master/install-hub.sh | bash
+curl -fsSL https://raw.githubusercontent.com/BlackVS/aimem/v0.9.0/install-hub.sh | bash
 ```
 
 Knobs (env): `AIMEM_HUB_USER` (default sessiond), `AIMEM_HTTP_LISTEN`
@@ -72,8 +109,11 @@ certificate with `aimem hub add ... --ca-file cert.pem` (or its key with
 then drop the flag; team mode accepts only the first),
 `AIMEM_TLS_CERT`/`AIMEM_TLS_KEY` (explicit cert paths; nothing set =
 plain HTTP), `AIMEM_OPENAI_API_KEY` + `AIMEM_OPENAI_BASE_URL` + models
-(enables the curation timer's LLM work). Idempotent: re-run to upgrade
-the binary. Everything stateful lives outside the binary — config
+(enables the curation timer's LLM work). Idempotent: run the newer
+release's one-liner to upgrade, with the backup and rollback of
+[Upgrades](#upgrades) (the hub's backup lands in
+`~sessiond/.local/state/aimem.backup-<UTC time>`). Everything stateful
+lives outside the binary — config
 `~/.config/aimem/env`, certs `~/.config/aimem/tls/`, data
 `~/.local/state/aimem/` — so an LXC backup captures the whole hub.
 
@@ -409,8 +449,15 @@ git tag v0.2.0 && git push origin v0.2.0
 binaries (CGO_ENABLED=0) for linux/darwin amd64+arm64 and windows-amd64.
 It publishes them as release assets with `LICENSE` and a `SHA256SUMS` that
 covers both. The release notes are the tag's CHANGELOG section, followed by
-the license URL and the `Required Notice:` lines from `LICENSE`. `boot.sh` and
-`boot.ps1` always fetch the latest release. `.github/workflows/ci.yml`
+the license URL and the `Required Notice:` lines from `LICENSE`.
+
+The installers are pinned to a release. The commit that rolls the
+CHANGELOG into the new version also bumps `RELEASE` in `boot.sh`,
+`install-hub.sh` and `$release` in `boot.ps1`, and the tag in every
+one-liner in `README.md` and `docs/`. `internal/installer` fails while
+these disagree with the newest CHANGELOG version, and the release
+workflow refuses a tag the installers do not name.
+`.github/workflows/ci.yml`
 runs vet and tests on Linux, Windows and macOS for every push and pull
 request.
 

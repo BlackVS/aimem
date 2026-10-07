@@ -1,8 +1,8 @@
 name: Release
 
 # Cut a release by pushing a tag:  git tag v0.2.0 && git push origin v0.2.0
-# The installers (boot.sh / boot.ps1) resolve "latest" and download these
-# assets, so every platform they offer must be built here.
+# The installers (boot.sh / boot.ps1 / install-hub.sh) download these assets
+# for the release they pin, so every platform they offer must be built here.
 on:
   push:
     tags: ['v*']
@@ -35,6 +35,19 @@ jobs:
             echo "::error::tagged commit $(git rev-parse --short HEAD) is not on master — merge first, then tag"
             exit 1
           fi
+
+      # The one-liners fetch the boot scripts from this tag, and each script
+      # installs the release it pins: a tag whose scripts pin another
+      # release would install something else (ADMIN-MANUAL, "Releases").
+      - name: Installers pin this tag
+        env:
+          TAG: ${{ github.event.inputs.tag || github.ref_name }}
+        run: |
+          for f in boot.sh install-hub.sh; do
+            grep -qx "RELEASE=$TAG" "$f" || { echo "::error::$f does not pin $TAG"; exit 1; }
+          done
+          # boot.ps1 is checked out with CRLF (.gitattributes).
+          tr -d '\r' < boot.ps1 | grep -qx "\$release = '$TAG'" || { echo "::error::boot.ps1 does not pin $TAG"; exit 1; }
 
       - uses: actions/setup-go@v7
         with:

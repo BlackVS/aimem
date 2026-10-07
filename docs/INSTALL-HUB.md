@@ -13,16 +13,23 @@ deployment.
 ## 1. One command, as root
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/BlackVS/aimem/master/install-hub.sh | bash
+curl -fsSL https://raw.githubusercontent.com/BlackVS/aimem/v0.9.0/install-hub.sh | bash
 ```
 
-It creates the service user, installs the latest release binary, writes
+It creates the service user, installs the release named in the URL
+(checked against that release's `SHA256SUMS`), writes
 `~/.config/aimem/env`, installs the serve unit and the hourly curation
 timer with memory caps, starts everything, and prints a health check plus
 the bearer token you will give to clients.
 
-Re-running upgrades the binary and restarts the service. An existing
-`env` file is never overwritten, so re-running is safe.
+To upgrade, run the one-liner of the newer release. On an existing hub it
+stops the hub's service and curation, copies the state root (without the
+socket) to `<state root>.backup-<UTC time>` beside it, by default
+`~sessiond/.local/state/aimem.backup-…`, swaps the binary and waits for
+health at the new version. If the new release does not come up, the
+previous binary and the state copy both go back and the script says so.
+An existing `env` file is never overwritten, so re-running is safe. See
+[ADMIN-MANUAL](ADMIN-MANUAL.md#upgrades).
 
 ## 2. Options
 
@@ -40,7 +47,8 @@ All of these are environment variables set before the command above.
 | `AIMEM_OPENAI_BASE_URL` | `https://api.openai.com/v1` | any OpenAI-compatible endpoint |
 | `AIMEM_CURATE_MODEL` | `gpt-4o-mini` | model that distils facts |
 | `AIMEM_EMBED_MODEL` | `text-embedding-3-large` | model for semantic recall |
-| `AIMEM_VERSION` | latest | pin a release |
+| `AIMEM_VERSION` | the release in the URL | install another release |
+| `AIMEM_UPGRADE_WAIT` | `30` | seconds to wait for health at the new version before rolling back |
 | `AIMEM_REPO` | `BlackVS/aimem` | install from a fork |
 
 Name your hubs if you run more than one — two consoles that both say
