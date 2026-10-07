@@ -25,3 +25,7 @@ docs/SESSION-STATE.md
 # else's machine. In YOUR projects, committing .aimem.json is right -
 # a pinned project id shared across machines is the point of the file.
 .aimem.json
+
+# PowerShell's module analysis cache, should a test's PowerShell ever write
+# it inside the tree again (scripts/check-tool-caches.sh refuses it in CI)
+ModuleAnalysisCache

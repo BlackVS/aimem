@@ -40,6 +40,10 @@ jobs:
       # (docs/DEVELOPMENT.md, "Processes and state in tests").
       - name: no process stops by name
         run: sh scripts/check-process-stops.sh
+      # Machine-local tool caches (a PowerShell module analysis cache came
+      # in with #197) never belong in the tree.
+      - name: no tool caches in the tree
+        run: sh scripts/check-tool-caches.sh
       # GOTOOLCHAIN inline: these @latest tools may declare a newer Go than
       # our pinned 1.26, and setup-go v7 exports GOTOOLCHAIN=local via
       # GITHUB_ENV, which clobbers workflow/job-level env — only a shell

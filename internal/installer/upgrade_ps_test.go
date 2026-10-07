@@ -64,7 +64,13 @@ try {
 		t.Fatal(err)
 	}
 	cmd := exec.Command(ps, "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-File", file)
-	cmd.Env = append(s.env, "SANDBOX="+s.dir, "NEW_BINARY="+newBinary, "AIMEM_UPGRADE_WAIT="+wait)
+	// The sandbox USERPROFILE has no local application data folder, so
+	// PowerShell would write its module analysis cache relative to the
+	// working directory, which is this package in the tree. Name the
+	// cache and the working directory inside the sandbox instead.
+	cmd.Dir = s.dir
+	cmd.Env = append(s.env, "SANDBOX="+s.dir, "NEW_BINARY="+newBinary, "AIMEM_UPGRADE_WAIT="+wait,
+		"PSModuleAnalysisCachePath="+filepath.Join(s.dir, "ps-module-analysis-cache"))
 	out, err := cmd.CombinedOutput()
 	if ee, ok := err.(*exec.ExitError); ok && ee.ExitCode() == 99 {
 		t.Fatalf("setup failed:\n%s", out)
