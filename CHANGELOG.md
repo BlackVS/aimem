@@ -13,6 +13,18 @@ currently 23); a binary refuses a database newer than it understands.
 
 ## [Unreleased]
 
+## [0.9.0] — 2026-10-07
+
+Enrollment (D1, enrollment.v1:
+[`docs/DESIGN-AIFORGE-ENROLLMENT-WIRE.md`](docs/DESIGN-AIFORGE-ENROLLMENT-WIRE.md)):
+the hub admin issues a one-time onboarding subcode, and a clean
+installation redeems it for its own user-scoped credential, delivered
+sealed with HPKE. Also: hub.json is owner-only on Windows, and building
+from source needs Go 1.26.
+
+The access schema moves to 7, one way: read the upgrade notes before
+upgrading a hub. Includes PR #184 to #193.
+
 ### Added
 
 - **The hub admin issues enrollment bundles** (D1, enrollment.v1:
@@ -100,7 +112,7 @@ currently 23); a binary refuses a database newer than it understands.
 
 - **Building from source needs Go 1.26.** `go.mod` now says `go 1.26.0`,
   and CI and the release workflow build with the newest Go 1.26 patch.
-  Enrollment delivery (D1) will use the standard library's `crypto/hpke`,
+  Enrollment delivery (D1) uses the standard library's `crypto/hpke`,
   which Go 1.26 added. Each CI job and the release build check that they
   run the runner's own Go 1.26, never a toolchain that `go.mod` would
   download. [`docs/DEVELOPMENT.md`](docs/DEVELOPMENT.md) has the toolchain
