@@ -76,6 +76,14 @@ currently 23); a binary refuses a database newer than it understands.
   recovers it once it is a minute old; a younger one is never touched,
   and the run asks to be repeated.
 
+- **A repeated enrollment issue is classified before its input is
+  validated.** An identical retry of `aimem identity enroll issue`'s
+  request after its requested expiry answered `invalid_request`, which
+  read as if nothing had been recorded. Now a repeated bundle ID always
+  answers `enrollment_exists` for the same input and
+  `idempotency_conflict` for other input (enrollment.v1 §1, corrected to
+  say so); only a new bundle's input is checked.
+
 - **hub.json is owner-only on Windows.** It holds every hub's checkpoint
   token and individual credential, including an enrolled installation's.
   It was written with a file mode only, which on Windows sets no ACL, so it

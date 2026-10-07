@@ -152,6 +152,39 @@ func TestIssueEnrollmentRepeatedBundle(t *testing.T) {
 	}
 }
 
+// A repeat is classified before its input is validated: after its requested
+// expiry has passed, the same input is still enrollment_exists and other
+// input still idempotency_conflict, while a new bundle with that expiry is
+// invalid_request (enrollment.v1 §1).
+func TestIssueEnrollmentRepeatedBundleAfterExpiry(t *testing.T) {
+	s := testStore(t)
+	clock := &settableClock{}
+	base := time.Now()
+	clock.set(base)
+	s.clock = clock.now
+	expires := base.Add(time.Hour)
+	issueTestEnrollment(t, s, testBundle, expires)
+	clock.set(base.Add(2 * time.Hour))
+	same := EnrollmentRequest{BundleID: testBundle, Purpose: EnrollmentPurposeNewUser, ExpiresAt: expires}
+	if _, subcode, err := s.IssueEnrollment("admin", same); !errors.Is(err, ErrEnrollmentExists) || subcode != "" {
+		t.Fatalf("same input after the expiry: %q %v", subcode, err)
+	}
+	other := same
+	other.UserName = "dana"
+	if _, subcode, err := s.IssueEnrollment("admin", other); !errors.Is(err, ErrIdempotencyConflict) || subcode != "" {
+		t.Fatalf("other input after the expiry: %q %v", subcode, err)
+	}
+	fresh := same
+	fresh.BundleID = "01a10c90-0000-7000-8000-00000000fffe"
+	if _, subcode, err := s.IssueEnrollment("admin", fresh); !errors.Is(err, ErrInvalidRequest) || subcode != "" {
+		t.Fatalf("a new bundle with a past expiry: %q %v", subcode, err)
+	}
+	var n int
+	if err := s.db.QueryRow("SELECT count(*) FROM enrollments").Scan(&n); err != nil || n != 1 {
+		t.Fatalf("rows: %d %v", n, err)
+	}
+}
+
 func TestRevokeEnrollmentStates(t *testing.T) {
 	s := testStore(t)
 	now := time.Now()
