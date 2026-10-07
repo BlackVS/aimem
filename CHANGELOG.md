@@ -13,6 +13,17 @@ currently 23); a binary refuses a database newer than it understands.
 
 ## [Unreleased]
 
+## [0.9.1] — 2026-10-07
+
+The one-line installer becomes the upgrade path. Every documented
+one-liner now names this release. On an existing installation the
+installer backs up the state root, swaps the binary, waits for health at
+the new version, and rolls back both binary and state if the new release
+does not come up. Also: the x/text advisory fix and two dependency
+bumps. No schema change: a 0.9.0 hub or workstation upgrades in place,
+and rolls back in place. Includes PR #195 to #198, with the dependency
+PRs #128 and #171.
+
 ### Changed
 
 - **The one-line installer is the upgrade path.** Every documented
@@ -36,6 +47,21 @@ currently 23); a binary refuses a database newer than it understands.
   GO-2026-5970 (an infinite loop on invalid input) from the release
   binary. The module arrives only through the TUI dependencies, and no
   aimem code path reached the affected function.
+- `golang.org/x/sys` moves from v0.47.0 to v0.48.0, and
+  `modernc.org/sqlite` from v1.59.0 to v1.60.1 (with `modernc.org/libc`
+  v1.77.1). The on-disk schema is unchanged.
+- The pilot hub runbook checks a member home's hub credential
+  (`aimem hub credential`) before the first identity proof. It also
+  corrects its CRLF note: a carriage return in the hub's own
+  `AIMEM_HTTP_TOKEN` breaks only that bearer (401); named admin tokens
+  still work.
+
+### Fixed
+
+- A PowerShell module analysis cache, written by the Windows installer
+  tests into the source tree, came in with #197 and is removed. The
+  tests keep PowerShell's working directory and cache in their sandbox,
+  and CI refuses a committed tool cache (`scripts/check-tool-caches.sh`).
 
 ## [0.9.0] — 2026-10-07
 

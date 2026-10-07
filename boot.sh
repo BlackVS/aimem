@@ -1,7 +1,7 @@
 #!/bin/sh
 # aimem bootstrap for Linux and macOS. Run it INSIDE a project directory.
 #
-#   curl -fsSL https://raw.githubusercontent.com/BlackVS/aimem/v0.9.0/boot.sh | bash
+#   curl -fsSL https://raw.githubusercontent.com/BlackVS/aimem/v0.9.1/boot.sh | bash
 #
 # It installs the release this script was fetched from (RELEASE below): the
 # prebuilt static binary (no Go needed), checked against that release's
@@ -25,7 +25,7 @@ set -e
 
 # The release this script installs. Bumped together with the CHANGELOG
 # when a release is cut (internal/installer checks they agree).
-RELEASE=v0.9.0
+RELEASE=v0.9.1
 
 for t in curl tar; do
   command -v "$t" >/dev/null 2>&1 ||
