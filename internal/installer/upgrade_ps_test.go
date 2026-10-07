@@ -84,6 +84,6 @@ func TestPowerShellUpgradeRollsBackBinaryAndState(t *testing.T) {
 		t.Skip("install.ps1 runs on Windows only; the Windows test job runs this")
 	}
 	s := newSandbox(t, binary(t, "v0.0.1"))
-	out := runPowerShellUpgrade(t, s, binary(t, "broken"), "3")
+	out := runPowerShellUpgrade(t, s, binary(t, "broken"), "15")
 	checkRolledBack(t, s, out)
 }

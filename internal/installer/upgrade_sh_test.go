@@ -78,7 +78,7 @@ func TestShellUpgradeKeepsBackupAndReportsBothVersions(t *testing.T) {
 func TestShellUpgradeRollsBackBinaryAndState(t *testing.T) {
 	shellOnly(t)
 	s := newSandbox(t, binary(t, "v0.0.1"))
-	out, code := runShellUpgrade(t, s, binary(t, "broken"), "3")
+	out, code := runShellUpgrade(t, s, binary(t, "broken"), "15")
 	if code == 0 {
 		t.Fatalf("an upgrade to a release that cannot start reported success:\n%s", out)
 	}
