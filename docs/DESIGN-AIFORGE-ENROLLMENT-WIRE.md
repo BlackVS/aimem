@@ -44,7 +44,7 @@ No response body, audit record, log line, task, fixture evidence or error messag
   - `user_name` is the display name the new user will get. Without it, the hub uses the label the client gives at redemption. A name never selects a user (D1); it can be changed later with `aimem access user-set`.
 - **Effect.** The hub stores `{bundle_id, purpose, subcode digest, expires_at, issued_by, user_name}` and the state `issued`. It stores no team, role or grant, because D1 gives the enrollment record none.
 - **Answer.** `201` with `{bundle_id, purpose, expires_at, hub_id, subcode}`, sent with `Cache-Control: no-store`. The `hub_id` is the hub's stable identity (the access store's `hub_identity`), which identity.v1 already binds receipts to.
-- **Lost reply.** The subcode cannot be recovered, because the hub keeps only its digest. Repeating the request with the same `bundle_id` and the same input answers `409` `enrollment_exists` without a subcode, and the operator revokes that bundle and issues a new one. A `bundle_id` reused with different input is `idempotency_conflict`.
+- **Lost reply.** The subcode cannot be recovered, because the hub keeps only its digest. Repeating the request with the same `bundle_id` and the same input answers `409` `enrollment_exists` without a subcode, and the operator revokes that bundle and issues a new one. A `bundle_id` reused with different input is `idempotency_conflict`. A repeated `bundle_id` is answered before its input is validated, so a retry gets the same answer at any time, even after its requested expiry has passed; only a new bundle's input is checked (`invalid_request`).
 - **Audit.** `enrollment.issued` with the bundle ID, purpose, expiry and admin, never the subcode.
 
 ## 2. Revoke and list (operator → aimem)

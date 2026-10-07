@@ -84,24 +84,33 @@ func (r EnrollmentRequest) inputDigest() string {
 	return hex.EncodeToString(sum[:])
 }
 
+// validate checks a new bundle's input at now.
+func (r EnrollmentRequest) validate(now time.Time) error {
+	switch {
+	case r.Purpose != EnrollmentPurposeNewUser:
+		return fmt.Errorf("%w: purpose must be %s", ErrInvalidRequest, EnrollmentPurposeNewUser)
+	case !r.ExpiresAt.After(now) || r.ExpiresAt.After(now.Add(EnrollmentMaxLife)):
+		return fmt.Errorf("%w: expires_at must be in the future and at most 72 hours ahead", ErrInvalidRequest)
+	}
+	if r.UserName != "" {
+		if err := validName(r.UserName); err != nil {
+			return fmt.Errorf("%w: user_name: %v", ErrInvalidRequest, err)
+		}
+	}
+	return nil
+}
+
 // IssueEnrollment records a new bundle and returns its subcode, shown only
 // here. A repeated bundle ID is ErrEnrollmentExists for the same input and
-// ErrIdempotencyConflict for other input; neither reveals a subcode.
+// ErrIdempotencyConflict for other input; neither reveals a subcode. A
+// repeat is answered before its input is validated, so a retry after a lost
+// reply is classified the same way at any time, even once its requested
+// expiry has passed (enrollment.v1 §1).
 func (s *Store) IssueEnrollment(actor string, req EnrollmentRequest) (Enrollment, string, error) {
 	now := s.now()
 	req.ExpiresAt = req.ExpiresAt.UTC().Truncate(time.Second)
-	switch {
-	case !bundleIDShape.MatchString(req.BundleID):
+	if !bundleIDShape.MatchString(req.BundleID) {
 		return Enrollment{}, "", fmt.Errorf("%w: bundle_id must be a lowercase UUID", ErrInvalidRequest)
-	case req.Purpose != EnrollmentPurposeNewUser:
-		return Enrollment{}, "", fmt.Errorf("%w: purpose must be %s", ErrInvalidRequest, EnrollmentPurposeNewUser)
-	case !req.ExpiresAt.After(now) || req.ExpiresAt.After(now.Add(EnrollmentMaxLife)):
-		return Enrollment{}, "", fmt.Errorf("%w: expires_at must be in the future and at most 72 hours ahead", ErrInvalidRequest)
-	}
-	if req.UserName != "" {
-		if err := validName(req.UserName); err != nil {
-			return Enrollment{}, "", fmt.Errorf("%w: user_name: %v", ErrInvalidRequest, err)
-		}
 	}
 	var random [32]byte
 	if _, err := rand.Read(random[:]); err != nil {
@@ -118,6 +127,9 @@ func (s *Store) IssueEnrollment(actor string, req EnrollmentRequest) (Enrollment
 		case err == nil:
 			return ErrIdempotencyConflict
 		case !errors.Is(err, sql.ErrNoRows):
+			return err
+		}
+		if err := req.validate(now); err != nil {
 			return err
 		}
 		_, err := tx.Exec("INSERT INTO enrollments(bundle_id,purpose,digest,input_digest,created_at,expires_at,issued_by,user_name) VALUES(?,?,?,?,?,?,?,?)",
