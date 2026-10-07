@@ -19,7 +19,8 @@ What each step means is in [CHANGELOG `[Unreleased]`](../CHANGELOG.md), "Configu
   - on Windows: `icacls admin.token /inheritance:r /grant:r "%USERNAME%:F"`;
   - on Linux or macOS: `chmod 600 admin.token`.
 
-  The CLI refuses a wider file and prints the exact command to fix it. Write it with a plain LF line ending: a stray carriage return makes the hub answer `401`.
+  The CLI refuses a wider file and prints the exact command to fix it. It trims the line ending, so a CRLF-written file works.
+- **No carriage return in the hub's own token.** When the admin bearer is the hub's environment token, the hub compares it with its `AIMEM_HTTP_TOKEN` exactly. If that value keeps a trailing carriage return, the bearer fails with `hub answered 401: Unauthorized`. Named admin tokens (`aimem token add`) are not affected. A carriage return gets into the value, for example, when a service script sets it with `$(cat FILE)` from a CRLF-written file: command substitution drops the newline but keeps the carriage return. aimem's own reader of `~/.config/aimem/env` trims line endings, but a value the service manager or a wrapper script has already set wins over the file. Write any file the hub service's environment comes from with LF line endings; `grep -c $'\r' FILE` must print `0`.
 - **Two kinds of command:**
   - `aimem identity ...` runs from any machine, over the hub's TLS listener. Every such command takes the same hub flags, written `$HUB` below:
 
@@ -312,13 +313,21 @@ task credential stored for hub "pilot-hub"; MCP task tools use it
 hub pilot-hub: individual credential set, active, scope user (user 01a0…-…, token 01a0…-…)
 ```
 
+The last line is the check the member's identity proof (step 7) depends on, and the only one that tests the home itself. Run `aimem hub credential pilot-hub` again in each home, with that home's two variables set, whenever a home is rebuilt or a token replaced. Anything but `set, active, scope user` means the proof cannot succeed:
+- `hub "pilot-hub" is not configured on this machine`: the home was never provisioned, or the variables name another installation. The proof itself would fail with `no hub is configured on this machine (aimem hub add)`.
+- `individual credential none`: `aimem hub task-token` was not run in this home.
+- `the stored credential is not an individual credential`: the home holds something other than the member's user token.
+- `refused by the hub`: the hub does not accept the token (revoked, expired or unknown). Issue a new one and provision the home again.
+- `the hub is unreachable`: the URL, the CA file or the pin in the home's `hub.json` does not match the hub's TLS listener; the detail in parentheses names the failure.
+- `active, scope project` or `scope read-only`: the token is not user-scoped and cannot enter team mode.
+
 Then delete the token files. Rules for this layout:
 - **Each process names its installation.** `AIMEM_STATE_DIR` names the installation and `AIMEM_SOCKET` its socket. aicrew's launcher and the home's settings set both for every process started in the home, so the member sets nothing. With an aimem release that includes the socket rule (an explicit `AIMEM_STATE_DIR` keeps the socket inside it), the explicit `AIMEM_SOCKET` is a second safeguard; with v0.7.4 it is required on Linux.
 - **The user-wide env file must not name an installation.** `~/.config/aimem/env` belongs to the whole OS account, and aimem folds its `AIMEM_*` values into every process that lacks its own. It must not set `AIMEM_STATE_DIR` or `AIMEM_SOCKET`: a process started without its own value would silently use the installation the file names.
 - **A member home runs no aimem service.** There is no `aimem serve` for a home, so the home's socket is never bound. Team mode needs none, and memory tools in a standalone session started in a home are unavailable.
 - **One account isolates identities, not files.** Both homes belong to one OS account, so each member's processes can read the other member's home, including its `aimem/hub.json` with the token, and reach its step socket. The hub still tells the two members apart. A separate OS account per member is the only host isolation, and needs no change here.
 
-**Verify the token over the hub's TLS** without putting the secret on a command line. Keep it in a private header file:
+**Verify the token over the hub's TLS** without putting the secret on a command line. This checks the token only, not the member's home: it passes before the home is provisioned. Keep it in a private header file:
 
 ```sh
 # coordinator.auth holds one line: Authorization: Bearer <the secret>
@@ -342,6 +351,8 @@ curl -s -H @coordinator.auth "https://hub.example.test:8443/v1/access/identity?p
 
 The operator never sees a receipt. `HUB_ID` is the hub ID from `aimem identity peer list`.
 
+**Prerequisite: the member's home is provisioned (step 6).** The proof runs in the member's own installation. It presents the individual credential that `aimem hub task-token` stored in the home, and it reaches the hub through the URL and the CA file or pin in the home's `hub.json`. Delivering the token file or the header file configures neither. Before the member's first session, `aimem hub credential pilot-hub`, run in that home, must answer `set, active, scope user`.
+
 **Verify from the hub side,** after a member has started a team session. The hub's access audit records `team.verified` for each verified team request. A refusal is recorded as `team.refused.<code>` with a correlation ID matching the one the member saw. On the hub host, `aimem access list` prints them under `recent_audit`, newest first, next to the users, grants and tokens. The setup above is there too: `identity_peer.register`, `identity_peer.credential.issue.<operation>`, `team.register.created` (by `peer:aicrew-example`), `team_grant.true`, `user.create` and `token.issue`. Each `team.read` of aicrewd is recorded as `team.read`.
 
 ## Checklist
@@ -355,7 +366,8 @@ The operator never sees a receipt. `HUB_ID` is the hub ID from `aimem identity p
 | aicrew's four credentials | `aimem identity cred list aicrew-example $HUB` shows `identity.redeem`, `reservation.read`, `team.register` and `team.read` active |
 | Team profile and grant | `aimem identity team grants --peer aicrew-example --team-name pilot $HUB` lists `pilot` |
 | Member tokens | `GET /v1/access/identity` answers `scope: user` for each member |
-| Member homes | with each home's `AIMEM_STATE_DIR` and `AIMEM_SOCKET`, `aimem hub credential pilot-hub` answers `set` and `active`; `~/.config/aimem/env` sets neither variable |
+| Member homes, before the first proof | with each home's `AIMEM_STATE_DIR` and `AIMEM_SOCKET`, `aimem hub credential pilot-hub` answers `set, active, scope user`; `~/.config/aimem/env` sets neither variable |
+| Hub token | `grep -c $'\r'` prints `0` for every file the hub service's environment comes from |
 | Members linked | a member's session start is audited as `team.verified` |
 
 Secrets never belong in a command line, a shell history, a log, a chat or a task comment. Every secret in this runbook travels in a file only its owner can read.
