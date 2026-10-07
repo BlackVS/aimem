@@ -337,12 +337,22 @@ func redeemAfterWait(t *testing.T, s *Store, clock *settableClock, req Enrollmen
 	if err != nil {
 		t.Fatal(err)
 	}
+	waits := s.db.Stats().WaitCount
 	done := make(chan error, 1)
 	go func() {
 		_, err := s.RedeemEnrollment(req)
 		done <- err
 	}()
-	time.Sleep(200 * time.Millisecond) // the redemption is now queued for the connection
+	// The store has one connection: a rise in its wait count means the
+	// redemption is queued for it, so the clock moves only after that.
+	deadline := time.Now().Add(10 * time.Second)
+	for s.db.Stats().WaitCount == waits {
+		if time.Now().After(deadline) {
+			hold.Rollback()
+			t.Fatal("the redemption never waited for the connection")
+		}
+		time.Sleep(time.Millisecond)
+	}
 	clock.set(after)
 	hold.Rollback()
 	return <-done
