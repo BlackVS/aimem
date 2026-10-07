@@ -84,9 +84,14 @@ function Wait-AimemHealth($exe, $want, $seconds) {
   } while ((Get-Date) -lt $deadline)
   $false
 }
-function Get-DefaultStateRoot {
+function Get-StateRoot($exe, $health) {
+  # The running service knows its state root; a stopped one's binary
+  # resolves it the same way it would (environment, then its env file).
+  if ($health -and $health.state_root) { return $health.state_root }
+  $named = (Invoke-Quiet $exe @('state-root')).Trim()
+  if ($named) { return $named }
   # The order of internal/adapter.StateRoot (Go's home dir on Windows is
-  # USERPROFILE), for when no running service names its state root.
+  # USERPROFILE), for a binary that cannot answer.
   if ($env:AIMEM_STATE_DIR) { return $env:AIMEM_STATE_DIR }
   $base = if ($env:XDG_STATE_HOME) { $env:XDG_STATE_HOME } else { Join-Path $env:USERPROFILE '.local\state' }
   Join-Path $base 'aimem'
@@ -102,8 +107,7 @@ function Invoke-Upgrade($exe, $new) {
   $wait = if ($env:AIMEM_UPGRADE_WAIT) { [int]$env:AIMEM_UPGRADE_WAIT } else { 30 }
   $oldV = Get-AimemVersion $exe
   $newV = Get-AimemVersion $new
-  $h = Get-AimemHealth $exe
-  $root = if ($h -and $h.state_root) { $h.state_root } else { Get-DefaultStateRoot }
+  $root = Get-StateRoot $exe (Get-AimemHealth $exe)
   $ts = (Get-Date).ToUniversalTime().ToString("yyyyMMdd'T'HHmmss'Z'")
   Say "upgrading aimem $oldV -> $newV (state root $root)"
   Stop-AimemService

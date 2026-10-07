@@ -56,8 +56,9 @@ need() { command -v "$1" >/dev/null 2>&1 || { echo "error: $1 is required" >&2; 
 # The caller defines svc_stop and svc_start (this installation's service
 # and timers, nothing else), aimem_as (runs a binary as the service's user,
 # with the service's environment), AIMEM_BIN (the installed binary),
-# STATE_ROOT_DEFAULT (the state root to use when no service answers) and
-# TXN_MANAGED=1 when svc_start really starts a service it can wait for.
+# STATE_ROOT_DEFAULT (the state root when neither the service nor the
+# installed binary names one) and TXN_MANAGED=1 when svc_start really
+# starts a service it can wait for.
 txn_field() { # binary field: a string field of the running service's health
   aimem_as "$1" health 2>/dev/null | sed -n 's/.*"'"$2"'": *"\([^"]*\)".*/\1/p' | head -n 1
 }
@@ -78,7 +79,10 @@ upgrade_txn() { # new-binary
   local new=$1 old_v new_v root ts backup="" prev="$AIMEM_BIN.prev"
   new_v=$(aimem_as "$new" version 2>/dev/null | awk '{print $2}') || true
   old_v=$(aimem_as "$AIMEM_BIN" version 2>/dev/null | awk '{print $2}') || true
+  # The running service knows its state root; a stopped one's binary
+  # resolves it the same way it would (environment, then its env file).
   root=$(txn_field "$AIMEM_BIN" state_root) || true
+  [ -n "$root" ] || root=$(aimem_as "$AIMEM_BIN" state-root 2>/dev/null | head -n 1) || true
   if [ "$TXN_MANAGED" != 1 ] && [ -n "$(txn_field "$AIMEM_BIN" status)" ]; then
     echo "ERROR: an aimem serve this installer does not manage is running; stop it, then re-run." >&2
     return 1
@@ -221,15 +225,6 @@ svc_start() {
   if [ "$SYNC_WAS_ACTIVE" = 1 ]; then systemctl --user start aimem-sync.timer || true; fi
 }
 aimem_as() { "$@"; }
-# client_state_root: the state root when no running service names it, in
-# the order internal/adapter.StateRoot uses, plus the env file that the
-# unit and the CLI both read.
-client_state_root() {
-  local v=${AIMEM_STATE_DIR:-}
-  [ -n "$v" ] || v=$(sed -n 's/^AIMEM_STATE_DIR=//p' "$HOME/.config/aimem/env" 2>/dev/null | tr -d "\"'" | tail -n 1)
-  [ -n "$v" ] || v=${XDG_STATE_HOME:-$HOME/.local/state}/aimem
-  printf '%s\n' "$v"
-}
 
 install_user() {
   need jq
@@ -273,7 +268,7 @@ EOF
     # An existing installation: back up its state, swap, and roll back
     # binary and state together if the new release does not come up.
     AIMEM_BIN="$BIN_DIR/aimem"
-    STATE_ROOT_DEFAULT=$(client_state_root)
+    STATE_ROOT_DEFAULT=${AIMEM_STATE_DIR:-${XDG_STATE_HOME:-$HOME/.local/state}/aimem}
     upgrade_txn "$BIN_DIR/aimem.new" || exit 1
   else
     mv "$BIN_DIR/aimem.new" "$BIN_DIR/aimem"

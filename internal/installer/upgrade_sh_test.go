@@ -5,13 +5,15 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"testing"
 )
 
 // runShellUpgrade runs install.sh's upgrade transaction in bash against the
 // sandbox: the old release serves the state root (a real `aimem serve`,
-// started and stopped by its own PID in place of the systemd unit), a
-// marker records the state before the upgrade, and the new binary goes in.
+// started and stopped by its own PID in place of the systemd unit), or in
+// an offline sandbox nothing serves it, a marker records the state before
+// the upgrade, and the new binary goes in.
 func runShellUpgrade(t *testing.T, s *sandbox, newBinary, wait string) (string, int) {
 	t.Helper()
 	newCopy := filepath.Join(s.bin, "aimem.new")
@@ -32,10 +34,14 @@ aimem_as() { "$@"; }
 trap svc_stop EXIT
 TXN_MANAGED=1
 AIMEM_BIN=$SANDBOX/bin/aimem
-STATE_ROOT_DEFAULT=$AIMEM_STATE_DIR
-svc_start
-AIMEM_UPGRADE_WAIT=20 txn_wait v0.0.1 || { echo "the old release did not come up"; cat "$SANDBOX/serve.log"; exit 99; }
-echo before > "$AIMEM_STATE_DIR/marker"
+STATE_ROOT_DEFAULT=$HOME/.local/state/aimem
+if [ "${OFFLINE:-}" = 1 ]; then
+  mkdir -p "$STATE"
+else
+  svc_start
+  AIMEM_UPGRADE_WAIT=20 txn_wait v0.0.1 || { echo "the old release did not come up"; cat "$SANDBOX/serve.log"; exit 99; }
+fi
+echo before > "$STATE/marker"
 rc=0
 upgrade_txn "$SANDBOX/bin/aimem.new" || rc=$?
 exit "$rc"
@@ -67,20 +73,41 @@ func shellOnly(t *testing.T) {
 
 func TestShellUpgradeKeepsBackupAndReportsBothVersions(t *testing.T) {
 	shellOnly(t)
-	s := newSandbox(t, binary(t, "v0.0.1"))
-	out, code := runShellUpgrade(t, s, binary(t, "v0.0.2"), "20")
-	if code != 0 {
-		t.Fatalf("upgrade failed (exit %d):\n%s", code, out)
+	for _, offline := range []bool{false, true} {
+		t.Run(map[bool]string{false: "running", true: "stopped"}[offline], func(t *testing.T) {
+			s := newSandbox(t, binary(t, "v0.0.1"), offline)
+			out, code := runShellUpgrade(t, s, binary(t, "v0.0.2"), "20")
+			if code != 0 {
+				t.Fatalf("upgrade failed (exit %d):\n%s", code, out)
+			}
+			checkSuccess(t, s, out)
+		})
 	}
-	checkSuccess(t, s, out)
 }
 
 func TestShellUpgradeRollsBackBinaryAndState(t *testing.T) {
 	shellOnly(t)
-	s := newSandbox(t, binary(t, "v0.0.1"))
-	out, code := runShellUpgrade(t, s, binary(t, "broken"), "15")
-	if code == 0 {
-		t.Fatalf("an upgrade to a release that cannot start reported success:\n%s", out)
+	for _, offline := range []bool{false, true} {
+		t.Run(map[bool]string{false: "running", true: "stopped"}[offline], func(t *testing.T) {
+			s := newSandbox(t, binary(t, "v0.0.1"), offline)
+			out, code := runShellUpgrade(t, s, binary(t, "broken"), "15")
+			if code == 0 {
+				t.Fatalf("an upgrade to a release that cannot start reported success:\n%s", out)
+			}
+			checkRolledBack(t, s, out)
+		})
 	}
-	checkRolledBack(t, s, out)
+}
+
+// On a fresh hub the service user has no configuration yet. The hub's
+// service hooks run before the binary is downloaded, under the script's
+// `set -euo pipefail`, so they must not depend on any of it existing.
+func TestHubServiceHooksNeedNoConfiguration(t *testing.T) {
+	shellOnly(t)
+	script := "set -euo pipefail\nHOME_DIR=" + t.TempDir() + "/fresh\nHUB_USER=nobody\n" +
+		extract(t, "install-hub.sh", "hub-service-hooks") + "echo \"reached $STATE_ROOT_DEFAULT\"\n"
+	out, err := exec.Command("bash", "-c", script).CombinedOutput()
+	if err != nil || !strings.Contains(string(out), "reached ") {
+		t.Fatalf("the hub's service hooks stop a fresh install: %v\n%s", err, out)
+	}
 }

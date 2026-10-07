@@ -11,8 +11,8 @@ import (
 // runPowerShellUpgrade runs install.ps1's Invoke-Upgrade against the
 // sandbox: the old release serves the state root (a real `aimem serve`,
 // started and stopped by its own process id in place of the logon task),
-// a marker records the state before the upgrade, and the new binary goes
-// in. A rollback ends in a thrown message, printed as THROWN.
+// or in an offline sandbox nothing serves it, a marker records the state
+// before the upgrade, and the new binary goes in. A rollback ends in a thrown message, printed as THROWN.
 func runPowerShellUpgrade(t *testing.T, s *sandbox, newBinary, wait string) string {
 	t.Helper()
 	if runtime.GOOS != "windows" {
@@ -47,9 +47,13 @@ function Start-AimemService {
   $global:svc = Start-Process -FilePath $Exe -ArgumentList 'serve' -PassThru -NoNewWindow -RedirectStandardOutput "$log.out" -RedirectStandardError "$log.err"
 }
 try {
-  Start-AimemService
-  if (-not (Wait-AimemHealth $Exe 'v0.0.1' 20)) { Write-Host 'SETUP: the old release did not come up'; exit 99 }
-  [IO.File]::WriteAllText((Join-Path $env:AIMEM_STATE_DIR 'marker'), 'before' + [char]10)
+  if ($env:OFFLINE -eq '1') {
+    New-Item -ItemType Directory -Force $env:STATE | Out-Null
+  } else {
+    Start-AimemService
+    if (-not (Wait-AimemHealth $Exe 'v0.0.1' 20)) { Write-Host 'SETUP: the old release did not come up'; exit 99 }
+  }
+  [IO.File]::WriteAllText((Join-Path $env:STATE 'marker'), 'before' + [char]10)
   try { Invoke-Upgrade $Exe $env:NEW_BINARY } catch { Write-Host "THROWN: $($_.Exception.Message)" }
 } finally {
   Stop-AimemService
@@ -74,16 +78,22 @@ func TestPowerShellUpgradeKeepsBackupAndReportsBothVersions(t *testing.T) {
 	if runtime.GOOS != "windows" {
 		t.Skip("install.ps1 runs on Windows only; the Windows test job runs this")
 	}
-	s := newSandbox(t, binary(t, "v0.0.1"))
-	out := runPowerShellUpgrade(t, s, binary(t, "v0.0.2"), "20")
-	checkSuccess(t, s, out)
+	for _, offline := range []bool{false, true} {
+		t.Run(map[bool]string{false: "running", true: "stopped"}[offline], func(t *testing.T) {
+			s := newSandbox(t, binary(t, "v0.0.1"), offline)
+			checkSuccess(t, s, runPowerShellUpgrade(t, s, binary(t, "v0.0.2"), "20"))
+		})
+	}
 }
 
 func TestPowerShellUpgradeRollsBackBinaryAndState(t *testing.T) {
 	if runtime.GOOS != "windows" {
 		t.Skip("install.ps1 runs on Windows only; the Windows test job runs this")
 	}
-	s := newSandbox(t, binary(t, "v0.0.1"))
-	out := runPowerShellUpgrade(t, s, binary(t, "broken"), "15")
-	checkRolledBack(t, s, out)
+	for _, offline := range []bool{false, true} {
+		t.Run(map[bool]string{false: "running", true: "stopped"}[offline], func(t *testing.T) {
+			s := newSandbox(t, binary(t, "v0.0.1"), offline)
+			checkRolledBack(t, s, runPowerShellUpgrade(t, s, binary(t, "broken"), "15"))
+		})
+	}
 }

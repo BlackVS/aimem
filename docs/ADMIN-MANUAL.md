@@ -60,7 +60,8 @@ hash is not in the release's `SHA256SUMS`. On an existing installation
 the installer:
 
 1. reads the installed version and asks the running service for its
-   state root;
+   state root (a stopped service's binary answers `aimem state-root`,
+   which reads the same environment and env file the service would);
 2. stops only this installation's service (the systemd user unit, or on
    Windows the `aimem-serve` task and the serve processes of this
    binary), and the sync job that opens the same databases;

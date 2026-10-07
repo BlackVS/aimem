@@ -83,12 +83,17 @@ func binary(t *testing.T, version string) string {
 // release installed, and a state root. Its parent directory is short,
 // because the service socket lives in the state root and Unix socket paths
 // are limited to about 104 bytes.
+//
+// An offline sandbox is an installation whose service is stopped and whose
+// state root is named only in its env file (~/.config/aimem/env), not in
+// the environment and not at the default location: the installer must ask
+// the installed binary where the state is.
 type sandbox struct {
 	dir, bin, state string
 	env             []string
 }
 
-func newSandbox(t *testing.T, oldBinary string) *sandbox {
+func newSandbox(t *testing.T, oldBinary string, offline bool) *sandbox {
 	t.Helper()
 	base := ""
 	if runtime.GOOS != "windows" {
@@ -126,7 +131,19 @@ func newSandbox(t *testing.T, oldBinary string) *sandbox {
 		}
 		s.env = append(s.env, kv)
 	}
-	s.env = append(s.env, "HOME="+home, "USERPROFILE="+home, "AIMEM_STATE_DIR="+s.state)
+	s.env = append(s.env, "HOME="+home, "USERPROFILE="+home, "STATE="+s.state)
+	if !offline {
+		s.env = append(s.env, "AIMEM_STATE_DIR="+s.state)
+		return s
+	}
+	s.env = append(s.env, "OFFLINE=1")
+	conf := filepath.Join(home, ".config", "aimem")
+	if err := os.MkdirAll(conf, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(conf, "env"), []byte("AIMEM_STATE_DIR="+s.state+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
 	return s
 }
 

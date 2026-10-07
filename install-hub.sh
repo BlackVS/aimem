@@ -76,8 +76,9 @@ sysuser() { runuser -u "$HUB_USER" -- env "XDG_RUNTIME_DIR=/run/user/$(id -u "$H
 # The caller defines svc_stop and svc_start (this installation's service
 # and timers, nothing else), aimem_as (runs a binary as the service's user,
 # with the service's environment), AIMEM_BIN (the installed binary),
-# STATE_ROOT_DEFAULT (the state root to use when no service answers) and
-# TXN_MANAGED=1 when svc_start really starts a service it can wait for.
+# STATE_ROOT_DEFAULT (the state root when neither the service nor the
+# installed binary names one) and TXN_MANAGED=1 when svc_start really
+# starts a service it can wait for.
 txn_field() { # binary field: a string field of the running service's health
   aimem_as "$1" health 2>/dev/null | sed -n 's/.*"'"$2"'": *"\([^"]*\)".*/\1/p' | head -n 1
 }
@@ -98,7 +99,10 @@ upgrade_txn() { # new-binary
   local new=$1 old_v new_v root ts backup="" prev="$AIMEM_BIN.prev"
   new_v=$(aimem_as "$new" version 2>/dev/null | awk '{print $2}') || true
   old_v=$(aimem_as "$AIMEM_BIN" version 2>/dev/null | awk '{print $2}') || true
+  # The running service knows its state root; a stopped one's binary
+  # resolves it the same way it would (environment, then its env file).
   root=$(txn_field "$AIMEM_BIN" state_root) || true
+  [ -n "$root" ] || root=$(aimem_as "$AIMEM_BIN" state-root 2>/dev/null | head -n 1) || true
   if [ "$TXN_MANAGED" != 1 ] && [ -n "$(txn_field "$AIMEM_BIN" status)" ]; then
     echo "ERROR: an aimem serve this installer does not manage is running; stop it, then re-run." >&2
     return 1
@@ -154,8 +158,10 @@ upgrade_txn() { # new-binary
 }
 # END upgrade-transaction
 
+# BEGIN hub-service-hooks
 # The hub's service hooks for upgrade_txn: this hub's serve unit and its
-# curation, run as the service user.
+# curation, run as the service user. They read no file: on a fresh host
+# nothing of the service user's configuration exists yet.
 AIMEM_BIN="$HOME_DIR/.local/bin/aimem"
 TXN_MANAGED=1
 svc_stop() { sysuser stop aimem-curate.timer aimem-curate.service aimem.service 2>/dev/null || true; }
@@ -164,8 +170,8 @@ svc_start() {
   sysuser start aimem-curate.timer || true
 }
 aimem_as() { runuser -u "$HUB_USER" -- env "HOME=$HOME_DIR" "XDG_RUNTIME_DIR=/run/user/$(id -u "$HUB_USER")" "$@"; }
-STATE_ROOT_DEFAULT=$(sed -n 's/^AIMEM_STATE_DIR=//p' "$HOME_DIR/.config/aimem/env" 2>/dev/null | tr -d "\"'" | tail -n 1)
-[ -n "$STATE_ROOT_DEFAULT" ] || STATE_ROOT_DEFAULT="$HOME_DIR/.local/state/aimem"
+STATE_ROOT_DEFAULT="$HOME_DIR/.local/state/aimem"
+# END hub-service-hooks
 
 # --- binary -----------------------------------------------------------------
 mkdir -p "$HOME_DIR/.local/bin" "$HOME_DIR/.local/sbin"
