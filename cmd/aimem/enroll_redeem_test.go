@@ -138,7 +138,7 @@ func TestEnrollRedeemEndToEnd(t *testing.T) {
 	if ca, err := os.ReadFile(h.CAFile); err != nil || !strings.Contains(string(ca), "CERTIFICATE") {
 		t.Fatalf("the CA bundle beside the entry: %v", err)
 	}
-	if entries, _ := os.ReadDir(filepath.Join(root, "enroll")); len(entries) != 0 {
+	if entries, _ := filepath.Glob(filepath.Join(root, "enroll", "*.json")); len(entries) != 0 {
 		t.Fatalf("pending state left: %v", entries)
 	}
 	noSecretOnDisk(t, root, recordSubcode(t, record), h.TaskToken)
@@ -213,7 +213,7 @@ func TestEnrollRedeemCrashAfterStorage(t *testing.T) {
 	if again.code != enrollExitOK || again.result(t).Outcome != "already_enrolled" || e.redeems.Load() != before {
 		t.Fatalf("rerun: %d %s, %d redemption requests", again.code, again.stderr, e.redeems.Load()-before)
 	}
-	if entries, _ := os.ReadDir(filepath.Join(root, "enroll")); len(entries) != 0 {
+	if entries, _ := filepath.Glob(filepath.Join(root, "enroll", "*.json")); len(entries) != 0 {
 		t.Fatalf("pending state left: %v", entries)
 	}
 }
@@ -355,13 +355,117 @@ func TestNewEnrollPendingPublishedOnce(t *testing.T) {
 	}
 }
 
+func TestNewEnrollPendingAbandonedEmpty(t *testing.T) {
+	bundle := "01a10c90-0000-7000-8000-000000000001"
+	dir := filepath.Join(t.TempDir(), "enroll")
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	empty := func(name string, age time.Duration) string {
+		path := filepath.Join(dir, name)
+		if err := os.WriteFile(path, nil, 0o600); err != nil {
+			t.Fatal(err)
+		}
+		at := time.Now().Add(-age)
+		if err := os.Chtimes(path, at, at); err != nil {
+			t.Fatal(err)
+		}
+		return path
+	}
+
+	// A creator that stopped before writing, long ago: the run recovers
+	// with fresh keys.
+	old := empty("old.json", 2*enrollAbandonedAfter)
+	p, err := newEnrollPending(old, bundle)
+	if err != nil {
+		t.Fatalf("abandoned empty file not recovered: %v", err)
+	}
+	stored, err := loadEnrollPending(old)
+	if err != nil || stored == nil || stored.RequestKey != p.RequestKey {
+		t.Fatalf("stored state: %+v %v", stored, err)
+	}
+
+	// A young empty file is never touched, even under the lock: the run
+	// asks to be repeated.
+	young := empty("young.json", time.Second)
+	if _, err := newEnrollPending(young, bundle); err == nil || !strings.Contains(err.Error(), "moments ago") {
+		t.Fatalf("young empty file: %v", err)
+	}
+	if fi, err := os.Stat(young); err != nil || fi.Size() != 0 {
+		t.Fatalf("young empty file was changed: %v %v", fi, err)
+	}
+
+	// Runs that start together from an abandoned file all resume with one
+	// set of keys: no run recovers a file another has already replaced.
+	shared := empty("shared.json", 2*enrollAbandonedAfter)
+	out := make(chan *enrollPending, 8)
+	for range 8 {
+		go func() {
+			p, err := newEnrollPending(shared, bundle)
+			if err != nil {
+				t.Error(err)
+			}
+			out <- p
+		}()
+	}
+	var first *enrollPending
+	for range 8 {
+		p := <-out
+		if p == nil {
+			continue
+		}
+		if first == nil {
+			first = p
+		} else if p.RequestKey != first.RequestKey {
+			t.Fatal("two runs recovered one abandoned file with different keys")
+		}
+	}
+	if stored, err := loadEnrollPending(shared); err != nil || first == nil || stored.RequestKey != first.RequestKey {
+		t.Fatalf("stored state: %+v %v", stored, err)
+	}
+}
+
+func TestNewEnrollPendingStalledCreatorKeepsItsFile(t *testing.T) {
+	// A creator stalled between the create and the write holds the creation
+	// lock: another run never recovers its file, however old the file looks.
+	path := filepath.Join(t.TempDir(), "enroll", "stalled.json")
+	bundle := "01a10c90-0000-7000-8000-000000000001"
+	var otherErr error
+	enrollAfterCreate = func() {
+		enrollAfterCreate = nil
+		at := time.Now().Add(-2 * enrollAbandonedAfter)
+		if err := os.Chtimes(path, at, at); err != nil {
+			t.Error(err)
+			return
+		}
+		enrollLockWait = 0
+		_, otherErr = newEnrollPending(path, bundle)
+		enrollLockWait = 10 * time.Second
+	}
+	t.Cleanup(func() { enrollAfterCreate = nil; enrollLockWait = 10 * time.Second })
+	p, err := newEnrollPending(path, bundle)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if otherErr == nil || !strings.Contains(otherErr.Error(), "another run is creating") {
+		t.Fatalf("a run got past a live creator: %v", otherErr)
+	}
+	stored, err := loadEnrollPending(path)
+	if err != nil || stored == nil || stored.RequestKey != p.RequestKey {
+		t.Fatalf("the stalled creator's keys are not the published state: %+v %v", stored, err)
+	}
+}
+
 // A first run stops retrying at the record's expiry with outcome unknown;
 // the rerun is a recovery, which the hub replays past the expiry.
 func TestEnrollRedeemFirstRunStopsAtExpiry(t *testing.T) {
 	e := newEnrollRig(t)
-	enrollBackoff = func(int) time.Duration { return 700 * time.Millisecond }
+	// The wire carries whole seconds and the issuing command truncates, so a
+	// record expires up to a second early: 3s keeps the issue clear of the
+	// hub's "in the future" check, and four 1s backoffs outlast it.
+	enrollBackoff = func(int) time.Duration { return time.Second }
 	read := pipeSecretStdout(t)
-	e.mustRun(t, "enroll", "issue", "--purpose", "new-user", "--expires", "1s", "--output", "-")
+	e.mustRun(t, "enroll", "issue", "--purpose", "new-user", "--expires", "3s", "--output", "-")
 	record := read()
 	root := t.TempDir()
 	e.lose.Store(5)
@@ -439,7 +543,7 @@ func TestEnrollRedeemOvertakenRunFinishesAsEnrolled(t *testing.T) {
 	if hubs, _ := adapter.LoadHubs(root); hubs["pilot"].TaskToken != stored {
 		t.Fatal("run B replaced run A's credential")
 	}
-	if entries, _ := os.ReadDir(filepath.Join(root, "enroll")); len(entries) != 0 {
+	if entries, _ := filepath.Glob(filepath.Join(root, "enroll", "*.json")); len(entries) != 0 {
 		t.Fatalf("pending state left: %v", entries)
 	}
 

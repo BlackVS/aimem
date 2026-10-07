@@ -69,6 +69,12 @@ currently 23); a binary refuses a database newer than it understands.
   record's expiry with outcome unknown (exit 5); the rerun is a recovery,
   which the hub replays. The redemption route's OpenAPI operation declares
   `security: []`, so schema consumers do not send a bearer.
+  A run that stopped between creating the pending state and writing it
+  left an empty file that blocked every later run. Runs now create the
+  pending state under a lock that the OS releases when its holder exits,
+  so an empty file found under the lock has no live writer. A later run
+  recovers it once it is a minute old; a younger one is never touched,
+  and the run asks to be repeated.
 
 - **hub.json is owner-only on Windows.** It holds every hub's checkpoint
   token and individual credential, including an enrolled installation's.

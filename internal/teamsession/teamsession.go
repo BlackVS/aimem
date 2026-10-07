@@ -30,6 +30,7 @@ import (
 	"time"
 
 	"aimem/internal/adapter"
+	"aimem/internal/filelock"
 	"aimem/internal/introspect"
 	"aimem/internal/privatefile"
 )
@@ -121,7 +122,7 @@ func Locked(root string, fn func() error) error {
 	defer lf.Close()
 	deadline := time.Now().Add(10 * time.Second)
 	for {
-		ok, err := tryLock(lf)
+		ok, err := filelock.TryLock(lf)
 		if err != nil {
 			return err
 		}
@@ -133,7 +134,7 @@ func Locked(root string, fn func() error) error {
 		}
 		time.Sleep(10 * time.Millisecond)
 	}
-	defer unlock(lf)
+	defer filelock.Unlock(lf)
 	return fn()
 }
 
