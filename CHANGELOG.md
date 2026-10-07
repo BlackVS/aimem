@@ -13,6 +13,13 @@ currently 23); a binary refuses a database newer than it understands.
 
 ## [Unreleased]
 
+### Changed
+
+- `golang.org/x/text` moves from v0.3.8 to v0.42.0, which clears
+  GO-2026-5970 (an infinite loop on invalid input) from the release
+  binary. The module arrives only through the TUI dependencies, and no
+  aimem code path reached the affected function.
+
 ## [0.9.0] — 2026-10-07
 
 Enrollment (D1, enrollment.v1:
