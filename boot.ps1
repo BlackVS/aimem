@@ -1,14 +1,17 @@
 # aimem bootstrap for Windows. Run it INSIDE a project directory.
 #
-#   powershell -NoProfile -ExecutionPolicy Bypass -Command "irm https://raw.githubusercontent.com/BlackVS/aimem/master/boot.ps1 | iex"
+#   powershell -NoProfile -ExecutionPolicy Bypass -Command "irm https://raw.githubusercontent.com/BlackVS/aimem/v0.9.0/boot.ps1 | iex"
 #
 # (The wrapper survives the default Restricted execution policy on a
 # fresh Windows machine; bare `irm ... | iex` works too once fetched,
 # since this script bypasses the policy for the installer it runs.)
 #
-# It downloads the latest release (a prebuilt aimem.exe - no Go needed),
-# unpacks the repository archive for the installer and the OpenCode plugin,
-# and runs install.ps1 against the current directory.
+# It installs the release this script was fetched from ($release below):
+# the prebuilt aimem.exe (no Go needed), checked against that release's
+# SHA256SUMS, and the repository archive of the same tag for the installer
+# and the OpenCode plugin. Then it runs install.ps1 against the current
+# directory. An upgrade backs up the state root first and rolls back if
+# the new release does not come up (install.ps1).
 #
 # Optional environment:
 #   AIMEM_HUB_URL, AIMEM_HUB_TOKEN   register a hub for real-time push
@@ -17,66 +20,60 @@
 #                                    the installed aimem is already current
 #                                    (an older install is upgraded anyway)
 #   AIMEM_REPO=owner/name            install from a fork
-#   AIMEM_VERSION=vX.Y.Z             pin a release instead of the latest
+#   AIMEM_VERSION=vX.Y.Z             install another release than $release
+#   AIMEM_UPGRADE_WAIT=30            seconds an upgrade waits for health at
+#                                    the new version before rolling back
 $ErrorActionPreference = 'Stop'
+
+# The release this script installs. Bumped together with the CHANGELOG
+# when a release is cut (internal/installer checks they agree).
+$release = 'v0.9.0'
 [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
 
 $repo = if ($env:AIMEM_REPO) { $env:AIMEM_REPO } else { 'BlackVS/aimem' }
 $base = "https://github.com/$repo"
 
-$tag = $env:AIMEM_VERSION
-if (-not $tag) {
-  # /releases/latest redirects to the tag page; read the version off the
-  # effective URL rather than parsing the API.
-  try {
-    $r = Invoke-WebRequest "$base/releases/latest" -MaximumRedirection 5 -UseBasicParsing
-    if ($r.BaseResponse.ResponseUri.AbsoluteUri -match '/releases/tag/(.+)$') { $tag = $Matches[1] }
-  } catch { $tag = $null }
-}
-if (-not $tag) { $tag = 'master' }   # no releases yet: install from the branch
+$tag = if ($env:AIMEM_VERSION) { $env:AIMEM_VERSION } else { $release }
 # Tell install.ps1 which release this is, so an older install gets upgraded.
-if ($tag -ne 'master') { $env:AIMEM_TARGET_VERSION = $tag }
+$env:AIMEM_TARGET_VERSION = $tag
 
 $dest = Join-Path ([IO.Path]::GetTempPath()) ("aimem-" + [Guid]::NewGuid().ToString('N'))
 New-Item -ItemType Directory -Force $dest | Out-Null
 try {
   Write-Host "Fetching aimem $tag ..."
-  $archive = if ($tag -eq 'master') { "$base/archive/refs/heads/master.tar.gz" }
-             else { "$base/archive/refs/tags/$tag.tar.gz" }
+  $archive = "$base/archive/refs/tags/$tag.tar.gz"
   $tgz = Join-Path $dest 'src.tar.gz'
   Invoke-WebRequest $archive -OutFile $tgz -UseBasicParsing
   # tar ships with Windows 10 1803+ and understands .tar.gz.
   & tar -xzf $tgz -C $dest --strip-components=1
   Remove-Item $tgz
 
-  if ($tag -ne 'master') {
-    $prebuilt = Join-Path $dest 'aimem-prebuilt.exe'
-    try {
-      Invoke-WebRequest "$base/releases/download/$tag/aimem-windows-amd64.exe" `
-        -OutFile $prebuilt -UseBasicParsing
-      $env:AIMEM_PREBUILT = $prebuilt
-    } catch {
-      Write-Warning "No prebuilt aimem.exe in release $tag; building from source (needs Go)."
-      Remove-Item -Force $prebuilt -ErrorAction SilentlyContinue
+  $prebuilt = Join-Path $dest 'aimem-prebuilt.exe'
+  try {
+    Invoke-WebRequest "$base/releases/download/$tag/aimem-windows-amd64.exe" `
+      -OutFile $prebuilt -UseBasicParsing
+    $env:AIMEM_PREBUILT = $prebuilt
+  } catch {
+    Write-Warning "No prebuilt aimem.exe in release $tag; building from source (needs Go)."
+    Remove-Item -Force $prebuilt -ErrorAction SilentlyContinue
+  }
+  # Verify against the release's SHA256SUMS. Deliberately OUTSIDE the
+  # try/catch above: a missing sums file or a mismatch must abort the
+  # install, never degrade into the source-build fallback (that path is
+  # reserved for a release with no binary at all). Guard on the file we
+  # actually downloaded — NOT $env:AIMEM_PREBUILT, which is also a
+  # user-supplied knob that survives a failed download and would send
+  # Get-FileHash at a path that does not exist.
+  if (Test-Path $prebuilt) {
+    $sums = Join-Path $dest 'SHA256SUMS'
+    Invoke-WebRequest "$base/releases/download/$tag/SHA256SUMS" -OutFile $sums -UseBasicParsing
+    $want = (Select-String -Path $sums -Pattern 'aimem-windows-amd64\.exe$' |
+             ForEach-Object { ($_.Line -split '\s+')[0] } | Select-Object -First 1)
+    $got = (Get-FileHash $prebuilt -Algorithm SHA256).Hash.ToLower()
+    if (-not $want -or $want.ToLower() -ne $got) {
+      throw "checksum mismatch for aimem-windows-amd64.exe (want $want, got $got)"
     }
-    # Verify against the release's SHA256SUMS. Deliberately OUTSIDE the
-    # try/catch above: a missing sums file or a mismatch must abort the
-    # install, never degrade into the source-build fallback (that path is
-    # reserved for a release with no binary at all). Guard on the file we
-    # actually downloaded — NOT $env:AIMEM_PREBUILT, which is also a
-    # user-supplied knob that survives a failed download and would send
-    # Get-FileHash at a path that does not exist.
-    if (Test-Path $prebuilt) {
-      $sums = Join-Path $dest 'SHA256SUMS'
-      Invoke-WebRequest "$base/releases/download/$tag/SHA256SUMS" -OutFile $sums -UseBasicParsing
-      $want = (Select-String -Path $sums -Pattern 'aimem-windows-amd64\.exe$' |
-               ForEach-Object { ($_.Line -split '\s+')[0] } | Select-Object -First 1)
-      $got = (Get-FileHash $prebuilt -Algorithm SHA256).Hash.ToLower()
-      if (-not $want -or $want.ToLower() -ne $got) {
-        throw "checksum mismatch for aimem-windows-amd64.exe (want $want, got $got)"
-      }
-      Write-Host "checksum OK: aimem-windows-amd64.exe"
-    }
+    Write-Host "checksum OK: aimem-windows-amd64.exe"
   }
 
   # Run the installer in a child shell with an explicit policy bypass:

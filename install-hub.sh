@@ -2,14 +2,20 @@
 # aimem hub installer: stand up a complete hub on a fresh Debian/Ubuntu
 # host (LXC or VM). Run AS ROOT on the hub host:
 #
-#   curl -fsSL https://raw.githubusercontent.com/BlackVS/aimem/master/install-hub.sh | bash
+#   curl -fsSL https://raw.githubusercontent.com/BlackVS/aimem/v0.9.0/install-hub.sh | bash
 #
 # What it does: creates the service user (with systemd linger), installs
-# the latest release binary, writes ~/.config/aimem/env, installs the
-# serve unit + hourly curation timer (+ memory caps), starts everything,
-# and prints the health check + bearer token to configure clients with.
-# Idempotent: re-running upgrades the binary and restarts the service;
-# an existing env file is never overwritten.
+# the release this script was fetched from (RELEASE below), checked
+# against that release's SHA256SUMS, writes ~/.config/aimem/env, installs
+# the serve unit + hourly curation timer (+ memory caps), starts
+# everything, and prints the health check + bearer token to configure
+# clients with. Idempotent: an existing env file is never overwritten.
+#
+# Upgrades: re-run the one-liner of the newer release. On an existing hub
+# it stops this hub's service and curation, copies the state root (without
+# the socket) to <state root>.backup-<UTC time>, swaps the binary, and
+# waits for health at the new version. If the new release does not come
+# up, the previous binary and the state copy are both put back.
 #
 # Environment knobs:
 #   AIMEM_HUB_USER=sessiond        service account (created if missing)
@@ -29,10 +35,15 @@
 #                                  API, or a LiteLLM / vLLM / Ollama proxy)
 #   AIMEM_CURATE_MODEL=gpt-4o-mini
 #   AIMEM_REPO=owner/name          install from a fork
-#   AIMEM_VERSION=vX.Y.Z           pin a release instead of the latest
+#   AIMEM_VERSION=vX.Y.Z           install another release than RELEASE
+#   AIMEM_UPGRADE_WAIT=30          seconds to wait for health after a swap
 #   AIMEM_EMBED_MODEL="Text Embedding 3 Large"
 #   AIMEM_PREBUILT=                path to a prebuilt binary (skips download)
 set -euo pipefail
+
+# The release this script installs. Bumped together with the CHANGELOG
+# when a release is cut (internal/installer checks they agree).
+RELEASE=v0.9.0
 
 [ "$(id -u)" = 0 ] || { echo "ERROR: run as root." >&2; exit 1; }
 for t in curl; do
@@ -55,19 +66,119 @@ HOME_DIR=$(getent passwd "$HUB_USER" | cut -d: -f6)
 as_user() { runuser -u "$HUB_USER" -- "$@"; }
 sysuser() { runuser -u "$HUB_USER" -- env "XDG_RUNTIME_DIR=/run/user/$(id -u "$HUB_USER")" systemctl --user "$@"; }
 
+# BEGIN upgrade-transaction
+# The upgrade transaction, kept identical in install.sh and install-hub.sh
+# (internal/installer checks the two copies match). A schema move is
+# one-way, so the state root is copied before the new binary first opens
+# it, and a new binary that does not come up healthy at its own version is
+# undone: the previous binary and the state copy both go back.
+#
+# The caller defines svc_stop and svc_start (this installation's service
+# and timers, nothing else), aimem_as (runs a binary as the service's user,
+# with the service's environment), AIMEM_BIN (the installed binary),
+# STATE_ROOT_DEFAULT (the state root when neither the service nor the
+# installed binary names one) and TXN_MANAGED=1 when svc_start really
+# starts a service it can wait for.
+txn_field() { # binary field: a string field of the running service's health
+  aimem_as "$1" health 2>/dev/null | sed -n 's/.*"'"$2"'": *"\([^"]*\)".*/\1/p' | head -n 1
+}
+txn_copy() { # src dst: copy a state root without the service socket, modes kept
+  (umask 077 && mkdir -p "$2") && (cd "$1" && tar -cf - --exclude=aimem.sock .) | (cd "$2" && tar -xpf -)
+}
+txn_wait() { # version: wait until the service answers health at that version
+  local i=0 n=$(( ${AIMEM_UPGRADE_WAIT:-30} * 2 )) v
+  while [ "$i" -lt "$n" ]; do
+    v=$(txn_field "$AIMEM_BIN" version)
+    if [ -n "$v" ] && { [ -z "$1" ] || [ "$v" = "$1" ]; }; then return 0; fi
+    sleep 0.5
+    i=$((i + 1))
+  done
+  return 1
+}
+upgrade_txn() { # new-binary
+  local new=$1 old_v new_v root ts backup="" prev="$AIMEM_BIN.prev"
+  new_v=$(aimem_as "$new" version 2>/dev/null | awk '{print $2}') || true
+  old_v=$(aimem_as "$AIMEM_BIN" version 2>/dev/null | awk '{print $2}') || true
+  # The running service knows its state root; a stopped one's binary
+  # resolves it the same way it would (environment, then its env file).
+  root=$(txn_field "$AIMEM_BIN" state_root) || true
+  [ -n "$root" ] || root=$(aimem_as "$AIMEM_BIN" state-root 2>/dev/null | head -n 1) || true
+  if [ "$TXN_MANAGED" != 1 ] && [ -n "$(txn_field "$AIMEM_BIN" status)" ]; then
+    echo "ERROR: an aimem serve this installer does not manage is running; stop it, then re-run." >&2
+    return 1
+  fi
+  [ -n "$root" ] || root=$STATE_ROOT_DEFAULT
+  ts=$(date -u +%Y%m%dT%H%M%SZ)
+  printf '==> upgrading aimem %s -> %s (state root %s)\n' "${old_v:-unknown}" "${new_v:-unknown}" "$root"
+  svc_stop
+  if [ -d "$root" ]; then
+    backup="$root.backup-$ts"
+    if ! txn_copy "$root" "$backup"; then
+      rm -rf "$backup"
+      svc_start
+      echo "ERROR: could not copy the state root to $backup; nothing was changed." >&2
+      return 1
+    fi
+    printf '==> state backup: %s\n' "$backup"
+  fi
+  cp -p "$AIMEM_BIN" "$prev" && mv "$new" "$AIMEM_BIN" || {
+    svc_start
+    echo "ERROR: could not swap $AIMEM_BIN; the previous binary is still in place." >&2
+    return 1
+  }
+  if [ "$TXN_MANAGED" != 1 ]; then
+    rm -f "$prev"
+    printf '==> upgraded aimem %s -> %s; no managed service here: start `aimem serve` yourself.\n' "${old_v:-unknown}" "${new_v:-unknown}"
+    [ -z "$backup" ] || printf '==> to undo: put the previous release back and replace %s with %s\n' "$root" "$backup"
+    return 0
+  fi
+  svc_start
+  if txn_wait "$new_v"; then
+    rm -f "$prev"
+    printf '==> upgraded aimem %s -> %s; service healthy at %s\n' "${old_v:-unknown}" "$new_v" "$new_v"
+    [ -z "$backup" ] || printf '==> the state backup stays at %s (remove it once satisfied)\n' "$backup"
+    return 0
+  fi
+  echo "ERROR: aimem ${new_v:-(new)} did not answer health at its version within ${AIMEM_UPGRADE_WAIT:-30}s; rolling back." >&2
+  svc_stop
+  mv "$prev" "$AIMEM_BIN"
+  if [ -n "$backup" ]; then
+    if ! { mv "$root" "$root.failed-$ts" && txn_copy "$backup" "$root"; }; then
+      echo "ERROR: the previous binary is back, but the state root could not be restored: copy $backup to $root by hand before starting the service." >&2
+      return 1
+    fi
+  fi
+  svc_start
+  if txn_wait "$old_v"; then
+    echo "ROLLED BACK: aimem ${old_v:-unknown} is running again on the state copied before the upgrade${backup:+ ($backup; the state the failed upgrade left is in $root.failed-$ts)}." >&2
+  else
+    echo "ROLLED BACK: the previous binary and state are restored${backup:+ from $backup}, but the service does not answer health; check it." >&2
+  fi
+  return 1
+}
+# END upgrade-transaction
+
+# BEGIN hub-service-hooks
+# The hub's service hooks for upgrade_txn: this hub's serve unit and its
+# curation, run as the service user. They read no file: on a fresh host
+# nothing of the service user's configuration exists yet.
+AIMEM_BIN="$HOME_DIR/.local/bin/aimem"
+TXN_MANAGED=1
+svc_stop() { sysuser stop aimem-curate.timer aimem-curate.service aimem.service 2>/dev/null || true; }
+svc_start() {
+  sysuser restart aimem.service || true
+  sysuser start aimem-curate.timer || true
+}
+aimem_as() { runuser -u "$HUB_USER" -- env "HOME=$HOME_DIR" "XDG_RUNTIME_DIR=/run/user/$(id -u "$HUB_USER")" "$@"; }
+STATE_ROOT_DEFAULT="$HOME_DIR/.local/state/aimem"
+# END hub-service-hooks
+
 # --- binary -----------------------------------------------------------------
 mkdir -p "$HOME_DIR/.local/bin" "$HOME_DIR/.local/sbin"
 if [ -n "${AIMEM_PREBUILT:-}" ]; then
   install -m 755 "$AIMEM_PREBUILT" "$HOME_DIR/.local/bin/aimem.new"
 else
-  # /releases/latest redirects to the tag page, so the effective URL names
-  # the version. No API parsing, no jq to install on a fresh hub host.
-  TAG=${AIMEM_VERSION:-}
-  if [ -z "$TAG" ]; then
-    URL=$(curl -fsSLI -o /dev/null -w '%{url_effective}' "$BASE/releases/latest" || true)
-    case "$URL" in */releases/tag/*) TAG=${URL##*/releases/tag/} ;; esac
-  fi
-  [ -n "$TAG" ] || { echo "ERROR: cannot resolve latest release of $REPO." >&2; exit 1; }
+  TAG=${AIMEM_VERSION:-$RELEASE}
   ASSET=aimem-linux-amd64
   case "$(uname -m)" in aarch64|arm64) ASSET=aimem-linux-arm64 ;; esac
   echo "installing aimem $TAG ($ASSET)"
@@ -88,7 +199,6 @@ else
   echo "checksum OK: $ASSET"
   chmod 755 "$HOME_DIR/.local/bin/aimem.new"
 fi
-mv "$HOME_DIR/.local/bin/aimem.new" "$HOME_DIR/.local/bin/aimem"   # text-busy-safe swap
 
 # --- self-signed TLS (optional, until a real cert is enrolled) ---------------
 if [ -n "${AIMEM_DOMAIN:-}" ] && [ -z "${AIMEM_TLS_CERT:-}" ]; then
@@ -209,8 +319,13 @@ chown -R "$HUB_USER:$HUB_USER" "$HOME_DIR/.local" "$HOME_DIR/.config"
 
 sysuser daemon-reload
 sysuser enable aimem.service aimem-curate.timer >/dev/null 2>&1 || true
-sysuser restart aimem.service     # restart, not start: a stale binary may be running
-sysuser start aimem-curate.timer
+if [ -e "$AIMEM_BIN" ]; then
+  upgrade_txn "$AIMEM_BIN.new" || exit 1
+else
+  mv "$AIMEM_BIN.new" "$AIMEM_BIN"
+  sysuser restart aimem.service   # restart, not start: a stale binary may be running
+  sysuser start aimem-curate.timer
+fi
 
 # --- verify -----------------------------------------------------------------
 sleep 1

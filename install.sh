@@ -46,6 +46,98 @@ version_older() {
 }
 need() { command -v "$1" >/dev/null 2>&1 || { echo "error: $1 is required" >&2; exit 1; }; }
 
+# BEGIN upgrade-transaction
+# The upgrade transaction, kept identical in install.sh and install-hub.sh
+# (internal/installer checks the two copies match). A schema move is
+# one-way, so the state root is copied before the new binary first opens
+# it, and a new binary that does not come up healthy at its own version is
+# undone: the previous binary and the state copy both go back.
+#
+# The caller defines svc_stop and svc_start (this installation's service
+# and timers, nothing else), aimem_as (runs a binary as the service's user,
+# with the service's environment), AIMEM_BIN (the installed binary),
+# STATE_ROOT_DEFAULT (the state root when neither the service nor the
+# installed binary names one) and TXN_MANAGED=1 when svc_start really
+# starts a service it can wait for.
+txn_field() { # binary field: a string field of the running service's health
+  aimem_as "$1" health 2>/dev/null | sed -n 's/.*"'"$2"'": *"\([^"]*\)".*/\1/p' | head -n 1
+}
+txn_copy() { # src dst: copy a state root without the service socket, modes kept
+  (umask 077 && mkdir -p "$2") && (cd "$1" && tar -cf - --exclude=aimem.sock .) | (cd "$2" && tar -xpf -)
+}
+txn_wait() { # version: wait until the service answers health at that version
+  local i=0 n=$(( ${AIMEM_UPGRADE_WAIT:-30} * 2 )) v
+  while [ "$i" -lt "$n" ]; do
+    v=$(txn_field "$AIMEM_BIN" version)
+    if [ -n "$v" ] && { [ -z "$1" ] || [ "$v" = "$1" ]; }; then return 0; fi
+    sleep 0.5
+    i=$((i + 1))
+  done
+  return 1
+}
+upgrade_txn() { # new-binary
+  local new=$1 old_v new_v root ts backup="" prev="$AIMEM_BIN.prev"
+  new_v=$(aimem_as "$new" version 2>/dev/null | awk '{print $2}') || true
+  old_v=$(aimem_as "$AIMEM_BIN" version 2>/dev/null | awk '{print $2}') || true
+  # The running service knows its state root; a stopped one's binary
+  # resolves it the same way it would (environment, then its env file).
+  root=$(txn_field "$AIMEM_BIN" state_root) || true
+  [ -n "$root" ] || root=$(aimem_as "$AIMEM_BIN" state-root 2>/dev/null | head -n 1) || true
+  if [ "$TXN_MANAGED" != 1 ] && [ -n "$(txn_field "$AIMEM_BIN" status)" ]; then
+    echo "ERROR: an aimem serve this installer does not manage is running; stop it, then re-run." >&2
+    return 1
+  fi
+  [ -n "$root" ] || root=$STATE_ROOT_DEFAULT
+  ts=$(date -u +%Y%m%dT%H%M%SZ)
+  printf '==> upgrading aimem %s -> %s (state root %s)\n' "${old_v:-unknown}" "${new_v:-unknown}" "$root"
+  svc_stop
+  if [ -d "$root" ]; then
+    backup="$root.backup-$ts"
+    if ! txn_copy "$root" "$backup"; then
+      rm -rf "$backup"
+      svc_start
+      echo "ERROR: could not copy the state root to $backup; nothing was changed." >&2
+      return 1
+    fi
+    printf '==> state backup: %s\n' "$backup"
+  fi
+  cp -p "$AIMEM_BIN" "$prev" && mv "$new" "$AIMEM_BIN" || {
+    svc_start
+    echo "ERROR: could not swap $AIMEM_BIN; the previous binary is still in place." >&2
+    return 1
+  }
+  if [ "$TXN_MANAGED" != 1 ]; then
+    rm -f "$prev"
+    printf '==> upgraded aimem %s -> %s; no managed service here: start `aimem serve` yourself.\n' "${old_v:-unknown}" "${new_v:-unknown}"
+    [ -z "$backup" ] || printf '==> to undo: put the previous release back and replace %s with %s\n' "$root" "$backup"
+    return 0
+  fi
+  svc_start
+  if txn_wait "$new_v"; then
+    rm -f "$prev"
+    printf '==> upgraded aimem %s -> %s; service healthy at %s\n' "${old_v:-unknown}" "$new_v" "$new_v"
+    [ -z "$backup" ] || printf '==> the state backup stays at %s (remove it once satisfied)\n' "$backup"
+    return 0
+  fi
+  echo "ERROR: aimem ${new_v:-(new)} did not answer health at its version within ${AIMEM_UPGRADE_WAIT:-30}s; rolling back." >&2
+  svc_stop
+  mv "$prev" "$AIMEM_BIN"
+  if [ -n "$backup" ]; then
+    if ! { mv "$root" "$root.failed-$ts" && txn_copy "$backup" "$root"; }; then
+      echo "ERROR: the previous binary is back, but the state root could not be restored: copy $backup to $root by hand before starting the service." >&2
+      return 1
+    fi
+  fi
+  svc_start
+  if txn_wait "$old_v"; then
+    echo "ROLLED BACK: aimem ${old_v:-unknown} is running again on the state copied before the upgrade${backup:+ ($backup; the state the failed upgrade left is in $root.failed-$ts)}." >&2
+  else
+    echo "ROLLED BACK: the previous binary and state are restored${backup:+ from $backup}, but the service does not answer health; check it." >&2
+  fi
+  return 1
+}
+# END upgrade-transaction
+
 # opencode_too_old prints the installed OpenCode version and succeeds when
 # it is a 1.x release before 1.18 (or a released 0.x). The plugin supports
 # 1.18+ and 2.x from one file; loaders before 1.14 call every export as a
@@ -119,6 +211,21 @@ remove_codex_hooks() { # file marker
     else . end' "$file" > "$tmp" && mv "$tmp" "$file"
 }
 
+# The client's service hooks for upgrade_txn: the systemd user unit and the
+# sync timer of this installation. Without systemd there is nothing to stop.
+SYNC_WAS_ACTIVE=0
+svc_stop() {
+  [ "$TXN_MANAGED" = 1 ] || return 0
+  if systemctl --user is-active --quiet aimem-sync.timer; then SYNC_WAS_ACTIVE=1; fi
+  systemctl --user stop aimem-sync.timer aimem-sync.service aimem.service 2>/dev/null || true
+}
+svc_start() {
+  [ "$TXN_MANAGED" = 1 ] || return 0
+  systemctl --user restart aimem.service || true
+  if [ "$SYNC_WAS_ACTIVE" = 1 ]; then systemctl --user start aimem-sync.timer || true; fi
+}
+aimem_as() { "$@"; }
+
 install_user() {
   need jq
   mkdir -p "$BIN_DIR"
@@ -135,7 +242,43 @@ install_user() {
       -ldflags "-X main.version=$(git -C "$REPO_DIR" describe --tags --always --dirty 2>/dev/null || echo dev)" \
       -o "$BIN_DIR/aimem.new" ./cmd/aimem)
   fi
-  mv "$BIN_DIR/aimem.new" "$BIN_DIR/aimem"
+  TXN_MANAGED=0
+  if [ "${AIMEM_NO_SYSTEMD:-0}" != 1 ] && command -v systemctl >/dev/null 2>&1; then
+    TXN_MANAGED=1
+    say "systemd user unit -> $UNIT_DIR/aimem.service"
+    mkdir -p "$UNIT_DIR"
+    cat > "$UNIT_DIR/aimem.service" <<EOF
+[Unit]
+Description=aimem - local coding-session recovery and memory service
+
+[Service]
+EnvironmentFile=-%h/.config/aimem/env
+ExecStart=$BIN_DIR/aimem serve
+Restart=on-failure
+RestartSec=2
+UMask=0077
+
+[Install]
+WantedBy=default.target
+EOF
+    systemctl --user daemon-reload
+    systemctl --user enable aimem
+  fi
+  if [ -e "$BIN_DIR/aimem" ]; then
+    # An existing installation: back up its state, swap, and roll back
+    # binary and state together if the new release does not come up.
+    AIMEM_BIN="$BIN_DIR/aimem"
+    STATE_ROOT_DEFAULT=${AIMEM_STATE_DIR:-${XDG_STATE_HOME:-$HOME/.local/state}/aimem}
+    upgrade_txn "$BIN_DIR/aimem.new" || exit 1
+  else
+    mv "$BIN_DIR/aimem.new" "$BIN_DIR/aimem"
+    if [ "$TXN_MANAGED" = 1 ]; then
+      systemctl --user restart aimem
+      sleep 0.5
+      "$BIN_DIR/aimem" health >/dev/null && say "service healthy" \
+        || echo "warning: service not answering yet; check: systemctl --user status aimem" >&2
+    fi
+  fi
   say "installed $BIN_DIR/aimem"
   case ":$PATH:" in *":$BIN_DIR:"*) ;; *) echo "warning: $BIN_DIR is not on PATH" >&2 ;; esac
 
@@ -187,29 +330,7 @@ install_user() {
   fi
   say "Codex wired (first Codex run will ask once to trust the new hooks)"
 
-  if [ "${AIMEM_NO_SYSTEMD:-0}" != 1 ] && command -v systemctl >/dev/null 2>&1; then
-    say "systemd user unit -> $UNIT_DIR/aimem.service"
-    mkdir -p "$UNIT_DIR"
-    cat > "$UNIT_DIR/aimem.service" <<EOF
-[Unit]
-Description=aimem - local coding-session recovery and memory service
-
-[Service]
-EnvironmentFile=-%h/.config/aimem/env
-ExecStart=$BIN_DIR/aimem serve
-Restart=on-failure
-RestartSec=2
-UMask=0077
-
-[Install]
-WantedBy=default.target
-EOF
-    systemctl --user daemon-reload
-    systemctl --user enable aimem
-    systemctl --user restart aimem   # enable --now would keep a stale binary/unit running
-    sleep 0.5
-    "$BIN_DIR/aimem" health >/dev/null && say "service healthy" \
-      || echo "warning: service not answering yet; check: systemctl --user status aimem" >&2
+  if [ "$TXN_MANAGED" = 1 ]; then
     "$BIN_DIR/aimem" spool-flush >/dev/null 2>&1 || true
   else
     say "skipping systemd (unavailable or AIMEM_NO_SYSTEMD=1); run 'aimem serve' manually"

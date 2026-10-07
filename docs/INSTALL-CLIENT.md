@@ -12,13 +12,13 @@ user-level pieces; every run wires the project you are standing in.
 **Linux / macOS**
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/BlackVS/aimem/master/boot.sh | bash
+curl -fsSL https://raw.githubusercontent.com/BlackVS/aimem/v0.9.0/boot.sh | bash
 ```
 
 **Windows (PowerShell)**
 
 ```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -Command "irm https://raw.githubusercontent.com/BlackVS/aimem/master/boot.ps1 | iex"
+powershell -NoProfile -ExecutionPolicy Bypass -Command "irm https://raw.githubusercontent.com/BlackVS/aimem/v0.9.0/boot.ps1 | iex"
 ```
 
 The wrapper matters on a fresh machine: Windows clients default to the
@@ -82,7 +82,8 @@ Set these before running the one-liner:
 | `AIMEM_HUB_URL` + `AIMEM_HUB_TOKEN` | register a hub, so checkpoints push in real time |
 | `AIMEM_GROUPS=a,b` | pre-declare shared knowledge groups in `.aimem.json` |
 | `AIMEM_REINSTALL=1` | refresh the binary and hooks even if the installed aimem is already current (an older install is upgraded without it) |
-| `AIMEM_VERSION=vX.Y.Z` | pin a release instead of taking the latest |
+| `AIMEM_VERSION=vX.Y.Z` | install another release than the one in the URL |
+| `AIMEM_UPGRADE_WAIT=30` | seconds an upgrade waits for health at the new version before rolling back |
 | `AIMEM_REPO=owner/name` | install from a fork |
 
 ## 3. Verify

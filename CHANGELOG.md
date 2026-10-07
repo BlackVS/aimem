@@ -15,6 +15,23 @@ currently 23); a binary refuses a database newer than it understands.
 
 ### Changed
 
+- **The one-line installer is the upgrade path.** Every documented
+  one-liner now names a release tag and fetches its boot script from that
+  tag, and the script installs that release (`RELEASE` in `boot.sh` and
+  `install-hub.sh`, `$release` in `boot.ps1`) instead of whatever is
+  latest; the binary is still refused unless its hash is in the release's
+  `SHA256SUMS`. On an existing installation, `install.sh`, `install.ps1`
+  and `install-hub.sh` now stop only that installation's service and sync
+  or curation job, copy the state root without the socket to
+  `<state root>.backup-<UTC time>` beside it, swap, and wait for health at
+  the new version. If the new release does not come up, the previous
+  binary and the state copy both go back and the installer exits with an
+  error that says so. A schema move is one-way (the access store moved
+  from schema 5 to 7 between 0.7.4 and 0.9.0), so upgrade hubs and
+  workstations with the newer release's one-liner, not by swapping
+  binaries by hand
+  ([ADMIN-MANUAL, Upgrades](docs/ADMIN-MANUAL.md#upgrades)). The backup
+  stays; remove it once the new release has proved itself.
 - `golang.org/x/text` moves from v0.3.8 to v0.42.0, which clears
   GO-2026-5970 (an infinite loop on invalid input) from the release
   binary. The module arrives only through the TUI dependencies, and no

@@ -50,6 +50,138 @@ function Select-ServeProcess($exe, $processes) {
 }
 # END Select-ServeProcess
 
+# BEGIN Invoke-Upgrade
+# Invoke-Upgrade replaces the installed binary $exe with $new without
+# risking the state root. A schema move is one-way, so the state root is
+# copied before the new binary first opens it, and a new binary that does
+# not come up healthy at its own version is undone: the previous binary
+# and the state copy both go back. The caller defines Stop-AimemService
+# and Start-AimemService (this installation's service and its sync task,
+# nothing else) and Say.
+function Invoke-Quiet($exe, [string[]]$argv) {
+  # PS 5.1 under EAP=Stop turns a native command's stderr into a
+  # terminating error; these probes expect failures, so relax it locally.
+  $prevEap = $ErrorActionPreference
+  $ErrorActionPreference = 'Continue'
+  try { $out = (& $exe @argv 2>$null | Out-String) } catch { $out = '' }
+  $ErrorActionPreference = $prevEap
+  $out
+}
+function Get-AimemVersion($exe) {
+  "$((Invoke-Quiet $exe @('version')).Trim() -split '\s+' | Select-Object -Index 1)"
+}
+function Get-AimemHealth($exe) {
+  $raw = Invoke-Quiet $exe @('health')
+  if (-not $raw.Trim()) { return $null }
+  try { $raw | ConvertFrom-Json } catch { $null }
+}
+function Wait-AimemHealth($exe, $want, $seconds) {
+  $deadline = (Get-Date).AddSeconds($seconds)
+  do {
+    $h = Get-AimemHealth $exe
+    if ($h -and $h.version -and (-not $want -or $h.version -eq $want)) { return $true }
+    Start-Sleep -Milliseconds 500
+  } while ((Get-Date) -lt $deadline)
+  $false
+}
+function Get-StateRoot($exe, $health) {
+  # The running service knows its state root; a stopped one's binary
+  # resolves it the same way it would (environment, then its env file).
+  if ($health -and $health.state_root) { return $health.state_root }
+  $named = (Invoke-Quiet $exe @('state-root')).Trim()
+  if ($named) { return $named }
+  # The order of internal/adapter.StateRoot (Go's home dir on Windows is
+  # USERPROFILE), for a binary that cannot answer.
+  if ($env:AIMEM_STATE_DIR) { return $env:AIMEM_STATE_DIR }
+  $base = if ($env:XDG_STATE_HOME) { $env:XDG_STATE_HOME } else { Join-Path $env:USERPROFILE '.local\state' }
+  Join-Path $base 'aimem'
+}
+function Copy-StateRoot($src, $dst) {
+  # robocopy, not Copy-Item: it skips the service socket (an AF_UNIX
+  # socket file that Copy-Item and Compress-Archive die on), and
+  # /COPY:DATS keeps the owner-only ACLs of the credential files.
+  $null = & robocopy $src $dst /E /COPY:DATS /DCOPY:DAT /XF aimem.sock /R:1 /W:1 /NFL /NDL /NJH /NJS /NP
+  $LASTEXITCODE -lt 8
+}
+function Invoke-Upgrade($exe, $new) {
+  $wait = if ($env:AIMEM_UPGRADE_WAIT) { [int]$env:AIMEM_UPGRADE_WAIT } else { 30 }
+  $oldV = Get-AimemVersion $exe
+  $newV = Get-AimemVersion $new
+  $root = Get-StateRoot $exe (Get-AimemHealth $exe)
+  $ts = (Get-Date).ToUniversalTime().ToString("yyyyMMdd'T'HHmmss'Z'")
+  Say "upgrading aimem $oldV -> $newV (state root $root)"
+  Stop-AimemService
+  $backup = $null
+  if (Test-Path $root) {
+    $backup = "$root.backup-$ts"
+    if (-not (Copy-StateRoot $root $backup)) {
+      Remove-Item -Recurse -Force $backup -ErrorAction SilentlyContinue
+      Start-AimemService
+      throw "could not copy the state root to $backup; nothing was changed"
+    }
+    Say "state backup: $backup"
+  }
+  # A running aimem.exe (an `aimem mcp` inside an agent session) blocks
+  # Copy-Item over it, but Windows allows RENAMING an in-use exe: park the
+  # old file under a unique name and drop the new one in.
+  $park = "$exe.old-$ts"
+  try { Move-Item $exe $park } catch {
+    Start-AimemService
+    throw "cannot replace $exe (still locked even for rename): $_"
+  }
+  Copy-Item $new $exe -Force
+  Start-AimemService
+  if (Wait-AimemHealth $exe $newV $wait) {
+    Say "upgraded aimem $oldV -> $newV; service healthy at $newV"
+    if ($backup) { Say "the state backup stays at $backup (remove it once satisfied)" }
+    return
+  }
+  Write-Warning "aimem $newV did not answer health at its version within ${wait}s; rolling back"
+  Stop-AimemService
+  Move-Item $exe "$exe.failed-$ts" -Force
+  Move-Item $park $exe
+  if ($backup) {
+    try {
+      Move-Item $root "$root.failed-$ts"
+      if (-not (Copy-StateRoot $backup $root)) { throw 'robocopy failed' }
+    } catch {
+      throw "the previous binary is back, but the state root could not be restored ($_): copy $backup to $root by hand before starting the service"
+    }
+  }
+  Start-AimemService
+  $kept = if ($backup) { " ($backup; the state the failed upgrade left is in $root.failed-$ts)" } else { '' }
+  if (Wait-AimemHealth $exe $oldV $wait) {
+    throw "ROLLED BACK: aimem $oldV is running again on the state copied before the upgrade$kept"
+  }
+  throw "ROLLED BACK: the previous binary and state are restored$kept, but the service does not answer health; check it"
+}
+# END Invoke-Upgrade
+
+# The service hooks Invoke-Upgrade calls: this installation's logon task
+# and serve processes, and the sync task, which opens the same databases.
+$script:SyncWasEnabled = $false
+function Stop-AimemService {
+  $sync = Get-ScheduledTask -TaskName 'aimem-sync' -ErrorAction SilentlyContinue
+  if ($sync -and $sync.State -ne 'Disabled') {
+    $script:SyncWasEnabled = $true
+    $sync | Disable-ScheduledTask | Out-Null
+  }
+  Stop-ScheduledTask 'aimem-sync' -ErrorAction SilentlyContinue
+  # Stopping the TASK kills the conhost wrapper but ORPHANS its aimem
+  # child, which keeps serving through the socket. Stop this
+  # installation's serve processes by executable path, never by name.
+  Stop-ScheduledTask 'aimem-serve' -ErrorAction SilentlyContinue
+  $candidates = Get-CimInstance Win32_Process -Filter "Name LIKE 'aimem.exe%'"
+  Select-ServeProcess $Exe $candidates | ForEach-Object {
+    Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue
+    Wait-Process -Id $_.ProcessId -Timeout 10 -ErrorAction SilentlyContinue
+  }
+}
+function Start-AimemService {
+  Start-ScheduledTask 'aimem-serve'
+  if ($script:SyncWasEnabled) { Enable-ScheduledTask -TaskName 'aimem-sync' | Out-Null }
+}
+
 # Windows PowerShell 5.1's `-Encoding UTF8` emits a BOM, and Go's
 # encoding/json rejects one. A BOM in .aimem.json therefore silently
 # voids the project's hub binding and group membership — the file parses
@@ -86,39 +218,61 @@ function Add-AgentHook($file, $event, $cmd, $status, $marker) {
   Write-Json $file $s
 }
 
+# Register-AimemTasks registers (or refreshes) the logon task for
+# `aimem serve` and the periodic sync task; neither starts anything.
+function Register-AimemTasks {
+  # Logon task for `aimem serve`; conhost --headless keeps it windowless.
+  Say 'registering logon task aimem-serve'
+  $action = New-ScheduledTaskAction -Execute 'conhost.exe' -Argument "--headless `"$Exe`" serve"
+  $trigger = New-ScheduledTaskTrigger -AtLogOn -User $env:USERNAME
+  $settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -ExecutionTimeLimit ([TimeSpan]::Zero)
+  Register-ScheduledTask -TaskName 'aimem-serve' -Action $action -Trigger $trigger -Settings $settings -Force | Out-Null
+  # Periodic anti-entropy sync (DESIGN-hub-sync): rides the hub API, so
+  # Windows machines finally PULL curated knowledge instead of only
+  # pushing events. Harmless no-op cadence when no hub is configured.
+  Say 'registering sync task aimem-sync (every 10 minutes)'
+  $syncAction = New-ScheduledTaskAction -Execute 'conhost.exe' -Argument "--headless `"$Exe`" sync --all-hubs"
+  # No -RepetitionDuration: an empty duration repeats indefinitely.
+  # [TimeSpan]::MaxValue renders as P99999999DT... which Task Scheduler
+  # rejects as out of range (verified live on Windows 11).
+  $syncTrigger = New-ScheduledTaskTrigger -Once -At (Get-Date).AddMinutes(2) `
+    -RepetitionInterval (New-TimeSpan -Minutes 10)
+  Register-ScheduledTask -TaskName 'aimem-sync' -Action $syncAction -Trigger $syncTrigger -Settings $settings -Force | Out-Null
+}
+
 function Install-User {
   # AIMEM_PREBUILT lets boot.ps1 hand over a binary it just downloaded,
   # matching install.sh. The in-repo path stays as the manual fallback.
   $prebuilt = if ($env:AIMEM_PREBUILT) { $env:AIMEM_PREBUILT }
               else { Join-Path $RepoDir 'bin\windows-amd64\aimem.exe' }
   New-Item -ItemType Directory -Force $BinDir | Out-Null
-  # A running aimem.exe (the aimem-serve task) blocks Copy-Item, but
-  # Windows allows RENAMING an in-use exe — same trick as the Linux
-  # `cp new && mv` swap. Park the old file, drop the new one in, and
-  # sweep parked copies on the next run once nothing holds them.
-  # Park under a UNIQUE name: a fixed .old can still be locked by a
-  # long-lived process from a previous upgrade (e.g. an `aimem mcp`
-  # stdio server inside a running agent session), which blocks both the
-  # delete and the rename-over-it. Sweep whatever is no longer held.
-  Get-ChildItem "$Exe.old*" -ErrorAction SilentlyContinue | ForEach-Object {
+  # Sweep the copies earlier upgrades parked once nothing holds them.
+  Get-ChildItem "$Exe.old*", "$Exe.failed*" -ErrorAction SilentlyContinue | ForEach-Object {
     Remove-Item $_.FullName -Force -ErrorAction SilentlyContinue
   }
-  if (Test-Path $Exe) {
-    $park = "$Exe.old-" + (Get-Date -Format 'yyyyMMddHHmmss')
-    try { Move-Item $Exe $park } catch {
-      throw "cannot replace $Exe (still locked even for rename): $_"
+  if (-not (Test-Path $prebuilt)) {
+    if (-not (Get-Command go -ErrorAction SilentlyContinue)) {
+      throw 'no prebuilt binary (bin\windows-amd64\aimem.exe) and no Go toolchain'
     }
+    Say 'building aimem'
+    $prebuilt = Join-Path $BinDir 'aimem.new.exe'
+    Push-Location $RepoDir
+    try { $env:CGO_ENABLED = '0'; go build -o $prebuilt ./cmd/aimem } finally { Pop-Location }
   }
-  if (Test-Path $prebuilt) {
+  Register-AimemTasks
+  if (Test-Path $Exe) {
+    # An existing installation: back up its state, swap, and roll back
+    # binary and state together if the new release does not come up.
+    Invoke-Upgrade $Exe $prebuilt
+  } else {
     Say 'installing prebuilt binary'
     Copy-Item $prebuilt $Exe -Force
-  } elseif (Get-Command go -ErrorAction SilentlyContinue) {
-    Say 'building aimem'
-    Push-Location $RepoDir
-    try { $env:CGO_ENABLED = '0'; go build -o $Exe ./cmd/aimem } finally { Pop-Location }
-  } else {
-    throw 'no prebuilt binary (bin\windows-amd64\aimem.exe) and no Go toolchain'
+    Start-AimemService
+    Start-Sleep -Milliseconds 800
+    try { & $Exe health | Out-Null; Say 'service healthy' }
+    catch { Write-Warning 'service not answering yet; check: Get-ScheduledTask aimem-serve' }
   }
+  Remove-Item (Join-Path $BinDir 'aimem.new.exe') -Force -ErrorAction SilentlyContinue
   Say "installed $Exe"
 
   # user PATH
@@ -203,40 +357,6 @@ function Install-User {
   }
   Say 'Codex wired (first Codex run will ask once to trust the new hooks)'
 
-  # Logon task for `aimem serve`; conhost --headless keeps it windowless.
-  Say 'registering logon task aimem-serve'
-  $action = New-ScheduledTaskAction -Execute 'conhost.exe' -Argument "--headless `"$Exe`" serve"
-  $trigger = New-ScheduledTaskTrigger -AtLogOn -User $env:USERNAME
-  $settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -ExecutionTimeLimit ([TimeSpan]::Zero)
-  Register-ScheduledTask -TaskName 'aimem-serve' -Action $action -Trigger $trigger -Settings $settings -Force | Out-Null
-  # Periodic anti-entropy sync (DESIGN-hub-sync): rides the hub API, so
-  # Windows machines finally PULL curated knowledge instead of only
-  # pushing events. Harmless no-op cadence when no hub is configured.
-  Say 'registering sync task aimem-sync (every 10 minutes)'
-  $syncAction = New-ScheduledTaskAction -Execute 'conhost.exe' -Argument "--headless `"$Exe`" sync --all-hubs"
-  # No -RepetitionDuration: an empty duration repeats indefinitely.
-  # [TimeSpan]::MaxValue renders as P99999999DT... which Task Scheduler
-  # rejects as out of range (verified live on Windows 11).
-  $syncTrigger = New-ScheduledTaskTrigger -Once -At (Get-Date).AddMinutes(2) `
-    -RepetitionInterval (New-TimeSpan -Minutes 10)
-  Register-ScheduledTask -TaskName 'aimem-sync' -Action $syncAction -Trigger $syncTrigger -Settings $settings -Force | Out-Null
-
-  # Restart, not start: a running task would keep serving the old
-  # (renamed) binary; Start on a Running task is a no-op. And stopping
-  # the TASK is not enough: it kills the conhost wrapper but ORPHANS
-  # its aimem child, which keeps serving the parked binary through the
-  # socket — found live when a service still reported a three-releases-
-  # old version after "successful" upgrades. Kill stray serve processes
-  # explicitly, but only this installation's: by executable path (this
-  # binary or its parked copies), never every aimem.exe by name.
-  Stop-ScheduledTask 'aimem-serve' -ErrorAction SilentlyContinue
-  $candidates = Get-CimInstance Win32_Process -Filter "Name LIKE 'aimem.exe%'"
-  Select-ServeProcess $Exe $candidates |
-    ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
-  Start-ScheduledTask 'aimem-serve'
-  Start-Sleep -Milliseconds 800
-  try { & $Exe health | Out-Null; Say 'service healthy' }
-  catch { Write-Warning 'service not answering yet; check: Get-ScheduledTask aimem-serve' }
   & $Exe spool-flush 2>$null | Out-Null
   Say 'user install done. Restart running OpenCode, Claude Code, and Codex sessions to activate.'
 }
