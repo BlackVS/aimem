@@ -2,7 +2,7 @@
 # aimem bootstrap for Linux and macOS. A first install runs it inside a
 # project directory; an upgrade runs it from anywhere.
 #
-#   curl -fsSL https://raw.githubusercontent.com/BlackVS/aimem/v0.9.1/boot.sh | bash
+#   curl -fsSL https://raw.githubusercontent.com/BlackVS/aimem/v0.9.2/boot.sh | bash
 #
 # It installs the release this script was fetched from (RELEASE below): the
 # prebuilt static binary (no Go needed), checked against that release's
@@ -30,7 +30,7 @@ set -e
 
 # The release this script installs. Bumped together with the CHANGELOG
 # when a release is cut (internal/installer checks they agree).
-RELEASE=v0.9.1
+RELEASE=v0.9.2
 
 for t in curl tar; do
   command -v "$t" >/dev/null 2>&1 ||

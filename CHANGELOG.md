@@ -13,6 +13,18 @@ currently 23); a binary refuses a database newer than it understands.
 
 ## [Unreleased]
 
+## [0.9.2] — 2026-10-08
+
+Identity peers are set up and removed with one command each. `aimem
+identity peer provision` registers a peer and writes its four
+credentials and the hub ID into one directory, and `aimem identity peer
+retire` removes a disabled peer's state so its name and teams can be
+registered again. The one-liner no longer wires the directory it runs in
+on an upgrade, and `install.ps1` keeps non-ASCII settings intact. No
+schema change: a 0.9.1 hub or workstation upgrades in place, and rolls
+back in place. `peer retire` needs a 0.9.2 hub, since it adds the
+retirement route. Includes PR #200 to #206.
+
 ### Added
 
 - **`aimem identity peer retire SERVICE`** removes a disabled identity
