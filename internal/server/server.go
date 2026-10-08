@@ -158,6 +158,7 @@ func (s *Server) Routes() []Route {
 		{"GET", "/v1/identity/peers", s.listIdentityPeers, true},
 		{"POST", "/v1/identity/peers", s.registerIdentityPeer, true},
 		{"PUT", "/v1/identity/peers/{service_id}", s.updateIdentityPeer, true},
+		{"POST", "/v1/identity/peers/{service_id}/retirement", s.retireIdentityPeer, true},
 		{"GET", "/v1/identity/peers/{service_id}/credentials", s.listPeerCredentials, true},
 		{"POST", "/v1/identity/peers/{service_id}/credentials", s.issuePeerCredential, true},
 		{"DELETE", "/v1/identity/peers/{service_id}/credentials/{credential_id}", s.revokePeerCredential, true},

@@ -131,6 +131,21 @@ aicrew-example  enabled  hub 01a0…-…
   endpoint trust ca_dns aicrew.example.test
 ```
 
+**Replacing the peer.** The hub allows one enabled peer. To move to a peer under another service ID, disable the old one first, then retire it so the new one can take its teams (`team.register` refuses a team UUID that another peer's profile holds, even a disabled one):
+
+```sh
+aimem identity peer disable aicrew-example $HUB
+aimem identity peer retire aicrew-example $HUB
+```
+
+**Expected:**
+
+```
+identity peer aicrew-example retired; removed credentials=5 team_profiles=1 team_grants=1 receipts=2 redemptions=2; its name and teams can be registered again
+```
+
+Retirement removes the peer with its credentials, team profiles and their grants, proof receipts and redemptions, and keeps the audit history. Grant the project again to the new peer's profile once aicrew has registered the team, and expect each member to prove again on the next join.
+
 ## 4. The introspection credential and aicrew's four credentials
 
 **The hub's outbound introspection credential.** aicrew issues it. Put it in a private file on the hub host, set `AIMEM_INTROSPECTION_TOKEN_FILE` to that file's path for the hub service, and restart the service. The hub rereads the file on every call, so a later rotation needs no restart.

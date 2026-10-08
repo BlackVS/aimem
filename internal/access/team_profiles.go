@@ -257,8 +257,12 @@ type TeamRegistration struct {
 // calling peer's profile for an aicrew team UUID, or renames it. It acts
 // only on that peer's profiles, never creates or touches a grant and never
 // re-enables a disabled profile. Every outcome, refusals included, is
-// audited under the peer credential's actor.
-func (s *Store) RegisterTeam(actor, serviceID, teamID, name string) (TeamRegistration, error) {
+// audited under the peer credential's actor. The peer's credential is
+// checked again inside the write transaction, so a request authenticated
+// before its peer was disabled, its credential revoked or the peer retired
+// writes nothing.
+func (s *Store) RegisterTeam(actor string, peer PeerIdentity, teamID, name string) (TeamRegistration, error) {
+	serviceID := peer.ServiceID
 	var reg TeamRegistration
 	outcome := func(err error) string {
 		switch {
@@ -270,6 +274,8 @@ func (s *Store) RegisterTeam(actor, serviceID, teamID, name string) (TeamRegistr
 			return "renamed"
 		case errors.Is(err, ErrPeerForbidden):
 			return "refused.peer_forbidden"
+		case errors.Is(err, ErrPeerUnauthenticated):
+			return "refused.peer_unauthenticated"
 		case errors.Is(err, ErrTeamNameTaken):
 			return "refused.team_name_taken"
 		case errors.Is(err, ErrTeamProfileDisabled):
@@ -301,6 +307,9 @@ func (s *Store) RegisterTeam(actor, serviceID, teamID, name string) (TeamRegistr
 	}
 	defer tx.Rollback()
 	err = func() error {
+		if err := peerStillValid(tx, peer, s.now()); err != nil {
+			return err
+		}
 		var others int
 		if err := tx.QueryRow("SELECT count(*) FROM team_access_profiles WHERE team_id=? AND service_id<>?", teamID, serviceID).Scan(&others); err != nil {
 			return err

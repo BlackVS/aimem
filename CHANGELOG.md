@@ -13,6 +13,25 @@ currently 23); a binary refuses a database newer than it understands.
 
 ## [Unreleased]
 
+### Added
+
+- **`aimem identity peer retire SERVICE`** removes a disabled identity
+  peer's state (`POST /v1/identity/peers/{service_id}/retirement`, hub
+  admin). After the pilot's aicrew peer was renamed, `team.register`
+  under the new peer was refused with `peer_forbidden`: the old peer's
+  team profile, although disabled, still held the team UUID, and nothing
+  could remove it. Retirement deletes, in one transaction, the peer's
+  credentials, its team profiles with their grants, its proof receipts
+  and redemptions, and then the peer itself, and writes one audit row
+  that lists the counts; the audit history is kept. The service ID and
+  the team UUIDs it held then register again, and a receipt redeemed
+  under the retired peer reads as unknown, so members prove again on
+  their next join. An enabled peer is refused (409), and so is an
+  unknown one (404). `team.register` now checks its peer credential again
+  inside its write transaction, as redemption does, so a request that
+  authenticated before its peer was disabled, its credential revoked or
+  the peer retired writes nothing and cannot leave a profile behind.
+
 ### Changed
 
 - **The one-liner upgrades without wiring the current directory.** Run on

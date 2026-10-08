@@ -37,6 +37,7 @@ const identityUsage = `usage: aimem identity peer list                          
        aimem identity peer register SERVICE --endpoint URL
                                  (--peer-trust-dns | --peer-trust-pin sha256-BASE64) [hub flags]
        aimem identity peer enable|disable|check SERVICE            [hub flags]
+       aimem identity peer retire SERVICE                          [hub flags]
        aimem identity cred list SERVICE                            [hub flags]
        aimem identity cred issue|rotate SERVICE --expires 90d|RFC3339 --output FILE|-
                                  [--operation identity.redeem|reservation.read|team.register|team.read] [hub flags]
@@ -61,6 +62,7 @@ Examples, one per command:
   aimem identity peer enable aicrew-example --hub https://hub.example.test:8443 --admin-token-file admin.token
   aimem identity peer disable aicrew-example --hub https://hub.example.test:8443 --admin-token-file admin.token
   aimem identity peer check aicrew-example --hub https://hub.example.test:8443 --admin-token-file admin.token
+  aimem identity peer retire aicrew-example --hub https://hub.example.test:8443 --admin-token-file admin.token
   aimem identity cred list aicrew-example --hub https://hub.example.test:8443 --admin-token-file admin.token
   aimem identity cred issue aicrew-example --operation reservation.read --expires 90d --output reservation-read.secret --hub https://hub.example.test:8443 --admin-token-file admin.token
   aimem identity cred rotate aicrew-example --expires 90d --output redeem-2.secret --hub https://hub.example.test:8443 --admin-token-file admin.token
@@ -223,7 +225,7 @@ func identityCmd(args []string) error {
 // identitySlots are the entities each command names, in the order of the
 // positional form of earlier releases.
 var identitySlots = map[string][]string{
-	"peer list": nil, "peer register": {"peer"}, "peer enable": {"peer"}, "peer disable": {"peer"}, "peer check": {"peer"},
+	"peer list": nil, "peer register": {"peer"}, "peer enable": {"peer"}, "peer disable": {"peer"}, "peer check": {"peer"}, "peer retire": {"peer"},
 	"cred list": {"peer"}, "cred issue": {"peer"}, "cred rotate": {"peer"}, "cred revoke": {"peer", "credential"},
 	"team list": {"peer"}, "team create": {"peer", "team-id"}, "team enable": {"peer", "team-id"}, "team disable": {"peer", "team-id"},
 	"team grants": {"peer", "team-id"}, "team grant": {"peer", "team-id", "project"}, "team revoke": {"peer", "team-id", "project"},
@@ -380,6 +382,8 @@ func runIdentity(args []string, out io.Writer) error {
 		return c.peerSetDisabled(peer, verb == "disable", out)
 	case "peer check":
 		return c.peerCheck(peer, out)
+	case "peer retire":
+		return c.peerRetire(peer, out)
 	case "cred list":
 		return c.credList(peer, out)
 	case "cred issue", "cred rotate":
@@ -899,6 +903,27 @@ func (c *identityClient) peerSetDisabled(service string, disabled bool, out io.W
 		state = "disabled; its credentials are refused"
 	}
 	fmt.Fprintf(out, "identity peer %s %s\n", service, state)
+	return nil
+}
+
+// peerRetire removes a disabled peer's state on the hub and reports what
+// was removed.
+func (c *identityClient) peerRetire(service string, out io.Writer) error {
+	var resp struct {
+		Retired struct {
+			Credentials  int64 `json:"credentials"`
+			TeamProfiles int64 `json:"team_profiles"`
+			TeamGrants   int64 `json:"team_grants"`
+			Receipts     int64 `json:"receipts"`
+			Redemptions  int64 `json:"redemptions"`
+		} `json:"retired"`
+	}
+	if err := c.call("POST", peerPath(service)+"/retirement", nil, http.StatusOK, &resp); err != nil {
+		return err
+	}
+	r := resp.Retired
+	fmt.Fprintf(out, "identity peer %s retired; removed credentials=%d team_profiles=%d team_grants=%d receipts=%d redemptions=%d; its name and teams can be registered again\n",
+		service, r.Credentials, r.TeamProfiles, r.TeamGrants, r.Receipts, r.Redemptions)
 	return nil
 }
 

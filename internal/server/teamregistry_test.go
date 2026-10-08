@@ -25,10 +25,12 @@ type teamRegRig struct {
 func newTeamRegRig(t *testing.T) *teamRegRig {
 	t.Helper()
 	g := &teamRegRig{identityRig: newIdentityRig(t)}
-	// A hub has one active peer. other-peer registers first, gets a team
-	// profile and is disabled, so its team is on the hub but not ours.
+	// A hub has one active peer. other-peer registers first, registers its
+	// team as "theirs" and is disabled, so its team is on the hub but not
+	// ours.
 	g.registerPeer(t, "other-peer")
-	if r := g.admin(t, "POST", "/v1/identity/peers/other-peer/teams", `{"team_id":"`+teamTheirs+`"}`); r.status != 201 {
+	_, theirs := g.issueCredentialFor(t, "other-peer", "team.register", time.Now().Add(time.Hour))
+	if r := g.reg(t, theirs, "other-peer", teamTheirs, "theirs"); r.status != 200 {
 		t.Fatalf("other peer's team: %d %s", r.status, r.body)
 	}
 	if r := g.admin(t, "PUT", "/v1/identity/peers/other-peer", `{"disabled":true}`); r.status != 200 {
@@ -81,13 +83,9 @@ func TestTeamRegister(t *testing.T) {
 		t.Fatalf("taken: %d %s", r.status, r.body)
 	}
 	g.auditHas(t, "team.register.refused.team_name_taken", "peer:aicrew-example", teamB)
-	// Names are unique per peer: another peer may hold the same name.
-	db, err := g.s.openAccess(false)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := db.RegisterTeam("peer:other-peer", "other-peer", teamTheirs, "pilot-2"); err != nil {
-		t.Fatalf("same name under another peer: %v", err)
+	// Names are unique per peer: another peer's name is free here.
+	if r := g.reg(t, g.register, "aicrew-example", teamB, "theirs"); r.status != 200 {
+		t.Fatalf("same name under another peer: %d %s", r.status, r.body)
 	}
 	// A team UUID registered under another peer is refused, and audited.
 	if r := g.reg(t, g.register, "aicrew-example", teamTheirs, "beta"); r.status != 403 || r.code() != "peer_forbidden" {
@@ -175,14 +173,8 @@ func TestTeamRead(t *testing.T) {
 	if r := g.admin(t, "PUT", "/v1/projects/alpha/process", `{"repo":"https://example.com/p.git","commit":"`+commit+`","manifest":"m.json","expected_commit":""}`); r.status != 200 {
 		t.Fatalf("process: %d %s", r.status, r.body)
 	}
-	// Another peer's team must never appear.
-	db, err := g.s.openAccess(false)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := db.RegisterTeam("peer:other-peer", "other-peer", teamTheirs, "theirs"); err != nil {
-		t.Fatal(err)
-	}
+	// Another peer's team ("theirs", registered by the rig) must never
+	// appear.
 	if err := g.s.reg.Drop("gamma"); err != nil {
 		t.Fatal(err)
 	}

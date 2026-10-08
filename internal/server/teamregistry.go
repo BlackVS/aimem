@@ -121,7 +121,7 @@ func (s *Server) registerTeam(w http.ResponseWriter, r *http.Request) {
 		s.identityRefuse(w, "identity_unavailable")
 		return
 	}
-	reg, err := db.RegisterTeam("peer:"+peer.ServiceID, peer.ServiceID, r.PathValue("team_id"), req.TeamName)
+	reg, err := db.RegisterTeam("peer:"+peer.ServiceID, peer, r.PathValue("team_id"), req.TeamName)
 	if err != nil {
 		s.identityRefuse(w, identityStoreError(err))
 		return

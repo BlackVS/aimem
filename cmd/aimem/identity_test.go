@@ -263,6 +263,17 @@ func TestIdentityCLIPeerLifecycle(t *testing.T) {
 	if out := g.mustRun(t, "peer", "list"); !strings.Contains(out, "aicrew-example  enabled") {
 		t.Errorf("after enable: %s", out)
 	}
+	if _, err := g.run(t, "peer", "retire", "aicrew-example"); err == nil || !strings.Contains(err.Error(), "disable it before retiring") {
+		t.Errorf("retire of an enabled peer: %v", err)
+	}
+	g.mustRun(t, "peer", "disable", "aicrew-example")
+	if out := g.mustRun(t, "peer", "retire", "aicrew-example"); !strings.Contains(out, "identity peer aicrew-example retired; removed credentials=0 team_profiles=0 team_grants=0 receipts=0 redemptions=0") {
+		t.Errorf("retire: %s", out)
+	}
+	if out := g.mustRun(t, "peer", "list"); strings.Contains(out, "aicrew-example") {
+		t.Errorf("after retire: %s", out)
+	}
+	g.register(t)
 	g.assertNoSecrets(t)
 }
 
