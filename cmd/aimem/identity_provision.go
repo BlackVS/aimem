@@ -287,26 +287,35 @@ func (c *identityClient) peerProvision(req provisionRequest, out io.Writer) erro
 	return nil
 }
 
-// checkHubIDFile reports whether the hub ID file already holds this hub's
-// ID, so it is kept. A missing or empty file is written at the end. One
-// holding another ID, or any ID while the hub has no peer to confirm it
-// against, is refused.
-func checkHubIDFile(path, knownHub string) (bool, error) {
+// readHubIDFile reads the hub ID file: present reports whether it exists,
+// and held is its trimmed content, so an empty or whitespace-only file
+// holds nothing. The check and the write share this one definition.
+func readHubIDFile(path string) (held string, present bool, err error) {
 	fi, err := os.Lstat(path)
 	switch {
 	case os.IsNotExist(err):
-		return false, nil
+		return "", false, nil
 	case err != nil:
-		return false, fmt.Errorf("%s cannot be inspected (%v); nothing changed", path, err)
+		return "", false, fmt.Errorf("%s cannot be inspected (%v)", path, err)
 	case !fi.Mode().IsRegular():
-		return false, fmt.Errorf("%s is not a regular file; nothing changed", path)
+		return "", false, fmt.Errorf("%s is not a regular file", path)
 	}
 	b, err := os.ReadFile(path)
 	if err != nil {
-		return false, fmt.Errorf("%s cannot be read (%v); nothing changed", path, err)
+		return "", false, fmt.Errorf("%s cannot be read (%v)", path, err)
 	}
-	held := strings.TrimSpace(string(b))
+	return strings.TrimSpace(string(b)), true, nil
+}
+
+// checkHubIDFile reports whether the hub ID file already holds this hub's
+// ID, so it is kept. A missing file, or one that holds nothing, is written
+// at the end. One holding another ID, or any ID while the hub has no peer
+// to confirm it against, is refused.
+func checkHubIDFile(path, knownHub string) (bool, error) {
+	held, _, err := readHubIDFile(path)
 	switch {
+	case err != nil:
+		return false, fmt.Errorf("%v; nothing changed", err)
 	case held == "":
 		return false, nil
 	case knownHub == "":
@@ -318,9 +327,15 @@ func checkHubIDFile(path, knownHub string) (bool, error) {
 }
 
 // writeHubIDFile writes the hub ID as one line into an owner-only file,
-// replacing an empty one.
+// replacing one that holds nothing.
 func writeHubIDFile(path, hub string) error {
-	if fi, err := os.Lstat(path); err == nil && fi.Mode().IsRegular() && fi.Size() == 0 {
+	held, present, err := readHubIDFile(path)
+	switch {
+	case err != nil:
+		return err
+	case held != "":
+		return fmt.Errorf("%s holds hub ID %s and is never overwritten", path, held)
+	case present:
 		if err := os.Remove(path); err != nil {
 			return fmt.Errorf("the empty %s cannot be replaced (%v)", path, err)
 		}
