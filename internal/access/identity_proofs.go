@@ -57,6 +57,7 @@ var (
 	ErrPeerUnknown          = errors.New("peer_unknown")
 	ErrPeerUnauthenticated  = errors.New("peer_unauthenticated")
 	ErrPeerForbidden        = errors.New("peer_forbidden")
+	ErrPeerEnabled          = errors.New("identity peer is enabled; disable it before retiring it")
 	ErrPeerCredentialLimit  = errors.New("peer already has the maximum number of active credentials")
 	ErrProofInvalid         = errors.New("proof_invalid")
 	ErrCredentialInactive   = errors.New("credential_inactive")
@@ -212,6 +213,71 @@ func (s *Store) SetIdentityPeerDisabled(actor, serviceID string, disabled bool) 
 		_, err := tx.Exec("UPDATE identity_peers SET disabled=? WHERE service_id=?", disabled, serviceID)
 		return err
 	})
+}
+
+// PeerRetirement counts what RetireIdentityPeer removed.
+type PeerRetirement struct {
+	Credentials  int64 `json:"credentials"`
+	TeamProfiles int64 `json:"team_profiles"`
+	TeamGrants   int64 `json:"team_grants"`
+	Receipts     int64 `json:"receipts"`
+	Redemptions  int64 `json:"redemptions"`
+}
+
+// RetireIdentityPeer removes a disabled peer and everything keyed by its
+// service ID: credentials, team profiles with their grants, proof receipts
+// and redemptions. The name and the teams it held can then be registered
+// under another peer, and a receipt redeemed under it reads as unknown, so
+// members prove again on their next join. One audit row lists the counts;
+// the audit history is kept.
+func (s *Store) RetireIdentityPeer(actor, serviceID string) (PeerRetirement, error) {
+	var r PeerRetirement
+	tx, err := s.db.Begin()
+	if err != nil {
+		return r, err
+	}
+	defer tx.Rollback()
+	var disabled bool
+	err = tx.QueryRow("SELECT disabled FROM identity_peers WHERE service_id=?", serviceID).Scan(&disabled)
+	if errors.Is(err, sql.ErrNoRows) {
+		return r, ErrPeerUnknown
+	}
+	if err != nil {
+		return r, err
+	}
+	if !disabled {
+		return r, ErrPeerEnabled
+	}
+	for _, step := range []struct {
+		n    *int64
+		stmt string
+	}{
+		{&r.TeamGrants, "DELETE FROM team_profile_grants WHERE profile_id IN (SELECT id FROM team_access_profiles WHERE service_id=?)"},
+		{&r.TeamProfiles, "DELETE FROM team_access_profiles WHERE service_id=?"},
+		{&r.Credentials, "DELETE FROM identity_peer_credentials WHERE service_id=?"},
+		{&r.Receipts, "DELETE FROM identity_receipts WHERE service_id=?"},
+		{&r.Redemptions, "DELETE FROM identity_redemptions WHERE service_id=?"},
+		{nil, "DELETE FROM identity_peers WHERE service_id=?"},
+	} {
+		res, err := tx.Exec(step.stmt, serviceID)
+		if err != nil {
+			return PeerRetirement{}, err
+		}
+		if step.n != nil {
+			if *step.n, err = res.RowsAffected(); err != nil {
+				return PeerRetirement{}, err
+			}
+		}
+	}
+	subject := fmt.Sprintf("service=%s credentials=%d team_profiles=%d team_grants=%d receipts=%d redemptions=%d",
+		serviceID, r.Credentials, r.TeamProfiles, r.TeamGrants, r.Receipts, r.Redemptions)
+	if err := audit(tx, actor, "identity_peer.retire", subject); err != nil {
+		return PeerRetirement{}, err
+	}
+	if err := tx.Commit(); err != nil {
+		return PeerRetirement{}, err
+	}
+	return r, nil
 }
 
 // IssuePeerCredential mints one peer bearer for one operation, shown only in

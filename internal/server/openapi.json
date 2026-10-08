@@ -2042,6 +2042,38 @@
         }
       }
     },
+    "/v1/identity/peers/{service_id}/retirement": {
+      "post": {
+        "summary": "Retire a disabled identity peer",
+        "description": "Removes a disabled peer and everything keyed by its service ID, in one transaction: its credentials, its team profiles with their grants, its proof receipts and its redemptions, then the peer itself. The service ID and the team UUIDs it held can then be registered again, by peer register and team.register. A receipt redeemed under the retired peer reads as unknown, so members prove again on their next join. One audit row lists the counts; the audit history is kept. An enabled peer is refused. Requires TLS terminated by this hub: plain HTTP, a TLS-terminating proxy and the unix socket are refused with tls_required, and forwarded headers never count. Not exposed as an MCP tool.",
+        "x-role": "admin",
+        "x-requires-tls": true,
+        "parameters": [
+          {
+            "name": "service_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Retired: {service_id, retired: {credentials, team_profiles, team_grants, receipts, redemptions}}, the counts removed"
+          },
+          "403": {
+            "description": "Refusal envelope {code, message, retryable, next_action, correlation_id}; never contains a secret"
+          },
+          "404": {
+            "description": "Unknown peer"
+          },
+          "409": {
+            "description": "The peer is enabled; disable it first"
+          }
+        }
+      }
+    },
     "/v1/identity/peers/{service_id}/credentials": {
       "get": {
         "summary": "List a peer's credential metadata (never secrets)",

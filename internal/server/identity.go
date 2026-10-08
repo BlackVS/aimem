@@ -465,6 +465,29 @@ func (s *Server) updateIdentityPeer(w http.ResponseWriter, r *http.Request) {
 	s.ok(w, map[string]bool{"ok": true})
 }
 
+// retireIdentityPeer removes a disabled peer's state so its name and teams
+// can be registered again; an enabled peer is refused.
+func (s *Server) retireIdentityPeer(w http.ResponseWriter, r *http.Request) {
+	db, ok := s.peerAdminStore(w, r)
+	if !ok {
+		return
+	}
+	service := r.PathValue("service_id")
+	retired, err := db.RetireIdentityPeer(accessActor(r), service)
+	switch {
+	case errors.Is(err, access.ErrPeerUnknown):
+		s.fail(w, http.StatusNotFound, fmt.Errorf("unknown identity peer"))
+		return
+	case errors.Is(err, access.ErrPeerEnabled):
+		s.fail(w, http.StatusConflict, err)
+		return
+	case err != nil:
+		s.fail(w, http.StatusInternalServerError, fmt.Errorf("cannot retire identity peer"))
+		return
+	}
+	s.ok(w, map[string]any{"service_id": service, "retired": retired})
+}
+
 func (s *Server) listPeerCredentials(w http.ResponseWriter, r *http.Request) {
 	db, ok := s.peerAdminStore(w, r)
 	if !ok {

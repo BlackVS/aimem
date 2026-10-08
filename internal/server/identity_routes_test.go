@@ -253,6 +253,7 @@ func TestIdentityRoutesRequireHubTLS(t *testing.T) {
 		"list peers":        {"GET", "/v1/identity/peers", g.env},
 		"register peer":     {"POST", "/v1/identity/peers", g.env},
 		"update peer":       {"PUT", "/v1/identity/peers/aicrew-example", g.env},
+		"retire peer":       {"POST", "/v1/identity/peers/aicrew-example/retirement", g.env},
 		"list credentials":  {"GET", "/v1/identity/peers/aicrew-example/credentials", g.env},
 		"issue credential":  {"POST", "/v1/identity/peers/aicrew-example/credentials", g.env},
 		"revoke credential": {"DELETE", "/v1/identity/peers/aicrew-example/credentials/x", g.env},
@@ -745,5 +746,37 @@ func TestIdentityEncodedPathsMatchTheMux(t *testing.T) {
 			t.Errorf("%s authenticated without the identity deadline (remaining %v)", p, left)
 		}
 	}
+	g.assertNoSecretLeak(t)
+}
+
+// Retirement is admin-only, refuses an enabled or unknown peer, and frees
+// the service ID for a new registration.
+func TestPeerRetirementOverTheWire(t *testing.T) {
+	g := newIdentityRig(t)
+	g.registerPeer(t, "aicrew-example")
+	g.issueCredential(t, "aicrew-example", time.Now().Add(time.Hour))
+	retire := "/v1/identity/peers/aicrew-example/retirement"
+	if r := g.call(t, g.tls, "POST", retire, g.alice, nil, "", true); r.status != 403 {
+		t.Errorf("retirement by a member bearer: %d %s", r.status, r.body)
+	}
+	if r := g.call(t, g.tls, "POST", retire, g.env, nil, "", true); r.status != 409 {
+		t.Errorf("retirement of an enabled peer: %d %s", r.status, r.body)
+	}
+	if r := g.call(t, g.tls, "POST", "/v1/identity/peers/no-such-peer/retirement", g.env, nil, "", true); r.status != 404 {
+		t.Errorf("retirement of an unknown peer: %d %s", r.status, r.body)
+	}
+	if r := g.call(t, g.tls, "PUT", "/v1/identity/peers/aicrew-example", g.env, nil, `{"disabled":true}`, true); r.status != 200 {
+		t.Fatalf("disable: %d %s", r.status, r.body)
+	}
+	r := g.call(t, g.tls, "POST", retire, g.env, nil, "", true)
+	var got struct {
+		ServiceID string                `json:"service_id"`
+		Retired   access.PeerRetirement `json:"retired"`
+	}
+	if r.status != 200 || json.Unmarshal(r.body, &got) != nil || got.ServiceID != "aicrew-example" ||
+		got.Retired != (access.PeerRetirement{Credentials: 1}) {
+		t.Fatalf("retirement: %d %s", r.status, r.body)
+	}
+	g.registerPeer(t, "aicrew-example")
 	g.assertNoSecretLeak(t)
 }
