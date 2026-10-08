@@ -10,13 +10,13 @@ One-liner in any project directory (installs the binary if missing, then
 wires the project):
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/BlackVS/aimem/v0.9.0/boot.sh | bash
+curl -fsSL https://raw.githubusercontent.com/BlackVS/aimem/v0.9.1/boot.sh | bash
 ```
 
 Windows (PowerShell; supported, tested less than Linux):
 
 ```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -Command "irm https://raw.githubusercontent.com/BlackVS/aimem/v0.9.0/boot.ps1 | iex"
+powershell -NoProfile -ExecutionPolicy Bypass -Command "irm https://raw.githubusercontent.com/BlackVS/aimem/v0.9.1/boot.ps1 | iex"
 ```
 
 Environment knobs for the boot script:
@@ -97,7 +97,7 @@ Fresh host (Debian/Ubuntu LXC or VM), as root — one command does user,
 binary, env, units, timers:
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/BlackVS/aimem/v0.9.0/install-hub.sh | bash
+curl -fsSL https://raw.githubusercontent.com/BlackVS/aimem/v0.9.1/install-hub.sh | bash
 ```
 
 Knobs (env): `AIMEM_HUB_USER` (default sessiond), `AIMEM_HTTP_LISTEN`

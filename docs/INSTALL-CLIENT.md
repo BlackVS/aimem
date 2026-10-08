@@ -12,13 +12,13 @@ user-level pieces; every run wires the project you are standing in.
 **Linux / macOS**
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/BlackVS/aimem/v0.9.0/boot.sh | bash
+curl -fsSL https://raw.githubusercontent.com/BlackVS/aimem/v0.9.1/boot.sh | bash
 ```
 
 **Windows (PowerShell)**
 
 ```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -Command "irm https://raw.githubusercontent.com/BlackVS/aimem/v0.9.0/boot.ps1 | iex"
+powershell -NoProfile -ExecutionPolicy Bypass -Command "irm https://raw.githubusercontent.com/BlackVS/aimem/v0.9.1/boot.ps1 | iex"
 ```
 
 The wrapper matters on a fresh machine: Windows clients default to the

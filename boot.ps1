@@ -1,6 +1,6 @@
 # aimem bootstrap for Windows. Run it INSIDE a project directory.
 #
-#   powershell -NoProfile -ExecutionPolicy Bypass -Command "irm https://raw.githubusercontent.com/BlackVS/aimem/v0.9.0/boot.ps1 | iex"
+#   powershell -NoProfile -ExecutionPolicy Bypass -Command "irm https://raw.githubusercontent.com/BlackVS/aimem/v0.9.1/boot.ps1 | iex"
 #
 # (The wrapper survives the default Restricted execution policy on a
 # fresh Windows machine; bare `irm ... | iex` works too once fetched,
@@ -27,7 +27,7 @@ $ErrorActionPreference = 'Stop'
 
 # The release this script installs. Bumped together with the CHANGELOG
 # when a release is cut (internal/installer checks they agree).
-$release = 'v0.9.0'
+$release = 'v0.9.1'
 [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
 
 $repo = if ($env:AIMEM_REPO) { $env:AIMEM_REPO } else { 'BlackVS/aimem' }

@@ -2,7 +2,7 @@
 # aimem hub installer: stand up a complete hub on a fresh Debian/Ubuntu
 # host (LXC or VM). Run AS ROOT on the hub host:
 #
-#   curl -fsSL https://raw.githubusercontent.com/BlackVS/aimem/v0.9.0/install-hub.sh | bash
+#   curl -fsSL https://raw.githubusercontent.com/BlackVS/aimem/v0.9.1/install-hub.sh | bash
 #
 # What it does: creates the service user (with systemd linger), installs
 # the release this script was fetched from (RELEASE below), checked
@@ -43,7 +43,7 @@ set -euo pipefail
 
 # The release this script installs. Bumped together with the CHANGELOG
 # when a release is cut (internal/installer checks they agree).
-RELEASE=v0.9.0
+RELEASE=v0.9.1
 
 [ "$(id -u)" = 0 ] || { echo "ERROR: run as root." >&2; exit 1; }
 for t in curl; do
