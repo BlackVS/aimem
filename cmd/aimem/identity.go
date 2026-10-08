@@ -38,6 +38,9 @@ const identityUsage = `usage: aimem identity peer list                          
                                  (--peer-trust-dns | --peer-trust-pin sha256-BASE64) [hub flags]
        aimem identity peer enable|disable|check SERVICE            [hub flags]
        aimem identity peer retire SERVICE                          [hub flags]
+       aimem identity peer provision SERVICE --endpoint URL
+                                 (--peer-trust-dns | --peer-trust-pin sha256-BASE64) --output-dir DIR
+                                 [--replace OLD] [--expires 90d|RFC3339] [hub flags]
        aimem identity cred list SERVICE                            [hub flags]
        aimem identity cred issue|rotate SERVICE --expires 90d|RFC3339 --output FILE|-
                                  [--operation identity.redeem|reservation.read|team.register|team.read] [hub flags]
@@ -63,6 +66,7 @@ Examples, one per command:
   aimem identity peer disable aicrew-example --hub https://hub.example.test:8443 --admin-token-file admin.token
   aimem identity peer check aicrew-example --hub https://hub.example.test:8443 --admin-token-file admin.token
   aimem identity peer retire aicrew-example --hub https://hub.example.test:8443 --admin-token-file admin.token
+  aimem identity peer provision aicrew-example --endpoint https://aicrew.example.test:9443/v1/crew/introspect --peer-trust-dns --output-dir aicrew-creds --hub https://hub.example.test:8443 --admin-token-file admin.token
   aimem identity cred list aicrew-example --hub https://hub.example.test:8443 --admin-token-file admin.token
   aimem identity cred issue aicrew-example --operation reservation.read --expires 90d --output reservation-read.secret --hub https://hub.example.test:8443 --admin-token-file admin.token
   aimem identity cred rotate aicrew-example --expires 90d --output redeem-2.secret --hub https://hub.example.test:8443 --admin-token-file admin.token
@@ -225,7 +229,7 @@ func identityCmd(args []string) error {
 // identitySlots are the entities each command names, in the order of the
 // positional form of earlier releases.
 var identitySlots = map[string][]string{
-	"peer list": nil, "peer register": {"peer"}, "peer enable": {"peer"}, "peer disable": {"peer"}, "peer check": {"peer"}, "peer retire": {"peer"},
+	"peer list": nil, "peer register": {"peer"}, "peer enable": {"peer"}, "peer disable": {"peer"}, "peer check": {"peer"}, "peer retire": {"peer"}, "peer provision": {"peer"},
 	"cred list": {"peer"}, "cred issue": {"peer"}, "cred rotate": {"peer"}, "cred revoke": {"peer", "credential"},
 	"team list": {"peer"}, "team create": {"peer", "team-id"}, "team enable": {"peer", "team-id"}, "team disable": {"peer", "team-id"},
 	"team grants": {"peer", "team-id"}, "team grant": {"peer", "team-id", "project"}, "team revoke": {"peer", "team-id", "project"},
@@ -262,6 +266,8 @@ func runIdentity(args []string, out io.Writer) error {
 	trustDNS := fs.Bool("peer-trust-dns", false, "")
 	trustPin := fs.String("peer-trust-pin", "", "")
 	expires := fs.String("expires", "", "")
+	outputDir := fs.String("output-dir", "", "")
+	replace := fs.String("replace", "", "")
 	output := fs.String("output", "", "")
 	secretFile := fs.String("secret-file", "", "")
 	operation := fs.String("operation", "identity.redeem", "")
@@ -318,6 +324,17 @@ func runIdentity(args []string, out io.Writer) error {
 	case "peer register":
 		if *endpoint == "" || *trustDNS == (*trustPin != "") {
 			return fmt.Errorf("peer register needs --endpoint and exactly one of --peer-trust-dns or --peer-trust-pin")
+		}
+	case "peer provision":
+		if *endpoint == "" || *trustDNS == (*trustPin != "") || *outputDir == "" {
+			return fmt.Errorf("peer provision needs --endpoint, exactly one of --peer-trust-dns or --peer-trust-pin, and --output-dir")
+		}
+		if *expires == "" {
+			*expires = provisionDefaultExpiry
+		}
+		var err error
+		if expiry, err = parseIdentityExpiry(*expires, time.Now()); err != nil {
+			return err
 		}
 	case "team create":
 		if t := ent["team-id"]; t == "." || t == ".." {
@@ -384,6 +401,9 @@ func runIdentity(args []string, out io.Writer) error {
 		return c.peerCheck(peer, out)
 	case "peer retire":
 		return c.peerRetire(peer, out)
+	case "peer provision":
+		return c.peerProvision(provisionRequest{service: peer, endpoint: *endpoint, trustDNS: *trustDNS, trustPin: *trustPin,
+			dir: *outputDir, replace: *replace, expiry: expiry}, out)
 	case "cred list":
 		return c.credList(peer, out)
 	case "cred issue", "cred rotate":
@@ -800,27 +820,15 @@ func (c *identityClient) call(method, path string, body any, want int, out any) 
 func peerPath(service string) string { return "/v1/identity/peers/" + url.PathEscape(service) }
 
 func (c *identityClient) peerList(out io.Writer) error {
-	var resp struct {
-		Peers []struct {
-			ServiceID     string `json:"service_id"`
-			HubID         string `json:"hub_id"`
-			Endpoint      string `json:"introspection_endpoint"`
-			Disabled      bool   `json:"disabled"`
-			Introspection bool   `json:"introspection_operational"`
-			TLSTrust      struct {
-				Mode  string `json:"mode"`
-				Value string `json:"value"`
-			} `json:"tls_trust"`
-		} `json:"peers"`
-	}
-	if err := c.call("GET", "/v1/identity/peers", nil, http.StatusOK, &resp); err != nil {
+	peers, err := c.peers()
+	if err != nil {
 		return err
 	}
-	if len(resp.Peers) == 0 {
+	if len(peers) == 0 {
 		fmt.Fprintln(out, "no identity peer is registered")
 		return nil
 	}
-	for _, p := range resp.Peers {
+	for _, p := range peers {
 		state := "enabled"
 		if p.Disabled {
 			state = "disabled"
@@ -836,13 +844,9 @@ func (c *identityClient) peerList(out io.Writer) error {
 }
 
 func (c *identityClient) peerRegister(service, endpoint string, trustDNS bool, trustPin string, out io.Writer) error {
-	trust := map[string]string{"mode": "spki_sha256", "value": trustPin}
-	if trustDNS {
-		u, err := url.Parse(endpoint)
-		if err != nil || u.Hostname() == "" {
-			return fmt.Errorf("--endpoint must be the peer's https introspection URL")
-		}
-		trust = map[string]string{"mode": "ca_dns", "value": u.Hostname()}
+	trust, err := peerTrust(endpoint, trustDNS, trustPin)
+	if err != nil {
+		return err
 	}
 	body := map[string]any{"service_id": service, "introspection_endpoint": endpoint, "tls_trust": trust}
 	var got struct {
@@ -998,33 +1002,12 @@ func (c *identityClient) credIssue(service, operation string, expiry time.Time, 
 				service, operation, c.command("cred", "revoke", "--peer", service, "--credential", old[0].ID))
 		}
 	}
-	status, data, err := c.do("POST", peerPath(service)+"/credentials", map[string]any{"expires_at": expiry.UTC().Format(time.RFC3339), "operation": operation})
-	switch {
-	case err != nil || status >= 500:
-		cause := err
-		if cause == nil {
-			cause = c.hubRefusal(status, data)
-		}
-		return c.unknownOutcome(service, known, cause, out)
-	case status != http.StatusCreated:
-		return fmt.Errorf("%v; nothing was issued", c.hubRefusal(status, data))
-	}
-	var resp struct {
-		Credential identityCred `json:"credential"`
-		Secret     string       `json:"secret"`
-	}
-	json.Unmarshal(data, &resp)
-	if resp.Credential.ID == "" {
-		return c.unknownOutcome(service, known, errors.New("the hub's answer did not name the credential"), out)
-	}
-	if !strings.HasPrefix(resp.Secret, "aimem_peer_") {
-		return c.undeliverable(service, resp.Credential.ID, sink.where(), errors.New("the answer carried no bearer"))
-	}
-	if err := sink.write(resp.Secret); err != nil {
-		return c.undeliverable(service, resp.Credential.ID, sink.where(), err)
+	cred, err := c.issueOne(service, operation, expiry, sink, known, out)
+	if err != nil {
+		return err
 	}
 	delivered = true
-	fmt.Fprintf(out, "issued credential %s (%s) for %s, expiring %s\n", resp.Credential.ID, resp.Credential.Operation, service, resp.Credential.ExpiresAt.Format(time.RFC3339))
+	fmt.Fprintf(out, "issued credential %s (%s) for %s, expiring %s\n", cred.ID, cred.Operation, service, cred.ExpiresAt.Format(time.RFC3339))
 	if sink.toStdout() {
 		fmt.Fprintln(out, "the bearer was written once to standard output")
 	} else {
@@ -1034,6 +1017,38 @@ func (c *identityClient) credIssue(service, operation string, expiry time.Time, 
 		fmt.Fprintf(out, "next: once aicrew uses the new credential, revoke the old one explicitly:\n  %s\n", c.command("cred", "revoke", "--peer", service, "--credential", old[0].ID))
 	}
 	return nil
+}
+
+// issueOne requests one credential and writes its bearer to sink. known
+// holds the credential IDs that existed before the request, for the report
+// of an unknown outcome; a bearer that cannot be written is revoked.
+func (c *identityClient) issueOne(service, operation string, expiry time.Time, sink *secretOutput, known map[string]bool, out io.Writer) (identityCred, error) {
+	status, data, err := c.do("POST", peerPath(service)+"/credentials", map[string]any{"expires_at": expiry.UTC().Format(time.RFC3339), "operation": operation})
+	switch {
+	case err != nil || status >= 500:
+		cause := err
+		if cause == nil {
+			cause = c.hubRefusal(status, data)
+		}
+		return identityCred{}, c.unknownOutcome(service, known, cause, out)
+	case status != http.StatusCreated:
+		return identityCred{}, fmt.Errorf("%v; nothing was issued", c.hubRefusal(status, data))
+	}
+	var resp struct {
+		Credential identityCred `json:"credential"`
+		Secret     string       `json:"secret"`
+	}
+	json.Unmarshal(data, &resp)
+	if resp.Credential.ID == "" {
+		return identityCred{}, c.unknownOutcome(service, known, errors.New("the hub's answer did not name the credential"), out)
+	}
+	if !strings.HasPrefix(resp.Secret, "aimem_peer_") {
+		return identityCred{}, c.undeliverable(service, resp.Credential.ID, sink.where(), errors.New("the answer carried no bearer"))
+	}
+	if err := sink.write(resp.Secret); err != nil {
+		return identityCred{}, c.undeliverable(service, resp.Credential.ID, sink.where(), err)
+	}
+	return resp.Credential, nil
 }
 
 // undeliverable handles a credential the hub confirmed but the bearer of

@@ -103,42 +103,50 @@ project.repository.set for project "pilot"
 
 `aimem project show --project pilot` prints the repository, the process pin and the project's grants with names beside IDs. Run it again after step 5 to see the team profile's grant. `aimem project repo clear --project pilot` removes the repository; every set and clear is kept in the project's repository history with the values before and after.
 
-## 3. Register aicrew as the identity peer
+## 3. Provision aicrew as the identity peer
 
-`--endpoint` is aicrew's introspection route. `--peer-trust-dns` trusts the endpoint's certificate by its name and the system roots; `--peer-trust-pin sha256-BASE64` pins it instead.
+One command registers aicrew as the hub's identity peer and writes aicrew's four credentials into a directory, one file each, readable only by you. Each credential permits exactly one operation:
+
+| File | Operation | What aicrew uses it for |
+|---|---|---|
+| `aimem-redeem.token` | `identity.redeem` | redeem identity proofs |
+| `aimem-read.token` | `reservation.read` | read the reservation scope |
+| `aimem-team-register.token` | `team.register` | create and name its own teams' profiles (step 5) |
+| `aimem-team-read.token` | `team.read` | read its own teams' grants, each granted project's repository and its process pin |
+
+`--endpoint` is aicrew's introspection route. `--peer-trust-dns` trusts the endpoint's certificate by its name and the system roots; `--peer-trust-pin sha256-BASE64` pins it instead. The credentials expire after 90 days unless `--expires` says otherwise.
 
 ```sh
-aimem identity peer register aicrew-example \
+aimem identity peer provision aicrew-example \
   --endpoint https://aicrew.example.test:9443/v1/crew/introspect \
-  --peer-trust-dns $HUB
-```
-
-**Expected:**
-
-```
-identity peer aicrew-example registered (endpoint trust ca_dns aicrew.example.test); introspection not operational yet; see aimem identity peer check aicrew-example --hub https://hub.example.test:8443 --admin-token-file admin.token
-```
-
-```sh
-aimem identity peer list $HUB
+  --peer-trust-dns --output-dir aicrew-creds $HUB
 ```
 
 **Expected** (the hub ID is this hub's own; aicrew and the members need it):
 
 ```
-aicrew-example  enabled  hub 01a0…-…
-  introspection endpoint https://aicrew.example.test:9443/v1/crew/introspect (not operational)
-  endpoint trust ca_dns aicrew.example.test
+identity peer aicrew-example registered (endpoint trust ca_dns aicrew.example.test)
+issued identity.redeem credential 01a0…-… into aicrew-creds/aimem-redeem.token, expiring …
+issued reservation.read credential 01a0…-… into aicrew-creds/aimem-read.token, expiring …
+issued team.register credential 01a0…-… into aicrew-creds/aimem-team-register.token, expiring …
+issued team.read credential 01a0…-… into aicrew-creds/aimem-team-read.token, expiring …
+hub ID 01a0…-…
 ```
 
-**Replacing the peer.** The hub allows one enabled peer. To move to a peer under another service ID, disable the old one first, then retire it so the new one can take its teams (`team.register` refuses a team UUID that another peer's profile holds, even a disabled one):
+aicrew reads the directory with `aicrew hub add --cred-dir aicrew-creds`. The bearers are never printed.
+
+**Running it again** is safe. It keeps every file that holds a credential, issues only for a file that is missing or empty, and says so; a provisioning that was cut short is finished this way. A file that holds a credential is never overwritten: for a peer that is not registered yet, the command refuses before it changes anything.
+
+**Replacing the peer.** The hub allows one enabled peer. To move aicrew to another service ID, name the old peer with `--replace`: it is disabled in the same step (and enabled again if the new registration fails). Then retire the old peer, so the new one can take its teams; `team.register` refuses a team UUID that another peer's profile holds, even a disabled one:
 
 ```sh
-aimem identity peer disable aicrew-example $HUB
+aimem identity peer provision aicrew-renamed \
+  --endpoint https://aicrew.example.test:9443/v1/crew/introspect \
+  --peer-trust-dns --output-dir aicrew-creds-renamed --replace aicrew-example $HUB
 aimem identity peer retire aicrew-example $HUB
 ```
 
-**Expected:**
+**Expected** from the retirement:
 
 ```
 identity peer aicrew-example retired; removed credentials=5 team_profiles=1 team_grants=1 receipts=2 redemptions=2; its name and teams can be registered again
@@ -146,7 +154,7 @@ identity peer aicrew-example retired; removed credentials=5 team_profiles=1 team
 
 Retirement removes the peer with its credentials, team profiles and their grants, proof receipts and redemptions, and keeps the audit history. Grant the project again to the new peer's profile once aicrew has registered the team, and expect each member to prove again on the next join.
 
-## 4. The introspection credential and aicrew's four credentials
+## 4. The introspection credential
 
 **The hub's outbound introspection credential.** aicrew issues it. Put it in a private file on the hub host, set `AIMEM_INTROSPECTION_TOKEN_FILE` to that file's path for the hub service, and restart the service. The hub rereads the file on every call, so a later rotation needs no restart.
 
@@ -168,32 +176,7 @@ identity peer aicrew-example introspection works: the peer verified and answered
 aimem: identity peer aicrew-example introspection check failed: not_configured (the hub has no AIMEM_INTROSPECTION_TOKEN_FILE set)
 ```
 
-**aicrew's four credentials.** Each permits exactly one operation:
-- `identity.redeem` redeems identity proofs;
-- `reservation.read` reads the reservation scope;
-- `team.register` lets aicrewd create and name its own teams' profiles (step 5);
-- `team.read` lets aicrewd read its own teams' grants, each granted project's repository and its process pin.
-
-Each bearer is written once, to a new file only you can read; it is never printed.
-
-```sh
-aimem identity cred issue aicrew-example --expires 90d --output redeem.secret $HUB
-aimem identity cred issue aicrew-example --expires 90d --output read.secret --operation reservation.read $HUB
-aimem identity cred issue aicrew-example --expires 90d --output team-register.secret --operation team.register $HUB
-aimem identity cred issue aicrew-example --expires 90d --output team-read.secret --operation team.read $HUB
-```
-
-**Expected:**
-
-```
-issued credential 01a0…-… (identity.redeem) for aicrew-example, expiring …
-the bearer was written once to redeem.secret (readable only by you); move it into aicrew's protected storage, then delete the file
-issued credential 01a0…-… (reservation.read) for aicrew-example, expiring …
-the bearer was written once to read.secret (readable only by you); move it into aicrew's protected storage, then delete the file
-…
-```
-
-The `team.register` and `team.read` issues print the same two lines. Deliver all four files to aicrew's protected storage, then delete them. Verify:
+**aicrew's credentials** are listed with:
 
 ```sh
 aimem identity cred list aicrew-example $HUB

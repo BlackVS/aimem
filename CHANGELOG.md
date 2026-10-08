@@ -32,6 +32,24 @@ currently 23); a binary refuses a database newer than it understands.
   authenticated before its peer was disabled, its credential revoked or
   the peer retired writes nothing and cannot leave a profile behind.
 
+- **`aimem identity peer provision SERVICE`** sets up an identity peer
+  in one command. Setting up the pilot's aicrew peer had taken seven
+  hand-typed commands, and the first try failed with a 400 under the
+  hub's one-active-peer rule. The command takes `--endpoint`, the trust
+  flag of `peer register`, and `--output-dir DIR`. It registers the peer,
+  issues its four credentials into owner-only files under fixed names
+  (`aimem-redeem.token`, `aimem-read.token`, `aimem-team-register.token`,
+  `aimem-team-read.token`), and prints the hub ID; `aicrew hub add
+  --cred-dir DIR` reads them. A rerun keeps every file that holds a
+  credential and issues only for a missing or empty one, so it reports
+  the existing peer and files and issues nothing, and it finishes a
+  provisioning that was cut short; a kept file whose operation has no
+  active credential on the hub is named in a warning. A non-empty
+  credential file is never overwritten. `--replace OLD` disables the enabled old peer in the same
+  step, and enables it again if the new registration fails. Credentials
+  last 90 days unless `--expires` says otherwise. The pilot hub runbook
+  now uses it.
+
 ### Changed
 
 - **The one-liner upgrades without wiring the current directory.** Run on
