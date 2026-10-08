@@ -13,6 +13,26 @@ currently 23); a binary refuses a database newer than it understands.
 
 ## [Unreleased]
 
+### Changed
+
+- **The one-liner upgrades without wiring the current directory.** Run on
+  a machine where aimem is already installed, `boot.sh` and `boot.ps1`
+  wire the current directory only if it already holds `.aimem.json`;
+  otherwise they upgrade the user level and print how to wire a project.
+  A fresh install still wires the directory it runs in.
+  `AIMEM_USER_ONLY=1` upgrades or installs the user level and wires
+  nothing. Before, an upgrade run from the home directory wired the home
+  as a project, and every Claude Code session under it read that
+  `CLAUDE.md`.
+
+### Fixed
+
+- The installers refuse to wire the home directory as a project in any
+  mode: the one-liner skips it, and `install.sh project ~` and
+  `install.ps1 -Target ~` stop with an error before writing anything.
+  Homes an earlier run already wired keep their files; remove them by
+  hand.
+
 ## [0.9.1] — 2026-10-07
 
 The one-line installer becomes the upgrade path. Every documented

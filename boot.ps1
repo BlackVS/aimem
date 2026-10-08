@@ -1,4 +1,5 @@
-# aimem bootstrap for Windows. Run it INSIDE a project directory.
+# aimem bootstrap for Windows. A first install runs it inside a project
+# directory; an upgrade runs it from anywhere.
 #
 #   powershell -NoProfile -ExecutionPolicy Bypass -Command "irm https://raw.githubusercontent.com/BlackVS/aimem/v0.9.1/boot.ps1 | iex"
 #
@@ -11,11 +12,15 @@
 # SHA256SUMS, and the repository archive of the same tag for the installer
 # and the OpenCode plugin. Then it runs install.ps1 against the current
 # directory. An upgrade backs up the state root first and rolls back if
-# the new release does not come up (install.ps1).
+# the new release does not come up (install.ps1). When aimem was already
+# installed, only a directory that already holds .aimem.json is wired; the
+# home directory is never wired.
 #
 # Optional environment:
 #   AIMEM_HUB_URL, AIMEM_HUB_TOKEN   register a hub for real-time push
 #   AIMEM_GROUPS=a,b                 pre-declare shared knowledge groups
+#   AIMEM_USER_ONLY=1                install or upgrade the user level only
+#                                    and wire no project
 #   AIMEM_REINSTALL=1                refresh the binary and hooks even if
 #                                    the installed aimem is already current
 #                                    (an older install is upgraded anyway)
@@ -81,8 +86,15 @@ try {
   # downloaded install.ps1 as a FILE is not — on the default Restricted
   # policy the install died right here (lived 2026-08-31). The bypass is
   # process-scoped and changes no machine state.
-  & powershell -NoProfile -ExecutionPolicy Bypass -File (Join-Path $dest 'install.ps1') -Target $PWD.Path
+# BEGIN run-installer
+  # -Bootstrap applies the one-liner's wiring rules; an older release named
+  # by AIMEM_VERSION has an install.ps1 without it.
+  $installer = Join-Path $dest 'install.ps1'
+  $mode = @()
+  if (Select-String -LiteralPath $installer -Pattern '\[switch\]\$Bootstrap' -Quiet) { $mode = @('-Bootstrap') }
+  & powershell -NoProfile -ExecutionPolicy Bypass -File $installer @mode -Target $PWD.Path
   if ($LASTEXITCODE -ne 0) { throw "install.ps1 failed with exit code $LASTEXITCODE" }
+# END run-installer
 } finally {
   Remove-Item -Recurse -Force $dest -ErrorAction SilentlyContinue
 }

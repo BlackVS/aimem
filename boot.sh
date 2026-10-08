@@ -1,5 +1,6 @@
 #!/bin/sh
-# aimem bootstrap for Linux and macOS. Run it INSIDE a project directory.
+# aimem bootstrap for Linux and macOS. A first install runs it inside a
+# project directory; an upgrade runs it from anywhere.
 #
 #   curl -fsSL https://raw.githubusercontent.com/BlackVS/aimem/v0.9.1/boot.sh | bash
 #
@@ -10,10 +11,14 @@
 # current directory: a user-level install or upgrade if aimem is missing or
 # older, then wiring for this project. An upgrade backs up the state root
 # first and rolls back if the new release does not come up (install.sh).
+# When aimem was already installed, only a directory that already holds
+# .aimem.json is wired; the home directory is never wired.
 #
 # Optional environment:
 #   AIMEM_HUB_URL, AIMEM_HUB_TOKEN   register a hub for real-time push
 #   AIMEM_GROUPS=a,b                 pre-declare shared knowledge groups
+#   AIMEM_USER_ONLY=1                install or upgrade the user level only
+#                                    and wire no project
 #   AIMEM_REINSTALL=1                refresh the binary and hooks even if
 #                                    the installed aimem is already current
 #                                    (an older install is upgraded anyway)

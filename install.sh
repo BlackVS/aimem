@@ -340,9 +340,13 @@ EOF
 }
 
 install_project() {
-  need jq
   local dir="${1:-.}"
   dir="$(cd "$dir" && pwd)"
+  if is_home "$dir"; then
+    echo "error: refusing to wire the home directory $dir as a project: Claude Code would read its CLAUDE.md in every session under it. Run this inside a project directory." >&2
+    return 1
+  fi
+  need jq
   say "wiring project $dir"
 
   if [ ! -f "$dir/docs/SESSION-STATE.md" ]; then
@@ -563,12 +567,33 @@ EOF
   say "sync timer enabled: every ~10min to $desc"
 }
 
-# bootstrap: the boot.sh one-liner entrypoint. Run from inside a project
-# directory: user-level install if aimem is not on PATH yet, optional hub
-# push config from env (AIMEM_HUB_URL / AIMEM_HUB_TOKEN), then wire the
-# current project.
+# BEGIN wire-decision
+# is_home dir: is dir the user's home directory?
+is_home() { [ "$(cd "$1" && pwd -P)" = "$(cd "$HOME" && pwd -P)" ]; }
+
+# wire_skip_reason dir was-installed: prints nothing when bootstrap wires
+# dir as a project, otherwise why it does not. An upgrade wires only a
+# project that already has its .aimem.json, so the one-liner can upgrade
+# from any directory; a fresh install wires the directory it runs in.
+wire_skip_reason() {
+  if [ "${AIMEM_USER_ONLY:-0}" = 1 ]; then
+    echo "AIMEM_USER_ONLY=1"
+  elif is_home "$1"; then
+    echo "$1 is the home directory, which is never wired as a project"
+  elif [ "$2" = 1 ] && [ ! -f "$1/.aimem.json" ]; then
+    echo "aimem was already installed and $1 has no .aimem.json"
+  fi
+}
+# END wire-decision
+
+# bootstrap: the boot.sh one-liner entrypoint: user-level install or
+# upgrade when aimem is missing, forced or older, optional hub push config
+# from env (AIMEM_HUB_URL / AIMEM_HUB_TOKEN), then wiring of the current
+# project unless wire_skip_reason says otherwise.
 bootstrap() {
   local dir="${1:-$PWD}"
+  local installed=0
+  if command -v aimem >/dev/null 2>&1 || [ -x "$BIN_DIR/aimem" ]; then installed=1; fi
   # User-level install when aimem is missing, forced, or older than the
   # release boot.sh is installing (AIMEM_TARGET_VERSION).
   local have="" why=""
@@ -590,6 +615,14 @@ bootstrap() {
   fi
   if [ -n "${AIMEM_HUB_URL:-}" ] && [ -n "${AIMEM_HUB_TOKEN:-}" ]; then
     "$BIN_DIR/aimem" hub "$AIMEM_HUB_URL" "$AIMEM_HUB_TOKEN" && say "hub push configured: $AIMEM_HUB_URL"
+  fi
+  local skip
+  skip=$(wire_skip_reason "$dir" "$installed")
+  if [ -n "$skip" ]; then
+    say "user level only, no project wired: $skip"
+    say "to wire a project, run the one-liner inside it after creating its .aimem.json: echo '{\"groups\":[]}' > .aimem.json"
+    say "bootstrap done. Restart Claude Code / OpenCode sessions to activate."
+    return
   fi
   install_project "$dir"
   say "bootstrap done. Restart Claude Code / OpenCode sessions in $dir to activate."
