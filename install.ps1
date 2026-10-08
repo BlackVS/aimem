@@ -185,6 +185,7 @@ function Start-AimemService {
   if ($script:SyncWasEnabled) { Enable-ScheduledTask -TaskName 'aimem-sync' | Out-Null }
 }
 
+# BEGIN json-io
 # Windows PowerShell 5.1's `-Encoding UTF8` emits a BOM, and Go's
 # encoding/json rejects one. A BOM in .aimem.json therefore silently
 # voids the project's hub binding and group membership — the file parses
@@ -195,10 +196,15 @@ function Write-Text($path, $text) {
   New-Item -ItemType Directory -Force (Split-Path -Parent $path) | Out-Null
   [System.IO.File]::WriteAllText($path, $text, $Utf8NoBom)
 }
+# Get-Content in 5.1 decodes a BOM-less file in the ANSI code page, so a
+# user's non-ASCII settings came back garbled once written out as UTF-8.
+# Every file this script reads goes through Read-Text: UTF-8 with or
+# without a BOM, which is dropped.
+function Read-Text($path) {
+  [System.IO.File]::ReadAllText($path, $Utf8NoBom).TrimStart([char]0xFEFF)
+}
 function Read-Json($path) {
-  # -Raw keeps a pre-existing BOM in the string; ConvertFrom-Json in 5.1
-  # chokes on it, so strip it before parsing files other tools wrote.
-  if (Test-Path $path) { (Get-Content $path -Raw).TrimStart([char]0xFEFF) | ConvertFrom-Json } else { [pscustomobject]@{} }
+  if (Test-Path $path) { Read-Text $path | ConvertFrom-Json } else { [pscustomobject]@{} }
 }
 function Write-Json($path, $obj) {
   Write-Text $path (($obj | ConvertTo-Json -Depth 16) + "`r`n")
@@ -220,6 +226,7 @@ function Add-AgentHook($file, $event, $cmd, $status, $marker) {
   })
   Write-Json $file $s
 }
+# END json-io
 
 # Register-AimemTasks registers (or refreshes) the logon task for
 # `aimem serve` and the periodic sync task; neither starts anything.
@@ -352,7 +359,7 @@ function Install-User {
     # Match hand-written spellings too (quoted key, inline table): a
     # missed match would append a duplicate key and break the whole
     # config.toml parse. A false positive merely skips the append.
-    $haveEntry = (Test-Path $codexToml) -and ((Get-Content $codexToml -Raw) -match '(?m)^\[mcp_servers\."?aimem"?\]|^\s*"?aimem"?\s*=\s*\{')
+    $haveEntry = (Test-Path $codexToml) -and ((Read-Text $codexToml) -match '(?m)^\[mcp_servers\."?aimem"?\]|^\s*"?aimem"?\s*=\s*\{')
     if (-not $haveEntry) {
       New-Item -ItemType Directory -Force $CodexHome | Out-Null
       [System.IO.File]::AppendAllText($codexToml, "`n[mcp_servers.aimem]`ncommand = `"aimem`"`nargs = [`"mcp`"]`n", $Utf8NoBom)
@@ -526,7 +533,7 @@ function Uninstall-User {
   # the case in which the fallback was NOT used.
   $codexToml = Join-Path $CodexHome 'config.toml'
   if (Test-Path $codexToml) {
-    $t = Get-Content $codexToml -Raw
+    $t = Read-Text $codexToml
     $t2 = [regex]::Replace($t, '(?ms)^\[mcp_servers\.aimem\]\r?\n.*?(?=^\[|\z)', '')
     if ($t2 -ne $t) { [System.IO.File]::WriteAllText($codexToml, $t2, $Utf8NoBom) }
   }
