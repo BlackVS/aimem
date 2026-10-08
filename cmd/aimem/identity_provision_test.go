@@ -269,14 +269,17 @@ func TestPeerProvisionRefusesAnExpiryBeforeTheHubChanges(t *testing.T) {
 	g := newIdentityCLIRig(t, nil)
 	g.register(t)
 	dir := filepath.Join(g.dir, "renamed-creds")
-	for _, expires := range []string{
-		time.Now().Add(-time.Hour).UTC().Format(time.RFC3339),
-		"367d",
-		time.Now().Add(400 * 24 * time.Hour).UTC().Format(time.RFC3339),
+	const outOfRange = "must expire in the future and within 366 days; nothing changed"
+	for _, c := range []struct{ expires, want string }{
+		{time.Now().Add(-time.Hour).UTC().Format(time.RFC3339), outOfRange},
+		{"367d", outOfRange},
+		{time.Now().Add(400 * 24 * time.Hour).UTC().Format(time.RFC3339), outOfRange},
+		{"213504d", "use a positive number of days"}, // overflows a time.Duration
 	} {
+		expires := c.expires
 		before := g.requests.Load()
 		_, err := g.provision(t, "aicrew-renamed", dir, "--replace", "aicrew-example", "--expires", expires)
-		if err == nil || !strings.Contains(err.Error(), "must expire in the future and within 366 days; nothing changed") {
+		if err == nil || !strings.Contains(err.Error(), c.want) {
 			t.Fatalf("--expires %s: %v", expires, err)
 		}
 		if n := g.requests.Load() - before; n != 0 {

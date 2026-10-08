@@ -515,6 +515,13 @@ func TestIdentityCLIUsage(t *testing.T) {
 	if _, err := parseIdentityExpiry("0d", time.Now()); err == nil {
 		t.Error("zero-day expiry accepted")
 	}
+	// 213504 days overflow a time.Duration and would wrap to minutes.
+	if _, err := parseIdentityExpiry("213504d", time.Now()); err == nil {
+		t.Error("an overflowing day count was accepted")
+	}
+	if _, err := parseIdentityExpiry("106751d", time.Now()); err != nil {
+		t.Errorf("the largest day count a time.Duration holds was refused: %v", err)
+	}
 }
 
 // newSelfSignedCert makes a CA certificate unrelated to httptest's built-in

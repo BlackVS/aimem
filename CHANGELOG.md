@@ -67,6 +67,11 @@ currently 23); a binary refuses a database newer than it understands.
 
 ### Fixed
 
+- `aimem identity cred issue` and `cred rotate` refuse an `--expires`
+  day count too large for Go's duration type (more than 106751 days).
+  Such a count overflowed and wrapped to an arbitrary expiry, as close as
+  minutes away, instead of failing.
+
 - The installers refuse to wire the home directory as a project in any
   mode: the one-liner skips it, and `install.sh project ~` and
   `install.ps1 -Target ~` stop with an error before writing anything.
