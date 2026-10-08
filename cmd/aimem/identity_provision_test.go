@@ -1,10 +1,13 @@
 package main
 
 import (
+	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
+	"time"
 
 	"aimem/internal/privatefile"
 )
@@ -255,6 +258,80 @@ func TestPeerProvisionReplaceRollsBackAFailedRegistration(t *testing.T) {
 	}
 	if entries, _ := os.ReadDir(dir); len(entries) != 0 {
 		t.Errorf("the failed provision left files: %v", entries)
+	}
+	g.assertNoSecrets(t)
+}
+
+// An expiry the hub would refuse is refused before any hub request, so
+// --replace never leaves the old peer disabled and the new one without
+// credentials.
+func TestPeerProvisionRefusesAnExpiryBeforeTheHubChanges(t *testing.T) {
+	g := newIdentityCLIRig(t, nil)
+	g.register(t)
+	dir := filepath.Join(g.dir, "renamed-creds")
+	for _, expires := range []string{
+		time.Now().Add(-time.Hour).UTC().Format(time.RFC3339),
+		"367d",
+		time.Now().Add(400 * 24 * time.Hour).UTC().Format(time.RFC3339),
+	} {
+		before := g.requests.Load()
+		_, err := g.provision(t, "aicrew-renamed", dir, "--replace", "aicrew-example", "--expires", expires)
+		if err == nil || !strings.Contains(err.Error(), "must expire in the future and within 366 days; nothing changed") {
+			t.Fatalf("--expires %s: %v", expires, err)
+		}
+		if n := g.requests.Load() - before; n != 0 {
+			t.Errorf("--expires %s: %d hub requests, want none", expires, n)
+		}
+	}
+	if out := g.mustRun(t, "peer", "list"); !strings.Contains(out, "aicrew-example  enabled") || strings.Contains(out, "aicrew-renamed") {
+		t.Errorf("the refused provisions changed the peers:\n%s", out)
+	}
+	if entries, _ := os.ReadDir(dir); len(entries) != 0 {
+		t.Errorf("the refused provisions left files: %v", entries)
+	}
+	// The hub's own limit is accepted.
+	if out, err := g.provision(t, "aicrew-renamed", dir, "--replace", "aicrew-example", "--expires", "366d"); err != nil {
+		t.Fatalf("--expires 366d: %v\n%s", err, out)
+	}
+	readCredFiles(t, dir)
+	g.assertNoSecrets(t)
+}
+
+// A credential list that fails after the files are settled is reported as
+// unread, not as every kept file holding a stale credential.
+func TestPeerProvisionReportsAnUnreadableCredentialStatus(t *testing.T) {
+	var listed, failAt atomic.Int32 // the credential list numbered failAt fails
+	g := newIdentityCLIRig(t, func(h http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if r.Method == http.MethodGet && strings.HasSuffix(r.URL.Path, "/credentials") && listed.Add(1) == failAt.Load() {
+				http.Error(w, "unavailable", http.StatusServiceUnavailable)
+				return
+			}
+			h.ServeHTTP(w, r)
+		})
+	})
+	dir := filepath.Join(g.dir, "creds")
+	if out, err := g.provision(t, "aicrew-example", dir); err != nil {
+		t.Fatalf("provision: %v\n%s", err, out)
+	}
+	files := readCredFiles(t, dir)
+	// The rerun lists the credentials twice: before issuing, and for the
+	// status of the kept files. Only the second fails.
+	listed.Store(0)
+	failAt.Store(2)
+	out, err := g.provision(t, "aicrew-example", dir)
+	if err != nil {
+		t.Fatalf("rerun: %v\n%s", err, out)
+	}
+	if listed.Load() != 2 {
+		t.Fatalf("the rerun listed the credentials %d times, want 2", listed.Load())
+	}
+	if linesWith(out, "warning: the credentials of aicrew-example could not be read") != 1 ||
+		strings.Contains(out, "has no active") || linesWith(out, "kept ") != 4 || !strings.Contains(out, "nothing was issued") {
+		t.Errorf("rerun with an unreadable credential status:\n%s", out)
+	}
+	if again := readCredFiles(t, dir); again["aimem-redeem.token"] != files["aimem-redeem.token"] || again["aimem-team-read.token"] != files["aimem-team-read.token"] {
+		t.Error("the rerun changed a credential file")
 	}
 	g.assertNoSecrets(t)
 }

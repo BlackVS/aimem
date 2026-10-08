@@ -44,11 +44,14 @@ currently 23); a binary refuses a database newer than it understands.
   credential and issues only for a missing or empty one, so it reports
   the existing peer and files and issues nothing, and it finishes a
   provisioning that was cut short; a kept file whose operation has no
-  active credential on the hub is named in a warning. A non-empty
+  active credential on the hub is named in a warning, and if the hub's
+  credential list cannot be read, the run says the kept files were not
+  checked. A non-empty
   credential file is never overwritten. `--replace OLD` disables the enabled old peer in the same
   step, and enables it again if the new registration fails. Credentials
-  last 90 days unless `--expires` says otherwise. The pilot hub runbook
-  now uses it.
+  last 90 days unless `--expires` says otherwise; an expiry in the past
+  or more than 366 days ahead is refused before the hub changes. The
+  pilot hub runbook now uses it.
 
 ### Changed
 

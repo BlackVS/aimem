@@ -332,9 +332,15 @@ func runIdentity(args []string, out io.Writer) error {
 		if *expires == "" {
 			*expires = provisionDefaultExpiry
 		}
+		now := time.Now()
 		var err error
-		if expiry, err = parseIdentityExpiry(*expires, time.Now()); err != nil {
+		if expiry, err = parseIdentityExpiry(*expires, now); err != nil {
 			return err
+		}
+		// The hub refuses this only at the first issue, after --replace has
+		// already disabled the old peer.
+		if !expiry.After(now) || expiry.After(now.Add(provisionMaxLife)) {
+			return fmt.Errorf("--expires %s: a peer credential must expire in the future and within 366 days; nothing changed", *expires)
 		}
 	case "team create":
 		if t := ent["team-id"]; t == "." || t == ".." {
