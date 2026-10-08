@@ -27,7 +27,10 @@ currently 23); a binary refuses a database newer than it understands.
   the team UUIDs it held then register again, and a receipt redeemed
   under the retired peer reads as unknown, so members prove again on
   their next join. An enabled peer is refused (409), and so is an
-  unknown one (404).
+  unknown one (404). `team.register` now checks its peer credential again
+  inside its write transaction, as redemption does, so a request that
+  authenticated before its peer was disabled, its credential revoked or
+  the peer retired writes nothing and cannot leave a profile behind.
 
 ### Changed
 
