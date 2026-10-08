@@ -105,7 +105,7 @@ project.repository.set for project "pilot"
 
 ## 3. Provision aicrew as the identity peer
 
-One command registers aicrew as the hub's identity peer and writes aicrew's four credentials into a directory, one file each, readable only by you. Each credential permits exactly one operation:
+One command registers aicrew as the hub's identity peer and writes aicrew's four credentials into a directory, one file each, readable only by you. Each credential permits exactly one operation. Beside them, `aimem-hub-id` holds the hub's ID on one line, also readable only by you:
 
 | File | Operation | What aicrew uses it for |
 |---|---|---|
@@ -131,11 +131,12 @@ issued reservation.read credential 01a0…-… into aicrew-creds/aimem-read.toke
 issued team.register credential 01a0…-… into aicrew-creds/aimem-team-register.token, expiring …
 issued team.read credential 01a0…-… into aicrew-creds/aimem-team-read.token, expiring …
 hub ID 01a0…-…
+wrote the hub ID into aicrew-creds/aimem-hub-id
 ```
 
-aicrew reads the directory with `aicrew hub add --cred-dir aicrew-creds`. The bearers are never printed.
+aicrew reads the directory with `aicrew hub add --cred-dir aicrew-creds`, the hub ID included, so it is never retyped. The bearers are never printed.
 
-**Running it again** is safe. It keeps every file that holds a credential, issues only for a file that is missing or empty, and says so; a provisioning that was cut short is finished this way. A file that holds a credential is never overwritten: for a peer that is not registered yet, the command refuses before it changes anything.
+**Running it again** is safe. It keeps every file that holds a credential, issues only for a file that is missing or empty, and says so; a provisioning that was cut short is finished this way. A file that holds a credential is never overwritten: for a peer that is not registered yet, the command refuses before it changes anything. `aimem-hub-id` is kept when it holds this hub's ID; a directory whose `aimem-hub-id` names another hub is refused before anything changes, and so is one that holds an ID while the hub has no peer yet to confirm it against.
 
 **Replacing the peer.** The hub allows one enabled peer. To move aicrew to another service ID, name the old peer with `--replace`: it is disabled in the same step (and enabled again if the new registration fails). Then retire the old peer, so the new one can take its teams; `team.register` refuses a team UUID that another peer's profile holds, even a disabled one:
 

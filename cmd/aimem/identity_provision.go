@@ -1,10 +1,10 @@
 package main
 
 // `aimem identity peer provision`: one command registers an identity peer
-// and writes its four credentials into a directory aicrew reads them from
-// (aicrew hub add --cred-dir). A rerun keeps what exists and issues only
-// what is missing, so a provisioning cut short is finished by running it
-// again.
+// and writes its four credentials and the hub's ID into a directory aicrew
+// reads them from (aicrew hub add --cred-dir). A rerun keeps what exists
+// and issues only what is missing, so a provisioning cut short is finished
+// by running it again.
 
 import (
 	"fmt"
@@ -16,6 +16,8 @@ import (
 	"slices"
 	"strings"
 	"time"
+
+	"aimem/internal/privatefile"
 )
 
 // provisionDefaultExpiry is the life of a provisioned credential when
@@ -33,6 +35,9 @@ var provisionFiles = []struct{ operation, name string }{
 	{"team.register", "aimem-team-register.token"},
 	{"team.read", "aimem-team-read.token"},
 }
+
+// provisionHubIDFile holds the hub's ID, one line, next to the credentials.
+const provisionHubIDFile = "aimem-hub-id"
 
 // identityPeerView is a registered peer as the hub lists it.
 type identityPeerView struct {
@@ -128,6 +133,17 @@ func (c *identityClient) peerProvision(req provisionRequest, out io.Writer) erro
 	if len(blocking) > 0 {
 		return fmt.Errorf("the hub allows one enabled identity peer and %s is enabled; name it with --replace to disable it in the same step; nothing changed",
 			strings.Join(blocking, ", "))
+	}
+	// Every peer carries the hub's own ID, so any listed one tells which hub
+	// this is before anything changes.
+	knownHub := ""
+	if len(peers) > 0 {
+		knownHub = peers[0].HubID
+	}
+	hubIDPath := filepath.Join(req.dir, provisionHubIDFile)
+	hubIDKept, err := checkHubIDFile(hubIDPath, knownHub)
+	if err != nil {
+		return err
 	}
 
 	// The files: present ones are kept, missing or empty ones are reserved
@@ -257,8 +273,69 @@ func (c *identityClient) peerProvision(req provisionRequest, out io.Writer) erro
 		return fmt.Errorf("identity peer %s is provisioned, but the hub ID could not be read back; see %s", req.service, c.command("peer", "list"))
 	}
 	fmt.Fprintf(out, "hub ID %s\n", hub)
+	if hubIDKept {
+		fmt.Fprintf(out, "%s already holds this hub ID\n", hubIDPath)
+	} else {
+		if err := writeHubIDFile(hubIDPath, hub); err != nil {
+			return fmt.Errorf("identity peer %s is provisioned, but %v; running the same command again writes it", req.service, err)
+		}
+		fmt.Fprintf(out, "wrote the hub ID into %s\n", hubIDPath)
+	}
 	if len(todo) == 0 {
 		fmt.Fprintf(out, "identity peer %s was already provisioned; nothing was issued\n", req.service)
+	}
+	return nil
+}
+
+// checkHubIDFile reports whether the hub ID file already holds this hub's
+// ID, so it is kept. A missing or empty file is written at the end. One
+// holding another ID, or any ID while the hub has no peer to confirm it
+// against, is refused.
+func checkHubIDFile(path, knownHub string) (bool, error) {
+	fi, err := os.Lstat(path)
+	switch {
+	case os.IsNotExist(err):
+		return false, nil
+	case err != nil:
+		return false, fmt.Errorf("%s cannot be inspected (%v); nothing changed", path, err)
+	case !fi.Mode().IsRegular():
+		return false, fmt.Errorf("%s is not a regular file; nothing changed", path)
+	}
+	b, err := os.ReadFile(path)
+	if err != nil {
+		return false, fmt.Errorf("%s cannot be read (%v); nothing changed", path, err)
+	}
+	held := strings.TrimSpace(string(b))
+	switch {
+	case held == "":
+		return false, nil
+	case knownHub == "":
+		return false, fmt.Errorf("%s holds hub ID %s, but this hub has no identity peer to confirm its ID against; move the file away first; nothing changed", path, held)
+	case held != knownHub:
+		return false, fmt.Errorf("%s holds hub ID %s, but this hub's ID is %s: the directory belongs to another hub; nothing changed", path, held, knownHub)
+	}
+	return true, nil
+}
+
+// writeHubIDFile writes the hub ID as one line into an owner-only file,
+// replacing an empty one.
+func writeHubIDFile(path, hub string) error {
+	if fi, err := os.Lstat(path); err == nil && fi.Mode().IsRegular() && fi.Size() == 0 {
+		if err := os.Remove(path); err != nil {
+			return fmt.Errorf("the empty %s cannot be replaced (%v)", path, err)
+		}
+	}
+	f, err := privatefile.Create(path)
+	if err != nil {
+		return fmt.Errorf("%s cannot be created (%v)", path, err)
+	}
+	_, werr := f.WriteString(hub + "\n")
+	if cerr := f.Close(); werr == nil {
+		werr = cerr
+	}
+	if werr != nil {
+		os.Remove(path)
+		return fmt.Errorf("%s cannot be written (%v)", path, werr)
 	}
 	return nil
 }
