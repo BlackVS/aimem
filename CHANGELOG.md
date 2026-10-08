@@ -39,8 +39,11 @@ currently 23); a binary refuses a database newer than it understands.
   flag of `peer register`, and `--output-dir DIR`. It registers the peer,
   issues its four credentials into owner-only files under fixed names
   (`aimem-redeem.token`, `aimem-read.token`, `aimem-team-register.token`,
-  `aimem-team-read.token`), and prints the hub ID; `aicrew hub add
-  --cred-dir DIR` reads them. A rerun keeps every file that holds a
+  `aimem-team-read.token`), and prints the hub ID and writes it into
+  `aimem-hub-id`, one line, owner-only; `aicrew hub add --cred-dir DIR`
+  reads them, so the hub ID is never retyped. A rerun keeps an
+  `aimem-hub-id` that holds this hub's ID and refuses, before anything
+  changes, one that names another hub. A rerun keeps every file that holds a
   credential and issues only for a missing or empty one, so it reports
   the existing peer and files and issues nothing, and it finishes a
   provisioning that was cut short; a kept file whose operation has no

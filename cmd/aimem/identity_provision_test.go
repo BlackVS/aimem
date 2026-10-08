@@ -338,3 +338,90 @@ func TestPeerProvisionReportsAnUnreadableCredentialStatus(t *testing.T) {
 	}
 	g.assertNoSecrets(t)
 }
+
+// The hub ID goes into the directory beside the credentials, owner-only, so
+// the peer's side reads it instead of having it retyped. A rerun keeps a
+// file with the same ID; one naming another hub is refused before anything
+// changes.
+func TestPeerProvisionWritesTheHubID(t *testing.T) {
+	g := newIdentityCLIRig(t, nil)
+	dir := filepath.Join(g.dir, "creds")
+	idFile := filepath.Join(dir, provisionHubIDFile)
+	out, err := g.provision(t, "aicrew-example", dir)
+	if err != nil {
+		t.Fatalf("provision: %v\n%s", err, out)
+	}
+	hub := hubIDOf(t, g)
+	if b, err := os.ReadFile(idFile); err != nil || string(b) != hub+"\n" {
+		t.Fatalf("%s holds %q (%v), want the hub ID %s on one line", provisionHubIDFile, b, err, hub)
+	}
+	if err := privatefile.Check(idFile); err != nil {
+		t.Errorf("%s is not owner-only: %v", provisionHubIDFile, err)
+	}
+	if !strings.Contains(out, "wrote the hub ID into "+idFile) {
+		t.Errorf("provision output:\n%s", out)
+	}
+
+	out, err = g.provision(t, "aicrew-example", dir)
+	if err != nil || !strings.Contains(out, idFile+" already holds this hub ID") || !strings.Contains(out, "nothing was issued") {
+		t.Fatalf("rerun: %v\n%s", err, out)
+	}
+	if b, _ := os.ReadFile(idFile); string(b) != hub+"\n" {
+		t.Errorf("the rerun changed %s: %q", provisionHubIDFile, b)
+	}
+
+	// A file naming another hub: refused after the peer list, with nothing
+	// changed.
+	other := "01a00000-0000-7000-8000-000000000000\n"
+	if err := os.WriteFile(idFile, []byte(other), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	before := g.requests.Load()
+	if _, err := g.provision(t, "aicrew-example", dir); err == nil || !strings.Contains(err.Error(), "belongs to another hub; nothing changed") {
+		t.Fatalf("provision with another hub's ID file: %v", err)
+	}
+	if n := g.requests.Load() - before; n != 1 {
+		t.Errorf("the refused provision made %d hub requests, want 1 (the peer list)", n)
+	}
+	if b, _ := os.ReadFile(idFile); string(b) != other {
+		t.Errorf("the refused provision changed %s: %q", provisionHubIDFile, b)
+	}
+	g.assertNoSecrets(t)
+}
+
+// On a hub with no peer yet there is no ID to check a hub ID file against,
+// so one that holds an ID is refused; an empty one is written.
+func TestPeerProvisionHubIDFileOnAHubWithoutPeers(t *testing.T) {
+	g := newIdentityCLIRig(t, nil)
+	dir := filepath.Join(g.dir, "creds")
+	if err := os.Mkdir(dir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	idFile := filepath.Join(dir, provisionHubIDFile)
+	if err := os.WriteFile(idFile, []byte("01a00000-0000-7000-8000-000000000000\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	before := g.requests.Load()
+	if _, err := g.provision(t, "aicrew-example", dir); err == nil || !strings.Contains(err.Error(), "no identity peer to confirm its ID against") {
+		t.Fatalf("provision with an unconfirmable hub ID file: %v", err)
+	}
+	if n := g.requests.Load() - before; n != 1 {
+		t.Errorf("the refused provision made %d hub requests, want 1 (the peer list)", n)
+	}
+	if out := g.mustRun(t, "peer", "list"); !strings.Contains(out, "no identity peer") {
+		t.Errorf("the refused provision registered a peer:\n%s", out)
+	}
+	if err := os.WriteFile(idFile, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if out, err := g.provision(t, "aicrew-example", dir); err != nil {
+		t.Fatalf("provision over an empty hub ID file: %v\n%s", err, out)
+	}
+	if b, _ := os.ReadFile(idFile); string(b) != hubIDOf(t, g)+"\n" {
+		t.Errorf("%s holds %q after replacing the empty file", provisionHubIDFile, b)
+	}
+	if err := privatefile.Check(idFile); err != nil {
+		t.Errorf("%s is not owner-only: %v", provisionHubIDFile, err)
+	}
+	g.assertNoSecrets(t)
+}
