@@ -42,8 +42,9 @@ currently 23); a binary refuses a database newer than it understands.
   `aimem-team-read.token`), and prints the hub ID and writes it into
   `aimem-hub-id`, one line, owner-only; `aicrew hub add --cred-dir DIR`
   reads them, so the hub ID is never retyped. A rerun keeps an
-  `aimem-hub-id` that holds this hub's ID and refuses, before anything
-  changes, one that names another hub. A rerun keeps every file that holds a
+  `aimem-hub-id` that holds this hub's ID, replaces one that is empty or
+  holds only whitespace, and refuses, before anything changes, one that
+  names another hub. A rerun keeps every file that holds a
   credential and issues only for a missing or empty one, so it reports
   the existing peer and files and issues nothing, and it finishes a
   provisioning that was cut short; a kept file whose operation has no

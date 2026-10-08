@@ -425,3 +425,30 @@ func TestPeerProvisionHubIDFileOnAHubWithoutPeers(t *testing.T) {
 	}
 	g.assertNoSecrets(t)
 }
+
+// A hub ID file that holds only whitespace holds nothing, for the check and
+// the write alike: it is replaced, on a fresh provision and on a rerun.
+func TestPeerProvisionReplacesABlankHubIDFile(t *testing.T) {
+	g := newIdentityCLIRig(t, nil)
+	dir := filepath.Join(g.dir, "creds")
+	if err := os.Mkdir(dir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	idFile := filepath.Join(dir, provisionHubIDFile)
+	for _, blank := range []string{"\n", " \r\n\t"} {
+		if err := os.WriteFile(idFile, []byte(blank), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		out, err := g.provision(t, "aicrew-example", dir)
+		if err != nil || !strings.Contains(out, "wrote the hub ID into "+idFile) {
+			t.Fatalf("provision over a hub ID file holding %q: %v\n%s", blank, err, out)
+		}
+		if b, _ := os.ReadFile(idFile); string(b) != hubIDOf(t, g)+"\n" {
+			t.Errorf("%s holds %q after replacing %q", provisionHubIDFile, b, blank)
+		}
+		if err := privatefile.Check(idFile); err != nil {
+			t.Errorf("%s is not owner-only: %v", provisionHubIDFile, err)
+		}
+	}
+	g.assertNoSecrets(t)
+}
