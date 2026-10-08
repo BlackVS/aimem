@@ -22,6 +22,9 @@ import (
 // --expires is not given.
 const provisionDefaultExpiry = "90d"
 
+// provisionMaxLife is the hub's limit on a peer credential's life.
+const provisionMaxLife = 366 * 24 * time.Hour
+
 // provisionFiles are the credential files a provisioned peer gets, one per
 // operation, under fixed names.
 var provisionFiles = []struct{ operation, name string }{
@@ -221,13 +224,15 @@ func (c *identityClient) peerProvision(req provisionRequest, out io.Writer) erro
 	// A kept file is not read; the hub's list says whether a credential of
 	// its operation is still active.
 	active := map[string]bool{}
-	if creds, err := c.creds(req.service); err == nil {
-		now := time.Now()
-		for _, cr := range creds {
-			if cr.state(now) == "active" {
-				active[cr.Operation] = true
-			}
+	creds, credsErr := c.creds(req.service)
+	now := time.Now()
+	for _, cr := range creds {
+		if cr.state(now) == "active" {
+			active[cr.Operation] = true
 		}
+	}
+	if credsErr != nil && len(kept) > 0 {
+		fmt.Fprintf(out, "warning: the credentials of %s could not be read (%v); the kept files were not checked against the hub\n", req.service, credsErr)
 	}
 	for _, f := range provisionFiles {
 		if !slices.Contains(kept, f.name) {
@@ -235,7 +240,7 @@ func (c *identityClient) peerProvision(req provisionRequest, out io.Writer) erro
 		}
 		path := filepath.Join(req.dir, f.name)
 		fmt.Fprintf(out, "kept %s (exists; nothing issued for it)\n", path)
-		if !active[f.operation] {
+		if credsErr == nil && !active[f.operation] {
 			fmt.Fprintf(out, "warning: %s has no active %s credential on the hub; %s may hold an expired or revoked one: move it away and run this again\n",
 				req.service, f.operation, path)
 		}

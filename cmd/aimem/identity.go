@@ -332,9 +332,15 @@ func runIdentity(args []string, out io.Writer) error {
 		if *expires == "" {
 			*expires = provisionDefaultExpiry
 		}
+		now := time.Now()
 		var err error
-		if expiry, err = parseIdentityExpiry(*expires, time.Now()); err != nil {
+		if expiry, err = parseIdentityExpiry(*expires, now); err != nil {
 			return err
+		}
+		// The hub refuses this only at the first issue, after --replace has
+		// already disabled the old peer.
+		if !expiry.After(now) || expiry.After(now.Add(provisionMaxLife)) {
+			return fmt.Errorf("--expires %s: a peer credential must expire in the future and within 366 days; nothing changed", *expires)
 		}
 	case "team create":
 		if t := ent["team-id"]; t == "." || t == ".." {
@@ -620,7 +626,8 @@ func (c *identityClient) teamRevokeInstance(service string, team teamRef, instan
 func parseIdentityExpiry(s string, now time.Time) (time.Time, error) {
 	if days, ok := strings.CutSuffix(s, "d"); ok {
 		n, err := strconv.Atoi(days)
-		if err != nil || n <= 0 {
+		// Beyond the largest time.Duration the day count would wrap.
+		if err != nil || n <= 0 || n > int(time.Duration(1<<63-1)/(24*time.Hour)) {
 			return time.Time{}, fmt.Errorf("--expires %q: use a positive number of days such as 90d, or an RFC 3339 time", s)
 		}
 		return now.Add(time.Duration(n) * 24 * time.Hour), nil

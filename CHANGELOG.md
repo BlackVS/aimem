@@ -44,11 +44,14 @@ currently 23); a binary refuses a database newer than it understands.
   credential and issues only for a missing or empty one, so it reports
   the existing peer and files and issues nothing, and it finishes a
   provisioning that was cut short; a kept file whose operation has no
-  active credential on the hub is named in a warning. A non-empty
+  active credential on the hub is named in a warning, and if the hub's
+  credential list cannot be read, the run says the kept files were not
+  checked. A non-empty
   credential file is never overwritten. `--replace OLD` disables the enabled old peer in the same
   step, and enables it again if the new registration fails. Credentials
-  last 90 days unless `--expires` says otherwise. The pilot hub runbook
-  now uses it.
+  last 90 days unless `--expires` says otherwise; an expiry in the past
+  or more than 366 days ahead is refused before the hub changes. The
+  pilot hub runbook now uses it.
 
 ### Changed
 
@@ -63,6 +66,11 @@ currently 23); a binary refuses a database newer than it understands.
   `CLAUDE.md`.
 
 ### Fixed
+
+- `aimem identity cred issue` and `cred rotate` refuse an `--expires`
+  day count too large for Go's duration type (more than 106751 days).
+  Such a count overflowed and wrapped to an arbitrary expiry, as close as
+  minutes away, instead of failing.
 
 - The installers refuse to wire the home directory as a project in any
   mode: the one-liner skips it, and `install.sh project ~` and
