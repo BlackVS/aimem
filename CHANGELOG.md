@@ -70,6 +70,14 @@ currently 23); a binary refuses a database newer than it understands.
 
 ### Fixed
 
+- `install.ps1` reads the user's files as UTF-8. Windows PowerShell 5.1
+  read a `settings.json` without a BOM in the ANSI code page, so
+  non-ASCII content, such as an emoji in a custom `statusLine`, came
+  back garbled when the hook merge wrote the file out as UTF-8. The
+  JSON settings and Codex's `config.toml` are now read as UTF-8, with or
+  without a BOM. Files an earlier run already garbled are not repaired;
+  fix them by hand.
+
 - `aimem identity cred issue` and `cred rotate` refuse an `--expires`
   day count too large for Go's duration type (more than 106751 days).
   Such a count overflowed and wrapped to an arbitrary expiry, as close as
