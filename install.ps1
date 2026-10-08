@@ -3,6 +3,8 @@
 #
 #   .\install.ps1 -Target C:\path\to\project      # user install (if needed) + wire project
 #   .\install.ps1 -UserOnly                       # user-level install only
+#   .\install.ps1 -Bootstrap -Target <dir>        # what boot.ps1 runs; wires
+#                                                 # <dir> unless Get-WireSkipReason says not
 #   .\install.ps1 -UninstallUser
 #
 # User install: aimem.exe -> %LOCALAPPDATA%\aimem\bin (added to user PATH),
@@ -14,6 +16,7 @@
 param(
   [string]$Target,
   [switch]$UserOnly,
+  [switch]$Bootstrap,
   [switch]$UninstallUser
 )
 $ErrorActionPreference = 'Stop'
@@ -361,8 +364,36 @@ function Install-User {
   Say 'user install done. Restart running OpenCode, Claude Code, and Codex sessions to activate.'
 }
 
+# BEGIN wire-decision
+# Test-HomeDir: is $dir the user's home directory?
+function Test-HomeDir($dir) {
+  $a = (Resolve-Path -LiteralPath $dir).ProviderPath.TrimEnd('\', '/')
+  $b = (Resolve-Path -LiteralPath $env:USERPROFILE).ProviderPath.TrimEnd('\', '/')
+  return [string]::Equals($a, $b, [StringComparison]::OrdinalIgnoreCase)
+}
+# Get-WireSkipReason: '' when the bootstrap wires $dir as a project,
+# otherwise why it does not. An upgrade wires only a project that already
+# has its .aimem.json, so the one-liner can upgrade from any directory; a
+# fresh install wires the directory it runs in.
+function Get-WireSkipReason($dir, $wasInstalled) {
+  if ($env:AIMEM_USER_ONLY -eq '1') { return 'AIMEM_USER_ONLY=1' }
+  if (Test-HomeDir $dir) { return "$dir is the home directory, which is never wired as a project" }
+  if ($wasInstalled -and -not (Test-Path -LiteralPath (Join-Path $dir '.aimem.json'))) {
+    return "aimem was already installed and $dir has no .aimem.json"
+  }
+  return ''
+}
+# END wire-decision
+
+function Assert-NotHome($dir) {
+  if (Test-HomeDir $dir) {
+    throw "refusing to wire the home directory $dir as a project: Claude Code would read its CLAUDE.md in every session under it. Run this inside a project directory."
+  }
+}
+
 function Wire-Project($dir) {
   $dir = (Resolve-Path $dir).Path
+  Assert-NotHome $dir
   Say "wiring project $dir"
 
   $handoff = Join-Path $dir 'docs\SESSION-STATE.md'
@@ -515,6 +546,10 @@ function Test-Older($have, $want) {
 }
 
 if ($UninstallUser) { Uninstall-User; return }
+if (-not $UserOnly -and -not $Target) { $Target = (Get-Location).Path }
+# An explicit project target is refused before anything is installed.
+if (-not $UserOnly -and -not $Bootstrap) { Assert-NotHome $Target }
+$wasInstalled = [bool](Get-Command aimem -ErrorAction SilentlyContinue) -or (Test-Path $Exe)
 $have = ''
 if (Get-Command aimem -ErrorAction SilentlyContinue) {
   try { $have = "$((& aimem version 2>$null) -split '\s+' | Select-Object -Index 1)" } catch { $have = '' }
@@ -531,7 +566,11 @@ if ($env:AIMEM_HUB_URL -and $env:AIMEM_HUB_TOKEN) {
   & $Exe hub $env:AIMEM_HUB_URL $env:AIMEM_HUB_TOKEN
   Say "hub push configured: $env:AIMEM_HUB_URL"
 }
-if (-not $UserOnly) {
-  if (-not $Target) { $Target = (Get-Location).Path }
-  Wire-Project $Target
+if ($UserOnly) { return }
+$skip = if ($Bootstrap) { Get-WireSkipReason $Target $wasInstalled } else { '' }
+if ($skip) {
+  Say "user level only, no project wired: $skip"
+  Say "to wire a project, run the one-liner inside it after creating its .aimem.json: Set-Content -Encoding ascii .aimem.json '{`"groups`":[]}'"
+  return
 }
+Wire-Project $Target

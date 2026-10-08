@@ -56,8 +56,20 @@ duplicate registration produces duplicate journal events.
 Upgrade with the same one-liner, naming the newer release; do not swap
 binaries by hand. Each one-liner fetches its boot script from a release
 tag, and the script installs that release's binary, refusing one whose
-hash is not in the release's `SHA256SUMS`. On an existing installation
-the installer:
+hash is not in the release's `SHA256SUMS`. Run it from any directory:
+when aimem is already installed the one-liner wires only a directory
+that already holds `.aimem.json`, and it never wires the home directory.
+`AIMEM_USER_ONLY=1` upgrades the user level and wires nothing:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/BlackVS/aimem/v0.9.1/boot.sh | AIMEM_USER_ONLY=1 bash
+```
+
+```powershell
+$env:AIMEM_USER_ONLY = '1'; powershell -NoProfile -ExecutionPolicy Bypass -Command "irm https://raw.githubusercontent.com/BlackVS/aimem/v0.9.1/boot.ps1 | iex"
+```
+
+On an existing installation the installer:
 
 1. reads the installed version and asks the running service for its
    state root (a stopped service's binary answers `aimem state-root`,

@@ -167,13 +167,15 @@ powershell -NoProfile -ExecutionPolicy Bypass -Command "irm https://raw.githubus
 ```
 
 Then restart any running Claude Code or OpenCode session. The first run
-installs the binary, hooks, plugin and background service; every run wires
-the project you are standing in. The one-liner names a release, and the
+installs the binary, hooks, plugin and background service, and wires the
+project you are standing in. The one-liner names a release, and the
 prebuilt static binary comes from that release, checked against its
 SHA256SUMS, so no Go toolchain is needed. To upgrade, run the one-liner of
-the newer release: it backs up the state root first and rolls back if the
-new release does not come up
-([ADMIN-MANUAL](docs/ADMIN-MANUAL.md#upgrades)).
+the newer release from any directory: it backs up the state root first and
+rolls back if the new release does not come up, and it wires only a
+directory that already holds `.aimem.json`
+([ADMIN-MANUAL](docs/ADMIN-MANUAL.md#upgrades)). The home directory is
+never wired.
 
 The one-liner needs the raw script to arrive intact. If the Windows form
 fails with `Cannot bind argument to parameter 'Command' because it is an

@@ -7,7 +7,12 @@ except section 4 applies whether or not you ever set one up.
 ## 1. One-liner
 
 Run it **inside a project directory**. The first run installs the
-user-level pieces; every run wires the project you are standing in.
+user-level pieces and wires the project you are standing in. Later runs
+upgrade aimem from any directory and wire only a directory that already
+holds `.aimem.json`; to wire another project, create its `.aimem.json`
+(`{"groups":[]}`) and run the one-liner inside it. The home directory is
+never wired: Claude Code reads a `CLAUDE.md` in every directory above a
+session, so wiring the home would reach every project under it.
 
 **Linux / macOS**
 
@@ -81,6 +86,7 @@ Set these before running the one-liner:
 |---|---|
 | `AIMEM_HUB_URL` + `AIMEM_HUB_TOKEN` | register a hub, so checkpoints push in real time |
 | `AIMEM_GROUPS=a,b` | pre-declare shared knowledge groups in `.aimem.json` |
+| `AIMEM_USER_ONLY=1` | install or upgrade the user level only and wire no project |
 | `AIMEM_REINSTALL=1` | refresh the binary and hooks even if the installed aimem is already current (an older install is upgraded without it) |
 | `AIMEM_VERSION=vX.Y.Z` | install another release than the one in the URL |
 | `AIMEM_UPGRADE_WAIT=30` | seconds an upgrade waits for health at the new version before rolling back |
