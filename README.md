@@ -11,7 +11,7 @@ Works with **Claude Code** and **OpenCode**. One static Go binary, no
 runtime dependencies, no external database, no cloud service.
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/BlackVS/aimem/v0.9.2/boot.sh | bash
+curl -fsSL https://raw.githubusercontent.com/BlackVS/aimem/v0.10.0/boot.sh | bash
 ```
 
 ---
@@ -158,12 +158,12 @@ each useful on their own.
 
 ```sh
 # Linux / macOS
-curl -fsSL https://raw.githubusercontent.com/BlackVS/aimem/v0.9.2/boot.sh | bash
+curl -fsSL https://raw.githubusercontent.com/BlackVS/aimem/v0.10.0/boot.sh | bash
 ```
 
 ```powershell
 # Windows
-powershell -NoProfile -ExecutionPolicy Bypass -Command "irm https://raw.githubusercontent.com/BlackVS/aimem/v0.9.2/boot.ps1 | iex"
+powershell -NoProfile -ExecutionPolicy Bypass -Command "irm https://raw.githubusercontent.com/BlackVS/aimem/v0.10.0/boot.ps1 | iex"
 ```
 
 Then restart any running Claude Code or OpenCode session. The first run
@@ -200,7 +200,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\install.ps1 -Target C:\pat
 **Hub** (optional) — on a fresh Debian or Ubuntu host, as root:
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/BlackVS/aimem/v0.9.2/install-hub.sh | bash
+curl -fsSL https://raw.githubusercontent.com/BlackVS/aimem/v0.10.0/install-hub.sh | bash
 ```
 
 Full detail: **[INSTALL-CLIENT.md](docs/INSTALL-CLIENT.md)** ·
