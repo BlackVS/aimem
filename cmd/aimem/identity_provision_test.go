@@ -4,11 +4,13 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
 
+	"aimem/internal/access"
 	"aimem/internal/privatefile"
 )
 
@@ -451,4 +453,19 @@ func TestPeerProvisionReplacesABlankHubIDFile(t *testing.T) {
 		}
 	}
 	g.assertNoSecrets(t)
+}
+
+// The CLI offers, and provision writes, exactly the operations the hub
+// issues.
+func TestIdentityOperationsMatchTheStore(t *testing.T) {
+	if !slices.Equal(identityOperations, access.PeerOperations) {
+		t.Errorf("cred --operation offers %v, the hub issues %v", identityOperations, access.PeerOperations)
+	}
+	var files []string
+	for _, f := range provisionFiles {
+		files = append(files, f.operation)
+	}
+	if !slices.Equal(files, access.PeerOperations) {
+		t.Errorf("provision writes %v, the hub issues %v", files, access.PeerOperations)
+	}
 }

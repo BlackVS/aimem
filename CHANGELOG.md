@@ -36,6 +36,15 @@ currently 24); a binary refuses a database newer than it understands.
   are one-way: a hub or workstation that has run this release does not
   start an older binary on the same state.
 
+### Fixed
+
+- **OpenAPI's peer credential issuance schema** listed only
+  `identity.redeem` and `reservation.read` as operations, although the hub
+  also issues `team.register` and `team.read`. It now lists every
+  operation, `board.read` included, and a test keeps the spec, the CLI's
+  `--operation` list and `peer provision`'s files equal to the operations
+  the hub issues.
+
 ## [0.9.2] — 2026-10-08
 
 Identity peers are set up and removed with one command each. `aimem

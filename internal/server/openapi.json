@@ -2202,10 +2202,13 @@
                     "type": "string",
                     "enum": [
                       "identity.redeem",
-                      "reservation.read"
+                      "reservation.read",
+                      "team.register",
+                      "team.read",
+                      "board.read"
                     ],
                     "default": "identity.redeem",
-                    "description": "The one operation the credential permits: identity.v1 redemption, or aicrew's read scope. A credential never permits both."
+                    "description": "The one operation the credential permits: identity.v1 redemption, aicrew's read scope, team.register, team.read or board.read (the board feed). A credential never permits two."
                   }
                 }
               }
