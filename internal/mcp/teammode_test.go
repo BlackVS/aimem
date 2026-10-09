@@ -166,6 +166,8 @@ func TestTeamModeToolListMatchesHubTeamRoutes(t *testing.T) {
 		"recall_memory": "GET /v1/projects/{p}/memories/recall",
 		"list_docs":     "GET /v1/projects/{p}/docs",
 		"read_doc":      "GET /v1/projects/{p}/docs/{name}",
+		// A member's report as a hub document (A0c).
+		writeReportTool: "PUT /v1/projects/{p}/docs/{name}",
 	}
 	// Local tools read only this binary and reach no route.
 	localOnly := []string{writingTool}
@@ -421,5 +423,57 @@ func TestTeamModeRefusedSessionContextWithdrawsVerification(t *testing.T) {
 	reqs := h.requests()[before:]
 	if !isErr || len(reqs) != 1 || reqs[0].path != "/v1/access/identity" {
 		t.Fatalf("the read after a refused session_context must re-verify and stop: %v %s %+v", isErr, text, reqs)
+	}
+}
+
+// write_report checks its arguments before any hub call, then verifies the
+// context and writes the report through the hub's team route with the
+// handle.
+func TestTeamModeWriteReport(t *testing.T) {
+	h := newTeamHub(t)
+	root := teamRoot(t, h, nil)
+	h.addSession(teamHandle('A'), "sess-1")
+	path := writeSession(t, root, h.ts.URL, "sess-1", teamHandle('A'))
+	s := newTeamSrv(path, root, "alpha")
+	h.custom = func(w http.ResponseWriter, r *http.Request, session string) bool {
+		var b struct {
+			Body    string `json:"body"`
+			BaseRev int64  `json:"base_rev"`
+		}
+		if r.Method != "PUT" || json.NewDecoder(r.Body).Decode(&b) != nil || b.Body != "# Done" {
+			return false
+		}
+		if b.BaseRev != 0 {
+			w.WriteHeader(http.StatusConflict)
+			json.NewEncoder(w).Encode(map[string]any{"error": "stale base_rev", "rev": 4})
+			return true
+		}
+		json.NewEncoder(w).Encode(map[string]any{"rev": 1})
+		return true
+	}
+	for _, args := range []map[string]any{
+		{"name": "RUNBOOK", "body": "x", "base_rev": 0},
+		{"name": "report-1", "body": "x"},
+		{"name": "report-1", "body": "x", "base_rev": -1},
+		{"name": "report-1", "body": "x", "base_rev": 0, "scope": "group"},
+		{"name": "report-1", "body": strings.Repeat("x", writeReportMaxBody+1), "base_rev": 0},
+	} {
+		if text, isErr := teamCall(t, s, writeReportTool, args); !isErr {
+			t.Errorf("accepted %v: %s", args["name"], text)
+		}
+	}
+	if len(h.requests()) != 0 {
+		t.Fatal("a refused write_report reached the hub")
+	}
+	if text, isErr := teamCall(t, s, writeReportTool, map[string]any{"name": "report-1", "body": "# Done", "base_rev": 0}); isErr || !strings.Contains(text, "report-1 written in alpha at rev 1") {
+		t.Fatalf("write_report: %v %s", isErr, text)
+	}
+	reqs := h.requests()
+	if len(reqs) != 2 || reqs[0].path != "/v1/access/identity" || reqs[1].path != "/v1/projects/alpha/docs/report-1" || reqs[1].handle != teamHandle('A') {
+		t.Fatalf("hub requests: %+v", reqs)
+	}
+	// A stale base_rev names the current revision and how to go on.
+	if text, isErr := teamCall(t, s, writeReportTool, map[string]any{"name": "report-1", "body": "# Done", "base_rev": 2}); !isErr || !strings.Contains(text, "at rev 4, not 2") || !strings.Contains(text, "base_rev 4") {
+		t.Fatalf("a stale base_rev: %v %s", isErr, text)
 	}
 }

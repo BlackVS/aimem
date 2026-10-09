@@ -21,10 +21,11 @@ var keptTextTools = map[string]bool{
 	"team_submit": true, "team_review": true, "team_handoff": true, "team_edit": true, "team_finalize": true,
 	"task_reservation_claim": true, "task_reservation_transfer": true, "task_reservation_update": true,
 	"task_reservation_release": true, "task_reservation_finalize": true,
+	writeReportTool: true,
 }
 
 func init() {
-	for _, defs := range [][]map[string]any{toolDefs, taskToolDefs} {
+	for _, defs := range [][]map[string]any{toolDefs, taskToolDefs, {writeReportToolDef}} {
 		for _, d := range defs {
 			if keptTextTools[d["name"].(string)] {
 				d["description"] = d["description"].(string) + " " + keptTextNote
