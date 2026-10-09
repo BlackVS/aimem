@@ -161,7 +161,7 @@ func TestTaskRequiredCapability(t *testing.T) {
 		t.Fatalf("read back: %+v %v", got, err)
 	}
 	for i, bad := range []string{"ops:network-x", "Ops: x", "ops:  x", "ops: x ", "ops: ", "ops", ": x", "1ops: x",
-		"ops: a\nb", "ops: a\tb", "ops: x\u00a0", "ops: \u2003x", "ops: token ghp_" + strings.Repeat("A", 36),
+		"ops: a\nb", "ops: a\tb", "ops: x\u00a0", "ops: \u2003x", "ops: a\u2028b", "ops: a\u2029b", "ops: a\u00a0b", "ops: token ghp_" + strings.Repeat("A", 36),
 		"ops: " + strings.Repeat("x", MaxCapabilityBytes)} {
 		key := fmt.Sprint("bad-", i)
 		b := content("needs network x")

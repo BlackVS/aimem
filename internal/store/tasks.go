@@ -49,12 +49,10 @@ var (
 	ErrTaskReservedScope = errors.New("tasks require an ordinary project (not the user store or a knowledge group)")
 	ErrProjectHasTasks   = errors.New("project holds tasks (including archived ones); drop and source-merge are refused until a task-preserving export/removal exists")
 
-	// capabilityRE is a required capability's form, "<kind>: <name>":
-	// a lowercase kind, one colon and one space, then a name of printable
-	// characters with no surrounding space ("ops: network-x",
-	// "code: forge github.com"). aimem keeps no registry of them.
-	capabilityRE = regexp.MustCompile(`^[a-z][a-z0-9-]{0,31}: [^\s\p{Z}\p{C}](?:[^\p{C}]*[^\s\p{Z}\p{C}])?$`)
-	taskIDRE     = regexp.MustCompile(`^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$`)
+	// capabilityKindRE is a required capability's "<kind>: " prefix; the
+	// name after it is checked by validCapability.
+	capabilityKindRE = regexp.MustCompile(`^[a-z][a-z0-9-]{0,31}: `)
+	taskIDRE         = regexp.MustCompile(`^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$`)
 )
 
 // TaskStates are the seven approved states; no forced transition graph.
@@ -199,6 +197,29 @@ func taskText(s string, max int, required bool) error {
 	return nil
 }
 
+// validCapability reports whether s has a required capability's form,
+// "<kind>: <name>" ("ops: network-x", "code: forge github.com"): a
+// lowercase kind, one colon and one space, then a name of printable
+// characters (unicode.IsPrint, so ASCII space is the only space) that
+// neither starts nor ends with a space; at most MaxCapabilityBytes. aimem
+// keeps no registry of capabilities.
+func validCapability(s string) bool {
+	if len(s) > MaxCapabilityBytes || !utf8.ValidString(s) {
+		return false
+	}
+	prefix := capabilityKindRE.FindString(s)
+	name := s[len(prefix):]
+	if prefix == "" || name == "" || name[0] == ' ' || name[len(name)-1] == ' ' {
+		return false
+	}
+	for _, r := range name {
+		if !unicode.IsPrint(r) {
+			return false
+		}
+	}
+	return true
+}
+
 func (c *TaskContent) validate() error {
 	if c.Dependencies == nil {
 		c.Dependencies = []string{}
@@ -224,8 +245,7 @@ func (c *TaskContent) validate() error {
 	if c.Epic != "" && !taskIDRE.MatchString(c.Epic) {
 		return errors.New("epic must be an epic id")
 	}
-	if c.RequiredCapability != "" && (len(c.RequiredCapability) > MaxCapabilityBytes ||
-		!utf8.ValidString(c.RequiredCapability) || !capabilityRE.MatchString(c.RequiredCapability)) {
+	if c.RequiredCapability != "" && !validCapability(c.RequiredCapability) {
 		return fmt.Errorf("required_capability must be \"<kind>: <name>\" (a lowercase kind, then a name), at most %d bytes", MaxCapabilityBytes)
 	}
 	if err := taskText(c.RequiredCapability, MaxCapabilityBytes, false); err != nil {
