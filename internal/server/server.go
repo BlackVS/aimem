@@ -155,6 +155,7 @@ func (s *Server) Routes() []Route {
 		{"PUT", strings.TrimPrefix(teamRegisterPattern, "PUT "), s.registerTeam, false},
 		{"GET", strings.TrimPrefix(teamReadAllPattern, "GET "), s.readTeams, false},
 		{"GET", strings.TrimPrefix(teamReadOnePattern, "GET "), s.readTeams, false},
+		{"GET", strings.TrimPrefix(boardReadPattern, "GET "), s.readBoard, false},
 		{"GET", "/v1/identity/peers", s.listIdentityPeers, true},
 		{"POST", "/v1/identity/peers", s.registerIdentityPeer, true},
 		{"PUT", "/v1/identity/peers/{service_id}", s.updateIdentityPeer, true},
@@ -659,7 +660,7 @@ func (s *Server) authWrapper(token string, next http.Handler) http.Handler {
 			case "proof":
 				s.identityRefuse(w, "credential_scope_forbidden")
 				return
-			case "team_register", "team_read":
+			case "team_register", "team_read", "board_read":
 				// Another operation's credential on a team operation's
 				// route: refused and audited under its peer.
 				s.teamOpRefuse(w, r, id.Peer, "peer_forbidden")

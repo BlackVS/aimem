@@ -115,7 +115,7 @@ func OpenExisting(root string) (*Store, error) {
 }
 
 // accessSchema is the access database version this binary writes.
-const accessSchema = 7
+const accessSchema = 8
 
 func (s *Store) migrate() error {
 	var current int
@@ -301,6 +301,30 @@ CREATE TABLE enrollments(
  delivery TEXT
 );
 PRAGMA user_version=7;`); err != nil {
+			return err
+		}
+		version = 7
+	}
+	if version == 7 {
+		// board.read, the board feed of aicrew's control plane: the
+		// credential table is rebuilt as in schema 6 to widen its CHECK,
+		// keeping every row and its operation.
+		if _, err := tx.Exec(`
+CREATE TABLE identity_peer_credentials_v8(
+ id TEXT PRIMARY KEY,
+ service_id TEXT NOT NULL REFERENCES identity_peers(service_id),
+ digest TEXT NOT NULL UNIQUE,
+ created_at INTEGER NOT NULL,
+ expires_at INTEGER NOT NULL,
+ revoked INTEGER NOT NULL DEFAULT 0 CHECK(revoked IN (0,1)),
+ operation TEXT NOT NULL DEFAULT 'identity.redeem'
+  CHECK(operation IN ('identity.redeem','reservation.read','team.register','team.read','board.read'))
+);
+INSERT INTO identity_peer_credentials_v8(id,service_id,digest,created_at,expires_at,revoked,operation)
+ SELECT id,service_id,digest,created_at,expires_at,revoked,operation FROM identity_peer_credentials;
+DROP TABLE identity_peer_credentials;
+ALTER TABLE identity_peer_credentials_v8 RENAME TO identity_peer_credentials;
+PRAGMA user_version=8;`); err != nil {
 			return err
 		}
 	}

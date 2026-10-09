@@ -7,8 +7,11 @@ package server
 
 import (
 	"encoding/json"
+	"slices"
 	"strings"
 	"testing"
+
+	"aimem/internal/access"
 )
 
 func TestOpenAPIMatchesRouteTable(t *testing.T) {
@@ -134,5 +137,48 @@ func TestOpenAPIDescribesTypedReferences(t *testing.T) {
 		if !strings.Contains(d, "typed references {kind, ref, note?, scope?}") || !strings.Contains(d, "a bare string is refused with 400") {
 			t.Errorf("%s %s does not describe typed references: %q", rt.method, rt.path, d)
 		}
+	}
+}
+
+// Every operation enum of a peer credential in the spec lists exactly the
+// operations the access store issues, so a schema-conforming client can
+// request each of them.
+func TestOpenAPIPeerOperationEnumsMatchTheStore(t *testing.T) {
+	var spec any
+	if err := json.Unmarshal(openAPISpec, &spec); err != nil {
+		t.Fatal(err)
+	}
+	found := 0
+	var walk func(any)
+	walk = func(v any) {
+		switch v := v.(type) {
+		case map[string]any:
+			if op, ok := v["operation"].(map[string]any); ok {
+				if raw, ok := op["enum"].([]any); ok {
+					var enum []string
+					for _, e := range raw {
+						s, _ := e.(string)
+						enum = append(enum, s)
+					}
+					if slices.Contains(enum, access.PeerOperationRedeem) {
+						found++
+						if !slices.Equal(enum, access.PeerOperations) {
+							t.Errorf("operation enum %v, the store issues %v", enum, access.PeerOperations)
+						}
+					}
+				}
+			}
+			for _, x := range v {
+				walk(x)
+			}
+		case []any:
+			for _, x := range v {
+				walk(x)
+			}
+		}
+	}
+	walk(spec)
+	if found == 0 {
+		t.Fatal("no peer credential operation enum in the spec")
 	}
 }

@@ -494,10 +494,11 @@ func writeTask(tx *sql.Tx, t Task, actor TaskActor, create bool) error {
 	if err != nil {
 		return err
 	}
+	from := ""
 	if create {
 		_, err = tx.Exec(`INSERT INTO tasks(id, state, archived, assignee, epic, body) VALUES(?,?,?,?,?,?)`,
 			t.ID, t.State, boolInt(t.Archived), t.Assignee.column(), t.Epic, string(body))
-	} else {
+	} else if err = tx.QueryRow(`SELECT state FROM tasks WHERE id=?`, t.ID).Scan(&from); err == nil {
 		_, err = tx.Exec(`UPDATE tasks SET state=?, archived=?, assignee=?, epic=?, body=? WHERE id=?`,
 			t.State, boolInt(t.Archived), t.Assignee.column(), t.Epic, string(body), t.ID)
 	}
@@ -508,8 +509,10 @@ func writeTask(tx *sql.Tx, t Task, actor TaskActor, create bool) error {
 	if err != nil {
 		return err
 	}
-	_, err = tx.Exec(`INSERT INTO task_history(task_id, revision, body) VALUES(?,?,?)`, t.ID, t.Revision, string(change))
-	return err
+	if _, err = tx.Exec(`INSERT INTO task_history(task_id, revision, body) VALUES(?,?,?)`, t.ID, t.Revision, string(change)); err != nil {
+		return err
+	}
+	return recordStateChange(tx, t, from, create)
 }
 
 type rowQuerier interface {

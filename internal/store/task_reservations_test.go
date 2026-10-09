@@ -30,6 +30,7 @@ func readyReservationTask(t *testing.T, db *DB, key string) Task {
 func rewindReservationSchema(t *testing.T, db *DB) {
 	t.Helper()
 	for _, stmt := range []string{
+		`DROP TABLE task_state_changes`,
 		`DROP TABLE task_reservation_services`,
 		`DROP TABLE task_reservation_requests`,
 		`DROP TABLE task_reservation_events`,
@@ -267,7 +268,7 @@ func TestTaskReservationSchemaPreservesExistingTasks(t *testing.T) {
 	}
 	task := readyReservationTask(t, db, "create-migrate")
 	for _, stmt := range []string{
-		`DROP TABLE task_reservation_services`,
+		`DROP TABLE task_state_changes`, `DROP TABLE task_reservation_services`,
 		`DROP TABLE task_reservation_requests`, `DROP TABLE task_reservation_events`, `DROP TABLE task_reservations`,
 		`UPDATE meta SET value='18' WHERE key='schema_version'`,
 	} {
@@ -345,7 +346,9 @@ func TestTaskReservationSchema20KeepsUnboundHoldsHeld(t *testing.T) {
 		`DROP TABLE r19`,
 		`DROP TABLE task_reservation_services`,
 		`DELETE FROM task_reservation_requests`,
-		// Schema 23's read-scope columns (C6b) did not exist either.
+		// Schema 23's read-scope columns (C6b) and schema 24's board feed
+		// did not exist either.
+		`DROP TABLE task_state_changes`,
 		`DROP INDEX idx_task_reservation_requests_proof`,
 		`DROP INDEX idx_task_reservation_requests_task`,
 		`ALTER TABLE task_reservation_requests DROP COLUMN service_id`,

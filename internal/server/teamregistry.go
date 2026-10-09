@@ -55,8 +55,11 @@ func (s *Server) teamPeer(w http.ResponseWriter, r *http.Request) (access.PeerId
 
 // teamOperation names the team operation a request targets, for its audit.
 func teamOperation(r *http.Request) string {
-	if identityWireRoute(r) == "team_register" {
+	switch identityWireRoute(r) {
+	case "team_register":
 		return "team.register"
+	case "board_read":
+		return "board.read"
 	}
 	return "team.read"
 }

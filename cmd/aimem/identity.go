@@ -43,7 +43,8 @@ const identityUsage = `usage: aimem identity peer list                          
                                  [--replace OLD] [--expires 90d|RFC3339] [hub flags]
        aimem identity cred list SERVICE                            [hub flags]
        aimem identity cred issue|rotate SERVICE --expires 90d|RFC3339 --output FILE|-
-                                 [--operation identity.redeem|reservation.read|team.register|team.read] [hub flags]
+                                 [--operation identity.redeem|reservation.read|team.register|team.read|board.read]
+                                 [hub flags]
        aimem identity cred revoke --peer SERVICE --credential ID   [hub flags]
        aimem identity team list SERVICE                            [hub flags]
        aimem identity team enable|disable|grants --peer SERVICE (--team-name NAME | --team-id TEAM) [hub flags]
@@ -123,10 +124,11 @@ it, revoke the old one explicitly with cred revoke.
 
 A credential permits exactly one --operation: identity.redeem (the default),
 which redeems identity proofs; reservation.read, aicrew's read-only
-reservation scope; team.register, with which aicrewd names its own teams; or
+reservation scope; team.register, with which aicrewd names its own teams;
 team.read, with which aicrewd reads its own teams' grants, repositories and
-process pins. At most two are active per peer and operation, and cred
-rotate counts only credentials of the named operation.`
+process pins; or board.read, with which aicrewd reads the task state
+changes of its teams' granted projects. At most two are active per peer and
+operation, and cred rotate counts only credentials of the named operation.`
 
 type identityCred struct {
 	ID        string    `json:"id"`
@@ -463,7 +465,7 @@ func identityNewForm(cmd string, slots []string, ent map[string]string, extra []
 var identityHubFlags = map[string]bool{"hub": true, "admin-token-file": true, "hub-ca-file": true, "hub-pin": true}
 
 // identityOperations are the operations a peer credential can be issued for.
-var identityOperations = []string{"identity.redeem", "reservation.read", "team.register", "team.read"}
+var identityOperations = []string{"identity.redeem", "reservation.read", "team.register", "team.read", "board.read"}
 
 type identityTeam struct {
 	ProfileID string `json:"profile_id"`
