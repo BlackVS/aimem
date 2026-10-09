@@ -469,3 +469,86 @@ func TestIdentityOperationsMatchTheStore(t *testing.T) {
 		t.Errorf("provision writes %v, the hub issues %v", files, access.PeerOperations)
 	}
 }
+
+// A peer provisioned before an operation existed gets only the new
+// credential: rerunning provision with the same flags issues the missing
+// board.read credential into its own file, keeps every earlier file and
+// the hub ID unchanged, and a further rerun issues nothing.
+func TestPeerProvisionAddsANewOperationToAnExistingPeer(t *testing.T) {
+	g := newIdentityCLIRig(t, nil)
+	dir := filepath.Join(g.dir, "aicrew-creds")
+	// Provision as v0.9.2 did: the four operations before board.read.
+	all := provisionFiles
+	provisionFiles = slices.DeleteFunc(slices.Clone(all), func(f struct{ operation, name string }) bool { return f.operation == "board.read" })
+	if out, err := g.provision(t, "aicrew-example", dir); err != nil {
+		provisionFiles = all
+		t.Fatalf("provision with four operations: %v\n%s", err, out)
+	}
+	provisionFiles = all
+	if len(g.credsOf(t, "aicrew-example")) != 4 {
+		t.Fatalf("the old provisioning issued %v", g.credsOf(t, "aicrew-example"))
+	}
+	before := readFiles(t, dir)
+	boardPath := filepath.Join(dir, "aimem-board-read.token")
+	if _, ok := before["aimem-board-read.token"]; ok {
+		t.Fatal("the old provisioning wrote a board.read file")
+	}
+
+	out, err := g.provision(t, "aicrew-example", dir)
+	if err != nil || linesWith(out, "issued ") != 1 || !strings.Contains(out, "issued board.read credential") ||
+		!strings.Contains(out, "into "+boardPath) || linesWith(out, "kept ") != 4 ||
+		!strings.Contains(out, "already registered with this endpoint and trust") || !strings.Contains(out, "already holds this hub ID") {
+		t.Fatalf("rerun after the upgrade: %v\n%s", err, out)
+	}
+	after := readFiles(t, dir)
+	for name, content := range before {
+		if after[name] != content {
+			t.Errorf("%s changed", name)
+		}
+	}
+	if len(after) != len(before)+1 {
+		t.Errorf("files before %d, after %d", len(before), len(after))
+	}
+	readCredFiles(t, dir) // every credential file is private and holds one bearer
+	ops := map[string]int{}
+	for _, c := range g.credsOf(t, "aicrew-example") {
+		f := strings.Fields(c)
+		ops[f[len(f)-1]]++
+	}
+	for _, f := range provisionFiles {
+		if ops[f.operation] != 1 {
+			t.Errorf("%s credentials on the hub: %d, want 1 (%v)", f.operation, ops[f.operation], ops)
+		}
+	}
+
+	// Idempotent: nothing missing, nothing issued, nothing rewritten.
+	out, err = g.provision(t, "aicrew-example", dir)
+	if err != nil || linesWith(out, "issued ") != 0 || linesWith(out, "kept ") != len(provisionFiles) || !strings.Contains(out, "nothing was issued") {
+		t.Fatalf("second rerun: %v\n%s", err, out)
+	}
+	if again := readFiles(t, dir); len(again) != len(after) || again["aimem-board-read.token"] != after["aimem-board-read.token"] {
+		t.Error("the second rerun changed a file")
+	}
+	if n := len(g.credsOf(t, "aicrew-example")); n != len(provisionFiles) {
+		t.Errorf("credentials after the second rerun: %d", n)
+	}
+	g.assertNoSecrets(t)
+}
+
+// readFiles returns every file in dir by name.
+func readFiles(t *testing.T, dir string) map[string]string {
+	t.Helper()
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	out := map[string]string{}
+	for _, e := range entries {
+		b, err := os.ReadFile(filepath.Join(dir, e.Name()))
+		if err != nil {
+			t.Fatal(err)
+		}
+		out[e.Name()] = string(b)
+	}
+	return out
+}

@@ -58,6 +58,13 @@ currently 24); a binary refuses a database newer than it understands.
   Deleting, merging and the log stay off in team mode, and an ordinary
   token in personal mode still writes no document. Contract: identity.v1,
   "Team-mode report documents".
+- **Adding a new operation's credential to an existing peer** is pinned
+  by a test and described in the runbook (step 3, "After an upgrade that
+  adds an operation"). After the hub is upgraded, rerunning `aimem identity
+  peer provision` with the same service, endpoint, trust and output
+  directory issues only the missing `board.read` credential into
+  `aimem-board-read.token`. It keeps every earlier file, credential and
+  the hub ID unchanged, and a further rerun issues nothing.
 
 ### Fixed
 
