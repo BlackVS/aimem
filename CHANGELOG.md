@@ -13,6 +13,20 @@ currently 24); a binary refuses a database newer than it understands.
 
 ## [Unreleased]
 
+## [0.10.0] — 2026-10-09
+
+aimem's prerequisites for aicrew's control plane (aicrew's control-plane
+design, A0, A0b and A0c). aicrewd reads a cursor feed of task state
+changes across its teams' granted projects with a new peer operation,
+`board.read`. A task can name the capability it requires
+(`required_capability`), and the feed carries it. A team member can
+deliver a report as a `report-*` hub document under the team's grant. An
+existing peer gets the new `board.read` credential by running
+`aimem identity peer provision` again.
+
+Project schema 24 and access schema 8 are one-way: read the upgrade notes
+before upgrading a hub or a workstation. Includes PR #208 to #211.
+
 ### Added
 
 - **The board feed, `board.read`** (`GET /v1/identity/peers/{service_id}/board-changes`),
@@ -74,6 +88,30 @@ currently 24); a binary refuses a database newer than it understands.
   operation, `board.read` included, and a test keeps the spec, the CLI's
   `--operation` list and `peer provision`'s files equal to the operations
   the hub issues.
+
+### Upgrade notes
+
+- **Project schema 24 and access schema 8 are one-way.** Each project
+  store, when 0.10.0 first opens it, adds `task_state_changes` and fills
+  it from the task history; the access store rebuilds its peer credential
+  table to admit `board.read`. Every existing row is kept. An older binary
+  refuses the migrated stores, so a hub or a workstation that has run
+  0.10.0 does not start 0.9.2 on the same state. Roll back only from a
+  backup taken before the upgrade. The one-liner and `install-hub.sh`
+  copy the state root before the new binary first opens it, and say
+  where.
+- **Upgrade the hub before aicrew uses the new routes.** `board.read`,
+  `required_capability` and team-mode report writes need a 0.10.0 hub.
+  Then give the existing aicrew peer its `board.read` credential by
+  running the same `aimem identity peer provision` command again, with
+  the same service, endpoint, trust and output directory
+  ([`docs/PILOT-HUB-RUNBOOK.md`](docs/PILOT-HUB-RUNBOOK.md), step 3,
+  "After an upgrade that adds an operation"). It issues only
+  `aimem-board-read.token`; `aimem identity cred list` then shows one
+  active credential per operation.
+- **The version is 0.10.0, not 0.9.3,** because of the one-way schema
+  steps: as with 0.9.0, a minor release marks a store that an older
+  binary will not open, and a patch release keeps in-place rollback.
 
 ## [0.9.2] — 2026-10-08
 

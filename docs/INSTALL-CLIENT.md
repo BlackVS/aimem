@@ -17,13 +17,13 @@ session, so wiring the home would reach every project under it.
 **Linux / macOS**
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/BlackVS/aimem/v0.9.2/boot.sh | bash
+curl -fsSL https://raw.githubusercontent.com/BlackVS/aimem/v0.10.0/boot.sh | bash
 ```
 
 **Windows (PowerShell)**
 
 ```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -Command "irm https://raw.githubusercontent.com/BlackVS/aimem/v0.9.2/boot.ps1 | iex"
+powershell -NoProfile -ExecutionPolicy Bypass -Command "irm https://raw.githubusercontent.com/BlackVS/aimem/v0.10.0/boot.ps1 | iex"
 ```
 
 The wrapper matters on a fresh machine: Windows clients default to the
