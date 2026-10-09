@@ -12,6 +12,7 @@
   "x-service-only": ["redeem"],
   "x-refusal-status": {
     "invalid_request": 400,
+    "invalid_cursor": 400,
     "tls_required": 403,
     "unsupported_version": 400,
     "invalid_credential": 401,
@@ -31,6 +32,7 @@
     "profile_disabled": 403,
     "not_found": 404,
     "team_name_taken": 409,
+    "cursor_ahead": 409,
     "task_held": 409,
     "idempotency_conflict": 409,
     "rate_limited": 429,

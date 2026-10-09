@@ -92,6 +92,7 @@ Every refusal uses the context contract's envelope: `{code, message, active_mode
 | Code | Status | Retryable | Next action |
 | --- | --- | --- | --- |
 | `invalid_request`, `unsupported_version` | 400 | no | Correct the request or use a supported version. |
+| `invalid_cursor` | 400 | no | Read the feed with the cursor this hub last returned to this peer, or without one. |
 | `tls_required` | 403 | no | Connect to the hub's TLS listener with certificate verification. |
 | `invalid_credential` | 401 | no | Renew or recover the individual credential through its authorized flow. |
 | `peer_unauthenticated` | 401 | no | Operator checks the peer registration and credential. |
@@ -107,6 +108,7 @@ Every refusal uses the context contract's envelope: `{code, message, active_mode
 | `not_found` | 404 | no | Register the team with `team.register`, or check the team ID. |
 | `idempotency_conflict` | 409 | no | Investigate the changed input; never reuse the key for other input. |
 | `team_name_taken` | 409 | no | Rename the team in aicrew, then register it again. |
+| `cursor_ahead` | 409 | no | Reconcile the board by reading its tasks, then read the feed without a cursor. |
 | `task_held` | 409 | no | Triage after the hold is released, or after the attempt is withdrawn; never edit a held task. |
 | `rate_limited` | 429 | yes | Wait, then request again. |
 | `request_in_progress`, `identity_unavailable`, `context_unavailable` | 503 | yes | Retry later with the same key or context; nothing was applied. |
@@ -137,7 +139,7 @@ The owner approved splitting E3 and made four implementation decisions (E3 task 
 
 **Peer credential lifecycle.**
 - **Format.** A peer credential is `aimem_peer_` followed by 256 random bits in hex. It is returned once, when issued, and stored only as a SHA-256 digest.
-- **Scope.** It is bound to one registered peer and to the `identity.redeem` operation family. Since task C6b, a peer credential permits exactly one operation. The same peer can also hold `reservation.read` credentials for aicrew's read scope ([coordination contract](DESIGN-AIFORGE-COORDINATION-WIRE.md) §2), which cannot redeem, and, since the first pilot's follow-ups, `team.register` and `team.read` credentials ([Team registration and read](#team-registration-and-read-teamregister-teamread)). Each reaches only the routes of its own operation.
+- **Scope.** It is bound to one registered peer and to the `identity.redeem` operation family. Since task C6b, a peer credential permits exactly one operation. The same peer can also hold `reservation.read` credentials for aicrew's read scope ([coordination contract](DESIGN-AIFORGE-COORDINATION-WIRE.md) §2), which cannot redeem, and, since the first pilot's follow-ups, `team.register` and `team.read` credentials ([Team registration and read](#team-registration-and-read-teamregister-teamread)), and `board.read` credentials for the board feed ([Board feed](#board-feed-boardread)). Each reaches only the routes of its own operation.
 - **Limits.** It lives at most 366 days. A peer has at most two active credentials, so a rotation can overlap.
 - **Lost issuance response.** The bearer cannot be recovered. The admin lists the peer's credential metadata, revokes the credential that was never received, and issues a new one.
 - **Expiry.** An expired credential is refused as if unknown and no longer counts toward the limit of two.
@@ -250,3 +252,18 @@ The first pilot's follow-ups ([DESIGN-AIFORGE-PILOT-1](DESIGN-AIFORGE-PILOT-1.md
 **Team-mode repository read.** Team mode also serves `GET /v1/projects/{p}/repository` under the profile's live grant, as for the other team reads. Without a grant the answer is `grant_denied`, and so it is for a reserved or unknown project; `?history=1` is `invalid_request`.
 
 **Unchanged.** Team operations under a disabled profile keep `context_stale`.
+
+## Board feed (`board.read`)
+
+aicrew's control plane wakes its coordinator when a task of a granted project changes state on the board ([aicrew's control-plane design](https://github.com/BlackVS/aicrew/blob/6d75e59/docs/DESIGN-CONTROL-PLANE.md), aicrew PR #112 at 6d75e59, A0 and D13). aicrewd reads those changes with one peer operation, once per tick, for all of its teams together. The feed names tasks and states; it never carries a task's content.
+
+**`board.read`: `GET /v1/identity/peers/{service_id}/board-changes`**, with the optional query parameters `cursor` and `limit`.
+- **Credential, transport, bound and audit.** As for `team.read` (the shared rules above): a peer credential issued for exactly `board.read` (`aimem identity cred issue --operation board.read`, and `aimem identity peer provision` writes one into `aimem-board-read.token`), the path's own `service_id`, TLS the hub terminated, `X-Aimem-Identity-Version: 1`, and the read scope's bound of 60 calls per minute per credential. A successful read is audited as `board.read` with the number of changes returned; a refusal as `board.read.refused.<code>`.
+- **Scope.** The projects granted to the calling peer's enabled team profiles, each once however many of its teams hold the grant. A disabled profile contributes nothing, and a revoked grant stops that project's changes at once. A grant whose project is gone is left out. Another peer's teams and ungranted projects are never read.
+- **Entries.** `{project, task_id, revision, from, to, at}`: the revision that set the state, the state before it (`""` for the task's creation), the state it set, and that revision's time. An edit that keeps the state is not an entry. Titles, objectives, comments and every other task field are never returned.
+- **Order and cursor.** Each project numbers its changes in commit order (project schema 24, `task_state_changes`). Projects are read in the order of their instance IDs, each from where the cursor left it, until `limit` entries are collected (default 100, at most 500; anything else is `invalid_request`). The answer is `{changes, cursor, more}`. `more` says that a granted project has changes past the returned cursor.
+  - The cursor is opaque. It holds the position reached in each project and the peer it was issued to. The same cursor reads the same page again while nothing new is written, and reading on from the returned cursor never skips or repeats a change. A peer that stores the cursor with what it announced, in one transaction, therefore announces each change once.
+  - The position of a project whose grant was revoked is carried forward unchanged, so a grant given back resumes where the peer stopped.
+  - With no cursor the feed starts at each project's first change. The migration to project schema 24 fills the feed from the task history, so a reader without a cursor also sees the changes made before the upgrade.
+- **Refusals.** A cursor that does not decode, holds a position below 1, or was issued to another peer is `invalid_cursor` (400). A cursor past a project's last change is `cursor_ahead` (409): the hub's state was restored or replaced, and the reader reconciles by reading the board, then starts again without a cursor.
+- **MCP.** Not exposed as an MCP tool.

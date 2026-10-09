@@ -492,7 +492,7 @@ func (r *Registry) Close() {
 	r.dbs = map[string]*DB{}
 }
 
-const currentSchema = 23
+const currentSchema = 24
 
 // SetMeta / GetMeta store small key-value project metadata (e.g. the
 // project's declared knowledge groups, stamped from event pushes so the
@@ -1077,6 +1077,35 @@ ALTER TABLE task_reservation_requests ADD COLUMN committed_at TEXT NOT NULL DEFA
 CREATE INDEX idx_task_reservation_requests_proof ON task_reservation_requests(service_id, proof_digest);
 CREATE INDEX idx_task_reservation_requests_task ON task_reservation_requests(task_id, operation);
 UPDATE meta SET value='23' WHERE key='schema_version';`); err != nil {
+			return err
+		}
+	}
+	if v < 24 {
+		// The board feed (aicrew's board.read). Every write that sets a
+		// task's state appends one row; the AUTOINCREMENT sequence is the
+		// feed's cursor, stable across VACUUM, unlike task_history's rowid.
+		// The rows are backfilled from the history: a task's first revision
+		// is a change from no state, and a later one counts when its state
+		// differs from the revision before it.
+		if err := d.step(`
+CREATE TABLE task_state_changes(
+  sequence INTEGER PRIMARY KEY AUTOINCREMENT,
+  task_id TEXT NOT NULL REFERENCES tasks(id),
+  revision INTEGER NOT NULL,
+  from_state TEXT NOT NULL,
+  to_state TEXT NOT NULL,
+  at TEXT NOT NULL,
+  UNIQUE(task_id, revision));
+INSERT INTO task_state_changes(task_id, revision, from_state, to_state, at)
+SELECT task_id, revision, COALESCE(prev, ''), state, at FROM (
+  SELECT task_id, revision,
+    COALESCE(json_extract(body, '$.task.state'), '') AS state,
+    LAG(COALESCE(json_extract(body, '$.task.state'), '')) OVER (PARTITION BY task_id ORDER BY revision) AS prev,
+    COALESCE(json_extract(body, '$.task.updated_at'), '') AS at
+  FROM task_history)
+WHERE prev IS NULL OR prev <> state
+ORDER BY at, task_id, revision;
+UPDATE meta SET value='24' WHERE key='schema_version';`); err != nil {
 			return err
 		}
 	}

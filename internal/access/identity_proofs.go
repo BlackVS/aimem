@@ -36,10 +36,13 @@ const (
 	// registers its teams' names and reads its own teams' grants.
 	PeerOperationTeamRegister = "team.register"
 	PeerOperationTeamRead     = "team.read"
+	// aicrewd's board feed (aicrew's control-plane design, A0): the state
+	// changes of the tasks in its teams' granted projects.
+	PeerOperationBoardRead = "board.read"
 )
 
 // PeerOperations lists every operation a peer credential can be issued for.
-var PeerOperations = []string{PeerOperationRedeem, PeerOperationReservationRead, PeerOperationTeamRegister, PeerOperationTeamRead}
+var PeerOperations = []string{PeerOperationRedeem, PeerOperationReservationRead, PeerOperationTeamRegister, PeerOperationTeamRead, PeerOperationBoardRead}
 
 const (
 	peerCredentialPrefix      = "aimem_peer_"

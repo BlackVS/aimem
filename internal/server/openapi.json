@@ -1411,6 +1411,75 @@
         }
       }
     },
+    "/v1/identity/peers/{service_id}/board-changes": {
+      "get": {
+        "summary": "identity.v1 board.read: the task state changes of the calling peer's teams' granted projects",
+        "description": "identity.v1 board.read (aicrew's control-plane design, A0): only an aimem_peer_ credential issued for board.read, for the path's service, may call this; every other credential is refused with peer_forbidden. Returns {changes, cursor, more}: each change is {project, task_id, revision, from, to, at}, the state a revision set and the state before it (\"\" for a creation), across every project granted to the calling peer's enabled team profiles. No task content. The cursor is opaque and bound to the peer; the same cursor reads the same page while nothing new is written, and reading on from the returned cursor never skips or repeats a change. A malformed or foreign cursor is invalid_cursor; a cursor past a project's last change is cursor_ahead. limit is 1 to 500 (default 100). Audited as board.read. Requires TLS terminated by this hub (plain HTTP, a TLS-terminating proxy and the unix socket are refused with tls_required) and X-Aimem-Identity-Version: 1. Bounded with the read scope at 60 calls per minute per credential (rate_limited). Not exposed as an MCP tool.",
+        "x-role": "writer",
+        "x-identity-auth": "peer",
+        "x-requires-tls": true,
+        "parameters": [
+          {
+            "name": "service_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 500,
+              "default": 100
+            }
+          },
+          {
+            "name": "X-Aimem-Identity-Version",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "1"
+              ]
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "{changes: [...], cursor, more}"
+          },
+          "400": {
+            "description": "invalid_request, invalid_cursor or unsupported_version"
+          },
+          "401": {
+            "description": "peer_unauthenticated"
+          },
+          "403": {
+            "description": "tls_required or peer_forbidden"
+          },
+          "409": {
+            "description": "cursor_ahead"
+          },
+          "429": {
+            "description": "rate_limited"
+          }
+        }
+      }
+    },
     "/v1/identity/peers/{service_id}/team-reads": {
       "get": {
         "summary": "identity.v1 team.read: the calling peer's own teams, grants, repositories and process pins",

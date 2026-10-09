@@ -32,7 +32,7 @@ func (g *identityCLIRig) credsOf(t *testing.T, service string) []string {
 	return lines
 }
 
-// readCredFiles returns the four files' contents; each must be private and
+// readCredFiles returns the credential files' contents; each must be private and
 // hold one peer bearer.
 func readCredFiles(t *testing.T, dir string) map[string]string {
 	t.Helper()
@@ -76,7 +76,7 @@ func hubIDOf(t *testing.T, g *identityCLIRig) string {
 	return ""
 }
 
-// A fresh provision registers the peer, writes the four credentials into
+// A fresh provision registers the peer, writes one credential per operation into
 // owner-only files under the fixed names and prints the hub ID; a rerun
 // reports what exists and issues nothing.
 func TestPeerProvisionFreshAndIdempotent(t *testing.T) {
@@ -92,8 +92,8 @@ func TestPeerProvisionFreshAndIdempotent(t *testing.T) {
 	}
 	files := readCredFiles(t, dir)
 	creds := g.credsOf(t, "aicrew-example")
-	if len(creds) != 4 {
-		t.Fatalf("want four credentials, got %v", creds)
+	if len(creds) != len(provisionFiles) {
+		t.Fatalf("want %d credentials, got %v", len(provisionFiles), creds)
 	}
 	for _, f := range provisionFiles {
 		found := false
@@ -110,13 +110,13 @@ func TestPeerProvisionFreshAndIdempotent(t *testing.T) {
 		t.Fatalf("rerun: %v\n%s", err, out)
 	}
 	if !strings.Contains(out, "already registered with this endpoint and trust") || !strings.Contains(out, "nothing was issued") ||
-		linesWith(out, "kept ") != 4 || !strings.Contains(out, "hub ID "+hub) {
+		linesWith(out, "kept ") != len(provisionFiles) || !strings.Contains(out, "hub ID "+hub) {
 		t.Errorf("rerun output:\n%s", out)
 	}
-	if again := readCredFiles(t, dir); len(again) != 4 || again["aimem-redeem.token"] != files["aimem-redeem.token"] || again["aimem-team-read.token"] != files["aimem-team-read.token"] {
+	if again := readCredFiles(t, dir); len(again) != len(provisionFiles) || again["aimem-redeem.token"] != files["aimem-redeem.token"] || again["aimem-team-read.token"] != files["aimem-team-read.token"] {
 		t.Error("the rerun changed a credential file")
 	}
-	if n := len(g.credsOf(t, "aicrew-example")); n != 4 {
+	if n := len(g.credsOf(t, "aicrew-example")); n != len(provisionFiles) {
 		t.Errorf("the rerun issued credentials: %d", n)
 	}
 
@@ -126,14 +126,14 @@ func TestPeerProvisionFreshAndIdempotent(t *testing.T) {
 		t.Fatal(err)
 	}
 	out, err = g.provision(t, "aicrew-example", dir)
-	if err != nil || linesWith(out, "issued ") != 1 || !strings.Contains(out, "issued reservation.read credential") || linesWith(out, "kept ") != 3 {
+	if err != nil || linesWith(out, "issued ") != 1 || !strings.Contains(out, "issued reservation.read credential") || linesWith(out, "kept ") != len(provisionFiles)-1 {
 		t.Fatalf("resume: %v\n%s", err, out)
 	}
 	if again := readCredFiles(t, dir); again["aimem-redeem.token"] != files["aimem-redeem.token"] {
 		t.Error("the resume changed a kept file")
 	}
-	if n := len(g.credsOf(t, "aicrew-example")); n != 5 {
-		t.Errorf("the resume issued %d credentials in all, want 5", n)
+	if n := len(g.credsOf(t, "aicrew-example")); n != len(provisionFiles)+1 {
+		t.Errorf("the resume issued %d credentials in all, want %d", n, len(provisionFiles)+1)
 	}
 
 	// A kept file whose credential the hub no longer holds active is named.
@@ -330,7 +330,7 @@ func TestPeerProvisionReportsAnUnreadableCredentialStatus(t *testing.T) {
 		t.Fatalf("the rerun listed the credentials %d times, want 2", listed.Load())
 	}
 	if linesWith(out, "warning: the credentials of aicrew-example could not be read") != 1 ||
-		strings.Contains(out, "has no active") || linesWith(out, "kept ") != 4 || !strings.Contains(out, "nothing was issued") {
+		strings.Contains(out, "has no active") || linesWith(out, "kept ") != len(provisionFiles) || !strings.Contains(out, "nothing was issued") {
 		t.Errorf("rerun with an unreadable credential status:\n%s", out)
 	}
 	if again := readCredFiles(t, dir); again["aimem-redeem.token"] != files["aimem-redeem.token"] || again["aimem-team-read.token"] != files["aimem-team-read.token"] {

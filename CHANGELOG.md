@@ -9,9 +9,32 @@ upgrading a fleet.
 The format follows [Keep a Changelog](https://keepachangelog.com/1.1.0/);
 this project does not yet promise semantic versioning. The on-disk schema
 version is tracked separately (`currentSchema` in `internal/store/store.go`,
-currently 23); a binary refuses a database newer than it understands.
+currently 24); a binary refuses a database newer than it understands.
 
 ## [Unreleased]
+
+### Added
+
+- **The board feed, `board.read`** (`GET /v1/identity/peers/{service_id}/board-changes`),
+  for aicrew's control plane (its design's prerequisite A0). With one call
+  per tick, aicrewd reads the task state changes of every project granted
+  to its enabled teams: task, project, the state before and after, the
+  revision and its time, and never a task's content. Paging is by an
+  opaque cursor bound to the peer: the same cursor reads the same page
+  again, reading on never skips or repeats a change, and a revoked grant
+  that comes back resumes where the peer stopped. A malformed or foreign
+  cursor is `invalid_cursor`; a cursor past the feed, as after a restore,
+  is `cursor_ahead`. It needs its own single-operation peer credential,
+  under the same TLS, version, rate and audit rules as `team.read`.
+  `aimem identity cred issue|rotate --operation board.read` issues one,
+  and `aimem identity peer provision` now writes five credentials, adding
+  `aimem-board-read.token`. Contract: identity.v1, "Board feed".
+- **Schema.** Project schema 24 adds `task_state_changes`, the feed's
+  record, and fills it from the task history, so the feed also covers the
+  changes made before the upgrade. Access schema 8 rebuilds the peer
+  credential table to admit `board.read`, keeping every credential. Both
+  are one-way: a hub or workstation that has run this release does not
+  start an older binary on the same state.
 
 ## [0.9.2] — 2026-10-08
 

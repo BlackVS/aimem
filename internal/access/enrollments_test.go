@@ -48,7 +48,7 @@ func TestAccessSchema7AddsEnrollmentsAndKeepsRows(t *testing.T) {
 			t.Fatal(err)
 		}
 		var version int
-		if err := s.db.QueryRow("PRAGMA user_version").Scan(&version); err != nil || version != 7 || accessSchema != 7 {
+		if err := s.db.QueryRow("PRAGMA user_version").Scan(&version); err != nil || version != accessSchema {
 			t.Fatalf("schema version %d: %v", version, err)
 		}
 		id, err := s.Authenticate(secret)

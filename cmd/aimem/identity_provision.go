@@ -1,7 +1,7 @@
 package main
 
 // `aimem identity peer provision`: one command registers an identity peer
-// and writes its four credentials and the hub's ID into a directory aicrew
+// and writes its five credentials and the hub's ID into a directory aicrew
 // reads them from (aicrew hub add --cred-dir). A rerun keeps what exists
 // and issues only what is missing, so a provisioning cut short is finished
 // by running it again.
@@ -34,6 +34,7 @@ var provisionFiles = []struct{ operation, name string }{
 	{"reservation.read", "aimem-read.token"},
 	{"team.register", "aimem-team-register.token"},
 	{"team.read", "aimem-team-read.token"},
+	{"board.read", "aimem-board-read.token"},
 }
 
 // provisionHubIDFile holds the hub's ID, one line, next to the credentials.

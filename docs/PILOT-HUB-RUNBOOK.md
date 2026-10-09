@@ -105,7 +105,7 @@ project.repository.set for project "pilot"
 
 ## 3. Provision aicrew as the identity peer
 
-One command registers aicrew as the hub's identity peer and writes aicrew's four credentials into a directory, one file each, readable only by you. Each credential permits exactly one operation. Beside them, `aimem-hub-id` holds the hub's ID on one line, also readable only by you:
+One command registers aicrew as the hub's identity peer and writes aicrew's five credentials into a directory, one file each, readable only by you. Each credential permits exactly one operation. Beside them, `aimem-hub-id` holds the hub's ID on one line, also readable only by you:
 
 | File | Operation | What aicrew uses it for |
 |---|---|---|
@@ -113,6 +113,7 @@ One command registers aicrew as the hub's identity peer and writes aicrew's four
 | `aimem-read.token` | `reservation.read` | read the reservation scope |
 | `aimem-team-register.token` | `team.register` | create and name its own teams' profiles (step 5) |
 | `aimem-team-read.token` | `team.read` | read its own teams' grants, each granted project's repository and its process pin |
+| `aimem-board-read.token` | `board.read` | read the task state changes of its teams' granted projects (the board feed) |
 
 `--endpoint` is aicrew's introspection route. `--peer-trust-dns` trusts the endpoint's certificate by its name and the system roots; `--peer-trust-pin sha256-BASE64` pins it instead. The credentials expire after 90 days unless `--expires` says otherwise.
 
@@ -130,6 +131,7 @@ issued identity.redeem credential 01a0…-… into aicrew-creds/aimem-redeem.tok
 issued reservation.read credential 01a0…-… into aicrew-creds/aimem-read.token, expiring …
 issued team.register credential 01a0…-… into aicrew-creds/aimem-team-register.token, expiring …
 issued team.read credential 01a0…-… into aicrew-creds/aimem-team-read.token, expiring …
+issued board.read credential 01a0…-… into aicrew-creds/aimem-board-read.token, expiring …
 hub ID 01a0…-…
 wrote the hub ID into aicrew-creds/aimem-hub-id
 ```
@@ -362,7 +364,7 @@ The operator never sees a receipt. `HUB_ID` is the hub ID from `aimem identity p
 | Pilot project | `aimem tasks on --project pilot`; `aimem process select …` echoes the selection; `aimem project show --project pilot` prints the repository and the pin |
 | aicrew peer | `aimem identity peer list $HUB` shows it `enabled` |
 | Introspection credential | `aimem identity peer check aicrew-example $HUB` says it works |
-| aicrew's four credentials | `aimem identity cred list aicrew-example $HUB` shows `identity.redeem`, `reservation.read`, `team.register` and `team.read` active |
+| aicrew's five credentials | `aimem identity cred list aicrew-example $HUB` shows `identity.redeem`, `reservation.read`, `team.register`, `team.read` and `board.read` active |
 | Team profile and grant | `aimem identity team grants --peer aicrew-example --team-name pilot $HUB` lists `pilot` |
 | Member tokens | `GET /v1/access/identity` answers `scope: user` for each member |
 | Member homes, before the first proof | with each home's `AIMEM_STATE_DIR` and `AIMEM_SOCKET`, `aimem hub credential pilot-hub` answers `set, active, scope user`; `~/.config/aimem/env` sets neither variable |
