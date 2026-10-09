@@ -772,3 +772,38 @@ func TestMCPProjectRepository(t *testing.T) {
 		t.Fatalf("read of an ungranted project: %s", text)
 	}
 }
+
+// required_capability travels through create_task and update_task as a
+// field of the content: set, read back, refused when malformed, and
+// cleared by an update that omits it.
+func TestMCPTaskRequiredCapability(t *testing.T) {
+	f := newHub(t)
+	call := func(name string, args map[string]any) (string, bool) {
+		return toolText(f.rpc(t, f.alice, "tools/call", map[string]any{"name": name, "arguments": args}))
+	}
+	text, isErr := call("create_task", map[string]any{"project": "alpha", "title": "needs x", "state": "READY",
+		"required_capability": "ops: network-x", "idempotency_key": "cap-c"})
+	var task struct {
+		ID                 string `json:"id"`
+		Revision           int64  `json:"revision"`
+		RequiredCapability string `json:"required_capability"`
+	}
+	if isErr || json.Unmarshal([]byte(text), &task) != nil || task.RequiredCapability != "ops: network-x" {
+		t.Fatalf("create_task: %v %s", isErr, text)
+	}
+	text, isErr = call("get_task", map[string]any{"id": task.ID})
+	var read struct {
+		RequiredCapability string `json:"required_capability"`
+	}
+	if isErr || json.Unmarshal([]byte(text), &read) != nil || read.RequiredCapability != "ops: network-x" {
+		t.Fatalf("get_task: %v %s", isErr, text)
+	}
+	if text, isErr = call("update_task", map[string]any{"id": task.ID, "title": "needs x", "state": "READY",
+		"required_capability": "network-x", "expected_revision": task.Revision, "idempotency_key": "cap-bad"}); !isErr || !strings.Contains(text, "required_capability") {
+		t.Fatalf("a malformed capability: %v %s", isErr, text)
+	}
+	if text, isErr = call("update_task", map[string]any{"id": task.ID, "title": "needs x", "state": "READY",
+		"expected_revision": task.Revision, "idempotency_key": "cap-clear"}); isErr || strings.Contains(text, "required_capability") {
+		t.Fatalf("an update without the field keeps it: %v %s", isErr, text)
+	}
+}

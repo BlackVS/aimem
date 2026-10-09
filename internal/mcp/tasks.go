@@ -215,6 +215,7 @@ func taskContentProps(extra map[string]any) map[string]any {
 		"next_action":         prop("string", "the next concrete step"),
 		"archived":            prop("boolean", "archive (DONE/CANCELLED only)"),
 		"epic":                prop("string", "optional epic id: an OPEN epic of the same project (an assignment a task already has survives the epic's retirement)"),
+		"required_capability": prop("string", "optional capability the task requires, \"<kind>: <name>\" such as \"ops: network-x\"; empty means the project's own"),
 	}
 	for k, v := range extra {
 		props[k] = v

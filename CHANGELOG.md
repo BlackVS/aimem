@@ -35,6 +35,17 @@ currently 24); a binary refuses a database newer than it understands.
   credential table to admit `board.read`, keeping every credential. Both
   are one-way: a hub or workstation that has run this release does not
   start an older binary on the same state.
+- **A task's required capability** (`required_capability`), for aicrew's
+  control plane (its design's prerequisite A0b, decision D15). It is an
+  optional field of the task content, `"<kind>: <name>"` such as
+  `"ops: network-x"` or `"code: forge github.com"`: a lowercase kind, one
+  colon and one space, then a name with no surrounding space, at most 256
+  bytes. Empty means the project's own capability. Whoever may write the
+  task sets or clears it through REST, `create_task` and `update_task`,
+  under the usual revision rules; a malformed value is refused and
+  nothing changes. It is kept in the task's history, and each `board.read`
+  entry carries it as of the change's revision. It lives in the task
+  body, so it needs no schema change.
 
 ### Fixed
 
