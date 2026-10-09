@@ -34,6 +34,7 @@ const (
 	MaxTaskBytes        = 32 * 1024 // canonical JSON of the editable content
 	MaxTaskCommentBytes = 32 * 1024 // decoded Markdown body
 	MaxTaskTitleBytes   = 256
+	MaxCapabilityBytes  = 256
 	MaxTaskRefBytes     = 2048
 	MaxTaskListEntries  = 32
 	MaxTaskKeyBytes     = 128
@@ -48,7 +49,10 @@ var (
 	ErrTaskReservedScope = errors.New("tasks require an ordinary project (not the user store or a knowledge group)")
 	ErrProjectHasTasks   = errors.New("project holds tasks (including archived ones); drop and source-merge are refused until a task-preserving export/removal exists")
 
-	taskIDRE = regexp.MustCompile(`^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$`)
+	// capabilityKindRE is a required capability's "<kind>: " prefix; the
+	// name after it is checked by validCapability.
+	capabilityKindRE = regexp.MustCompile(`^[a-z][a-z0-9-]{0,31}: `)
+	taskIDRE         = regexp.MustCompile(`^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$`)
 )
 
 // TaskStates are the seven approved states; no forced transition graph.
@@ -118,6 +122,11 @@ type TaskContent struct {
 	// the wire when empty, so older readers and the retry digest see the
 	// content they always saw.
 	Epic string `json:"epic,omitempty"`
+	// RequiredCapability narrows the capability the project's pinned
+	// process names for its work (aicrew's control-plane design, D15).
+	// Empty means the project's own. Omitted on the wire when empty, like
+	// Epic.
+	RequiredCapability string `json:"required_capability,omitempty"`
 }
 
 // Task is the current row. The owning project is NOT stored in the
@@ -188,6 +197,29 @@ func taskText(s string, max int, required bool) error {
 	return nil
 }
 
+// validCapability reports whether s has a required capability's form,
+// "<kind>: <name>" ("ops: network-x", "code: forge github.com"): a
+// lowercase kind, one colon and one space, then a name of printable
+// characters (unicode.IsPrint, so ASCII space is the only space) that
+// neither starts nor ends with a space; at most MaxCapabilityBytes. aimem
+// keeps no registry of capabilities.
+func validCapability(s string) bool {
+	if len(s) > MaxCapabilityBytes || !utf8.ValidString(s) {
+		return false
+	}
+	prefix := capabilityKindRE.FindString(s)
+	name := s[len(prefix):]
+	if prefix == "" || name == "" || name[0] == ' ' || name[len(name)-1] == ' ' {
+		return false
+	}
+	for _, r := range name {
+		if !unicode.IsPrint(r) {
+			return false
+		}
+	}
+	return true
+}
+
 func (c *TaskContent) validate() error {
 	if c.Dependencies == nil {
 		c.Dependencies = []string{}
@@ -212,6 +244,12 @@ func (c *TaskContent) validate() error {
 	}
 	if c.Epic != "" && !taskIDRE.MatchString(c.Epic) {
 		return errors.New("epic must be an epic id")
+	}
+	if c.RequiredCapability != "" && !validCapability(c.RequiredCapability) {
+		return fmt.Errorf("required_capability must be \"<kind>: <name>\" (a lowercase kind, then a name), at most %d bytes", MaxCapabilityBytes)
+	}
+	if err := taskText(c.RequiredCapability, MaxCapabilityBytes, false); err != nil {
+		return fmt.Errorf("required_capability: %w", err)
 	}
 	if len(c.Dependencies) > MaxTaskListEntries {
 		return fmt.Errorf("at most %d entries per dependency or reference list", MaxTaskListEntries)

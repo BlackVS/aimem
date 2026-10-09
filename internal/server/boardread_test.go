@@ -271,3 +271,25 @@ func TestBoardReadRefusals(t *testing.T) {
 	}
 	g.assertNoSecretLeak(t)
 }
+
+// Each entry carries the task's required capability at the change's
+// revision; an empty one means the project's own.
+func TestBoardReadCarriesTheRequiredCapability(t *testing.T) {
+	g := newBoardRig(t)
+	db, err := g.s.reg.OpenExisting("alpha")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.CreateTask(store.TaskContent{Title: "net", State: "READY", RequiredCapability: "ops: network-x"}, boardActor, "cap-1"); err != nil {
+		t.Fatal(err)
+	}
+	g.task(t, "alpha", "plain", "READY")
+	v := g.page(t, "", 10)
+	if len(v.Changes) != 2 || v.Changes[0].RequiredCapability != "ops: network-x" || v.Changes[1].RequiredCapability != "" {
+		t.Fatalf("feed: %+v", v.Changes)
+	}
+	r := g.read(t, g.board, "")
+	if !strings.Contains(string(r.body), `"required_capability":""`) {
+		t.Fatalf("an empty capability is not stated: %s", r.body)
+	}
+}

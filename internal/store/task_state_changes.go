@@ -15,6 +15,9 @@ type TaskStateChange struct {
 	From     string `json:"from"`
 	To       string `json:"to"`
 	At       string `json:"at"`
+	// RequiredCapability is the task's at that revision, read from its
+	// history snapshot.
+	RequiredCapability string `json:"required_capability"`
 }
 
 // recordStateChange appends the feed entry of a write that created the
@@ -36,7 +39,8 @@ func (d *DB) TaskStateChanges(after int64, limit int) ([]TaskStateChange, int64,
 	if after < 0 || limit < 1 {
 		return nil, 0, invalid(errors.New("invalid state change cursor or limit"))
 	}
-	rows, err := d.sql.Query(`SELECT l.last, c.sequence, c.task_id, c.revision, c.from_state, c.to_state, c.at
+	rows, err := d.sql.Query(`SELECT l.last, c.sequence, c.task_id, c.revision, c.from_state, c.to_state, c.at,
+  (SELECT json_extract(h.body, '$.task.required_capability') FROM task_history h WHERE h.task_id = c.task_id AND h.revision = c.revision)
 FROM (SELECT COALESCE(MAX(sequence), 0) AS last FROM task_state_changes) l
 LEFT JOIN (SELECT * FROM task_state_changes WHERE sequence > ? ORDER BY sequence LIMIT ?) c
 ORDER BY c.sequence`, after, limit)
@@ -48,12 +52,12 @@ ORDER BY c.sequence`, after, limit)
 	var last int64
 	for rows.Next() {
 		var seq, rev sql.NullInt64
-		var task, from, to, at sql.NullString
-		if err := rows.Scan(&last, &seq, &task, &rev, &from, &to, &at); err != nil {
+		var task, from, to, at, capability sql.NullString
+		if err := rows.Scan(&last, &seq, &task, &rev, &from, &to, &at, &capability); err != nil {
 			return nil, 0, err
 		}
 		if seq.Valid {
-			out = append(out, TaskStateChange{seq.Int64, task.String, rev.Int64, from.String, to.String, at.String})
+			out = append(out, TaskStateChange{seq.Int64, task.String, rev.Int64, from.String, to.String, at.String, capability.String})
 		}
 	}
 	return out, last, rows.Err()

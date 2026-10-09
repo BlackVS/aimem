@@ -78,6 +78,9 @@ type boardChangeView struct {
 	From     string `json:"from"`
 	To       string `json:"to"`
 	At       string `json:"at"`
+	// RequiredCapability is the task's at the change's revision; empty
+	// means the project's own (aicrew's control-plane design, D15).
+	RequiredCapability string `json:"required_capability"`
 }
 
 type boardReadView struct {
@@ -162,7 +165,7 @@ func (s *Server) readBoard(w http.ResponseWriter, r *http.Request) {
 		}
 		if room > 0 {
 			for _, c := range changes {
-				out.Changes = append(out.Changes, boardChangeView{project, c.TaskID, c.Revision, c.From, c.To, c.At})
+				out.Changes = append(out.Changes, boardChangeView{project, c.TaskID, c.Revision, c.From, c.To, c.At, c.RequiredCapability})
 				pos = c.Sequence
 			}
 			if pos > 0 {
