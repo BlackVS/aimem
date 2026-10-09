@@ -46,6 +46,18 @@ currently 24); a binary refuses a database newer than it understands.
   nothing changes. It is kept in the task's history, and each `board.read`
   entry carries it as of the change's revision. It lives in the task
   body, so it needs no schema change.
+- **A team member's report as a hub document**, for aicrew's control
+  plane (its design's prerequisite A0c). Team mode now serves
+  `PUT /v1/projects/{p}/docs/{name}` for every member role, under the team
+  profile's live grant, for documents named `report-*` only: another name
+  is `invalid_request`, an ungranted, unknown or reserved project is
+  `grant_denied`. The revisions are compare-and-swap as in personal mode.
+  The revision's writer is `<token name>/team:<team id>/<role>`, and the
+  write is audited as `team.doc.write`. A team conversation lists
+  `write_report`, and the context report says `doc_write: "report-*"`.
+  Deleting, merging and the log stay off in team mode, and an ordinary
+  token in personal mode still writes no document. Contract: identity.v1,
+  "Team-mode report documents".
 
 ### Fixed
 

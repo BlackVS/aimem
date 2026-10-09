@@ -85,6 +85,10 @@ func (s *Server) docLog(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) putDoc(w http.ResponseWriter, r *http.Request) {
+	tc, team := teamContextFrom(r.Context())
+	if team && s.teamDocWriteDenied(w, r, tc) {
+		return
+	}
 	db := s.withDB(w, r)
 	if db == nil {
 		return
@@ -98,10 +102,17 @@ func (s *Server) putDoc(w http.ResponseWriter, r *http.Request) {
 		s.fail(w, http.StatusBadRequest, err)
 		return
 	}
-	doc, err := db.PutDoc(r.PathValue("name"), body.Body, stampWriter(r, body.UpdatedBy), body.BaseRev, false)
+	by := stampWriter(r, body.UpdatedBy)
+	if team {
+		by = teamWriter(r, tc, body.UpdatedBy)
+	}
+	doc, err := db.PutDoc(r.PathValue("name"), body.Body, by, body.BaseRev, false)
 	if err != nil {
 		s.docWriteError(w, err)
 		return
+	}
+	if team {
+		s.auditTeamDocWrite(r, tc, doc)
 	}
 	s.log.Info("doc published", "project", r.PathValue("p"), "doc", doc.Name,
 		"rev", doc.Rev, "by", doc.UpdatedBy, "bytes", doc.Size)

@@ -72,6 +72,9 @@ var teamRoutes = append(append([]string{
 	// handlers refuse every other role.
 	"POST /v1/tasks/{id}/triage",
 	"POST /v1/tasks/{id}/comments",
+	// A member's report as a hub document (aicrew's control-plane design,
+	// A0c, 8.4); putDoc limits it to report- names under the grant.
+	"PUT /v1/projects/{p}/docs/{name}",
 }, reservationRoutePatterns...), knowledgeRoutes...)
 
 // teamRouteMux matches teamRoutes by the route mux's own rules.
@@ -352,7 +355,7 @@ func (s *Server) teamContextReport(w http.ResponseWriter, r *http.Request, id Id
 			"session_id": tc.SessionID, "generation": tc.Generation, "handle_expires_at": tc.HandleExpiresAt.Format(time.RFC3339),
 		},
 		"task_read": "granted-projects", "task_write": teamTaskWrite(tc.Role), "projects": projects,
-		"knowledge": "read", "correlation_id": tc.CorrelationID,
+		"knowledge": "read", "doc_write": teamReportPrefix + "*", "correlation_id": tc.CorrelationID,
 	}
 	if project := r.URL.Query().Get("project"); project != "" {
 		pdb, err := s.reg.OpenExisting(project)

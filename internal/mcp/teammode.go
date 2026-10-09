@@ -10,7 +10,7 @@ package mcp
 //     any team refusal; until then every tool refuses;
 //   - the tool list is the hub's team routes: the task and epic reads, the
 //     member reservation tools (C6a), the pilot's project knowledge reads
-//     (19d8), plus session_context.
+//     (19d8), the report document write (A0c), plus session_context.
 // Nothing here ever makes a call without the handle, and nothing falls back
 // to personal mode, the local socket or a checkout's credential.
 
@@ -59,6 +59,7 @@ func teamToolList() []map[string]any {
 		}
 	}
 	out = append(out, scopedKnowledgeToolDefs...)
+	out = append(out, writeReportToolDef)
 	// The reservation writes point to the rule for kept text; it is public
 	// and reads nothing but this binary.
 	return append(out, sessionContextToolDef, writingToolDef)
@@ -264,6 +265,16 @@ func (s *srv) teamToolCall(ctx context.Context, name string, raw []byte) (string
 			return "", err
 		}
 		return s.scopedKnowledgeRead(ctx, name, a)
+	case name == writeReportTool:
+		// Checked before the context is verified, like the knowledge reads.
+		a, err := s.writeReportArgsOf(raw)
+		if err != nil {
+			return "", err
+		}
+		if err := s.team.ensureReady(ctx); err != nil {
+			return "", err
+		}
+		return s.writeReport(ctx, a)
 	}
-	return "", fmt.Errorf("tool %q is not available in a team conversation: team mode serves only the team's task and epic reads, the project's repository, the coordinator's triage (triage_task, add_task_comment), the reservation tools, the project knowledge reads (recall_memory, list_docs, read_doc), session_context and writing_rule; every other knowledge tool and every other write is off", name)
+	return "", fmt.Errorf("tool %q is not available in a team conversation: team mode serves only the team's task and epic reads, the project's repository, the coordinator's triage (triage_task, add_task_comment), the reservation tools, the project knowledge reads (recall_memory, list_docs, read_doc), report documents (write_report), session_context and writing_rule; every other knowledge tool and every other write is off", name)
 }
