@@ -140,6 +140,21 @@ aicrew reads the directory with `aicrew hub add --cred-dir aicrew-creds`, the hu
 
 **Running it again** is safe. It keeps every file that holds a credential, issues only for a file that is missing or empty, and says so; a provisioning that was cut short is finished this way. A file that holds a credential is never overwritten: for a peer that is not registered yet, the command refuses before it changes anything. `aimem-hub-id` is kept when it holds this hub's ID; a directory whose `aimem-hub-id` names another hub is refused before anything changes, and so is one that holds an ID while the hub has no peer yet to confirm it against.
 
+**After an upgrade that adds an operation.** A release can add a peer operation that an existing peer has no credential for, as `board.read` did (aicrew's board feed). Upgrade the hub first, then run the same `peer provision` command again, with the same service, `--endpoint`, trust flag and `--output-dir`. It issues a credential for each new operation into its own file and leaves every other file and credential as it was. Running it once more issues nothing:
+
+```
+identity peer aicrew-example already registered with this endpoint and trust
+issued board.read credential 01a1…-… into aicrew-creds/aimem-board-read.token, expiring …
+kept aicrew-creds/aimem-redeem.token (exists; nothing issued for it)
+kept aicrew-creds/aimem-read.token (exists; nothing issued for it)
+kept aicrew-creds/aimem-team-register.token (exists; nothing issued for it)
+kept aicrew-creds/aimem-team-read.token (exists; nothing issued for it)
+hub ID 01a0…-…
+aicrew-creds/aimem-hub-id already holds this hub ID
+```
+
+Check with `aimem identity cred list aicrew-example $HUB`: one active credential per operation, `board.read` included. A different endpoint or trust is refused before anything changes, so take them from `aimem identity peer list $HUB`.
+
 **Replacing the peer.** The hub allows one enabled peer. To move aicrew to another service ID, name the old peer with `--replace`: it is disabled in the same step (and enabled again if the new registration fails). Then retire the old peer, so the new one can take its teams; `team.register` refuses a team UUID that another peer's profile holds, even a disabled one:
 
 ```sh
