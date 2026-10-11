@@ -231,8 +231,9 @@ func usage() {
                              set reads a project-scoped token from stdin
   session-start [file]       SessionStart hook adapter (Claude Code and
                              Codex share the wire format): emit the handoff
-                             (docs/SESSION-STATE.md) as hook JSON;
-                             portable (no jq/bash), silent if file missing
+                             (docs/SESSION-STATE.md, at most its first
+                             8 KiB) as hook JSON; portable (no jq/bash),
+                             silent if file missing
   state-root                 print the state root path
   access                     manage users, access groups, grants and ordinary tokens
   identity                   manage the aicrew identity peer and its credentials (hub TLS listener);
@@ -486,7 +487,7 @@ func sessionStartCmd(args []string) error {
 	team := teamsession.Active()
 	if b, err := os.ReadFile(p); err == nil {
 		ctx = "Canonical session handoff (" + p +
-			") — treat all claims as unverified until re-checked against git/tests:\n\n" + string(b)
+			") — treat all claims as unverified until re-checked against git/tests:\n\n" + handoffHead(p, string(b))
 		if !team {
 			ctx += hubHandoffNotice(string(b))
 		}
@@ -522,6 +523,31 @@ func sessionStartCmd(args []string) error {
 			"additionalContext": ctx,
 		},
 	})
+}
+
+// handoffInjectLimit bounds the handoff text session start injects. The
+// handoff is meant to hold only the current state (about 50 lines), and it
+// is injected again after every compaction, so one that grows over
+// sessions costs that much context each time.
+const handoffInjectLimit = 8 << 10
+
+// handoffHead returns the handoff whole when it fits handoffInjectLimit.
+// Otherwise it returns the head, cut at the last line break within the
+// limit, and a one-line note naming the file, so the session never
+// receives the whole document.
+func handoffHead(path, body string) string {
+	if len(body) <= handoffInjectLimit {
+		return body
+	}
+	head := body[:handoffInjectLimit]
+	if i := strings.LastIndexByte(head, '\n'); i >= 0 {
+		head = head[:i+1]
+	} else {
+		head = strings.ToValidUTF8(head, "")
+	}
+	return strings.TrimRight(head, "\r\n") + fmt.Sprintf("\n\n[aimem: %s is %d bytes, over the %d-byte session-start limit; only its first %d bytes are shown. "+
+		"Read the file for the rest, and keep it to the current state: history belongs in docs/SESSION-STATE-ARCHIVE.md, which is never injected.]",
+		path, len(body), handoffInjectLimit, len(head))
 }
 
 // writingNotice is the session-start line for the rule for kept text. A

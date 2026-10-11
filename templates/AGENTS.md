@@ -37,6 +37,14 @@ Fixed section order, hard cap ~50 lines, empty sections omitted, ends with
 a one-line "Pick up here". Reference code by path and commit — never paste
 it. Durable policy lives here, not in the handoff.
 
+The handoff holds only the current state. When an item is finished and no
+longer needed to continue, move it to `docs/SESSION-STATE-ARCHIVE.md`
+instead of letting the handoff grow. The archive is never injected into a
+session; read it only when you need the history. The session-start hook
+(Claude Code and Codex) injects at most the first 8 KiB of the handoff and
+then a one-line note that it was cut, so anything past that point does not
+reach the session.
+
 ## Project context
 
 <!-- Replace everything below with what an agent needs to know about THIS

@@ -13,6 +13,22 @@ currently 24); a binary refuses a database newer than it understands.
 
 ## [Unreleased]
 
+### Fixed
+
+- **Session start injects at most 8 KiB of the handoff.** `aimem
+  session-start`, the SessionStart hook for Claude Code and Codex,
+  injected `docs/SESSION-STATE.md` whole, again after every compaction.
+  Handoffs grow over sessions: on one machine the injection took about
+  half the context at once, and on another it was 13 KB. A handoff over
+  8 KiB is now injected as its head, cut at the last line break within
+  the limit, followed by one line that names the file, its size and the
+  limit, and points history to `docs/SESSION-STATE-ARCHIVE.md`. A handoff
+  within the limit is injected unchanged, and team conversations get the
+  same limit. The installed `AGENTS.md` template now says the handoff
+  holds only the current state and that history goes to
+  `docs/SESSION-STATE-ARCHIVE.md`, which nothing injects. A project that
+  already has an `AGENTS.md` keeps it: the installers never overwrite it.
+
 ## [0.10.0] — 2026-10-09
 
 aimem's prerequisites for aicrew's control plane (aicrew's control-plane
