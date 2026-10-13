@@ -27,6 +27,7 @@ $ClaudeSettings = Join-Path $env:USERPROFILE '.claude\settings.json'
 $OcPluginDir = Join-Path $env:USERPROFILE '.config\opencode\plugins'
 $CodexHome = if ($env:AIMEM_CODEX_HOME) { $env:AIMEM_CODEX_HOME } else { Join-Path $env:USERPROFILE '.codex' }
 $SubmitCmd = 'aimem submit-claude'
+$FailureRecallCmd = 'aimem failure-recall'
 # Codex space-splits hook commands and spawns them directly (no shell),
 # so its command must stay a bare program + args.
 $CodexSubmitCmd = 'aimem submit-codex'
@@ -214,16 +215,18 @@ function Write-Json($path, $obj) {
 # re-runs find it. Never touches other hooks. Claude Code settings.json and
 # Codex hooks.json share the same hooks block shape, so one merger serves
 # both clients.
-function Add-AgentHook($file, $event, $cmd, $status, $marker) {
+function Add-AgentHook($file, $event, $cmd, $status, $marker, $matcher = '') {
   $s = Read-Json $file
   if (-not $s.PSObject.Properties['hooks']) { $s | Add-Member hooks ([pscustomobject]@{}) }
   if (-not $s.hooks.PSObject.Properties[$event]) { $s.hooks | Add-Member $event @() }
   foreach ($entry in $s.hooks.$event) {
     foreach ($h in $entry.hooks) { if ("$($h.command)" -match [regex]::Escape($marker)) { return } }
   }
-  $s.hooks.$event = @($s.hooks.$event) + ,([pscustomobject]@{
+  $entry = [pscustomobject]@{
     hooks = @([pscustomobject]@{ type = 'command'; command = $cmd; timeout = 10; statusMessage = $status })
-  })
+  }
+  if ($matcher) { $entry = [pscustomobject]@{ matcher = $matcher; hooks = $entry.hooks } }
+  $s.hooks.$event = @($s.hooks.$event) + ,$entry
   Write-Json $file $s
 }
 # END json-io
@@ -297,6 +300,7 @@ function Install-User {
   Add-AgentHook $ClaudeSettings 'Stop'        $SubmitCmd 'Checkpointing turn'            'aimem submit-claude'
   Add-AgentHook $ClaudeSettings 'StopFailure' $SubmitCmd 'Checkpointing failed turn'     'aimem submit-claude'
   Add-AgentHook $ClaudeSettings 'PreCompact'  $SubmitCmd 'Journaling compaction marker'  'aimem submit-claude'
+  Add-AgentHook $ClaudeSettings 'PostToolUseFailure' $FailureRecallCmd 'Recalling aimem for the failure' 'aimem failure-recall' 'Bash'
 
   # The plugin supports OpenCode 1.18+ and 2.x from one file; 1.x loaders
   # before 1.14 call every export as a function and stop OpenCode at
@@ -500,7 +504,7 @@ function Uninstall-User {
     if ($s.PSObject.Properties['hooks']) {
       foreach ($ev in @($s.hooks.PSObject.Properties.Name)) {
         $kept = @($s.hooks.$ev | Where-Object {
-          -not (@($_.hooks | Where-Object { "$($_.command)" -match 'aimem submit-claude' }).Count)
+          -not (@($_.hooks | Where-Object { "$($_.command)" -match 'aimem submit-claude|aimem failure-recall' }).Count)
         })
         if ($kept.Count) { $s.hooks.$ev = $kept } else { $s.hooks.PSObject.Properties.Remove($ev) }
       }

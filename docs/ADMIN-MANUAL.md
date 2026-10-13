@@ -38,7 +38,8 @@ What a user install does: binary → `~/.local/bin/aimem` (Windows:
 `%LOCALAPPDATA%\aimem\bin`), systemd user unit `aimem.service` with
 `EnvironmentFile=-%h/.config/aimem/env` (Windows: logon task via
 `conhost --headless`), user-level Claude Code hooks
-(Stop/StopFailure/PreCompact → `aimem submit-claude`), global OpenCode
+(Stop/StopFailure/PreCompact → `aimem submit-claude`; PostToolUseFailure
+for Bash → `aimem failure-recall`), global OpenCode
 plugin. The installer **restarts** the service (enable --now alone keeps a
 stale binary running).
 

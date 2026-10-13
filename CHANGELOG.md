@@ -13,6 +13,28 @@ currently 24); a binary refuses a database newer than it understands.
 
 ## [Unreleased]
 
+### Added
+
+- **A failed command recalls aimem before the agent reports it.** Agents
+  reported environment blockers, such as a push refused because the SSH
+  identity needed a hardware key's interactive PIN, although aimem held
+  the remedy; they found it only when told to check aimem. The installers
+  now add a user-level Claude Code `PostToolUseFailure` hook for `Bash`
+  that runs the new `aimem failure-recall`. A command that exits non-zero
+  fires `PostToolUseFailure`, not `PostToolUse` (observed on Claude Code
+  2.1.296). The hook reduces the error to at most 20 distinctive words:
+  redacted first, with the exit line, paths, numbers, hashes and common
+  words left out. It recalls the project's and the user's memories with
+  them through the local service, within 2 seconds. It returns at most 3
+  memories that share enough of the words (2, or 3 for an error of 8 words
+  or more), each redacted and cut at 400 bytes, 1500 bytes in all, as
+  context the agent reads before it answers. It is silent when nothing
+  qualifies, when the local service is not running, for an interrupted
+  command and in a team conversation, and it always exits 0. An existing
+  installation gets the hook from its next one-liner upgrade; uninstall
+  removes it with the other aimem hooks. Codex is not covered: its hooks
+  document no event for a failed command.
+
 ### Fixed
 
 - **`aimem handoff compact` keeps the closing section under the names
