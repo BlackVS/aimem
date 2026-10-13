@@ -96,7 +96,7 @@ func handoffCmd(args []string) error {
 			fmt.Printf("summary: added %d lines to the current state.\n", countLines(s))
 		}
 	}
-	current := insertBeforePickUp(plan.current, summary)
+	current := insertBeforePickUp(plan.current, summary, plan.closing)
 	out := current + handoffMarker + plan.eol
 	if *dry {
 		fmt.Printf("dry run: would keep %d lines (%d bytes); nothing written.\n", countLines(out), len(out))
@@ -132,12 +132,14 @@ func handoffCmd(args []string) error {
 // compactPlan is how compact splits a handoff. current is the new current
 // state without the marker line; moved is the history to archive, trimmed
 // of blank lines at either end ("" when nothing moves); first and last are
-// its 1-based line range in the file.
+// its 1-based line range in the file. closing is the byte offset in current
+// of the closing section the cut kept, or -1 when the plan did not cut one.
 type compactPlan struct {
 	current, moved string
 	first, last    int
 	eol            string
 	marker         bool // the file has the marker line
+	closing        int
 }
 
 // planCompact splits body. With the marker, everything below it moves.
@@ -147,7 +149,7 @@ type compactPlan struct {
 // before a heading or blank line where one falls in its second half, plus
 // a short trailing closing section, and the rest moves.
 func planCompact(body string, lineLimit, byteLimit, reserveLines, reserveBytes int) compactPlan {
-	p := compactPlan{eol: "\n"}
+	p := compactPlan{eol: "\n", closing: -1}
 	if strings.Contains(body, "\r\n") {
 		p.eol = "\r\n"
 	}
@@ -193,9 +195,12 @@ func planCompact(body string, lineLimit, byteLimit, reserveLines, reserveBytes i
 		head += p.eol
 	}
 	p.current = head + tailText
+	if tail != nil {
+		p.closing = len(head)
+	}
 	p.setMoved(pre, n, len(pre))
 	if p.moved == "" {
-		p.current = body
+		p.current, p.closing = body, -1
 	}
 	if p.current != "" && !strings.HasSuffix(p.current, p.eol+p.eol) {
 		p.current += p.eol
@@ -265,13 +270,22 @@ func isPickUp(line string) bool {
 }
 
 // insertBeforePickUp puts block before the current state's closing
-// section, or at its end when it has none.
-func insertBeforePickUp(current, block string) string {
+// section, or at its end when it has none. closing is where the plan put
+// that section (-1 when it cut none); otherwise, as above a marker, the
+// section is looked for among the last lines, trailing blank lines aside.
+func insertBeforePickUp(current, block string, closing int) string {
 	if block == "" {
 		return current
 	}
+	if closing >= 0 {
+		return current[:closing] + block + current[closing:]
+	}
 	lines := strings.SplitAfter(current, "\n")
-	if i := firstPickUp(lines, handoffTailMaxLines+1); i >= 0 {
+	end := len(lines)
+	for end > 0 && strings.TrimSpace(lines[end-1]) == "" {
+		end--
+	}
+	if i := firstPickUp(lines[:end], handoffTailMaxLines); i >= 0 {
 		return strings.Join(lines[:i], "") + block + strings.Join(lines[i:], "")
 	}
 	return current + block

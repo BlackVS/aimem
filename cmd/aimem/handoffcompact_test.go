@@ -396,8 +396,49 @@ func TestHandoffCompactKeepsTheClosingSectionFromItsFirstLine(t *testing.T) {
 		}
 	}
 	current := "# Session State\n\n## Pick up here\nNext: open the PR.\n\n"
-	if got := insertBeforePickUp(current, "## Summary\n\n- Done: x\n\n"); !strings.Contains(got, "- Done: x\n\n## Pick up here\nNext:") {
+	if got := insertBeforePickUp(current, "## Summary\n\n- Done: x\n\n", -1); !strings.Contains(got, "- Done: x\n\n## Pick up here\nNext:") {
 		t.Errorf("summary not before the closing heading:\n%s", got)
+	}
+}
+
+// A closing section at the full 10 lines, with a "Next:" line inside it,
+// gets the summary before its heading, through planning and insertion both
+// with a cut and above a marker.
+func TestHandoffSummaryBeforeAFullClosingSection(t *testing.T) {
+	closing := "## Next steps\n- one\n- two\nNext: three\n- four\n- five\n- six\n- seven\n- eight\n- nine\n"
+	block := "## Summary\n\n- Done: x\n\n"
+	body := strings.Replace(grownHandoff("\n", 200), "## Pick up here\nOpen the PR after #215 merges.\n", closing, 1)
+	plan := planCompact(body, handoffLineLimit, handoffInjectLimit, handoffSummaryMaxLines+3, handoffSummaryMaxBytes+128)
+	if plan.moved == "" || !strings.HasSuffix(plan.current, closing+"\n") {
+		t.Fatalf("the 10-line closing section was not kept:\n%s", plan.current)
+	}
+	if got := insertBeforePickUp(plan.current, block, plan.closing); !strings.HasSuffix(got, block+closing+"\n") {
+		t.Errorf("after a cut, the summary is not before the closing heading:\n%s", got)
+	}
+	// A head that ends with a "Next:" lead-in within the last lines: the
+	// summary still goes where the plan put the closing section.
+	var hb strings.Builder
+	hb.WriteString("# Session State\n\n")
+	for i := 0; i < 60; i++ {
+		lead := "- h"
+		if i < 20 {
+			lead = "Next: h"
+		}
+		fmt.Fprintf(&hb, "## H %d\n%s %d\n\n", i, lead, i)
+	}
+	hb.WriteString("## Pick up here\nGo.\n")
+	short := planCompact(hb.String(), handoffLineLimit, handoffInjectLimit, handoffSummaryMaxLines+3, handoffSummaryMaxBytes+128)
+	if !strings.Contains(short.current, "Next: h") || !strings.HasSuffix(short.current, "## Pick up here\nGo.\n\n") {
+		t.Fatalf("the head should end with a Next: section and keep the closing one:\n%s", short.current)
+	}
+	if got := insertBeforePickUp(short.current, block, short.closing); !strings.HasSuffix(got, block+"## Pick up here\nGo.\n\n") {
+		t.Errorf("the summary is not before the planned closing section:\n%s", got)
+	}
+
+	above := "# Session State\n\n" + closing + "\n"
+	marked := planCompact(above+handoffMarker+"\n- old history\n", handoffLineLimit, handoffInjectLimit, 0, 0)
+	if got := insertBeforePickUp(marked.current, block, marked.closing); got != "# Session State\n\n"+block+closing+"\n" {
+		t.Errorf("above a marker, the summary is not before the closing heading:\n%s", got)
 	}
 }
 
@@ -405,7 +446,7 @@ func TestHandoffCompactKeepsTheClosingSectionFromItsFirstLine(t *testing.T) {
 func TestHandoffSummaryGoesBeforeEveryClosingName(t *testing.T) {
 	for _, name := range handoffClosingNames {
 		current := "# Session State\n\n## Objective\n\nOne thing.\n\n## " + name + "\nDo it.\n\n"
-		got := insertBeforePickUp(current, "## Summary\n\n- Done: x\n\n")
+		got := insertBeforePickUp(current, "## Summary\n\n- Done: x\n\n", -1)
 		if !strings.Contains(got, "- Done: x\n\n## "+name+"\nDo it.") {
 			t.Errorf("%q: summary not before the closing section:\n%s", name, got)
 		}
