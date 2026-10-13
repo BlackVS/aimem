@@ -13,6 +13,19 @@ currently 24); a binary refuses a database newer than it understands.
 
 ## [Unreleased]
 
+## [0.10.2] — 2026-10-13
+
+A handoff that has grown past the session-start limit is now compacted
+with a command instead of by hand. `aimem handoff compact` keeps the
+current state in `docs/SESSION-STATE.md` and moves the history to
+`docs/SESSION-STATE-ARCHIVE.md`; `--summarize` adds a short summary from
+the curation backend. Existing projects keep their own `AGENTS.md`,
+because the installers never overwrite it: such a project does not get
+the new template rule, and learns the command from the session-start
+note, which names it whenever the handoff is over the limit. No schema
+change and no breaking change: a 0.10.1 hub or workstation upgrades in
+place and rolls back in place. Includes PR #213 and #216.
+
 ### Added
 
 - **`aimem handoff compact`** moves history out of `docs/SESSION-STATE.md`
@@ -33,6 +46,11 @@ currently 24); a binary refuses a database newer than it understands.
   the command, and the installed `AGENTS.md` template tells the agent to
   run it rather than cutting the file by hand, while the agent still
   rewrites the current state itself at milestones.
+
+### Changed
+
+- `golang.org/x/sys` moves from v0.48.0 to v0.49.0. The on-disk schema
+  is unchanged.
 
 ## [0.10.1] — 2026-10-13
 
