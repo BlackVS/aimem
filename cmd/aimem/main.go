@@ -239,7 +239,10 @@ func usage() {
   handoff compact [--summarize] [--dry-run]
                              keep the current state in docs/SESSION-STATE.md
                              (above the line <!-- aimem: history below -->,
-                             else the head within 50 lines and 8 KiB) and
+                             else the head within 50 lines and 8 KiB plus a
+                             closing section of up to 10 lines named Pick up
+                             here, Pick up, Exact next action, Next action,
+                             Next or Next steps, in any case) and
                              move the rest to docs/SESSION-STATE-ARCHIVE.md;
                              --summarize adds a short summary of what moved,
                              written by the curation backend

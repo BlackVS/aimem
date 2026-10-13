@@ -121,7 +121,7 @@ func TestInstalledGuidanceStatesTheHandoffLimit(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, want := range []string{fmt.Sprintf("first %d KiB", handoffInjectLimit>>10), "docs/SESSION-STATE-ARCHIVE.md", "never injected", "`aimem handoff compact`", handoffMarker, "instead of cutting the file by hand"} {
+	for _, want := range append([]string{fmt.Sprintf("first %d KiB", handoffInjectLimit>>10), "docs/SESSION-STATE-ARCHIVE.md", "never injected", "`aimem handoff compact`", handoffMarker, "instead of cutting the file by hand"}, handoffClosingNames...) {
 		if !strings.Contains(strings.Join(strings.Fields(string(b)), " "), want) {
 			t.Errorf("templates/AGENTS.md lacks %q", want)
 		}

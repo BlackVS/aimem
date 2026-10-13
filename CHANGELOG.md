@@ -13,6 +13,21 @@ currently 24); a binary refuses a database newer than it understands.
 
 ## [Unreleased]
 
+### Fixed
+
+- **`aimem handoff compact` keeps the closing section under the names
+  projects use.** It recognised the closing section only by the name
+  "Pick up here". On a real 9530-line handoff whose closing section was
+  "Exact next action", that section went to the archive with the history.
+  Compact now keeps the last section of up to 10 lines whose heading, or
+  bold or plain lead-in, is one of Pick up here, Pick up, Exact next
+  action, Next action, Next or Next steps, in any case, alone or followed
+  by a colon, a parenthesis or a dash ("Pick up here" with anything after
+  it, as before). A heading that only starts with a name, such as "Next
+  week", is not one. The section starts at its first such line, so a
+  "Next:" line inside it does not cut it short. The command's usage and
+  the installed `AGENTS.md` template list the names.
+
 ## [0.10.2] — 2026-10-13
 
 A handoff that has grown past the session-start limit is now compacted
