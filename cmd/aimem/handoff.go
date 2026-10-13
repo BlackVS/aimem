@@ -72,12 +72,20 @@ func handoffCmd(args []string) error {
 	if *summarize && *dry {
 		fmt.Println("summary: not requested in a dry run.")
 	} else if *summarize {
-		s, why := handoffSummary(plan.moved, *model, *backend)
+		head := "## Summary of archived history (" + now.Format("2006-01-02") + ")" + plan.eol + plan.eol
+		// The room left for its bullet lines once the block's heading and
+		// blank lines and the marker line are counted: the result stays
+		// within both limits, also above a marker, where nothing was cut.
+		roomLines := min(*lines-strings.Count(plan.current, "\n")-4, handoffSummaryMaxLines)
+		roomBytes := min(handoffInjectLimit-len(plan.current)-len(handoffMarker)-len(head)-3*len(plan.eol), handoffSummaryMaxBytes)
+		s, why := "", "no room left within the limits"
+		if roomLines > 0 && roomBytes > 0 {
+			s, why = handoffSummary(plan.moved, *model, *backend, roomLines, roomBytes, len(plan.eol))
+		}
 		if why != "" {
 			fmt.Printf("summary: not added (%s); the moved part is archived only.\n", why)
 		} else {
-			summary = "## Summary of archived history (" + now.Format("2006-01-02") + ")" + plan.eol + plan.eol +
-				strings.ReplaceAll(s, "\n", plan.eol) + plan.eol + plan.eol
+			summary = head + strings.ReplaceAll(s, "\n", plan.eol) + plan.eol + plan.eol
 			fmt.Printf("summary: added %d lines to the current state.\n", countLines(s))
 		}
 	}
@@ -245,8 +253,9 @@ func insertBeforePickUp(current, block string) string {
 
 // handoffSummary asks the curation backend for a short summary of the moved
 // history. The text is redacted before it leaves the machine. It returns a
-// reason instead when there is no backend or the call fails.
-func handoffSummary(moved, model, backend string) (string, string) {
+// reason instead when there is no backend or the call fails. The summary
+// is at most maxLines lines and maxBytes bytes with eolLen-byte line ends.
+func handoffSummary(moved, model, backend string, maxLines, maxBytes, eolLen int) (string, string) {
 	syn, _, err := curateBackend(stateRoot(), model, backend)
 	if err != nil {
 		return "", "no curation backend: " + err.Error()
@@ -260,16 +269,17 @@ func handoffSummary(moved, model, backend string) (string, string) {
 	if err != nil {
 		return "", "the curation backend failed: " + llmClip(err.Error())
 	}
-	s := clipSummary(out)
+	s := clipSummary(out, maxLines, maxBytes, eolLen)
 	if s == "" {
 		return "", "the curation backend returned no summary"
 	}
 	return s, ""
 }
 
-// clipSummary keeps the non-empty lines of out, within the summary's line
-// and byte bounds, as valid UTF-8.
-func clipSummary(out string) string {
+// clipSummary keeps the non-empty lines of out, outside code fences, within
+// maxLines lines and maxBytes bytes (each line counted with an eolLen-byte
+// end), as valid UTF-8.
+func clipSummary(out string, maxLines, maxBytes, eolLen int) string {
 	var kept []string
 	size := 0
 	for _, l := range strings.Split(strings.ToValidUTF8(out, ""), "\n") {
@@ -277,11 +287,11 @@ func clipSummary(out string) string {
 		if strings.TrimSpace(l) == "" || strings.HasPrefix(strings.TrimSpace(l), "```") {
 			continue
 		}
-		if len(kept) == handoffSummaryMaxLines || size+len(l)+1 > handoffSummaryMaxBytes {
+		if len(kept) == maxLines || size+len(l)+eolLen > maxBytes {
 			break
 		}
 		kept = append(kept, l)
-		size += len(l) + 1
+		size += len(l) + eolLen
 	}
 	return strings.Join(kept, "\n")
 }

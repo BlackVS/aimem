@@ -275,6 +275,33 @@ func TestHandoffCompactSummarize(t *testing.T) {
 		t.Fatalf("--summarize cut a compact handoff: %s", out)
 	}
 
+	// Also with no backend at all.
+	if out := runCompact(t, dir, []string{"AIMEM_CURATE_BACKEND=openai", "AIMEM_CURATE_MODEL="}, "--summarize"); !strings.Contains(out, "already compact") || readFile(t, handoff) != small {
+		t.Fatalf("--summarize without a backend cut a compact handoff: %s", out)
+	}
+
+	// Above a marker nothing is cut, so the summary gets only the room
+	// left: 40 lines above it leave 6 bullet lines within 50 lines.
+	// The state ends with a blank line, which counts as a line.
+	above := "## Pick up here\n" + strings.Repeat("- a current item\n", 38) + "\n"
+	dir, handoff, _ = compactCheckout(t, above+handoffMarker+"\n- history\n")
+	if out := runCompact(t, dir, env, "--summarize"); !strings.Contains(out, "summary: added 6 lines") {
+		t.Fatalf("marker with summary: %s", out)
+	}
+	if n := countLines(readFile(t, handoff)); n > handoffLineLimit {
+		t.Fatalf("the summary took the marker-mode state to %d lines", n)
+	}
+	// With no room left the backend is not asked and nothing is added.
+	prompt = ""
+	full := ""
+	for len(full)+10 <= handoffInjectLimit-len(handoffMarker)-20 {
+		full += "- item 01\n"
+	}
+	dir, handoff, _ = compactCheckout(t, full+handoffMarker+"\n- history\n")
+	if out := runCompact(t, dir, env, "--summarize", "--lines", "2000"); prompt != "" || !strings.Contains(out, "no room left") || readFile(t, handoff) != full+handoffMarker+"\n" {
+		t.Fatalf("no room: %s", out)
+	}
+
 	dir, handoff, archive = compactCheckout(t, body)
 	out = runCompact(t, dir, []string{"AIMEM_CURATE_BACKEND=openai", "AIMEM_CURATE_MODEL="}, "--summarize")
 	if !strings.Contains(out, "summary: not added (no curation backend") || strings.Contains(readFile(t, handoff), "## Summary") ||
