@@ -16,8 +16,8 @@ const (
 	// (below) in docs/SESSION-STATE.md; compact moves what is below it.
 	handoffMarker    = "<!-- aimem: history below -->"
 	handoffLineLimit = 50
-	// A trailing "Pick up here" section longer than this is not a pick-up
-	// line but a section compact treats like any other.
+	// A trailing closing section (handoffClosingNames) longer than this is
+	// not a pick-up line but a section compact treats like any other.
 	handoffTailMaxLines = 10
 	// The summary block --summarize adds, at most.
 	handoffSummaryMaxLines = 12
@@ -25,10 +25,17 @@ const (
 )
 
 func handoffCmd(args []string) error {
+	usage := "usage: aimem handoff compact [--file docs/SESSION-STATE.md] [--lines N] [--summarize] [--dry-run]\n" +
+		"A file without the line " + handoffMarker + " keeps its head within the limits and a closing section of up to " +
+		fmt.Sprint(handoffTailMaxLines) + " lines whose heading is one of: " + strings.Join(handoffClosingNames, ", ") + " (any case)."
 	if len(args) == 0 || args[0] != "compact" {
-		return fmt.Errorf("usage: aimem handoff compact [--file docs/SESSION-STATE.md] [--lines N] [--summarize] [--dry-run]")
+		return fmt.Errorf("%s", usage)
 	}
 	fs := flag.NewFlagSet("handoff compact", flag.ExitOnError)
+	fs.Usage = func() {
+		fmt.Fprintln(fs.Output(), usage)
+		fs.PrintDefaults()
+	}
 	file := fs.String("file", filepath.Join("docs", "SESSION-STATE.md"), "the handoff to compact")
 	lines := fs.Int("lines", handoffLineLimit, "line limit for the current state when the file has no marker")
 	summarize := fs.Bool("summarize", false, "add a short summary of the moved part, written by the curation backend")
@@ -138,7 +145,7 @@ type compactPlan struct {
 // otherwise the current state is the head that fits the limits less the
 // reserve (room for a summary block), ending
 // before a heading or blank line where one falls in its second half, plus
-// a short trailing "Pick up here" section, and the rest moves.
+// a short trailing closing section, and the rest moves.
 func planCompact(body string, lineLimit, byteLimit, reserveLines, reserveBytes int) compactPlan {
 	p := compactPlan{eol: "\n"}
 	if strings.Contains(body, "\r\n") {
@@ -162,12 +169,12 @@ func planCompact(body string, lineLimit, byteLimit, reserveLines, reserveBytes i
 		p.current = body
 		return p
 	}
+	// The closing section starts at the first closing line in the last
+	// handoffTailMaxLines lines, so a "Next:" line inside it is not taken
+	// for its start.
 	pre, tail := lines, []string(nil)
-	for i := len(lines) - 1; i > 0 && len(lines)-i <= handoffTailMaxLines; i-- {
-		if isPickUp(lines[i]) {
-			pre, tail = lines[:i], lines[i:]
-			break
-		}
+	if i := firstPickUp(lines, handoffTailMaxLines); i >= 0 {
+		pre, tail = lines[:i], lines[i:]
 	}
 	tailText := strings.Join(tail, "")
 	// The marker line and up to two blank lines are added around the tail.
@@ -229,26 +236,56 @@ func (p *compactPlan) setMoved(lines []string, from, to int) {
 	p.first, p.last = from+1, to
 }
 
-// isPickUp reports whether a line opens the handoff's closing "Pick up
-// here" section, as a heading or as a bold or plain lead-in.
+// handoffClosingNames are the names of a handoff's closing section, the
+// one compact keeps after the head, matched without regard to case.
+var handoffClosingNames = []string{"Pick up here", "Pick up", "Exact next action", "Next action", "Next", "Next steps"}
+
+// isPickUp reports whether a line opens the handoff's closing section, as a
+// heading or as a bold or plain lead-in: one of handoffClosingNames, alone
+// or followed by a colon, a parenthesis or a dash ("## Next steps",
+// "**Exact next action:** ...", "Next (Monday)"), but not a longer phrase
+// that only starts with a name ("## Next week"). "Pick up here" matches with
+// any continuation, as it did before the other names.
 func isPickUp(line string) bool {
 	l := strings.ToLower(strings.TrimLeft(strings.TrimSpace(line), "#*_ "))
-	return strings.HasPrefix(l, "pick up here")
+	if strings.HasPrefix(l, "pick up here") {
+		return true // as before the other names existed: any continuation
+	}
+	for _, name := range handoffClosingNames {
+		rest, ok := strings.CutPrefix(l, strings.ToLower(name))
+		if !ok {
+			continue
+		}
+		rest = strings.TrimLeft(rest, "*_# ")
+		if rest == "" || strings.ContainsAny(rest[:1], ":(-") || strings.HasPrefix(rest, "—") || strings.HasPrefix(rest, "–") {
+			return true
+		}
+	}
+	return false
 }
 
-// insertBeforePickUp puts block before the current state's "Pick up here"
+// insertBeforePickUp puts block before the current state's closing
 // section, or at its end when it has none.
 func insertBeforePickUp(current, block string) string {
 	if block == "" {
 		return current
 	}
 	lines := strings.SplitAfter(current, "\n")
-	for i := len(lines) - 1; i > 0 && len(lines)-i <= handoffTailMaxLines+1; i-- {
-		if isPickUp(lines[i]) {
-			return strings.Join(lines[:i], "") + block + strings.Join(lines[i:], "")
-		}
+	if i := firstPickUp(lines, handoffTailMaxLines+1); i >= 0 {
+		return strings.Join(lines[:i], "") + block + strings.Join(lines[i:], "")
 	}
 	return current + block
+}
+
+// firstPickUp returns the index of the first line among the last window
+// lines (never the first line) that opens a closing section, or -1.
+func firstPickUp(lines []string, window int) int {
+	for i := max(1, len(lines)-window); i < len(lines); i++ {
+		if isPickUp(lines[i]) {
+			return i
+		}
+	}
+	return -1
 }
 
 // handoffSummary asks the curation backend for a short summary of the moved

@@ -41,7 +41,9 @@ The handoff holds only the current state. Keep that state above the line
 `<!-- aimem: history below -->`; finished items that are no longer needed
 to continue go below it. Run `aimem handoff compact` to move everything
 below the line to `docs/SESSION-STATE-ARCHIVE.md` under a dated heading
-(without the line, it keeps the head within 50 lines and 8 KiB), instead
+(without the line, it keeps the head within 50 lines and 8 KiB and a
+closing section of up to 10 lines headed Pick up here, Pick up, Exact
+next action, Next action, Next or Next steps, in any case), instead
 of cutting the file by hand; `--summarize` also adds a short summary of
 what moved, written by the curation backend. At each milestone, rewrite
 the current state yourself; the command only moves history out. The

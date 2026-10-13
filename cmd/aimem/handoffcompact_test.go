@@ -343,3 +343,84 @@ func TestHandoffCompactFillsTheLineLimit(t *testing.T) {
 		t.Fatalf("kept %d lines; want close to %d", n, handoffLineLimit)
 	}
 }
+
+// A grown handoff keeps its closing section under any of the closing
+// names, in any case and as a heading or a lead-in; without one, or under a
+// heading that only starts with a name, the last section is archived.
+func TestHandoffCompactKeepsTheClosingSectionByName(t *testing.T) {
+	var closings []string
+	for _, name := range handoffClosingNames {
+		closings = append(closings, "## "+name, "### "+strings.ToLower(name), "## "+strings.ToUpper(name)+":", "**"+name+":**")
+	}
+	closings = append(closings, "## Exact next action (2026-10-13)", "Exact next action: run the tests", "## Next — Monday", "## Next steps - after the merge")
+	for _, closing := range closings {
+		body := strings.Replace(grownHandoff("\n", 200), "## Pick up here", closing, 1)
+		dir, handoff, archive := compactCheckout(t, body)
+		runCompact(t, dir, nil)
+		kept, arch := readFile(t, handoff), readFile(t, archive)
+		if !strings.HasSuffix(kept, closing+"\nOpen the PR after #215 merges.\n\n"+handoffMarker+"\n") ||
+			strings.Contains(arch, closing) || strings.Contains(arch, "Open the PR") {
+			t.Errorf("closing %q was not kept:\n%s", closing, kept)
+		}
+		if n := countLines(kept); n > handoffLineLimit || len(kept) > handoffInjectLimit {
+			t.Errorf("closing %q: the kept state is %d lines, %d bytes", closing, n, len(kept))
+		}
+	}
+	for _, other := range []string{"## Notes", "## Next week", "## Pick up the pieces", "- Next: a list item"} {
+		body := strings.Replace(grownHandoff("\n", 200), "## Pick up here", other, 1)
+		dir, handoff, archive := compactCheckout(t, body)
+		runCompact(t, dir, nil)
+		kept, arch := readFile(t, handoff), readFile(t, archive)
+		if strings.Contains(kept, other) || strings.Contains(kept, "Open the PR") ||
+			!strings.HasSuffix(strings.TrimRight(arch, "\n"), other+"\nOpen the PR after #215 merges.") {
+			t.Errorf("%q is not a closing section, yet it was kept:\n%s", other, kept)
+		}
+		if n := countLines(kept); n > handoffLineLimit || len(kept) > handoffInjectLimit || !strings.HasPrefix(kept, "# Session State\n") {
+			t.Errorf("%q: the kept state is %d lines, %d bytes", other, n, len(kept))
+		}
+	}
+}
+
+// A closing section whose body has a line that is itself a closing name
+// ("Next: ...") is kept from its heading, not from that line; so is a
+// "Pick up here" heading with any continuation, as before.
+func TestHandoffCompactKeepsTheClosingSectionFromItsFirstLine(t *testing.T) {
+	for _, closing := range []string{"## Pick up here\nNext: open the PR.", "## Exact next action\n**Next action:** open the PR.\nThen: wait.", "## Pick up here today\nOpen the PR."} {
+		body := strings.Replace(grownHandoff("\n", 200), "## Pick up here\nOpen the PR after #215 merges.", closing, 1)
+		dir, handoff, archive := compactCheckout(t, body)
+		runCompact(t, dir, nil)
+		kept, arch := readFile(t, handoff), readFile(t, archive)
+		first := strings.SplitN(closing, "\n", 2)[0]
+		if !strings.HasSuffix(kept, closing+"\n\n"+handoffMarker+"\n") || strings.Contains(arch, first) {
+			t.Errorf("closing %q was not kept whole:\n%s", closing, kept)
+		}
+	}
+	current := "# Session State\n\n## Pick up here\nNext: open the PR.\n\n"
+	if got := insertBeforePickUp(current, "## Summary\n\n- Done: x\n\n"); !strings.Contains(got, "- Done: x\n\n## Pick up here\nNext:") {
+		t.Errorf("summary not before the closing heading:\n%s", got)
+	}
+}
+
+// The summary goes before the closing section whatever its name.
+func TestHandoffSummaryGoesBeforeEveryClosingName(t *testing.T) {
+	for _, name := range handoffClosingNames {
+		current := "# Session State\n\n## Objective\n\nOne thing.\n\n## " + name + "\nDo it.\n\n"
+		got := insertBeforePickUp(current, "## Summary\n\n- Done: x\n\n")
+		if !strings.Contains(got, "- Done: x\n\n## "+name+"\nDo it.") {
+			t.Errorf("%q: summary not before the closing section:\n%s", name, got)
+		}
+	}
+}
+
+// The command's usage names every closing name.
+func TestHandoffUsageNamesTheClosingNames(t *testing.T) {
+	_, errOut, err := runAimemEnv(t, t.TempDir(), t.TempDir(), "", nil, "handoff")
+	if err == nil {
+		t.Fatal("aimem handoff without compact succeeded")
+	}
+	for _, name := range handoffClosingNames {
+		if !strings.Contains(errOut, name) {
+			t.Errorf("usage lacks %q:\n%s", name, errOut)
+		}
+	}
+}
