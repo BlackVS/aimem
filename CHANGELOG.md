@@ -13,6 +13,27 @@ currently 24); a binary refuses a database newer than it understands.
 
 ## [Unreleased]
 
+### Added
+
+- **`aimem handoff compact`** moves history out of `docs/SESSION-STATE.md`
+  into `docs/SESSION-STATE-ARCHIVE.md`, under a dated heading, so a handoff
+  that has grown past the session-start limit no longer needs cutting by
+  hand. It moves everything below the line `<!-- aimem: history below -->`.
+  In a file without that line, it keeps the head that fits 50 lines and
+  8 KiB, ending at a heading or blank line, plus a closing "Pick up here"
+  section, and adds the line. It prints the moved line range, size and
+  headings. A rerun, or a run on a compact handoff, changes nothing, and a
+  run interrupted after the archive write does not archive the block twice
+  when run again. `--summarize` asks the curation backend (the one
+  `aimem curate` uses) for a short summary of what moved, at most 12 lines
+  of done, decisions and open items, redacting the text first, and puts it
+  before "Pick up here". Without a backend, or when the call fails, the
+  command archives only and says why. `--dry-run` reports without writing
+  or calling the backend. The session-start note over the limit now names
+  the command, and the installed `AGENTS.md` template tells the agent to
+  run it rather than cutting the file by hand, while the agent still
+  rewrites the current state itself at milestones.
+
 ## [0.10.1] — 2026-10-13
 
 Session start no longer injects a growing handoff whole. `aimem

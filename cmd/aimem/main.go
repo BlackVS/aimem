@@ -106,6 +106,8 @@ func main() {
 		err = projectID(args)
 	case "session-start":
 		err = sessionStartCmd(args)
+	case "handoff":
+		err = handoffCmd(args)
 	case "state-root":
 		fmt.Println(stateRoot())
 	case "meta":
@@ -234,6 +236,13 @@ func usage() {
                              (docs/SESSION-STATE.md, at most its first
                              8 KiB) as hook JSON; portable (no jq/bash),
                              silent if file missing
+  handoff compact [--summarize] [--dry-run]
+                             keep the current state in docs/SESSION-STATE.md
+                             (above the line <!-- aimem: history below -->,
+                             else the head within 50 lines and 8 KiB) and
+                             move the rest to docs/SESSION-STATE-ARCHIVE.md;
+                             --summarize adds a short summary of what moved,
+                             written by the curation backend
   state-root                 print the state root path
   access                     manage users, access groups, grants and ordinary tokens
   identity                   manage the aicrew identity peer and its credentials (hub TLS listener);
@@ -546,7 +555,7 @@ func handoffHead(path, body string) string {
 		head = strings.ToValidUTF8(head, "")
 	}
 	return strings.TrimRight(head, "\r\n") + fmt.Sprintf("\n\n[aimem: %s is %d bytes, over the %d-byte session-start limit; only its first %d bytes are shown. "+
-		"Read the file for the rest, and keep it to the current state: history belongs in docs/SESSION-STATE-ARCHIVE.md, which is never injected.]",
+		"Read the file for the rest, and run `aimem handoff compact` to move its history to docs/SESSION-STATE-ARCHIVE.md, which is never injected.]",
 		path, len(body), handoffInjectLimit, len(head))
 }
 
@@ -1948,6 +1957,63 @@ func clipLine(s string) string {
 	return s
 }
 
+// curateBackendImpl is a curation backend: both kinds extract facts and
+// complete free prompts.
+type curateBackendImpl interface {
+	curate.Extractor
+	curate.Synthesizer
+}
+
+// curateBackend resolves the curation backend and the model name run
+// history records. model defaults to AIMEM_CURATE_MODEL. A registry
+// binding decides the backend by its provider's kind (so the GUI can
+// select the claude CLI: bind e.g. claude/haiku and pick it as curate
+// model); backend (claude|openai) applies only to unbound models. Payloads
+// use the resolved upstream name; run history keeps the local alias for
+// attribution.
+func curateBackend(root, model, backend string) (curateBackendImpl, string, error) {
+	// Run the claude turn from a scratch workdir so the curator's own
+	// claude session doesn't checkpoint into a real project's journal.
+	claudeEx := func(m string) curateBackendImpl {
+		workDir := filepath.Join(root, "curator-workdir")
+		os.MkdirAll(workDir, 0o700)
+		return &curate.ClaudeExtractor{Model: m, WorkDir: workDir}
+	}
+	m := model
+	if m == "" {
+		m = os.Getenv("AIMEM_CURATE_MODEL")
+	}
+	ep, isBound, why := provider.ResolveBound(root, m)
+	if isBound && why != "" {
+		// A binding that cannot be honored never falls through to the
+		// backend choice: that would run the model on the wrong service.
+		return nil, "", fmt.Errorf("no curate endpoint: %s", why)
+	}
+	if isBound {
+		if ep.Kind == "claude" {
+			return claudeEx(ep.Model), m, nil
+		}
+		return &curate.OpenAIExtractor{BaseURL: ep.BaseURL, APIKey: ep.Token, Model: ep.Model}, m, nil
+	}
+	switch backend {
+	case "openai":
+		if m == "" {
+			return nil, "", fmt.Errorf("openai backend needs --model or AIMEM_CURATE_MODEL")
+		}
+		ep, why := provider.Lookup(root, m, "openai")
+		if why != "" {
+			return nil, "", fmt.Errorf("no openai endpoint: %s", why)
+		}
+		return &curate.OpenAIExtractor{BaseURL: ep.BaseURL, APIKey: ep.Token, Model: ep.Model}, m, nil
+	case "claude":
+		if m == "" {
+			m = "haiku"
+		}
+		return claudeEx(m), m, nil
+	}
+	return nil, "", fmt.Errorf("unknown backend %q (claude|openai)", backend)
+}
+
 func curateCmd(args []string) error {
 	fs := flag.NewFlagSet("curate", flag.ExitOnError)
 	p := projectFlag(fs, "project id (default: current directory's project)")
@@ -2033,58 +2099,9 @@ func curateCmd(args []string) error {
 		}
 		projects = []string{id}
 	}
-	var ex curate.Extractor
-	var runModel string
-	// Run the extraction turn from a scratch workdir so the curator's own
-	// claude session doesn't checkpoint into a real project's journal.
-	claudeEx := func(m string) curate.Extractor {
-		workDir := filepath.Join(root, "curator-workdir")
-		os.MkdirAll(workDir, 0o700)
-		return &curate.ClaudeExtractor{Model: m, WorkDir: workDir}
-	}
-	m := *model
-	if m == "" {
-		m = os.Getenv("AIMEM_CURATE_MODEL")
-	}
-	// A registry binding decides the backend by its provider's kind (so
-	// the GUI can select the claude CLI: bind e.g. claude/haiku and pick
-	// it as curate model); --backend / AIMEM_CURATE_BACKEND applies only
-	// to unbound models. Payloads use the resolved upstream name; run
-	// history keeps the local alias for attribution.
-	ep, isBound, why := provider.ResolveBound(root, m)
-	if isBound && why != "" {
-		// A binding that cannot be honored never falls through to the
-		// --backend choice: that would run the model on the wrong service.
-		return fmt.Errorf("no curate endpoint: %s", why)
-	}
-	if isBound {
-		if ep.Kind == "claude" {
-			ex = claudeEx(ep.Model)
-		} else {
-			ex = &curate.OpenAIExtractor{BaseURL: ep.BaseURL, APIKey: ep.Token, Model: ep.Model}
-		}
-		runModel = m
-	} else {
-		switch *backend {
-		case "openai":
-			if m == "" {
-				return fmt.Errorf("openai backend needs --model or AIMEM_CURATE_MODEL")
-			}
-			ep, why := provider.Lookup(root, m, "openai")
-			if why != "" {
-				return fmt.Errorf("no openai endpoint: %s", why)
-			}
-			ex = &curate.OpenAIExtractor{BaseURL: ep.BaseURL, APIKey: ep.Token, Model: ep.Model}
-			runModel = m
-		case "claude":
-			if m == "" {
-				m = "haiku"
-			}
-			ex = claudeEx(m)
-			runModel = m
-		default:
-			return fmt.Errorf("unknown backend %q (claude|openai)", *backend)
-		}
+	ex, runModel, err := curateBackend(root, *model, *backend)
+	if err != nil {
+		return err
 	}
 	// Semantic dedup rides on the embedding config when present; disable
 	// or tune with AIMEM_DEDUP_SIM (0 = off, default 0.90).
