@@ -25,6 +25,8 @@ currently 24); a binary refuses a database newer than it understands.
   through the `context` hook. On 1.x the plugin's `tool.execute.after`
   hook sees the failed `bash` call, and the recall is appended to its
   output. A recall that fails or takes over 5 seconds adds nothing. The
+  plugin never cuts the error text, so the command redacts all of it
+  before any size cap; a failure over 512 KiB is not recalled. The
   plugin's end-to-end check gains `recall` and `norecall`, which run the
   real binary against a fake store on both generations. The plugin
   file is installed by the client one-liner, so a workstation gets it

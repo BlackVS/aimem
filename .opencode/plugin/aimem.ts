@@ -161,10 +161,12 @@ const SHELL_TOOLS = new Set(["bash", "shell"])
 // FAILURE_RECALL_TIMEOUT_MS bounds one recall; the command bounds its own
 // lookup at 2 s, so this only guards a stuck process.
 const FAILURE_RECALL_TIMEOUT_MS = 5000
-// FAILURE_TEXT_MAX bounds the error text sent to the command (its stdin
-// limit is 1 MiB); a longer one keeps its head and tail, as Claude Code
-// cuts a long error in the middle.
-const FAILURE_TEXT_MAX = 64 * 1024
+// FAILURE_TEXT_MAX bounds the error text sent to the command, whose input
+// limit is 1 MiB. A longer failure is not recalled at all: the plugin
+// never cuts the text itself, because a cut can separate a secret from the
+// context the redactor recognises it by (`password=` from its value). The
+// command redacts the whole text first and caps it after.
+const FAILURE_TEXT_MAX = 512 * 1024
 
 // recallFailure runs `aimem failure-recall`, the Claude Code hook (#219),
 // with the failure as that hook's payload, and returns the context it
@@ -172,10 +174,7 @@ const FAILURE_TEXT_MAX = 64 * 1024
 // redaction, matching and bounds all live in the Go command, so the plugin
 // carries no copy of them; it never fails the session.
 function recallFailure(directory: string, errorText: string): Promise<string> {
-  if (errorText.length > FAILURE_TEXT_MAX) {
-    const half = FAILURE_TEXT_MAX / 2
-    errorText = errorText.slice(0, half) + "\n...\n" + errorText.slice(-half)
-  }
+  if (Buffer.byteLength(errorText) > FAILURE_TEXT_MAX) return Promise.resolve("")
   return new Promise((resolve) => {
     let out = ""
     let done = false

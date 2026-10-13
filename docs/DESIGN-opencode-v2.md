@@ -188,7 +188,10 @@ Claude Code (#219). The plugin runs that command, with the failure as its
 hook payload (`PostToolUseFailure`, `Bash`, `Exit code N` plus the
 output), and injects what it prints. The query, redaction, matching and
 bounds therefore live in Go only. A run that fails, prints nothing or
-outlasts 5 s injects nothing.
+outlasts 5 s injects nothing. The plugin never cuts the error text: a cut
+can separate a secret from the context the redactor recognises it by
+(`password=` from its value), so the command gets the whole text, redacts
+it and only then caps it. A failure over 512 KiB is not recalled.
 
 What a failed call looks like was observed with a logging plugin in the
 e2e harness:
