@@ -181,6 +181,29 @@ To match what the 1.x wiring did:
 - skipped when the system prompt already contains it, so nothing is
   duplicated once OpenCode starts honoring `instructions`.
 
+### 4.5a Failure recall
+
+A failed shell call recalls aimem, as `aimem failure-recall` does for
+Claude Code (#219). The plugin runs that command, with the failure as its
+hook payload (`PostToolUseFailure`, `Bash`, `Exit code N` plus the
+output), and injects what it prints. The query, redaction, matching and
+bounds therefore live in Go only. A run that fails, prints nothing or
+outlasts 5 s injects nothing.
+
+What a failed call looks like was observed with a logging plugin in the
+e2e harness:
+
+| | OpenCode 1.18.32 | OpenCode 2.0.18 |
+|---|---|---|
+| shell tool | `bash` | `shell` |
+| non-zero exit | `tool.execute.after`: `output.metadata.exit` is N, `output.output` the text | `session.tool.success` with `metadata.exit` N and the output in `content` (a non-zero exit is not a tool failure) |
+| tool error | (not exercised) | `session.tool.failed` with `error.message` |
+| where the recall goes | appended to `output.output`, which the model gets as the tool result | queued for the session, then pushed into `system` by the `context` hook before the next model request |
+
+On 2.x the tool event arrives before the next request's `context` hook,
+because the host persists the step before it starts the next one; the
+`recall` scenario passed five runs out of five.
+
 ### 4.6 Context usage and warnings
 
 The limit comes from `ctx.model.list()` (`limit.context`) or

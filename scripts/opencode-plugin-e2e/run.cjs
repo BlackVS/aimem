@@ -69,7 +69,33 @@ const scenarios = {
   // 1.x loads it through opencode.json `instructions`, which aimem does not
   // control.
   big: { mode: 'text', handoff: bigHandoff(), v2only: true },
+  // recall / norecall: a shell call fails with an SSH error; the plugin runs
+  // `aimem failure-recall`, the real binary named by AIMEM_E2E_AIMEM,
+  // against a fake store. A matching memory reaches the model; an
+  // unrelated one does not.
+  recall: { mode: 'shellfail', realAimem: true, memories: [{ id: 'm-pin', kind: 'solution',
+    text: 'ssh push refused: agent refused operation at the hardware key PIN prompt; pass -o PKCS11Provider=none so publickey works.' }] },
+  norecall: { mode: 'shellfail', realAimem: true, memories: [{ id: 'm-other', kind: 'fact',
+    text: 'The release workflow builds from tags reachable from master.' }] },
 };
+
+// The failing shell command of `shellfail`.
+const SHELL_FAILURE = "echo 'sign_and_send_pubkey: signing failed for ECDSA-SK from agent: agent refused operation' >&2; " +
+  "echo 'git@github.com: Permission denied (publickey).' >&2; exit 128";
+
+// fakeStore serves aimem's recall route on a Unix socket, with the same
+// canned memories for every scope, for the real `aimem failure-recall`.
+function fakeStore(memories) {
+  const dir = fs.mkdtempSync('/tmp/afs-');
+  const sock = path.join(dir, 's');
+  const server = http.createServer((req, res) => {
+    res.writeHead(200, { 'content-type': 'application/json' });
+    res.end(JSON.stringify({ memories: req.url.includes('/memories/recall') ? memories : [] }));
+  });
+  return new Promise(resolve => server.listen(sock, () => resolve({
+    sock, close: () => { server.close(); fs.rmSync(dir, { recursive: true, force: true }); },
+  })));
+}
 
 // bigHandoff is a handoff of about 20 KB: a head the model must get, then
 // history it must not.
@@ -108,6 +134,8 @@ function provider(mode, firstTokens, opts = {}) {
         handoff: text.includes('MARKER-HANDOFF'),
         handoffNote: text.includes('AIMEM HANDOFF'),
         handoffTail: text.includes('MARKER-TAIL'),
+        recall: text.includes('aimem recall for this failure'),
+        recallHit: text.includes('(memory m-pin)'),
         handoffLimit: text.includes('over the 8192-byte session-start limit') && text.includes('aimem handoff compact'),
         warning: text.includes("aimem: this session's context"),
       });
@@ -131,6 +159,10 @@ function provider(mode, firstTokens, opts = {}) {
         if (index === 1) tokens = firstTokens;
         const last = messages[messages.length - 1];
         if (mode === 'tool' && !(last && last.role === 'tool')) call = { name: 'glob', arguments: JSON.stringify({ pattern: '*.md' }) };
+        // The shell tool is `shell` in 2.x and `bash` in 1.x.
+        if (mode === 'shellfail' && !(last && last.role === 'tool')) {
+          call = { name: v2 ? 'shell' : 'bash', arguments: JSON.stringify({ command: SHELL_FAILURE, description: 'push' }) };
+        }
       }
       const answer = () => {
       const base = { id: 'c', object: 'chat.completion.chunk', created: Math.floor(Date.now() / 1000), model: 'mock' };
@@ -239,7 +271,10 @@ async function run(name, sc) {
   // plugin prefers (a development build).
   const bin = path.join(work, 'bin');
   fs.mkdirSync(bin);
-  const fakeAimem = '#!/bin/sh\n[ "$1" = submit ] && { cat; echo; } >> "$AIMEM_E2E_LOG"\nexit 0\n';
+  // `failure-recall` goes to the real binary when the scenario asks for it.
+  const fakeAimem = '#!/bin/sh\n[ "$1" = submit ] && { cat; echo; } >> "$AIMEM_E2E_LOG"\n' +
+    '[ "$1" = failure-recall ] && [ -n "$AIMEM_E2E_AIMEM" ] && exec "$AIMEM_E2E_AIMEM" failure-recall\nexit 0\n';
+  const store = sc.memories ? await fakeStore(sc.memories) : null;
   fs.writeFileSync(path.join(proj, 'docs', 'SESSION-STATE.md'), sc.handoff || '# Handoff\n\nMARKER-HANDOFF\n');
   const p = await provider(sc.mode, sc.first || 100, { delayFirstMs: sc.delayFirstMs, failFrom: sc.failFrom });
   fs.writeFileSync(path.join(proj, 'opencode.json'), JSON.stringify({
@@ -267,6 +302,7 @@ async function run(name, sc) {
     ...(process.env.HTTPS_PROXY ? { HTTPS_PROXY: process.env.HTTPS_PROXY } : {}),
     ...(process.env.NODE_EXTRA_CA_CERTS ? { NODE_EXTRA_CA_CERTS: process.env.NODE_EXTRA_CA_CERTS } : {}),
     ...(sc.env || {}),
+    ...(store ? { AIMEM_SOCKET: store.sock, AIMEM_E2E_AIMEM: process.env.AIMEM_E2E_AIMEM } : {}),
   };
   const args = ['run', ...(v2 ? ['--standalone', '--auto'] : []), 'say hi please'];
   // Async on purpose: the scripted provider runs in this process, so a
@@ -282,6 +318,7 @@ async function run(name, sc) {
   // Submits are detached; give the last one a moment to land.
   await new Promise(resolve => setTimeout(resolve, 1500));
   p.server.close();
+  if (store) store.close();
   const records = readSubmits(log);
   const submits = records.map(r => r.event);
   const turns = submits.filter(e => e.kind === 'turn');
@@ -339,6 +376,14 @@ async function run(name, sc) {
         assert.equal(failures[0].user_request, 'REQUEST-2');
         assert.notEqual(failures[0].idempotency_key, turns[0].idempotency_key);
         break;
+      case 'recall':
+        assert.ok(primaries.some(x => x.recall && x.recallHit), 'the failure recall never reached the model');
+        assert.equal(turns.length, 1, 'expected exactly one journaled turn');
+        break;
+      case 'norecall':
+        assert.ok(!p.requests.some(x => x.recall), 'an unrelated memory reached the model as a failure recall');
+        assert.equal(turns.length, 1, 'expected exactly one journaled turn');
+        break;
       case 'big':
         assert.ok(primaries.some(x => x.handoffLimit), 'the session-start limit note never reached the model');
         assert.ok(!p.requests.some(x => x.handoffTail), 'the handoff past the limit reached the model');
@@ -359,6 +404,10 @@ async function run(name, sc) {
   const wanted = process.argv.slice(3);
   const names = (wanted.length ? wanted : Object.keys(scenarios)).filter(n => {
     if (!scenarios[n]) throw new Error('unknown scenario ' + n);
+    if (scenarios[n].realAimem && !process.env.AIMEM_E2E_AIMEM) {
+      console.log(`  skip  ${n}  (set AIMEM_E2E_AIMEM to a real aimem binary for this platform)`);
+      return false;
+    }
     return v2 || !scenarios[n].v2only || wanted.includes(n);
   });
   console.log(`OpenCode ${version} (${v2 ? '2.x plugin path' : '1.x plugin path'})`);
