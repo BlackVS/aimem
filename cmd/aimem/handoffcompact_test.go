@@ -266,6 +266,15 @@ func TestHandoffCompactSummarize(t *testing.T) {
 		t.Fatalf("a dry run called the backend: %s", out)
 	}
 
+	// A handoff compact by the plain limits stays untouched with
+	// --summarize too, and the backend is not asked.
+	prompt = ""
+	small := strings.Repeat("- a current item\n", handoffLineLimit-10)
+	dir, handoff, _ = compactCheckout(t, small)
+	if out := runCompact(t, dir, env, "--summarize"); prompt != "" || !strings.Contains(out, "already compact") || readFile(t, handoff) != small {
+		t.Fatalf("--summarize cut a compact handoff: %s", out)
+	}
+
 	dir, handoff, archive = compactCheckout(t, body)
 	out = runCompact(t, dir, []string{"AIMEM_CURATE_BACKEND=openai", "AIMEM_CURATE_MODEL="}, "--summarize")
 	if !strings.Contains(out, "summary: not added (no curation backend") || strings.Contains(readFile(t, handoff), "## Summary") ||

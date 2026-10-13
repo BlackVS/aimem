@@ -42,11 +42,12 @@ func handoffCmd(args []string) error {
 		return fmt.Errorf("no handoff to compact: %w", err)
 	}
 	body := strings.TrimPrefix(string(raw), "\xef\xbb\xbf")
-	reserve := 0
+	var reserveLines, reserveBytes int
 	if *summarize {
-		reserve = handoffSummaryMaxLines + 3 // its heading and blank lines
+		// The summary block, with its heading and blank lines.
+		reserveLines, reserveBytes = handoffSummaryMaxLines+3, handoffSummaryMaxBytes+128
 	}
-	plan := planCompact(body, *lines-reserve, handoffInjectLimit-reserveBytes(*summarize))
+	plan := planCompact(body, *lines, handoffInjectLimit, reserveLines, reserveBytes)
 	archive := filepath.Join(filepath.Dir(*file), "SESSION-STATE-ARCHIVE.md")
 	if plan.marker && (countLines(plan.current) > *lines || len(plan.current) > handoffInjectLimit) {
 		fmt.Printf("warning: the current state above %s is %d lines, %d bytes, over %d lines or %d bytes; "+
@@ -113,13 +114,6 @@ func handoffCmd(args []string) error {
 	return nil
 }
 
-func reserveBytes(summarize bool) int {
-	if summarize {
-		return handoffSummaryMaxBytes + 128
-	}
-	return 0
-}
-
 // compactPlan is how compact splits a handoff. current is the new current
 // state without the marker line; moved is the history to archive, trimmed
 // of blank lines at either end ("" when nothing moves); first and last are
@@ -133,10 +127,11 @@ type compactPlan struct {
 
 // planCompact splits body. With the marker, everything below it moves.
 // Without one, a file within lineLimit and byteLimit stays as it is;
-// otherwise the current state is the head that fits the limits, ending
+// otherwise the current state is the head that fits the limits less the
+// reserve (room for a summary block), ending
 // before a heading or blank line where one falls in its second half, plus
 // a short trailing "Pick up here" section, and the rest moves.
-func planCompact(body string, lineLimit, byteLimit int) compactPlan {
+func planCompact(body string, lineLimit, byteLimit, reserveLines, reserveBytes int) compactPlan {
 	p := compactPlan{eol: "\n"}
 	if strings.Contains(body, "\r\n") {
 		p.eol = "\r\n"
@@ -168,8 +163,8 @@ func planCompact(body string, lineLimit, byteLimit int) compactPlan {
 	}
 	tailText := strings.Join(tail, "")
 	// The marker line and up to two blank lines are added around the tail.
-	budgetLines := lineLimit - len(tail) - 3
-	budgetBytes := byteLimit - len(tailText) - len(handoffMarker) - 3*len(p.eol)
+	budgetLines := lineLimit - reserveLines - len(tail) - 3
+	budgetBytes := byteLimit - reserveBytes - len(tailText) - len(handoffMarker) - 3*len(p.eol)
 	n, size := 0, 0
 	for n < len(pre) && n < budgetLines && size+len(pre[n]) <= budgetBytes {
 		size += len(pre[n])
