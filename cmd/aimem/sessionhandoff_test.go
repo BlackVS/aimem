@@ -114,6 +114,32 @@ func TestSessionStartInjectsAHandoffWithinTheLimitWhole(t *testing.T) {
 	}
 }
 
+// The OpenCode 2.x plugin injects the handoff with the same limit and the
+// same note as session start: one constant and one sentence in two
+// languages, pinned here so they cannot drift.
+func TestOpenCodePluginUsesTheSessionStartLimit(t *testing.T) {
+	b, err := os.ReadFile(filepath.Join("..", "..", ".opencode", "plugin", "aimem.ts"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	src := string(b)
+	if handoffInjectLimit != 8*1024 || !strings.Contains(src, "const HANDOFF_INJECT_LIMIT = 8 * 1024\n") {
+		t.Errorf("the plugin's HANDOFF_INJECT_LIMIT is not session start's %d bytes", handoffInjectLimit)
+	}
+	if strings.Contains(src, "HANDOFF_MAX_BYTES") {
+		t.Error("the plugin still has the old 64 KiB HANDOFF_MAX_BYTES")
+	}
+	note := handoffHead("docs/SESSION-STATE.md", strings.Repeat("a line of the handoff\n", 1000))
+	for _, part := range []string{
+		"-byte session-start limit; ",
+		"Read the file for the rest, and run `aimem handoff compact` to move its history to docs/SESSION-STATE-ARCHIVE.md, which is never injected.]",
+	} {
+		if !strings.Contains(note, part) || !strings.Contains(src, part) {
+			t.Errorf("session start and the plugin do not share %q", part)
+		}
+	}
+}
+
 // The installed guidance sends environment blockers to aimem's recall
 // before they are reported, as the session-start line does.
 func TestInstalledGuidanceSendsEnvironmentBlockersToRecall(t *testing.T) {

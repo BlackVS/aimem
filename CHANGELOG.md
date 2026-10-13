@@ -45,6 +45,19 @@ currently 24); a binary refuses a database newer than it understands.
 
 ### Fixed
 
+- **OpenCode 2.x injects the handoff with the session-start limit.** The
+  plugin's context hook, which runs on every model call, injected
+  `docs/SESSION-STATE.md` whole up to 64 KiB, and skipped a larger one
+  without a word. It now applies the limit of `aimem session-start`
+  (0.10.1): a handoff over 8 KiB is injected as its head, cut at the last
+  line break within the limit, followed by the same one-line note naming
+  the file, its size and `aimem handoff compact`. Only the head is read.
+  A Go test keeps the plugin's limit and note equal to session start's,
+  and the plugin's end-to-end check gains an oversized-handoff scenario.
+  OpenCode 1.x loads the handoff through `opencode.json` `instructions`,
+  whole and outside aimem's control; `docs/INSTALL-CLIENT.md` now says so,
+  and that the 50-line rule and `aimem handoff compact` keep it small
+  there.
 - **`aimem handoff compact` keeps the closing section under the names
   projects use.** It recognised the closing section only by the name
   "Pick up here". On a real 9530-line handoff whose closing section was

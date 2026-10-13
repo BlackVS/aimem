@@ -64,7 +64,20 @@ const scenarios = {
   // second: turn 1 succeeds, turn 2 fails; the failure must be journaled
   // under its own turn, not dropped as a repeat of turn 1.
   second: { mode: 'text', failFrom: 2, serve: 'second', v2only: true },
+  // big: a handoff over the 8 KiB session-start limit reaches the model as
+  // its head and the limit note, never whole and never skipped. 2.x only:
+  // 1.x loads it through opencode.json `instructions`, which aimem does not
+  // control.
+  big: { mode: 'text', handoff: bigHandoff(), v2only: true },
 };
+
+// bigHandoff is a handoff of about 20 KB: a head the model must get, then
+// history it must not.
+function bigHandoff() {
+  let s = '# Handoff\n\nMARKER-HANDOFF\n\n## History\n\n';
+  for (let i = 0; i < 400; i++) s += `- item ${i}: an old delivery line kept for the record\n`;
+  return s + '\nMARKER-TAIL\n';
+}
 
 // A scripted provider: `text` answers, `tool` calls glob once then
 // answers, `fail` rejects agent requests. `failFrom` rejects agent
@@ -94,6 +107,8 @@ function provider(mode, firstTokens, opts = {}) {
         compaction, primary: isPrimary,
         handoff: text.includes('MARKER-HANDOFF'),
         handoffNote: text.includes('AIMEM HANDOFF'),
+        handoffTail: text.includes('MARKER-TAIL'),
+        handoffLimit: text.includes('over the 8192-byte session-start limit') && text.includes('aimem handoff compact'),
         warning: text.includes("aimem: this session's context"),
       });
       if (isPrimary && ((mode === 'fail') || (opts.failFrom && index >= opts.failFrom))) {
@@ -225,7 +240,7 @@ async function run(name, sc) {
   const bin = path.join(work, 'bin');
   fs.mkdirSync(bin);
   const fakeAimem = '#!/bin/sh\n[ "$1" = submit ] && { cat; echo; } >> "$AIMEM_E2E_LOG"\nexit 0\n';
-  fs.writeFileSync(path.join(proj, 'docs', 'SESSION-STATE.md'), '# Handoff\n\nMARKER-HANDOFF\n');
+  fs.writeFileSync(path.join(proj, 'docs', 'SESSION-STATE.md'), sc.handoff || '# Handoff\n\nMARKER-HANDOFF\n');
   const p = await provider(sc.mode, sc.first || 100, { delayFirstMs: sc.delayFirstMs, failFrom: sc.failFrom });
   fs.writeFileSync(path.join(proj, 'opencode.json'), JSON.stringify({
     $schema: 'https://opencode.ai/config.json',
@@ -283,6 +298,7 @@ async function run(name, sc) {
     else assert.equal(r.status, 0, `opencode run exited ${r.status}`);
     assert.ok(p.requests.length > 0, 'the provider was never called');
     assert.ok(primaries.some(x => x.handoff), 'docs/SESSION-STATE.md never reached the model');
+    if (!sc.handoff) assert.ok(!p.requests.some(x => x.handoffLimit), 'a handoff within the limit got the limit note');
     for (const rec of records) {
       // Both generations name the LAUNCH directory as project_dir, also from
       // a subdirectory (a known gap, see docs/DESIGN-opencode-v2.md section 7);
@@ -322,6 +338,10 @@ async function run(name, sc) {
         assert.equal(failures.length, 1, 'the second turn\'s failure was not journaled');
         assert.equal(failures[0].user_request, 'REQUEST-2');
         assert.notEqual(failures[0].idempotency_key, turns[0].idempotency_key);
+        break;
+      case 'big':
+        assert.ok(primaries.some(x => x.handoffLimit), 'the session-start limit note never reached the model');
+        assert.ok(!p.requests.some(x => x.handoffTail), 'the handoff past the limit reached the model');
         break;
       case 'compact':
         assert.ok(p.requests.some(x => x.compaction && x.handoffNote), 'compaction request lacks the AIMEM HANDOFF note');

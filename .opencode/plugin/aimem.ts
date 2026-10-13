@@ -396,7 +396,37 @@ const AimemPlugin: Plugin = async ({ directory, client, $ }) => {
 // ---------------------------------------------------------------------------
 
 const HANDOFF_REL = path.join("docs", "SESSION-STATE.md")
-const HANDOFF_MAX_BYTES = 64 * 1024
+// HANDOFF_INJECT_LIMIT is the session-start limit of `aimem session-start`
+// (handoffInjectLimit in cmd/aimem/main.go; a Go test keeps the two equal).
+// The context hook runs on every model call, so a handoff that grows over
+// sessions would cost that much context each time.
+const HANDOFF_INJECT_LIMIT = 8 * 1024
+
+// handoffText is what the context hook injects for a handoff of `size`
+// bytes: the whole file within HANDOFF_INJECT_LIMIT; otherwise its head, cut
+// at the last line break within the limit, and the same one-line note
+// `aimem session-start` adds. Only the head is read from disk.
+function handoffText(file: string, size: number): string {
+  if (size <= HANDOFF_INJECT_LIMIT) return fs.readFileSync(file, "utf8").replace(/^\uFEFF/, "")
+  const buf = Buffer.alloc(HANDOFF_INJECT_LIMIT)
+  const fd = fs.openSync(file, "r")
+  let n = 0
+  try {
+    n = fs.readSync(fd, buf, 0, HANDOFF_INJECT_LIMIT, 0)
+  } finally {
+    fs.closeSync(fd)
+  }
+  let head = buf.subarray(0, n)
+  const nl = head.lastIndexOf(0x0a)
+  if (nl >= 0) head = head.subarray(0, nl + 1)
+  // Without a line break, drop a rune the cut split.
+  const text = head.toString("utf8").replace(/\uFFFD+$/, "")
+  const shown = Buffer.byteLength(text)
+  return text.replace(/^\uFEFF/, "").replace(/[\r\n]+$/, "") +
+    `\n\n[aimem: ${HANDOFF_REL} is ${size} bytes, over the ${HANDOFF_INJECT_LIMIT}-byte session-start limit; ` +
+    `only its first ${shown} bytes are shown. ` +
+    "Read the file for the rest, and run `aimem handoff compact` to move its history to docs/SESSION-STATE-ARCHIVE.md, which is never injected.]"
+}
 
 // handoffRoot finds the project directory that opted into loading the
 // handoff through opencode.json(c) `instructions` (what `aimem doctor` and
@@ -676,8 +706,8 @@ async function setupV2(ctx: any) {
         try {
           const file = path.join(root, HANDOFF_REL)
           const st = fs.statSync(file)
-          if (st.isFile() && st.size > 0 && st.size <= HANDOFF_MAX_BYTES) {
-            const body = fs.readFileSync(file, "utf8").replace(/^﻿/, "")
+          if (st.isFile() && st.size > 0) {
+            const body = handoffText(file, st.size)
             // Skip when the handoff is already present, e.g. once OpenCode
             // starts honoring `instructions` itself.
             if (body.trim() && !existing.includes(body.trim().slice(0, 200))) {
