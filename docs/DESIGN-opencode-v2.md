@@ -171,7 +171,13 @@ To match what the 1.x wiring did:
   `/tmp` or `/`. Paths are compared after resolving symlinks and, on
   Windows, folding case; the result is cached for 30 s;
 - read fresh on every request (the file changes during a session);
-  skipped when missing, empty or over 64 KiB;
+  skipped when missing or empty. A handoff over 8 KiB, the limit of
+  `aimem session-start`, is injected as its head, cut at the last line
+  break within the limit, followed by the same one-line note naming the
+  file, its size, the limit and `aimem handoff compact`; only the head is
+  read. (Before 0.10.3 a handoff up to 64 KiB was injected whole on every
+  request, and a larger one was skipped without a word.)
+  `docs/SESSION-STATE-ARCHIVE.md` is never injected;
 - skipped when the system prompt already contains it, so nothing is
   duplicated once OpenCode starts honoring `instructions`.
 
