@@ -234,7 +234,10 @@ func failureRecallContext(terms []string, hits []store.Memory) string {
 		if i == failureRecallHits {
 			break
 		}
-		text, _ := redact.String(strings.Join(strings.Fields(s.m.Text), " "), 64<<10)
+		// Redact the text as stored, before anything reshapes it: a known
+		// secret with inner whitespace would no longer match once flattened.
+		text, _ := redact.String(s.m.Text, 64<<10)
+		text = strings.Join(strings.Fields(text), " ")
 		if len(text) > failureRecallHitBytes {
 			text = strings.ToValidUTF8(text[:failureRecallHitBytes], "") + "…"
 		}
