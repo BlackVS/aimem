@@ -52,6 +52,16 @@ history. The session-start hook (Claude Code and Codex) injects at most
 the first 8 KiB of the handoff and then a one-line note that it was cut,
 so anything past that point does not reach the session.
 
+## Environment blockers
+
+Before you report a blocker caused by the environment (credentials, SSH,
+hardware keys, network, missing tools), recall aimem with the error's text
+(the `recall_memory` MCP tool, or `aimem recall -q "<error text>"`, adding
+`-u` for the user's own scope) and apply what it finds. Report the blocker
+only when nothing there resolves it, and say what you searched for. In
+Claude Code, `aimem failure-recall` already adds matching memories after a
+failed Bash command; read them before you decide.
+
 ## Project context
 
 <!-- Replace everything below with what an agent needs to know about THIS

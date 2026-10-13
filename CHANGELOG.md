@@ -15,6 +15,14 @@ currently 24); a binary refuses a database newer than it understands.
 
 ### Added
 
+- **The guidance sends environment blockers to aimem first.** Session
+  start (Claude Code and Codex) now carries one line, and the installed
+  `AGENTS.md` template a short "Environment blockers" section. Before
+  the agent reports a blocker caused by the environment (credentials,
+  SSH, hardware keys, network, missing tools), it recalls aimem with the
+  error's text and applies what it finds. A team conversation, where
+  recall is off, does not get the line. An existing project keeps its
+  own `AGENTS.md`, and gets the rule from the session-start line.
 - **A failed command recalls aimem before the agent reports it.** Agents
   reported environment blockers, such as a push refused because the SSH
   identity needed a hardware key's interactive PIN, although aimem held
