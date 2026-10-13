@@ -37,13 +37,18 @@ Fixed section order, hard cap ~50 lines, empty sections omitted, ends with
 a one-line "Pick up here". Reference code by path and commit — never paste
 it. Durable policy lives here, not in the handoff.
 
-The handoff holds only the current state. When an item is finished and no
-longer needed to continue, move it to `docs/SESSION-STATE-ARCHIVE.md`
-instead of letting the handoff grow. The archive is never injected into a
-session; read it only when you need the history. The session-start hook
-(Claude Code and Codex) injects at most the first 8 KiB of the handoff and
-then a one-line note that it was cut, so anything past that point does not
-reach the session.
+The handoff holds only the current state. Keep that state above the line
+`<!-- aimem: history below -->`; finished items that are no longer needed
+to continue go below it. Run `aimem handoff compact` to move everything
+below the line to `docs/SESSION-STATE-ARCHIVE.md` under a dated heading
+(without the line, it keeps the head within 50 lines and 8 KiB), instead
+of cutting the file by hand; `--summarize` also adds a short summary of
+what moved, written by the curation backend. At each milestone, rewrite
+the current state yourself; the command only moves history out. The
+archive is never injected into a session; read it only when you need the
+history. The session-start hook (Claude Code and Codex) injects at most
+the first 8 KiB of the handoff and then a one-line note that it was cut,
+so anything past that point does not reach the session.
 
 ## Project context
 
