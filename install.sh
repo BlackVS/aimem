@@ -20,6 +20,7 @@ OC_PLUGIN_DIR="${AIMEM_OC_PLUGIN_DIR:-$HOME/.config/opencode/plugins}"
 CODEX_HOME_DIR="${AIMEM_CODEX_HOME:-$HOME/.codex}"
 UNIT_DIR="${AIMEM_UNIT_DIR:-$HOME/.config/systemd/user}"
 SUBMIT_CMD='command -v aimem >/dev/null 2>&1 && aimem submit-claude || true'
+FAILURE_RECALL_CMD='command -v aimem >/dev/null 2>&1 && aimem failure-recall || true'
 # Codex space-splits hook commands and spawns them directly (no shell —
 # verified against codex-cli 0.153: quoted paths fail, shell operators
 # would too), so the command must be a bare program + args.
@@ -157,21 +158,23 @@ opencode_too_old() {
   [ "$major" -eq 0 ] || { [ "$major" -eq 1 ] && [ "$minor" -lt 18 ]; }
 }
 
+# BEGIN claude-hooks
 # Merge one checkpoint hook entry into a hooks config, keyed on the marker
 # string so re-runs and uninstalls find it. Never touches other hooks.
 # Claude Code's settings.json and Codex's hooks.json share this block shape.
-add_agent_hook() { # file event command status marker
-  local file=$1 event=$2 cmd=$3 status=$4 marker=$5
+add_agent_hook() { # file event command status marker [matcher]
+  local file=$1 event=$2 cmd=$3 status=$4 marker=$5 matcher=${6:-}
   mkdir -p "$(dirname "$file")"
   [ -s "$file" ] || echo '{}' > "$file"
   jq -e . "$file" >/dev/null || { echo "error: $file is not valid JSON; fix it first" >&2; exit 1; }
   local tmp
   tmp=$(mktemp)
-  jq --arg ev "$event" --arg cmd "$cmd" --arg st "$status" --arg mk "$marker" '
+  jq --arg ev "$event" --arg cmd "$cmd" --arg st "$status" --arg mk "$marker" --arg mt "$matcher" '
     .hooks[$ev] = ((.hooks[$ev] // []) |
       if ([.[] | .hooks[]? | .command // ""] | any(contains($mk)))
       then .
-      else . + [{"hooks":[{"type":"command","command":$cmd,"timeout":10,"statusMessage":$st}]}]
+      else . + [(if $mt == "" then {} else {"matcher":$mt} end) +
+        {"hooks":[{"type":"command","command":$cmd,"timeout":10,"statusMessage":$st}]}]
       end)' "$file" > "$tmp" && mv "$tmp" "$file"
 }
 
@@ -188,12 +191,13 @@ remove_claude_hooks() { # file
     if .hooks then
       .hooks |= with_entries(
         .value |= map(select(
-          ([.hooks[]? | .command // ""] | any(contains("aimem submit-claude"))) | not
+          ([.hooks[]? | .command // ""] | any(contains("aimem submit-claude") or contains("aimem failure-recall"))) | not
         ))
       ) | .hooks |= with_entries(select(.value | length > 0))
       | if (.hooks | length) == 0 then del(.hooks) else . end
     else . end' "$file" > "$tmp" && mv "$tmp" "$file"
 }
+# END claude-hooks
 
 remove_codex_hooks() { # file marker
   local file=$1 marker=$2
@@ -286,6 +290,8 @@ EOF
   add_claude_hook "$CLAUDE_SETTINGS" Stop        "$SUBMIT_CMD" "Checkpointing turn"
   add_claude_hook "$CLAUDE_SETTINGS" StopFailure "$SUBMIT_CMD" "Checkpointing failed turn"
   add_claude_hook "$CLAUDE_SETTINGS" PreCompact  "$SUBMIT_CMD" "Journaling compaction marker"
+  add_agent_hook "$CLAUDE_SETTINGS" PostToolUseFailure "$FAILURE_RECALL_CMD" \
+    "Recalling aimem for the failure" "aimem failure-recall" Bash
 
   local oc_old
   if oc_old=$(opencode_too_old); then

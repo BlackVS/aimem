@@ -74,6 +74,8 @@ func main() {
 		err = submitClaudeCmd()
 	case "submit-codex":
 		err = submitCodexCmd()
+	case "failure-recall":
+		err = failureRecallCmd()
 	case "spool-flush":
 		err = spoolFlushCmd()
 	case "export-events":
@@ -183,6 +185,10 @@ func usage() {
                              reads the hook payload on stdin
   submit-codex               Codex CLI Stop/PreCompact hook adapter:
                              reads the hook payload on stdin
+  failure-recall             Claude Code PostToolUseFailure hook for Bash:
+                             recalls memories that share the failed
+                             command's error terms and returns at most 3
+                             as context; silent when nothing matches
   spool-flush                replay spooled checkpoints into the service
   export-events [-p <proj>]  dump journal events as JSONL (all projects
                              unless -p); for backup and cross-machine sync

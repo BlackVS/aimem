@@ -48,7 +48,7 @@ and `iex` had nothing to run. Retry, or install from a checkout (section
 | Path | What |
 |---|---|
 | `~/.local/bin/aimem` (`%LOCALAPPDATA%\aimem\bin\aimem.exe`) | the single static binary: CLI, service, hub, MCP server, curator |
-| `~/.claude/settings.json` | `Stop`, `StopFailure`, `PreCompact` hooks running `aimem submit-claude` |
+| `~/.claude/settings.json` | `Stop`, `StopFailure`, `PreCompact` hooks running `aimem submit-claude`, and a `PostToolUseFailure` hook for `Bash` running `aimem failure-recall`: when a command fails, it recalls the project's and the user's memories with the error's distinctive words (redacted; paths, numbers and hashes left out) and gives the agent at most 3 that share enough of them (2 words, or 3 for an error of 8 words or more), at most 1500 bytes. It says nothing when none qualifies, when the local service is not running, or in a team conversation. |
 | `~/.config/opencode/plugins/aimem.ts` | the OpenCode plugin |
 | `~/.codex/hooks.json` | `Stop`, `PreCompact` hooks running `aimem submit-codex` |
 | `~/.codex/config.toml` | `[mcp_servers.aimem]` MCP registration (via `codex mcp add` when codex is on PATH) |
