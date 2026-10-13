@@ -13,6 +13,16 @@ currently 24); a binary refuses a database newer than it understands.
 
 ## [Unreleased]
 
+## [0.10.1] — 2026-10-13
+
+Session start no longer injects a growing handoff whole. `aimem
+session-start` injects at most the first 8 KiB of `docs/SESSION-STATE.md`
+and a one-line note when the file is longer. The installed `AGENTS.md`
+template says the handoff holds only the current state and history goes to
+`docs/SESSION-STATE-ARCHIVE.md`, which is never injected. No schema change
+and no breaking change: a 0.10.0 hub or workstation upgrades in place and
+rolls back in place. Includes PR #214.
+
 ### Fixed
 
 - **Session start injects at most 8 KiB of the handoff.** `aimem
