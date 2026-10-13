@@ -13,6 +13,22 @@ currently 24); a binary refuses a database newer than it understands.
 
 ## [Unreleased]
 
+## [0.10.3] — 2026-10-13
+
+Agents consult aimem before they report an environment blocker. A failed
+Bash command in Claude Code now brings back the stored memories that share
+its error's words, through a new user-level hook running `aimem
+failure-recall`. The installers wire that hook on the next client
+one-liner run: the 0.10.3 one-liner upgrades an older workstation and adds
+the hook to its Claude Code settings, while a binary swapped by hand or a
+hub-only install does not get it. Session start and the installed
+`AGENTS.md` template tell the agent to recall aimem with the error text
+before reporting such a blocker. The OpenCode 2.x plugin now injects the
+handoff with the 8 KiB limit of `aimem session-start`, and `aimem handoff
+compact` keeps a closing section under any of six common names. No schema
+change and no breaking change: a 0.10.2 hub or workstation upgrades in
+place and rolls back in place. Includes PR #218 to #221.
+
 ### Added
 
 - **The guidance sends environment blockers to aimem first.** Session
