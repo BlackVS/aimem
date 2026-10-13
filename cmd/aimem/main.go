@@ -535,6 +535,9 @@ func sessionStartCmd(args []string) error {
 	// The rule for kept text (docs/WRITING-PERSISTED-TEXT.md) also covers the
 	// Markdown files an agent saves, which no write tool's description reaches.
 	ctx += writingNotice
+	// Remedies for environment failures are what aimem most often holds and
+	// agents least often ask for.
+	ctx += environmentNotice
 	return json.NewEncoder(os.Stdout).Encode(map[string]any{
 		"hookSpecificOutput": map[string]any{
 			"hookEventName":     "SessionStart",
@@ -573,6 +576,15 @@ func handoffHead(path, body string) string {
 const writingNotice = "\n\naimem: text you keep is read later by people and sessions without this conversation. " +
 	"In the Markdown files you save and in what you send to aimem's write tools, write complete, normally spaced sentences " +
 	"and keep code, paths and IDs exact; the full rule is the writing_rule MCP tool."
+
+// environmentNotice is the session-start line that sends the agent to
+// aimem before it reports a blocker the environment caused: agents reported
+// a push refused for a hardware key's PIN prompt, although aimem held the
+// SSH option that avoids it, and found it only when told to look. The
+// installed AGENTS.md template states the same rule.
+const environmentNotice = "\n\naimem: before you report a blocker caused by the environment (credentials, SSH, hardware keys, " +
+	"network, missing tools), recall aimem with the error's text (the recall_memory MCP tool, or `aimem recall -q`) " +
+	"and apply what it finds; report the blocker only when nothing there resolves it."
 
 // mergePreviewNotice is the offline conflict beacon (DESIGN-doc-collab):
 // a <file>.merge preview left by sync's reconcile means hub and this
