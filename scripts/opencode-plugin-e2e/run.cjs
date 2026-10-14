@@ -338,8 +338,8 @@ async function run(name, sc) {
     if (!sc.handoff) assert.ok(!p.requests.some(x => x.handoffLimit), 'a handoff within the limit got the limit note');
     for (const rec of records) {
       // Both generations name the LAUNCH directory as project_dir, also from
-      // a subdirectory (a known gap, see docs/DESIGN-opencode-v2.md section 7);
-      // this pins that parity rather than endorsing it.
+      // a subdirectory; the service resolves it to the directory whose
+      // .aimem.json governs it (docs/DESIGN-opencode-v2.md section 7).
       assert.equal(fs.realpathSync(rec.project_dir), fs.realpathSync(cwd), 'submit names the wrong project');
       assert.equal(rec.event.client, 'opencode');
       assert.ok(rec.event.idempotency_key.startsWith(`opencode:${rec.event.session_id}:`));

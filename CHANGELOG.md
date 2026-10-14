@@ -13,6 +13,28 @@ currently 24); a binary refuses a database newer than it understands.
 
 ## [Unreleased]
 
+### Fixed
+
+- **A session in a git worktree or a subdirectory journals under the
+  pinned project.** `.aimem.json` was read only in the directory a hook,
+  `aimem project-id`, `session-start` or the MCP server ran in. A linked
+  worktree has no copy of the file when it is gitignored, and a
+  subdirectory has none, so such sessions journaled under a derived twin
+  id (the git remote plus a hash) on the machine's default hub, silently,
+  while the pinned project's journal, handoff and recall went stale. Now
+  every caller resolves the governing file the same way: the nearest
+  `.aimem.json` up to the checkout's top, then, from a linked worktree,
+  the main checkout's, found through the worktree's `.git` and
+  `commondir` files with no git binary. The pin, hub binding and groups
+  travel together, and bound documents are read where that file lives. A
+  directory with its own `.aimem.json` keeps it; a nested checkout stops
+  the search; outside any checkout nothing changes. The OpenCode plugin
+  still sends its launch directory and the service resolves it. Task
+  credentials keep the per-checkout rule: a subdirectory uses its
+  checkout's, and a worktree whose main checkout requires a local task
+  credential refuses until the worktree is configured itself. Events
+  already journaled under a twin id stay there.
+
 ## [0.10.4] — 2026-10-14
 
 On macOS the client one-liner now runs aimem as a service. It registers two

@@ -504,6 +504,13 @@ func sessionStartCmd(args []string) error {
 	p := filepath.Join("docs", "SESSION-STATE.md")
 	if len(args) > 0 {
 		p = args[0]
+	} else if _, err := os.Stat(p); err != nil {
+		// A session launched in a subdirectory or a linked worktree reads
+		// the handoff of the project whose .aimem.json governs it; a
+		// checkout's own handoff file still comes first.
+		if dir := ident.ProjectDir("."); dir != "." {
+			p = filepath.Join(dir, p)
+		}
 	}
 	ctx := ""
 	team := teamsession.Active()
@@ -596,8 +603,9 @@ const environmentNotice = "\n\naimem: before you report a blocker caused by the 
 // Purely local — session start gains no network dependency.
 func mergePreviewNotice() string {
 	var b strings.Builder
-	for _, rel := range ident.ProjectDocs(".") {
-		if _, err := os.Stat(filepath.FromSlash(rel) + ".merge"); err == nil {
+	dir := ident.ProjectDir(".")
+	for _, rel := range ident.ProjectDocs(dir) {
+		if _, err := os.Stat(filepath.Join(dir, filepath.FromSlash(rel)) + ".merge"); err == nil {
 			fmt.Fprintf(&b, "\n\nATTENTION: %s.merge holds an unresolved shared-document merge preview — the hub and this machine both changed %s. Run `aimem docs merge %s`, resolve any <<<<<<< markers in the bound file, and the next checkpoint publishes it (the .merge preview is removed by a completed merge).",
 				rel, rel, ident.DocName(rel))
 		}

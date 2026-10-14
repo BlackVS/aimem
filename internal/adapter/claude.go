@@ -106,6 +106,10 @@ func BuildClaudeEvent(raw []byte) (*Payload, error) {
 	if dir == "" {
 		dir = "."
 	}
+	// A session standing in a subdirectory or a linked worktree belongs to
+	// the project whose .aimem.json governs it, and its bound files live
+	// there too.
+	dir = ident.ProjectDir(dir)
 	pid, err := ident.ProjectID(dir)
 	if err != nil {
 		return nil, err

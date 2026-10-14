@@ -115,6 +115,12 @@ into memories.
   `.aimem.json` `{"hub":"home"}` routes this project's data to that hub
   only; no `hub` key = the machine's default hub (`aimem hub` lists
   them, see ADMIN-MANUAL 3d).
+- **where `.aimem.json` is read** — a session started in a subdirectory
+  or in a linked git worktree uses the nearest `.aimem.json` up to the
+  checkout's top, or else the main checkout's, so its project id, hub
+  binding and groups are the checkout's own (`aimem project-id` prints
+  the result); a nested checkout stops the search, and outside any
+  checkout only the directory's own file counts.
 
 ## The handoff file (`docs/SESSION-STATE.md`)
 

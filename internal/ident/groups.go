@@ -71,10 +71,11 @@ func SessionFactsBudget(dir string) int {
 // "absent" for "default hub", and reads through the strict variant.
 var ErrConfigUnreadable = errors.New(".aimem.json exists but cannot be parsed")
 
-// loadConfig reads and parses the config file: absent is an empty config,
-// unparseable is ErrConfigUnreadable.
+// loadConfig reads and parses the config file that governs dir (see
+// ProjectDir): absent is an empty config, unparseable is
+// ErrConfigUnreadable.
 func loadConfig(dir string) (*projectConfig, error) {
-	raw, err := os.ReadFile(filepath.Join(dir, ".aimem.json"))
+	raw, err := os.ReadFile(filepath.Join(ProjectDir(dir), ".aimem.json"))
 	if os.IsNotExist(err) {
 		return &projectConfig{}, nil
 	}
@@ -104,7 +105,7 @@ func readConfig(dir string) (*projectConfig, error) {
 		warnBadConfig.Do(func() {
 			fmt.Fprintf(os.Stderr,
 				"aimem: %s unreadable (%v) — treated as absent; project pin, hub binding and groups are inactive until the file is fixed\n",
-				filepath.Join(dir, ".aimem.json"), err)
+				filepath.Join(ProjectDir(dir), ".aimem.json"), err)
 		})
 		return &projectConfig{}, nil
 	}
@@ -193,8 +194,9 @@ const DefaultDocPath = "docs/SESSION-STATE.md"
 
 // ProjectDocs returns the project-relative paths of the files bound as
 // shared documents: the default handoff when present, plus any declared in
-// .aimem.json. Paths must stay inside the project — a binding is a name
-// on the hub, and "../../etc/passwd" must never become one. Malformed
+// .aimem.json, relative to ProjectDir(dir), not to dir. Paths must stay
+// inside the project — a binding is a name on the hub, and
+// "../../etc/passwd" must never become one. Malformed
 // config yields only the default binding (fail-open, like checkpoints).
 func ProjectDocs(dir string) []string {
 	cfg, err := readConfig(dir)
@@ -209,7 +211,7 @@ func ProjectDocs(dir string) []string {
 		return nil
 	}
 	var out []string
-	if _, err := os.Stat(filepath.Join(dir, filepath.FromSlash(DefaultDocPath))); err == nil {
+	if _, err := os.Stat(filepath.Join(ProjectDir(dir), filepath.FromSlash(DefaultDocPath))); err == nil {
 		out = append(out, DefaultDocPath)
 	}
 	for _, p := range cfg.Docs {

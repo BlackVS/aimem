@@ -291,8 +291,9 @@ conflict. Declare bindings in .aimem.json {"collections":[{"name","scope","rende
 		}
 		target := *out
 		if target == "" {
-			if b := binding(name); b != nil {
-				target = b.Render
+			if b := binding(name); b != nil && b.Render != "" {
+				// Render paths are relative to the governing .aimem.json.
+				target = filepath.Join(ident.ProjectDir(dir), filepath.FromSlash(b.Render))
 			}
 		}
 		recs, err := c.ListHubRecords(hub, p, name, true)
