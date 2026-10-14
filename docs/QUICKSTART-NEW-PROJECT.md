@@ -217,9 +217,11 @@ the project's identity, its hub, and the design documents to share:
   paths. The handoff, `docs/SESSION-STATE.md`, is shared without being
   listed.
 
-On Windows, write the file without a byte order mark, which aimem cannot
-read. `Set-Content -Encoding ascii` does that; an editor's "UTF-8 with
-BOM" does not.
+On Windows, save the file as UTF-8, with or without a byte order mark;
+`Set-Content -Encoding ascii` or `-Encoding UTF8` both do. Do not write it
+with `Out-File` or `>` in Windows PowerShell 5.1: they write UTF-16, which
+aimem cannot read. It then warns that `.aimem.json` is unreadable and
+treats the file as absent.
 
 Commit `.aimem.json` and the other wired files if the project is tracked.
 
@@ -276,7 +278,7 @@ was installed, is never used on a workstation.
 |---|---|
 | `aimem health` cannot connect | macOS: start `aimem serve` (step 3.1). Linux: `systemctl --user status aimem`. Windows: the `aimem-serve` scheduled task. |
 | `aimem hub add` refuses the token file | The file is readable by other accounts; the error names the command that restricts it. |
-| `aimem project-id .` prints a hash-suffixed ID | `.aimem.json` has no `project` field, or is not valid JSON (on Windows, often a byte order mark). |
+| `aimem project-id .` prints a hash-suffixed ID | `.aimem.json` has no `project` field, or aimem warns that it is unreadable: the JSON is not valid, or the file is not UTF-8 (on Windows, often UTF-16 from `Out-File` or `>`). |
 | `aimem docs list` says no shared documents | Run `aimem docs push`; check that the `docs` paths exist and that `hub` names the hub you added. |
 | The agent has no task tools | Start a new session; check `aimem hub credential team` and that tasks are on for the project on the hub. |
 | Task reads work but writes fail | The user's grant on `my-project`, and that the token is the user task token, not the writer token. |
