@@ -83,18 +83,22 @@ func synopsisHead(s string) string {
 // the leading "usage:" and "aimem " removed.
 func usageForms(text, cmd string) []usageForm {
 	var forms []usageForm
-	cur := -1
+	cur, curIndent := -1, 0
 	for _, line := range strings.Split(text, "\n") {
+		indent := len(line) - len(strings.TrimLeft(line, " "))
 		s := strings.TrimSpace(line)
 		s = strings.TrimSpace(strings.TrimPrefix(s, "usage:"))
 		s = strings.TrimPrefix(s, "aimem ")
 		first, _, _ := strings.Cut(s, " ")
 		if s != "" && hasAlternative(first, cmd) {
 			forms = append(forms, usageForm{head: synopsisHead(s), full: s})
-			cur = len(forms) - 1
+			cur, curIndent = len(forms)-1, indent
 			continue
 		}
-		if cur >= 0 && s != "" && line != strings.TrimLeft(line, " ") {
+		// A continuation is indented deeper than its form's row; a row at
+		// the same depth is the next command, whose flags are not this
+		// form's.
+		if cur >= 0 && s != "" && indent > curIndent {
 			forms[cur].full += " " + s
 			continue
 		}
@@ -212,6 +216,8 @@ func TestCheckAgainstUsageRefusesDrift(t *testing.T) {
 		"aimem hub credential team",
 		"aimem health",
 		"aimem session-start",
+		// --expires and --output are on the form's continuation row.
+		"aimem access token-issue --user-name u --label l --project p --expires x --output f",
 	} {
 		if err := checkAgainstUsage(c); err != nil {
 			t.Errorf("%s: %v", c, err)
@@ -227,6 +233,8 @@ func TestCheckAgainstUsageRefusesDrift(t *testing.T) {
 		"aimem tasks enable -p p",                      // tasks takes on|off
 		"aimem frobnicate",                             // no such command
 		"aimem health --json",                          // health takes no flag
+		"aimem health --project p",                     // a flag of the next row (project repo)
+		"aimem tasks on --sim 0.9",                     // a flag of a later row (dedup)
 		"aimem hub task-token team --token-file f --x", // an unknown flag at the end
 	} {
 		if err := checkAgainstUsage(c); err == nil {
