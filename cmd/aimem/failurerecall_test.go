@@ -220,6 +220,25 @@ func TestFailureRecallOverlap(t *testing.T) {
 	}
 }
 
+// A long error is redacted whole before the query's size cap applies, so a
+// credential assignment that straddles any cut point never reaches the
+// query: the OpenCode plugin sends the whole text for this reason.
+func TestFailureQueryTermsRedactsBeforeTheCap(t *testing.T) {
+	secret := "qzwxecrvtbynumiqzwxecrvtbynumiopl" // 33 lowercase letters, not hex
+	for _, pad := range []int{40000, 64<<10 - len("password="), 64<<10 - len("password=") - 4, 64 << 10, 70000} {
+		// The text after the value is 32 KiB less the value itself, so a cut
+		// keeping the last 32 KiB would start exactly at the value.
+		tail := "\nagent refused operation publickey\n"
+		text := "Exit code 1\n" + strings.Repeat(" ", pad) + "password=" + secret +
+			strings.Repeat(" ", 32<<10-len(secret)-len(tail)) + tail
+		for _, term := range failureQueryTerms(text) {
+			if strings.Contains(term, secret[:16]) {
+				t.Fatalf("pad %d: the secret reached the query: %q", pad, term)
+			}
+		}
+	}
+}
+
 func TestFailureQueryTerms(t *testing.T) {
 	got := failureQueryTerms("Exit code 1\nerror: cannot open /var/lib/app/data-7f3a9c21e.db: permission denied (errno 13)\nsee https://user@example.org/path/x for more\n")
 	want := []string{"open", "data-7f3a9c21e.db", "permission", "denied", "errno", "example.org"}
@@ -238,5 +257,25 @@ func TestFailureQueryTerms(t *testing.T) {
 	}
 	if got := failureQueryTerms("Exit code 1\n"); len(got) != 0 {
 		t.Errorf("an error without text gave terms %q", got)
+	}
+}
+
+// The OpenCode plugin hands the failure to this command whole: it skips an
+// oversized one rather than cut it, so redaction always sees the full
+// context (a cut can separate `password=` from its value).
+func TestOpenCodePluginSendsTheWholeFailure(t *testing.T) {
+	b, err := os.ReadFile(filepath.Join("..", "..", ".opencode", "plugin", "aimem.ts"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	src := string(b)
+	if !strings.Contains(src, `spawn(aimemBin(directory), ["failure-recall"]`) {
+		t.Error("the plugin no longer runs `aimem failure-recall`")
+	}
+	if !strings.Contains(src, `if (Buffer.byteLength(errorText) > FAILURE_TEXT_MAX) return Promise.resolve("")`) {
+		t.Error("the plugin no longer skips an oversized failure")
+	}
+	if strings.Contains(src, "errorText.slice") || strings.Contains(src, "errorText.substring") {
+		t.Error("the plugin cuts the failure text before the command redacts it")
 	}
 }

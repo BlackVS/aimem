@@ -107,9 +107,13 @@ const HANDOFF_NOTE =
 // (development), else PATH (user-level install via install.sh). `$` is
 // the V1 Bun shell helper; V2 has none, so without it the spawn goes
 // through node:child_process with the same detach semantics.
-function makePoster(directory: string, $?: any) {
+function aimemBin(directory: string): string {
   const localBin = `${directory}/aimem${process.platform === "win32" ? ".exe" : ""}`
-  const bin = fs.existsSync(localBin) ? localBin : "aimem"
+  return fs.existsSync(localBin) ? localBin : "aimem"
+}
+
+function makePoster(directory: string, $?: any) {
+  const bin = aimemBin(directory)
   return async (payload: unknown) => {
     try {
       if (bin.includes("/") && !fs.existsSync(bin)) return false
@@ -149,6 +153,73 @@ function makePoster(directory: string, $?: any) {
       return false
     }
   }
+}
+
+// SHELL_TOOLS are the shell tools whose failures are recalled: `bash` in
+// OpenCode 1.x, `shell` in 2.x (observed on 1.18.32 and 2.0.18).
+const SHELL_TOOLS = new Set(["bash", "shell"])
+// FAILURE_RECALL_TIMEOUT_MS bounds one recall; the command bounds its own
+// lookup at 2 s, so this only guards a stuck process.
+const FAILURE_RECALL_TIMEOUT_MS = 5000
+// FAILURE_TEXT_MAX bounds the error text sent to the command, whose input
+// limit is 1 MiB. A longer failure is not recalled at all: the plugin
+// never cuts the text itself, because a cut can separate a secret from the
+// context the redactor recognises it by (`password=` from its value). The
+// command redacts the whole text first and caps it after.
+const FAILURE_TEXT_MAX = 512 * 1024
+
+// recallFailure runs `aimem failure-recall`, the Claude Code hook (#219),
+// with the failure as that hook's payload, and returns the context it
+// prints, or "" when it prints nothing, fails or times out. The query,
+// redaction, matching and bounds all live in the Go command, so the plugin
+// carries no copy of them; it never fails the session.
+function recallFailure(directory: string, errorText: string): Promise<string> {
+  if (Buffer.byteLength(errorText) > FAILURE_TEXT_MAX) return Promise.resolve("")
+  return new Promise((resolve) => {
+    let out = ""
+    let done = false
+    const finish = (v: string) => {
+      if (!done) {
+        done = true
+        resolve(v)
+      }
+    }
+    try {
+      const child = spawn(aimemBin(directory), ["failure-recall"], { stdio: ["pipe", "pipe", "ignore"], windowsHide: true })
+      const timer = setTimeout(() => {
+        child.kill()
+        finish("")
+      }, FAILURE_RECALL_TIMEOUT_MS)
+      child.on("error", () => {
+        clearTimeout(timer)
+        finish("")
+      })
+      child.stdout.on("data", (c: Buffer) => {
+        if (out.length < 64 * 1024) out += c.toString("utf8")
+      })
+      child.on("close", () => {
+        clearTimeout(timer)
+        try {
+          const ctx = JSON.parse(out)?.hookSpecificOutput?.additionalContext
+          finish(typeof ctx === "string" ? ctx : "")
+        } catch {
+          finish("")
+        }
+      })
+      child.stdin.on("error", () => {})
+      child.stdin.end(
+        JSON.stringify({
+          hook_event_name: "PostToolUseFailure",
+          tool_name: "Bash",
+          error: errorText,
+          is_interrupt: false,
+          cwd: directory,
+        }),
+      )
+    } catch {
+      finish("")
+    }
+  })
 }
 
 // turnPayload and markerPayload are the two journal events both plugin
@@ -312,6 +383,20 @@ const AimemPlugin: Plugin = async ({ directory, client, $ }) => {
   }
 
   return {
+    // A failed shell call: the recall goes into the tool's own output,
+    // which is what 1.x hands the model next.
+    "tool.execute.after": async (input: any, output: any) => {
+      try {
+        const exit = output?.metadata?.exit
+        if (!SHELL_TOOLS.has(input?.tool) || typeof exit !== "number" || exit === 0) return
+        if (typeof output.output !== "string") return
+        const ctx = await recallFailure(directory, `Exit code ${exit}\n${output.output}`)
+        if (ctx) output.output += `\n\n${ctx}`
+      } catch (e) {
+        console.error("aimem failure recall:", e)
+      }
+    },
+
     // Deterministic pointer injection at compaction time (Phase 4). Only
     // ever APPEND to an existing prompt or context list — replacing
     // output.prompt wholesale would clobber the default compaction prompt.
@@ -493,6 +578,8 @@ const HANDLED = new Set([
   "session.inbox.delivered",
   "session.text.ended",
   "session.tool.input.started",
+  "session.tool.success",
+  "session.tool.failed",
   "session.step.ended",
   "session.execution.succeeded",
   "session.execution.failed",
@@ -555,6 +642,8 @@ async function setupV2(ctx: any) {
   const anchors = new Map<string, string>() // sessionID -> latest assistant message id, for markers
   const used = new Map<string, number>() // sessionID -> context tokens of the last model step
   const ctxWarnedStep = new Map<string, number>() // sessionID -> last logged 5%-step
+  const toolNames = new Map<string, string>() // sessionID + call id -> tool name (call ids repeat across sessions)
+  const recalls = new Map<string, Promise<string>[]>() // sessionID -> failure recalls not yet injected
 
   // The wiring changes rarely; re-check it at most every 30 s rather than
   // reading up to four config files per level on every model request.
@@ -701,6 +790,15 @@ async function setupV2(ctx: any) {
       if (!sid || !Array.isArray(e?.system) || !(await mine(sid))) return
       const existing = e.system.map((p: any) => (typeof p?.text === "string" ? p.text : "")).join("\n")
 
+      // Failure recalls started since the last request go in once.
+      const pendingRecalls = recalls.get(sid)
+      if (pendingRecalls) {
+        recalls.delete(sid)
+        for (const text of await Promise.all(pendingRecalls)) {
+          if (text) e.system.push({ type: "text", text })
+        }
+      }
+
       const root = wiredRoot()
       if (root) {
         try {
@@ -812,6 +910,33 @@ async function setupV2(ctx: any) {
       case "session.tool.input.started": {
         const t = turn(sid)
         if (typeof d.name === "string" && !t.tools.includes(d.name)) t.tools.push(d.name)
+        if (typeof d.id === "string" && typeof d.name === "string") toolNames.set(`${sid}/${d.id}`, d.name)
+        break
+      }
+      case "session.tool.success":
+      case "session.tool.failed": {
+        // A shell call that exited non-zero (2.x reports it as a success
+        // with metadata.exit) or failed outright: recall aimem with it, for
+        // the context hook to inject before the next model request.
+        const name = toolNames.get(`${sid}/${d.id}`)
+        toolNames.delete(`${sid}/${d.id}`)
+        if (!name || !SHELL_TOOLS.has(name)) break
+        let text = ""
+        if (type === "session.tool.failed") {
+          text = String(d.error?.message ?? "")
+        } else {
+          const exit = d.metadata?.exit
+          if (typeof exit !== "number" || exit === 0) break
+          const output = (Array.isArray(d.content) ? d.content : [])
+            .map((c: any) => (typeof c?.text === "string" ? c.text : ""))
+            .filter((t: string) => !/^Exited with code -?\d+$/.test(t.trim()))
+            .join("\n")
+          text = `Exit code ${exit}\n${output}`
+        }
+        if (!text.trim()) break
+        const list = recalls.get(sid) ?? []
+        list.push(recallFailure(directory, text))
+        recalls.set(sid, list)
         break
       }
       case "session.step.ended": {
@@ -823,10 +948,12 @@ async function setupV2(ctx: any) {
         break
       }
       case "session.execution.succeeded":
+        recalls.delete(sid) // never carried into the next turn
         await submit(sid, "ok")
         break
       case "session.execution.failed":
       case "session.execution.interrupted":
+        recalls.delete(sid)
         await submit(sid, "failed")
         break
       case "session.compaction.started":
