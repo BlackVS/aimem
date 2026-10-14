@@ -15,6 +15,18 @@ currently 24); a binary refuses a database newer than it understands.
 
 ### Added
 
+- **A quickstart for one new project on a fresh workstation.**
+  `docs/QUICKSTART-NEW-PROJECT.md` takes an operator from a hub that
+  already runs to a project on a new macOS, Linux or Windows machine with
+  tasks, the session handoff and shared design documents. It covers the
+  three names to decide, the hub-side commands (a writer token, tasks
+  on, the user, the grant, the user task token), the workstation
+  commands in order (the one-liner, `aimem hub add --token-file`,
+  `aimem hub task-token`, `.aimem.json` with `docs` bound), the order to
+  verify in, and how the two secrets move and are revoked. A test checks
+  every `aimem` command in the guide against the CLI's usage text, so a
+  renamed subcommand or flag fails the build instead of the operator's
+  run. QUICKSTART and README link to it.
 - **OpenCode gets the failure recall too.** When a shell call fails, the
   OpenCode plugin runs `aimem failure-recall` (#219) with the failure and
   gives the model what it prints: at most 3 stored memories that share

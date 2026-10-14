@@ -11,6 +11,7 @@ package main
 import (
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"flag"
 	"fmt"
 	"os"
@@ -23,15 +24,18 @@ import (
 	"aimem/internal/store"
 )
 
-func docsCmd(args []string) error {
-	if len(args) == 0 {
-		return fmt.Errorf(`usage: aimem docs <list|sync|push|pull|diff|merge|log|rm> [name] [--force]
+// docsUsage is the usage text of `aimem docs`.
+const docsUsage = `usage: aimem docs <list|sync|push|pull|diff|merge|log|rm> [name] [--force]
 
 Shared documents: whole files (the handoff, runbooks) versioned on the
 project's hub with compare-and-swap. Bound files (docs/SESSION-STATE.md
 by default, plus .aimem.json "docs" entries) publish automatically on
 every checkpoint; these commands are for deliberate moments. "sync"
-runs the periodic reconcile (pull / clean-merge / push) right now.`)
+runs the periodic reconcile (pull / clean-merge / push) right now.`
+
+func docsCmd(args []string) error {
+	if len(args) == 0 {
+		return errors.New(docsUsage)
 	}
 	sub, rest := args[0], args[1:]
 	force := false

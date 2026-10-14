@@ -172,8 +172,9 @@ func main() {
 	}
 }
 
-func usage() {
-	fmt.Fprint(os.Stderr, `usage: aimem <command> [flags]
+// mainUsage is the top-level usage text; docs tests check documented
+// commands against it.
+const mainUsage = `usage: aimem <command> [flags]
 
   -p is the alias of --project on every command that takes a project.
 
@@ -315,7 +316,10 @@ func usage() {
 
 env: AIMEM_STATE_DIR overrides the state root
      AIMEM_SECRET_ENV: comma-separated env var names whose values are scrubbed
-`)
+`
+
+func usage() {
+	fmt.Fprint(os.Stderr, mainUsage)
 }
 
 func serve() error {
@@ -2277,7 +2281,17 @@ func embedProjects(reg *store.Registry, c *embed.Client, projects []string, batc
 	return nil
 }
 
+// hubUsage is the usage text of `aimem hub`.
+const hubUsage = `usage: aimem hub <url> <token>                      set/replace the default hub
+       aimem hub add <name> <url> (<token> | --token-file PATH|-) [--sync <ssh-dest>] [--default] [--ca-file PATH | --pin sha256-BASE64]
+       aimem hub rm <name>
+       aimem hub default <name>
+       aimem hub repair                                 rewrite hub.json owner-only, changing nothing else
+       aimem hub task-token <name> (<ordinary-token> | --token-file PATH|-)   credential the MCP task tools present to this hub
+       aimem hub credential [<name>] [--json]         whether an individual credential is set, and the hub's answer for it (no secret)`
+
 func hubCmd(args []string) error {
+	usage := hubUsage
 	root := stateRoot()
 	// `hub list` is what both humans and agents guess first — alias it.
 	if len(args) == 1 && (args[0] == "list" || args[0] == "ls") {
@@ -2323,13 +2337,6 @@ func hubCmd(args []string) error {
 		}
 		return nil
 	}
-	usage := `usage: aimem hub <url> <token>                      set/replace the default hub
-       aimem hub add <name> <url> (<token> | --token-file PATH|-) [--sync <ssh-dest>] [--default] [--ca-file PATH | --pin sha256-BASE64]
-       aimem hub rm <name>
-       aimem hub default <name>
-       aimem hub repair                                 rewrite hub.json owner-only, changing nothing else
-       aimem hub task-token <name> (<ordinary-token> | --token-file PATH|-)   credential the MCP task tools present to this hub
-       aimem hub credential [<name>] [--json]         whether an individual credential is set, and the hub's answer for it (no secret)`
 	switch args[0] {
 	case "credential":
 		return hubCredentialCmd(args[1:], os.Stdout)
