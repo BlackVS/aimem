@@ -13,6 +13,37 @@ currently 24); a binary refuses a database newer than it understands.
 
 ## [Unreleased]
 
+## [0.10.5] — 2026-10-15
+
+A session started in a linked git worktree or in a subdirectory of a
+checkout now journals under the project its `.aimem.json` pins, on the
+hub that file binds. Before, `.aimem.json` was read only in the directory
+the hook or command ran in, so such sessions silently journaled under a
+derived twin id on the machine's default hub while the pinned project's
+journal, handoff and recall went stale. The hooks, `aimem project-id`,
+`session-start`, the MCP server and the OpenCode submit path now resolve
+the governing file the same way, without a git binary. The new-project
+quickstart covers a setup resumed after a pause, the two "aimem" Login
+Items on macOS and an optional step that installs the agent skills. No
+schema change and no hub change. Includes PR #228 and #229.
+
+### Upgrade notes
+
+- **No schema change and no hub change.** Hubs may stay on 0.10.4.
+- **Workstations: the client one-liner, then restart the agent
+  sessions.** The identity fix lives in the client binary, the hooks and
+  the submit path. Every workstation whose sessions run from a linked
+  worktree or a subdirectory needs the 0.10.5 client one-liner, then a
+  restart of its agent sessions, so the hooks and the MCP server load the
+  new binary.
+- **Events already journaled under a twin id stay there.** They are not
+  migrated to the pinned project.
+- **A worktree that inherits a local task credential requirement
+  refuses.** When the main checkout's `.aimem.json` requires a local task
+  credential, task tools in a worktree that inherits that file refuse
+  until the worktree gets its own `.aimem.json`, as the entry below
+  describes.
+
 ### Fixed
 
 - **A session in a git worktree or a subdirectory journals under the
