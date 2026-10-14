@@ -2,7 +2,8 @@
 # aimem installer. Idempotent; safe to re-run.
 #
 #   ./install.sh user               user-level install: binary -> ~/.local/bin,
-#                                   systemd user unit, Claude Code user hooks,
+#                                   systemd user unit (macOS: launchd user
+#                                   agents), Claude Code user hooks,
 #                                   OpenCode global plugin, Codex user hooks
 #                                   + MCP registration
 #   ./install.sh project [dir]      wire one project: handoff template,
@@ -215,16 +216,103 @@ remove_codex_hooks() { # file marker
     else . end' "$file" > "$tmp" && mv "$tmp" "$file"
 }
 
+# service_kind prints the service manager this installation uses: systemd
+# user units on Linux, launchd user agents on macOS, or none.
+# AIMEM_NO_SERVICE=1 (or the older AIMEM_NO_SYSTEMD=1) keeps the manual mode.
+service_kind() {
+  if [ "${AIMEM_NO_SERVICE:-0}" = 1 ] || [ "${AIMEM_NO_SYSTEMD:-0}" = 1 ]; then
+    echo none
+  elif [ "$(uname -s)" = Darwin ]; then
+    if command -v launchctl >/dev/null 2>&1; then echo launchd; else echo none; fi
+  elif command -v systemctl >/dev/null 2>&1; then
+    echo systemd
+  else
+    echo none
+  fi
+}
+
+# BEGIN launchd-agents
+# macOS: two launchd user agents in the login session's gui domain. The
+# serve agent starts at login and is restarted if it fails; the sync agent
+# runs `aimem sync` every 10 minutes, the Linux timer's cadence. Both read
+# ~/.config/aimem/env through the binary itself, as the systemd units do.
+LAUNCHD_DIR="${AIMEM_LAUNCHD_DIR:-$HOME/Library/LaunchAgents}"
+LAUNCHD_LABEL="${AIMEM_LAUNCHD_LABEL:-io.github.blackvs.aimem}"
+LAUNCHD_SYNC_LABEL="$LAUNCHD_LABEL.sync"
+LAUNCHD_LOG_DIR="${AIMEM_LAUNCHD_LOG_DIR:-$HOME/Library/Logs/aimem}"
+launchd_domain() { echo "gui/$(id -u)"; }
+launchd_plist() { echo "$LAUNCHD_DIR/$1.plist"; } # label
+xml_text() { printf '%s' "$1" | sed -e 's/&/\&amp;/g' -e 's/</\&lt;/g' -e 's/>/\&gt;/g'; }
+# launchd_write label serve|sync program args...: writes the agent's plist.
+launchd_write() {
+  local label=$1 kind=$2 a
+  shift 2
+  mkdir -p "$LAUNCHD_DIR" "$LAUNCHD_LOG_DIR"
+  {
+    printf '<?xml version="1.0" encoding="UTF-8"?>\n'
+    printf '<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">\n'
+    printf '<plist version="1.0">\n<dict>\n'
+    printf '  <key>Label</key>\n  <string>%s</string>\n' "$(xml_text "$label")"
+    printf '  <key>ProgramArguments</key>\n  <array>\n'
+    for a in "$@"; do printf '    <string>%s</string>\n' "$(xml_text "$a")"; done
+    printf '  </array>\n'
+    # 63 is umask 0077, as the systemd unit's UMask.
+    printf '  <key>Umask</key>\n  <integer>63</integer>\n'
+    if [ "$kind" = serve ]; then
+      printf '  <key>RunAtLoad</key>\n  <true/>\n'
+      # Restart on failure, as the systemd unit's Restart=on-failure.
+      printf '  <key>KeepAlive</key>\n  <dict>\n    <key>SuccessfulExit</key>\n    <false/>\n  </dict>\n'
+    else
+      printf '  <key>StartInterval</key>\n  <integer>600</integer>\n'
+      if [ -n "${AIMEM_SSH_OPTS:-}" ]; then
+        printf '  <key>EnvironmentVariables</key>\n  <dict>\n    <key>AIMEM_SSH_OPTS</key>\n    <string>%s</string>\n  </dict>\n' \
+          "$(xml_text "$AIMEM_SSH_OPTS")"
+      fi
+    fi
+    printf '  <key>StandardOutPath</key>\n  <string>%s</string>\n' "$(xml_text "$LAUNCHD_LOG_DIR/$kind.log")"
+    printf '  <key>StandardErrorPath</key>\n  <string>%s</string>\n' "$(xml_text "$LAUNCHD_LOG_DIR/$kind.log")"
+    printf '</dict>\n</plist>\n'
+  } > "$(launchd_plist "$label").tmp"
+  mv "$(launchd_plist "$label").tmp" "$(launchd_plist "$label")"
+}
+# launchd_usable: a login session whose gui domain can take agents. Over ssh
+# without one, the agents load at the next login instead.
+launchd_usable() { launchctl print "$(launchd_domain)" >/dev/null 2>&1; }
+launchd_loaded() { launchctl print "$(launchd_domain)/$1" >/dev/null 2>&1; } # label
+launchd_stop() { launchctl bootout "$(launchd_domain)/$1" >/dev/null 2>&1 || true; } # label
+# launchd_start label: (re)loads the agent from its plist, so a changed
+# plist takes effect.
+launchd_start() {
+  launchd_stop "$1"
+  launchctl bootstrap "$(launchd_domain)" "$(launchd_plist "$1")"
+}
+# END launchd-agents
+
 # The client's service hooks for upgrade_txn: the systemd user unit and the
-# sync timer of this installation. Without systemd there is nothing to stop.
+# sync timer of this installation, or its two launchd agents. Without a
+# service manager there is nothing to stop.
+SERVICE_KIND=none
 SYNC_WAS_ACTIVE=0
 svc_stop() {
   [ "$TXN_MANAGED" = 1 ] || return 0
+  if [ "$SERVICE_KIND" = launchd ]; then
+    launchd_stop "$LAUNCHD_SYNC_LABEL"
+    launchd_stop "$LAUNCHD_LABEL"
+    # bootout signals the process; the state copy waits until it is gone.
+    local i=0
+    while [ "$i" -lt 20 ] && [ -n "$(txn_field "$AIMEM_BIN" status)" ]; do sleep 0.5; i=$((i + 1)); done
+    return 0
+  fi
   if systemctl --user is-active --quiet aimem-sync.timer; then SYNC_WAS_ACTIVE=1; fi
   systemctl --user stop aimem-sync.timer aimem-sync.service aimem.service 2>/dev/null || true
 }
 svc_start() {
   [ "$TXN_MANAGED" = 1 ] || return 0
+  if [ "$SERVICE_KIND" = launchd ]; then
+    launchd_start "$LAUNCHD_LABEL" || true
+    launchd_start "$LAUNCHD_SYNC_LABEL" || true
+    return 0
+  fi
   systemctl --user restart aimem.service || true
   if [ "$SYNC_WAS_ACTIVE" = 1 ]; then systemctl --user start aimem-sync.timer || true; fi
 }
@@ -247,7 +335,29 @@ install_user() {
       -o "$BIN_DIR/aimem.new" ./cmd/aimem)
   fi
   TXN_MANAGED=0
-  if [ "${AIMEM_NO_SYSTEMD:-0}" != 1 ] && command -v systemctl >/dev/null 2>&1; then
+  SERVICE_KIND=$(service_kind)
+  if [ "$SERVICE_KIND" = launchd ]; then
+    say "launchd user agents -> $(launchd_plist "$LAUNCHD_LABEL"), $(launchd_plist "$LAUNCHD_SYNC_LABEL")"
+    launchd_write "$LAUNCHD_LABEL" serve "$BIN_DIR/aimem" serve
+    # An existing sync agent keeps its command: `enable-sync <ssh-dest>`
+    # may have pointed it at one hub.
+    [ -f "$(launchd_plist "$LAUNCHD_SYNC_LABEL")" ] ||
+      launchd_write "$LAUNCHD_SYNC_LABEL" sync "$BIN_DIR/aimem" sync --all-hubs
+    if launchd_usable; then
+      TXN_MANAGED=1
+    else
+      say "no login session for launchd ($(launchd_domain)); the agents load at your next login"
+    fi
+    # A serve started by hand (before this installer managed one) holds
+    # the socket the agent needs. It is stopped by the person who started
+    # it, never by name from here.
+    if [ "$TXN_MANAGED" = 1 ] && [ -e "$BIN_DIR/aimem" ] && ! launchd_loaded "$LAUNCHD_LABEL" &&
+      [ -n "$(aimem_as "$BIN_DIR/aimem" health 2>/dev/null | sed -n 's/.*"status": *"\([^"]*\)".*/\1/p' | head -n 1)" ]; then
+      rm -f "$BIN_DIR/aimem.new"
+      echo "ERROR: an aimem serve started by hand is running. Stop it (for example: kill <its pid>, from ps -x | grep 'aimem serve'), then re-run: from now on the launchd agent runs it." >&2
+      exit 1
+    fi
+  elif [ "$SERVICE_KIND" = systemd ]; then
     TXN_MANAGED=1
     say "systemd user unit -> $UNIT_DIR/aimem.service"
     mkdir -p "$UNIT_DIR"
@@ -276,7 +386,12 @@ EOF
     upgrade_txn "$BIN_DIR/aimem.new" || exit 1
   else
     mv "$BIN_DIR/aimem.new" "$BIN_DIR/aimem"
-    if [ "$TXN_MANAGED" = 1 ]; then
+    if [ "$TXN_MANAGED" = 1 ] && [ "$SERVICE_KIND" = launchd ]; then
+      AIMEM_BIN="$BIN_DIR/aimem"
+      svc_start
+      AIMEM_UPGRADE_WAIT=${AIMEM_UPGRADE_WAIT:-10} txn_wait "" && say "service healthy" \
+        || echo "warning: service not answering yet; check: launchctl print $(launchd_domain)/$LAUNCHD_LABEL" >&2
+    elif [ "$TXN_MANAGED" = 1 ]; then
       systemctl --user restart aimem
       sleep 0.5
       "$BIN_DIR/aimem" health >/dev/null && say "service healthy" \
@@ -338,8 +453,10 @@ EOF
 
   if [ "$TXN_MANAGED" = 1 ]; then
     "$BIN_DIR/aimem" spool-flush >/dev/null 2>&1 || true
+  elif [ "$SERVICE_KIND" = launchd ]; then
+    say "the launchd agents load at your next login; until then run 'aimem serve' manually"
   else
-    say "skipping systemd (unavailable or AIMEM_NO_SYSTEMD=1); run 'aimem serve' manually"
+    say "skipping the service manager (unavailable, AIMEM_NO_SERVICE=1 or AIMEM_NO_SYSTEMD=1); run 'aimem serve' manually"
   fi
 
   say "user install done. Restart running OpenCode, Claude Code, and Codex sessions to activate."
@@ -545,6 +662,17 @@ enable_sync() {
   local dest="${1:-}"
   local synccmd="sync --all-hubs" desc="all configured hubs"
   if [ -n "$dest" ]; then synccmd="sync $dest"; desc="$dest"; fi
+  if [ "$(service_kind)" = launchd ]; then
+    # shellcheck disable=SC2086 # synccmd is the subcommand and its words
+    launchd_write "$LAUNCHD_SYNC_LABEL" sync "$BIN_DIR/aimem" $synccmd
+    if launchd_usable; then
+      launchd_start "$LAUNCHD_SYNC_LABEL"
+      say "sync agent enabled: every ~10min to $desc"
+    else
+      say "sync agent written: it runs every ~10min to $desc from your next login"
+    fi
+    return 0
+  fi
   mkdir -p "$UNIT_DIR"
   cat > "$UNIT_DIR/aimem-sync.service" <<EOF
 [Unit]
@@ -639,6 +767,11 @@ uninstall_user() {
   if command -v systemctl >/dev/null 2>&1; then
     systemctl --user disable --now aimem 2>/dev/null || true
   fi
+  if [ "$(uname -s)" = Darwin ] && command -v launchctl >/dev/null 2>&1; then
+    launchd_stop "$LAUNCHD_SYNC_LABEL"
+    launchd_stop "$LAUNCHD_LABEL"
+  fi
+  rm -f "$(launchd_plist "$LAUNCHD_LABEL")" "$(launchd_plist "$LAUNCHD_SYNC_LABEL")"
   rm -f "$UNIT_DIR/aimem.service" "$BIN_DIR/aimem" "$OC_PLUGIN_DIR/aimem.ts"
   remove_claude_hooks "$CLAUDE_SETTINGS"
   remove_codex_hooks "$CODEX_HOME_DIR/hooks.json" "aimem submit-codex"

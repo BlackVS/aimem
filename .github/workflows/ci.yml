@@ -75,6 +75,11 @@ jobs:
           go version | grep -q ' go1\.26'
       - run: go vet ./...
       - run: go test ./...
+      # The client installer's launchd agents, against the runner's real
+      # launchd: install, upgrade in place, uninstall.
+      - name: macOS install registers launchd agents
+        if: matrix.os == 'macos-latest'
+        run: bash scripts/check-launchd-install.sh
       # The end-to-end identity test races concurrent redemptions against
       # the rig's shared state. The race detector needs cgo, which the
       # Ubuntu runner has; 50 runs keep a lost update from passing by luck.

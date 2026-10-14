@@ -52,7 +52,7 @@ and `iex` had nothing to run. Retry, or install from a checkout (section
 | `~/.config/opencode/plugins/aimem.ts` | the OpenCode plugin (1.18+ and 2.x). It journals turns, injects the handoff on 2.x, and, when a shell call fails, runs `aimem failure-recall` and gives the model at most 3 matching memories, as the Claude Code hook does |
 | `~/.codex/hooks.json` | `Stop`, `PreCompact` hooks running `aimem submit-codex` |
 | `~/.codex/config.toml` | `[mcp_servers.aimem]` MCP registration (via `codex mcp add` when codex is on PATH) |
-| `~/.config/systemd/user/aimem.service` | the local service (Windows: an `aimem-serve` logon scheduled task) |
+| `~/.config/systemd/user/aimem.service` | the local service (macOS: launchd user agents, see section 6; Windows: an `aimem-serve` logon scheduled task) |
 | `~/.local/state/aimem/` | journals and memories, one SQLite database per project |
 
 Checkpoint hooks are installed at **user level only**. Never add
@@ -91,6 +91,7 @@ Set these before running the one-liner:
 | `AIMEM_VERSION=vX.Y.Z` | install another release than the one in the URL |
 | `AIMEM_UPGRADE_WAIT=30` | seconds an upgrade waits for health at the new version before rolling back |
 | `AIMEM_REPO=owner/name` | install from a fork |
+| `AIMEM_NO_SERVICE=1` | register no service (no systemd unit, no launchd agents): run `aimem serve` yourself. `AIMEM_NO_SYSTEMD=1` does the same |
 
 ## 3. Verify
 
@@ -209,8 +210,10 @@ hub's HTTPS API with the same token as everything else:
 bash ./install.sh enable-sync          # Linux: systemd timer, every ~10 min
 ```
 
-On Windows the installer registers an `aimem-sync` scheduled task
-automatically (same cadence). Passing an ssh destination
+On macOS and Windows the installer registers the periodic sync
+automatically, at the same cadence: a launchd agent on macOS, an
+`aimem-sync` scheduled task on Windows. On macOS, `enable-sync` repoints
+that agent, and a later install keeps it. Passing an ssh destination
 (`enable-sync aimem@hub.example.com`) keeps the legacy ssh transport
 for hubs that predate the sync API.
 
@@ -246,7 +249,38 @@ Building from source needs Go 1.26+. The release binaries are static
 (`CGO_ENABLED=0`), so a machine that installs from a release needs no
 toolchain at all.
 
-## 6. Windows notes
+## 6. macOS notes
+
+The installer needs `jq` (for example `brew install jq`). It registers
+two launchd user agents in `~/Library/LaunchAgents`, loaded into your
+login session:
+
+| Agent | What it runs |
+|---|---|
+| `io.github.blackvs.aimem` | `aimem serve`, started at login and restarted if it fails |
+| `io.github.blackvs.aimem.sync` | `aimem sync --all-hubs` every 10 minutes |
+
+Their output goes to `~/Library/Logs/aimem/`. An upgrade stops the agents,
+swaps the binary and starts them again; uninstall unloads and removes
+both.
+
+```sh
+launchctl list | grep io.github.blackvs.aimem                  # both agents, with the serve agent's PID
+launchctl print gui/$(id -u)/io.github.blackvs.aimem            # state, last exit status
+launchctl bootout gui/$(id -u)/io.github.blackvs.aimem          # stop the service until the next login
+launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/io.github.blackvs.aimem.plist   # start it again
+```
+
+- Run the one-liner in a login session. Over ssh with nobody logged in
+  at the Mac, the installer writes the agents and they load at the next
+  login.
+- If an `aimem serve` you started by hand is running, as releases up to
+  v0.10.3 asked on macOS, stop it first. The installer refuses while it
+  answers and stops nothing itself.
+- With `AIMEM_NO_SERVICE=1` the installer registers no agent and you run
+  `aimem serve` yourself, as before.
+
+## 7. Windows notes
 
 Windows support is best-effort and tested less than Linux.
 
@@ -257,7 +291,7 @@ Windows support is best-effort and tested less than Linux.
 - The installer parks a replaced `aimem.exe` under a timestamped name,
   because Windows will not overwrite a running executable.
 
-## 7. Uninstall
+## 8. Uninstall
 
 ```sh
 bash ./install.sh uninstall-user       # binary, hooks, plugin, service

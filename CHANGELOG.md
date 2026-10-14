@@ -15,6 +15,23 @@ currently 24); a binary refuses a database newer than it understands.
 
 ### Added
 
+- **macOS runs aimem as launchd user agents.** On a Mac the client
+  installer now registers two agents in `~/Library/LaunchAgents`:
+  `io.github.blackvs.aimem` runs `aimem serve` from login and restarts it
+  if it fails, and `io.github.blackvs.aimem.sync` runs
+  `aimem sync --all-hubs` every 10 minutes, so the pull leg runs as on
+  Linux and Windows. Before, the installer set up no service on macOS:
+  the operator started `aimem serve` by hand after each login, and an
+  upgrade refused while that serve answered. Now an upgrade stops the
+  agents, swaps the binary and starts them again; `uninstall-user`
+  unloads and removes both; `enable-sync <ssh-dest>` repoints the sync
+  agent and a later install keeps it. A serve started by hand under an
+  earlier release has to be stopped once before the first upgrade: the
+  installer refuses while it answers and stops nothing by name.
+  `AIMEM_NO_SERVICE=1` (or `AIMEM_NO_SYSTEMD=1`) keeps the manual mode.
+  Without a login session (ssh with nobody logged in at the Mac) the
+  agents are written and load at the next login. The macOS CI job
+  installs, upgrades and uninstalls against the runner's real launchd.
 - **A quickstart for one new project on a fresh workstation.**
   `docs/QUICKSTART-NEW-PROJECT.md` takes an operator from a hub that
   already runs to a project on a new macOS, Linux or Windows machine with
