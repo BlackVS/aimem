@@ -337,26 +337,25 @@ install_user() {
   TXN_MANAGED=0
   SERVICE_KIND=$(service_kind)
   if [ "$SERVICE_KIND" = launchd ]; then
-    say "launchd user agents -> $(launchd_plist "$LAUNCHD_LABEL"), $(launchd_plist "$LAUNCHD_SYNC_LABEL")"
-    launchd_write "$LAUNCHD_LABEL" serve "$BIN_DIR/aimem" serve
-    # An existing sync agent keeps its command: `enable-sync <ssh-dest>`
-    # may have pointed it at one hub.
-    [ -f "$(launchd_plist "$LAUNCHD_SYNC_LABEL")" ] ||
-      launchd_write "$LAUNCHD_SYNC_LABEL" sync "$BIN_DIR/aimem" sync --all-hubs
-    if launchd_usable; then
-      TXN_MANAGED=1
-    else
-      say "no login session for launchd ($(launchd_domain)); the agents load at your next login"
-    fi
+    if launchd_usable; then TXN_MANAGED=1; fi
     # A serve started by hand (before this installer managed one) holds
     # the socket the agent needs. It is stopped by the person who started
-    # it, never by name from here.
+    # it, never by name from here. The check runs before any agent is
+    # written, so a refusal leaves everything as it was.
     if [ "$TXN_MANAGED" = 1 ] && [ -e "$BIN_DIR/aimem" ] && ! launchd_loaded "$LAUNCHD_LABEL" &&
       [ -n "$(aimem_as "$BIN_DIR/aimem" health 2>/dev/null | sed -n 's/.*"status": *"\([^"]*\)".*/\1/p' | head -n 1)" ]; then
       rm -f "$BIN_DIR/aimem.new"
       echo "ERROR: an aimem serve started by hand is running. Stop it (for example: kill <its pid>, from ps -x | grep 'aimem serve'), then re-run: from now on the launchd agent runs it." >&2
       exit 1
     fi
+    say "launchd user agents -> $(launchd_plist "$LAUNCHD_LABEL"), $(launchd_plist "$LAUNCHD_SYNC_LABEL")"
+    launchd_write "$LAUNCHD_LABEL" serve "$BIN_DIR/aimem" serve
+    # An existing sync agent keeps its command: `enable-sync <ssh-dest>`
+    # may have pointed it at one hub.
+    [ -f "$(launchd_plist "$LAUNCHD_SYNC_LABEL")" ] ||
+      launchd_write "$LAUNCHD_SYNC_LABEL" sync "$BIN_DIR/aimem" sync --all-hubs
+    [ "$TXN_MANAGED" = 1 ] ||
+      say "no login session for launchd ($(launchd_domain)); the agents load at your next login"
   elif [ "$SERVICE_KIND" = systemd ]; then
     TXN_MANAGED=1
     say "systemd user unit -> $UNIT_DIR/aimem.service"

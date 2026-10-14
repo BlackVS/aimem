@@ -283,15 +283,39 @@ func TestShellInstallRefusesAServeStartedByHand(t *testing.T) {
 		}
 		time.Sleep(100 * time.Millisecond)
 	}
-	out, code := m.run(t, "v0.0.2", nil, "user")
-	if code == 0 || !strings.Contains(out, "aimem serve started by hand is running") {
-		t.Fatalf("the install did not refuse a serve started by hand (exit %d):\n%s", code, out)
+	refuse := func(stage string) {
+		t.Helper()
+		out, code := m.run(t, "v0.0.2", nil, "user")
+		if code == 0 || !strings.Contains(out, "aimem serve started by hand is running") {
+			t.Fatalf("%s: the install did not refuse a serve started by hand (exit %d):\n%s", stage, code, out)
+		}
+		if got := m.version(t); got != "aimem v0.0.1" {
+			t.Errorf("%s: the refused install changed the binary to %q", stage, got)
+		}
+		if m.loaded(serveLabel) || exists(filepath.Join(m.bin, "aimem.new")) {
+			t.Errorf("%s: the refused install loaded the agent or left aimem.new\ncalls:\n%s", stage, m.calls())
+		}
 	}
-	if got := m.version(t); got != "aimem v0.0.1" {
-		t.Errorf("the refused install changed the binary to %q", got)
+	// No agent yet: the refusal writes none.
+	refuse("no plists")
+	if exists(m.plist(serveLabel)) || exists(m.plist(syncLabel)) {
+		t.Errorf("the refused install wrote an agent plist")
 	}
-	if m.loaded(serveLabel) || exists(filepath.Join(m.bin, "aimem.new")) {
-		t.Errorf("the refused install loaded the agent or left aimem.new\ncalls:\n%s", m.calls())
+	// Agents already written (for example for the next login): the
+	// refusal leaves them as they were.
+	if err := os.MkdirAll(m.agents, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	for _, label := range []string{serveLabel, syncLabel} {
+		if err := os.WriteFile(m.plist(label), []byte("keep "+label), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	refuse("existing plists")
+	for _, label := range []string{serveLabel, syncLabel} {
+		if b, err := os.ReadFile(m.plist(label)); err != nil || string(b) != "keep "+label {
+			t.Errorf("the refused install changed %s: %q, %v", label, b, err)
+		}
 	}
 }
 
