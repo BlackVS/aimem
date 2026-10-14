@@ -35,6 +35,16 @@ currently 24); a binary refuses a database newer than it understands.
   credential refuses until the worktree is configured itself. Events
   already journaled under a twin id stay there.
 
+- **The new-project quickstart covers a paused setup, the macOS Login
+  Items and the agent skills.** The verify step now names the hub
+  registration steps as its prerequisite, and the troubleshooting table
+  explains `no hub configured`, which is what the verify commands print
+  when those steps were skipped. The two "aimem" entries macOS lists
+  under Login Items are the serve and sync agents; the quickstart and
+  `docs/INSTALL-CLIENT.md` say how to tell them apart. A new optional
+  step 3.2 installs the agent skills from the aiskills set, which the
+  review gates and team processes need; the later steps are renumbered.
+
 ## [0.10.4] — 2026-10-14
 
 On macOS the client one-liner now runs aimem as a service. It registers two
