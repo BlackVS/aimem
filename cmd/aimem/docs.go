@@ -48,7 +48,9 @@ func docsCmd(args []string) error {
 		}
 	}
 
-	dir := "."
+	// Bound files are relative to the directory whose .aimem.json governs
+	// this one: the checkout root, or a linked worktree's main checkout.
+	dir := ident.ProjectDir(".")
 	projID, err := ident.ProjectID(dir)
 	if err != nil {
 		return err

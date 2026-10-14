@@ -76,6 +76,16 @@ Project task enablement remains independently enforced by the hub.
 Configure each clone/worktree separately. Moving a checkout, changing its
 project or hub binding, or copying the marker to another machine requires
 setting a credential there; the marker intentionally prevents fallback.
+Correction (project identity from a worktree or subdirectory): a session
+in a subdirectory or a linked worktree now takes its project from the
+`.aimem.json` that governs it. A subdirectory binds its checkout's
+credential. A linked worktree that inherits the main checkout's
+configuration is still a separate checkout: when that configuration
+carries the marker, task tools in the worktree refuse instead of using
+the main checkout's local credential or the per-hub one, and
+`aimem task-token set` there asks for the worktree's own copy of
+`.aimem.json` first, since a marker-only file would drop the inherited
+project pin.
 Use these commands and start agent sessions at the configured project root,
 as with existing project configuration. Running processes resolve task
 credentials on each call; restart the session to refresh its tool listing.

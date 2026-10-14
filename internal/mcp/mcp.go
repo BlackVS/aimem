@@ -926,7 +926,8 @@ func (s *srv) docTool(p *toolParams) (string, error) {
 		// conflict, and the local file would silently go stale.
 		if !strings.HasPrefix(a.Scope, "group:") {
 			if rel := boundDocPath(".", a.Name); rel != "" {
-				if werr := writeFileAtomic(filepath.FromSlash(rel), []byte(a.Body)); werr == nil {
+				path := filepath.Join(ident.ProjectDir("."), filepath.FromSlash(rel))
+				if werr := writeFileAtomic(path, []byte(a.Body)); werr == nil {
 					c.DocSyncRecord(project, a.Name, doc.Rev, adapter.DocBodyHash([]byte(a.Body)))
 					msg += ", bound file " + rel + " rewritten"
 				} else {

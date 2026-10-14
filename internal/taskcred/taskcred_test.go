@@ -235,3 +235,76 @@ func TestStateInsideCheckoutRefused(t *testing.T) {
 		t.Fatal("secret stored in checkout")
 	}
 }
+
+// A subdirectory binds its checkout's credential; a linked worktree that
+// takes its project from the main checkout is configured separately: a
+// marked main checkout makes it fail closed, never fall back, and the
+// marker is never written into it while it inherits.
+func TestWorktreeAndSubdirectoryBinding(t *testing.T) {
+	root, repo, _, _ := fixture(t)
+	if err := os.Mkdir(filepath.Join(repo, ".git"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	sub := filepath.Join(repo, "internal", "pkg")
+	wt := filepath.Join(t.TempDir(), "wt")
+	gitDir := filepath.Join(repo, ".git", "worktrees", "wt")
+	for _, d := range []string{sub, wt, gitDir} {
+		if err := os.MkdirAll(d, 0700); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.WriteFile(filepath.Join(wt, ".git"), []byte("gitdir: "+filepath.ToSlash(gitDir)+"\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(gitDir, "commondir"), []byte("../..\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := Set(context.Background(), repo, root, token("a")); err != nil {
+		t.Fatal(err)
+	}
+	main, err := Resolve(repo, root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if s, err := Resolve(sub, root); err != nil || s.Source != "project-local" || s.Token != token("a") || s.Repo != main.Repo {
+		t.Fatalf("subdirectory: %+v %v", s, err)
+	}
+	if local, err := LocalRequired(wt); err != nil || !local {
+		t.Fatalf("worktree bootstrap: local=%v err=%v", local, err)
+	}
+	if _, err := Resolve(wt, root); err == nil || Classify(err) != ClassMissing || !strings.Contains(err.Error(), "worktree") {
+		t.Fatalf("worktree inherited a local requirement but resolved: %v", err)
+	}
+
+	// Without the marker the worktree uses the per-hub credential for the
+	// inherited project, as the main checkout does, and setting a local one
+	// asks for the worktree's own configuration first.
+	if err := Clear(repo, root); err != nil {
+		t.Fatal(err)
+	}
+	if s, err := Resolve(wt, root); err != nil || s.Source != "user-hub" || s.Token != "global" || s.Project != "alpha" {
+		t.Fatalf("unmarked worktree: %+v %v", s, err)
+	}
+	if err := Set(context.Background(), wt, root, token("b")); err == nil {
+		t.Fatal("set wrote a marker into an inheriting worktree")
+	}
+	if _, err := os.Stat(filepath.Join(wt, ".aimem.json")); !os.IsNotExist(err) {
+		t.Fatalf("worktree config created: %v", err)
+	}
+	raw, err := os.ReadFile(filepath.Join(repo, ".aimem.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(wt, ".aimem.json"), raw, 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := Set(context.Background(), wt, root, token("b")); err != nil {
+		t.Fatal(err)
+	}
+	if s, err := Resolve(wt, root); err != nil || s.Token != token("b") || s.Repo == main.Repo {
+		t.Fatalf("configured worktree: %+v %v", s, err)
+	}
+	if s, err := Resolve(repo, root); err != nil || s.Token != "global" {
+		t.Fatalf("main checkout after worktree set: %+v %v", s, err)
+	}
+}

@@ -22,8 +22,12 @@ var nonSlug = regexp.MustCompile(`[^A-Za-z0-9._-]+`)
 // ids (the user DB, group DBs) are refused.
 var pinnedName = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$`)
 
-// ProjectID computes the project identity for a directory.
+// ProjectID computes the project identity for a directory. A directory
+// inside a checkout takes the identity of the .aimem.json that governs it
+// (see ProjectDir): its own, the checkout's, or a linked worktree's main
+// checkout's.
 func ProjectID(dir string) (string, error) {
+	dir = ProjectDir(dir)
 	if pin, err := projectPin(dir); err != nil {
 		return "", err
 	} else if pin != "" {

@@ -46,6 +46,12 @@ type Payload struct {
 // stamps group membership while the directory is at hand (best-effort: a
 // malformed .aimem.json must not block checkpoints).
 func (p *Payload) ResolveProjectID() error {
+	// Adapters that send the launch directory (the OpenCode plugin) get
+	// the same resolution as the hooks: the directory whose .aimem.json
+	// governs it.
+	if p.ProjectDir != "" {
+		p.ProjectDir = ident.ProjectDir(p.ProjectDir)
+	}
 	if p.ProjectDir != "" && p.Groups == nil {
 		if g, err := ident.ProjectGroups(p.ProjectDir); err == nil {
 			if g == nil {

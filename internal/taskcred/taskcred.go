@@ -147,19 +147,52 @@ func config(dir string) (map[string]json.RawMessage, bool, error) {
 
 // LocalRequired lets read-only bootstrap paths honor an explicit requirement
 // while retaining their existing behavior when no override is configured.
+// The requirement is read from the .aimem.json that governs dir, so a
+// worktree inheriting a marked configuration reports it (and Resolve then
+// refuses there).
 func LocalRequired(dir string) (bool, error) {
-	_, local, err := config(dir)
+	cfgDir, _ := ident.ConfigDir(dir)
+	_, local, err := config(cfgDir)
 	return local, err
 }
 
+// checkout returns the directory a credential binds for dir, and the
+// configuration directory a linked worktree inherits ("" when none). A
+// subdirectory binds the checkout whose .aimem.json governs it. A linked
+// worktree that takes its project from the main checkout is still a
+// separate checkout (DESIGN-access-control: configure each clone or
+// worktree separately): it binds itself and inherits no local credential.
+func checkout(dir string) (repo, inherited string, err error) {
+	cfgDir, viaWorktree := ident.ConfigDir(dir)
+	if viaWorktree {
+		inherited = cfgDir
+	} else {
+		dir = cfgDir
+	}
+	repo, err = canonical(dir)
+	return repo, inherited, err
+}
+
 func binding(dir, root string) (*Selection, bool, error) {
-	repo, err := canonical(dir)
+	repo, inherited, err := checkout(dir)
 	if err != nil {
 		return nil, false, err
 	}
 	_, local, err := config(repo)
 	if err != nil {
 		return nil, false, err
+	}
+	if inherited != "" {
+		// The main checkout's marker forbids any fallback; a worktree
+		// that has no credential of its own must not reach for the
+		// per-hub one either.
+		if _, required, err := config(inherited); err != nil {
+			return nil, false, err
+		} else if required {
+			return nil, false, failure(ClassMissing, fmt.Sprintf("this worktree takes its project configuration from %s, which requires a local task credential; "+
+				"each worktree is configured separately: copy that .aimem.json into the worktree, then run aimem task-token set there",
+				filepath.Join(inherited, ".aimem.json")), nil)
+		}
 	}
 	name, err := ident.ProjectHubNameStrict(repo)
 	if err != nil {
@@ -319,6 +352,15 @@ func Set(ctx context.Context, dir, root, token string) error {
 	if !validToken(token) {
 		return errors.New("expected a complete ordinary project token on stdin")
 	}
+	if _, inherited, err := checkout(dir); err != nil {
+		return err
+	} else if inherited != "" {
+		// Writing the marker would create the worktree's own .aimem.json
+		// holding nothing else, which would then govern the worktree and
+		// drop the project pin and hub binding it inherits.
+		return fmt.Errorf("this worktree takes its project configuration from %s; copy that file into the worktree first, then run aimem task-token set again",
+			filepath.Join(inherited, ".aimem.json"))
+	}
 	s, _, err := binding(dir, root)
 	if err != nil {
 		return err
@@ -351,7 +393,7 @@ func Set(ctx context.Context, dir, root, token string) error {
 }
 
 func Clear(dir, root string) error {
-	repo, err := canonical(dir)
+	repo, _, err := checkout(dir)
 	if err != nil {
 		return err
 	}

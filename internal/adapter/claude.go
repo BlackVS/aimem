@@ -102,10 +102,14 @@ func BuildClaudeEvent(raw []byte) (*Payload, error) {
 		reply = ""
 		tools = nil
 	}
-	dir := hp.CWD
-	if dir == "" {
-		dir = "."
+	cwd := hp.CWD
+	if cwd == "" {
+		cwd = "."
 	}
+	// A session standing in a subdirectory or a linked worktree belongs to
+	// the project whose .aimem.json governs it, and its bound files live
+	// there too; the branch is still the one checked out where it stands.
+	dir := ident.ProjectDir(cwd)
 	pid, err := ident.ProjectID(dir)
 	if err != nil {
 		return nil, err
@@ -125,7 +129,7 @@ func BuildClaudeEvent(raw []byte) (*Payload, error) {
 			UserRequest:    userReq,
 			AssistantReply: reply,
 			ToolSummary:    tools,
-			GitBranch:      ident.GitBranch(dir),
+			GitBranch:      ident.GitBranch(cwd),
 		},
 	}, nil
 }

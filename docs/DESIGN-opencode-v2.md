@@ -385,13 +385,16 @@ Binaries were obtained with `npm pack opencode-linux-x64@<version>`
 - **`scripts/agent-probe`** uses the 1.x server API and will not work
   against 2.x. It is a discovery probe, not a shipped path; not ported
   here.
-- **Launch from a subdirectory: project identity.** Both generations
-  name the launch directory as `project_dir` in submits and read
-  `.aimem.json` knobs there, so a turn started in `repo/sub` is not
-  attributed through `repo/.aimem.json` (a project pin or hub binding
-  there is missed). This predates this change and matches 1.x; the
-  `subdir` scenario pins the parity. Resolving the project root for both
-  generations is a separate change.
+- **Launch from a subdirectory: project identity.** Closed. Both
+  generations still name the launch directory as `project_dir` in
+  submits, and the service resolves it as the hooks resolve theirs
+  (`ident.ProjectDir`): the nearest `.aimem.json` up to the checkout's
+  top, then a linked worktree's main checkout. A turn started in
+  `repo/sub` or in a worktree is attributed through `repo/.aimem.json`,
+  pin, hub binding and groups together. What stays open is narrower: the
+  plugin's context knobs (`ctx_limit`, `ctx_warn_fraction`,
+  `auto_compact`) are still read from `.aimem.json` in the launch
+  directory only.
 - **Optional later:** have `aimem doctor` write the native 2.x MCP shape
   (`mcp.servers.aimem`) and warn about OpenCode older than 1.18. Today
   version probing runs only under `aimem teams setup --client-versions`.
