@@ -1,7 +1,10 @@
 # Quickstart
 
 For project task boards and agent task access, see the
-[Kanban quickstart](KANBAN-QUICKSTART.md).
+[Kanban quickstart](KANBAN-QUICKSTART.md). To add one new project on a
+fresh workstation to a hub that already runs, with tasks, the session
+handoff and design documents, follow
+[the new-project quickstart](QUICKSTART-NEW-PROJECT.md).
 
 Fifteen minutes from nothing to a hub your agents share. Three stages,
 each useful on its own — stop after any of them.

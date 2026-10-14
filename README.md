@@ -152,7 +152,9 @@ Fair detail, sources, and where each of these is genuinely stronger:
 
 **New here? Start with the [Quickstart](docs/QUICKSTART.md)** — fifteen
 minutes from nothing to a hub your agents share, in three stages that are
-each useful on their own.
+each useful on their own. Adding a project on a new machine to a hub you
+already run, with tasks, the handoff and design documents, is
+[QUICKSTART-NEW-PROJECT.md](docs/QUICKSTART-NEW-PROJECT.md).
 
 **Workstation** — run inside a project directory:
 
@@ -220,6 +222,7 @@ aimem tui             # operator dashboard
 | Document | For |
 |---|---|
 | [QUICKSTART.md](docs/QUICKSTART.md) | **start here** - workstation, then hub, then curation |
+| [QUICKSTART-NEW-PROJECT.md](docs/QUICKSTART-NEW-PROJECT.md) | one new project on a fresh workstation against an existing hub: tokens, tasks, handoff, design docs |
 | [INSTALL-CLIENT.md](docs/INSTALL-CLIENT.md) | putting aimem on a workstation |
 | [INSTALL-HUB.md](docs/INSTALL-HUB.md) | standing up a hub |
 | [STORAGE-GUIDE.md](docs/STORAGE-GUIDE.md) | what goes where: journal vs KB vs groups vs docs vs wiki, and full-featured project setup |

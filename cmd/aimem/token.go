@@ -14,8 +14,8 @@ import (
 	"aimem/internal/server"
 )
 
-func tokenCmd(args []string) error {
-	usage := `usage: aimem token add <name> [--role writer|admin]   create (prints the secret ONCE)
+// tokenUsage is the usage text of `aimem token`.
+const tokenUsage = `usage: aimem token add <name> [--role writer|admin]   create (prints the secret ONCE)
        aimem token list                             names and roles (no secrets exist to show)
        aimem token rm <name>                        revoke
 
@@ -23,6 +23,9 @@ Named bearer tokens for this hub. A writer token covers events, sync,
 recall, and shared documents; admin adds config, providers, rename,
 drop, retention, chapter tools, and logs. The AIMEM_HTTP_TOKEN env
 token keeps working as an implicit admin named "env".`
+
+func tokenCmd(args []string) error {
+	usage := tokenUsage
 	if len(args) == 0 {
 		return fmt.Errorf("%s", usage)
 	}
