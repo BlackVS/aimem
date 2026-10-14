@@ -95,7 +95,9 @@ understands), which is why the copy is taken before the new release
 first opens the state. The backup stays after a successful upgrade.
 It holds everything the state root holds, credentials included, with
 the same permissions; remove it once the new release has proved itself.
-Without a service manager (macOS, or `AIMEM_NO_SYSTEMD=1`) the installer
+On macOS the service is a launchd user agent, which the upgrade stops
+and starts the same way. Without a service manager (`AIMEM_NO_SERVICE=1`
+or `AIMEM_NO_SYSTEMD=1`, or no login session on a Mac) the installer
 still takes the backup and swaps, but it refuses to run while an
 unmanaged `aimem serve` answers, and leaves starting the service to you.
 

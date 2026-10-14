@@ -101,20 +101,23 @@ then remove the hub's copy.
 Run the one-liner **inside the project directory**.
 
 **macOS.** The installer needs `jq` (for example `brew install jq`).
-macOS has no service manager the installer can use, so start the local
-service yourself after the install, and again after each login:
+Run it in a login session on the Mac. It registers the local service and
+the periodic sync as launchd user agents, which start at each login:
 
 ```sh
 cd ~/src/my-project
 curl -fsSL https://raw.githubusercontent.com/BlackVS/aimem/v0.10.3/boot.sh | bash
 export PATH="$HOME/.local/bin:$PATH"
-nohup aimem serve >/dev/null 2>&1 &
+launchctl list | grep io.github.blackvs.aimem
 ```
 
-Add the `PATH` line to `~/.zprofile` so new shells find `aimem`. Before
-a later upgrade, stop that `aimem serve`: the installer refuses to
-upgrade while a service it does not manage answers, and leaves starting
-the new one to you.
+The last line shows the serve and sync agents. Add the `PATH` line to
+`~/.zprofile` so new shells find `aimem`. To stop the service, and how
+the agents work, see
+[INSTALL-CLIENT.md, macOS notes](INSTALL-CLIENT.md#6-macos-notes).
+Releases up to v0.10.3 registered no agent and had you start
+`aimem serve` by hand; stop such a serve before upgrading, since the
+installer refuses while it answers.
 
 **Linux.** The installer needs `jq` (`sudo apt install jq` on Debian or
 Ubuntu) and runs the service as a systemd user unit:
@@ -238,7 +241,7 @@ aimem docs list
 ```
 
 - `aimem health` answers from the local service. On macOS, if it cannot
-  connect, the `aimem serve` from step 3.1 is not running.
+  connect, check the serve agent from step 3.1 with `launchctl list`.
 - `aimem project-id .` prints `my-project`, the pinned ID.
 - `aimem session-start` prints the hook output an agent receives at
   start: JSON that carries `docs/SESSION-STATE.md`.
@@ -276,7 +279,7 @@ was installed, is never used on a workstation.
 
 | Symptom | Check |
 |---|---|
-| `aimem health` cannot connect | macOS: start `aimem serve` (step 3.1). Linux: `systemctl --user status aimem`. Windows: the `aimem-serve` scheduled task. |
+| `aimem health` cannot connect | macOS: `launchctl print gui/$(id -u)/io.github.blackvs.aimem`, and its log in `~/Library/Logs/aimem/serve.log`. Linux: `systemctl --user status aimem`. Windows: the `aimem-serve` scheduled task. |
 | `aimem hub add` refuses the token file | The file is readable by other accounts; the error names the command that restricts it. |
 | `aimem project-id .` prints a hash-suffixed ID | `.aimem.json` has no `project` field, or aimem warns that it is unreadable: the JSON is not valid, or the file is not UTF-8 (on Windows, often UTF-16 from `Out-File` or `>`). |
 | `aimem docs list` says no shared documents | Run `aimem docs push`; check that the `docs` paths exist and that `hub` names the hub you added. |
