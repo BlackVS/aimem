@@ -260,6 +260,11 @@ login session:
 | `io.github.blackvs.aimem` | `aimem serve`, started at login and restarted if it fails |
 | `io.github.blackvs.aimem.sync` | `aimem sync --all-hubs` every 10 minutes |
 
+System Settings > General > Login Items shows them as two entries, both
+named "aimem". That is expected: both agents run the same binary, and
+macOS shows the executable's name for an agent without an app bundle.
+`launchctl list | grep io.github.blackvs.aimem` tells them apart by label.
+
 Their output goes to `~/Library/Logs/aimem/`. An upgrade stops the agents,
 swaps the binary and starts them again; uninstall unloads and removes
 both.

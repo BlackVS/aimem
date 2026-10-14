@@ -57,7 +57,7 @@ aimem token add my-mac
 ```
 
 The secret is printed once. Copy it into the workstation's private file
-in step 3.2 now, or keep this terminal open until you get there.
+in step 3.3 now, or keep this terminal open until you get there.
 
 **The task board.** This creates the project on the hub if it is new and
 switches its tasks on:
@@ -91,7 +91,7 @@ rm my-agent.token
 
 The command writes the secret to a new file only the service account can
 read and prints the token ID. Keep the ID; it is what you revoke. Copy
-the secret out of `cat` into the workstation's private file in step 3.3,
+the secret out of `cat` into the workstation's private file in step 3.4,
 then remove the hub's copy.
 
 ## 3. On the workstation
@@ -111,7 +111,11 @@ export PATH="$HOME/.local/bin:$PATH"
 launchctl list | grep io.github.blackvs.aimem
 ```
 
-The last line shows the serve and sync agents. Add the `PATH` line to
+The last line shows the serve and sync agents. System Settings >
+General > Login Items lists them as two entries both named "aimem",
+which is expected: the labels `io.github.blackvs.aimem` (serve) and
+`io.github.blackvs.aimem.sync` (sync) in that `launchctl list` output
+tell them apart. Add the `PATH` line to
 `~/.zprofile` so new shells find `aimem`. To stop the service, and how
 the agents work, see
 [INSTALL-CLIENT.md, macOS notes](INSTALL-CLIENT.md#6-macos-notes).
@@ -140,10 +144,35 @@ The install puts the hooks and the agent plugins in your user profile,
 and wires the project: `docs/SESSION-STATE.md` (the handoff),
 `AGENTS.md`, `CLAUDE.md`, the project's hook and MCP registration, and
 `.aimem.json`. [INSTALL-CLIENT.md](INSTALL-CLIENT.md) lists every file.
-Do not start an agent in the project yet: until step 3.4 pins the project
+Do not start an agent in the project yet: until step 3.5 pins the project
 ID, a session would journal under an ID derived from the directory.
 
-### 3.2 Register the hub with the writer token
+### 3.2 Install the agent skills (optional)
+
+Skip this step for plain journaling. A project that will use the review
+gates or a team process needs it: the review skill (`oh-code-review`),
+the delivery check and the team processes come from the
+[aiskills](https://github.com/BlackVS/aiskills) set, not from aimem.
+
+macOS and Linux:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/BlackVS/aiskills/main/boot.sh | bash
+```
+
+Windows (PowerShell):
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -Command "irm https://raw.githubusercontent.com/BlackVS/aiskills/main/boot.ps1 | iex"
+```
+
+Either line installs, for your user, every skill and the prompts for
+Claude Code and Codex, plus the review-gates block in the agents'
+instructions. To install them into the project instead, so that every
+clone gets them, see the project-level form in
+[the aiskills README](https://github.com/BlackVS/aiskills#quick-install).
+
+### 3.3 Register the hub with the writer token
 
 Put the writer token from step 2 in a file only you can read, give the
 file to `aimem hub add`, and delete it.
@@ -175,7 +204,7 @@ it at `~/.config/aimem/tls/selfsigned.pem` in the service account's
 home), or `--pin sha256-BASE64`. The certificate is public; only the
 tokens are secret.
 
-### 3.3 Give the task tools their credential
+### 3.4 Give the task tools their credential
 
 Do the same with the user task token from step 2:
 
@@ -196,7 +225,7 @@ aimem hub credential team
 `aimem hub credential` must report `individual credential set, active,
 scope user`, with the user and token IDs. It never prints the secret.
 
-### 3.4 Bind the project in `.aimem.json`
+### 3.5 Bind the project in `.aimem.json`
 
 Replace the `.aimem.json` the installer created in the project root with
 the project's identity, its hub, and the design documents to share:
@@ -228,9 +257,10 @@ treats the file as absent.
 
 Commit `.aimem.json` and the other wired files if the project is tracked.
 
-### 3.5 Verify, in this order
+### 3.6 Verify, in this order
 
-From the project directory:
+This step needs the hub registered and the project bound: do steps 3.3
+to 3.5 first. From the project directory:
 
 ```sh
 aimem health
@@ -282,6 +312,7 @@ was installed, is never used on a workstation.
 | `aimem health` cannot connect | macOS: `launchctl print gui/$(id -u)/io.github.blackvs.aimem`, and its log in `~/Library/Logs/aimem/serve.log`. Linux: `systemctl --user status aimem`. Windows: the `aimem-serve` scheduled task. |
 | `aimem hub add` refuses the token file | The file is readable by other accounts; the error names the command that restricts it. |
 | `aimem project-id .` prints a hash-suffixed ID | `.aimem.json` has no `project` field, or aimem warns that it is unreadable: the JSON is not valid, or the file is not UTF-8 (on Windows, often UTF-16 from `Out-File` or `>`). |
+| `aimem docs push` or `aimem docs list` fails with `no hub configured (aimem hub add ...)` | The hub was never registered on this workstation, for example after a pause right after the one-liner. Do steps 3.3 to 3.5, then rerun step 3.6. |
 | `aimem docs list` says no shared documents | Run `aimem docs push`; check that the `docs` paths exist and that `hub` names the hub you added. |
 | The agent has no task tools | Start a new session; check `aimem hub credential team` and that tasks are on for the project on the hub. |
 | Task reads work but writes fail | The user's grant on `my-project`, and that the token is the user task token, not the writer token. |
