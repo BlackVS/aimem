@@ -13,6 +13,37 @@ currently 24); a binary refuses a database newer than it understands.
 
 ## [Unreleased]
 
+## [0.10.4] — 2026-10-14
+
+On macOS the client one-liner now runs aimem as a service. It registers two
+launchd user agents: one runs `aimem serve` from login and restarts it if it
+fails, and one runs `aimem sync --all-hubs` every 10 minutes, so a Mac pulls
+from its hubs as Linux and Windows do. Before, the operator started `aimem
+serve` by hand after each login and nothing ran the periodic sync. OpenCode
+now gets the failure recall that Claude Code gained in 0.10.3: a failed shell
+call brings back the stored memories that share its error's words. A new
+quickstart takes a fresh workstation to a working project on an existing
+hub, and its Windows note now names the real `.aimem.json` trap: a UTF-8
+byte order mark is read, UTF-16 from `Out-File` or `>` is not. No schema
+change and no hub change: a 0.10.3 hub or workstation upgrades in place.
+Includes PR #223 to #226.
+
+### Upgrade notes
+
+- **No schema change and no hub change.** A 0.10.3 hub or workstation
+  upgrades in place with its one-liner.
+- **macOS: stop a serve started by hand once.** Releases up to 0.10.3
+  had you start `aimem serve` by hand on a Mac. Stop that serve before you
+  run the 0.10.4 client one-liner: the installer refuses while it answers,
+  and stops nothing by name. After the one-liner the two agents run from
+  login; `launchctl list | grep io.github.blackvs.aimem` shows them.
+  `AIMEM_NO_SERVICE=1` keeps the manual mode. Run the one-liner in a login
+  session; over ssh with nobody logged in at the Mac, the agents load at
+  the next login.
+- **Linux and Windows:** the client one-liner as before. A workstation gets
+  the OpenCode failure recall from its next one-liner run, which installs
+  the plugin file.
+
 ### Added
 
 - **macOS runs aimem as launchd user agents.** On a Mac the client
@@ -60,6 +91,17 @@ currently 24); a binary refuses a database newer than it understands.
   real binary against a fake store on both generations. The plugin
   file is installed by the client one-liner, so a workstation gets it
   from its next one-liner run.
+
+### Fixed
+
+- **The new-project quickstart names the real `.aimem.json` trap on
+  Windows.** It said aimem cannot read a `.aimem.json` that starts with a
+  byte order mark, but the loader strips a UTF-8 BOM before parsing. The
+  trap is UTF-16: in Windows PowerShell 5.1, `Out-File` and `>` write
+  UTF-16LE, and aimem then warns that `.aimem.json` is unreadable and
+  derives a hash-suffixed project ID. `Set-Content -Encoding ascii` and
+  `-Encoding UTF8` (with a BOM) are both read. Step 3.4 and the
+  troubleshooting row now say so (#225).
 
 ## [0.10.3] — 2026-10-13
 
