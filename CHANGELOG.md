@@ -18,15 +18,16 @@ currently 24); a binary refuses a database newer than it understands.
 On macOS the client one-liner now runs aimem as a service. It registers two
 launchd user agents: one runs `aimem serve` from login and restarts it if it
 fails, and one runs `aimem sync --all-hubs` every 10 minutes, so a Mac pulls
-from its hubs as Linux and Windows do. Before, the operator started `aimem
-serve` by hand after each login and nothing ran the periodic sync. OpenCode
-now gets the failure recall that Claude Code gained in 0.10.3: a failed shell
-call brings back the stored memories that share its error's words. A new
-quickstart takes a fresh workstation to a working project on an existing
-hub, and its Windows note now names the real `.aimem.json` trap: a UTF-8
-byte order mark is read, UTF-16 from `Out-File` or `>` is not. No schema
-change and no hub change: a 0.10.3 hub or workstation upgrades in place.
-Includes PR #223 to #226.
+from its hubs without a separate step, as Windows does (Linux runs the sync
+once `install.sh enable-sync` sets up its timer). Before, the operator
+started `aimem serve` by hand after each login and nothing ran the periodic
+sync. OpenCode now gets the failure recall that Claude Code gained in
+0.10.3: a failed shell call brings back the stored memories that share its
+error's words. A new quickstart takes a fresh workstation to a working
+project on an existing hub, and its Windows note now names the real
+`.aimem.json` trap: a UTF-8 byte order mark is read, UTF-16 from `Out-File`
+or `>` is not. No schema change and no hub change: a 0.10.3 hub or
+workstation upgrades in place. Includes PR #223 to #226.
 
 ### Upgrade notes
 
@@ -50,15 +51,17 @@ Includes PR #223 to #226.
   installer now registers two agents in `~/Library/LaunchAgents`:
   `io.github.blackvs.aimem` runs `aimem serve` from login and restarts it
   if it fails, and `io.github.blackvs.aimem.sync` runs
-  `aimem sync --all-hubs` every 10 minutes, so the pull leg runs as on
-  Linux and Windows. Before, the installer set up no service on macOS:
-  the operator started `aimem serve` by hand after each login, and an
-  upgrade refused while that serve answered. Now an upgrade stops the
-  agents, swaps the binary and starts them again; `uninstall-user`
-  unloads and removes both; `enable-sync <ssh-dest>` repoints the sync
-  agent and a later install keeps it. A serve started by hand under an
-  earlier release has to be stopped once before the first upgrade: the
-  installer refuses while it answers and stops nothing by name.
+  `aimem sync --all-hubs` every 10 minutes, so the pull leg runs without
+  a separate step, as on Windows (Linux runs it once `install.sh
+  enable-sync` sets up its timer). Before, the installer set up no
+  service on macOS: the operator started `aimem serve` by hand after each
+  login, and an upgrade refused while that serve answered. Now an upgrade
+  stops the agents, swaps the binary and starts them again;
+  `uninstall-user` unloads and removes both; `enable-sync <ssh-dest>`
+  repoints the sync agent and a later install keeps it. A serve started by
+  hand under an earlier release has to be stopped once before the first
+  upgrade: the installer refuses while it answers and stops nothing by
+  name.
   `AIMEM_NO_SERVICE=1` (or `AIMEM_NO_SYSTEMD=1`) keeps the manual mode.
   Without a login session (ssh with nobody logged in at the Mac) the
   agents are written and load at the next login. The macOS CI job
