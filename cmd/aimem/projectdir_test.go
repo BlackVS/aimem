@@ -59,7 +59,9 @@ func TestProjectIDAndSessionStartFromWorktree(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(wt, "docs", "SESSION-STATE.md"), []byte("WORKTREE HANDOFF\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if ctx := sessionStartContext(t, wt, nil); !strings.Contains(ctx, "WORKTREE HANDOFF") || strings.Contains(ctx, "MAIN CHECKOUT HANDOFF") {
-		t.Errorf("session-start ignored the worktree's own handoff: %q", ctx)
+	for _, dir := range []string{wt, filepath.Join(wt, "internal")} {
+		if ctx := sessionStartContext(t, dir, nil); !strings.Contains(ctx, "WORKTREE HANDOFF") || strings.Contains(ctx, "MAIN CHECKOUT HANDOFF") {
+			t.Errorf("session-start in %s ignored the worktree's own handoff: %q", dir, ctx)
+		}
 	}
 }

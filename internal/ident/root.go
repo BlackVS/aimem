@@ -60,6 +60,26 @@ func ConfigDir(dir string) (string, bool) {
 	}
 }
 
+// CheckoutDir returns the top of the checkout dir belongs to (the first
+// directory at or above it holding a .git entry), or "" outside any
+// checkout. A linked worktree's top is the worktree, not its main checkout.
+func CheckoutDir(dir string) string {
+	abs, err := filepath.Abs(dir)
+	if err != nil {
+		return ""
+	}
+	for d := abs; ; {
+		if _, err := os.Lstat(filepath.Join(d, ".git")); err == nil {
+			return d
+		}
+		parent := filepath.Dir(d)
+		if parent == d {
+			return ""
+		}
+		d = parent
+	}
+}
+
 // ProjectDir returns the directory a project's configuration and bound
 // files are read from for dir: the directory holding the governing
 // .aimem.json, or dir itself when none governs it.

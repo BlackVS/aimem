@@ -506,10 +506,16 @@ func sessionStartCmd(args []string) error {
 		p = args[0]
 	} else if _, err := os.Stat(p); err != nil {
 		// A session launched in a subdirectory or a linked worktree reads
-		// the handoff of the project whose .aimem.json governs it; a
-		// checkout's own handoff file still comes first.
-		if dir := ident.ProjectDir("."); dir != "." {
-			p = filepath.Join(dir, p)
+		// its checkout's own handoff first, then the handoff of the
+		// project whose .aimem.json governs it.
+		for _, dir := range []string{ident.CheckoutDir("."), ident.ProjectDir(".")} {
+			if dir == "" || dir == "." {
+				continue
+			}
+			if _, err := os.Stat(filepath.Join(dir, p)); err == nil {
+				p = filepath.Join(dir, p)
+				break
+			}
 		}
 	}
 	ctx := ""
