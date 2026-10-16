@@ -3,8 +3,8 @@
 // against a real OpenCode executable, 1.x or 2.x.
 //
 // Usage: node scripts/opencode-plugin-e2e/run.cjs /path/to/opencode [scenario...]
-// Scenarios: text tool fail subdir on both generations; warn compact queued
-// second on 2.x only (default: all that apply to the detected
+// Scenarios: text tool fail subdir subknob wtknob on both generations; warn
+// compact queued second on 2.x only (default: all that apply to the detected
 // generation). Linux/macOS only: the fake `aimem` that records submits is
 // a shell script, put first on PATH.
 //
@@ -55,6 +55,12 @@ const scenarios = {
   // upward; the 2.x plugin walks up to the project root).
   subdir: { mode: 'text', subdir: true },
   warn: { mode: 'tool', limit: 100000, first: 60000, env: { AIMEM_CTX_WARN_FRACTION: '0.5' }, v2only: true },
+  // subknob / wtknob: a context knob set only in the project root's
+  // .aimem.json takes effect for a session started in a subdirectory, or in
+  // a linked worktree of the checkout (which has no copy of the file). The
+  // default warn fraction (0.8) would stay silent at 60%.
+  subknob: { mode: 'tool', limit: 100000, first: 60000, subdir: true, aimemJson: { ctx_warn_fraction: 0.5 } },
+  wtknob: { mode: 'tool', limit: 100000, first: 60000, worktree: true, aimemJson: { ctx_warn_fraction: 0.5 } },
   compact: { mode: 'tool', limit: 100000, first: 90000, v2only: true },
   // Long-lived server scenarios (2.x `opencode serve`, driven over its
   // HTTP API): several turns in one plugin process.
@@ -291,7 +297,16 @@ async function run(name, sc) {
   cp.execFileSync('git', ['-C', proj, '-c', 'user.name=e2e', '-c', 'user.email=e2e@example.invalid',
     '-c', 'commit.gpgsign=false', '-c', 'core.hooksPath=/dev/null',
     'commit', '-q', '--allow-empty', '--no-verify', '-m', 'init']);
-  const cwd = sc.subdir ? path.join(proj, 'sub') : proj;
+  // A linked worktree gets the committed project files, but not the
+  // root's .aimem.json, written after the worktree is added.
+  if (sc.worktree) {
+    cp.execFileSync('git', ['-C', proj, 'add', '-A']);
+    cp.execFileSync('git', ['-C', proj, '-c', 'user.name=e2e', '-c', 'user.email=e2e@example.invalid',
+      '-c', 'commit.gpgsign=false', '-c', 'core.hooksPath=/dev/null', 'commit', '-q', '--no-verify', '-m', 'project']);
+    cp.execFileSync('git', ['-C', proj, 'worktree', 'add', '-q', path.join(work, 'wt')]);
+  }
+  if (sc.aimemJson) fs.writeFileSync(path.join(proj, '.aimem.json'), JSON.stringify(sc.aimemJson));
+  const cwd = sc.subdir ? path.join(proj, 'sub') : sc.worktree ? path.join(work, 'wt') : proj;
   fs.mkdirSync(cwd, { recursive: true });
   fs.writeFileSync(path.join(sc.localBin ? cwd : bin, 'aimem'), fakeAimem, { mode: 0o755 });
   const env = {
@@ -310,7 +325,8 @@ async function run(name, sc) {
   const r = sc.serve ? await serveRun(proj, env, sc.serve) : await new Promise(resolve => {
     const child = cp.spawn(exe, args, { cwd, env, stdio: ['ignore', 'ignore', 'pipe'] });
     let stderr = '';
-    child.stderr.on('data', c => { stderr = (stderr + c).slice(-4000); });
+    // Kept long enough to find the plugin's own lines (the 1.x warning).
+    child.stderr.on('data', c => { stderr = (stderr + c).slice(-262144); });
     let timedOut = false;
     const timer = setTimeout(() => { timedOut = true; child.kill('SIGKILL'); }, Number(process.env.AIMEM_E2E_TIMEOUT_MS) || 150000);
     child.on('close', (status, signal) => { clearTimeout(timer); resolve({ status, signal, timedOut, stderr }); });
@@ -362,6 +378,13 @@ async function run(name, sc) {
         break;
       case 'warn':
         assert.ok(primaries.some(x => x.warning), 'the context warning never reached the model');
+        break;
+      case 'subknob':
+      case 'wtknob':
+        // 2.x tells the model; 1.x logs the warning (and shows a toast).
+        if (v2) assert.ok(primaries.some(x => x.warning), 'the root .aimem.json warn fraction did not apply');
+        else assert.match(r.stderr || '', /aimem: context ~\d+%/, 'the root .aimem.json warn fraction did not apply');
+        assert.equal(turns.length, 1, 'expected exactly one journaled turn');
         break;
       case 'queued':
         assert.equal(turns.length, 1, 'expected exactly one journaled turn');

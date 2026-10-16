@@ -118,8 +118,9 @@ into memories.
 - **where `.aimem.json` is read** — a session started in a subdirectory
   or in a linked git worktree uses the nearest `.aimem.json` up to the
   checkout's top, or else the main checkout's, so its project id, hub
-  binding and groups are the checkout's own (`aimem project-id` prints
-  the result); a nested checkout stops the search, and outside any
+  binding, groups and OpenCode context knobs are the checkout's own
+  (`aimem project-id` prints the result); a nested checkout stops the
+  search, and outside any
   checkout only the directory's own file counts.
 
 ## The handoff file (`docs/SESSION-STATE.md`)

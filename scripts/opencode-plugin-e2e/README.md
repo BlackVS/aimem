@@ -35,6 +35,8 @@ payloads are right.
 | `tool` | the turn's `tool_summary` names the tool that ran |
 | `fail` | a `failure` event; every submit shares one idempotency key |
 | `subdir` | OpenCode started in a subdirectory still gets the handoff wired in the project root's opencode.json |
+| `subknob` | OpenCode started in a subdirectory gets the warn fraction set only in the project root's `.aimem.json` (2.x: the warning reaches the model; 1.x: the plugin logs it) |
+| `wtknob` | the same, started in a linked worktree of the project, which has no copy of `.aimem.json` |
 | `warn` | 2.x only: the context warning reached the model |
 | `compact` | 2.x only: the compaction request carries the `AIMEM HANDOFF` note, and one compaction marker is journaled |
 | `queued` | 2.x only, via `opencode serve`: a prompt queued behind a slow turn and cancelled leaves that turn's request intact and is never journaled |

@@ -28,6 +28,15 @@ currently 24); a binary refuses a database newer than it understands.
 
 ### Fixed
 
+- **OpenCode: the context knobs of `.aimem.json` apply in a
+  subdirectory or a linked worktree.** The plugin read `ctx_limit`,
+  `ctx_warn_fraction` and `auto_compact` from `.aimem.json` in the
+  directory OpenCode was launched in only, so such a session got the
+  host defaults instead of the project's overrides. It now finds the
+  governing `.aimem.json` the way the project id is found: the nearest
+  one up to the checkout's top, then a linked worktree's main
+  checkout. Both OpenCode generations.
+
 - **The new-project quickstart ends at a board the agent works from,
   not at "tasks on".** A project set up by the quickstart had tasks on
   and no process selected, so every session started with the notice
