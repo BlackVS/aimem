@@ -284,6 +284,8 @@ fails even when its payloads are right. Scenarios:
 | `tool` | `tool_summary` is `["glob"]` |
 | `fail` | a `failure` event; all submits share one idempotency key |
 | `subdir` | OpenCode started in a subdirectory: the handoff wired at the project root still reaches the model |
+| `subknob` | OpenCode started in a subdirectory: a warn fraction set only in the root's `.aimem.json` applies (2.x: the warning reaches the model; 1.x: the plugin logs it) |
+| `wtknob` | the same, started in a linked worktree that has no copy of `.aimem.json` |
 | `warn` (2.x) | the warning note reached the model |
 | `compact` (2.x) | compaction request carries `AIMEM HANDOFF`; one compaction marker |
 | `queued` (2.x) | B queued behind a slow A and cancelled: one turn, with A's request and reply; B never journaled |
@@ -303,7 +305,10 @@ which 1.x never reaches past its guard. `queued` fails against the
 plugin as first reviewed (commit `87f358c`: the running turn is
 journaled with the cancelled prompt's request), and passes with the fix;
 `subdir` likewise fails against `04182c6` (the handoff never reached the
-model) and passes now.
+model) and passes now. `subknob` and `wtknob` (2026-10-16, 1.18.32 and
+2.0.18, Linux x64 under WSL) fail against `86e1251`, where the knobs
+were read in the launch directory only, and pass with the fix; the
+other scenarios still pass on both generations.
 With `AIMEM_E2E_TIMEOUT_MS=2000`, `text` fails with "opencode run timed
 out", which shows the process-health check works.
 
@@ -391,10 +396,10 @@ Binaries were obtained with `npm pack opencode-linux-x64@<version>`
   (`ident.ProjectDir`): the nearest `.aimem.json` up to the checkout's
   top, then a linked worktree's main checkout. A turn started in
   `repo/sub` or in a worktree is attributed through `repo/.aimem.json`,
-  pin, hub binding and groups together. What stays open is narrower: the
-  plugin's context knobs (`ctx_limit`, `ctx_warn_fraction`,
-  `auto_compact`) are still read from `.aimem.json` in the launch
-  directory only.
+  pin, hub binding and groups together. The plugin's context knobs
+  (`ctx_limit`, `ctx_warn_fraction`, `auto_compact`) follow the same
+  rule: the plugin's `configDir` mirrors `ident.ConfigDir` and reads
+  the governing `.aimem.json` (the `subknob` and `wtknob` scenarios).
 - **Optional later:** have `aimem doctor` write the native 2.x MCP shape
   (`mcp.servers.aimem`) and warn about OpenCode older than 1.18. Today
   version probing runs only under `aimem teams setup --client-versions`.

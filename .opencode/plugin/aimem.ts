@@ -53,7 +53,10 @@ type TurnState = {
 // compacting hook injects the handoff instruction, and the marker is
 // written — the "prepare" half is automatic by construction.
 // Knob resolution, most-specific-intent first:
-//   process env  >  project .aimem.json  >  ~/.config/aimem/env  >  default
+//   process env  >  governing .aimem.json  >  ~/.config/aimem/env  >  default
+// The governing .aimem.json is the one that names the project (configDir),
+// so a session started in a subdirectory or a linked worktree gets the
+// checkout's overrides.
 // The env file is folded with the CLI's exact semantics (AIMEM_* lines,
 // quotes stripped) so the machine's ONE aimem config tunes the plugin;
 // the PROJECT override exists because these are model-behavior knobs in
@@ -76,6 +79,59 @@ function envFileVal(name: string): string | undefined {
     // No env file is the common workstation case; env-only still works.
   }
   return undefined
+}
+
+// configDir returns the directory whose .aimem.json governs dir, by the
+// rule of ident.ConfigDir (internal/ident/root.go), which the service
+// applies to the project_dir of every submit: the nearest .aimem.json up to
+// the checkout's top (the first directory holding a .git entry), else a
+// linked worktree's main checkout's, else dir itself.
+function configDir(dir: string): string {
+  const has = (d: string) => {
+    try {
+      return fs.statSync(path.join(d, ".aimem.json")).isFile()
+    } catch {
+      return false
+    }
+  }
+  const isTop = (d: string) => {
+    try {
+      fs.lstatSync(path.join(d, ".git"))
+      return true
+    } catch {
+      return false
+    }
+  }
+  if (has(dir)) return dir
+  let nearest = ""
+  for (let d = path.resolve(dir); ; ) {
+    if (!nearest && has(d)) nearest = d
+    if (isTop(d)) {
+      if (nearest) return nearest
+      const main = mainCheckout(d)
+      return main && has(main) ? main : dir
+    }
+    const up = path.dirname(d)
+    if (up === d) return dir
+    d = up
+  }
+}
+
+// mainCheckout returns the main working tree of the linked worktree whose
+// top is top, or "" when top is not one (ident.mainCheckout): its .git file
+// names its git dir, whose commondir file names the shared .git.
+function mainCheckout(top: string): string {
+  try {
+    const raw = fs.readFileSync(path.join(top, ".git"), "utf8").trim()
+    if (!raw.startsWith("gitdir:")) return ""
+    const gitDir = path.resolve(top, raw.slice("gitdir:".length).trim())
+    const common = path.resolve(gitDir, fs.readFileSync(path.join(gitDir, "commondir"), "utf8").trim())
+    if (path.basename(common) !== ".git") return ""
+    const main = path.dirname(common)
+    return main !== top ? main : ""
+  } catch {
+    return "" // a directory (an ordinary checkout) or unreadable
+  }
 }
 
 function knob(dir: string, envName: string, projKey: string, dflt: number, fraction: boolean): number {
@@ -268,9 +324,10 @@ function markerPayload(directory: string, sid: string, anchor: string) {
 }
 
 const AimemPlugin: Plugin = async ({ directory, client, $ }) => {
-  const CTX_LIMIT = knob(directory, "AIMEM_CTX_LIMIT", "ctx_limit", 0, false)
-  const CTX_WARN_FRACTION = knob(directory, "AIMEM_CTX_WARN_FRACTION", "ctx_warn_fraction", 0.8, true)
-  const AUTO_COMPACT = knob(directory, "AIMEM_AUTO_COMPACT", "auto_compact", 0, true)
+  const cfg = configDir(directory)
+  const CTX_LIMIT = knob(cfg, "AIMEM_CTX_LIMIT", "ctx_limit", 0, false)
+  const CTX_WARN_FRACTION = knob(cfg, "AIMEM_CTX_WARN_FRACTION", "ctx_warn_fraction", 0.8, true)
+  const AUTO_COMPACT = knob(cfg, "AIMEM_AUTO_COMPACT", "auto_compact", 0, true)
   const roles = new Map<string, string>() // messageID -> role
   const turns = new Map<string, TurnState>() // sessionID -> current turn
   const submitted = new Map<string, string>() // sessionID -> last submitted turn id
@@ -613,9 +670,10 @@ async function setupV2(ctx: any) {
   // context; only a full V2 context proceeds (see header comment).
   if (!directory || typeof ctx?.event?.subscribe !== "function" || typeof ctx?.session?.hook !== "function") return
 
-  const CTX_LIMIT = knob(directory, "AIMEM_CTX_LIMIT", "ctx_limit", 0, false)
-  const CTX_WARN_FRACTION = knob(directory, "AIMEM_CTX_WARN_FRACTION", "ctx_warn_fraction", 0.8, true)
-  const AUTO_COMPACT = knob(directory, "AIMEM_AUTO_COMPACT", "auto_compact", 0, true)
+  const cfg = configDir(directory)
+  const CTX_LIMIT = knob(cfg, "AIMEM_CTX_LIMIT", "ctx_limit", 0, false)
+  const CTX_WARN_FRACTION = knob(cfg, "AIMEM_CTX_WARN_FRACTION", "ctx_warn_fraction", 0.8, true)
+  const AUTO_COMPACT = knob(cfg, "AIMEM_AUTO_COMPACT", "auto_compact", 0, true)
   if (AUTO_COMPACT > 0) {
     console.error(
       "aimem: AIMEM_AUTO_COMPACT is not supported on OpenCode 2 (plugins cannot request compaction); " +
