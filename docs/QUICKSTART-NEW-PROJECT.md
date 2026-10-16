@@ -363,13 +363,16 @@ epic and its tasks.
 ### 4.3 Where your decisions go
 
 A decision given only in a chat is gone when that session ends. Put it
-where the next session reads it:
-- A decision about one task goes in a comment on that task: use
-  **add comment** on the task page, or ask the agent to add one.
-- A decision for the whole project is remembered: ask the agent to
-  remember it as a decision, or run
-  `aimem remember -p my-project "Decision: ..."`. Later sessions
-  recall it.
+where a later session finds it:
+- A decision about one task goes in a comment on that task, which an
+  agent reads with the task: use **add comment** on the task page, or
+  ask the agent to add one.
+- A decision for the whole project goes into the project's memory: ask
+  the agent to remember it as a decision, or run
+  `aimem remember -p my-project --kind decision "..."`. An agent finds it
+  with `recall_memory`. It reaches a session's start context only when
+  `.aimem.json` sets `session_facts`, a token budget for recalled
+  facts, which is off by default.
 
 ### 4.4 Check that a new session sees it all
 

@@ -219,6 +219,7 @@ func TestCheckAgainstUsageRefusesDrift(t *testing.T) {
 		"aimem health",
 		"aimem session-start",
 		"aimem process select r 0123 m.json --ref main -p p",
+		"aimem remember -p p --kind decision text",
 		// --expires and --output are on the form's continuation row.
 		"aimem access token-issue --user-name u --label l --project p --expires x --output f",
 	} {

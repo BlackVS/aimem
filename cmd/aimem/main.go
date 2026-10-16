@@ -212,7 +212,7 @@ const mainUsage = `usage: aimem <command> [flags]
   search     -p -q [-n]      FTS search within a project
   retention  -p [--max-age-days N] [--max-bytes N]
   fts-rebuild -p <project>|--all   rebuild search indexes from the base tables
-  remember   -p|-u <text>    store a curated memory (project or user scope)
+  remember   -p|-u [--kind] <text>  store a curated memory (project or user scope; --kind decision, convention, ...)
   recall     -p|-u -q [-n]   search curated memories (token budget -n)
   memories   -p|-u [-a]      list curated memories (-a includes stale)
   forget     -p|-u --id      retire a memory (bi-temporal; audit preserved)
