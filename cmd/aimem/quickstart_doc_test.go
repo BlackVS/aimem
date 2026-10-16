@@ -12,10 +12,11 @@ import (
 // commandUsages are the commands with a usage text of their own; every
 // other command is described in mainUsage.
 var commandUsages = map[string]string{
-	"access": accessUsage,
-	"docs":   docsUsage,
-	"hub":    hubUsage,
-	"token":  tokenUsage,
+	"access":  accessUsage,
+	"docs":    docsUsage,
+	"hub":     hubUsage,
+	"process": processUsage,
+	"token":   tokenUsage,
 }
 
 // docAimemCommands returns every aimem command a guide shows: each line of
@@ -194,6 +195,7 @@ func TestQuickstartNewProjectCommandsMatchUsage(t *testing.T) {
 		"aimem token add ", "aimem tasks on ", "aimem access user-add ", "aimem access grant add ",
 		"aimem access token-issue-user ", "aimem hub add team ", "aimem hub task-token team ",
 		"aimem health", "aimem session-start", "aimem docs list",
+		"aimem process select ", "aimem process show", "aimem process show --template task",
 	} {
 		found := false
 		for _, c := range cmds {
@@ -216,6 +218,7 @@ func TestCheckAgainstUsageRefusesDrift(t *testing.T) {
 		"aimem hub credential team",
 		"aimem health",
 		"aimem session-start",
+		"aimem process select r 0123 m.json --ref main -p p",
 		// --expires and --output are on the form's continuation row.
 		"aimem access token-issue --user-name u --label l --project p --expires x --output f",
 	} {
@@ -235,6 +238,7 @@ func TestCheckAgainstUsageRefusesDrift(t *testing.T) {
 		"aimem health --json",                          // health takes no flag
 		"aimem health --project p",                     // a flag of the next row (project repo)
 		"aimem tasks on --sim 0.9",                     // a flag of a later row (dedup)
+		"aimem process show --ref main",                // a flag of the select form
 		"aimem hub task-token team --token-file f --x", // an unknown flag at the end
 	} {
 		if err := checkAgainstUsage(c); err == nil {

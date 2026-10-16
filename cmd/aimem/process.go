@@ -24,13 +24,15 @@ import (
 	"aimem/internal/processctx"
 )
 
-func processCmd(args []string) error {
-	usage := `usage: aimem process select <repo> <commit> <manifest> [--ref <branch|tag>] [--expect <commit>] [-p <project>]
+const processUsage = `usage: aimem process select <repo> <commit> <manifest> [--ref <branch|tag>] [--expect <commit>] [-p <project>]
        aimem process clear --expect <commit> [-p <project>]
        aimem process show [--full] [--template <kind>] [-p <project>]
 
 select/clear run on the hub host (admin); show runs anywhere and prints
 what the session-start hook injects for this project.`
+
+func processCmd(args []string) error {
+	usage := processUsage
 	if len(args) == 0 {
 		return fmt.Errorf("%s", usage)
 	}

@@ -13,6 +13,21 @@ currently 24); a binary refuses a database newer than it understands.
 
 ## [Unreleased]
 
+### Fixed
+
+- **The new-project quickstart ends at a board the agent works from,
+  not at "tasks on".** A project set up by the quickstart had tasks on
+  and no process selected, so every session started with the notice
+  that no process reference is selected, and the agent took that as
+  "not ready" and never used the board. Step 2 now selects the process
+  (the aiskills set at `processes/aimem/manifest.json`, at a full
+  commit id), and step 3.6 verifies it with `aimem process show`. A new
+  step 4 adds the line that makes the board authoritative in the
+  project's `AGENTS.md`, the first epic and tasks from the process's
+  task template, where a person's decisions go, and how to check that
+  a new session sees all of it. The command check in
+  `cmd/aimem/quickstart_doc_test.go` now covers `aimem process`.
+
 ## [0.10.5] — 2026-10-15
 
 A session started in a linked git worktree or in a subdirectory of a
