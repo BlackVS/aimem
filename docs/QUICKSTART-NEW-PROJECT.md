@@ -3,8 +3,8 @@
 This is the path for one new project on a workstation that has never run
 aimem, against a hub that already runs. At the end the project journals
 to the hub, its agent reads the session handoff at every start, its
-design documents are shared through the hub, and the agent reads and
-writes the project's task board.
+design documents are shared through the hub, and the agent works from
+the project's task board under a selected process.
 
 You need:
 - the workstation (macOS, Linux or Windows) and the project directory on it;
@@ -31,7 +31,7 @@ The examples below use these three values, the hub
 `sessiond`, and `my-mac` as the label of the workstation's credentials.
 Substitute your own.
 
-## 2. On the hub: two credentials and the project's board
+## 2. On the hub: two credentials, the project's board and its process
 
 Log in to the hub host and switch to the service account, so the CLI
 talks to the running hub service:
@@ -69,6 +69,34 @@ aimem projects
 
 Check that the ID in the list is exactly the one you decided: a typo
 creates a second project.
+
+**The process.** Tasks on without a process is an unfinished setup.
+Every session then starts with the notice that no process reference is
+selected, and an agent can read that as "the board is not ready" and
+leave it alone. The process is the handbook, the checklists that gate
+READY and DONE, and the task templates the agents follow. The
+[aiskills](https://github.com/BlackVS/aiskills) repository ships a
+ready set at `processes/aimem/manifest.json`. It is aimem's own process
+and requires the `oh-code-review` skill from step 3.2. Read its
+[handbook](https://github.com/BlackVS/aiskills/blob/main/processes/aimem/handbook.md)
+before you select it; a project with other rules copies the
+set into a repository of its own and selects that instead.
+
+A selection names a full 40-character commit, never a branch, so the
+agents read exactly what you reviewed. Look up the commit `main` holds
+now (`git ls-remote` runs on any machine with Git), then select it:
+
+```sh
+git ls-remote https://github.com/BlackVS/aiskills.git refs/heads/main
+aimem process select https://github.com/BlackVS/aiskills.git FULL_40_HEX_COMMIT processes/aimem/manifest.json --ref main -p my-project
+```
+
+Replace `FULL_40_HEX_COMMIT` with the first column of the `git
+ls-remote` output. The hub stores only this reference; each workstation
+fetches the files itself, and step 3.6 checks that it can. To move to a
+newer commit later, select it with `--expect` and the commit selected
+now; see
+[the administrator manual](ADMIN-MANUAL.md#selecting-a-projects-process-documents).
 
 **The user and the grant.** List the users first and skip `user-add` if
 `my-agent` already exists:
@@ -149,10 +177,11 @@ ID, a session would journal under an ID derived from the directory.
 
 ### 3.2 Install the agent skills (optional)
 
-Skip this step for plain journaling. A project that will use the review
-gates or a team process needs it: the review skill (`oh-code-review`),
-the delivery check and the team processes come from the
-[aiskills](https://github.com/BlackVS/aiskills) set, not from aimem.
+Skip this step for plain journaling. A project that uses the process
+from step 2, the review gates or a team process needs it: the review
+skill (`oh-code-review`), the delivery check and the team processes
+come from the [aiskills](https://github.com/BlackVS/aiskills) set, not
+from aimem.
 
 macOS and Linux:
 
@@ -268,6 +297,7 @@ aimem project-id .
 aimem session-start
 aimem docs push
 aimem docs list
+aimem process show
 ```
 
 - `aimem health` answers from the local service. On macOS, if it cannot
@@ -278,6 +308,15 @@ aimem docs list
 - `aimem docs push` publishes the bound documents now instead of at the
   next checkpoint, and `aimem docs list` shows them on the hub,
   `SESSION-STATE` and each file you listed in `docs`.
+- `aimem process show` prints what a session receives about the
+  process. Its second line starts with
+  `Process set: https://github.com/BlackVS/aiskills.git @` and the first
+  12 characters of the commit you selected, then names the manifest,
+  `processes/aimem/manifest.json`. Then come
+  `Required skills: oh-code-review (installed)`, the handbook and the
+  READY and DONE checklists. A notice in their place (no process
+  selected, access denied, unavailable) names its cause. The command
+  succeeds either way, so read the output.
 
 Then start Claude Code, OpenCode or Codex in the project directory, a
 new session, since hooks and MCP servers are read at startup. Ask the
@@ -286,6 +325,65 @@ project's tasks. The new task appearing in the list proves the whole
 chain: the MCP registration, the task credential, the user's grant and
 the board. The hub's task page,
 `https://hub.example.com:8440/tasks`, shows the same task.
+
+## 4. The first day on the board
+
+Steps 1 to 3 give a board that works; this step makes the agent work
+from it. This guide gives the order and the first commands. What an
+epic stands for in your project, how large a task may be and who moves
+it to READY or DONE belong in the process handbook.
+
+### 4.1 Make the board authoritative
+
+Add one line to the project's `AGENTS.md`, which the installer created
+in step 3.1, and commit it:
+
+```markdown
+The aimem task board is authoritative for task state: a stage plan is an epic and a pull request is a task. Pick up, claim and move tasks as the process handbook says, without waiting for permission to use the board.
+```
+
+Without such a line an agent can treat the board as optional and ask
+before every task change.
+
+### 4.2 The first epic and the first tasks
+
+Start a new session in the project and ask the agent to create:
+- the first epic: the current stage or milestone, with its objective
+  and target;
+- one or two tasks under it, each a concrete outcome with acceptance
+  criteria, filled in from the process's task template.
+
+`aimem process show --template task` prints that template: the title,
+the objective, the acceptance criteria, the non-goals and a next action
+that records priority and size. Every placeholder is replaced before a
+task is created. A task moves to READY when it meets the READY
+checklist that `aimem process show` printed. The task page shows the
+epic and its tasks.
+
+### 4.3 Where your decisions go
+
+A decision given only in a chat is gone when that session ends. Put it
+where a later session finds it:
+- A decision about one task goes in a comment on that task, which an
+  agent reads with the task: use **add comment** on the task page, or
+  ask the agent to add one.
+- A decision for the whole project goes into the project's memory: ask
+  the agent to remember it as a decision, or run
+  `aimem remember -p my-project --kind decision "..."`. An agent finds it
+  with `recall_memory`. It reaches a session's start context only when
+  `.aimem.json` sets `session_facts`, a token budget for recalled
+  facts, which is off by default.
+
+### 4.4 Check that a new session sees it all
+
+Start one more new session in the project; hooks, the MCP server and
+`AGENTS.md` are read at startup. Then check:
+- `aimem process show` still prints the handbook and the checklists,
+  not a notice;
+- the session's start context has the same process block, so ask the
+  agent which process set and commit it follows;
+- the agent lists the project's tasks and names the epic from step 4.2
+  without being told where to look.
 
 ## The two secrets
 
@@ -314,5 +412,7 @@ was installed, is never used on a workstation.
 | `aimem project-id .` prints a hash-suffixed ID | `.aimem.json` has no `project` field, or aimem warns that it is unreadable: the JSON is not valid, or the file is not UTF-8 (on Windows, often UTF-16 from `Out-File` or `>`). |
 | `aimem docs push` or `aimem docs list` fails with `no hub configured (aimem hub add ...)` | The hub was never registered on this workstation, for example after a pause right after the one-liner. Do steps 3.3 to 3.5, then rerun step 3.6. |
 | `aimem docs list` says no shared documents | Run `aimem docs push`; check that the `docs` paths exist and that `hub` names the hub you added. |
+| The session starts with "no process reference is selected" | Tasks are on and no process is selected: do the process part of step 2, then start a new session. |
+| `aimem process show` says access denied or unavailable | This workstation cannot fetch the selected repository or commit: check its Git access to the repository, and that the commit is the one the `--ref` branch held. |
 | The agent has no task tools | Start a new session; check `aimem hub credential team` and that tasks are on for the project on the hub. |
 | Task reads work but writes fail | The user's grant on `my-project`, and that the token is the user task token, not the writer token. |
