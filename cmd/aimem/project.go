@@ -17,6 +17,8 @@ import (
 	"net/url"
 	"os"
 	"strings"
+
+	"aimem/internal/store"
 )
 
 // projectFlag registers --project with -p as its alias on one variable, so
@@ -123,8 +125,29 @@ func (r *repositoryJSON) line() string {
 	return fmt.Sprintf("%s %s (host %s, access %s)", r.Kind, r.URL, r.Host, r.Access)
 }
 
+// processSelected reports whether the hub holds a process selection for
+// the project.
+func processSelected(project string) (bool, error) {
+	var proc struct {
+		Current *json.RawMessage `json:"current"`
+	}
+	// ?history=1 answers 200 with a null current when nothing is selected.
+	err := localJSON(http.MethodGet, "/v1/projects/"+url.PathEscape(project)+"/process?history=1", nil, &proc)
+	return proc.Current != nil, err
+}
+
+// processNextStep is what a project with tasks on and no process is told:
+// without a process its agents read the board as not ready.
+func processNextStep(project string) string {
+	return "next step: select the project's process on this hub host; until then agents read the board as not ready:\n" +
+		"  aimem process select <repo> <40-hex commit> <manifest> [--ref <branch>] -p " + project + "\n" +
+		"  (docs/QUICKSTART-NEW-PROJECT.md, step 2)\n"
+}
+
 // projectShowCmd prints what the hub holds for a project: its repository,
-// its process pin and who is granted it, with names beside IDs.
+// whether its tasks are on, its process pin and who is granted it, with
+// names beside IDs. Tasks on with no process is an unfinished setup and
+// says so.
 func projectShowCmd(args []string) error {
 	fs := flag.NewFlagSet("project show", flag.ContinueOnError)
 	fs.Usage = func() { fmt.Fprintln(fs.Output(), projectUsage) }
@@ -170,11 +193,23 @@ func projectShowCmd(args []string) error {
 	if err := localJSON(http.MethodGet, base+"/grants", nil, &grants); err != nil {
 		return err
 	}
+	var tasks struct {
+		Value string `json:"value"`
+	}
+	if err := localJSON(http.MethodGet, base+"/meta/"+store.TasksMetaKey, nil, &tasks); err != nil {
+		return err
+	}
+	tasksOn := tasks.Value == "on"
 	w := os.Stdout
 	fmt.Fprintf(w, "project %s\n", *p)
 	fmt.Fprintf(w, "repository: %s\n", repo.Repository.line())
 	if r := repo.Repository; r != nil && r.SetBy != "" {
 		fmt.Fprintf(w, "  set %s by %s\n", r.SetAt, r.SetBy)
+	}
+	if tasksOn {
+		fmt.Fprintln(w, "tasks:      on")
+	} else {
+		fmt.Fprintln(w, "tasks:      off")
 	}
 	if c := proc.Current; c != nil {
 		fmt.Fprintf(w, "process:    %s %s %s", c.Repo, c.Commit, c.Manifest)
@@ -184,6 +219,10 @@ func projectShowCmd(args []string) error {
 		fmt.Fprintf(w, "\n  selected %s by %s\n", c.SelectedAt, c.SelectedBy)
 	} else {
 		fmt.Fprintln(w, "process:    (none selected)")
+		if tasksOn {
+			fmt.Fprintln(w, "warning:    tasks on, process not selected")
+			fmt.Fprint(w, processNextStep(*p))
+		}
 	}
 	if len(grants.Grants) == 0 {
 		fmt.Fprintln(w, "grants:     (none)")

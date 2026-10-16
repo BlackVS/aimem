@@ -115,6 +115,63 @@ func TestProjectRepoSetShowClear(t *testing.T) {
 	}
 }
 
+// Tasks on with no process is an unfinished setup: `tasks on` names the
+// next step and `project show` warns. A project with a process, or with
+// tasks off (a project that only journals), gets neither.
+func TestTasksOnWithoutProcessIsAnUnfinishedSetup(t *testing.T) {
+	reg := projectService(t)
+	if _, err := reg.Open("example"); err != nil {
+		t.Fatal(err)
+	}
+	show := func() string {
+		t.Helper()
+		out, err := stdoutOf(t, func() error { return projectNamespaceCmd([]string{"show", "-p", "example"}) })
+		if err != nil {
+			t.Fatalf("show: %v\n%s", err, out)
+		}
+		return out
+	}
+	tasks := func(v string) string {
+		t.Helper()
+		out, err := stdoutOf(t, func() error { return tasksCmd([]string{v, "-p", "example"}) })
+		if err != nil {
+			t.Fatalf("tasks %s: %v\n%s", v, err, out)
+		}
+		return out
+	}
+	const next = "aimem process select <repo> <40-hex commit> <manifest> [--ref <branch>] -p example"
+
+	if out := show(); !strings.Contains(out, "tasks:      off") || strings.Contains(out, "warning") {
+		t.Fatalf("tasks off, no process:\n%s", out)
+	}
+	if out := tasks("on"); !strings.Contains(out, `tasks on for project "example"`) || !strings.Contains(out, "next step: select the project's process") || !strings.Contains(out, next) {
+		t.Fatalf("tasks on, no process:\n%s", out)
+	}
+	if out := show(); !strings.Contains(out, "tasks:      on") || !strings.Contains(out, "warning:    tasks on, process not selected") || !strings.Contains(out, next) {
+		t.Fatalf("show, tasks on, no process:\n%s", out)
+	}
+
+	commit := strings.Repeat("ab", 20)
+	if out, err := stdoutOf(t, func() error {
+		return processCmd([]string{"select", "https://example.com/process.git", commit, "process/manifest.json", "-p", "example"})
+	}); err != nil {
+		t.Fatalf("select: %v\n%s", err, out)
+	}
+	if out := tasks("on"); strings.Contains(out, "next step") {
+		t.Fatalf("tasks on with a process selected:\n%s", out)
+	}
+	if out := show(); !strings.Contains(out, "process:    https://example.com/process.git "+commit) || strings.Contains(out, "warning") {
+		t.Fatalf("show, tasks on, process selected:\n%s", out)
+	}
+
+	if out := tasks("off"); strings.Contains(out, "next step") {
+		t.Fatalf("tasks off:\n%s", out)
+	}
+	if out := show(); !strings.Contains(out, "tasks:      off") || strings.Contains(out, "warning") {
+		t.Fatalf("show, tasks off:\n%s", out)
+	}
+}
+
 // Every command that takes a project registers --project with -p as its
 // alias on the same variable.
 func TestProjectFlagAlias(t *testing.T) {

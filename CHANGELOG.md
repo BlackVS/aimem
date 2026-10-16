@@ -13,6 +13,19 @@ currently 24); a binary refuses a database newer than it understands.
 
 ## [Unreleased]
 
+### Changed
+
+- **Tasks on with no process selected is reported as an unfinished
+  setup.** Such a project's sessions start with the notice that no
+  process reference is selected, and an agent can take that as "the
+  board is not ready" and leave it alone. `aimem tasks on` now checks
+  the project's process selection and, when there is none, prints the
+  next step with the shape of `aimem process select`. `aimem project
+  show` prints whether tasks are on, and for tasks on with no process
+  it adds `warning:    tasks on, process not selected` and the same next
+  step. A project whose tasks are off, one that only journals, gets
+  neither.
+
 ### Fixed
 
 - **The new-project quickstart ends at a board the agent works from,

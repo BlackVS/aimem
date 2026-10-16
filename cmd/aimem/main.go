@@ -203,7 +203,7 @@ const mainUsage = `usage: aimem <command> [flags]
   projects                   list project IDs
   project repo set|clear --project <p> [--kind --url --access]
                              a project's one repository (hub host, admin)
-  project show --project <p> repository, process pin and grants (hub host)
+  project show --project <p> repository, tasks, process pin and grants (hub host)
   project list|id|drop       the namespace forms of projects, project-id
                              and drop-project
   sessions   -p <project>    list sessions in a project
@@ -735,6 +735,13 @@ func tasksCmd(args []string) error {
 		return fmt.Errorf("HTTP %d: %s", resp.StatusCode, strings.TrimSpace(string(data)))
 	}
 	fmt.Printf("tasks %s for project %q\n", args[0], proj)
+	if args[0] == "on" {
+		if selected, err := processSelected(proj); err != nil {
+			fmt.Printf("could not check the project's process selection: %v\n", err)
+		} else if !selected {
+			fmt.Print(processNextStep(proj))
+		}
+	}
 	return nil
 }
 
