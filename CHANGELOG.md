@@ -13,6 +13,36 @@ currently 24); a binary refuses a database newer than it understands.
 
 ## [Unreleased]
 
+## [0.10.6] — 2026-10-16
+
+A new project set up by the quickstart now ends at a board its agent
+works from. Before, a project could have tasks on and no process
+selected; every session then started with the notice that no process
+reference is selected, and the agent took that as "not ready" and never
+used the board. The quickstart now selects and verifies the process and
+walks through the first day on the board, and `aimem tasks on` and
+`aimem project show` report tasks on with no process as an unfinished
+setup, with the next step. The OpenCode plugin's context knobs in
+`.aimem.json` now apply to a session started in a subdirectory or a
+linked worktree, as the project id already did. No schema change and no
+hub change. Includes PR #231, #232 and #233.
+
+### Upgrade notes
+
+- **No schema change and no hub change.** Hubs may stay on 0.10.5: the
+  new `tasks on` and `project show` output reads routes a 0.10.5 hub
+  already serves.
+- **Hub hosts where projects are set up: a 0.10.6 `aimem` command for
+  the new next step and warning.** `aimem tasks on` and `aimem project
+  show` run on the hub host, so the next step and the `tasks on, process
+  not selected` warning appear once that host's `aimem` command is
+  0.10.6. An older command keeps working without them.
+- **OpenCode workstations: the client one-liner, then restart OpenCode.**
+  The installer copies the plugin, and the plugin reads its knobs when
+  it loads, so a project's `ctx_limit`, `ctx_warn_fraction` and
+  `auto_compact` apply in a subdirectory or a worktree only after the
+  0.10.6 client one-liner and a restart of OpenCode.
+
 ### Changed
 
 - **Tasks on with no process selected is reported as an unfinished
