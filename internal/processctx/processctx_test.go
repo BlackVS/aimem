@@ -39,6 +39,7 @@ type fakeHub struct {
 	kept      map[string]*process.Ref
 	setStatus int
 	setDigest string
+	setCut    bool // answer the set with its body cut short, as a dropped connection leaves it
 	setCalls  atomic.Int64
 }
 
@@ -78,9 +79,13 @@ func (h *fakeHub) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		if digest == "" {
 			digest = h.set.Digest()
 		}
-		json.NewEncoder(w).Encode(map[string]any{"project": "alpha",
+		raw, _ := json.Marshal(map[string]any{"project": "alpha",
 			"selection": map[string]string{"name": ref.DisplayName(), "commit": ref.Commit, "manifest": ref.Manifest, "digest": digest},
 			"set":       h.set})
+		if h.setCut {
+			raw = raw[:len(raw)*2/3]
+		}
+		w.Write(raw)
 	case strings.HasSuffix(r.URL.Path, "/process"):
 		if h.processStatus != 0 {
 			w.WriteHeader(h.processStatus)

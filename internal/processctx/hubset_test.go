@@ -132,6 +132,20 @@ func TestHubSetDigestMismatchIsRefusedAndNotCached(t *testing.T) {
 	if entries, _ := os.ReadDir(filepath.Join(root, "process", "sets")); len(entries) != 0 {
 		t.Fatalf("a mismatching set was cached: %v", entries)
 	}
+	// A body cut short is not a set: unavailable, nothing cached, and the
+	// next load asks again.
+	sel.Digest = b.Digest()
+	h.change(func(h *fakeHub) { h.setDigest, h.setCut = "", true })
+	if r := Load(dir, root, ""); r.State != Unavailable || r.Set != nil || !strings.Contains(r.Detail, "not a complete set") {
+		t.Fatalf("truncated set: %+v", r)
+	}
+	if entries, _ := os.ReadDir(filepath.Join(root, "process", "sets")); len(entries) != 0 {
+		t.Fatalf("a truncated set was cached: %v", entries)
+	}
+	h.change(func(h *fakeHub) { h.setCut = false })
+	if r := Load(dir, root, ""); r.State != Ready || r.Source != SourceHub {
+		t.Fatalf("after the cut: %+v", r)
+	}
 }
 
 // A selection without a digest (an older hub's, or one recorded before
