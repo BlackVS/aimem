@@ -95,9 +95,11 @@ func checkRepoPath(p string) error {
 
 // Manifest names the files of one process set at one commit. Version 1
 // names the required skills by name; version 2 pins each one as name,
-// version and source (docs/DESIGN-portable-team-context.md, increment 1e),
-// and an aimem from before version 2 refuses it with a message naming the
-// version, never misreading it.
+// version and source (docs/DESIGN-portable-team-context.md, increment 1e).
+// An aimem from before version 2 refuses it outright: its decoder rejects
+// the skill objects (skills was a list of strings) before it checks the
+// version, so it never misreads the pins; the message here names the
+// version only from this release on.
 type Manifest struct {
 	Version     int               `json:"version"`
 	Handbook    string            `json:"handbook"`
@@ -777,9 +779,44 @@ func SkillStateOn(projectDir, homeDir string) func(name string) SkillState {
 // required skills from the hub; no text names where the hub got them.
 const SkillInstallCommand = "aimem skills install"
 
+// Mismatch reports whether an installed copy is known to be another one
+// than the pin: its recorded version or its recorded source differs. An
+// unknown version or source (a copy by hand) is not a mismatch; the line
+// says it is unknown.
+func (st SkillState) Mismatch(p SkillPin) bool {
+	if !p.Pinned() || !st.Installed {
+		return false
+	}
+	return (st.Version != "" && st.Version != p.Version) || (st.Source != "" && st.Source != p.Source)
+}
+
+// Have is what the copy is, as far as its record says: "1.0 (instance)",
+// "1.0", "(instance)" or "".
+func (st SkillState) Have() string {
+	switch {
+	case st.Version != "" && st.Source != "":
+		return st.Version + " (" + st.Source + ")"
+	case st.Version != "":
+		return st.Version
+	case st.Source != "":
+		return "(" + st.Source + ")"
+	}
+	return ""
+}
+
+// PinLabel is the pin alone: the name, or the name with its version and
+// source.
+func PinLabel(p SkillPin) string {
+	if !p.Pinned() {
+		return p.Name
+	}
+	return p.Name + " " + p.Version + " (" + p.Source + ")"
+}
+
 // SkillLine is one required skill as the bootstrap and the readiness
 // checks print it: the pin, then what this machine has. A missing skill or
-// one at another version names the command, never a URL.
+// one recorded at another version or source names the command, never a
+// URL.
 func SkillLine(p SkillPin, st SkillState) string {
 	if !p.Pinned() {
 		if st.Installed {
@@ -791,10 +828,10 @@ func SkillLine(p SkillPin, st SkillState) string {
 	switch {
 	case !st.Installed:
 		return head + "NOT FOUND, run `" + SkillInstallCommand + "`)"
+	case st.Mismatch(p):
+		return head + "installed " + st.Have() + ", run `" + SkillInstallCommand + "`)"
 	case st.Version == "":
 		return head + "installed, version unknown)"
-	case st.Version != p.Version:
-		return head + "installed " + st.Version + ", run `" + SkillInstallCommand + "`)"
 	}
 	return head + "installed)"
 }

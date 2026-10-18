@@ -251,8 +251,9 @@ func TestBootstrapBudgetAndSkills(t *testing.T) {
 }
 
 // Version 2 of the manifest pins each skill's version and source; version
-// 1 names skills only; an aimem from before version 2 refuses a version 2
-// manifest by its version, with a message naming it.
+// 1 names skills only. (An aimem from before version 2 refuses a version 2
+// manifest by a decoding error on the skill objects; from this release on,
+// an unknown version is refused by a message naming it.)
 func TestManifestVersion2PinsSkills(t *testing.T) {
 	v2 := `{"version":2,"handbook":"h.md","skills":[{"name":"oh-code-review","version":"1.33.13","source":"release"},{"name":"house-style","version":"3","source":"instance"}]}`
 	m, err := ParseManifest([]byte(v2))
@@ -299,6 +300,10 @@ func TestManifestVersion2PinsSkills(t *testing.T) {
 		{SkillState{Installed: true}, "oh-code-review 1.33.13 (release; installed, version unknown)"},
 		{SkillState{Installed: true, Version: "1.33.13"}, "oh-code-review 1.33.13 (release; installed)"},
 		{SkillState{Installed: true, Version: "1.33.12"}, "oh-code-review 1.33.13 (release; installed 1.33.12, run `aimem skills install`)"},
+		// The same version from the other source is another skill.
+		{SkillState{Installed: true, Version: "1.33.13", Source: "instance"}, "oh-code-review 1.33.13 (release; installed 1.33.13 (instance), run `aimem skills install`)"},
+		{SkillState{Installed: true, Source: "instance"}, "oh-code-review 1.33.13 (release; installed (instance), run `aimem skills install`)"},
+		{SkillState{Installed: true, Version: "1.33.13", Source: "release"}, "oh-code-review 1.33.13 (release; installed)"},
 	} {
 		if got := SkillLine(pin, c.st); got != c.want {
 			t.Errorf("SkillLine(%+v) = %q, want %q", c.st, got, c.want)

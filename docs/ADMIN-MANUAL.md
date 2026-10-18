@@ -453,7 +453,8 @@ requires: plain names in version 1; in version 2 each one pinned as
 `{"name", "version", "source"}`, the source `release` or `instance`, see
 [Importing the skills sets](#importing-the-skills-sets)) and an optional
 `budget_bytes` for the injected unit (24 KiB by default). An aimem from
-before version 2 refuses a version 2 manifest by its version, so move to
+before version 2 refuses a version 2 manifest outright (a decoding error
+on the skill objects, not a message naming the version), so move to
 version 2 once every member runs a release that reads it. A selection names a full commit id, so what a
 session sees is exactly what was reviewed; the `--ref` lets a machine
 fetch from a server that refuses fetch-by-hash, and the commit must be

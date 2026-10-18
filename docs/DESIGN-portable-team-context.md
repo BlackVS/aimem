@@ -315,7 +315,7 @@ the project credential exactly as the session-start hook does.
 | v0.10.x or older | New | Reads the reference, ignores `digest` and `name`, fetches the commit from Git with its own access, as before. |
 | Older `aimem process select` | New hub | Refused: a selection must carry its set or name a kept one; the hub host runs the hub's own command. |
 | New | Hub without the skills routes (older hub) | The bootstrap's skills line needs no hub: it compares the manifest's pins with the installers' record on this machine. `aimem skills install` and `aimem skills list` ask the index route; an older hub refuses it with 403 like any route it does not know, which these commands report as a refusal naming both causes (the grant, or a hub older than hub-served skills), and install nothing. |
-| Any client from before version 2 manifests | Any | Refuses a version 2 manifest with `manifest: version 2 is not supported (want 1)`; a version 1 manifest with plain names is read by every version. The process owner moves to version 2 once every member runs this release. |
+| Any client from before version 2 manifests | Any | Refuses a version 2 manifest outright: its decoder rejects the skill objects (`skills` was a list of strings) before it checks the version, so the error is a JSON decoding error, not a message naming version 2; it never misreads the pins. A version 1 manifest with plain names is read by every version. The process owner moves to version 2 once every member runs this release. |
 | Skills installed by the aiskills installers | New client | Count as installed, with the version the installer's record (`.ai-skills.json`) gives the directory; `aimem skills install` replaces them whole and records the version and source per skill, so the two installers agree. |
 
 The report gains fields and never removes one; a consumer of `status`,
@@ -455,7 +455,8 @@ Each has its own task, review gates and human merge.
   denied, 404 and 405 unsupported, a cut body or a digest mismatch refused
   and never cached. The process manifest moves to version 2 to pin each
   skill as `{name, version, source}` (version 1 with plain names stays
-  accepted; an older aimem refuses version 2 by its version). `aimem
+  accepted; an older aimem refuses version 2 outright, by a decoding
+  error on the skill objects rather than by the version). `aimem
   skills install` in a checkout resolves each pin (the source's current
   import when the version matches, else a kept import of that version;
   an unservable pin is named and nothing is installed for it), reads the

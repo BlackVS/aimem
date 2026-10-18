@@ -54,6 +54,14 @@ func Install(targets []Target, picks []Skill, files func(digest string) (map[str
 		if rec.Sources == nil {
 			rec.Sources = map[string]string{}
 		}
+		// A skill the record lists under its one version keeps that version
+		// as its own before the record's version moves on: a partial upgrade
+		// must not report the untouched skills at the new version.
+		for _, s := range rec.Skills {
+			if _, ok := rec.Versions[s]; !ok && rec.Version != "" {
+				rec.Versions[s] = rec.Version
+			}
+		}
 		for _, p := range picks {
 			all, err := files(p.Digest)
 			if err != nil {

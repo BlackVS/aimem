@@ -226,6 +226,45 @@ func TestStoreImportKeepsFivePerSourceAndPrunes(t *testing.T) {
 	}
 }
 
+// Two versions with the same files (a release that changed only its
+// installer) are two kept imports sharing one stored set, so a pin on
+// either version resolves; the same version re-imported with the same
+// files replaces its entry.
+func TestSameContentUnderTwoVersionsKeepsBoth(t *testing.T) {
+	root := t.TempDir()
+	st := NewStore(root)
+	now := time.Date(2026, 10, 18, 20, 0, 0, 0, time.UTC)
+	e10, written, err := st.Import(&Set{Source: SourceRelease, Version: "1.0", Files: releaseFiles()}, "admin", now)
+	if err != nil || !written {
+		t.Fatal(err)
+	}
+	e11, written, err := st.Import(&Set{Source: SourceRelease, Version: "1.1", Files: releaseFiles()}, "admin", now.Add(time.Minute))
+	if err != nil || written || e11.Digest != e10.Digest {
+		t.Fatalf("second import: %+v %v %v", e11, written, err)
+	}
+	ix, _ := st.Load()
+	rel := ix.Sources[SourceRelease]
+	if rel.Current.Version != "1.1" || len(rel.Kept) != 2 || rel.Kept[1].Version != "1.0" {
+		t.Fatalf("kept: %+v", rel)
+	}
+	if !st.Has(e10.Digest) {
+		t.Fatal("the shared files were pruned")
+	}
+	answer := &IndexAnswer{Sources: ix.Current(), Kept: map[string][]Entry{SourceRelease: rel.Kept}, Effective: ix.Effective()}
+	picks, problems := Resolve(answer, []process.SkillPin{{Name: "oh-code-review", Version: "1.0", Source: SourceRelease}, {Name: "verify-delivery", Version: "1.1", Source: SourceRelease}})
+	if len(problems) != 0 || len(picks) != 2 || picks[0].Version != "1.0" || picks[1].Version != "1.1" || picks[0].Digest != e10.Digest {
+		t.Fatalf("resolve: %+v %v", picks, problems)
+	}
+	// The same version again, same files: one entry, still current.
+	if _, _, err := st.Import(&Set{Source: SourceRelease, Version: "1.1", Files: releaseFiles()}, "admin", now.Add(2*time.Minute)); err != nil {
+		t.Fatal(err)
+	}
+	ix, _ = st.Load()
+	if rel := ix.Sources[SourceRelease]; len(rel.Kept) != 2 || rel.Current.Version != "1.1" {
+		t.Fatalf("re-import of the same version: %+v", rel)
+	}
+}
+
 // The member's trim never removes a set the index keeps: on the hub host
 // the admin's cache and the hub's store share one root. With no readable
 // index it trims nothing.
@@ -314,6 +353,9 @@ func TestInstallWritesSkillsWholeAndRecordsVersions(t *testing.T) {
 	// A copy by hand with a stray file, as the installer would also replace.
 	os.MkdirAll(filepath.Join(claude, "verify-delivery"), 0o755)
 	os.WriteFile(filepath.Join(claude, "verify-delivery", "stale.txt"), []byte("old"), 0o644)
+	// An untouched skill the installers' record lists under its one version.
+	os.MkdirAll(filepath.Join(claude, "oh-technical-writing"), 0o755)
+	os.WriteFile(filepath.Join(claude, "oh-technical-writing", "SKILL.md"), []byte("write"), 0o644)
 	os.WriteFile(filepath.Join(claude, ".ai-skills.json"), []byte(`{"version":"1.20.0","commit":"abc","skills":["verify-delivery","oh-technical-writing"],"archive_sha256":"x","installed_at":"2026-01-01T00:00:00Z"}`), 0o644)
 	targets := []Target{{Client: "claude", Dir: claude}, {Client: "codex", Dir: filepath.Join(dir, ".agents", "skills")}}
 	picks := []Skill{
@@ -350,8 +392,13 @@ func TestInstallWritesSkillsWholeAndRecordsVersions(t *testing.T) {
 	if st := state("oh-code-review"); !st.Installed || st.Version != "site-2" || st.Source != SourceInstance {
 		t.Fatalf("state after install: %+v", st)
 	}
-	if st := state("oh-technical-writing"); st.Installed {
-		t.Fatalf("a listed but absent skill counted as installed: %+v", st)
+	// The untouched skill keeps the version it was installed at: the
+	// record's one version moved to 1.33.13, its own entry did not.
+	if st := state("oh-technical-writing"); !st.Installed || st.Version != "1.20.0" || rec.Versions["oh-technical-writing"] != "1.20.0" {
+		t.Fatalf("an untouched skill took the new version: %+v %v", st, rec.Versions)
+	}
+	if line := process.SkillLine(process.SkillPin{Name: "oh-technical-writing", Version: "1.33.13", Source: "release"}, state("oh-technical-writing")); line != "oh-technical-writing 1.33.13 (release; installed 1.20.0, run `aimem skills install`)" {
+		t.Fatalf("untouched skill line: %q", line)
 	}
 	if line := process.SkillLine(process.SkillPin{Name: "verify-delivery", Version: "1.33.13", Source: "release"}, state("verify-delivery")); line != "verify-delivery 1.33.13 (release; installed)" {
 		t.Fatalf("line: %q", line)

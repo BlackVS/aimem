@@ -603,44 +603,64 @@ func (s *setup) checkProcess() {
 	home, _ := os.UserHomeDir()
 	// What this machine has of each pin, in the bootstrap's words: the
 	// version and source, and the command for a missing or outdated one.
-	state := process.SkillStateOn(s.env.Dir, home)
-	var lines []string
-	var wrong []string // missing, or at another version than the pin
-	for _, p := range set.Manifest.Skills {
-		st := state(p.Name)
-		lines = append(lines, process.SkillLine(p, st))
-		if !st.Installed || (p.Pinned() && st.Version != "" && st.Version != p.Version) {
-			wrong = append(wrong, p.Name)
-		}
-	}
-	detail := "process set selected; required skills: " + strings.Join(lines, "; ")
 	fix := "run `" + process.SkillInstallCommand + "` in this checkout: it installs the required skills from the hub, at the pinned versions, where the clients on this machine read them; needed before the step that needs them (the review gate)"
 	if s.report.Wiring == nil || len(s.report.Wiring.Clients) == 0 {
-		// No client on PATH to judge for: the machine-wide locations decide.
-		if len(wrong) > 0 {
+		// No client on PATH to judge for: the machine-wide locations decide,
+		// in the bootstrap's words (the version and source of the copy found,
+		// and the command for a missing or mismatched one).
+		state := process.SkillStateOn(s.env.Dir, home)
+		var lines []string
+		wrong := false
+		for _, p := range set.Manifest.Skills {
+			st := state(p.Name)
+			lines = append(lines, process.SkillLine(p, st))
+			wrong = wrong || !st.Installed || st.Mismatch(p)
+		}
+		detail := "process set selected; required skills: " + strings.Join(lines, "; ")
+		if wrong {
 			s.check("process", "warn", detail, fix)
 			return
 		}
 		s.check("process", "ok", detail, "")
 		return
 	}
-	// Per client: a skill counts only where that client reads it, and only
-	// as a directory holding SKILL.md.
+	// Per client: a skill counts only where that client reads it, only as
+	// a directory holding SKILL.md, and only as the copy that client reads:
+	// its own record decides the version and source, so one client's
+	// current copy never answers for another client's outdated one.
+	pins := map[string]process.SkillPin{}
+	var labels []string
+	for _, p := range set.Manifest.Skills {
+		pins[p.Name] = p
+		labels = append(labels, process.PinLabel(p))
+	}
+	detail := "process set selected; required skills: " + strings.Join(labels, "; ")
 	s.report.Wiring.Skills = wiring.Skills(s.sel.Repo, home, s.report.Wiring.Clients, set.Manifest.SkillNames())
-	var missing []string
-	for _, st := range s.report.Wiring.Skills {
+	var missing, mismatched []string
+	for i := range s.report.Wiring.Skills {
+		st := &s.report.Wiring.Skills[i]
 		if st.Path == "" {
 			missing = append(missing, st.Skill+" for "+st.Client)
+			continue
+		}
+		have := process.SkillState{Installed: true, Dir: st.Path}
+		have.Version, have.Source = process.ReadInstalledRecord(filepath.Dir(st.Path)).Of(st.Skill)
+		if p := pins[st.Skill]; have.Mismatch(p) {
+			mismatched = append(mismatched, st.Skill+" for "+st.Client+" (installed "+have.Have()+")")
+			st.Fix = "run `" + process.SkillInstallCommand + "` in the checkout (the copy " + st.Client + " reads is " + have.Have() + ", the process pins " + p.Version + " (" + p.Source + "))"
 		}
 	}
-	if len(missing) > 0 || len(wrong) > 0 {
+	if len(missing) > 0 || len(mismatched) > 0 {
 		if len(missing) > 0 {
 			detail += "; NOT FOUND: " + strings.Join(missing, ", ")
+		}
+		if len(mismatched) > 0 {
+			detail += "; another version or source than the pin: " + strings.Join(mismatched, ", ")
 		}
 		s.check("process", "warn", detail, fix+"; see the skills list below")
 		return
 	}
-	s.check("process", "ok", detail+" (found for every client on PATH)", "")
+	s.check("process", "ok", detail+" (found for every client on PATH, at the pinned version and source where recorded)", "")
 }
 
 // checkBaseCommit records HEAD: the base commit a worker's attempt and a

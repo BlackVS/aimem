@@ -120,9 +120,13 @@ func (s *Store) Import(set *Set, by string, now time.Time) (Entry, bool, error) 
 		st = &SourceState{}
 		ix.Sources[set.Source] = st
 	}
+	// An import is a version with a content: the same version with the
+	// same content replaces its entry; the same content under another
+	// version (a release that changed only its installer) is another kept
+	// import sharing the stored files, so a pin on either version resolves.
 	kept := []Entry{e}
 	for _, k := range st.Kept {
-		if k.Digest != digest {
+		if k.Digest != digest || k.Version != set.Version {
 			kept = append(kept, k)
 		}
 	}

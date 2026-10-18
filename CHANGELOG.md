@@ -67,8 +67,10 @@ currently 24); a binary refuses a database newer than it understands.
   version 2 manifest names each skill as `{"name", "version", "source"}`
   (source `release` or `instance`); a version 1 manifest with plain names
   is still accepted (any version present on the hub). An aimem from before
-  this release refuses a version 2 manifest with its existing message
-  `manifest: version 2 is not supported (want 1)`, never misreading it.
+  this release refuses a version 2 manifest outright (its decoder rejects
+  the skill objects, before it looks at the version), so it never misreads
+  one; the process owner moves to version 2 once every member runs this
+  release.
 - **The hub serves the process files; a member needs no Git and no access
   to the process repository.** `aimem process select` on the hub host now
   reads the set at the selected commit (the manifest and every file it
