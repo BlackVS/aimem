@@ -395,6 +395,41 @@ func relName(path string) string {
 // clientNames are the agent clients this checker knows, in report order.
 var clientNames = []string{"claude", "codex", "opencode"}
 
+// DetectClients reports the agent clients on PATH, without their versions.
+func DetectClients() []Client { return detectClients(false) }
+
+// InstallDir is the directory `aimem skills install` writes a client's
+// skills to, the same the aiskills installers use: the project checkout's
+// (default) or the user's. The second value is false for a client it
+// does not know.
+func InstallDir(dir, home, client string, user bool) (string, bool) {
+	project := map[string][]string{
+		"claude":    {".claude", "skills"},
+		"codex":     {".agents", "skills"},
+		"opencode":  {".opencode", "skills"},
+		"openhands": {".openhands", "skills"},
+	}
+	userDirs := map[string][]string{
+		"claude":    {".claude", "skills"},
+		"codex":     {".agents", "skills"},
+		"opencode":  {".config", "opencode", "skills"},
+		"openhands": {".openhands", "skills"},
+	}
+	rel, ok := project[client]
+	base := dir
+	if user {
+		rel, ok = userDirs[client]
+		base = home
+	}
+	if !ok || base == "" {
+		return "", false
+	}
+	return filepath.Join(append([]string{base}, rel...)...), true
+}
+
+// InstallClients lists the clients InstallDir knows, in report order.
+var InstallClients = []string{"claude", "codex", "opencode", "openhands"}
+
 var versionRE = regexp.MustCompile(`\d+\.\d+(\.\d+)?`)
 
 func detectClients(versions bool) []Client {
@@ -472,7 +507,7 @@ func skillReport(dir, home string, clients []Client, required []string) []SkillS
 			}
 			if st.Path == "" {
 				dirs := skillDirs(dir, home, c.Name)
-				st.Fix = "install the skill directory (with SKILL.md) under " + strings.Join(dirs[:1], "") + " or another location " + c.Name + " reads"
+				st.Fix = "run `aimem skills install` in the checkout (it writes the skill under " + strings.Join(dirs[:1], "") + ", which " + c.Name + " reads)"
 			}
 			out = append(out, st)
 		}

@@ -130,10 +130,10 @@ func Bootstrap(dir, root, projectID string, full bool) (string, *process.Set) {
 	home, _ := os.UserHomeDir()
 	var text string
 	if full {
-		text = process.BootstrapFull(r.Set, r.Project, process.SkillInstalled(dir, home))
+		text = process.BootstrapFull(r.Set, r.Project, process.SkillStateOn(dir, home))
 	} else {
 		var err error
-		if text, err = process.Bootstrap(r.Set, r.Project, process.SkillInstalled(dir, home)); err != nil {
+		if text, err = process.Bootstrap(r.Set, r.Project, process.SkillStateOn(dir, home)); err != nil {
 			return "process context unavailable: " + err.Error(), r.Set
 		}
 	}
@@ -362,7 +362,7 @@ func (r *Result) finish(dir, root string) *Result {
 		r.Source = SourceHub
 	}
 	home, _ := os.UserHomeDir()
-	unit := process.BootstrapFull(res.Set, id, process.SkillInstalled(dir, home))
+	unit := process.BootstrapFull(res.Set, id, process.SkillStateOn(dir, home))
 	if len(unit) > MaxDeliveryBytes {
 		r.State, r.Detail, r.Fix = TooLarge, fmt.Sprintf("the complete process unit is %d bytes, over the %d-byte delivery limit; it is not delivered in part", len(unit), MaxDeliveryBytes),
 			"the process owner splits the handbook so the complete unit fits; `aimem process show --full` prints it on this machine"

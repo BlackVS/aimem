@@ -601,18 +601,24 @@ func (s *setup) checkProcess() {
 		return
 	}
 	home, _ := os.UserHomeDir()
+	// What this machine has of each pin, in the bootstrap's words: the
+	// version and source, and the command for a missing or outdated one.
+	state := process.SkillStateOn(s.env.Dir, home)
+	var lines []string
+	var wrong []string // missing, or at another version than the pin
+	for _, p := range set.Manifest.Skills {
+		st := state(p.Name)
+		lines = append(lines, process.SkillLine(p, st))
+		if !st.Installed || (p.Pinned() && st.Version != "" && st.Version != p.Version) {
+			wrong = append(wrong, p.Name)
+		}
+	}
+	detail := "process set selected; required skills: " + strings.Join(lines, "; ")
+	fix := "run `" + process.SkillInstallCommand + "` in this checkout: it installs the required skills from the hub, at the pinned versions, where the clients on this machine read them; needed before the step that needs them (the review gate)"
 	if s.report.Wiring == nil || len(s.report.Wiring.Clients) == 0 {
 		// No client on PATH to judge for: the machine-wide locations decide.
-		installed := process.SkillInstalled(s.env.Dir, home)
-		var missing []string
-		for _, name := range set.Manifest.Skills {
-			if !installed(name) {
-				missing = append(missing, name)
-			}
-		}
-		detail := "process set selected; required skills: " + strings.Join(set.Manifest.Skills, ", ")
-		if len(missing) > 0 {
-			s.check("process", "warn", detail+"; NOT FOUND on this machine: "+strings.Join(missing, ", "), "install the missing skills before the step that needs them (the review gate)")
+		if len(wrong) > 0 {
+			s.check("process", "warn", detail, fix)
 			return
 		}
 		s.check("process", "ok", detail, "")
@@ -620,16 +626,18 @@ func (s *setup) checkProcess() {
 	}
 	// Per client: a skill counts only where that client reads it, and only
 	// as a directory holding SKILL.md.
-	s.report.Wiring.Skills = wiring.Skills(s.sel.Repo, home, s.report.Wiring.Clients, set.Manifest.Skills)
+	s.report.Wiring.Skills = wiring.Skills(s.sel.Repo, home, s.report.Wiring.Clients, set.Manifest.SkillNames())
 	var missing []string
 	for _, st := range s.report.Wiring.Skills {
 		if st.Path == "" {
 			missing = append(missing, st.Skill+" for "+st.Client)
 		}
 	}
-	detail := "process set selected; required skills: " + strings.Join(set.Manifest.Skills, ", ")
-	if len(missing) > 0 {
-		s.check("process", "warn", detail+"; NOT FOUND: "+strings.Join(missing, ", "), "install the missing skills where that client reads them before the step that needs them (the review gate); see the skills list below")
+	if len(missing) > 0 || len(wrong) > 0 {
+		if len(missing) > 0 {
+			detail += "; NOT FOUND: " + strings.Join(missing, ", ")
+		}
+		s.check("process", "warn", detail, fix+"; see the skills list below")
 		return
 	}
 	s.check("process", "ok", detail+" (found for every client on PATH)", "")

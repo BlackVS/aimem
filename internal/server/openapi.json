@@ -614,6 +614,81 @@
         }
       }
     },
+    "/v1/projects/{p}/skills": {
+      "get": {
+        "summary": "The hub's skills sets and the effective skills, for a member of the project",
+        "description": "The hub-served skills set (docs/DESIGN-portable-team-context.md, increment 1e): per source (release: the public skills release; instance: the instance's own skills) the current import (version, digest, skills, bytes, imported_at), the kept imports per source (the last 5, newest first) and effective, the merged list of skills with each one's name, version, source and set digest, an instance skill replacing a release skill of the same name. The route is on the ordinary surface with the process set's rule: an ordinary user token or a team session needs a live grant on the project; an unknown project answers as one without a grant. A hub with nothing imported answers 200 with null sources and an empty list. Nothing names where a set was imported from.",
+        "x-role": "writer",
+        "parameters": [
+          {
+            "name": "p",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "{project, sources: {release, instance}, kept: {release, instance}, effective}"
+          },
+          "403": {
+            "description": "no current grant on the project"
+          }
+        }
+      }
+    },
+    "/v1/projects/{p}/skills/set": {
+      "get": {
+        "summary": "The files of one skills set, for a member of the project",
+        "description": "One stored skills set ({project, source, version, digest, imported_at, skills, files}, files as a map of <skill>/<path> to base64 content): ?source=release|instance for that source's current import, or ?digest= for a kept import (the version a process manifest pins). The member verifies that the files digest to digest before caching or installing them; `aimem skills install` is the consumer. Same rule as /process/set: a live grant on the project. ETag is the digest; If-None-Match answers 304. 404 when nothing is imported for the source, or when no kept set has the digest.",
+        "x-role": "writer",
+        "parameters": [
+          {
+            "name": "p",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "source",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "digest",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "{project, source, version, digest, imported_at, skills, files}"
+          },
+          "304": {
+            "description": "If-None-Match matched the set's digest"
+          },
+          "400": {
+            "description": "neither a valid source nor a digest"
+          },
+          "403": {
+            "description": "no current grant on the project"
+          },
+          "404": {
+            "description": "nothing imported for the source, or no kept set with that digest"
+          }
+        }
+      }
+    },
     "/v1/projects/{p}/repository": {
       "get": {
         "summary": "The project's repository (kind, clone URL, its host, access)",
@@ -6506,6 +6581,74 @@
         "responses": {
           "200": {
             "description": "{processes: [{repo, ref, commit, manifest, projects}]}"
+          }
+        }
+      }
+    },
+    "/v1/skills": {
+      "get": {
+        "summary": "The hub's skills sets: current and kept imports per source, and the effective skills (admin)",
+        "description": "The hub host's own view of the skills store, as `aimem skills list --hub` prints it: the same body as GET /v1/projects/{p}/skills without the project. The store lives under the state root (skills/index.json and skills/sets/<digest>/) and is hub state a backup or a migration carries; an index that exists and cannot be read is reported by /v1/health as a fault.",
+        "x-role": "admin",
+        "responses": {
+          "200": {
+            "description": "{sources, kept, effective}"
+          }
+        }
+      }
+    },
+    "/v1/skills/{source}": {
+      "get": {
+        "summary": "The files of the current skills set of a source (admin)",
+        "description": "The same body as GET /v1/projects/{p}/skills/set for the source's current import; `aimem skills export` writes it back as the archive with its SHA256SUMS line. ?digest= selects a kept import instead.",
+        "x-role": "admin",
+        "parameters": [
+          {
+            "name": "source",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "digest",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "{source, version, digest, imported_at, skills, files}"
+          },
+          "404": {
+            "description": "nothing imported for the source"
+          }
+        }
+      },
+      "put": {
+        "summary": "Import a skills set for a source (admin, on the hub host)",
+        "description": "Body: version (the set's version: a release's VERSION, or the instance's own word) and files, a map of <skill>/<path> to base64 content (each skill a directory holding SKILL.md; at most 1024 files, 1 MiB each, 4 MiB together). `aimem skills import --from-archive FILE` on the hub host verifies the archive against its SHA256SUMS, reads skills/<name>/… from it and sends them here; the API itself imports from no URL and no file. The set is validated whole and refused whole; the hub stores it under its digest (SHA-256 over the sorted paths and contents with length prefixes, as a process set), makes it the source's current import, keeps the last 5 imports per source and removes the files of sets no source keeps, in one step. Re-importing a kept digest makes it current again without writing files.",
+        "x-role": "admin",
+        "parameters": [
+          {
+            "name": "source",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "{source, current, imported}: the new current import and whether its files were written now"
+          },
+          "400": {
+            "description": "an unknown source, or a set that does not validate (nothing stored)"
           }
         }
       }

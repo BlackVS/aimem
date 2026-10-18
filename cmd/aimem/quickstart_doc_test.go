@@ -16,6 +16,7 @@ var commandUsages = map[string]string{
 	"docs":    docsUsage,
 	"hub":     hubUsage,
 	"process": processUsage,
+	"skills":  skillsUsage,
 	"token":   tokenUsage,
 }
 

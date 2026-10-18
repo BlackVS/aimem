@@ -314,6 +314,9 @@ the project credential exactly as the session-start hook does.
 | New | Hub that stores no set for the selection (older hub, or a selection recorded before sets) | The selection carries no digest, so the client does not ask the set route (an older hub refuses a route it does not know with 403, which must not read as a denial) and fetches Git at the selected commit as before. For a selection with a digest, a 401 or 403 on the set route is denied and Git is not tried; a 404 (a kept version since pruned) leaves Git. |
 | v0.10.x or older | New | Reads the reference, ignores `digest` and `name`, fetches the commit from Git with its own access, as before. |
 | Older `aimem process select` | New hub | Refused: a selection must carry its set or name a kept one; the hub host runs the hub's own command. |
+| New | Hub without the skills routes (older hub) | The bootstrap's skills line needs no hub: it compares the manifest's pins with the installers' record on this machine. `aimem skills install` and `aimem skills list` ask the index route; an older hub refuses it with 403 like any route it does not know, which these commands report as a refusal naming both causes (the grant, or a hub older than hub-served skills), and install nothing. |
+| Any client from before version 2 manifests | Any | Refuses a version 2 manifest with `manifest: version 2 is not supported (want 1)`; a version 1 manifest with plain names is read by every version. The process owner moves to version 2 once every member runs this release. |
+| Skills installed by the aiskills installers | New client | Count as installed, with the version the installer's record (`.ai-skills.json`) gives the directory; `aimem skills install` replaces them whole and records the version and source per skill, so the two installers agree. |
 
 The report gains fields and never removes one; a consumer of `status`,
 `checks` and `next` keeps working.
@@ -363,6 +366,23 @@ The report gains fields and never removes one; a consumer of `status`,
 5. **"Delivered" versus "read".** The review asked for delivered versus
    acknowledged context. Only delivery in the same result is observable;
    acknowledgement is an agent declaration and is reported as one.
+6. **Three precedence levels for skills.** The instance-boundary design
+   (aicrew docs/DESIGN-INSTANCE-BOUNDARY.md, D1 amendment) orders the
+   skills set as it orders automations: instance above process above
+   release. aimem's process set carries no skill files, so there is no
+   "process" source for a skill; increment 1e has two sources, instance
+   above release, and a process manifest names the source it pins. A
+   process set bundling skills would be a third source and is not asked
+   for by any decision.
+7. **A hub-wide table for the skills store.** The hub keeps per-project
+   state in each project's database and identity in the access store; it
+   has no hub-wide table, and a skills release is one per hub, not one per
+   project. Increment 1e keeps the skills sets as files under the state
+   root (`skills/index.json` replaced whole, `skills/sets/<digest>/`
+   complete entries), which a backup or a migration of the state root
+   carries; the later instance automations set (D2's third kind) can share
+   the index format. A reserved project database would appear in project
+   listings; a table in the access store would mix identity with content.
 
 ## Increments
 
@@ -409,6 +429,48 @@ Each has its own task, review gates and human merge.
   and never tries Git in their place; no path or URL comes from an agent
   request, and Git's own messages are redacted of the repository URL and
   host before any notice an agent sees. OpenAPI parity holds for the route.
+- **1e. The hub-served skills set** (M, implemented). The operator's
+  principle applied to the skills: a member receives them only through the
+  hub, never from Git and never from the internet. Two sources with one
+  stored form: the public skills release (`release`) and the instance's own
+  skills and modified copies (`instance`, authored in the instance
+  configuration repository); the effective set is the release plus the
+  instance set, an instance skill replacing a release skill of the same
+  name. The admin imports on the hub host from an archive verified by its
+  `SHA256SUMS` (`aimem skills import --from-archive FILE [--source
+  release|instance] [--version V]`: a release archive is read below its
+  leading directory, `skills/<name>/…` with `VERSION`; `aimem skills
+  export` writes the same form); the hub validates the set whole (each
+  skill a directory with `SKILL.md`, the process set's bounds), stores it
+  under its digest in a hub-wide file store under the state root
+  (correction 7), keeps the last five imports per source and removes the
+  files of sets no source keeps; the API lists and reads, never imports
+  (`PUT /v1/skills/{source}` is admin-only, outside the ordinary surface).
+  The contract for members: `GET /v1/projects/{p}/skills` (the current and
+  kept imports per source and the effective skills with name, version,
+  source and set digest) and `GET /v1/projects/{p}/skills/set`
+  (`?source=release|instance` for the current import, `?digest=` for a
+  kept one, `ETag` by digest), both under the process set's grant rule, on
+  the ordinary and the team surfaces with OpenAPI parity; 401 and 403 are
+  denied, 404 and 405 unsupported, a cut body or a digest mismatch refused
+  and never cached. The process manifest moves to version 2 to pin each
+  skill as `{name, version, source}` (version 1 with plain names stays
+  accepted; an older aimem refuses version 2 by its version). `aimem
+  skills install` in a checkout resolves each pin (the source's current
+  import when the version matches, else a kept import of that version;
+  an unservable pin is named and nothing is installed for it), reads the
+  sets from the hub with the checkout's credential, caches them by digest
+  under `skills/sets/<digest>`, and writes the skills whole into the
+  skills directories of the clients on the machine (the aiskills
+  installers' locations; `--tool` names them, `--user` installs for the
+  user, `--all` every effective skill), recording each skill's version
+  and source in the directory's `.ai-skills.json`. The bootstrap, `aimem
+  process show`, the delivered unit and the team setup's process check
+  print each required skill with its version and source and what this
+  machine has of it, and name `aimem skills install` for a missing or
+  outdated one, never a URL; `aimem skills list` prints the effective set
+  with sources. `aimem health` reports the store (`none`, `ok` with the
+  versions, or `fault` for an unreadable index).
 - **Later.** Context versions on the attempt record; an optional hub check
   that refuses `team_accept` from a session that declared no current
   context. Both are schema changes and wait for evidence that the process
