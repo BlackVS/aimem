@@ -47,12 +47,32 @@ func NextStep(project string, inUse []InUse) string {
 			break
 		}
 		fmt.Fprintf(&b, "  as %s:\n", strings.Join(u.Projects, ", "))
-		fmt.Fprintf(&b, "    aimem process select %s %s %s", u.Repo, u.Commit, u.Manifest)
+		fmt.Fprintf(&b, "    aimem process select %s %s %s", shellArg(u.Repo), shellArg(u.Commit), shellArg(u.Manifest))
 		if u.Ref != "" {
-			fmt.Fprintf(&b, " --ref %s", u.Ref)
+			fmt.Fprintf(&b, " --ref %s", shellArg(u.Ref))
 		}
-		fmt.Fprintf(&b, " -p %s\n", project)
+		fmt.Fprintf(&b, " -p %s\n", shellArg(project))
 	}
-	fmt.Fprintf(&b, "  or another process: aimem process select <repo> <commit> <manifest> [--ref <branch>] -p %s\n", project)
+	fmt.Fprintf(&b, "  or another process: aimem process select <repo> <commit> <manifest> [--ref <branch>] -p %s\n", shellArg(project))
 	return b.String()
+}
+
+// shellArg renders one argument of an offered command so a POSIX shell
+// reads it back unchanged. A selection may hold characters the shell
+// interprets (a manifest path may contain ' " $ ; &): anything outside a
+// plain set is single-quoted, and a quote inside it closes the quoting,
+// adds an escaped quote and reopens it. A ~ is never plain, since it
+// expands at the start of a word.
+func shellArg(s string) string {
+	plain := s != ""
+	for _, c := range s {
+		if !(c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' || c >= '0' && c <= '9' || strings.ContainsRune("@%+=:,./_-", c)) {
+			plain = false
+			break
+		}
+	}
+	if plain {
+		return s
+	}
+	return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
 }

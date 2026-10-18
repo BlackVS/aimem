@@ -38,11 +38,11 @@ const projectUsage = `usage: aimem project repo set --project <p> --kind github|
 
 repo set|clear, show and list run on the hub host (admin). list prints
 each project's tasks and process state and marks a project with tasks on
-and no process as not ready for work, with the command that selects one. The repository is the
-one repository the project's work happens in: --kind is the forge's API
-dialect, the host of --url names the credential a member needs, and
---access is what members need (write, the default, or read). The hub
-stores no default branch: the forge owns it.
+and no process as not ready for work, with the command that selects one.
+The repository is the one repository the project's work happens in:
+--kind is the forge's API dialect, the host of --url names the credential
+a member needs, and --access is what members need (write, the default, or
+read). The hub stores no default branch: the forge owns it.
 
 Examples, one per command:
   aimem project repo set --project example --kind github --url https://github.com/example/example.git

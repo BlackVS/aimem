@@ -2,6 +2,7 @@ package process
 
 import (
 	"fmt"
+	"os/exec"
 	"strings"
 	"testing"
 )
@@ -43,5 +44,37 @@ func TestNextStep(t *testing.T) {
 	got = NextStep("new", many)
 	if strings.Count(got, "    aimem process select ") != inUseShown || !strings.Contains(got, "(2 more not shown)") {
 		t.Fatalf("more than %d offered:\n%s", inUseShown, got)
+	}
+}
+
+// An offered command runs as printed: a selection may hold characters a
+// shell interprets (the manifest path accepts ' " $ ; & |), and a POSIX
+// shell must read every argument back unchanged.
+func TestNextStepQuotesForTheShell(t *testing.T) {
+	sel := Ref{Repo: "https://example.com/team$1;x.git", Ref: "main", Commit: strings.Repeat("1", 40), Manifest: `process/team's"$HOME;&|~x.json`}
+	if err := sel.Validate(); err != nil {
+		t.Fatalf("the test selection must be one the hub accepts: %v", err)
+	}
+	got := NextStep("beta", []InUse{{Repo: sel.Repo, Ref: sel.Ref, Commit: sel.Commit, Manifest: sel.Manifest, Projects: []string{"alpha"}}})
+	if !strings.Contains(got, `'process/team'\''s"$HOME;&|~x.json'`) || !strings.Contains(got, `'https://example.com/team$1;x.git'`) {
+		t.Fatalf("not quoted:\n%s", got)
+	}
+	var line string
+	for _, l := range strings.Split(got, "\n") {
+		if strings.HasPrefix(l, "    aimem process select ") {
+			line = strings.TrimPrefix(l, "    aimem process select ")
+		}
+	}
+	sh, err := exec.LookPath("sh")
+	if err != nil {
+		t.Skip("no sh on this machine to read the command back")
+	}
+	out, err := exec.Command(sh, "-c", `printf '%s\n' `+line).Output()
+	if err != nil {
+		t.Fatalf("sh could not read the command: %v", err)
+	}
+	want := strings.Join([]string{sel.Repo, sel.Commit, sel.Manifest, "--ref", "main", "-p", "beta"}, "\n") + "\n"
+	if string(out) != want {
+		t.Fatalf("sh read back\n%q\nwant\n%q", out, want)
 	}
 }

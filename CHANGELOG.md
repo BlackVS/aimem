@@ -21,7 +21,8 @@ currently 24); a binary refuses a database newer than it understands.
   its start with `project_process: not_selected`. `aimem tasks on`, and
   the admin API's answer to it, now say that at once and print the
   selection command with the values of the processes this hub already
-  uses for other projects, most used first. When the hub uses none, the
+  uses for other projects, most used first, quoted for a POSIX shell
+  where a value needs it. When the hub uses none, the
   command comes with an example of each of its three values: the process
   repository's git URL, the full 40-hex commit and the manifest's path in
   that repository. Nothing is selected by turning tasks on. The admin API
