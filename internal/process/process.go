@@ -1,11 +1,14 @@
-// Package process fetches a project's selected process documents — the
+// Package process handles a project's selected process documents — the
 // handbook, the checklists that gate READY and DONE, the task template —
-// from Git at a pinned commit, keeps an exact-version cache per commit,
 // and composes the session-start bootstrap an agent receives when a
-// project's tasks are on. The hub stores only the reference
-// (docs/DESIGN-kanban-docs.md, "Session bootstrap"); every machine fetches
-// with its own Git access, and a commit is immutable, so a complete cache
-// entry for a commit is the commit and needs no network to be trusted.
+// project's tasks are on. The hub stores the selection and, since the
+// hub-served set became the default path (docs/DESIGN-portable-team-context.md,
+// increment 1d), the files of the selected commit with their digest
+// (bundle.go); a member reads them from the hub and caches them by digest.
+// The Git path below is the admin's import on the hub host and a member's
+// fallback against an older hub: a commit is immutable, so a complete
+// cache entry for a commit is the commit and needs no network to be
+// trusted.
 package process
 
 import (
@@ -30,9 +33,11 @@ import (
 // exact version of it this project follows.
 type Ref struct {
 	Repo       string `json:"repo"`
-	Ref        string `json:"ref,omitempty"` // branch or tag to fetch when the server refuses fetch-by-hash
-	Commit     string `json:"commit"`        // full 40-hex commit id
-	Manifest   string `json:"manifest"`      // manifest path in the repository at that commit
+	Ref        string `json:"ref,omitempty"`    // branch or tag to fetch when the server refuses fetch-by-hash
+	Commit     string `json:"commit"`           // full 40-hex commit id
+	Manifest   string `json:"manifest"`         // manifest path in the repository at that commit
+	Digest     string `json:"digest,omitempty"` // SHA-256 of the stored set (Digest); empty for a selection made before the hub stored sets
+	Name       string `json:"name,omitempty"`   // the set's display name, derived at selection (SetName)
 	SelectedAt string `json:"selected_at,omitempty"`
 	SelectedBy string `json:"selected_by,omitempty"`
 }
@@ -64,8 +69,18 @@ func (r Ref) Validate() error {
 	if r.Ref != "" && !refRE.MatchString(r.Ref) {
 		return errors.New("ref must be a plain branch or tag name")
 	}
+	if r.Digest != "" && !digestRE.MatchString(r.Digest) {
+		return errors.New("digest must be 64 lowercase hex characters")
+	}
+	if len(r.Name) > 128 || strings.ContainsAny(r.Name, " \t\r\n") {
+		return errors.New("name must be one word of at most 128 bytes")
+	}
 	return nil
 }
+
+// Key is the selection without its stamps and derived fields: what makes
+// two selections the same process version.
+func (r Ref) Key() Ref { return Ref{Repo: r.Repo, Ref: r.Ref, Commit: r.Commit, Manifest: r.Manifest} }
 
 // checkRepoPath accepts a relative slash path inside the repository.
 func checkRepoPath(p string) error {
@@ -248,12 +263,18 @@ func Fetch(ctx context.Context, root string, ref Ref) Result {
 	return fetchNoValidate(ctx, root, ref)
 }
 
-// Cached returns the set for ref from this machine's complete exact-commit
-// cache entry and never contacts Git: the only source a selection the hub
-// has not just confirmed (a last-observed one) may use.
+// Cached returns the set for ref from this machine's complete cache entry
+// (the selection's digest, or the exact commit fetched from Git) and never
+// contacts anything: the only source a selection the hub has not just
+// confirmed (a last-observed one) may use.
 func Cached(root string, ref Ref) Result {
 	if err := ref.Validate(); err != nil {
 		return Result{Status: StatusUnavailable, Err: err}
+	}
+	if ref.Digest != "" {
+		if set, err := CachedSet(root, ref); err == nil {
+			return Result{Set: set, Status: StatusCached}
+		}
 	}
 	set, err := loadSet(CacheDir(root, ref), ref)
 	if err != nil {
@@ -365,13 +386,23 @@ func loadSet(dir string, ref Ref) (*Set, error) {
 	if strings.TrimSpace(string(marker)) != ref.Manifest {
 		return nil, fmt.Errorf("cache entry was fetched for manifest %q, not %q", strings.TrimSpace(string(marker)), ref.Manifest)
 	}
-	read := func(p string) ([]byte, error) {
+	set, err := loadSetFrom(func(p string) ([]byte, error) {
 		b, err := os.ReadFile(filepath.Join(dir, filepath.FromSlash(p)))
 		if err != nil {
 			return nil, fmt.Errorf("cache entry incomplete: %w", err)
 		}
 		return b, nil
+	}, ref)
+	if err != nil {
+		return nil, err
 	}
+	set.Dir = dir
+	return set, nil
+}
+
+// loadSetFrom parses the set for ref from read, which answers each
+// repository path with its bytes.
+func loadSetFrom(read func(p string) ([]byte, error), ref Ref) (*Set, error) {
 	raw, err := read(ref.Manifest)
 	if err != nil {
 		return nil, err
@@ -380,7 +411,7 @@ func loadSet(dir string, ref Ref) (*Set, error) {
 	if err != nil {
 		return nil, err
 	}
-	set := &Set{Ref: ref, Manifest: m, Dir: dir, Checklists: map[string]Checklist{}, Templates: map[string]json.RawMessage{}}
+	set := &Set{Ref: ref, Manifest: m, Checklists: map[string]Checklist{}, Templates: map[string]json.RawMessage{}}
 	hb, err := read(m.Handbook)
 	if err != nil {
 		return nil, err
@@ -508,7 +539,9 @@ func classify(out []byte, err error) (Status, error) {
 var TaskTools = []string{"list_tasks", "get_task", "create_task", "update_task", "get_task_history", "list_task_comments", "get_task_comment", "add_task_comment"}
 
 // Bootstrap composes the session-start context for a project whose tasks
-// are on: the signal line, the process set's identity, the required
+// are on: the signal line, the process set's identity (its name, commit
+// and manifest; never the repository URL, which is the admin's and is
+// shown by `aimem process show --full` outside this unit), the required
 // skills with what this machine knows about them, the handbook and the
 // checklists — as one unit. If the unit exceeds the manifest's budget it
 // is not injected at all; the error names the size and the retrieval
@@ -517,7 +550,7 @@ var TaskTools = []string{"list_tasks", "get_task", "create_task", "update_task",
 func Bootstrap(set *Set, projectID string, installed func(name string) bool) (string, error) {
 	var b strings.Builder
 	fmt.Fprintf(&b, "Tasks (Kanban) are ON for project %s. Task tools: %s.\n", projectID, strings.Join(TaskTools, ", "))
-	fmt.Fprintf(&b, "Process set: %s @ %s (manifest %s)%s.\n", set.Ref.Repo, set.Ref.Commit[:12], set.Ref.Manifest, map[bool]string{true: ", from this machine's cache", false: ""}[set.FromCache])
+	fmt.Fprintf(&b, "Process set: %s @ %s (manifest %s)%s.\n", set.Ref.DisplayName(), set.Ref.Commit[:12], set.Ref.Manifest, map[bool]string{true: ", from this machine's cache", false: ""}[set.FromCache])
 	if len(set.Manifest.Skills) > 0 {
 		b.WriteString("Required skills: ")
 		parts := make([]string, 0, len(set.Manifest.Skills))

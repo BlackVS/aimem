@@ -92,8 +92,9 @@ aimem process select https://github.com/BlackVS/aiskills.git FULL_40_HEX_COMMIT 
 ```
 
 Replace `FULL_40_HEX_COMMIT` with the first column of the `git
-ls-remote` output. The hub stores only this reference; each workstation
-fetches the files itself, and step 3.6 checks that it can. To move to a
+ls-remote` output. The command reads the files at that commit on the hub
+host and stores them on the hub with the selection; each workstation reads
+them from the hub, and step 3.6 checks that it does. To move to a
 newer commit later, select it with `--expect` and the commit selected
 now; see
 [the administrator manual](ADMIN-MANUAL.md#selecting-a-projects-process-documents).
@@ -309,10 +310,10 @@ aimem process show
   next checkpoint, and `aimem docs list` shows them on the hub,
   `SESSION-STATE` and each file you listed in `docs`.
 - `aimem process show` prints what a session receives about the
-  process. Its second line starts with
-  `Process set: https://github.com/BlackVS/aiskills.git @` and the first
-  12 characters of the commit you selected, then names the manifest,
-  `processes/aimem/manifest.json`. Then come
+  process. Its second line starts with `Process set: aimem @` and the
+  first 12 characters of the commit you selected, then names the
+  manifest, `processes/aimem/manifest.json` (the repository URL is not
+  part of what a session sees; `--full` prints it). Then come
   `Required skills: oh-code-review (installed)`, the handbook and the
   READY and DONE checklists. A notice in their place (no process
   selected, access denied, unavailable) names its cause. The command
@@ -413,6 +414,6 @@ was installed, is never used on a workstation.
 | `aimem docs push` or `aimem docs list` fails with `no hub configured (aimem hub add ...)` | The hub was never registered on this workstation, for example after a pause right after the one-liner. Do steps 3.3 to 3.5, then rerun step 3.6. |
 | `aimem docs list` says no shared documents | Run `aimem docs push`; check that the `docs` paths exist and that `hub` names the hub you added. |
 | The session starts with "no process reference is selected" | Tasks are on and no process is selected: do the process part of step 2, then start a new session. |
-| `aimem process show` says access denied or unavailable | This workstation cannot fetch the selected repository or commit: check its Git access to the repository, and that the commit is the one the `--ref` branch held. |
+| `aimem process show` says access denied or unavailable | Denied: this workstation's task token has no current grant on the project, or expired; check `aimem hub credential` and the grant. Unavailable: the hub is unreachable, or stores no set for the selection (an older hub, or a selection made before the upgrade): re-select the process on the hub host, which imports the files. |
 | The agent has no task tools | Start a new session; check `aimem hub credential team` and that tasks are on for the project on the hub. |
 | Task reads work but writes fail | The user's grant on `my-project`, and that the token is the user task token, not the writer token. |

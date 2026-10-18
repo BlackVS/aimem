@@ -54,6 +54,16 @@ func decodeRepository(v string) (*projectrepo.Repository, error) {
 // it and a live direct or group grant). An unknown project reads the same
 // as one without a grant. Admin credentials and the local socket pass.
 func (s *Server) repositoryReadDenied(w http.ResponseWriter, r *http.Request) bool {
+	return s.projectReadDenied(w, r, "repository", r.URL.Query().Get("history") != "")
+}
+
+// projectReadDenied is the grant-limited read rule shared by the project
+// repository and the process set (what is a property of the project and
+// replaces an access a member would otherwise need elsewhere): an ordinary
+// token or a team session needs a current grant on the project; history
+// is an admin read; the reserved stores and unknown projects read as
+// projects without a grant. Admin credentials and the local socket pass.
+func (s *Server) projectReadDenied(w http.ResponseWriter, r *http.Request, what string, history bool) bool {
 	id, ok := IdentityFrom(r.Context())
 	p := r.PathValue("p")
 	if tc, team := teamContextFrom(r.Context()); team {
@@ -62,7 +72,7 @@ func (s *Server) repositoryReadDenied(w http.ResponseWriter, r *http.Request) bo
 		// unknown project reads as one without a grant.
 		detail := teamAuditDetail(tc.Context, r) + fmt.Sprintf(" project=%q", p)
 		switch {
-		case r.URL.Query().Get("history") != "":
+		case history:
 			s.teamDeny(w, r, tc.Role, id, "invalid_request", detail+" reason=history", tc.CorrelationID)
 			return true
 		case store.IsReservedProject(p):
@@ -87,8 +97,8 @@ func (s *Server) repositoryReadDenied(w http.ResponseWriter, r *http.Request) bo
 		s.fail(w, http.StatusBadRequest, store.ErrTaskReservedScope)
 		return true
 	}
-	if r.URL.Query().Get("history") != "" {
-		s.fail(w, http.StatusForbidden, errors.New("the repository history is an admin read"))
+	if history {
+		s.fail(w, http.StatusForbidden, errors.New("the "+what+" history is an admin read"))
 		return true
 	}
 	instance, err := s.knowledgeInstance(p)
@@ -103,13 +113,13 @@ func (s *Server) repositoryReadDenied(w http.ResponseWriter, r *http.Request) bo
 			return true
 		}
 		if allowed, err = db.CanWriteToken(id.UserID, id.TokenID, instance); err != nil {
-			s.log.Error("repository read authorization", "project", p, "err", err)
+			s.log.Error(what+" read authorization", "project", p, "err", err)
 			s.fail(w, http.StatusInternalServerError, errors.New("cannot check project access"))
 			return true
 		}
 	}
 	if !allowed {
-		s.fail(w, http.StatusForbidden, errors.New("token scope or current grant does not permit reading this project's repository"))
+		s.fail(w, http.StatusForbidden, errors.New("token scope or current grant does not permit reading this project's "+what))
 		return true
 	}
 	return false

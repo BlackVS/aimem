@@ -1,14 +1,21 @@
 package main
 
-// The process reference: which Git repository, commit and manifest hold
+// The process selection: which Git repository, commit and manifest hold
 // the handbook, checklists and templates a project's agents follow
-// (docs/DESIGN-kanban-docs.md). `aimem process select|clear` run on the
-// hub host as the admin; `aimem process show` runs on any machine and
-// prints exactly what the session-start hook injects, with the same
-// availability notices, so a person can see what an agent saw.
+// (docs/DESIGN-kanban-docs.md), and the files themselves, stored on the
+// hub with the selection (docs/DESIGN-portable-team-context.md, increment
+// 1d). `aimem process select|clear` run on the hub host as the admin:
+// select reads the set from Git, or from an archive verified by its
+// SHA256SUMS, and sends it with the selection, so the hub never runs Git
+// and a member never needs access to the repository. `aimem process
+// export` writes that archive on a machine that has the access, for a hub
+// that has none. `aimem process show` runs on any machine and prints
+// exactly what the session-start hook injects, with the same availability
+// notices, so a person can see what an agent saw.
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"flag"
@@ -17,6 +24,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"path/filepath"
 	"strings"
 
 	"aimem/internal/ident"
@@ -24,12 +32,19 @@ import (
 	"aimem/internal/processctx"
 )
 
-const processUsage = `usage: aimem process select <repo> <commit> <manifest> [--ref <branch|tag>] [--expect <commit>] [-p <project>]
+const processUsage = `usage: aimem process select <repo> <commit> <manifest> [--ref <branch|tag>] [--from-archive <file>] [--sums <file>] [--expect <commit>] [-p <project>]
+       aimem process export <repo> <commit> <manifest> [--ref <branch|tag>] [--out <dir>]
        aimem process clear --expect <commit> [-p <project>]
        aimem process show [--full] [--template <kind>] [-p <project>]
 
-select/clear run on the hub host (admin); show runs anywhere and prints
-what the session-start hook injects for this project.`
+select and clear run on the hub host (admin). select reads the set at the
+commit from Git, or with --from-archive from a tar.gz verified against the
+SHA256SUMS beside it (--sums names another file), and stores it on the hub
+with the selection; a set the hub already keeps (the last 5 selections) is
+re-selected without a new import. export writes that archive and its
+SHA256SUMS line on a machine with access to the repository. show runs
+anywhere and prints what the session-start hook injects for this project;
+--full adds the repository URL, for the admin.`
 
 func processCmd(args []string) error {
 	usage := processUsage
@@ -37,11 +52,14 @@ func processCmd(args []string) error {
 		return fmt.Errorf("%s", usage)
 	}
 	switch args[0] {
-	case "select", "clear":
+	case "select", "clear", "export":
 		fs := flag.NewFlagSet("process "+args[0], flag.ExitOnError)
 		p := projectFlag(fs, "project id (default: current directory's project)")
 		ref := fs.String("ref", "", "branch or tag to fetch when the server refuses fetch-by-hash")
 		expect := fs.String("expect", "", "the commit currently selected (compare-and-swap); empty when none")
+		archive := fs.String("from-archive", "", "import the set from this tar.gz instead of Git")
+		sums := fs.String("sums", "", "the SHA256SUMS file that names the archive (default: SHA256SUMS beside it)")
+		out := fs.String("out", ".", "export: the directory to write the archive and SHA256SUMS into")
 		var pos []string
 		rest := args[1:]
 		for len(rest) > 0 { // flags after the positionals too
@@ -52,6 +70,12 @@ func processCmd(args []string) error {
 			}
 			pos = append(pos, rest[0])
 			rest = rest[1:]
+		}
+		if args[0] == "export" {
+			if len(pos) != 3 {
+				return fmt.Errorf("%s", usage)
+			}
+			return processExport(process.Ref{Repo: pos[0], Commit: pos[1], Manifest: pos[2], Ref: *ref}, *out)
 		}
 		proj, err := projectOrCurrent(*p)
 		if err != nil {
@@ -64,9 +88,24 @@ func processCmd(args []string) error {
 			if len(pos) != 3 {
 				return fmt.Errorf("%s", usage)
 			}
-			body["repo"], body["commit"], body["manifest"] = pos[0], pos[1], pos[2]
-			if *ref != "" {
-				body["ref"] = *ref
+			sel := process.Ref{Repo: pos[0], Commit: pos[1], Manifest: pos[2], Ref: *ref}
+			if err := sel.Validate(); err != nil {
+				return err
+			}
+			body["repo"], body["commit"], body["manifest"] = sel.Repo, sel.Commit, sel.Manifest
+			if sel.Ref != "" {
+				body["ref"] = sel.Ref
+			}
+			if kept := keptSetFor(proj, sel); kept != "" {
+				fmt.Fprintf(os.Stderr, "set %s is already kept on this hub: re-selecting it without an import\n", kept[:12])
+				body["digest"] = kept
+			} else {
+				bundle, err := importBundle(sel, *archive, *sums)
+				if err != nil {
+					return err
+				}
+				body["files"] = bundle.Files
+				fmt.Fprintf(os.Stderr, "importing set %s (%d files, %d bytes)\n", bundle.Digest()[:12], len(bundle.Files), bundle.Bytes())
 			}
 		}
 		raw, _ := json.Marshal(body)
@@ -90,7 +129,7 @@ func processCmd(args []string) error {
 		fs := flag.NewFlagSet("process show", flag.ExitOnError)
 		p := projectFlag(fs, "project id (default: current directory's project)")
 		tmpl := fs.String("template", "", "print this template from the process set instead of the bootstrap")
-		full := fs.Bool("full", false, "print the whole unit regardless of the manifest's injection budget")
+		full := fs.Bool("full", false, "print the whole unit regardless of the manifest's injection budget, and the repository URL")
 		fs.Parse(args[1:])
 		// A named project is still resolved through this directory's hub
 		// binding: the reference lives on the hub the project is bound to.
@@ -108,9 +147,138 @@ func processCmd(args []string) error {
 			return nil
 		}
 		fmt.Println(strings.TrimSpace(text))
+		if *full && set != nil {
+			// The admin's view, after the unit: the unit itself is what the
+			// MCP tools deliver to an agent, and it never names the URL.
+			fmt.Printf("\nRepository (admin view, not part of the agent's context): %s\n", set.Ref.Repo)
+		}
 		return nil
 	}
 	return fmt.Errorf("%s", usage)
+}
+
+// keptSetFor asks the hub whether it still keeps a set for exactly this
+// selection (repository, commit and manifest of an earlier selection, with
+// its set among the kept ones) and returns its digest, or "" when a new
+// import is needed. Any failure to ask means importing, which is safe.
+func keptSetFor(proj string, sel process.Ref) string {
+	resp, err := client().Get("http://aimem/v1/projects/" + url.PathEscape(proj) + "/process?history=1")
+	if err != nil {
+		return ""
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return ""
+	}
+	var got struct {
+		History []process.Ref `json:"history"`
+		Sets    []struct {
+			Digest string `json:"digest"`
+		} `json:"sets"`
+	}
+	if json.NewDecoder(io.LimitReader(resp.Body, 1<<20)).Decode(&got) != nil {
+		return ""
+	}
+	kept := map[string]bool{}
+	for _, s := range got.Sets {
+		kept[s.Digest] = true
+	}
+	for _, h := range got.History {
+		if h.Repo == sel.Repo && h.Commit == sel.Commit && h.Manifest == sel.Manifest && h.Digest != "" && kept[h.Digest] {
+			return h.Digest
+		}
+	}
+	return ""
+}
+
+// importBundle builds the set to send: from the archive when one is named
+// (verified against its SHA256SUMS first), otherwise from Git, through the
+// same bounded fetch a member used to make, into a directory that is
+// removed afterwards.
+func importBundle(sel process.Ref, archive, sums string) (*process.Bundle, error) {
+	if archive != "" {
+		if sums == "" {
+			sums = filepath.Join(filepath.Dir(archive), "SHA256SUMS")
+		}
+		b, err := process.ReadArchiveFile(archive, sums, sel.Manifest)
+		if err != nil {
+			return nil, fmt.Errorf("archive %s: %w", archive, err)
+		}
+		return b, nil
+	}
+	return fetchBundle(sel)
+}
+
+// fetchBundle reads the set at the selection's commit from Git.
+func fetchBundle(sel process.Ref) (*process.Bundle, error) {
+	tmp, err := os.MkdirTemp("", "aimem-process-")
+	if err != nil {
+		return nil, err
+	}
+	defer os.RemoveAll(tmp)
+	ctx, cancel := context.WithTimeout(context.Background(), 3*process.FetchTimeout)
+	defer cancel()
+	res := process.Fetch(ctx, tmp, sel)
+	if res.Set == nil {
+		return nil, fmt.Errorf("reading the set from Git (%s): %v", res.Status, res.Err)
+	}
+	return process.BundleFromDir(res.Set.Dir, sel)
+}
+
+// processExport fetches the set from Git and writes it as
+// <name>-<commit12>.tar.gz under out, with its line in out/SHA256SUMS
+// (added, or replaced when the file already names that archive), so the
+// pair can be carried to a hub host without access and imported there with
+// --from-archive.
+func processExport(sel process.Ref, out string) error {
+	if err := sel.Validate(); err != nil {
+		return err
+	}
+	b, err := fetchBundle(sel)
+	if err != nil {
+		return err
+	}
+	archivePath, sumsPath, err := writeExport(b, sel, out)
+	if err != nil {
+		return err
+	}
+	fmt.Printf("wrote %s (%d files, %d bytes, set %s) and its line in %s\n", archivePath, len(b.Files), b.Bytes(), b.Digest()[:12], sumsPath)
+	fmt.Printf("on the hub host: aimem process select %s %s %s --from-archive %s -p <project>\n", sel.Repo, sel.Commit, sel.Manifest, filepath.Base(archivePath))
+	return nil
+}
+
+// writeExport writes the bundle's archive and its SHA256SUMS line under
+// out and returns both paths.
+func writeExport(b *process.Bundle, sel process.Ref, out string) (archivePath, sumsPath string, err error) {
+	if err := os.MkdirAll(out, 0o755); err != nil {
+		return "", "", err
+	}
+	name := fmt.Sprintf("%s-%s.tar.gz", process.SetName(sel.Repo, sel.Manifest), sel.Commit[:12])
+	var buf bytes.Buffer
+	if err := process.WriteArchive(&buf, b); err != nil {
+		return "", "", err
+	}
+	archivePath = filepath.Join(out, name)
+	if err := os.WriteFile(archivePath, buf.Bytes(), 0o644); err != nil {
+		return "", "", err
+	}
+	sumsPath = filepath.Join(out, "SHA256SUMS")
+	var lines []string
+	if old, err := os.ReadFile(sumsPath); err == nil {
+		for _, l := range strings.Split(strings.TrimRight(string(old), "\n"), "\n") {
+			if f := strings.Fields(l); len(f) == 2 && strings.TrimPrefix(f[1], "*") == name {
+				continue
+			}
+			if l != "" {
+				lines = append(lines, l)
+			}
+		}
+	}
+	lines = append(lines, strings.TrimRight(process.SumsLine(buf.Bytes(), name), "\n"))
+	if err := os.WriteFile(sumsPath, []byte(strings.Join(lines, "\n")+"\n"), 0o644); err != nil {
+		return "", "", err
+	}
+	return archivePath, sumsPath, nil
 }
 
 func projectOrCurrent(p string) (string, error) {

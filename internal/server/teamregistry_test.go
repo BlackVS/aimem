@@ -170,7 +170,7 @@ func TestTeamRead(t *testing.T) {
 		t.Fatalf("repository: %d %s", r.status, r.body)
 	}
 	commit := strings.Repeat("a", 40)
-	if r := g.admin(t, "PUT", "/v1/projects/alpha/process", `{"repo":"https://example.com/p.git","commit":"`+commit+`","manifest":"m.json","expected_commit":""}`); r.status != 200 {
+	if r := g.admin(t, "PUT", "/v1/projects/alpha/process", withSet(t, `{"repo":"https://example.com/p.git","commit":"`+commit+`","manifest":"m.json","expected_commit":""}`, "rules")); r.status != 200 {
 		t.Fatalf("process: %d %s", r.status, r.body)
 	}
 	// Another peer's team ("theirs", registered by the rig) must never

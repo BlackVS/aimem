@@ -66,8 +66,10 @@ var teamRoutes = append(append([]string{
 	"GET /v1/tasks/{id}/comments/{c}",
 	"GET /v1/projects/{p}/epics",
 	"GET /v1/projects/{p}/epics/{e}",
-	// The project's repository under the profile's grant (DESIGN-AIFORGE-PILOT-1 §1).
+	// The project's repository under the profile's grant (DESIGN-AIFORGE-PILOT-1 §1),
+	// and the stored process set under the same rule (DESIGN-portable-team-context 1d).
 	"GET /v1/projects/{p}/repository",
+	"GET /v1/projects/{p}/process/set",
 	// The coordinator's triage writes (DESIGN-AIFORGE-PILOT-1 §4); the
 	// handlers refuse every other role.
 	"POST /v1/tasks/{id}/triage",

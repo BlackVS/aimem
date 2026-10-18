@@ -214,8 +214,8 @@ playbook and leave through `team_leave`. A later return uses join, not
 resume. Never force a new session just to hide an unresolved old one.
 
 Missing context stops work, not membership. When a member's guidance or
-project process is missing, including during a temporary hub or Git
-outage, the report says it is not ready: an offered attempt is declined, a
+project process is missing, including during a temporary hub outage,
+the report says it is not ready: an offered attempt is declined, a
 running one is blocked with the reason and stays reserved to the worker.
 Nothing resumes it automatically. After the cause is fixed, resume the
 member and let the coordinator decide; the worker resumes the attempt only

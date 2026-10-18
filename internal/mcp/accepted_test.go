@@ -95,7 +95,7 @@ func TestAcceptedAttemptKeepsItsVersionAcrossASelectionChange(t *testing.T) {
 	if rep.Status != "joined" || !rep.Readiness.ReadyForWork || pp.State != "ready" || pp.Version != teamsetuptest.Selection.Commit {
 		t.Fatalf("continue: %+v", rep.Readiness)
 	}
-	if !strings.Contains(proc, rulesA) || strings.Contains(proc, rulesB) || !strings.Contains(proc, "PINNED") || !strings.Contains(proc, "The project now selects "+teamsetuptest.Selection.Repo+" @ "+selB.Commit) {
+	if !strings.Contains(proc, rulesA) || strings.Contains(proc, rulesB) || !strings.Contains(proc, "PINNED") || !strings.Contains(proc, "The project now selects "+selB.DisplayName()+" @ "+selB.Commit) || strings.Contains(proc, teamsetuptest.Selection.Repo) {
 		t.Fatalf("delivered process:\n%s", proc)
 	}
 	if lvl, detail := rep.check("accepted version"); lvl != "ok" || !strings.Contains(detail, "the project now selects "+selB.Commit+", which applies to new work only") {

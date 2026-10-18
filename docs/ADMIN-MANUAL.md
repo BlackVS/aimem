@@ -422,9 +422,10 @@ to see the tools again after they are switched back on.
 When a project's tasks are on, its agents receive the process documents
 at session start: the handbook (states, who moves a task, evidence and
 review rules), the checklists that gate READY and DONE, and where the
-task templates are. The hub holds only a reference to them; the files
-live in a Git repository and every machine fetches them with its own
-access.
+task templates are. The files live in a Git repository; the hub stores
+the selection (repository, commit, manifest) and, with it, the files of
+that version (the set), and serves them to each member under its project
+grant. A member machine needs neither Git nor access to the repository.
 
 ```sh
 aimem process select https://example.com/team/process.git \
@@ -432,7 +433,18 @@ aimem process select https://example.com/team/process.git \
 aimem process select … --expect <current commit>     # change it later
 aimem process clear --expect <current commit>
 aimem process show -p <project>                      # what a session gets
+aimem process show --full -p <project>               # the whole unit, plus the repository URL
 ```
+
+`select` runs on the hub host and reads the set at the commit from Git
+with that host's access, or, with `--from-archive FILE`, from a tar.gz
+verified against the `SHA256SUMS` beside it (`--sums` names another
+file); a forge's source tarball of the commit works as the archive. For
+a hub host without access to the repository, `aimem process export
+<repo> <commit> <manifest>` on a machine that has it writes
+`<name>-<commit12>.tar.gz` and its `SHA256SUMS` line, to carry over and
+import. The hub keeps the sets of the last five selections, so an earlier
+one is re-selected without an import; the hub itself never runs Git.
 
 The manifest is JSON (`version` 1): `handbook` (Markdown path),
 `checklists` (task state to a JSON file of `{state, items:[{id,text}]}`),
@@ -445,13 +457,19 @@ what that ref holds. Changing the selection needs the currently selected
 commit (`--expect`), so two admins cannot overwrite each other unseen;
 every selection stays in the project's history.
 
-Each machine keeps a cache per commit under its state directory; the
-first session after a selection pays one bounded Git fetch, later ones
-none. A machine without read access to the repository sees "access
-denied" and nothing else; a hub that cannot be reached leaves the session
-with the selection as last observed and a warning; a unit larger than
-the budget is not injected and the notice says to read it with `aimem
-process show`.
+A session names the set by its name (the manifest's directory, else the
+repository's name), commit and manifest, never by the repository URL,
+which `--full` prints for the admin after the unit. Each machine keeps a
+cache per set digest under its state directory; the first session after
+a selection reads the set from the hub once, verifies it against the
+selection's digest and caches it, later sessions read the cache. A member
+the hub refuses (an expired credential, a grant removed) sees "denied" and
+nothing else; a hub that cannot be reached leaves the session with the
+selection as last observed and a warning; a unit larger than the budget is
+not injected and the notice says to read it with `aimem process show`. A
+hub from before sets were stored, or a selection it recorded then, serves
+no set, and the member fetches the commit from Git with its own access, as
+before; re-selecting on the new hub imports the files.
 
 ## 5. Releases
 

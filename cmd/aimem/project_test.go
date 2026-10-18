@@ -161,8 +161,11 @@ func TestTasksOnWithoutProcessIsAnUnfinishedSetup(t *testing.T) {
 	}
 
 	commit := strings.Repeat("ab", 20)
+	// The selection carries its set: here from an exported archive, as on
+	// a hub host without access to the repository.
+	archive, _ := exportFixture(t, "https://example.com/process.git", commit, "process/manifest.json")
 	run(func() error {
-		return processCmd([]string{"select", "https://example.com/process.git", commit, "process/manifest.json", "--ref", "main", "-p", "example"})
+		return processCmd([]string{"select", "https://example.com/process.git", commit, "process/manifest.json", "--ref", "main", "--from-archive", archive, "-p", "example"})
 	})
 	if out := tasks("on", "example"); strings.Contains(out, "next step") || strings.Contains(out, "not ready") {
 		t.Fatalf("tasks on with a process selected:\n%s", out)

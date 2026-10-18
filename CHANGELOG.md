@@ -13,8 +13,42 @@ currently 24); a binary refuses a database newer than it understands.
 
 ## [Unreleased]
 
+### Added
+
+- **The hub serves the process files; a member needs no Git and no access
+  to the process repository.** `aimem process select` on the hub host now
+  reads the set at the selected commit (the manifest and every file it
+  names) from Git, or with `--from-archive FILE` from a tar.gz verified
+  against the `SHA256SUMS` beside it, and stores it on the hub with the
+  selection, in the same compare-and-swap; `aimem process export` writes
+  that archive pair on a machine with access, for a hub host without it.
+  The hub keeps the sets of the last five selections, so an earlier one is
+  re-selected without an import, and never runs Git itself. A new route on
+  the ordinary surface, `GET /v1/projects/{p}/process/set`, serves the
+  current selection's set, or a kept earlier one by commit and manifest,
+  to a token or team session with a current grant on the project (the
+  project repository's read rule); the member verifies the files against
+  the selection's digest before caching them by it; a selection without a
+  digest (an older hub's, or one made before the upgrade) is fetched from
+  Git as before without asking the route. The selection records `digest`
+  and `name`.
+  (docs/DESIGN-portable-team-context.md, increment 1d, now the default
+  path.)
+
 ### Changed
 
+- **The session bootstrap names the process set, not the repository
+  URL.** `Process set: <name> @ <commit> (manifest <path>)`, in the
+  session-start hook, `process_context`, `team_setup` and `team_continue`
+  and `aimem process show`; the name is the manifest's directory, else the
+  repository's name. `aimem process show --full` prints the URL after the
+  unit, for the admin. The availability notices name the set the same way,
+  and Git's own messages are redacted of the repository URL and host
+  before they reach one; a hub that refuses the set read is reported as
+  denied and Git is not tried in its place. `PUT /v1/projects/{p}/process` refuses a selection
+  that carries neither `files` nor the `digest` of a kept set, so an older
+  `aimem process select` against a new hub is refused rather than storing
+  a selection no member can read from the hub.
 - **Turning tasks on names the missing process with values you can run.**
   A project with tasks on and no process selected is not ready for work:
   no member can take a task, and the first agent session there fails at

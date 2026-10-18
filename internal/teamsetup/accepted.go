@@ -108,7 +108,7 @@ func (s *setup) recoverAccepted(me *Session, attempt string, rec *teamstate.Acce
 	case rec.SessionID != me.ID:
 		return notRecorded("the record belongs to session " + rec.SessionID + ", not " + me.ID)
 	}
-	ref := process.Ref{Repo: rec.Repo, Commit: rec.Commit, Manifest: rec.Manifest}
+	ref := process.Ref{Repo: rec.Repo, Commit: rec.Commit, Manifest: rec.Manifest, Digest: rec.SetDigest, Name: rec.SetName}
 	if err := ref.Validate(); err != nil {
 		return notRecorded("the record is malformed (" + err.Error() + ")")
 	}

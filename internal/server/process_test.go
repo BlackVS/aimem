@@ -11,11 +11,15 @@ import (
 // Selecting a process reference is an admin action with a compare-and-swap
 // on the previous commit; reading the selection is on the ordinary
 // surface; the history survives a change; every credential is refused a
-// malformed selection.
+// malformed selection. A selection carries its set (process_set_test.go
+// has the set's own contract).
 func TestProcessReferenceSelection(t *testing.T) {
 	f := newTaskFixture(t)
 	c1, c2 := strings.Repeat("1", 40), strings.Repeat("2", 40)
 	sel := func(token, body string) (int, string) {
+		if strings.Contains(body, `"manifest"`) {
+			body = withSet(t, body, "rules")
+		}
 		w := taskReq(t, f.h, "PUT", "/v1/projects/alpha/process", token, "", body)
 		return w.Code, w.Body.String()
 	}
@@ -99,7 +103,7 @@ func TestProcessReferenceSelection(t *testing.T) {
 func TestProcessReferenceCompareAndSwapIsAtomic(t *testing.T) {
 	f := newTaskFixture(t)
 	c0 := strings.Repeat("0", 40)
-	if w := taskReq(t, f.h, "PUT", "/v1/projects/alpha/process", f.admin, "", `{"repo":"https://example.com/p.git","commit":"`+c0+`","manifest":"m.json","expected_commit":""}`); w.Code != 200 {
+	if w := taskReq(t, f.h, "PUT", "/v1/projects/alpha/process", f.admin, "", withSet(t, `{"repo":"https://example.com/p.git","commit":"`+c0+`","manifest":"m.json","expected_commit":""}`, "seed")); w.Code != 200 {
 		t.Fatalf("seed: %d %s", w.Code, w.Body)
 	}
 	const n = 16
@@ -110,7 +114,7 @@ func TestProcessReferenceCompareAndSwapIsAtomic(t *testing.T) {
 		go func(i int) {
 			defer wg.Done()
 			commit := strings.Repeat(string(rune('a'+i%6)), 40)
-			w := taskReq(t, f.h, "PUT", "/v1/projects/alpha/process", f.admin, "", `{"repo":"https://example.com/p.git","commit":"`+commit+`","manifest":"m.json","expected_commit":"`+c0+`"}`)
+			w := taskReq(t, f.h, "PUT", "/v1/projects/alpha/process", f.admin, "", withSet(t, `{"repo":"https://example.com/p.git","commit":"`+commit+`","manifest":"m.json","expected_commit":"`+c0+`"}`, "rules "+commit))
 			codes[i] = w.Code
 		}(i)
 	}
@@ -136,6 +140,12 @@ func TestProcessReferenceCompareAndSwapIsAtomic(t *testing.T) {
 	if w.Code != 200 || json.Unmarshal(w.Body.Bytes(), &out) != nil || len(out.History) != 2 || out.History[0].Commit != out.Current.Commit || out.History[1].Commit != c0 {
 		t.Fatalf("history after the race: %d %s", w.Code, w.Body)
 	}
+	// Exactly the winner's set was stored beside the seed's: the losers'
+	// sets went with their refused transactions.
+	var kept historyAnswer
+	if json.Unmarshal(w.Body.Bytes(), &kept) != nil || len(kept.Sets) != 2 || kept.Sets[0].Digest != kept.History[0].Digest || kept.Sets[1].Digest != kept.History[1].Digest {
+		t.Fatalf("kept sets after the race: %s", w.Body)
+	}
 }
 
 // Turning tasks on for a project with no process selected names the gap in
@@ -156,7 +166,7 @@ func TestTasksOnWithoutProcessNamesTheGap(t *testing.T) {
 		{"alpha", `{"repo":"https://example.com/p.git","commit":"` + c1 + `","manifest":"m.json","ref":"main","expected_commit":""}`},
 		{"beta", `{"repo":"https://example.com/p.git","commit":"` + c1 + `","manifest":"m.json","ref":"main","expected_commit":""}`},
 	} {
-		if w := taskReq(t, f.h, "PUT", "/v1/projects/"+sel.project+"/process", f.admin, "", sel.body); w.Code != 200 {
+		if w := taskReq(t, f.h, "PUT", "/v1/projects/"+sel.project+"/process", f.admin, "", withSet(t, sel.body, "rules")); w.Code != 200 {
 			t.Fatalf("select %s: %d %s", sel.project, w.Code, w.Body)
 		}
 	}

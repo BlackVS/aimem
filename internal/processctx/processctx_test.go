@@ -21,7 +21,7 @@ import (
 
 var projectSecret = "aimem_user_" + strings.Repeat("e", 64)
 
-// fakeHub answers the two routes the process context reads. Its behavior
+// fakeHub answers the three routes the process context reads. Its behavior
 // can change between loads; calls counts every request.
 type fakeHub struct {
 	mu             sync.Mutex
@@ -31,6 +31,16 @@ type fakeHub struct {
 	tasksEnabled   bool // identity's tasks_enabled
 	ref            *process.Ref
 	calls          atomic.Int64
+	// The stored set: served at /process/set for ref (or, with ?commit=,
+	// for the entry of kept with that commit) when set; 404 otherwise, as
+	// an older hub answers. setStatus forces another status; setDigest,
+	// when set, is what the answer claims the set's digest is.
+	set       *process.Bundle
+	kept      map[string]*process.Ref
+	setStatus int
+	setDigest string
+	setCut    bool // answer the set with its body cut short, as a dropped connection leaves it
+	setCalls  atomic.Int64
 }
 
 func (h *fakeHub) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -49,6 +59,33 @@ func (h *fakeHub) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		json.NewEncoder(w).Encode(map[string]any{"scope": "project", "task_write": true, "tasks_enabled": h.tasksEnabled})
+	case strings.HasSuffix(r.URL.Path, "/process/set"):
+		h.setCalls.Add(1)
+		if h.setStatus != 0 {
+			w.WriteHeader(h.setStatus)
+			json.NewEncoder(w).Encode(map[string]string{"error": "set route answered " + http.StatusText(h.setStatus)})
+			return
+		}
+		ref := h.ref
+		if c := r.URL.Query().Get("commit"); c != "" {
+			ref = h.kept[c]
+		}
+		if h.set == nil || ref == nil {
+			w.WriteHeader(http.StatusNotFound)
+			json.NewEncoder(w).Encode(map[string]string{"error": "the selection was made before this hub stored sets"})
+			return
+		}
+		digest := h.setDigest
+		if digest == "" {
+			digest = h.set.Digest()
+		}
+		raw, _ := json.Marshal(map[string]any{"project": "alpha",
+			"selection": map[string]string{"name": ref.DisplayName(), "commit": ref.Commit, "manifest": ref.Manifest, "digest": digest},
+			"set":       h.set})
+		if h.setCut {
+			raw = raw[:len(raw)*2/3]
+		}
+		w.Write(raw)
 	case strings.HasSuffix(r.URL.Path, "/process"):
 		if h.processStatus != 0 {
 			w.WriteHeader(h.processStatus)
@@ -138,7 +175,7 @@ func TestLoadDeliversTheCompleteSelectedUnitFromTheExactCache(t *testing.T) {
 	if r.State != Ready || r.Source != SourceCache || r.Project != "alpha" || r.Ref.Commit != selection.Commit || r.Problem() != nil {
 		t.Fatalf("load: %+v", r)
 	}
-	for _, want := range []string{"Work only on READY tasks.", "[ready.outcome]", "oh-code-review", "Process set: " + selection.Repo} {
+	for _, want := range []string{"Work only on READY tasks.", "[ready.outcome]", "oh-code-review", "Process set: " + selection.DisplayName() + " @ " + selection.Commit[:12]} {
 		if !strings.Contains(r.Unit, want) {
 			t.Errorf("unit lacks %q:\n%s", want, r.Unit)
 		}
@@ -329,6 +366,16 @@ func TestGitRefusalIsDenied(t *testing.T) {
 	r := Load(dir, root, "")
 	if r.State != Denied || r.Set != nil || !strings.Contains(r.Fix, "read access") {
 		t.Fatalf("git refusal: %+v", r)
+	}
+	hook, _ := Bootstrap(dir, root, "", false)
+	host := strings.TrimPrefix(git.URL, "https://")
+	for _, text := range []string{r.Detail, r.Fix, hook} {
+		if strings.Contains(text, ref.Repo) || strings.Contains(text, host) {
+			t.Fatalf("a notice names the repository or its host:\n%s", text)
+		}
+	}
+	if !strings.Contains(r.Detail, "git access denied") || !strings.Contains(hook, "DENIED") {
+		t.Fatalf("the redacted notice lost its category: %q / %q", r.Detail, hook)
 	}
 }
 

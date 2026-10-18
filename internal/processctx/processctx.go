@@ -1,7 +1,7 @@
 // Package processctx builds the session-start process context: the
 // enablement signal and the selected reference from the hub, the set from
-// the cache or Git, rendered as the bootstrap the session-start hook
-// injects. Every step is bounded and fails to a notice, never to a blocked
+// this machine's cache, the hub (the default path) or Git (an older hub),
+// rendered as the bootstrap the session-start hook injects. Every step is bounded and fails to a notice, never to a blocked
 // session start. The CLI (`aimem session-start`, `aimem process show`,
 // `aimem teams setup`) and the checkout-bound local MCP facade share it.
 //
@@ -21,6 +21,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"time"
 
@@ -40,7 +41,7 @@ type State string
 
 const (
 	// Ready: the hub named the selection just now and the complete set is
-	// here, fetched or from this machine's exact-commit cache.
+	// here, read from the hub, fetched from Git or from this machine's cache.
 	Ready State = "ready"
 	// LastObserved: the hub could not be reached; the set is the exact
 	// cached commit of the selection this machine last observed. Complete,
@@ -67,8 +68,10 @@ const (
 // (decision 2): over it, nothing is delivered and the state is TooLarge.
 const MaxDeliveryBytes = 32 << 10
 
-// Source says where a complete set came from.
+// Source says where a complete set came from: the hub's stored set, a Git
+// fetch of the commit (an older hub), or this machine's cache of either.
 const (
+	SourceHub     = "hub"
 	SourceFetched = "fetched"
 	SourceCache   = "cache"
 )
@@ -99,6 +102,9 @@ type Result struct {
 	// notice is the text Bootstrap has always returned for this outcome;
 	// "" where it said nothing.
 	notice string
+	// The hub and credential connect selected, for the content step.
+	hub       *adapter.HubConfig
+	hubClient *http.Client
 }
 
 // Complete reports whether the result carries the whole unit.
@@ -313,37 +319,47 @@ func (r *Result) connect(dir, root string) (*adapter.HubConfig, *http.Client, bo
 		hub = &copyHub
 		hubClient = selected.Client()
 	}
+	r.hub, r.hubClient = hub, hubClient
 	return hub, hubClient, true
 }
 
 // finish reads the files of r.Ref and sets the final state. A selection
-// the hub just confirmed comes from the cache or Git, bounded; one the hub
-// did not confirm now (last observed, or pinned while the hub cannot be
-// asked) only from this machine's exact cache (docs/DESIGN-kanban-docs.md:
-// the cache must match that selection), never from Git. Neither
-// substitutes another commit.
+// the hub just confirmed comes from this machine's cache, from the hub's
+// stored set (verified against the selection's digest, then cached by it)
+// or, only when the hub stored no set, from Git, bounded; one the hub did
+// not confirm now (last observed, or pinned while the hub cannot be asked)
+// only from this machine's cache (docs/DESIGN-kanban-docs.md: the cache
+// must match that selection), never from the network. Neither substitutes
+// another version. No text here names the repository URL: it is the
+// admin's, shown by `aimem process show --full` outside the unit.
 func (r *Result) finish(dir, root string) *Result {
 	id := r.Project
 	var res process.Result
-	if r.FromLastObserved {
+	switch {
+	case r.FromLastObserved:
 		res = process.Cached(root, *r.Ref)
-	} else {
-		ctx, cancel := context.WithTimeout(context.Background(), process.FetchTimeout+time.Second)
-		defer cancel()
-		res = process.Fetch(ctx, root, *r.Ref)
+	default:
+		res = r.content(root)
 	}
+	name := r.Ref.DisplayName()
 	switch res.Status {
 	case process.StatusDenied:
-		return r.set(Denied, fmt.Sprintf("Git refused this machine's access to %s: %v", r.Ref.Repo, res.Err), "give the account running aimem on this machine read access to "+r.Ref.Repo,
-			fmt.Sprintf("process context unavailable: access to the process repository was DENIED on this machine (%v); this machine needs read access to %s", res.Err, r.Ref.Repo))
+		why := redactRepo(res.Err, r.Ref.Repo)
+		return r.set(Denied, fmt.Sprintf("access to the process set %s @ %s was refused on this machine: %s", name, short(r.Ref.Commit), why), credentialFix+"; for a hub without stored sets, the account running aimem needs read access to the process repository (aimem process show --full names it)",
+			fmt.Sprintf("process context unavailable: access to the process set was DENIED on this machine (%s); no cached selection is used", why))
 	case process.StatusUnavailable:
-		return r.set(Unavailable, fmt.Sprintf("%v (selection %s @ %s)", res.Err, r.Ref.Repo, short(r.Ref.Commit)), "retry when Git is reachable; only the exact selected commit is used",
-			fmt.Sprintf("process context unavailable: %v (selection %s @ %s)", res.Err, r.Ref.Repo, short(r.Ref.Commit)))
+		why := redactRepo(res.Err, r.Ref.Repo)
+		return r.set(Unavailable, fmt.Sprintf("%s (selection %s @ %s, manifest %s)", why, name, short(r.Ref.Commit), r.Ref.Manifest), "retry when the hub is reachable; only the exact selected version is used",
+			fmt.Sprintf("process context unavailable: %s (selection %s @ %s, manifest %s)", why, name, short(r.Ref.Commit), r.Ref.Manifest))
 	}
 	r.Set = res.Set
-	r.Source = SourceFetched
-	if res.Status == process.StatusCached {
+	switch res.Status {
+	case process.StatusCached:
 		r.Source = SourceCache
+	case process.StatusFetched:
+		r.Source = SourceFetched
+	default:
+		r.Source = SourceHub
 	}
 	home, _ := os.UserHomeDir()
 	unit := process.BootstrapFull(res.Set, id, process.SkillInstalled(dir, home))
@@ -363,6 +379,92 @@ func (r *Result) finish(dir, root string) *Result {
 		r.Detail = "the hub is unreachable; this is the exact cached commit of the selection last observed at " + r.ObservedAt + "; it may be stale and never authorizes a task write"
 	}
 	return r
+}
+
+// content obtains the set for a selection the hub just confirmed. A
+// selection that carries a digest was recorded by a hub that stores sets,
+// so its files come from this machine's cache by that digest, else from
+// the hub's stored set, verified and cached; a refusal by the hub is then
+// a denial, never masked by a Git attempt, and a hub that no longer keeps
+// the set (a pruned pinned version) leaves Git. A selection without a
+// digest (an older hub's, or one recorded before sets; a pinned version
+// from an accept before this record carried the digest) is fetched from
+// Git as before, and the set route is not asked: an older hub refuses the
+// route it does not know with 403, which must not read as a denial.
+func (r *Result) content(root string) process.Result {
+	if r.Ref.Digest != "" {
+		if set, err := process.CachedSet(root, *r.Ref); err == nil {
+			return process.Result{Set: set, Status: process.StatusCached}
+		}
+	}
+	if r.hub != nil && r.Ref.Digest != "" {
+		byVersion := r.Pinned && (r.Current == nil || r.Current.Commit != r.Ref.Commit || r.Current.Manifest != r.Ref.Manifest)
+		outcome, err := hubSet(r.hub, r.hubClient, root, r.Project, r.Ref, byVersion)
+		switch outcome {
+		case hubSetStored:
+			set, err := process.CachedSet(root, *r.Ref)
+			if err != nil {
+				return process.Result{Status: process.StatusUnavailable, Err: err}
+			}
+			set.FromCache = false
+			return process.Result{Set: set, Status: statusHub}
+		case hubSetDenied:
+			return process.Result{Status: process.StatusDenied, Err: fmt.Errorf("the hub refused the set read: %w", err)}
+		case hubSetFailed:
+			return process.Result{Status: process.StatusUnavailable, Err: err}
+		}
+		// Unsupported: the hub stores no set for this selection; Git as
+		// before, with the digest dropped so the cache entry is the commit's.
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), setFetchDeadline)
+	defer cancel()
+	ref := *r.Ref
+	ref.Digest = ""
+	res := process.Fetch(ctx, root, ref)
+	if res.Set != nil {
+		res.Set.Ref = *r.Ref
+	}
+	return res
+}
+
+// statusHub marks a set read from the hub just now, as distinct from a
+// Git fetch or the cache.
+const statusHub process.Status = "hub"
+
+// redactRepo returns err's text with the process repository's URL and host
+// removed: Git names the repository in its own messages, and no notice an
+// agent sees may carry it (the URL is the admin's, printed by
+// `aimem process show --full`). The failure's category stays readable.
+func redactRepo(err error, repo string) string {
+	s := err.Error()
+	bare := strings.TrimSuffix(repo, ".git")
+	for _, form := range []string{repo + "/", repo, bare + "/", bare} {
+		if len(form) > 1 {
+			s = strings.ReplaceAll(s, form, "the process repository")
+		}
+	}
+	for _, host := range repoHosts(repo) {
+		s = regexp.MustCompile(`(^|[^A-Za-z0-9.\-])`+regexp.QuoteMeta(host)+`([^A-Za-z0-9.\-]|$)`).ReplaceAllString(s, "${1}its host${2}")
+	}
+	return s
+}
+
+// repoHosts is the repository's host as Git may print it: with and
+// without the port for a URL, the part between @ and : for an scp form.
+func repoHosts(repo string) []string {
+	var hosts []string
+	if u, err := url.Parse(repo); err == nil && u.Host != "" {
+		hosts = append(hosts, u.Host)
+		if h := u.Hostname(); h != u.Host {
+			hosts = append(hosts, h)
+		}
+	} else if i := strings.IndexByte(repo, '@'); i >= 0 {
+		rest := repo[i+1:]
+		if j := strings.IndexAny(rest, ":/"); j > 0 {
+			hosts = append(hosts, rest[:j])
+		}
+	}
+	return hosts
 }
 
 // validTime reports an RFC 3339 observation time: a last-observed record

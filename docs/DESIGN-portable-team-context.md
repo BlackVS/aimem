@@ -29,6 +29,15 @@ corrects the earlier fallback that let a revoked credential look like an
 offline hub. With a required project-local credential an unreachable hub
 stays `unavailable`, because the credential cannot be validated.
 
+Increment 1d is implemented as the **default path**, by the operator's
+decision on the design task: the hub stores the files of the selected
+process (the set) with the selection and serves them to a member under a
+current project grant, so a member machine needs neither Git nor access
+to the process repository; Git on the member is only the fallback for a
+hub that stores no set. The contract is in the increment's entry below;
+the decision 2 paragraph that made Git access on the member a requirement
+is corrected there.
+
 1c-2 is implemented: `team_setup` and `team_continue` report the four
 readiness parts of decision 3 for a verified session, deliver the role
 guidance and the complete project unit as their own MCP text blocks after
@@ -179,11 +188,14 @@ bootstrap") are reused unchanged. What changes is reachability:
   credential).
 - Templates are read by kind from the same unit, never by path.
 
-The project process still needs Git read access on the member's host. A host
-without that access gets `project_process: denied`, not a partial policy.
-Serving process content from the hub for such hosts is a separate,
-optional increment (below), because it copies content from an access-
-controlled repository into the hub and needs its own authorization rule.
+The project process no longer needs Git on the member's host (increment
+1d, the default path): the selection carries the set, the hub serves it
+under a current project grant, and the member verifies it against the
+selection's digest and caches it by that digest. A member the hub refuses
+gets `project_process: denied`, not a partial policy and not a Git attempt
+in its place. Only a hub that stores no set for the selection (an older
+hub, or a selection it recorded before sets) leaves the member to fetch the
+commit itself, as before.
 
 ### 3. Readiness has four independent parts
 
@@ -299,7 +311,9 @@ the project credential exactly as the session-start hook does.
 | New | New or v0.7.x | Role context comes from the client binary and needs no hub change; project process through the existing routes. Works against any hub with protocol v0.7.0. |
 | v0.7.2 or older | Any | Unchanged: no `team_context`, no readiness object, the playbook path in the report. The hub cannot detect this; the pilot must upgrade every member. |
 | New command assets | Old `aimem mcp` still running | Step 0 of the regenerated entry points stops when `team_setup`/`team_continue`, `team_context` or `process_context` is missing and tells the user to upgrade and restart. No shell fallback. |
-| Any | Hub without the optional process bundle routes | The client uses Git as today; a 404 or 405 on the bundle route is "unsupported", never "denied". |
+| New | Hub that stores no set for the selection (older hub, or a selection recorded before sets) | The selection carries no digest, so the client does not ask the set route (an older hub refuses a route it does not know with 403, which must not read as a denial) and fetches Git at the selected commit as before. For a selection with a digest, a 401 or 403 on the set route is denied and Git is not tried; a 404 (a kept version since pruned) leaves Git. |
+| v0.10.x or older | New | Reads the reference, ignores `digest` and `name`, fetches the commit from Git with its own access, as before. |
+| Older `aimem process select` | New hub | Refused: a selection must carry its set or name a kept one; the hub host runs the hub's own command. |
 
 The report gains fields and never removes one; a consumer of `status`,
 `checks` and `next` keeps working.
@@ -329,8 +343,11 @@ The report gains fields and never removes one; a consumer of `status`,
 2. **Hub-published bundle as the first step.** The review and task 1b put
    a validated bundle on the hub first. For the public protocol guidance it
    adds storage, a publish route and an authorization rule for no gain.
-   Corrected: the bundle is only needed for project process content on hosts
-   without Git access, and is optional (increment 1d).
+   Corrected: the bundle is for project process content, not guidance. It
+   was first planned as optional for hosts without Git access; the
+   operator then made it the default path (increment 1d), because a member
+   machine that needs Git and repository access for its rules is the
+   portability gap the increment exists to close.
 3. **"Starting a new attempt records the instruction versions."** Not true
    of the current store (decision 6). Corrected to worker-declared evidence
    now, server-recorded later.
@@ -340,7 +357,9 @@ The report gains fields and never removes one; a consumer of `status`,
    acceptable for a reference, which grants no repository access, but not
    for hub-served process content: a hub bundle read must require a current
    grant on that project, stricter than the reference read, because it
-   replaces a Git permission.
+   replaces a Git permission. Implemented: `GET /v1/projects/{p}/process/set`
+   applies the project repository's read rule (a live grant for an ordinary
+   token or a team session; unknown projects read as ungranted).
 5. **"Delivered" versus "read".** The review asked for delivered versus
    acknowledged context. Only delivery in the same result is observable;
    acknowledgement is an agent declaration and is reported as one.
@@ -358,13 +377,38 @@ Each has its own task, review gates and human merge.
   points (from the templates, never hand-edited) that check for the new tool.
   Tests: a non-aimem checkout, no agent shell, an old hub, a reconnect, cache
   boundaries and both roles through the real local MCP.
-- **1d. Optional hub-served process bundle** (M, only when a pilot host
-  lacks Git access to the process repository). An admin publishes the
-  validated files of the selected commit with its digest; the selection
-  records the digest in the same compare-and-swap; reads require a current
-  project grant and return a complete unit or an error; the client verifies
-  the digest and caches by it. No Git fetch on the hub, no paths or URLs from
-  agent requests. OpenAPI parity for any new route.
+- **1d. The hub-served process set as the default path** (M, implemented).
+  The operator's decisions on the design task: two import sources with the
+  same stored result, a Git reference read by the admin's command on the
+  hub host and an archive verified by its `SHA256SUMS`
+  (`aimem process select --from-archive FILE`, the archive written by
+  `aimem process export` on a machine with access, or a forge's source
+  tarball); the hub runs no Git outside the admin's selection step; the hub
+  keeps the sets of the last five selections, so an earlier one is
+  re-selected without an import; import is the admin's CLI action on the
+  hub host only, the API lists and reads and never imports; the session
+  bootstrap and `aimem process show` name the set by name, commit and
+  manifest and never by repository URL (`--full` prints the URL for the
+  admin, outside the delivered unit); a member machine without Git is ready
+  for work; Git on the member is only the fallback for a hub that stores no
+  set. The contract: `PUT /v1/projects/{p}/process` takes `files` (the
+  manifest and every file it names, validated as one set and refused whole)
+  or `digest` (a kept set, for the same manifest) and refuses a bare
+  reference; the set is stored under its digest (SHA-256 over the sorted
+  paths and contents with length prefixes) in the same compare-and-swap as
+  the selection, the kept list and the history; the selection records
+  `digest` and `name`; `GET /v1/projects/{p}/process/set` serves the
+  current selection's set, or a kept earlier one by `?commit=&manifest=`
+  (the version an accepted attempt was taken under), under a current
+  project grant, with the digest as `ETag`, 404 when the hub stores no set;
+  the client asks the route only for a selection that carries a digest
+  (the signal that the hub stores sets; an older hub answers 403 for a
+  route it does not know, and a selection without a digest is fetched from
+  Git as before), verifies the files against the selection's digest before
+  caching them under `process/sets/<digest>`, treats 401 and 403 as denied
+  and never tries Git in their place; no path or URL comes from an agent
+  request, and Git's own messages are redacted of the repository URL and
+  host before any notice an agent sees. OpenAPI parity holds for the route.
 - **Later.** Context versions on the attempt record; an optional hub check
   that refuses `team_accept` from a session that declared no current
   context. Both are schema changes and wait for evidence that the process
