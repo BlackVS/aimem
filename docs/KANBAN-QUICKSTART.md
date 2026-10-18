@@ -252,7 +252,8 @@ they are not changing and re-read after conflicts.
 A project with tasks on needs a selected process before it is ready for
 work (section 2). The process injects your handbook, readiness and
 completion checklists, templates and required-skill names; prepare a
-reviewed manifest in a Git repository each agent machine can read.
+reviewed manifest in a Git repository the hub host can read (or export
+the set as an archive from a machine that can, see the manual).
 
 On the hub as the service user:
 
@@ -271,8 +272,10 @@ aimem process show -p my-project
 ```
 
 Verify the source commit, complete handbook/checklists and required-skill
-availability, then restart the session. Git access is machine-local;
-the hub stores only the selection. See the [manifest and cache
+availability, then restart the session. The hub stores the selection
+and the files of that version and serves them to each member under its
+grant; the agent machine needs neither Git nor access to the repository.
+See the [manifest and cache
 contract](ADMIN-MANUAL.md#selecting-a-projects-process-documents).
 
 ## Disable, revoke, and troubleshoot
@@ -296,7 +299,7 @@ direct grant removes that grant, but a group grant may still allow writes.
 | Required local credential fails | Check project/hub binding, expiry, revocation and grant; run `set` with a valid project token, or deliberately `clear` to restore per-hub selection |
 | Token rejected | Correct hub, ordinary token, expiry, revocation and enabled user |
 | Reads work, writes fail | Tasks enabled, enabled user, current user/group grant and token scope; a recreated project needs a new grant and, for project-scoped tokens, a new token |
-| Process context unavailable | Selected manifest/commit, each machine's Git access, required files and bootstrap budget |
+| Process context unavailable | Selected manifest/commit, the member's grant on the project (denied) and hub reachability, required files and bootstrap budget; a hub that stores no set for the selection needs re-selecting on the hub host |
 | CLI cannot reach service | Run as the configured service user; export `XDG_RUNTIME_DIR="/run/user/$(id -u)"` and check `aimem health`. If that runtime directory/socket is absent too, inspect `systemctl --user status aimem` |
 
 For deployment and API details, see [the administrator manual](ADMIN-MANUAL.md)

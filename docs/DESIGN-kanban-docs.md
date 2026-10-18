@@ -308,10 +308,16 @@ admin console and CLI, project metadata and its read interface, bound-hub
 lookup, MCP discovery and dispatch, task mutation handlers and the page.
 
 **Session bootstrap.** When the project is enabled, the session-start hook
-reads the selected Git reference through the scoped hub interface, then
-fetches a complete short process bootstrap from that pinned Git commit. It includes the enablement signal, owning project,
-process-set version and source commit, the short handbook, applicable
-DoR/DoD and how to obtain the matching templates and other process assets.
+reads the selected reference through the scoped hub interface, then
+obtains the complete process set for it: from this machine's cache of
+that exact version, else from the hub's stored set, verified against the
+selection's digest and cached by it (the default path,
+`docs/DESIGN-portable-team-context.md` increment 1d), else, only when the
+hub stores no set for the selection, fetched from Git at that pinned
+commit. It includes the enablement signal, owning project, the set's
+name, version and source commit (never the repository URL, which is the
+admin's), the short handbook, applicable DoR/DoD and how to obtain the
+matching templates and other process assets.
 It identifies project-specific rules and the installed skill/agent names
 the process requires. Hooks and the OpenCode plugin follow the same
 contract; injection does not install skills or write repository files.
@@ -327,13 +333,14 @@ that must be explicit and tested.
 
 Unavailable, stale and disabled are distinct states. Bounded hub and Git
 fetches must not prevent session startup. Missing files, denied access,
-absent credentials, commit mismatch or an offline service produce explicit
-availability notices. If Git is unavailable, use only a complete local cache
-matching the selected repository, commit and manifest, and warn: "Git is
-unavailable; using cached process documents at commit …". If that exact
+absent credentials, a digest or commit mismatch or an offline service
+produce explicit availability notices. If the set cannot be read, use only
+a complete local cache matching the selected version (its digest, or for a
+Git fetch its repository, commit and manifest), and say so. If that exact
 version is absent, report process context unavailable; do not substitute an
-older commit. A confirmed Git access denial is reported as denial, not
-disguised as an offline fallback.
+older version. A confirmed access denial, by the hub or by Git, is reported
+as denial, not disguised as an offline fallback and not masked by trying
+the other source.
 
 If the hub is offline, identify the selection as last observed, including
 its last-verification time; the cache must match that selection and the same
@@ -345,7 +352,8 @@ Report missing required skills when detectable; otherwise identify their
 availability as unverified and direct the agent to check before the
 dependent step. Missing or incomplete process assets must not be treated
 as satisfied gates. Once context is available, agents retrieve referenced
-assets from Git at the same pinned commit using the manifest.
+assets from the same set (by kind, through `process_context` or `aimem
+process show --template`), never by path or from another version.
 Boundary: the hook's context builder, credential handling, process-set
 retrieval and cache, availability diagnostics and the plugin's equivalent.
 

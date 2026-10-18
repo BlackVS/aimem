@@ -196,6 +196,7 @@ func (s *Server) Routes() []Route {
 		{"POST", "/v1/tasks/{id}/comments", s.addTaskComment, false},
 		{"GET", "/v1/tasks/{id}/comments/{c}", s.getTaskComment, false},
 		{"GET", "/v1/projects/{p}/process", s.getProcessRef, false},
+		{"GET", strings.TrimPrefix(processSetReadRoute, "GET "), s.getProcessSet, false},
 		{"GET", "/v1/projects/{p}/repository", s.getRepository, false},
 		{"GET", "/v1/projects/{p}/epics", s.listEpics, false},
 		{"POST", "/v1/projects/{p}/epics", s.createEpic, false},

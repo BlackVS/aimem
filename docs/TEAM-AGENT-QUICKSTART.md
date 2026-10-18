@@ -111,9 +111,10 @@ returns this project's selected process as one complete unit (the text
 `aimem process show --full` prints: handbook, the checklists gating task
 states, required skills, template kinds), or with `template` one template
 by the kind the manifest names. It uses the checkout's own credential with
-no fallback, reads only the selection the hub names and this machine's
-exact-commit cache or Git at that commit, changes nothing and takes no
-path, URL, repository, commit or project. The result ends with a
+no fallback, reads only the selection the hub names and its files from
+this machine's cache or the hub's stored set (Git only for a hub that
+stores none), changes nothing and takes no path, URL, repository, commit
+or project. The unit names the set, never the repository URL. The result ends with a
 terminator line (project, commit, manifest, SHA-256 of the delivered
 text). It is delivered in state `ready`, or in state `last_observed`:
 the hub is unreachable, and the exact cached commit of the selection last

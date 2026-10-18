@@ -63,7 +63,9 @@ type AcceptedAttempt struct {
 	Repo          string `json:"repo"`
 	Commit        string `json:"commit"`
 	Manifest      string `json:"manifest"`
-	ProcessDigest string `json:"process_digest"` // SHA-256 of the unit delivered at accept: evidence, not identity (the commit is)
+	ProcessDigest string `json:"process_digest"`       // SHA-256 of the unit delivered at accept: evidence, not identity (the commit is)
+	SetDigest     string `json:"set_digest,omitempty"` // the stored set's digest when the hub served it: the cache key for this version offline
+	SetName       string `json:"set_name,omitempty"`   // the set's display name at accept
 	RoleDigest    string `json:"role_digest"`
 	RoleVersion   string `json:"role_version"`
 	Confirmed     bool   `json:"confirmed"` // the hub answered the accept with RUNNING

@@ -81,7 +81,7 @@ func (r *Result) render(what, payload string) string {
 	sum := sha256.Sum256([]byte(payload))
 	terminator := fmt.Sprintf("=== end aimem process context %s project %s commit %s manifest %s sha256 %s ===", what, r.Project, r.Ref.Commit, r.Ref.Manifest, hex.EncodeToString(sum[:]))
 	var b strings.Builder
-	fmt.Fprintf(&b, "aimem process context, %s: project %s, state %s, selection %s @ %s (manifest %s), from %s.\n", what, r.Project, r.State, r.Ref.Repo, r.Ref.Commit, r.Ref.Manifest, sourceText(r.Source))
+	fmt.Fprintf(&b, "aimem process context, %s: project %s, state %s, selection %s @ %s (manifest %s), from %s.\n", what, r.Project, r.State, r.Ref.DisplayName(), r.Ref.Commit, r.Ref.Manifest, sourceText(r.Source))
 	switch {
 	case r.Pinned:
 		b.WriteString(pinnedNote(r))
@@ -99,10 +99,13 @@ func (r *Result) render(what, payload string) string {
 }
 
 func sourceText(source string) string {
-	if source == SourceCache {
-		return "this machine's exact-commit cache"
+	switch source {
+	case SourceCache:
+		return "this machine's cache of that exact version"
+	case SourceFetched:
+		return "Git at that commit (the hub stores no set for it)"
 	}
-	return "Git at that commit"
+	return "the hub's stored set, verified by its digest"
 }
 
 // pinnedNote says whose rules a pinned delivery carries, and that a newer
@@ -117,7 +120,7 @@ func pinnedNote(r *Result) string {
 	case r.FromLastObserved:
 		note += "The hub could not be asked: no live check ran, so this cached copy is not ready and never authorizes a task write.\n"
 	case r.Current != nil && r.Current.Commit != r.Ref.Commit:
-		note += fmt.Sprintf("The project now selects %s @ %s (manifest %s). That applies to new work only; it is not delivered here and is not this attempt's rules.\n", r.Current.Repo, r.Current.Commit, r.Current.Manifest)
+		note += fmt.Sprintf("The project now selects %s @ %s (manifest %s). That applies to new work only; it is not delivered here and is not this attempt's rules.\n", r.Current.DisplayName(), r.Current.Commit, r.Current.Manifest)
 	case r.Current != nil:
 		note += "The project's current selection is the same commit.\n"
 	default:

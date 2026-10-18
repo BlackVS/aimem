@@ -381,17 +381,54 @@
         "description": "Ordinary user tokens may call this route. An epic is the grouping above tasks that a release or milestone maps to.",
         "x-role": "writer",
         "parameters": [
-          {"name": "p", "in": "path", "required": true, "schema": {"type": "string"}},
-          {"name": "include_retired", "in": "query", "required": false, "schema": {"type": "string"}}
+          {
+            "name": "p",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "include_retired",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
         ],
-        "responses": {"200": {"description": "epic list"}}
+        "responses": {
+          "200": {
+            "description": "epic list"
+          }
+        }
       },
       "post": {
         "summary": "Create an epic",
         "description": "Body: title (required), objective, target, state (OPEN by default). Authorized like a task write in this project (ordinary user-scoped or matching project-scoped token with a current grant, or admin; tasks must be enabled). Retry keys travel in the Idempotency-Key header.",
         "x-role": "writer",
-        "parameters": [{"name": "p", "in": "path", "required": true, "schema": {"type": "string"}}],
-        "responses": {"201": {"description": "the epic"}, "400": {"description": "invalid content"}, "403": {"description": "not authorized or tasks not enabled"}}
+        "parameters": [
+          {
+            "name": "p",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "201": {
+            "description": "the epic"
+          },
+          "400": {
+            "description": "invalid content"
+          },
+          "403": {
+            "description": "not authorized or tasks not enabled"
+          }
+        }
       }
     },
     "/v1/projects/{p}/epics/{e}": {
@@ -401,20 +438,62 @@
         "description": "Ordinary user tokens may call this route.",
         "x-role": "writer",
         "parameters": [
-          {"name": "p", "in": "path", "required": true, "schema": {"type": "string"}},
-          {"name": "e", "in": "path", "required": true, "schema": {"type": "string"}}
+          {
+            "name": "p",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "e",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
         ],
-        "responses": {"200": {"description": "the epic"}, "404": {"description": "no such epic"}}
+        "responses": {
+          "200": {
+            "description": "the epic"
+          },
+          "404": {
+            "description": "no such epic"
+          }
+        }
       },
       "put": {
         "summary": "Replace an epic's fields under expected_revision; state RETIRED retires it",
         "description": "Authorized like a task write. A stale expected_revision returns 409 with the current epic. Retirement keeps existing task assignments and refuses new ones; ids are never reused.",
         "x-role": "writer",
         "parameters": [
-          {"name": "p", "in": "path", "required": true, "schema": {"type": "string"}},
-          {"name": "e", "in": "path", "required": true, "schema": {"type": "string"}}
+          {
+            "name": "p",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "e",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
         ],
-        "responses": {"200": {"description": "the epic"}, "409": {"description": "revision conflict, current epic in the body"}}
+        "responses": {
+          "200": {
+            "description": "the epic"
+          },
+          "409": {
+            "description": "revision conflict, current epic in the body"
+          }
+        }
       }
     },
     "/v1/access/directory": {
@@ -422,13 +501,17 @@
         "summary": "The identity directory: id, kind, name and enabled of every user and group",
         "description": "Ordinary user tokens may call this route: it is what the task page labels assignees and comment authors with. Nothing else about an identity is returned (no tokens, grants or project lists); effective permissions stay in the access store.",
         "x-role": "writer",
-        "responses": {"200": {"description": "identities"}}
+        "responses": {
+          "200": {
+            "description": "identities"
+          }
+        }
       }
     },
     "/v1/projects/{p}/process": {
       "get": {
-        "summary": "The project's selected process reference (repository, ref, commit, manifest)",
-        "description": "Ordinary user tokens may call this route: the reference is what an agent needs to find the project's process documents and grants no access to the repository. 404 when nothing is selected; ?history=1 adds the retained earlier selections, newest first, and answers 200 even when nothing is selected now.",
+        "summary": "The project's selected process reference (repository, ref, commit, manifest, set digest and name)",
+        "description": "Ordinary user tokens may call this route: the reference is what an agent needs to name the project's process and grants no access to the repository. A selection made with a stored set carries digest (SHA-256 over the set's files) and name (the manifest's directory, else the repository's basename); a member reads the files from /process/set and verifies that digest. 404 when nothing is selected; ?history=1 adds the retained earlier selections, newest first, and the sets the hub keeps (sets: digest, manifest, bytes, stored_at; the last 5 selections' sets), and answers 200 even when nothing is selected now.",
         "x-role": "writer",
         "parameters": [
           {
@@ -458,8 +541,8 @@
         }
       },
       "put": {
-        "summary": "Select or clear the project's process reference (admin)",
-        "description": "Body: repo (https/ssh/git@ URL), commit (full 40-hex), manifest (relative path in the repository), optional ref (branch or tag for servers that refuse fetch-by-hash), and expected_commit — the commit currently selected, empty when none — or the write is refused with 409 and the current selection. {\"clear\":true,\"expected_commit\":...} clears. Every selection is retained in the project's history.",
+        "summary": "Select or clear the project's process reference, importing its set (admin)",
+        "description": "Body: repo (https/ssh/git@ URL), commit (full 40-hex), manifest (relative path in the repository), optional ref (branch or tag), expected_commit (the commit currently selected, empty when none, or the write is refused with 409 and the current selection) and the set: files, a map of repository path to base64 file content (the manifest and every file it names, at most 64 files and 4 MiB; validated as a whole and refused whole), or digest, naming a set the hub already keeps from one of the last 5 selections (its manifest must match). A selection without files or digest is refused: the hub runs no Git, the admin's command reads the set from Git or from an archive verified by its SHA256SUMS and sends it here. The hub stores the set under its digest, keeps the sets of the last 5 selections, and records the selection with digest and name in the project's history; the selection, the set and the pruning are one transaction. {\"clear\":true,\"expected_commit\":...} clears (the kept sets stay).",
         "x-role": "admin",
         "parameters": [
           {
@@ -473,13 +556,60 @@
         ],
         "responses": {
           "200": {
-            "description": "the new selection"
+            "description": "{project, current, imported}: the new selection and whether its set was stored now (false when a kept set was re-selected)"
           },
           "400": {
-            "description": "malformed selection"
+            "description": "malformed selection, an invalid set, or a selection without files or digest"
           },
           "409": {
             "description": "expected_commit does not match the current selection"
+          }
+        }
+      }
+    },
+    "/v1/projects/{p}/process/set": {
+      "get": {
+        "summary": "The stored files of the project's selected process (the set)",
+        "description": "The default way a member obtains the process files (docs/DESIGN-portable-team-context.md, increment 1d): the current selection's set as the hub stored it at import ({project, selection: {name, commit, manifest, digest, selected_at}, set: {version, manifest, files}}, files as a map of repository path to base64 content), so the member needs neither Git nor access to the process repository. The client verifies that the files digest to selection.digest before caching them. ?commit=&manifest= returns a kept earlier selection's set (a pinned version); the hub keeps the sets of the last 5 selections. The route is on the ordinary surface with the repository read's rule: an ordinary user token or a team session needs a live grant on the project; an unknown project answers as one without a grant. ETag is the digest; If-None-Match answers 304. 404 when nothing is selected, when the selection predates stored sets (the member falls back to Git), or when the set is no longer kept.",
+        "x-role": "writer",
+        "parameters": [
+          {
+            "name": "p",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "commit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "manifest",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "{project, selection, set}"
+          },
+          "304": {
+            "description": "If-None-Match matched the set's digest"
+          },
+          "403": {
+            "description": "no current grant on the project"
+          },
+          "404": {
+            "description": "no selection, no stored set for it, a set no longer kept, or unknown project"
           }
         }
       }
@@ -491,13 +621,33 @@
         "x-role": "writer",
         "x-team-mode": "Team mode: served to a verified session under the linked team access profile's live grant on the project, over TLS terminated by the hub, never under the caller's personal grants. Refusals use the envelope with active_mode team: grant_denied (no profile grant, a reserved or unknown project), invalid_request (?history=1), context_unavailable (503, retryable), context_stale, identity_mismatch.",
         "parameters": [
-          {"name": "p", "in": "path", "required": true, "schema": {"type": "string"}},
-          {"name": "history", "in": "query", "required": false, "schema": {"type": "string"}}
+          {
+            "name": "p",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "history",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
         ],
         "responses": {
-          "200": {"description": "the repository, or null (and the history)"},
-          "403": {"description": "an ordinary token without a live grant on the project, or asking for the history"},
-          "404": {"description": "unknown project (admin)"}
+          "200": {
+            "description": "the repository, or null (and the history)"
+          },
+          "403": {
+            "description": "an ordinary token without a live grant on the project, or asking for the history"
+          },
+          "404": {
+            "description": "unknown project (admin)"
+          }
         }
       },
       "put": {
@@ -505,12 +655,25 @@
         "description": "Body: kind (github, gitea or gitlab: the API dialect a credential is verified against), url (https://host/path, ssh://host/path or user@host:path; stored as given, never fetched; no password, no user name on https, no query or fragment), optional access (write, the default, or read). {\"clear\":true} clears. No default branch is stored: the forge owns it. Every change is recorded in the project's repository history in the same storage step.",
         "x-role": "admin",
         "parameters": [
-          {"name": "p", "in": "path", "required": true, "schema": {"type": "string"}}
+          {
+            "name": "p",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
         ],
         "responses": {
-          "200": {"description": "the action, the new repository and the previous one"},
-          "400": {"description": "malformed repository"},
-          "404": {"description": "unknown project, or clear with no repository set"}
+          "200": {
+            "description": "the action, the new repository and the previous one"
+          },
+          "400": {
+            "description": "malformed repository"
+          },
+          "404": {
+            "description": "unknown project, or clear with no repository set"
+          }
         }
       }
     },
@@ -520,11 +683,22 @@
         "description": "Each grantee with its kind (user, group or team_profile), ID and the name the hub holds; a team profile carries its service and team IDs, and a disabled user or profile is marked. A project never granted has no access instance and lists nobody.",
         "x-role": "admin",
         "parameters": [
-          {"name": "p", "in": "path", "required": true, "schema": {"type": "string"}}
+          {
+            "name": "p",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
         ],
         "responses": {
-          "200": {"description": "project, access instance and grants"},
-          "404": {"description": "unknown project"}
+          "200": {
+            "description": "project, access instance and grants"
+          },
+          "404": {
+            "description": "unknown project"
+          }
         }
       }
     },
@@ -697,7 +871,7 @@
       },
       "put": {
         "summary": "Replace a task's editable fields under expected-revision CAS",
-        "description": "Body is the full editable content plus expected_revision; omitted optional fields clear (candidate_refs and evidence_refs are typed references {kind, ref, note?, scope?} \u2014 a bare string is refused with 400 since schema 13). required_capability is optional: \"<kind>: <name>\" (a lowercase kind of at most 32 characters, one colon and one space, then a name of printable characters with no surrounding space; at most 256 bytes), such as \"ops: network-x\"; empty means the project's own capability, and a malformed value is refused with 400. A stale revision answers 409 with the current task. Ordinary user tokens may call this route; writes are authorized per attempt against the task's owning project (user-scoped token or token issued for that project instance, plus a current grant), legacy writer tokens read only, admin tokens may update unmanaged tasks. Retry keys travel in the Idempotency-Key header. Managed tasks refuse generic update/archive with 409 managed_task, including admins and old update receipts. Tasks with an active reservation also refuse generic update/archive with 409, including admins and old update receipts; the response does not disclose the holder. Reservation transitions are not exposed through this route. The coordination projection is not editable content.",
+        "description": "Body is the full editable content plus expected_revision; omitted optional fields clear (candidate_refs and evidence_refs are typed references {kind, ref, note?, scope?} — a bare string is refused with 400 since schema 13). required_capability is optional: \"<kind>: <name>\" (a lowercase kind of at most 32 characters, one colon and one space, then a name of printable characters with no surrounding space; at most 256 bytes), such as \"ops: network-x\"; empty means the project's own capability, and a malformed value is refused with 400. A stale revision answers 409 with the current task. Ordinary user tokens may call this route; writes are authorized per attempt against the task's owning project (user-scoped token or token issued for that project instance, plus a current grant), legacy writer tokens read only, admin tokens may update unmanaged tasks. Retry keys travel in the Idempotency-Key header. Managed tasks refuse generic update/archive with 409 managed_task, including admins and old update receipts. Tasks with an active reservation also refuse generic update/archive with 409, including admins and old update receipts; the response does not disclose the holder. Reservation transitions are not exposed through this route. The coordination projection is not editable content.",
         "x-role": "writer",
         "parameters": [
           {
@@ -759,16 +933,68 @@
         "x-role": "writer",
         "x-team-mode": "Team mode (DESIGN-AIFORGE-PILOT-1 §4): served only to a verified session whose role is coordinator, under the linked team access profile's live grant on the task's project, over TLS terminated by the hub; the actor is the member's user. Refusals use the envelope with active_mode team: role_forbidden (another role), grant_denied, task_held (409, a task under a reservation), context_unavailable (503, retryable), context_stale, identity_mismatch.",
         "parameters": [
-          {"name": "id", "in": "path", "required": true, "schema": {"type": "string"}},
-          {"name": "Idempotency-Key", "in": "header", "required": true, "schema": {"type": "string"}}
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
         ],
-        "requestBody": {"required": true, "content": {"application/json": {"schema": {"type": "object", "additionalProperties": false, "required": ["expected_revision"], "properties": {"expected_revision": {"type": "integer"}, "state": {"type": "string", "enum": ["BACKLOG", "READY"]}, "next_action": {"type": "string"}}}}}},
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "expected_revision"
+                ],
+                "properties": {
+                  "expected_revision": {
+                    "type": "integer"
+                  },
+                  "state": {
+                    "type": "string",
+                    "enum": [
+                      "BACKLOG",
+                      "READY"
+                    ]
+                  },
+                  "next_action": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          }
+        },
         "responses": {
-          "200": {"description": "the task after triage"},
-          "400": {"description": "invalid triage (no field named, a state outside BACKLOG and READY, a task in another state)"},
-          "403": {"description": "write not permitted, role_forbidden or grant_denied (team mode)"},
-          "404": {"description": "unknown task"},
-          "409": {"description": "stale revision (with the current task), managed or reserved task, task_held (team mode)"}
+          "200": {
+            "description": "the task after triage"
+          },
+          "400": {
+            "description": "invalid triage (no field named, a state outside BACKLOG and READY, a task in another state)"
+          },
+          "403": {
+            "description": "write not permitted, role_forbidden or grant_denied (team mode)"
+          },
+          "404": {
+            "description": "unknown task"
+          },
+          "409": {
+            "description": "stale revision (with the current task), managed or reserved task, task_held (team mode)"
+          }
         }
       }
     },
@@ -1271,7 +1497,11 @@
                   },
                   "scope": {
                     "type": "string",
-                    "enum": ["user", "project", "read-only"],
+                    "enum": [
+                      "user",
+                      "project",
+                      "read-only"
+                    ],
                     "description": "User follows current direct/group grants on every write; project additionally restricts to one project instance; read-only never writes. Omitted scope preserves legacy project-or-read-only issuance."
                   },
                   "expires_at": {
@@ -1396,18 +1626,72 @@
         "x-identity-auth": "peer",
         "x-requires-tls": true,
         "parameters": [
-          {"name": "service_id", "in": "path", "required": true, "schema": {"type": "string"}},
-          {"name": "team_id", "in": "path", "required": true, "schema": {"type": "string"}},
-          {"name": "X-Aimem-Identity-Version", "in": "header", "required": true, "schema": {"type": "string", "enum": ["1"]}}
+          {
+            "name": "service_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "team_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "X-Aimem-Identity-Version",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "1"
+              ]
+            }
+          }
         ],
-        "requestBody": {"required": true, "content": {"application/json": {"schema": {"type": "object", "additionalProperties": false, "required": ["team_name"], "properties": {"team_name": {"type": "string"}}}}}},
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "team_name"
+                ],
+                "properties": {
+                  "team_name": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          }
+        },
         "responses": {
-          "200": {"description": "profile_id, team_id, team_name, created and previous_name"},
-          "400": {"description": "invalid_request or unsupported_version"},
-          "401": {"description": "peer_unauthenticated"},
-          "403": {"description": "tls_required, peer_forbidden or profile_disabled"},
-          "409": {"description": "team_name_taken"},
-          "429": {"description": "rate_limited"}
+          "200": {
+            "description": "profile_id, team_id, team_name, created and previous_name"
+          },
+          "400": {
+            "description": "invalid_request or unsupported_version"
+          },
+          "401": {
+            "description": "peer_unauthenticated"
+          },
+          "403": {
+            "description": "tls_required, peer_forbidden or profile_disabled"
+          },
+          "409": {
+            "description": "team_name_taken"
+          },
+          "429": {
+            "description": "rate_limited"
+          }
         }
       }
     },
@@ -1488,14 +1772,39 @@
         "x-identity-auth": "peer",
         "x-requires-tls": true,
         "parameters": [
-          {"name": "service_id", "in": "path", "required": true, "schema": {"type": "string"}},
-          {"name": "X-Aimem-Identity-Version", "in": "header", "required": true, "schema": {"type": "string", "enum": ["1"]}}
+          {
+            "name": "service_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "X-Aimem-Identity-Version",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "1"
+              ]
+            }
+          }
         ],
         "responses": {
-          "200": {"description": "{teams: [...]}"},
-          "401": {"description": "peer_unauthenticated"},
-          "403": {"description": "tls_required or peer_forbidden"},
-          "429": {"description": "rate_limited"}
+          "200": {
+            "description": "{teams: [...]}"
+          },
+          "401": {
+            "description": "peer_unauthenticated"
+          },
+          "403": {
+            "description": "tls_required or peer_forbidden"
+          },
+          "429": {
+            "description": "rate_limited"
+          }
         }
       }
     },
@@ -1507,16 +1816,50 @@
         "x-identity-auth": "peer",
         "x-requires-tls": true,
         "parameters": [
-          {"name": "service_id", "in": "path", "required": true, "schema": {"type": "string"}},
-          {"name": "team_id", "in": "path", "required": true, "schema": {"type": "string"}},
-          {"name": "X-Aimem-Identity-Version", "in": "header", "required": true, "schema": {"type": "string", "enum": ["1"]}}
+          {
+            "name": "service_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "team_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "X-Aimem-Identity-Version",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "1"
+              ]
+            }
+          }
         ],
         "responses": {
-          "200": {"description": "the team"},
-          "401": {"description": "peer_unauthenticated"},
-          "403": {"description": "tls_required or peer_forbidden"},
-          "404": {"description": "not_found"},
-          "429": {"description": "rate_limited"}
+          "200": {
+            "description": "the team"
+          },
+          "401": {
+            "description": "peer_unauthenticated"
+          },
+          "403": {
+            "description": "tls_required or peer_forbidden"
+          },
+          "404": {
+            "description": "not_found"
+          },
+          "429": {
+            "description": "rate_limited"
+          }
         }
       }
     },
@@ -4295,12 +4638,11 @@
                   },
                   "terminal_evidence": {
                     "type": "array",
-                    "description": "Evidence references of reviewed delivery. On an accepted_for_finalization fact, exactly the delivery evidence the coordinator confirmed through aicrew, in its order: the fact's evidence_digest binds it, and anything else is evidence_mismatch.",
+                    "description": "Reviewed delivery and human-merge evidence; required when content.state is DONE",
                     "items": {
                       "type": "string"
                     },
-                    "maxItems": 16,
-                    "description": "Reviewed delivery and human-merge evidence; required when content.state is DONE"
+                    "maxItems": 16
                   },
                   "coordination_proof": {
                     "type": "string",
@@ -6177,7 +6519,9 @@
           {
             "name": "tasks_enabled",
             "in": "query",
-            "schema": {"type": "boolean"},
+            "schema": {
+              "type": "boolean"
+            },
             "description": "Filter ordinary projects by task enablement; true includes empty enabled boards. Omit for the existing general listing."
           }
         ],
@@ -7235,7 +7579,8 @@
           }
         ]
       }
-    },    "/v1/projects/{p}/teams/{team}/export": {
+    },
+    "/v1/projects/{p}/teams/{team}/export": {
       "get": {
         "summary": "Administrator team audit export (JSONL pages)",
         "description": "Admin JSONL export page (application/x-ndjson) of a team's accepted events and message metadata for post-analysis; every page runs the admin gate again. Lines: one header record (schema_version 1, protocol_version, project, team_id, normalized filters, include_bodies, limit, snapshot {event_sequence, message_sequence, taken_at}, first_page, exported_at, server_version, request_id), then up to limit event records, then up to limit message records, then one end record (events, messages, complete, next {after_events, after_messages, snapshot_events, snapshot_messages}). The first page takes the snapshot; a continued page passes all four next values back so records accepted after the snapshot never appear; complete:true marks the last page. Message records are metadata by default: id, sequence, sender session and generation, reported profile as stored, created_at, recipient, kind, task/attempt/reply references, lifecycle record and one delivery record per recipient (delivered_at means an inbox response was served, acked_at is the client's explicit report); include_bodies=true adds the payload. Filters as on /events; an operation filter selects lifecycle messages by their operation. A stream whose snapshot sequence is zero yields nothing on any page. limit 1-100 (default 50). Nothing here infers model identity or cost; rotated server diagnostics are not part of the export.",

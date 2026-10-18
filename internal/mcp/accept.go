@@ -85,7 +85,7 @@ func acceptWithRecord(ctx context.Context, call TaskCallFunc, defaultProject, di
 		}
 		sum := sha256.Sum256([]byte(r.Unit))
 		st.Accepted = &teamstate.AcceptedAttempt{Attempt: a.Attempt, SessionID: a.SessionID, Generation: a.Generation, Key: a.Key,
-			Repo: r.Ref.Repo, Commit: r.Ref.Commit, Manifest: r.Ref.Manifest, ProcessDigest: "sha256:" + hex.EncodeToString(sum[:]),
+			Repo: r.Ref.Repo, Commit: r.Ref.Commit, Manifest: r.Ref.Manifest, SetDigest: r.Ref.Digest, SetName: r.Ref.Name, ProcessDigest: "sha256:" + hex.EncodeToString(sum[:]),
 			RoleDigest: u.Digest, RoleVersion: version, RecordedAt: time.Now().UTC().Format(time.RFC3339)}
 		if err := teamstate.Save(statePath, st); err != nil {
 			return refuse("the process version could not be recorded (" + err.Error() + ")")

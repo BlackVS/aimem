@@ -276,7 +276,7 @@ const mainUsage = `usage: aimem <command> [flags]
   teams      list|show|create|configure|events  team administration (on the hub host)
   teams      setup TEAM <worker|coordinator>  verified team onboarding from a checkout
                              (checks, join or reconcile, role entry; aimem teams setup for flags)
-  process    select|clear|show  the project's process reference (Git repo, commit, manifest); show prints the session bootstrap
+  process    select|clear|show|export  the project's process (Git repo, commit, manifest) and its files, stored on the hub; show prints the session bootstrap
   dedup      [-p|--all] [--sim 0.90] [--dry-run]
                              fold near-identical memories onto one survivor
                              (pinned wins, else newest; tags/sources merged,
