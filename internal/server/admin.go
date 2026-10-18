@@ -6,6 +6,7 @@ package server
 // API with it, so serving the page unauthenticated leaks nothing.
 
 import (
+	"aimem/internal/process"
 	"aimem/internal/store"
 	_ "embed"
 	"encoding/json"
@@ -119,8 +120,35 @@ func (s *Server) putMeta(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		s.log.Info("admin meta", "project", r.PathValue("p"), "key", key)
-		s.ok(w, map[string]string{"key": key, "value": req.Value})
+		out := map[string]any{"key": key, "value": req.Value}
+		if key == store.TasksMetaKey && req.Value == "on" {
+			s.addProcessGap(out, db, r.PathValue("p"))
+		}
+		s.ok(w, out)
 	}
+}
+
+// addProcessGap tells the admin who just turned tasks on for a project
+// with no process selected that the project is not ready for work, and
+// how to select one, with the processes this hub already uses. Tasks are
+// on either way: a failed lookup leaves the answer as it was.
+func (s *Server) addProcessGap(out map[string]any, db *store.DB, project string) {
+	ref, err := currentProcessRef(db)
+	if err != nil || ref != nil {
+		return
+	}
+	inUse, err := s.processesInUse()
+	if err != nil {
+		s.log.Error("processes in use", "err", err)
+		inUse = nil
+	}
+	if inUse == nil {
+		inUse = []process.InUse{}
+	}
+	out["ready_for_work"] = false
+	out["not_ready"] = process.NotSelected
+	out["processes"] = inUse
+	out["next_step"] = process.NextStep(project, inUse)
 }
 
 // Model config lives in the aimem env file (sourced by curate-all.sh on

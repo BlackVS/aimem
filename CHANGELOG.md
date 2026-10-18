@@ -13,6 +13,27 @@ currently 24); a binary refuses a database newer than it understands.
 
 ## [Unreleased]
 
+### Changed
+
+- **Turning tasks on names the missing process with values you can run.**
+  A project with tasks on and no process selected is not ready for work:
+  no member can take a task, and the first agent session there fails at
+  its start with `project_process: not_selected`. `aimem tasks on`, and
+  the admin API's answer to it, now say that at once and print the
+  selection command with the values of the processes this hub already
+  uses for other projects, most used first, quoted for a POSIX shell
+  where a value needs it. When the hub uses none, the
+  command comes with an example of each of its three values: the process
+  repository's git URL, the full 40-hex commit and the manifest's path in
+  that repository. Nothing is selected by turning tasks on. The admin API
+  adds `ready_for_work`, `not_ready`, `processes` and `next_step` to the
+  answer, and a new admin route, `GET /v1/processes`, lists the
+  selections in use. The console's toggle says the project is not ready.
+  `aimem project show` prints the same, and `aimem project list` now
+  prints each project's tasks and process state and marks such a project
+  as not ready, with the command; `aimem projects` still prints the raw
+  id list.
+
 ## [0.10.6] — 2026-10-16
 
 A new project set up by the quickstart now ends at a board its agent

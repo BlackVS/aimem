@@ -61,7 +61,29 @@ aimem projects
 ```
 
 This creates the project's store if absent and enables tasks. There is no
-separate `aimem create-project` command. Creation through task enablement
+separate `aimem create-project` command.
+
+Until a process is selected for the project, it is not ready for work: no
+member can take a task, workers are announced unavailable and the
+coordinator issues no offers. `aimem tasks on` says so at once and prints
+the selection command. When the hub already follows a process for another
+project, the command carries that process's values, ready to run:
+
+```text
+tasks on for project "my-project"
+not ready for work: tasks on, process not selected
+next step: select the project's process on this hub host; processes this hub already uses:
+  as other-project:
+    aimem process select https://example.com/team/process.git 0123456789abcdef0123456789abcdef01234567 process/manifest.json --ref main -p my-project
+  or another process: aimem process select <repo> <commit> <manifest> [--ref <branch>] -p my-project
+```
+
+The three values are the process repository's git URL, the full 40-hex
+commit to follow, and the manifest's path in that repository. Turning tasks
+on never selects a process; you run the command, and section 6 covers
+choosing and verifying one. `aimem project show -p my-project` and
+`aimem project list` keep marking the project as not ready, with the same
+command, until it has one. Creation through task enablement
 is a temporary workaround; explicit CLI and console project creation are
 backlogged, with Kanban enablement kept separate. Double-check the ID
 first: a typo can create an unintended project.
@@ -227,9 +249,9 @@ they are not changing and re-read after conflicts.
 
 ## 6. Select process instructions for agents
 
-Kanban works without a selected process, but agents then receive a notice
-that process context is unavailable. To inject your handbook, readiness
-and completion checklists, templates and required-skill names, prepare a
+A project with tasks on needs a selected process before it is ready for
+work (section 2). The process injects your handbook, readiness and
+completion checklists, templates and required-skill names; prepare a
 reviewed manifest in a Git repository each agent machine can read.
 
 On the hub as the service user:

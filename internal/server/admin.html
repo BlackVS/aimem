@@ -378,7 +378,7 @@ let kbPage = 1;
 
 const $ = id => document.getElementById(id);
 const esc = s => (s??"").replace(/[&<>"]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
-function toast(m){const t=$("toast");t.textContent=m;t.style.opacity=1;setTimeout(()=>t.style.opacity=0,2200);}
+function toast(m,ms){const t=$("toast");t.textContent=m;t.style.opacity=1;setTimeout(()=>t.style.opacity=0,ms||2200);}
 function ago(ts){if(!ts)return"-";const s=(Date.now()-Date.parse(ts))/1e3;
   if(s<90)return Math.round(s)+"s ago";if(s<5400)return Math.round(s/60)+"m ago";
   if(s<172800)return Math.round(s/3600)+"h ago";return Math.round(s/86400)+"d ago";}
@@ -550,13 +550,19 @@ function toggleKbMenu(key){ kbMenu = (kbMenu===key || kbMenu==="merge:"+key.repl
 
 // Task enablement is an admin decision recorded on the hub (project meta
 // key "tasks"): read the current value, flip it, say what happened. A
-// writer token gets the hub's refusal in the toast.
+// writer token gets the hub's refusal in the toast. Tasks on with no
+// process selected leaves the project not ready for work; the toast says
+// so and where the selection command is printed.
 async function toggleTasksUI(id){
   const p = `/v1/projects/${encodeURIComponent(id)}/meta/tasks`;
   try{
     const cur = (await api(p)).value === "on";
     const next = cur ? "off" : "on";
-    await api(p, {method:"PUT", body: JSON.stringify({value: next})});
+    const res = await api(p, {method:"PUT", body: JSON.stringify({value: next})});
+    if(res.ready_for_work === false){
+      toast(`tasks on for ${id} - not ready for work: ${res.not_ready}. Select its process on the hub host; aimem project show -p ${id} prints the command`, 10000);
+      return;
+    }
     toast(`tasks ${next} for ${id}`);
   }catch(e){ toast(String(e.message||e)); }
 }

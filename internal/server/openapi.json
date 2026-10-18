@@ -6156,6 +6156,18 @@
         }
       }
     },
+    "/v1/processes": {
+      "get": {
+        "summary": "The process selections in use on this hub (admin)",
+        "description": "Each distinct current selection (repo, ref, commit, manifest) held by an ordinary project, with the projects that follow it, most used first. This is what an admin turning tasks on for a project without a process is offered.",
+        "x-role": "admin",
+        "responses": {
+          "200": {
+            "description": "{processes: [{repo, ref, commit, manifest, projects}]}"
+          }
+        }
+      }
+    },
     "/v1/projects": {
       "get": {
         "summary": "List project ids",
@@ -6559,6 +6571,7 @@
       },
       "put": {
         "summary": "Write one allow-listed project meta key",
+        "description": "Answers {key, value}. Setting tasks to on for a project with no process selected also answers ready_for_work false, not_ready, processes (the selections in use on this hub, as GET /v1/processes) and next_step (the selection command to run on the hub host). Tasks are on either way.",
         "x-role": "writer",
         "parameters": [
           {

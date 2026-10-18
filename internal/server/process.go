@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"slices"
 	"time"
 
 	"aimem/internal/process"
@@ -197,4 +198,59 @@ func (s *Server) putProcessRef(w http.ResponseWriter, r *http.Request) {
 		s.log.Info("process reference selected", "project", r.PathValue("p"), "commit", result.Commit, "by", result.SelectedBy)
 	}
 	s.ok(w, map[string]any{"project": r.PathValue("p"), "current": result})
+}
+
+// processesInUse lists the distinct process selections this hub holds,
+// each with the projects that follow it, most used first. It is what an
+// admin turning tasks on for a project without one is offered.
+func (s *Server) processesInUse() ([]process.InUse, error) {
+	ids, err := s.reg.Projects()
+	if err != nil {
+		return nil, err
+	}
+	var out []process.InUse
+	at := map[process.Ref]int{}
+	for _, p := range ids {
+		if store.IsReservedProject(p) {
+			continue
+		}
+		db, err := s.reg.OpenExisting(p)
+		if errors.Is(err, store.ErrNoSuchProject) {
+			continue // dropped since the listing
+		}
+		if err != nil {
+			return nil, fmt.Errorf("project %q: %w", p, err)
+		}
+		ref, err := currentProcessRef(db)
+		if err != nil {
+			return nil, fmt.Errorf("project %q: %w", p, err)
+		}
+		if ref == nil {
+			continue
+		}
+		key := process.Ref{Repo: ref.Repo, Ref: ref.Ref, Commit: ref.Commit, Manifest: ref.Manifest}
+		i, seen := at[key]
+		if !seen {
+			i = len(out)
+			at[key] = i
+			out = append(out, process.InUse{Repo: ref.Repo, Ref: ref.Ref, Commit: ref.Commit, Manifest: ref.Manifest})
+		}
+		out[i].Projects = append(out[i].Projects, p)
+	}
+	slices.SortStableFunc(out, func(a, b process.InUse) int { return len(b.Projects) - len(a.Projects) })
+	return out, nil
+}
+
+// listProcesses answers the selections in use on this hub (admin).
+func (s *Server) listProcesses(w http.ResponseWriter, r *http.Request) {
+	inUse, err := s.processesInUse()
+	if err != nil {
+		s.log.Error("processes in use", "err", err)
+		s.fail(w, http.StatusInternalServerError, errors.New("process selections unavailable"))
+		return
+	}
+	if inUse == nil {
+		inUse = []process.InUse{}
+	}
+	s.ok(w, map[string]any{"processes": inUse})
 }

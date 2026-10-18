@@ -115,60 +115,83 @@ func TestProjectRepoSetShowClear(t *testing.T) {
 	}
 }
 
-// Tasks on with no process is an unfinished setup: `tasks on` names the
-// next step and `project show` warns. A project with a process, or with
-// tasks off (a project that only journals), gets neither.
+// Tasks on with no process is an unfinished setup: `tasks on` says the
+// project is not ready for work and names the selection command, with the
+// three values explained while the hub uses no process and with the values
+// of the processes it already uses once it does; `project show` and
+// `project list` mark the project the same way. A project with a process,
+// or with tasks off (a project that only journals), gets none of it.
 func TestTasksOnWithoutProcessIsAnUnfinishedSetup(t *testing.T) {
 	reg := projectService(t)
-	if _, err := reg.Open("example"); err != nil {
-		t.Fatal(err)
+	for _, p := range []string{"example", "beta"} {
+		if _, err := reg.Open(p); err != nil {
+			t.Fatal(err)
+		}
 	}
-	show := func() string {
+	run := func(fn func() error) string {
 		t.Helper()
-		out, err := stdoutOf(t, func() error { return projectNamespaceCmd([]string{"show", "-p", "example"}) })
+		out, err := stdoutOf(t, fn)
 		if err != nil {
-			t.Fatalf("show: %v\n%s", err, out)
+			t.Fatalf("%v\n%s", err, out)
 		}
 		return out
 	}
-	tasks := func(v string) string {
-		t.Helper()
-		out, err := stdoutOf(t, func() error { return tasksCmd([]string{v, "-p", "example"}) })
-		if err != nil {
-			t.Fatalf("tasks %s: %v\n%s", v, err, out)
-		}
-		return out
+	show := func(p string) string {
+		return run(func() error { return projectNamespaceCmd([]string{"show", "-p", p}) })
 	}
-	const next = "aimem process select <repo> <40-hex commit> <manifest> [--ref <branch>] -p example"
+	list := func() string { return run(func() error { return projectNamespaceCmd([]string{"list"}) }) }
+	tasks := func(v, p string) string { return run(func() error { return tasksCmd([]string{v, "-p", p}) }) }
+	const (
+		notReady = "not ready for work: tasks on, process not selected"
+		example  = "aimem process select <repo> <commit> <manifest> [--ref <branch>] -p example"
+		values   = "<commit>    the full 40-hex commit to follow, e.g. "
+	)
 
-	if out := show(); !strings.Contains(out, "tasks:      off") || strings.Contains(out, "warning") {
+	if out := show("example"); !strings.Contains(out, "tasks:      off") || strings.Contains(out, "warning") {
 		t.Fatalf("tasks off, no process:\n%s", out)
 	}
-	if out := tasks("on"); !strings.Contains(out, `tasks on for project "example"`) || !strings.Contains(out, "next step: select the project's process") || !strings.Contains(out, next) {
-		t.Fatalf("tasks on, no process:\n%s", out)
+	if out := tasks("on", "example"); !strings.Contains(out, `tasks on for project "example"`) || !strings.Contains(out, notReady) || !strings.Contains(out, example) || !strings.Contains(out, values) {
+		t.Fatalf("tasks on, no process anywhere:\n%s", out)
 	}
-	if out := show(); !strings.Contains(out, "tasks:      on") || !strings.Contains(out, "warning:    tasks on, process not selected") || !strings.Contains(out, next) {
+	if out := show("example"); !strings.Contains(out, "tasks:      on") || !strings.Contains(out, "warning:    "+notReady) || !strings.Contains(out, example) {
 		t.Fatalf("show, tasks on, no process:\n%s", out)
+	}
+	if out := list(); !strings.Contains(out, "example  "+notReady) || !strings.Contains(out, "    "+example) || !strings.Contains(out, "beta     tasks off") {
+		t.Fatalf("list, tasks on, no process:\n%s", out)
 	}
 
 	commit := strings.Repeat("ab", 20)
-	if out, err := stdoutOf(t, func() error {
-		return processCmd([]string{"select", "https://example.com/process.git", commit, "process/manifest.json", "-p", "example"})
-	}); err != nil {
-		t.Fatalf("select: %v\n%s", err, out)
-	}
-	if out := tasks("on"); strings.Contains(out, "next step") {
+	run(func() error {
+		return processCmd([]string{"select", "https://example.com/process.git", commit, "process/manifest.json", "--ref", "main", "-p", "example"})
+	})
+	if out := tasks("on", "example"); strings.Contains(out, "next step") || strings.Contains(out, "not ready") {
 		t.Fatalf("tasks on with a process selected:\n%s", out)
 	}
-	if out := show(); !strings.Contains(out, "process:    https://example.com/process.git "+commit) || strings.Contains(out, "warning") {
+	if out := show("example"); !strings.Contains(out, "process:    https://example.com/process.git "+commit) || strings.Contains(out, "warning") {
 		t.Fatalf("show, tasks on, process selected:\n%s", out)
 	}
 
-	if out := tasks("off"); strings.Contains(out, "next step") {
+	// A second project is offered the process the hub already uses, as a
+	// complete command; turning its tasks on selects nothing.
+	offered := "aimem process select https://example.com/process.git " + commit + " process/manifest.json --ref main -p beta"
+	if out := tasks("on", "beta"); !strings.Contains(out, notReady) || !strings.Contains(out, "as example:") || !strings.Contains(out, offered) || strings.Contains(out, values) {
+		t.Fatalf("tasks on, a process in use elsewhere:\n%s", out)
+	}
+	if out := show("beta"); !strings.Contains(out, "process:    (none selected)") || !strings.Contains(out, offered) {
+		t.Fatalf("show, offered process:\n%s", out)
+	}
+	if out := list(); !strings.Contains(out, "beta     "+notReady) || !strings.Contains(out, offered) || !strings.Contains(out, "example  tasks on, process selected") {
+		t.Fatalf("list, one ready and one not:\n%s", out)
+	}
+
+	if out := tasks("off", "beta"); strings.Contains(out, "next step") {
 		t.Fatalf("tasks off:\n%s", out)
 	}
-	if out := show(); !strings.Contains(out, "tasks:      off") || strings.Contains(out, "warning") {
+	if out := show("beta"); !strings.Contains(out, "tasks:      off") || strings.Contains(out, "warning") {
 		t.Fatalf("show, tasks off:\n%s", out)
+	}
+	if out := list(); strings.Contains(out, "not ready") || !strings.Contains(out, "beta     tasks off") {
+		t.Fatalf("list, tasks off:\n%s", out)
 	}
 }
 

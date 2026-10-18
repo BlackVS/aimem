@@ -3,8 +3,9 @@ package main
 // `aimem project <verb>`: a project's properties on the hub
 // (docs/DESIGN-AIFORGE-PILOT-1.md §1, §5). `repo set|clear` and `show` run
 // on the hub host as the admin, through the local service, like `process
-// select`. `list`, `id` and `drop` are the namespace's forms of `projects`,
-// `project-id` and `drop-project`, which keep working as they are.
+// select`. `list` prints each project's tasks and process state; `id` and
+// `drop` are the namespace's forms of `project-id` and `drop-project`, which
+// keep working as they are, as does `projects` (the raw id list).
 
 import (
 	"bytes"
@@ -18,6 +19,7 @@ import (
 	"os"
 	"strings"
 
+	"aimem/internal/process"
 	"aimem/internal/store"
 )
 
@@ -34,11 +36,13 @@ const projectUsage = `usage: aimem project repo set --project <p> --kind github|
        aimem project show --project <p>
        aimem project list | id [dir] | drop --project <p> --yes
 
-repo set|clear and show run on the hub host (admin). The repository is the
-one repository the project's work happens in: --kind is the forge's API
-dialect, the host of --url names the credential a member needs, and
---access is what members need (write, the default, or read). The hub
-stores no default branch: the forge owns it.
+repo set|clear, show and list run on the hub host (admin). list prints
+each project's tasks and process state and marks a project with tasks on
+and no process as not ready for work, with the command that selects one.
+The repository is the one repository the project's work happens in:
+--kind is the forge's API dialect, the host of --url names the credential
+a member needs, and --access is what members need (write, the default, or
+read). The hub stores no default branch: the forge owns it.
 
 Examples, one per command:
   aimem project repo set --project example --kind github --url https://github.com/example/example.git
@@ -54,7 +58,7 @@ func projectNamespaceCmd(args []string) error {
 	}
 	switch args[0] {
 	case "list":
-		return getJSON("/v1/projects")
+		return projectListCmd(args[1:])
 	case "id":
 		return projectID(args[1:])
 	case "drop":
@@ -136,12 +140,96 @@ func processSelected(project string) (bool, error) {
 	return proc.Current != nil, err
 }
 
-// processNextStep is what a project with tasks on and no process is told:
-// without a process its agents read the board as not ready.
-func processNextStep(project string) string {
-	return "next step: select the project's process on this hub host; until then agents read the board as not ready:\n" +
-		"  aimem process select <repo> <40-hex commit> <manifest> [--ref <branch>] -p " + project + "\n" +
-		"  (docs/QUICKSTART-NEW-PROJECT.md, step 2)\n"
+// processesInUse reads the process selections this hub already uses, or
+// nil when it cannot say (a hub older than the route).
+func processesInUse() []process.InUse {
+	var out struct {
+		Processes []process.InUse `json:"processes"`
+	}
+	if localJSON(http.MethodGet, "/v1/processes", nil, &out) != nil {
+		return nil
+	}
+	return out.Processes
+}
+
+// notReady is the line that marks a project with tasks on and no process.
+const notReady = "not ready for work: " + process.NotSelected + "\n"
+
+// tasksOnGap is what `tasks on` adds for a project left without a process:
+// the hub's own answer to the toggle, or, from a hub too old to give one,
+// the same text from the CLI's own reads. Empty when a process is selected.
+func tasksOnGap(project string, answer []byte) string {
+	var a struct {
+		NextStep string `json:"next_step"`
+	}
+	if json.Unmarshal(answer, &a) == nil && a.NextStep != "" {
+		return notReady + a.NextStep
+	}
+	selected, err := processSelected(project)
+	if err != nil {
+		return fmt.Sprintf("could not check the project's process selection: %v\n", err)
+	}
+	if selected {
+		return ""
+	}
+	return notReady + process.NextStep(project, processesInUse())
+}
+
+// projectListCmd prints every project on the hub with its tasks and
+// process state. A project with tasks on and no process is marked not
+// ready, with the command that selects one.
+func projectListCmd(args []string) error {
+	if len(args) != 0 {
+		return errors.New(projectUsage)
+	}
+	var all, on struct {
+		Projects []string `json:"projects"`
+	}
+	if err := localJSON(http.MethodGet, "/v1/projects", nil, &all); err != nil {
+		return err
+	}
+	if err := localJSON(http.MethodGet, "/v1/projects?tasks_enabled=true", nil, &on); err != nil {
+		return err
+	}
+	tasksOn := map[string]bool{}
+	width := 0
+	for _, p := range on.Projects {
+		tasksOn[p] = true
+	}
+	for _, p := range all.Projects {
+		width = max(width, len(p))
+	}
+	var inUse []process.InUse
+	inUseRead := false
+	for _, p := range all.Projects {
+		fmt.Printf("%-*s  ", width, p)
+		switch {
+		case store.IsReservedProject(p):
+			fmt.Println("memory store, no tasks")
+		case !tasksOn[p]:
+			fmt.Println("tasks off")
+		default:
+			selected, err := processSelected(p)
+			if err != nil {
+				fmt.Printf("tasks on, process selection unknown: %v\n", err)
+				continue
+			}
+			if selected {
+				fmt.Println("tasks on, process selected")
+				continue
+			}
+			if !inUseRead {
+				inUse, inUseRead = processesInUse(), true
+			}
+			fmt.Print(notReady)
+			for _, line := range strings.SplitAfter(process.NextStep(p, inUse), "\n") {
+				if line != "" {
+					fmt.Print("  " + line)
+				}
+			}
+		}
+	}
+	return nil
 }
 
 // projectShowCmd prints what the hub holds for a project: its repository,
@@ -220,8 +308,8 @@ func projectShowCmd(args []string) error {
 	} else {
 		fmt.Fprintln(w, "process:    (none selected)")
 		if tasksOn {
-			fmt.Fprintln(w, "warning:    tasks on, process not selected")
-			fmt.Fprint(w, processNextStep(*p))
+			fmt.Fprint(w, "warning:    "+notReady)
+			fmt.Fprint(w, process.NextStep(*p, processesInUse()))
 		}
 	}
 	if len(grants.Grants) == 0 {
