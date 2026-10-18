@@ -203,6 +203,7 @@ func (s *Server) Routes() []Route {
 		{"PUT", "/v1/projects/{p}/epics/{e}", s.updateEpic, false},
 		{"GET", "/v1/access/directory", s.accessDirectory, false},
 		{"PUT", "/v1/projects/{p}/process", s.putProcessRef, true},
+		{"GET", "/v1/processes", s.listProcesses, true},
 		{"PUT", "/v1/projects/{p}/repository", s.putRepository, true},
 		{"GET", "/v1/projects/{p}/grants", s.getProjectGrants, true},
 		{"GET", "/v1/projects/{p}/teams", s.listTeams, true},
