@@ -21,6 +21,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"time"
 
@@ -343,11 +344,13 @@ func (r *Result) finish(dir, root string) *Result {
 	name := r.Ref.DisplayName()
 	switch res.Status {
 	case process.StatusDenied:
-		return r.set(Denied, fmt.Sprintf("access to the process set %s @ %s was refused on this machine: %v", name, short(r.Ref.Commit), res.Err), credentialFix+"; for a hub without stored sets, the account running aimem needs read access to the process repository (aimem process show --full names it)",
-			fmt.Sprintf("process context unavailable: access to the process set was DENIED on this machine (%v); no cached selection is used", res.Err))
+		why := redactRepo(res.Err, r.Ref.Repo)
+		return r.set(Denied, fmt.Sprintf("access to the process set %s @ %s was refused on this machine: %s", name, short(r.Ref.Commit), why), credentialFix+"; for a hub without stored sets, the account running aimem needs read access to the process repository (aimem process show --full names it)",
+			fmt.Sprintf("process context unavailable: access to the process set was DENIED on this machine (%s); no cached selection is used", why))
 	case process.StatusUnavailable:
-		return r.set(Unavailable, fmt.Sprintf("%v (selection %s @ %s, manifest %s)", res.Err, name, short(r.Ref.Commit), r.Ref.Manifest), "retry when the hub is reachable; only the exact selected version is used",
-			fmt.Sprintf("process context unavailable: %v (selection %s @ %s, manifest %s)", res.Err, name, short(r.Ref.Commit), r.Ref.Manifest))
+		why := redactRepo(res.Err, r.Ref.Repo)
+		return r.set(Unavailable, fmt.Sprintf("%s (selection %s @ %s, manifest %s)", why, name, short(r.Ref.Commit), r.Ref.Manifest), "retry when the hub is reachable; only the exact selected version is used",
+			fmt.Sprintf("process context unavailable: %s (selection %s @ %s, manifest %s)", why, name, short(r.Ref.Commit), r.Ref.Manifest))
 	}
 	r.Set = res.Set
 	switch res.Status {
@@ -378,20 +381,23 @@ func (r *Result) finish(dir, root string) *Result {
 	return r
 }
 
-// content obtains the set for a selection the hub just confirmed: this
-// machine's cache by digest first; then the hub's stored set, verified and
-// cached; Git only when the hub answers that it stores no set for it (an
-// older hub, or a selection made before sets were stored). A refusal by
-// the hub is a denial, never masked by a Git attempt. A pinned version
-// without a digest (recorded before sets had one) asks the hub for that
-// commit and manifest among the selections it keeps.
+// content obtains the set for a selection the hub just confirmed. A
+// selection that carries a digest was recorded by a hub that stores sets,
+// so its files come from this machine's cache by that digest, else from
+// the hub's stored set, verified and cached; a refusal by the hub is then
+// a denial, never masked by a Git attempt, and a hub that no longer keeps
+// the set (a pruned pinned version) leaves Git. A selection without a
+// digest (an older hub's, or one recorded before sets; a pinned version
+// from an accept before this record carried the digest) is fetched from
+// Git as before, and the set route is not asked: an older hub refuses the
+// route it does not know with 403, which must not read as a denial.
 func (r *Result) content(root string) process.Result {
 	if r.Ref.Digest != "" {
 		if set, err := process.CachedSet(root, *r.Ref); err == nil {
 			return process.Result{Set: set, Status: process.StatusCached}
 		}
 	}
-	if r.hub != nil {
+	if r.hub != nil && r.Ref.Digest != "" {
 		byVersion := r.Pinned && (r.Current == nil || r.Current.Commit != r.Ref.Commit || r.Current.Manifest != r.Ref.Manifest)
 		outcome, err := hubSet(r.hub, r.hubClient, root, r.Project, r.Ref, byVersion)
 		switch outcome {
@@ -424,6 +430,42 @@ func (r *Result) content(root string) process.Result {
 // statusHub marks a set read from the hub just now, as distinct from a
 // Git fetch or the cache.
 const statusHub process.Status = "hub"
+
+// redactRepo returns err's text with the process repository's URL and host
+// removed: Git names the repository in its own messages, and no notice an
+// agent sees may carry it (the URL is the admin's, printed by
+// `aimem process show --full`). The failure's category stays readable.
+func redactRepo(err error, repo string) string {
+	s := err.Error()
+	bare := strings.TrimSuffix(repo, ".git")
+	for _, form := range []string{repo + "/", repo, bare + "/", bare} {
+		if len(form) > 1 {
+			s = strings.ReplaceAll(s, form, "the process repository")
+		}
+	}
+	for _, host := range repoHosts(repo) {
+		s = regexp.MustCompile(`(^|[^A-Za-z0-9.\-])`+regexp.QuoteMeta(host)+`([^A-Za-z0-9.\-]|$)`).ReplaceAllString(s, "${1}its host${2}")
+	}
+	return s
+}
+
+// repoHosts is the repository's host as Git may print it: with and
+// without the port for a URL, the part between @ and : for an scp form.
+func repoHosts(repo string) []string {
+	var hosts []string
+	if u, err := url.Parse(repo); err == nil && u.Host != "" {
+		hosts = append(hosts, u.Host)
+		if h := u.Hostname(); h != u.Host {
+			hosts = append(hosts, h)
+		}
+	} else if i := strings.IndexByte(repo, '@'); i >= 0 {
+		rest := repo[i+1:]
+		if j := strings.IndexAny(rest, ":/"); j > 0 {
+			hosts = append(hosts, rest[:j])
+		}
+	}
+	return hosts
+}
 
 // validTime reports an RFC 3339 observation time: a last-observed record
 // without one cannot say how old it is and is not used.

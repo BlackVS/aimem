@@ -311,7 +311,7 @@ the project credential exactly as the session-start hook does.
 | New | New or v0.7.x | Role context comes from the client binary and needs no hub change; project process through the existing routes. Works against any hub with protocol v0.7.0. |
 | v0.7.2 or older | Any | Unchanged: no `team_context`, no readiness object, the playbook path in the report. The hub cannot detect this; the pilot must upgrade every member. |
 | New command assets | Old `aimem mcp` still running | Step 0 of the regenerated entry points stops when `team_setup`/`team_continue`, `team_context` or `process_context` is missing and tells the user to upgrade and restart. No shell fallback. |
-| New | Hub that stores no set for the selection (older hub, or a selection recorded before sets) | The client falls back to Git at the selected commit; a 404 or 405 on the set route is "unsupported", never "denied"; a 401 or 403 is denied and Git is not tried. |
+| New | Hub that stores no set for the selection (older hub, or a selection recorded before sets) | The selection carries no digest, so the client does not ask the set route (an older hub refuses a route it does not know with 403, which must not read as a denial) and fetches Git at the selected commit as before. For a selection with a digest, a 401 or 403 on the set route is denied and Git is not tried; a 404 (a kept version since pruned) leaves Git. |
 | v0.10.x or older | New | Reads the reference, ignores `digest` and `name`, fetches the commit from Git with its own access, as before. |
 | Older `aimem process select` | New hub | Refused: a selection must carry its set or name a kept one; the hub host runs the hub's own command. |
 
@@ -400,11 +400,15 @@ Each has its own task, review gates and human merge.
   `digest` and `name`; `GET /v1/projects/{p}/process/set` serves the
   current selection's set, or a kept earlier one by `?commit=&manifest=`
   (the version an accepted attempt was taken under), under a current
-  project grant, with the digest as `ETag`, 404 when the hub stores no set
-  (the client falls back to Git); the client verifies the files against the
-  selection's digest before caching them under `process/sets/<digest>`,
-  treats 401 and 403 as denied and never tries Git in their place; no path
-  or URL comes from an agent request. OpenAPI parity holds for the route.
+  project grant, with the digest as `ETag`, 404 when the hub stores no set;
+  the client asks the route only for a selection that carries a digest
+  (the signal that the hub stores sets; an older hub answers 403 for a
+  route it does not know, and a selection without a digest is fetched from
+  Git as before), verifies the files against the selection's digest before
+  caching them under `process/sets/<digest>`, treats 401 and 403 as denied
+  and never tries Git in their place; no path or URL comes from an agent
+  request, and Git's own messages are redacted of the repository URL and
+  host before any notice an agent sees. OpenAPI parity holds for the route.
 - **Later.** Context versions on the attempt record; an optional hub check
   that refuses `team_accept` from a session that declared no current
   context. Both are schema changes and wait for evidence that the process

@@ -362,6 +362,16 @@ func TestGitRefusalIsDenied(t *testing.T) {
 	if r.State != Denied || r.Set != nil || !strings.Contains(r.Fix, "read access") {
 		t.Fatalf("git refusal: %+v", r)
 	}
+	hook, _ := Bootstrap(dir, root, "", false)
+	host := strings.TrimPrefix(git.URL, "https://")
+	for _, text := range []string{r.Detail, r.Fix, hook} {
+		if strings.Contains(text, ref.Repo) || strings.Contains(text, host) {
+			t.Fatalf("a notice names the repository or its host:\n%s", text)
+		}
+	}
+	if !strings.Contains(r.Detail, "git access denied") || !strings.Contains(hook, "DENIED") {
+		t.Fatalf("the redacted notice lost its category: %q / %q", r.Detail, hook)
+	}
 }
 
 // A malformed selection, from the hub or from a damaged last-observed

@@ -8,6 +8,7 @@ package processctx
 // names the repository URL.
 
 import (
+	"errors"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -133,19 +134,26 @@ func TestHubSetDigestMismatchIsRefusedAndNotCached(t *testing.T) {
 	}
 }
 
-// A hub that stores no set for the selection (an older hub, or a selection
-// it recorded before sets) answers 404, and the member falls back to Git
-// as before: here a Git server that refuses it, which is a denial. The
-// hub's refusal of the set route itself is tested above; this is the
-// fallback's existence.
-func TestOlderHubWithoutStoredSetsFallsBackToGit(t *testing.T) {
+// A selection without a digest (an older hub's, or one recorded before
+// sets) is served by the Git path without asking the set route; a
+// selection with a digest whose set the hub no longer keeps (404) falls
+// back to Git too. Here the commit's cache answers both, as a finished
+// fetch leaves it.
+func TestSelectionsTheHubStoresNoSetForUseGit(t *testing.T) {
 	h := &fakeHub{}
-	h.change(ready) // no set: the fake hub answers 404 on /process/set
+	h.change(ready) // no digest, no set
 	dir, root, _ := checkout(t, h, true)
 	cache(t, root, selection, "# Handbook\n\nfetched earlier\n")
 	r := Load(dir, root, "")
+	if r.State != Ready || r.Source != SourceCache || h.setCalls.Load() != 0 {
+		t.Fatalf("no digest: %+v (set calls %d)", r, h.setCalls.Load())
+	}
+	pruned := selection
+	pruned.Digest = strings.Repeat("ab", 32)
+	h.change(func(h *fakeHub) { h.ref = &pruned }) // the hub names a digest but keeps no set: 404
+	r = Load(dir, root, "")
 	if r.State != Ready || r.Source != SourceCache || h.setCalls.Load() != 1 {
-		t.Fatalf("fallback to the commit's cache after a 404: %+v (set calls %d)", r, h.setCalls.Load())
+		t.Fatalf("digest without a kept set: %+v (set calls %d)", r, h.setCalls.Load())
 	}
 	text, _ := r.Deliver()
 	if strings.Contains(text, selection.Repo) {
@@ -204,11 +212,13 @@ func TestPinnedVersionIsReadFromTheHubsKeptSets(t *testing.T) {
 	if err != nil || !strings.Contains(text, "PINNED") || !strings.Contains(text, "The project now selects proc @ "+current.Commit) || strings.Contains(text, selection.Repo) {
 		t.Fatalf("pinned delivery: %v\n%.600s", err, text)
 	}
-	// Pinned before sets had digests: the hub's digest is taken, the
-	// files must match it.
+	// Pinned without a digest (an accept recorded before the record
+	// carried one): the set route is not asked; the Git path serves it, or
+	// here, with no Git, nothing does.
 	pinnedOld := selection
-	if r := LoadRef(dir, root, "", pinnedOld); r.State != Ready || !strings.Contains(r.Unit, "older rules") || r.Ref.Digest != older.Digest() {
-		t.Fatalf("pinned without a digest: %+v", r)
+	calls := h.setCalls.Load()
+	if r := LoadRef(dir, root, "", pinnedOld); r.State == Ready || h.setCalls.Load() != calls {
+		t.Fatalf("pinned without a digest asked the hub for a set: %+v (set calls %d)", r, h.setCalls.Load()-calls)
 	}
 	// Offline, the pinned version with its digest comes from the set
 	// cached by it (the accept record carries the digest for this).
@@ -218,5 +228,44 @@ func TestPinnedVersionIsReadFromTheHubsKeptSets(t *testing.T) {
 	}
 	if r := LoadRef(dir, root, "", pinnedOld); r.State != Unavailable {
 		t.Fatalf("pinned offline without a digest cannot name its cache: %+v", r)
+	}
+}
+
+// An older hub does not know the set route and refuses it with 403 (its
+// ordinary-token allowlist), which must not read as a denial: a selection
+// without a digest never asks the route, and the Git path serves it.
+func TestOlderHubForbidsTheSetRouteAndGitStillServes(t *testing.T) {
+	h := &fakeHub{}
+	h.change(func(h *fakeHub) { ready(h); h.setStatus = http.StatusForbidden })
+	dir, root, _ := checkout(t, h, true)
+	cache(t, root, selection, "# Handbook\n\nfetched earlier\n")
+	r := Load(dir, root, "")
+	if r.State != Ready || r.Source != SourceCache || h.setCalls.Load() != 0 || !strings.Contains(r.Unit, "fetched earlier") {
+		t.Fatalf("older hub answering 403: %+v (set calls %d)", r, h.setCalls.Load())
+	}
+	// The same older hub with a pinned version: Git as well.
+	if r := LoadRef(dir, root, "", selection); r.State != Ready || h.setCalls.Load() != 0 {
+		t.Fatalf("pinned against an older hub: %+v (set calls %d)", r, h.setCalls.Load())
+	}
+}
+
+// Git names the repository in its errors; no notice an agent sees keeps
+// the URL or the host, and the failure's category stays.
+func TestGitErrorsAreRedactedOfTheRepository(t *testing.T) {
+	cases := []struct{ repo, in, want string }{
+		{"https://example.com/team/process.git", "git access denied: fatal: Authentication failed for 'https://example.com/team/process.git/'",
+			"git access denied: fatal: Authentication failed for 'the process repository'"},
+		{"https://git.example.com:4403/r.git", "git unreachable: fatal: unable to access 'https://git.example.com:4403/r.git/': Could not resolve host: git.example.com",
+			"git unreachable: fatal: unable to access 'the process repository': Could not resolve host: its host"},
+		{"git@forge.example.org:team/process.git", "git access denied: forge.example.org: Permission denied (publickey).",
+			"git access denied: its host: Permission denied (publickey)."},
+		{"https://example.com/team/process", "git: fatal: repository 'https://example.com/team/process/' not found",
+			"git: fatal: repository 'the process repository' not found"},
+		{"https://x/", "git: something exact and unrelated", "git: something exact and unrelated"},
+	}
+	for _, c := range cases {
+		if got := redactRepo(errors.New(c.in), c.repo); got != c.want {
+			t.Errorf("redactRepo(%q, %q):\n got %q\nwant %q", c.in, c.repo, got, c.want)
+		}
 	}
 }

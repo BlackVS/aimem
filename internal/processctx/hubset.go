@@ -3,8 +3,9 @@ package processctx
 // The hub-served set (docs/DESIGN-portable-team-context.md, increment 1d,
 // the default path): a member reads the files of the selected process
 // from the hub under its project grant, verifies their digest against the
-// selection and caches them by that digest. Git on the member is only the
-// fallback for a hub that stored no set.
+// selection and caches them by that digest. Only a selection that carries
+// a digest is read this way: the digest is the signal that the hub stores
+// sets. Git on the member is the path for every other selection.
 
 import (
 	"context"
@@ -40,11 +41,9 @@ const (
 )
 
 // hubSet reads the set for ref from the hub and stores it under its
-// digest. ref.Digest, when set, is the selection's and the answer must
-// match it; when empty (a pinned version recorded before sets had
-// digests), the hub's stated digest is taken and the files must match
-// that. byVersion asks for an earlier selection by commit and manifest
-// rather than the current one.
+// digest, which is the selection's: the answer must state it and the
+// files must digest to it. byVersion asks for an earlier selection by
+// commit and manifest rather than the current one.
 func hubSet(hub *adapter.HubConfig, client *http.Client, root, project string, ref *process.Ref, byVersion bool) (hubSetOutcome, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), setReadTimeout)
 	defer cancel()
@@ -95,9 +94,6 @@ func hubSet(hub *adapter.HubConfig, client *http.Client, root, project string, r
 		return hubSetFailed, fmt.Errorf("the hub answered for %s (manifest %s), not the selection %s (manifest %s)", short(body.Selection.Commit), body.Selection.Manifest, short(ref.Commit), ref.Manifest)
 	}
 	want := ref.Digest
-	if want == "" {
-		want = body.Selection.Digest
-	}
 	if body.Selection.Digest != want {
 		return hubSetFailed, fmt.Errorf("the hub's set is %s, not the selection's %s", short(body.Selection.Digest), short(want))
 	}
@@ -107,7 +103,6 @@ func hubSet(hub *adapter.HubConfig, client *http.Client, root, project string, r
 	if _, err := process.StoreSet(root, &body.Set, want); err != nil {
 		return hubSetFailed, fmt.Errorf("the hub's set does not validate: %w", err)
 	}
-	ref.Digest = want
 	if ref.Name == "" {
 		ref.Name = body.Selection.Name
 	}

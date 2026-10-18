@@ -28,9 +28,10 @@ currently 24); a binary refuses a database newer than it understands.
   current selection's set, or a kept earlier one by commit and manifest,
   to a token or team session with a current grant on the project (the
   project repository's read rule); the member verifies the files against
-  the selection's digest before caching them by it, and falls back to Git
-  only when the hub stores no set (an older hub, or a selection made
-  before the upgrade). The selection records `digest` and `name`.
+  the selection's digest before caching them by it; a selection without a
+  digest (an older hub's, or one made before the upgrade) is fetched from
+  Git as before without asking the route. The selection records `digest`
+  and `name`.
   (docs/DESIGN-portable-team-context.md, increment 1d, now the default
   path.)
 
@@ -41,9 +42,10 @@ currently 24); a binary refuses a database newer than it understands.
   session-start hook, `process_context`, `team_setup` and `team_continue`
   and `aimem process show`; the name is the manifest's directory, else the
   repository's name. `aimem process show --full` prints the URL after the
-  unit, for the admin. The availability notices name the set the same way;
-  a hub that refuses the set read is reported as denied and Git is not
-  tried in its place. `PUT /v1/projects/{p}/process` refuses a selection
+  unit, for the admin. The availability notices name the set the same way,
+  and Git's own messages are redacted of the repository URL and host
+  before they reach one; a hub that refuses the set read is reported as
+  denied and Git is not tried in its place. `PUT /v1/projects/{p}/process` refuses a selection
   that carries neither `files` nor the `digest` of a kept set, so an older
   `aimem process select` against a new hub is refused rather than storing
   a selection no member can read from the hub.
