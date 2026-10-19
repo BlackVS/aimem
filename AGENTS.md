@@ -115,6 +115,19 @@ overlap when the user says so.
 
 ## Working in this repo
 
+STRICT: `.creds/` is for credential material only (tokens, private keys and
+authentication files). Never create noncredential files or directories there,
+even temporarily or because the directory is gitignored. This prohibits
+scripts, binaries, logs, reports, prompts, review notes, fixtures, source
+checkouts and general backups. A file that references credentials is not
+itself a credential file.
+
+Use `.work/` (gitignored) for temporary scripts and private working artifacts;
+keep secrets out of their output. Reusable scripts belong in `scripts/`
+after review and removal of private data. Existing credential-bearing backups
+are not permission to create new general backups in `.creds/`. Do not move,
+rewrite or delete existing credentials as part of artifact cleanup.
+
 Build and test exactly as CI does:
 
     CGO_ENABLED=0 go build -o aimem ./cmd/aimem

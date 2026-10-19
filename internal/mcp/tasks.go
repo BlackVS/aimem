@@ -36,13 +36,20 @@ type TaskCallFunc func(ctx context.Context, method, path string, headers map[str
 // the caller is an ordinary token that may use task tools only.
 type PrincipalFunc func(r *http.Request) (tasks TaskCallFunc, tasksOnly bool)
 
+// taskReadScope is appended to every task and epic read tool: the
+// project argument selects a project, it does not limit what the token
+// may read. Outside team mode an ordinary token reads the tasks of every
+// project on the hub (docs/DESIGN-access-control.md, "Permissions").
+const taskReadScope = " Reads are hub-wide: an ordinary token reads every project on the hub, not only the current one " +
+	"(project scope limits writes only); a team conversation reads only the team's granted projects."
+
 var taskToolDefs = append([]map[string]any{
 	{
 		"name": "list_tasks",
 		"description": "List task summaries of a project (archived excluded unless asked). " +
-			"Pages of up to 100; pass the returned next_cursor as `after`.",
+			"Pages of up to 100; pass the returned next_cursor as `after`." + taskReadScope,
 		"inputSchema": objSchema(map[string]any{
-			"project":          prop("string", "project id (defaults to the current project)"),
+			"project":          prop("string", "project id (defaults to the current project; it selects what to read, it is not a limit)"),
 			"state":            propEnum("only this state", "BACKLOG", "READY", "IN_PROGRESS", "REVIEW", "BLOCKED", "DONE", "CANCELLED"),
 			"assignee":         assigneeProp("only this assignee"),
 			"epic":             prop("string", "only tasks under this epic id"),
@@ -53,7 +60,7 @@ var taskToolDefs = append([]map[string]any{
 	},
 	{
 		"name":        "get_task",
-		"description": "Read one task by id: current content, revision, owning project and links.",
+		"description": "Read one task by id: current content, revision, owning project and links." + taskReadScope,
 		"inputSchema": objSchema(map[string]any{"id": prop("string", "task id")}, "id"),
 	},
 	{
@@ -100,7 +107,7 @@ var taskToolDefs = append([]map[string]any{
 	},
 	{
 		"name":        "get_task_history",
-		"description": "Accepted revisions of a task in order, each with its full snapshot and actor.",
+		"description": "Accepted revisions of a task in order, each with its full snapshot and actor." + taskReadScope,
 		"inputSchema": objSchema(map[string]any{
 			"id":    prop("string", "task id"),
 			"after": prop("integer", "next_cursor from the previous page"),
@@ -109,7 +116,7 @@ var taskToolDefs = append([]map[string]any{
 	},
 	{
 		"name":        "list_task_comments",
-		"description": "Discussion of a task in append order (immutable Markdown comments).",
+		"description": "Discussion of a task in append order (immutable Markdown comments)." + taskReadScope,
 		"inputSchema": objSchema(map[string]any{
 			"id":    prop("string", "task id"),
 			"after": prop("integer", "next_cursor from the previous page"),
@@ -118,7 +125,7 @@ var taskToolDefs = append([]map[string]any{
 	},
 	{
 		"name":        "get_task_comment",
-		"description": "One comment by task id and comment id.",
+		"description": "One comment by task id and comment id." + taskReadScope,
 		"inputSchema": objSchema(map[string]any{
 			"task_id":    prop("string", "task id"),
 			"comment_id": prop("string", "comment id"),
@@ -126,17 +133,17 @@ var taskToolDefs = append([]map[string]any{
 	},
 	{
 		"name":        "list_epics",
-		"description": "Epics of a project: the grouping above tasks that a release or milestone maps to. OPEN ones unless include_retired.",
+		"description": "Epics of a project: the grouping above tasks that a release or milestone maps to. OPEN ones unless include_retired." + taskReadScope,
 		"inputSchema": objSchema(map[string]any{
-			"project":         prop("string", "project id (defaults to the current project)"),
+			"project":         prop("string", "project id (defaults to the current project; it selects what to read, it is not a limit)"),
 			"include_retired": prop("boolean", "include RETIRED epics"),
 		}),
 	},
 	{
 		"name":        "get_epic",
-		"description": "Read one epic of a project by id.",
+		"description": "Read one epic of a project by id." + taskReadScope,
 		"inputSchema": objSchema(map[string]any{
-			"project": prop("string", "project id (defaults to the current project)"),
+			"project": prop("string", "project id (defaults to the current project; it selects what to read, it is not a limit)"),
 			"id":      prop("string", "epic id"),
 		}, "id"),
 	},

@@ -162,6 +162,17 @@ currently 24); a binary refuses a database newer than it understands.
   name, which is then renamed into place. A second escape is closed too:
   a bare `..` in `.aimem.json`, as a docs binding or a collection render
   path, named the checkout's parent directory and is now dropped.
+- **A-10: the hub-wide task read is stated where agents and operators
+  read it.** An ordinary token reads the tasks, comments, history and
+  epics of every project on the hub. A project-scoped token and a missing
+  grant limit writes only. The MCP task and epic read tools said only that
+  the project argument defaults to the current project, which reads as a
+  limit. Their descriptions now state the hub-wide read and its team-mode
+  exception. The identity route's API description explains `task_read`,
+  the new-project quickstart warns that a task is visible to every user of
+  the hub, and the access-control design marks this as the current
+  contract until task reads come under the project grant. No behaviour
+  changes.
 
 ## [0.10.6] — 2026-10-16
 

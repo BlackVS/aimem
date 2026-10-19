@@ -121,6 +121,20 @@ No nested groups or custom role language in v1.
 | Ordinary authenticated token without matching project write access | All projects on this hub | No |
 | Unauthenticated caller | No | No |
 
+**Current contract: task reads are hub-wide.** Any ordinary token reads the
+tasks, comments, history and epics of every ordinary project on the hub, and
+the project list. A project-scoped token and a missing project grant limit
+writes only; do not treat projects as private task tenants. The identity
+route says so (`task_read: all-projects`), and the MCP task and epic read
+tools state it in their descriptions. Team mode is the exception: a team
+conversation reads only the projects the team is granted
+(`task_read: granted-projects`). Knowledge, repository and process-set reads
+already require a live project grant. Bringing task reads under the same
+grant (unknown and ungranted projects answered alike, the project list
+filtered, read grants for crew roles) is a planned change from the
+2026-10 security audit (finding A-10); until it ships, this table is the
+contract.
+
 A write requires both current user access (directly or through an access group)
 and the token's write-project restriction to match the task's actual project.
 A user assigned to several projects can have a separate agent token for each.

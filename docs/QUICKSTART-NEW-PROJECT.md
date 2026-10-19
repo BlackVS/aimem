@@ -110,7 +110,10 @@ aimem access grant add --project my-project --user-name my-agent
 
 **The user task token.** It is the credential the agent's task tools
 present. It writes to every project the user is granted, now and later,
-so give it an expiry that suits that:
+so give it an expiry that suits that. Like any ordinary token, it can
+read the tasks of every project on the hub, not only the granted ones:
+grants and project scope limit writes. Do not put anything in a task
+that the hub's other users must not see.
 
 ```sh
 aimem access token-issue-user --user-name my-agent --label my-mac --expires 2027-01-01T00:00:00Z --output my-agent.token
