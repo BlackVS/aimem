@@ -26,17 +26,20 @@ const inUseShown = 5
 // NextStep is what an admin is told about a project with tasks on and no
 // process selected: the selection command for it, complete with the
 // values of each process the hub already uses (most used first), or, when
-// it uses none, with the three values explained. It names commands only;
-// the admin chooses and runs one, which records the pin like any other
-// selection.
+// it uses none, with the values explained. A process in use is offered by
+// its exact commit, with the tag or branch it was selected by as --ref, so
+// the new project follows the same version as the others: running a ref
+// again would resolve it anew, and a branch or a moved tag would give
+// another commit. It names commands only; the admin chooses and runs one,
+// which records the pin like any other selection.
 func NextStep(project string, inUse []InUse) string {
 	var b strings.Builder
 	if len(inUse) == 0 {
 		b.WriteString("next step: select the project's process on this hub host:\n")
-		fmt.Fprintf(&b, "  aimem process select <repo> <commit> <manifest> [--ref <branch>] -p %s\n", project)
+		fmt.Fprintf(&b, "  aimem process select <repo> <tag> [<manifest>] -p %s\n", project)
 		b.WriteString("    <repo>      the process repository's git URL, e.g. https://github.com/example/process.git\n")
-		b.WriteString("    <commit>    the full 40-hex commit to follow, e.g. 0123456789abcdef0123456789abcdef01234567\n")
-		b.WriteString("    <manifest>  the manifest's path in that repository, e.g. process/manifest.json\n")
+		b.WriteString("    <tag>       a release tag of that repository, e.g. v1.4.0; a full 40-hex commit also works\n")
+		fmt.Fprintf(&b, "    <manifest>  optional: the manifest's path in that repository, by default %s\n", DefaultManifest)
 		b.WriteString("  (docs/QUICKSTART-NEW-PROJECT.md, step 2)\n")
 		return b.String()
 	}
@@ -53,7 +56,7 @@ func NextStep(project string, inUse []InUse) string {
 		}
 		fmt.Fprintf(&b, " -p %s\n", shellArg(project))
 	}
-	fmt.Fprintf(&b, "  or another process: aimem process select <repo> <commit> <manifest> [--ref <branch>] -p %s\n", shellArg(project))
+	fmt.Fprintf(&b, "  or another process: aimem process select <repo> <tag> [<manifest>] -p %s\n", shellArg(project))
 	return b.String()
 }
 

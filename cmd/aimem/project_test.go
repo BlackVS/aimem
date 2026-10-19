@@ -143,8 +143,8 @@ func TestTasksOnWithoutProcessIsAnUnfinishedSetup(t *testing.T) {
 	tasks := func(v, p string) string { return run(func() error { return tasksCmd([]string{v, "-p", p}) }) }
 	const (
 		notReady = "not ready for work: tasks on, process not selected"
-		example  = "aimem process select <repo> <commit> <manifest> [--ref <branch>] -p example"
-		values   = "<commit>    the full 40-hex commit to follow, e.g. "
+		example  = "aimem process select <repo> <tag> [<manifest>] -p example"
+		values   = "<tag>       a release tag of that repository, e.g. v1.4.0; a full 40-hex commit also works"
 	)
 
 	if out := show("example"); !strings.Contains(out, "tasks:      off") || strings.Contains(out, "warning") {

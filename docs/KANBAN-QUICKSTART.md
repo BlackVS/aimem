@@ -74,12 +74,16 @@ tasks on for project "my-project"
 not ready for work: tasks on, process not selected
 next step: select the project's process on this hub host; processes this hub already uses:
   as other-project:
-    aimem process select https://example.com/team/process.git 0123456789abcdef0123456789abcdef01234567 process/manifest.json --ref main -p my-project
-  or another process: aimem process select <repo> <commit> <manifest> [--ref <branch>] -p my-project
+    aimem process select https://example.com/team/process.git 0123456789abcdef0123456789abcdef01234567 processes/aimem/manifest.json --ref v1.4.0 -p my-project
+  or another process: aimem process select <repo> <tag> [<manifest>] -p my-project
 ```
 
-The three values are the process repository's git URL, the full 40-hex
-commit to follow, and the manifest's path in that repository. Turning tasks
+The values are the process repository's git URL, a release tag of that
+repository (a full 40-hex commit also works), and optionally the
+manifest's path in that repository, by default
+`processes/aimem/manifest.json`. A process the hub already uses is offered
+by its exact commit, with the tag it was selected by as `--ref`, so the
+project follows the same version as the others. Turning tasks
 on never selects a process; you run the command, and section 6 covers
 choosing and verifying one. `aimem project show -p my-project` and
 `aimem project list` keep marking the project as not ready, with the same

@@ -7,16 +7,17 @@ import (
 	"testing"
 )
 
-// With no process in use on the hub, the next step explains the three
-// values with an example each; with some, it offers each one as a
-// complete command, in the order given, and at most inUseShown of them.
+// With no process in use on the hub, the next step explains the values
+// with an example each; with some, it offers each one as a complete
+// command, in the order given, and at most inUseShown of them: by its
+// exact commit, with the tag it was selected by as --ref.
 func TestNextStep(t *testing.T) {
 	got := NextStep("new", nil)
 	for _, want := range []string{
-		"aimem process select <repo> <commit> <manifest> [--ref <branch>] -p new",
+		"aimem process select <repo> <tag> [<manifest>] -p new",
 		"<repo>      the process repository's git URL, e.g. https://",
-		"<commit>    the full 40-hex commit to follow, e.g. 0123456789abcdef0123456789abcdef01234567",
-		"<manifest>  the manifest's path in that repository, e.g. process/manifest.json",
+		"<tag>       a release tag of that repository, e.g. v1.4.0; a full 40-hex commit also works",
+		"<manifest>  optional: the manifest's path in that repository, by default processes/aimem/manifest.json",
 	} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("no process in use: lacks %q:\n%s", want, got)
@@ -25,10 +26,10 @@ func TestNextStep(t *testing.T) {
 
 	c1, c2 := strings.Repeat("1", 40), strings.Repeat("2", 40)
 	got = NextStep("new", []InUse{
-		{Repo: "https://example.com/p.git", Ref: "main", Commit: c1, Manifest: "m.json", Projects: []string{"alpha", "beta"}},
+		{Repo: "https://example.com/p.git", Ref: "v1.4.0", Commit: c1, Manifest: "m.json", Projects: []string{"alpha", "beta"}},
 		{Repo: "git@example.com:o/q.git", Commit: c2, Manifest: "x/m.json", Projects: []string{"gamma"}},
 	})
-	first := "  as alpha, beta:\n    aimem process select https://example.com/p.git " + c1 + " m.json --ref main -p new\n"
+	first := "  as alpha, beta:\n    aimem process select https://example.com/p.git " + c1 + " m.json --ref v1.4.0 -p new\n"
 	second := "  as gamma:\n    aimem process select git@example.com:o/q.git " + c2 + " x/m.json -p new\n"
 	if !strings.Contains(got, first) || !strings.Contains(got, second) || strings.Index(got, first) > strings.Index(got, second) {
 		t.Fatalf("processes in use:\n%s", got)
