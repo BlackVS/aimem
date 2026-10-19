@@ -209,7 +209,7 @@ func TestTasksOnWithoutProcessNamesTheGap(t *testing.T) {
 		t.Fatalf("tasks on with no process: %s", w.Body)
 	}
 	for _, want := range []string{
-		"aimem process select https://example.com/p.git " + c1 + " m.json --ref main -p delta",
+		"aimem process select https://example.com/p.git main m.json -p delta  # at " + c1,
 		"aimem process select https://example.com/other.git " + c2 + " x/m.json -p delta",
 	} {
 		if !strings.Contains(on.NextStep, want) {

@@ -198,12 +198,12 @@ func Load(dir, root, projectID string) *Result {
 	case errors.As(serr, &refused) && refused.denied():
 		return r.set(Denied, "the hub refused to read the process selection: "+serr.Error(), credentialFix, "process context unavailable: "+serr.Error())
 	case serr != nil && strings.Contains(serr.Error(), "no process reference"):
-		return r.set(NotSelected, "tasks are on for project "+id+" but no process reference is selected", "an admin selects one on the hub host: aimem process select <repo> <commit> <manifest>",
-			"Tasks (Kanban) are ON for project "+id+", but no process reference is selected: process context unavailable until an admin selects one (`aimem process select <repo> <commit> <manifest>` on the hub host).")
+		return r.set(NotSelected, "tasks are on for project "+id+" but no process reference is selected", "an admin selects one on the hub host: aimem process select <repo> <tag>",
+			"Tasks (Kanban) are ON for project "+id+", but no process reference is selected: process context unavailable until an admin selects one (`aimem process select <repo> <tag>` on the hub host).")
 	case serr != nil:
 		return r.set(Unavailable, serr.Error(), "retry; if it persists, check the hub's log", "process context unavailable: "+serr.Error())
 	case sel.Current == nil:
-		return r.set(NotSelected, "tasks are on for project "+id+" but no process reference is selected", "an admin selects one on the hub host: aimem process select <repo> <commit> <manifest>",
+		return r.set(NotSelected, "tasks are on for project "+id+" but no process reference is selected", "an admin selects one on the hub host: aimem process select <repo> <tag>",
 			"Tasks (Kanban) are ON for project "+id+", but no process reference is selected: process context unavailable until an admin selects one.")
 	default:
 		r.Ref = sel.Current

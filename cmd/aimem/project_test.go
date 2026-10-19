@@ -143,8 +143,8 @@ func TestTasksOnWithoutProcessIsAnUnfinishedSetup(t *testing.T) {
 	tasks := func(v, p string) string { return run(func() error { return tasksCmd([]string{v, "-p", p}) }) }
 	const (
 		notReady = "not ready for work: tasks on, process not selected"
-		example  = "aimem process select <repo> <commit> <manifest> [--ref <branch>] -p example"
-		values   = "<commit>    the full 40-hex commit to follow, e.g. "
+		example  = "aimem process select <repo> <tag> [<manifest>] -p example"
+		values   = "<tag>       a release tag of that repository, e.g. v1.4.0; a full 40-hex commit also works"
 	)
 
 	if out := show("example"); !strings.Contains(out, "tasks:      off") || strings.Contains(out, "warning") {
@@ -176,7 +176,7 @@ func TestTasksOnWithoutProcessIsAnUnfinishedSetup(t *testing.T) {
 
 	// A second project is offered the process the hub already uses, as a
 	// complete command; turning its tasks on selects nothing.
-	offered := "aimem process select https://example.com/process.git " + commit + " process/manifest.json --ref main -p beta"
+	offered := "aimem process select https://example.com/process.git main process/manifest.json -p beta  # at " + commit
 	if out := tasks("on", "beta"); !strings.Contains(out, notReady) || !strings.Contains(out, "as example:") || !strings.Contains(out, offered) || strings.Contains(out, values) {
 		t.Fatalf("tasks on, a process in use elsewhere:\n%s", out)
 	}
