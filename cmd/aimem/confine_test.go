@@ -112,3 +112,35 @@ func TestHandoffCompactRefusesALinkedHandoff(t *testing.T) {
 	}
 	assertOutsideUntouched(t, outside)
 }
+
+// A --file spelling that passes a link and then ".." cleans to a path
+// inside the checkout, while the operating system resolves it through the
+// link. It is refused: the handoff outside is neither archived nor
+// rewritten, and nothing is written in the checkout.
+func TestHandoffCompactRefusesALinkThenDotDotSpelling(t *testing.T) {
+	t.Setenv("AIMEM_STATE_DIR", t.TempDir())
+	base := t.TempDir()
+	proj, outside := filepath.Join(base, "checkout"), filepath.Join(base, "outside")
+	os.MkdirAll(filepath.Join(proj, "docs"), 0o755)
+	os.MkdirAll(filepath.Join(outside, "deep"), 0o755)
+	os.WriteFile(filepath.Join(proj, ".aimem.json"), []byte(`{}`), 0o600)
+	handoff := "# State\n\nnow\n\n" + handoffMarker + "\n\n## old\n\nhistory outside\n"
+	os.WriteFile(filepath.Join(outside, "SESSION-STATE.md"), []byte(handoff), 0o644)
+	linktest.Dir(t, filepath.Join(proj, "docs", "jump"), filepath.Join(outside, "deep"))
+	t.Chdir(proj)
+
+	err := handoffCmd([]string{"compact", "--file", filepath.Join("docs", "jump") + string(filepath.Separator) + ".." + string(filepath.Separator) + "SESSION-STATE.md"})
+	if err == nil || !strings.Contains(err.Error(), `".."`) {
+		t.Fatalf("a link-then-.. spelling was not refused: %v", err)
+	}
+	if b, _ := os.ReadFile(filepath.Join(outside, "SESSION-STATE.md")); string(b) != handoff {
+		t.Fatalf("the handoff outside was rewritten: %q", b)
+	}
+	if es, _ := os.ReadDir(filepath.Join(proj, "docs")); len(es) != 1 {
+		t.Fatalf("something was written in the checkout: %v", es)
+	}
+	// A handoff named outside the checkout altogether stays the caller's choice.
+	if err := handoffCmd([]string{"compact", "--dry-run", "--file", filepath.Join("..", "outside", "SESSION-STATE.md")}); err != nil {
+		t.Fatalf("a handoff outside the checkout: %v", err)
+	}
+}

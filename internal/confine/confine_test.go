@@ -128,3 +128,38 @@ func TestAPathOutsideTheRootIsRefused(t *testing.T) {
 		t.Fatal("a .. path out of the root was written")
 	}
 }
+
+// A raw spelling with ".." after a link cleans to a path inside the
+// checkout, but the operating system follows the link before the "..".
+// Such a spelling is refused whether or not a link is there.
+func TestARawDotDotSpellingIsRefused(t *testing.T) {
+	root, outside := layout(t)
+	deep := filepath.Join(outside, "deep")
+	os.MkdirAll(deep, 0o755)
+	linktest.Dir(t, filepath.Join(root, "docs", "jump"), deep)
+	raw := root + string(filepath.Separator) + filepath.Join("docs", "jump") + string(filepath.Separator) + ".." + string(filepath.Separator) + "secret.txt"
+	if _, err := confine.ReadFile(root, raw); err == nil || !strings.Contains(err.Error(), "..") {
+		t.Fatalf("a raw link/.. read was not refused: %v", err)
+	}
+	if err := confine.WriteFile(root, raw, []byte("x"), 0o644); err == nil {
+		t.Fatal("a raw link/.. write was not refused")
+	}
+	if b, _ := os.ReadFile(filepath.Join(outside, "secret.txt")); string(b) != "outside" {
+		t.Fatalf("the file outside changed: %q", b)
+	}
+	if err := confine.Check(root, "docs/../docs/x.md"); err == nil {
+		t.Fatal("a relative .. spelling was not refused")
+	}
+}
+
+// A relative root spelled with ".." still works for paths joined under it.
+func TestARootSpelledWithDotDotIsAllowed(t *testing.T) {
+	root, _ := layout(t)
+	t.Chdir(filepath.Join(root, "docs"))
+	if err := confine.WriteFile("..", filepath.Join("..", "docs", "x.md"), []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if b, _ := os.ReadFile(filepath.Join(root, "docs", "x.md")); string(b) != "x" {
+		t.Fatalf("not written: %q", b)
+	}
+}

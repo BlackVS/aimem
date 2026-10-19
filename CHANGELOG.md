@@ -154,12 +154,14 @@ currently 24); a binary refuses a database newer than it understands.
   writes, and project-level `aimem skills install` now refuse a path
   when any component below the checkout root is a symbolic link or
   junction, the file itself included. A link that points inside the
-  checkout is refused too. The checkout root itself may be a link, and
+  checkout is refused too, and so is a path into the checkout spelled
+  with a `..` element, which the system could resolve through a link. The checkout root itself may be a link, and
   user-level directories are written as before. On Windows, a reparse
   point that does not redirect, such as a cloud-sync placeholder, is not
   treated as a link. Writes go to a temporary file with an unpredictable
-  name, which is then renamed into place. A `..` binding is no longer
-  accepted from `.aimem.json`.
+  name, which is then renamed into place. A second escape is closed too:
+  a bare `..` in `.aimem.json`, as a docs binding or a collection render
+  path, named the checkout's parent directory and is now dropped.
 
 ## [0.10.6] — 2026-10-16
 

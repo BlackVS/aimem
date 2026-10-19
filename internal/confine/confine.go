@@ -32,6 +32,10 @@ import (
 // ErrLink marks a refusal: some component of the path is a link.
 var ErrLink = errors.New("a symbolic link or junction")
 
+// ErrOutside marks a path that does not lie under the root at all; a caller
+// that also accepts paths outside the checkout tells it apart from ErrLink.
+var ErrOutside = errors.New("not inside the root")
+
 // LinkError names the path that was refused and the component that is a
 // link. It matches ErrLink with errors.Is.
 type LinkError struct {
@@ -52,6 +56,14 @@ func (e *LinkError) Unwrap() error { return ErrLink }
 // Check reports whether path, which must lie under root, can be read or
 // written without passing through a link below root. Components that do
 // not exist yet end the walk: whatever creates them creates real entries.
+//
+// A path inside the root spelled with a ".." element is refused. The walk
+// checks the cleaned path, but the operating system resolves "a/link/../b"
+// by following the link first and then its parent, which can be anywhere;
+// the cleaned "a/b" says nothing about that. Paths built with
+// filepath.Join are already clean, so only raw, caller-supplied spellings
+// meet this refusal. The root's own spelling, when path starts with it,
+// is not examined: only what lies below it can hold a link.
 func Check(root, path string) error {
 	absRoot, err := filepath.Abs(root)
 	if err != nil {
@@ -63,13 +75,22 @@ func Check(root, path string) error {
 	}
 	rel, err := filepath.Rel(absRoot, absPath)
 	if err != nil {
-		return fmt.Errorf("%s is not inside %s: %w", path, root, err)
+		return fmt.Errorf("%s is not inside %s: %w (%v)", path, root, ErrOutside, err)
+	}
+	if rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) || filepath.IsAbs(rel) {
+		return fmt.Errorf("refusing %s: it is %w %s", path, ErrOutside, root)
+	}
+	below := path
+	if r := filepath.Clean(root); r != "." {
+		below = strings.TrimPrefix(path, r)
+	}
+	for _, el := range strings.Split(filepath.ToSlash(below), "/") {
+		if el == ".." {
+			return fmt.Errorf("refusing %s: a path inside the checkout must not contain \"..\"", path)
+		}
 	}
 	if rel == "." {
 		return nil
-	}
-	if rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) || filepath.IsAbs(rel) {
-		return fmt.Errorf("refusing %s: it is not inside %s", path, root)
 	}
 	cur := absRoot
 	for _, part := range strings.Split(rel, string(filepath.Separator)) {

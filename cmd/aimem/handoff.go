@@ -49,9 +49,10 @@ func handoffCmd(args []string) error {
 
 	archive := filepath.Join(filepath.Dir(*file), "SESSION-STATE-ARCHIVE.md")
 	// A handoff inside the checkout is never read or rewritten through a
-	// link there; one named outside it is the caller's own choice.
+	// link there, nor named by a spelling that could pass one; a handoff
+	// named outside the checkout is the caller's own choice.
 	for _, p := range []string{*file, archive} {
-		if err := confine.Check(ident.ProjectDir("."), p); errors.Is(err, confine.ErrLink) {
+		if err := confine.Check(ident.ProjectDir("."), p); err != nil && !errors.Is(err, confine.ErrOutside) {
 			return err
 		}
 	}
