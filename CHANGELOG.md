@@ -54,7 +54,10 @@ currently 24); a binary refuses a database newer than it understands.
   name must carry the commit, as `aimem process export` names it). It uses the compare-and-swap of a re-select
   and leaves a selection that has its set unchanged. It reports each
   project as refreshed, already stored, or needing an archive, and a
-  project it cannot refresh does not fail the run.
+  project it cannot refresh does not fail the run. The export and refresh
+  commands it prints for a set it cannot read quote each value for a POSIX
+  shell where needed, so a manifest path holding `$`, `;` or a quote is
+  pasted as it is.
 
 ## [0.10.7] — 2026-10-19
 
