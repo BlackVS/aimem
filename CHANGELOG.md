@@ -13,7 +13,26 @@ currently 24); a binary refuses a database newer than it understands.
 
 ## [Unreleased]
 
+## [0.10.7] — 2026-10-19
+
+A security release. It addresses three findings of an independent security
+review of aimem, done with Claude Mythos 5.1 (see Security below), and
+ships the hub-served process and skills sets. Once the admin re-selects
+a project's process on the upgraded hub (see Upgrade notes), its members
+no longer need Git or access to the process repository: the hub stores
+the selected process files and the imported skills, and `aimem skills install` installs the
+skills a project requires from the hub. `aimem tasks on` names the
+missing process with the values to run. No schema change. Includes PR
+#235, #236, #237, #238, #239 and #240.
+
 ### Upgrade notes
+
+- **Upgrade the hubs and the workstations.** The A-1 fix is in the admin
+  console and the hub's own checks, so it takes effect when the hub host
+  runs this release (the hub one-liner). The A-2 fix and the A-10 tool
+  descriptions are in the client (`aimem mcp` and the `aimem` commands on
+  a workstation), so they take effect with the client one-liner and a
+  restart of the agent client.
 
 - **Re-select each project's process on each hub after the hub host runs
   this release.** A selection recorded before it carries no set: the
@@ -135,6 +154,23 @@ currently 24); a binary refuses a database newer than it understands.
   id list.
 
 ### Security
+
+An independent security review of the whole product was done on
+2026-10-18 with Claude Mythos 5.1, with Defense Access under
+Anthropic's Cyber Verification Program, at commit `2cb868e` (the
+hub-served skills set, #237, landed after it and was not part of that
+review). This release addresses three of its
+findings, one line each:
+
+- A-1: the admin console could run script from stored values (cross-site
+  scripting); fixed.
+- A-2: bound documents and other checkout files could be read or written
+  through a link that leaves the checkout; fixed.
+- A-10: the MCP task-read tools understated the scope of a task read;
+  the hub-wide read is now stated honestly, with no behaviour change.
+
+Findings fixed in later releases are listed with those releases. The
+fixes in detail:
 
 - **A-1: the admin console no longer places stored values inside inline
   event handlers.** HTML escaping cannot protect a value inside an
