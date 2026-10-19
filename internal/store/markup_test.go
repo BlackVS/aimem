@@ -44,6 +44,29 @@ func TestStoreImportKeepsAnIDOutsideTheImportRule(t *testing.T) {
 	}
 }
 
+// Stripping applies to tags being written, not to the identity a removal
+// matches: a fact holding a legacy "owner's" beside "owners" loses exactly
+// the one asked for.
+func TestRemoveTagMatchesALegacySpellingExactly(t *testing.T) {
+	r := newTestRegistry(t)
+	db, _ := r.Open("proj-a")
+	id, _, err := db.Remember("a fact", "t", RememberOpts{Tags: []string{"owners"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// A tag stored before the write rule existed.
+	if _, err := db.sql.Exec(`INSERT INTO memory_tags(memory_id, tag) VALUES(?,?)`, id, "owner's"); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.RemoveTag(id, "owner's"); err != nil {
+		t.Fatalf("removing the legacy spelling: %v", err)
+	}
+	mems, _ := db.Memories(true)
+	if len(mems) != 1 || !slices.Equal(mems[0].Tags, []string{"owners"}) {
+		t.Fatalf("tags after removing owner's: %+v, want only owners", mems)
+	}
+}
+
 // Tags and sources are identifiers: control and markup characters are
 // dropped on every write path, so none reaches a page.
 func TestTagsAndSourcesDropMarkup(t *testing.T) {

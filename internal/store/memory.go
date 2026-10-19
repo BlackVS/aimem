@@ -79,12 +79,18 @@ func validKind(k string) string {
 }
 
 func normTag(t string) string {
-	t = strings.ToLower(strings.TrimSpace(StripMarkup(t)))
+	t = strings.ToLower(strings.TrimSpace(t))
 	if len(t) > 64 {
 		t = t[:64]
 	}
 	return t
 }
+
+// writeTag is the form a NEW tag is stored in: normTag without the
+// control and markup characters. Lookups and removals keep plain normTag,
+// so a tag stored before this rule is still found under its own spelling
+// and never confused with its stripped twin.
+func writeTag(t string) string { return normTag(StripMarkup(t)) }
 
 // StripMarkup removes control characters and the characters that can end
 // an HTML attribute or a script string (< > " ' ` \). Tags, sources and
@@ -316,7 +322,7 @@ func (d *DB) addTags(memoryID string, tags []string) error {
 // the fact under.
 func (d *DB) addTagsOpt(memoryID string, tags []string, multiChapter bool) error {
 	for _, t := range tags {
-		if t = normTag(t); t == "" {
+		if t = writeTag(t); t == "" {
 			continue
 		}
 		if strings.HasPrefix(t, "chapter:") && !d.hasTag(memoryID, t) {
@@ -347,7 +353,7 @@ func (d *DB) Tag(memoryID, tag, actor string) error {
 	if n == 0 {
 		return fmt.Errorf("no active memory %s", memoryID)
 	}
-	if t := normTag(tag); strings.HasPrefix(t, "chapter:") && !d.hasTag(memoryID, t) {
+	if t := writeTag(tag); strings.HasPrefix(t, "chapter:") && !d.hasTag(memoryID, t) {
 		if c := d.ChapterCount(memoryID); c >= MaxChaptersPerFact {
 			return fmt.Errorf("memory %s is already filed in %d chapters (max %d) — unfile one first",
 				memoryID, c, MaxChaptersPerFact)
