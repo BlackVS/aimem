@@ -66,6 +66,16 @@ func TestProcessSelectByTag(t *testing.T) {
 	if err := sel(repo, "v1"); err != nil {
 		t.Fatalf("re-select of the selected commit: %v", err)
 	}
+	// The same tag with another manifest is another process set: without
+	// --expect it is refused, as a change of commit is.
+	other := "processes/other/manifest.json"
+	otherArchive, _ := exportFixture(t, repo, c1, other)
+	if err := sel(repo, "v1", other, "--from-archive", otherArchive); err == nil {
+		t.Fatal("another manifest at the selected commit was accepted without --expect")
+	}
+	if got := current(); got.Manifest != manifest {
+		t.Fatalf("the manifest changed unseen: %+v", got)
+	}
 	// Another commit without --expect: the hub's compare-and-swap refuses.
 	if err := sel(repo, "v2", "--from-archive", archives[c2]); err == nil {
 		t.Fatal("a change without --expect was accepted")

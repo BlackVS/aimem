@@ -36,7 +36,7 @@ currently 24); a binary refuses a database newer than it understands.
   both: the tag for people, the commit as the pin, so a session still
   sees exactly the reviewed commit. The manifest path defaults to
   `processes/aimem/manifest.json`. `--expect` takes the current
-  selection's tag or commit, and re-selecting the commit already
+  selection's tag or commit, and re-selecting the commit and manifest already
   selected needs no `--expect`. A full commit, with `--ref` as the fetch
   hint, works as before. The session's `Process set:` line names the tag
   beside the commit. No schema or API change: the selection's existing

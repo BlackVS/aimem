@@ -472,8 +472,8 @@ a process repository are best protected as immutable); the session's
 lets a machine fetch from a server that refuses fetch-by-hash, and the
 commit must be what that ref holds. Changing the selection needs the
 current one named in `--expect`, by its commit or by its tag, so two
-admins cannot overwrite each other unseen; re-selecting the commit
-already selected needs no `--expect`. Every selection stays in the
+admins cannot overwrite each other unseen; re-selecting the commit and
+manifest already selected needs no `--expect`. Every selection stays in the
 project's history.
 
 A session names the set by its name (the manifest's directory, else the

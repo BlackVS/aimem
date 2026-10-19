@@ -46,7 +46,7 @@ a tag (or a branch) or a full commit: a tag is resolved to the commit it
 holds now (git ls-remote on this host), and the selection stores both and
 stays pinned to that commit. The manifest defaults to
 processes/aimem/manifest.json. --expect names the current selection by
-its commit or its tag; re-selecting the commit already selected needs
+its commit or its tag; re-selecting the commit and manifest already selected needs
 none. select reads the set at the commit from Git, or with --from-archive
 from a tar.gz verified against the SHA256SUMS beside it (--sums names another file), and
 stores it on the hub with the selection; a set the hub already keeps (the
@@ -102,7 +102,7 @@ func processCmd(args []string) error {
 		body := map[string]any{}
 		if args[0] == "clear" {
 			body["clear"] = true
-			expected, err := expectedCommit(proj, *expect, "")
+			expected, err := expectedCommit(proj, *expect, nil)
 			if err != nil {
 				return err
 			}
@@ -132,7 +132,7 @@ func processCmd(args []string) error {
 			if err := sel.Validate(); err != nil {
 				return err
 			}
-			expected, err := expectedCommit(proj, *expect, sel.Commit)
+			expected, err := expectedCommit(proj, *expect, &sel)
 			if err != nil {
 				return err
 			}
@@ -228,10 +228,11 @@ var resolveRef = func(repo, name string) (string, error) {
 // expectedCommit turns --expect into the commit the hub's compare-and-swap
 // needs. A full commit passes as given. A tag or branch must be the
 // current selection's ref, and stands for its commit. Without --expect,
-// re-selecting the commit already selected (newCommit) needs no
-// confirmation, so the current commit is sent; otherwise nothing is, and
-// the hub refuses a change of an existing selection.
-func expectedCommit(proj, expect, newCommit string) (string, error) {
+// re-selecting the same process version (next: the same commit and
+// manifest as the current selection) needs no confirmation, so the
+// current commit is sent; anything else sends nothing, and the hub refuses
+// a change of an existing selection. A clear passes next nil.
+func expectedCommit(proj, expect string, next *process.Ref) (string, error) {
 	if process.IsCommit(expect) {
 		return expect, nil
 	}
@@ -243,7 +244,7 @@ func expectedCommit(proj, expect, newCommit string) (string, error) {
 		return "", fmt.Errorf("--expect %s: reading the current selection: %w", expect, err)
 	}
 	if expect == "" {
-		if cur != nil && newCommit != "" && cur.Commit == newCommit {
+		if cur != nil && next != nil && cur.Commit == next.Commit && cur.Manifest == next.Manifest {
 			return cur.Commit, nil
 		}
 		return "", nil
