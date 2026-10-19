@@ -97,6 +97,12 @@ func (s *Server) putMeta(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
+	if key == "chapters" && req.Value != "" {
+		if err := store.CheckChapters(req.Value); err != nil {
+			s.fail(w, http.StatusBadRequest, err)
+			return
+		}
+	}
 	if key == "policy" && req.Value != "" && req.Value != "all" && req.Value != "domain" {
 		s.fail(w, http.StatusBadRequest, fmt.Errorf("policy must be all or domain"))
 		return

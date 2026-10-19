@@ -377,7 +377,32 @@ const PAGE = 50;
 let kbPage = 1;
 
 const $ = id => document.getElementById(id);
-const esc = s => (s??"").replace(/[&<>"]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+const esc = s => String(s??"").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+// Rendered elements never carry data inside inline JavaScript. The
+// browser decodes an attribute BEFORE its handler is parsed, so an
+// HTML-escaped value in onclick="f('...')" can still close the string
+// and run as script. Instead an element names its handler in
+// data-on-<event> and carries its arguments as JSON in data-args; one
+// listener per event type calls the named entry of ACT (an explicit
+// allowlist, defined at the end of the script) with (...args, element,
+// event). The nearest marked element wins, so a control inside a
+// clickable row acts alone, as the old stopPropagation calls did.
+function acts(map, ...args){
+  return Object.entries(map).map(([e,f])=>` data-on-${e}="${esc(f)}"`).join("")+` data-args="${esc(JSON.stringify(args))}"`;
+}
+const act = (fn, ...args) => acts({click: fn}, ...args);
+for(const type of ["click","change","input","keydown"]){
+  document.addEventListener(type, ev=>{
+    const el = ev.target.closest && ev.target.closest(`[data-on-${type}]`);
+    if(!el) return;
+    const name = el.getAttribute("data-on-"+type);
+    if(!Object.prototype.hasOwnProperty.call(ACT, name)) return;
+    let args;
+    try{ args = JSON.parse(el.getAttribute("data-args")||"[]"); }catch(_){ return; }
+    if(!Array.isArray(args)) return;
+    ACT[name](...args, el, ev);
+  });
+}
 function toast(m,ms){const t=$("toast");t.textContent=m;t.style.opacity=1;setTimeout(()=>t.style.opacity=0,ms||2200);}
 function ago(ts){if(!ts)return"-";const s=(Date.now()-Date.parse(ts))/1e3;
   if(s<90)return Math.round(s)+"s ago";if(s<5400)return Math.round(s/60)+"m ago";
@@ -458,7 +483,7 @@ function treeEntry(g){
   // chapters read as a filter, which was exactly the confusion.
   const kebab = on && g.id!=="user"
     ? `<span class="kebab" role="button" tabindex="0" title="actions" `+
-      `onclick="event.stopPropagation();toggleKbMenu('scope:${esc(g.id)}')">&hellip;</span>` : "";
+      `${act("toggleKbMenu","scope:"+g.id)}>&hellip;</span>` : "";
   // Sub-rows exist only when there is something to FILTER by: chapters
   // or origins. A scope with neither used to expand into a lone "all"
   // row (user: "what sense in this?") — now it expands into nothing
@@ -493,7 +518,7 @@ function treeEntry(g){
   // two different figures).
   const count = (on && hasSub) ? "" : `<span class="n">${g.stats.memories}</span>`;
   let rows = `<div class="tg ${on?"on":""}" role="button" tabindex="0" title="${esc(g.id)}" `+
-    `onclick="pickGroup('${g.id}')" onkeydown="if(event.key==='Enter')pickGroup('${g.id}')">`+
+    `${acts({click:"pickGroup",keydown:"pickGroupKey"},g.id)}>`+
     `<span>${on?"▾":"▸"} ${esc(kbLabel(g.id))}</span>${count}${kebab}</div>`;
   if(on && (kbMenu==="scope:"+g.id || kbMenu==="merge:"+g.id)){
     // A derived project id is unreadable by design; the user DB and
@@ -502,11 +527,11 @@ function treeEntry(g){
     rows += `<div class="kbmenu">` +
       (g.id.startsWith("group-")
         ? `<div class="tc" role="button" tabindex="0" onclick="tab('groups')"><span class="name">chapters, charter, AI propose / re-label (Groups tab)&hellip;</span></div>`
-        : `<div class="tc" role="button" tabindex="0" onclick="renameProject('${esc(g.id)}')"><span class="name">rename project&hellip;</span></div>`+
-          `<div class="tc" role="button" tabindex="0" onclick="mergeProjectUI('${esc(g.id)}')"><span class="name">merge into another project&hellip;</span></div>`+
-          `<div class="tc" role="button" tabindex="0" onclick="toggleTasksUI('${esc(g.id)}')"><span class="name">tasks (Kanban): switch on / off&hellip;</span></div>`+
+        : `<div class="tc" role="button" tabindex="0" ${act("renameProject",g.id)}><span class="name">rename project&hellip;</span></div>`+
+          `<div class="tc" role="button" tabindex="0" ${act("mergeProjectUI",g.id)}><span class="name">merge into another project&hellip;</span></div>`+
+          `<div class="tc" role="button" tabindex="0" ${act("toggleTasksUI",g.id)}><span class="name">tasks (Kanban): switch on / off&hellip;</span></div>`+
           (kbMenu==="merge:"+g.id ? mergeChooser(g.id) : "")+
-          `<div class="tc danger" role="button" tabindex="0" onclick="dropProjectUI('${esc(g.id)}')"><span class="name">drop project&hellip;</span></div>`) +
+          `<div class="tc danger" role="button" tabindex="0" ${act("dropProjectUI",g.id)}><span class="name">drop project&hellip;</span></div>`) +
       `</div>`;
   }
   if(on && hasSub){
@@ -518,14 +543,14 @@ function treeEntry(g){
       const ck = `chap:${g.id}:${c.name}`;
       const chapKebab = curChap===c.name
         ? `<span class="kebab" role="button" tabindex="0" title="chapter actions" `+
-          `onclick="event.stopPropagation();toggleKbMenu('${esc(ck)}')">&hellip;</span>` : "";
+          `${act("toggleKbMenu",ck)}>&hellip;</span>` : "";
       let row = `<div class="tc ${curChap===c.name?"on":""}" role="button" tabindex="0" `+
-        `title="${esc(c.about)}" onclick="pickChap('${esc(c.name)}')">`+
+        `title="${esc(c.about)}" ${act("pickChap",c.name)}>`+
         `<span class="name"><span class="dot" style="background:${SPINES[i%SPINES.length]}"></span>${esc(c.name)}</span>`+
         `<span class="n">${n(counts[c.name])}</span>${chapKebab}</div>`;
       if(kbMenu===ck)
         row += `<div class="kbmenu"><div class="tc" role="button" tabindex="0" `+
-          `onclick="renameChapter('${esc(g.id)}','${esc(c.name)}')"><span class="name">rename chapter&hellip;</span></div></div>`;
+          `${act("renameChapter",g.id,c.name)}><span class="name">rename chapter&hellip;</span></div></div>`;
       return row;
     }).join("");
     // With no chapters declared, every fact is unfiled and the row just
@@ -540,7 +565,7 @@ function treeEntry(g){
     if(orgNames.length){
       rows += `<div class="tsep">from</div>`;
       rows += orgNames.map(o=>`<div class="tc ${curOrigin===o?"on":""}" role="button" tabindex="0" `+
-        `onclick="pickOrigin('${esc(o)}')"><span class="name">${esc(o)}</span>`+
+        `${act("pickOrigin",o)}><span class="name">${esc(o)}</span>`+
         `<span class="n">${org[o]}</span></div>`).join("");
     }
   }
@@ -681,7 +706,7 @@ function mergeChooser(id){
   // the buttons in the 230px sidebar shrank it to an unreadable sliver.
   return `<div class="tc"><select id="mergeInto" style="flex:1;min-width:0" onclick="event.stopPropagation()" onchange="mergeInto=this.value">`+
       others.map(o=>`<option${o===mergeInto?" selected":""}>${esc(o)}</option>`).join("")+`</select></div>`+
-    `<div class="tc"><button class="act danger" onclick="event.stopPropagation();mergeProjectDo('${esc(id)}')">merge into selected</button>`+
+    `<div class="tc"><button class="act danger" ${act("mergeProjectDo",id)}>merge into selected</button>`+
     `<button class="act" onclick="event.stopPropagation();mergeProjectCancel()">cancel</button></div>`+
     `<div class="dim" style="font-size:12px;margin:0 10px 6px">Its journal, facts and curation history fold into the target `+
     `(idempotent — a re-run completes, never duplicates) and shared knowledge bases relabel their citations; `+
@@ -751,7 +776,7 @@ function addLabelUI(id){
   const span=$("addlbl-"+id);
   span.innerHTML = `<input list="kbAllTags" placeholder="label…" autocomplete="off"
     style="width:130px;font:12px var(--mono);padding:1px 4px"
-    onkeydown="if(event.key==='Enter')addLabel('${id}',this);else if(event.key==='Escape')renderFacts()"
+    ${acts({keydown:"addLabelKey"},id)}
     onblur="setTimeout(renderFacts,150)">`;
   span.querySelector("input").focus();
 }
@@ -830,7 +855,7 @@ function renderTagBar(facts){
   $("kbAllTags").innerHTML = [...all].sort().map(t=>`<option value="${esc(t)}">`).join("");
   chips.hidden = !curTags.length;
   chips.innerHTML = curTags.map(t=>`<span class="chip on" style="cursor:pointer" `+
-    `title="remove this label filter" onclick="pickTag('${esc(t)}')">${esc(t)} ×</span>`).join("")+
+    `title="remove this label filter" ${act("pickTag",t)}>${esc(t)} ×</span>`).join("")+
     (curTags.length>1?`<span class="dim" style="font-size:12px">facts carrying all ${curTags.length} labels</span>`:"");
 }
 async function loadFacts(){
@@ -879,20 +904,20 @@ function renderFacts(){
     const origin=(m.sources||[]).filter(s=>s.startsWith("project:")).map(s=>s.slice(8));
     return `<div class="card" style="--i:${i};border-left-color:${chs.length?chapColor(chs[0]):"var(--edge)"}">
       <div class="acts">
-        <button class="act" onclick="editFact('${m.id}')">edit</button>
-        <button class="act danger" onclick="forget('${m.id}')">forget</button>
+        <button class="act" ${act("editFact",m.id)}>edit</button>
+        <button class="act danger" ${act("forget",m.id)}>forget</button>
       </div>
-      <div class="fact" id="ftx-${m.id}">${esc(m.text)}</div>
+      <div class="fact" id="ftx-${esc(m.id)}">${esc(m.text)}</div>
       <div class="srcs">
         <span class="chip">${esc(m.kind||"fact")}</span>
         ${chs.map((c,ci)=>`<span class="chip ch"${ci?"":' title="primary — the design document files this fact here"'}>${
-          ci?"":"● "}${esc(c)} <a class="x" onclick="unfileFact('${m.id}','${esc(c)}')">×</a></span>`).join("")}
+          ci?"":"● "}${esc(c)} <a class="x" ${act("unfileFact",m.id,c)}>×</a></span>`).join("")}
         ${chs.length<3 && chapNames.some(c=>!chs.includes(c))
-          ?`<select class="addch" onchange="fileFact('${m.id}',this.value);this.value=''">
+          ?`<select class="addch" ${acts({change:"fileFactPick"},m.id)}>
           <option value="">+ chapter</option>${chapNames.filter(c=>!chs.includes(c))
             .map(c=>`<option>${esc(c)}</option>`).join("")}</select>`:""}
-        ${tags.map(t=>`<span class="chip${curTags.includes(t)?" on":""}" style="cursor:pointer" title="toggle this label filter" onclick="pickTag('${esc(t)}')">${esc(t)} <a class="x" title="remove this label from the fact" onclick="event.stopPropagation();unlabelFact('${m.id}','${esc(t)}')">×</a></span>`).join("")}
-        <span id="addlbl-${m.id}"><span class="chip click dim" title="add a label to this fact" onclick="addLabelUI('${m.id}')">+ label</span></span>
+        ${tags.map(t=>`<span class="chip${curTags.includes(t)?" on":""}" style="cursor:pointer" title="toggle this label filter" ${act("pickTag",t)}>${esc(t)} <a class="x" title="remove this label from the fact" ${act("unlabelFact",m.id,t)}>×</a></span>`).join("")}
+        <span id="addlbl-${esc(m.id)}"><span class="chip click dim" title="add a label to this fact" ${act("addLabelUI",m.id)}>+ label</span></span>
         <span class="dim">${ago(m.created_at)} · conf ${(m.confidence??0).toFixed(2)}`+
         `${m.corroboration?` · ×${m.corroboration}`:""}`+
         `${origin.length?` · from ${esc(origin.join(", "))}`:""}</span>
@@ -922,7 +947,7 @@ document.addEventListener("keydown", e=>{
 });
 async function forget(id){
   if(!confirm("Retire this fact? (bi-temporal: audit preserved)"))return;
-  await api(`/v1/projects/${encodeURIComponent(curGroup)}/memories/${id}/forget`,{method:"POST",body:"{}"});
+  await api(`/v1/projects/${encodeURIComponent(curGroup)}/memories/${encodeURIComponent(id)}/forget`,{method:"POST",body:"{}"});
   toast("fact retired"); loadFacts();
 }
 // "Edit" is the user's intent; SUPERSESSION is how the store implements
@@ -935,10 +960,10 @@ function editFact(id){
   const el=$("ftx-"+id);
   if(!m || !el || el.dataset.editing) return;
   el.dataset.editing="1";
-  el.innerHTML = `<textarea id="fed-${id}" oninput="autoGrow(this)"
+  el.innerHTML = `<textarea id="fed-${esc(id)}" oninput="autoGrow(this)"
       style="width:100%;font:inherit;line-height:inherit;resize:vertical"></textarea>
     <div class="row" style="margin-top:4px">
-      <button class="act" onclick="saveFact('${id}')">save</button>
+      <button class="act" ${act("saveFact",id)}>save</button>
       <button class="act" onclick="renderFacts()">cancel</button>
       <span class="dim" style="font-size:12px">saving keeps the previous text in this fact's lineage</span>
     </div>`;
@@ -950,7 +975,7 @@ async function saveFact(id){
   const m=(memCache[curGroup]||[]).find(x=>x.id===id);
   const txt=$("fed-"+id).value.trim();
   if(!txt || (m && txt===m.text)){ renderFacts(); return; } // unchanged is not a change
-  await api(`/v1/projects/${encodeURIComponent(curGroup)}/memories/${id}/supersede`,
+  await api(`/v1/projects/${encodeURIComponent(curGroup)}/memories/${encodeURIComponent(id)}/supersede`,
     {method:"POST",body:JSON.stringify({text:txt, actor:"console"})});
   toast("saved — previous version kept in lineage"); loadFacts();
 }
@@ -999,7 +1024,7 @@ async function toggleDoc(){
 function renderGroups(){
   $("groupEditors").innerHTML = groups().map(g=>{
     const ch = g.chapters||[];
-    return `<div class="card" id="ge-${g.id}" oninput="markDirty(event,'${g.id}')" onchange="markDirty(event,'${g.id}')">
+    return `<div class="card" id="ge-${esc(g.id)}"${acts({input:"markDirty",change:"markDirty"},g.id)}>
       <div class="row"><b>${esc(g.id.slice(6))}</b>
         <span class="dim">${g.stats.memories} facts · members: ${esc(members(g.id).join(", ")||"none yet")}</span></div>
       <div class="row"><span class="dim" style="width:70px">charter</span>
@@ -1017,12 +1042,12 @@ function renderGroups(){
       <div class="row"><span class="dim" style="width:70px">chapters</span><div class="grow" data-chapters>
         ${ch.map(c=>chapRow(c.name,c.about)).join("")}</div></div>
       <div class="row"><span style="width:70px"></span>
-        <button class="act" onclick="addChap('${g.id}')">+ chapter</button>
-        <button class="act" onclick="proposeChap('${g.id}',this)">propose chapters (AI)</button>
+        <button class="act" ${act("addChap",g.id)}>+ chapter</button>
+        <button class="act" ${act("proposeChap",g.id)}>propose chapters (AI)</button>
         <button class="act" title="the chapter set evolved: review ALL filed facts and propose ADDITIONAL labels (add-only; nothing moves; cancel anytime; nothing written until you approve)"
-          onclick="sweepRelabel('${g.id}',this)">re-label filed facts (AI)</button>
+          ${act("sweepRelabel",g.id)}>re-label filed facts (AI)</button>
         <span class="grow"></span>
-        <button class="act" data-save onclick="saveGroup('${g.id}')">save ${esc(g.id.slice(6))}</button></div>
+        <button class="act" data-save ${act("saveGroup",g.id)}>save ${esc(g.id.slice(6))}</button></div>
       <!-- Status ("asking the curate model…", sweep progress) gets its
            OWN line: inline, it shoved the save button onto a wrap
            (user notice). An empty div costs no height. -->
@@ -1118,8 +1143,8 @@ async function renderPlan(gid,plan){
       <input type="checkbox" checked data-fid="${esc(a.fact_id)}" style="width:auto">
       <span class="grow dim">${esc((texts[a.fact_id]||a.fact_id).slice(0,140))}</span>
       <span class="chip ch">${esc(a.chapter)}</span></div>`).join("")}
-    <div class="row"><button class="act" onclick="applyPlan('${gid}',this)">apply approved</button>
-      <button class="act danger" onclick="discardPlan('${gid}')">discard proposal</button>
+    <div class="row"><button class="act" ${act("applyPlan",gid)}>apply approved</button>
+      <button class="act danger" ${act("discardPlan",gid)}>discard proposal</button>
       <span class="dim" data-applynote></span></div>
   </div>`;
 }
@@ -1230,8 +1255,8 @@ async function loadProviders(){
       `<span class="grow dim">${esc(p.base_url||"(default proxy)")}</span>`+
       (p.token || p.kind==="claude" ? `<span class="dim">${esc(p.token||"no token needed")}</span>`
                                     : `<span class="bad">NO TOKEN — bound models will not resolve</span>`)+
-      `<button class="act" onclick="editProvider('${esc(n)}')">edit</button>`+
-      `<button class="act danger" onclick="delProvider('${esc(n)}')">delete</button></div>`;
+      `<button class="act" ${act("editProvider",n)}>edit</button>`+
+      `<button class="act danger" ${act("delProvider",n)}>delete</button></div>`;
   }).join("") : '<span class="dim">none yet — models use the host env fallback</span>';
   const models = Object.keys(PROV.models).sort();
   $("bindList").className="";
@@ -1242,9 +1267,9 @@ async function loadProviders(){
     const b=PROV.models[m], up=b.model&&b.model!==m?` <span class="dim">→ ${esc(b.model)}</span>`:"";
     return `<div class="row"><span class="grow">${esc(m)}${up}</span>`+
     `<span class="chip">${esc(b.provider)}</span>`+
-    `<button class="act" onclick="testModel('${esc(m)}','chat',this)">test chat</button>`+
-    `<button class="act" onclick="testModel('${esc(m)}','embed',this)">test embed</button>`+
-    `<button class="act danger" onclick="unbindModel('${esc(m)}')">unbind</button></div>`;}).join("");
+    `<button class="act" ${act("testModel",m,"chat")}>test chat</button>`+
+    `<button class="act" ${act("testModel",m,"embed")}>test embed</button>`+
+    `<button class="act danger" ${act("unbindModel",m)}>unbind</button></div>`;}).join("");
   const sel=$("bProv").value;
   $("bProv").innerHTML = names.map(n=>`<option>${esc(n)}</option>`).join("");
   if(names.includes(sel)) $("bProv").value=sel;
@@ -1535,8 +1560,8 @@ async function loadDocs(keepView){
       const del = d.deleted ? ' <span class="bad">[retired]</span>' : "";
       return `<div class="card">
         <div class="acts">
-          <button class="act" onclick="openDoc('${esc(proj)}','${esc(d.name)}')">open</button>
-          ${d.deleted?"":`<button class="act danger" onclick="retireDoc('${esc(proj)}','${esc(d.name)}',${d.rev})">retire</button>`}
+          <button class="act" ${act("openDoc",proj,d.name)}>open</button>
+          ${d.deleted?"":`<button class="act danger" ${act("retireDoc",proj,d.name,d.rev)}>retire</button>`}
         </div>
         <div class="fact">${esc(d.name)}${del}</div>
         <div class="srcs"><span class="chip">rev ${d.rev}</span>
@@ -1605,7 +1630,7 @@ async function loadCols(){
     $("wikiHint").textContent = cols.length ? "" :
       "no collections in this scope yet — seed one with `aimem col import` or `aimem col put`";
     $("colList").innerHTML = cols.map(c=>`<div class="card">
-      <div class="acts"><button class="act" onclick="openCol('${esc(proj)}','${esc(c.name)}')">open</button></div>
+      <div class="acts"><button class="act" ${act("openCol",proj,c.name)}>open</button></div>
       <div class="fact">${esc(c.name)}</div>
       <div class="srcs"><span class="chip">${c.records} records</span>
         <span class="dim">updated ${ago(c.updated_at)}</span></div>
@@ -1626,7 +1651,7 @@ async function openCol(proj, col, mode){
 function renderColView(){
   const d = colData;
   if(!d) return;
-  const modeBtn = m => `<button class="act${d.mode===m?" on":""}" onclick="colData.mode='${m}';renderColView()">${m}</button>`;
+  const modeBtn = m => `<button class="act${d.mode===m?" on":""}" ${act("colMode",m)}>${m}</button>`;
   $("colView").innerHTML = `<div class="card">
     <div class="acts">${modeBtn("wiki")}${modeBtn("table")}</div>
     <div class="fact">${esc(d.col)} <span class="dim">${d.recs.length} entries · edits are per record — different entries never conflict</span></div>
@@ -1639,7 +1664,7 @@ function renderColView(){
 }
 
 function colTableHTML(d){
-  return d.recs.map(x=>`<div class="tc"><span class="name"><a class="x" onclick="openRec('${esc(x.id)}')">${esc(x.id)}</a></span>`+
+  return d.recs.map(x=>`<div class="tc"><span class="name"><a class="x" ${act("openRec",x.id)}>${esc(x.id)}</a></span>`+
     `<span class="n dim">rev ${x.rev} · ${x.size}B · ${ago(x.updated_at)} by ${esc(x.updated_by||"?")}</span></div>`).join("");
 }
 
@@ -1679,7 +1704,7 @@ function colWikiHTML(d){
   // The edit link lives inside a <summary>: stop the click from also
   // toggling the fold.
   const editLink = r => `<a class="x dim" style="font-size:11px;font-weight:normal"
-    onclick="event.stopPropagation();event.preventDefault();openRec('${esc(r.id)}')">edit · rev ${r.rev}</a>`;
+    ${act("openRecInSummary",r.id)}>edit · rev ${r.rev}</a>`;
   const render = (n, name) => {
     const kidNames = Object.keys(n.kids).sort();
     if(!name){ // root: just the children
@@ -1723,7 +1748,7 @@ async function showRecLog(){
     const r = await api(`/v1/projects/${encodeURIComponent(colCur.project)}/collections/${encodeURIComponent(colCur.col)}/log/${colCur.id.split("/").map(encodeURIComponent).join("/")}`);
     $("recLog").innerHTML = `<div class="tsep">history</div>` + (r.revisions||[]).map(v=>
       `<div class="tc"><span class="name">rev ${v.rev}${v.deleted?" (retired)":""} - ${esc(v.updated_at)} by ${esc(v.updated_by||"?")}</span>`+
-      `<span class="n"><a class="x" onclick="viewRecRev(${v.rev})">view</a></span></div>`).join("");
+      `<span class="n"><a class="x" ${act("viewRecRev",v.rev)}>view</a></span></div>`).join("");
   }catch(e){ $("recLog").innerHTML = `<div class="bad">${esc(String(e.message||e))}</div>`; }
 }
 
@@ -1843,7 +1868,7 @@ async function showDocLog(){
     const r = await api(`/v1/projects/${encodeURIComponent(docCur.project)}/docs/${encodeURIComponent(docCur.name)}/log`);
     $("docLog").innerHTML = `<div class="tsep">history</div>` + (r.revisions||[]).map(v=>
       `<div class="tc"><span class="name">rev ${v.rev}${v.deleted?" (retired)":""} - ${esc(v.updated_at)} by ${esc(v.updated_by||"?")}</span>`+
-      `<span class="n"><a class="x" onclick="viewRev(${v.rev})">view</a></span></div>`).join("");
+      `<span class="n"><a class="x" ${act("viewRev",v.rev)}>view</a></span></div>`).join("");
   }catch(e){ $("docLog").innerHTML = `<div class="bad">${esc(String(e.message||e))}</div>`; }
 }
 
@@ -1943,9 +1968,9 @@ async function loadReview(){
       : "queue is clear";
     $("revList").innerHTML = items.map(it=>`<div class="card" id="rev-${esc(it.id)}">
       <div class="acts">
-        <button class="act" onclick="revConfirm('${esc(proj)}','${esc(it.id)}')">still true</button>
-        <button class="act" onclick="revEdit('${esc(it.id)}')">edit&hellip;</button>
-        <button class="act danger" onclick="revForget('${esc(proj)}','${esc(it.id)}')">expire</button>
+        <button class="act" ${act("revConfirm",proj,it.id)}>still true</button>
+        <button class="act" ${act("revEdit",it.id)}>edit&hellip;</button>
+        <button class="act danger" ${act("revForget",proj,it.id)}>expire</button>
       </div>
       <div class="fact">${esc(it.text)}</div>
       <div class="srcs"><span class="chip">${esc(it.kind)}</span>
@@ -1954,7 +1979,7 @@ async function loadReview(){
         <textarea id="revTx-${esc(it.id)}" oninput="autoGrow(this)"
           style="width:100%;font:inherit;line-height:inherit;resize:vertical">${esc(it.text)}</textarea>
         <div class="row" style="margin-top:4px">
-          <button class="act" onclick="revSupersede('${esc(proj)}','${esc(it.id)}')">save</button>
+          <button class="act" ${act("revSupersede",proj,it.id)}>save</button>
           <span class="dim" style="font-size:12px">saving keeps the previous text in this fact's lineage</span>
         </div>
       </div>
@@ -1998,6 +2023,56 @@ async function revForget(proj, id){
   }catch(e){ toast("expire failed: "+String(e.message||e)); }
 }
 
+// The only functions a rendered element can name (see acts above). Each
+// entry spells out the arguments it passes on, so an element can never
+// push an extra one into a function's optional parameter.
+const ACT = {
+  toggleKbMenu: key => toggleKbMenu(key),
+  pickGroup: id => pickGroup(id),
+  pickGroupKey: (id, el, ev) => { if(ev.key==="Enter") pickGroup(id); },
+  renameProject: id => renameProject(id),
+  mergeProjectUI: id => mergeProjectUI(id),
+  toggleTasksUI: id => toggleTasksUI(id),
+  dropProjectUI: id => dropProjectUI(id),
+  pickChap: c => pickChap(c),
+  renameChapter: (gid, name) => renameChapter(gid, name),
+  pickOrigin: o => pickOrigin(o),
+  mergeProjectDo: id => mergeProjectDo(id),
+  pickTag: t => pickTag(t),
+  editFact: id => editFact(id),
+  forget: id => forget(id),
+  unfileFact: (id, c) => unfileFact(id, c),
+  fileFactPick: (id, el) => { fileFact(id, el.value); el.value=""; },
+  unlabelFact: (id, t) => unlabelFact(id, t),
+  addLabelUI: id => addLabelUI(id),
+  addLabelKey: (id, el, ev) => { if(ev.key==="Enter") addLabel(id, el); else if(ev.key==="Escape") renderFacts(); },
+  saveFact: id => saveFact(id),
+  markDirty: (gid, el, ev) => markDirty(ev, gid),
+  addChap: gid => addChap(gid),
+  proposeChap: (gid, el) => proposeChap(gid, el),
+  sweepRelabel: (gid, el) => sweepRelabel(gid, el),
+  saveGroup: gid => saveGroup(gid),
+  applyPlan: (gid, el) => applyPlan(gid, el),
+  discardPlan: gid => discardPlan(gid),
+  editProvider: n => editProvider(n),
+  delProvider: n => delProvider(n),
+  testModel: (m, op, el) => testModel(m, op, el),
+  unbindModel: m => unbindModel(m),
+  openDoc: (proj, name) => openDoc(proj, name),
+  retireDoc: (proj, name, rev) => retireDoc(proj, name, rev),
+  openCol: (proj, col) => openCol(proj, col),
+  colMode: m => { colData.mode = m; renderColView(); },
+  openRec: id => openRec(id),
+  // The edit link sits inside a <summary>: keep the click from also
+  // toggling the fold.
+  openRecInSummary: (id, el, ev) => { ev.preventDefault(); openRec(id); },
+  viewRecRev: rev => viewRecRev(rev),
+  viewRev: rev => viewRev(rev),
+  revConfirm: (proj, id) => revConfirm(proj, id),
+  revEdit: id => revEdit(id),
+  revForget: (proj, id) => revForget(proj, id),
+  revSupersede: (proj, id) => revSupersede(proj, id),
+};
 </script>
 </body>
 </html>
