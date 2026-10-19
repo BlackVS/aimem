@@ -18,7 +18,9 @@ You should receive an initial response within a week.
 
 Besides the review every change gets before it merges, aimem is reviewed
 as a whole product by an independent, model-assisted security review.
-The first was done on 2026-10-18 with Claude Mythos 5.1. Each release
+The first was done on 2026-10-18 with Claude Mythos 5.1. The review is
+repeated for new versions of the reviewing model and after significant
+changes to the product. Each release
 that fixes a finding lists it in the Security section of `CHANGELOG.md`,
 one line per finding, saying what was fixed and not how to exploit it.
 Findings that are still open are not published. To report a

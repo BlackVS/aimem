@@ -156,9 +156,10 @@ missing process with the values to run. No schema change. Includes PR
 ### Security
 
 An independent security review of the whole product was done on
-2026-10-18 with Claude Mythos 5.1, under Anthropic's official access,
-at commit `2cb868e` (the hub-served skills set, #237, landed after it
-and was not part of that review). This release addresses three of its
+2026-10-18 with Claude Mythos 5.1, with Defense Access under
+Anthropic's Cyber Verification Program, at commit `2cb868e` (the
+hub-served skills set, #237, landed after it and was not part of that
+review). This release addresses three of its
 findings, one line each:
 
 - A-1: the admin console could run script from stored values (cross-site
