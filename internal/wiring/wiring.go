@@ -21,6 +21,8 @@ import (
 	"sort"
 	"strings"
 	"time"
+
+	"aimem/internal/confine"
 )
 
 // Finding is one verified fact about one file or client. Level is ok,
@@ -109,10 +111,10 @@ Updated: (date) | branch: (branch) | HEAD: (sha) | by: (client/session)
 func Check(dir string, o Options) Report {
 	var r Report
 	r.Findings = append(r.Findings, checkHandoff(dir, o.Repair))
-	r.Findings = append(r.Findings, checkHooks(filepath.Join(dir, ".claude", "settings.json"), "Claude Code", o)...)
-	r.Findings = append(r.Findings, checkHooks(filepath.Join(dir, ".codex", "hooks.json"), "Codex", o)...)
-	r.Findings = append(r.Findings, checkMCPJSON(filepath.Join(dir, ".mcp.json"), o.Repair))
-	r.Findings = append(r.Findings, checkOpenCode(filepath.Join(dir, "opencode.json"), o.Repair)...)
+	r.Findings = append(r.Findings, checkHooks(dir, filepath.Join(dir, ".claude", "settings.json"), "Claude Code", o)...)
+	r.Findings = append(r.Findings, checkHooks(dir, filepath.Join(dir, ".codex", "hooks.json"), "Codex", o)...)
+	r.Findings = append(r.Findings, checkMCPJSON(dir, filepath.Join(dir, ".mcp.json"), o.Repair))
+	r.Findings = append(r.Findings, checkOpenCode(dir, filepath.Join(dir, "opencode.json"), o.Repair)...)
 	if o.Commands {
 		r.Findings = append(r.Findings, InstallCommands(dir, o.Home, o.Repair)...)
 	}
@@ -130,10 +132,7 @@ func checkHandoff(dir string, repair bool) Finding {
 	if !repair {
 		return Finding{File: rel, Level: "warn", Detail: "handoff file missing", Fix: "run without --no-repair to create the template"}
 	}
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-		return Finding{File: rel, Level: "fail", Detail: "cannot create docs/: " + err.Error()}
-	}
-	if err := writeAtomic(path, []byte(handoffTemplate), 0o644); err != nil {
+	if err := writeAtomic(dir, path, []byte(handoffTemplate), 0o644); err != nil {
 		return Finding{File: rel, Level: "fail", Detail: "cannot write the template: " + err.Error()}
 	}
 	return Finding{File: rel, Level: "ok", Detail: "handoff template created", Repaired: true}
@@ -144,11 +143,12 @@ func checkHandoff(dir string, repair bool) Finding {
 // were (member order follows the key order on output).
 type object map[string]json.RawMessage
 
-// readObject parses path as a JSON object. A missing file is an empty
-// object; a BOM is tolerated; anything that is not an object is an error
-// and is never overwritten.
-func readObject(path string) (object, os.FileMode, bool, error) {
-	raw, err := os.ReadFile(path)
+// readObject parses path, a file inside the checkout at root, as a JSON
+// object. A missing file is an empty object; a BOM is tolerated; anything
+// that is not an object is an error and is never overwritten. A path
+// reached through a link below root is refused (package confine).
+func readObject(root, path string) (object, os.FileMode, bool, error) {
+	raw, err := confine.ReadFile(root, path)
 	if errors.Is(err, os.ErrNotExist) {
 		return object{}, 0o644, false, nil
 	}
@@ -170,27 +170,23 @@ func readObject(path string) (object, os.FileMode, bool, error) {
 	return o, fi.Mode().Perm(), true, nil
 }
 
-func writeObject(path string, o object, mode os.FileMode) error {
+func writeObject(root, path string, o object, mode os.FileMode) error {
 	out, err := json.MarshalIndent(o, "", "  ")
 	if err != nil {
 		return err
 	}
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-		return err
-	}
-	return writeAtomic(path, append(out, '\n'), mode)
+	return writeAtomic(root, path, append(out, '\n'), mode)
 }
 
-func writeAtomic(path string, data []byte, mode os.FileMode) error {
-	tmp := path + ".aimem-tmp"
-	if err := os.WriteFile(tmp, data, mode); err != nil {
-		return err
+// writeAtomic replaces path, creating its directory, through a temporary
+// file and a rename. A path inside a checkout is written only when no link
+// below root leads to it; an empty root (a file in the user's own home,
+// where linked dotfiles are normal) writes without that check.
+func writeAtomic(root, path string, data []byte, mode os.FileMode) error {
+	if root == "" {
+		root = path
 	}
-	if err := os.Rename(tmp, path); err != nil {
-		os.Remove(tmp)
-		return err
-	}
-	return nil
+	return confine.WriteFile(root, path, data, mode)
 }
 
 // hookEntry is the shape both clients use inside hooks.<Event>.
@@ -203,9 +199,9 @@ type hookEntry struct {
 // checkHooks verifies the SessionStart handoff hook in a Claude Code
 // settings.json or a Codex hooks.json, and refuses project-level
 // checkpoint hooks.
-func checkHooks(path, client string, o Options) []Finding {
+func checkHooks(root, path, client string, o Options) []Finding {
 	rel := relName(path)
-	obj, mode, _, err := readObject(path)
+	obj, mode, _, err := readObject(root, path)
 	if err != nil {
 		return []Finding{{File: rel, Level: "fail", Detail: "unreadable: " + err.Error(), Fix: "repair the file by hand; nothing was written"}}
 	}
@@ -259,7 +255,7 @@ func checkHooks(path, client string, o Options) []Finding {
 	list = append(list, entry)
 	hooks["SessionStart"], _ = json.Marshal(list)
 	obj["hooks"], _ = json.Marshal(hooks)
-	if err := writeObject(path, obj, mode); err != nil {
+	if err := writeObject(root, path, obj, mode); err != nil {
 		return append(out, Finding{File: rel, Level: "fail", Detail: "cannot write: " + err.Error()})
 	}
 	return append(out, Finding{File: rel, Level: "ok", Detail: client + " SessionStart handoff hook added", Repaired: true})
@@ -279,9 +275,9 @@ func hasHandoffHook(entries []hookEntry) bool {
 }
 
 // checkMCPJSON verifies mcpServers.aimem in Claude Code's .mcp.json.
-func checkMCPJSON(path string, repair bool) Finding {
+func checkMCPJSON(root, path string, repair bool) Finding {
 	rel := relName(path)
-	obj, mode, _, err := readObject(path)
+	obj, mode, _, err := readObject(root, path)
 	if err != nil {
 		return Finding{File: rel, Level: "fail", Detail: "unreadable: " + err.Error(), Fix: "repair the file by hand; nothing was written"}
 	}
@@ -303,7 +299,7 @@ func checkMCPJSON(path string, repair bool) Finding {
 	}
 	servers["aimem"], _ = json.Marshal(want)
 	obj["mcpServers"], _ = json.Marshal(servers)
-	if err := writeObject(path, obj, mode); err != nil {
+	if err := writeObject(root, path, obj, mode); err != nil {
 		return Finding{File: rel, Level: "fail", Detail: "cannot write: " + err.Error()}
 	}
 	return Finding{File: rel, Level: "ok", Detail: "Claude Code MCP registration added", Repaired: true}
@@ -311,9 +307,9 @@ func checkMCPJSON(path string, repair bool) Finding {
 
 // checkOpenCode verifies opencode.json: the handoff in instructions and
 // mcp.aimem. $schema is added with the registration when the file is new.
-func checkOpenCode(path string, repair bool) []Finding {
+func checkOpenCode(root, path string, repair bool) []Finding {
 	rel := relName(path)
-	obj, mode, existed, err := readObject(path)
+	obj, mode, existed, err := readObject(root, path)
 	if err != nil {
 		return []Finding{{File: rel, Level: "fail", Detail: "unreadable: " + err.Error(), Fix: "repair the file by hand; nothing was written"}}
 	}
@@ -368,7 +364,7 @@ func checkOpenCode(path string, repair bool) []Finding {
 		if _, ok := obj["$schema"]; !ok && !existed {
 			obj["$schema"], _ = json.Marshal("https://opencode.ai/config.json")
 		}
-		if err := writeObject(path, obj, mode); err != nil {
+		if err := writeObject(root, path, obj, mode); err != nil {
 			// Nothing landed: no repair happened, whatever was drafted above.
 			return []Finding{{File: rel, Level: "fail", Detail: "cannot write: " + err.Error(), Fix: "make the file writable and re-run; nothing was changed"}}
 		}

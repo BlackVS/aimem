@@ -215,16 +215,27 @@ func ProjectDocs(dir string) []string {
 		out = append(out, DefaultDocPath)
 	}
 	for _, p := range cfg.Docs {
-		p = filepath.ToSlash(filepath.Clean(p))
-		// Windows nuance: IsAbs("/x") is false (rooted, not absolute),
-		// so reject leading slashes and volume names explicitly too.
-		if p == "" || p == "." || strings.HasPrefix(p, "../") || strings.HasPrefix(p, "/") ||
-			filepath.IsAbs(p) || filepath.VolumeName(p) != "" || p == DefaultDocPath {
+		p, ok := checkoutRel(p)
+		if !ok || p == DefaultDocPath {
 			continue
 		}
 		out = append(out, p)
 	}
 	return out
+}
+
+// checkoutRel cleans a path declared in .aimem.json to slash form and
+// reports whether it names something strictly inside the checkout. Windows
+// nuance: IsAbs("/x") is false (rooted, not absolute), so leading slashes
+// and volume names are rejected explicitly too. Links inside the checkout
+// are refused where the file is read or written (package confine).
+func checkoutRel(p string) (string, bool) {
+	p = filepath.ToSlash(filepath.Clean(p))
+	if p == "" || p == "." || p == ".." || strings.HasPrefix(p, "../") || strings.HasPrefix(p, "/") ||
+		filepath.IsAbs(p) || filepath.VolumeName(p) != "" {
+		return "", false
+	}
+	return p, true
 }
 
 // ProjectCollections returns the structured-collection bindings declared
@@ -241,13 +252,7 @@ func ProjectCollections(dir string) []ColBinding {
 			continue
 		}
 		if b.Render != "" {
-			p := filepath.ToSlash(filepath.Clean(b.Render))
-			if p == "" || p == "." || strings.HasPrefix(p, "../") || strings.HasPrefix(p, "/") ||
-				filepath.IsAbs(p) || filepath.VolumeName(p) != "" {
-				b.Render = ""
-			} else {
-				b.Render = p
-			}
+			b.Render, _ = checkoutRel(b.Render)
 		}
 		out = append(out, b)
 	}

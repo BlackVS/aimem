@@ -147,6 +147,19 @@ currently 24); a binary refuses a database newer than it understands.
   and sources drop control and markup characters, and chapter names
   with them are refused from the console and from group-config sync.
   A test fails on any new data-bearing inline handler in the console.
+- **A-2: files in a checkout are never read or written through a link.**
+  Bound shared documents (the checkpoint publisher and pull,
+  `update_doc`, and the `aimem docs` commands), collection renders to a
+  bound path, `aimem handoff compact`, the client files a setup repair
+  writes, and project-level `aimem skills install` now refuse a path
+  when any component below the checkout root is a symbolic link or
+  junction, the file itself included. A link that points inside the
+  checkout is refused too. The checkout root itself may be a link, and
+  user-level directories are written as before. On Windows, a reparse
+  point that does not redirect, such as a cloud-sync placeholder, is not
+  treated as a link. Writes go to a temporary file with an unpredictable
+  name, which is then renamed into place. A `..` binding is no longer
+  accepted from `.aimem.json`.
 
 ## [0.10.6] — 2026-10-16
 

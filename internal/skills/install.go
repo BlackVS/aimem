@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"aimem/internal/confine"
 	"aimem/internal/process"
 )
 
@@ -19,10 +20,13 @@ import (
 // source per skill, so the bootstrap's version check and either installer
 // agree on what is there.
 
-// Target is one skills directory to install into.
+// Target is one skills directory to install into. Root, when set, is the
+// checkout that holds Dir: nothing is then read, written or removed through
+// a link below it (package confine). A user-level directory has no Root.
 type Target struct {
 	Client string
 	Dir    string
+	Root   string
 }
 
 // Installed is one skill written into one target.
@@ -41,6 +45,9 @@ type Installed struct {
 func Install(targets []Target, picks []Skill, files func(digest string) (map[string][]byte, error), now time.Time) ([]Installed, error) {
 	var out []Installed
 	for _, t := range targets {
+		if err := t.check(t.Dir, filepath.Join(t.Dir, process.InstalledRecordName)); err != nil {
+			return out, err
+		}
 		if err := os.MkdirAll(t.Dir, 0o755); err != nil {
 			return out, err
 		}
@@ -71,6 +78,9 @@ func Install(targets []Target, picks []Skill, files func(digest string) (map[str
 			if err != nil {
 				return out, err
 			}
+			if err := t.check(filepath.Join(t.Dir, p.Name)); err != nil {
+				return out, err
+			}
 			replaced, err := writeSkill(t.Dir, p.Name, own)
 			if err != nil {
 				return out, fmt.Errorf("%s into %s: %w", p.Name, t.Dir, err)
@@ -84,7 +94,7 @@ func Install(targets []Target, picks []Skill, files func(digest string) (map[str
 		sort.Strings(rec.Skills)
 		rec.Version = recordVersion(rec, picks)
 		rec.InstalledAt = now.UTC().Format(time.RFC3339)
-		if err := writeRecord(t.Dir, rec); err != nil {
+		if err := t.writeRecord(rec); err != nil {
 			return out, err
 		}
 	}
@@ -146,14 +156,28 @@ func writeSkill(dir, name string, own map[string][]byte) (bool, error) {
 	return replaced, nil
 }
 
-func writeRecord(dir string, rec *process.InstalledRecord) error {
+// check refuses paths that a link below the target's Root leads to.
+func (t Target) check(paths ...string) error {
+	if t.Root == "" {
+		return nil
+	}
+	for _, p := range paths {
+		if err := confine.Check(t.Root, p); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (t Target) writeRecord(rec *process.InstalledRecord) error {
 	raw, err := json.MarshalIndent(rec, "", "  ")
 	if err != nil {
 		return err
 	}
-	tmp := filepath.Join(dir, process.InstalledRecordName+".tmp")
-	if err := os.WriteFile(tmp, append(raw, '\n'), 0o644); err != nil {
-		return err
+	path := filepath.Join(t.Dir, process.InstalledRecordName)
+	root := t.Root
+	if root == "" {
+		root = path // a user-level directory: written as it is reached
 	}
-	return os.Rename(tmp, filepath.Join(dir, process.InstalledRecordName))
+	return confine.WriteFile(root, path, append(raw, '\n'), 0o644)
 }

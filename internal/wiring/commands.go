@@ -6,6 +6,8 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+
+	"aimem/internal/confine"
 )
 
 // Each entry point is one body, rendered once per client with that
@@ -84,7 +86,7 @@ func commandAssets() []commandAsset {
 func InstallCommands(dir, home string, write bool) []Finding {
 	var out []Finding
 	for _, a := range commandAssets() {
-		base := dir
+		base, root := dir, dir
 		if a.User {
 			if home == "" {
 				continue
@@ -93,9 +95,15 @@ func InstallCommands(dir, home string, write bool) []Finding {
 				out = append(out, Finding{File: a.Label, Level: "ok", Detail: "skipped: no Codex home directory on this machine"})
 				continue
 			}
-			base = home
+			base, root = home, ""
 		}
 		path := filepath.Join(base, a.Rel)
+		if root != "" {
+			if err := confine.Check(root, path); err != nil {
+				out = append(out, Finding{File: a.Label, Level: "fail", Detail: err.Error()})
+				continue
+			}
+		}
 		current, err := os.ReadFile(path)
 		switch {
 		case err == nil && string(current) == a.Content:
@@ -116,11 +124,7 @@ func InstallCommands(dir, home string, write bool) []Finding {
 			out = append(out, Finding{File: a.Label, Level: "warn", Detail: "command asset " + state, Fix: "run `aimem teams commands` (or setup without --no-repair) to write it"})
 			continue
 		}
-		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-			out = append(out, Finding{File: a.Label, Level: "fail", Detail: "cannot create the directory: " + err.Error()})
-			continue
-		}
-		if err := writeAtomic(path, []byte(a.Content), 0o644); err != nil {
+		if err := writeAtomic(root, path, []byte(a.Content), 0o644); err != nil {
 			out = append(out, Finding{File: a.Label, Level: "fail", Detail: "cannot write: " + err.Error()})
 			continue
 		}

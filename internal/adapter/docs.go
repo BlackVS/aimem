@@ -13,6 +13,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -21,6 +22,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"aimem/internal/confine"
 	"aimem/internal/diff3"
 	"aimem/internal/ident"
 	"aimem/internal/redact"
@@ -137,7 +139,11 @@ func (c *Client) PublishDocs(projectDir, projectID, hubName, by string) []DocPus
 			continue
 		}
 		seen[docName] = rel
-		body, err := os.ReadFile(filepath.Join(projectDir, filepath.FromSlash(rel)))
+		body, err := confine.ReadFile(projectDir, filepath.Join(projectDir, filepath.FromSlash(rel)))
+		if errors.Is(err, confine.ErrLink) {
+			out = append(out, DocPushResult{Name: docName, Err: fmt.Errorf("%w; not published", err)})
+			continue
+		}
 		if err != nil {
 			continue // an unbound or deleted file is not an error; `docs rm` retires deliberately
 		}
@@ -349,7 +355,11 @@ func (c *Client) ReconcileDocsIn(hub *HubConfig, projectID, dir string) {
 			continue // hub has nothing newer
 		}
 		abs := filepath.Join(dir, filepath.FromSlash(rel))
-		local, err := os.ReadFile(abs)
+		local, err := confine.ReadFile(dir, abs)
+		if errors.Is(err, confine.ErrLink) {
+			c.note("aimem: shared doc %s not reconciled: %v", name, err)
+			continue
+		}
 		if err != nil {
 			continue // no local file: pull is a deliberate act (`docs pull`)
 		}
@@ -359,7 +369,8 @@ func (c *Client) ReconcileDocsIn(hub *HubConfig, projectID, dir string) {
 		}
 		if hashBody(local) == st.Hash {
 			// Fast-forward: nothing local to lose.
-			if err := os.WriteFile(abs, []byte(cur.Body), 0o644); err != nil {
+			if err := confine.WriteFile(dir, abs, []byte(cur.Body), 0o644); err != nil {
+				c.note("aimem: shared doc %s not fast-forwarded: %v", name, err)
 				continue
 			}
 			state[name] = docState{Rev: cur.Rev, Hash: hashBody([]byte(cur.Body))}
@@ -384,7 +395,8 @@ func (c *Client) ReconcileDocsIn(hub *HubConfig, projectID, dir string) {
 			// Same sidecar semantics as `docs merge`: rebase onto the hub
 			// rev with the HUB body's hash, so PublishDocs pushes the
 			// merged file with a valid CAS base on this very sync.
-			if err := os.WriteFile(abs, []byte(merged), 0o644); err != nil {
+			if err := confine.WriteFile(dir, abs, []byte(merged), 0o644); err != nil {
+				c.note("aimem: shared doc %s not merged: %v", name, err)
 				continue
 			}
 			state[name] = docState{Rev: cur.Rev, Hash: hashBody([]byte(cur.Body))}
@@ -399,7 +411,10 @@ func (c *Client) ReconcileDocsIn(hub *HubConfig, projectID, dir string) {
 		// hub may have moved again by the time anyone reads it.
 		header := fmt.Sprintf("aimem merge preview: base rev %d + local %s vs hub rev %d by %s — %d conflict(s); disposable, resolve with `aimem docs merge %s`\n\n",
 			st.Rev, rel, cur.Rev, cur.UpdatedBy, conflicts, name)
-		os.WriteFile(abs+".merge", []byte(header+merged), 0o644)
+		if err := confine.WriteFile(dir, abs+".merge", []byte(header+merged), 0o644); err != nil {
+			c.note("aimem: shared doc %s conflict preview not written: %v", name, err)
+			continue
+		}
 		c.note("aimem: shared doc %s CONFLICTS with hub rev %d (%d overlap(s)) — preview in %s.merge; resolve with `aimem docs merge %s`",
 			name, cur.Rev, conflicts, rel, name)
 	}

@@ -144,7 +144,11 @@ names.
 ```
 
 Document name = the file's base name without extension. Paths stay
-inside the project (no `..`, no absolute paths).
+inside the project (no `..`, no absolute paths), and a bound file is
+never read or written through a symbolic link or junction below the
+checkout root, the file itself included. This holds even for a link
+that points inside the checkout. The checkout root itself may be a link
+(`internal/confine`).
 
 **Local bookkeeping.** CAS needs a base, and it must not come from a
 network round trip — capture never depends on the network. The local

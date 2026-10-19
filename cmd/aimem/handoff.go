@@ -1,6 +1,7 @@
 package main
 
 import (
+	"errors"
 	"flag"
 	"fmt"
 	"os"
@@ -8,6 +9,8 @@ import (
 	"strings"
 	"time"
 
+	"aimem/internal/confine"
+	"aimem/internal/ident"
 	"aimem/internal/redact"
 )
 
@@ -44,6 +47,14 @@ func handoffCmd(args []string) error {
 	dry := fs.Bool("dry-run", false, "print what would move and write nothing")
 	fs.Parse(args[1:])
 
+	archive := filepath.Join(filepath.Dir(*file), "SESSION-STATE-ARCHIVE.md")
+	// A handoff inside the checkout is never read or rewritten through a
+	// link there; one named outside it is the caller's own choice.
+	for _, p := range []string{*file, archive} {
+		if err := confine.Check(ident.ProjectDir("."), p); errors.Is(err, confine.ErrLink) {
+			return err
+		}
+	}
 	raw, err := os.ReadFile(*file)
 	if err != nil {
 		return fmt.Errorf("no handoff to compact: %w", err)
@@ -55,7 +66,6 @@ func handoffCmd(args []string) error {
 		reserveLines, reserveBytes = handoffSummaryMaxLines+3, handoffSummaryMaxBytes+128
 	}
 	plan := planCompact(body, *lines, handoffInjectLimit, reserveLines, reserveBytes)
-	archive := filepath.Join(filepath.Dir(*file), "SESSION-STATE-ARCHIVE.md")
 	if plan.marker && (countLines(plan.current) > *lines || len(plan.current) > handoffInjectLimit) {
 		fmt.Printf("warning: the current state above %s is %d lines, %d bytes, over %d lines or %d bytes; "+
 			"compact moves only what is below the line, so shorten the current state itself.\n",

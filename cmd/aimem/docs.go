@@ -19,6 +19,7 @@ import (
 	"strings"
 
 	"aimem/internal/adapter"
+	"aimem/internal/confine"
 	"aimem/internal/diff3"
 	"aimem/internal/ident"
 	"aimem/internal/store"
@@ -121,7 +122,7 @@ func docsCmd(args []string) error {
 				state = rel
 				// Compare the file against the sidecar's last-synced hash:
 				// free, and avoids one full-body hub fetch per doc.
-				if body, err := os.ReadFile(filepath.Join(dir, filepath.FromSlash(rel))); err == nil {
+				if body, err := confine.ReadFile(dir, filepath.Join(dir, filepath.FromSlash(rel))); err == nil {
 					if last := c.DocSyncHash(projID, d.Name); last != "" && last != hashHex(body) {
 						state += " (local differs)"
 					}
@@ -158,7 +159,7 @@ func docsCmd(args []string) error {
 		if rel == "" {
 			return fmt.Errorf("%q is not a bound file (docs/SESSION-STATE.md is bound by default; add others to .aimem.json \"docs\")", name)
 		}
-		body, err := os.ReadFile(filepath.Join(dir, filepath.FromSlash(rel)))
+		body, err := confine.ReadFile(dir, filepath.Join(dir, filepath.FromSlash(rel)))
 		if err != nil {
 			return err
 		}
@@ -196,6 +197,9 @@ func docsCmd(args []string) error {
 			rel = "docs/" + name + ".md"
 		}
 		abs := filepath.Join(dir, filepath.FromSlash(rel))
+		if err := confine.Check(dir, abs); err != nil {
+			return err
+		}
 		// Never clobber unpublished local work: losing an uncommitted
 		// handoff to a pull would be this feature's worst possible bug.
 		if cur, err := os.ReadFile(abs); err == nil && !force {
@@ -203,10 +207,7 @@ func docsCmd(args []string) error {
 				return fmt.Errorf("%s has local changes not on the hub — `aimem docs diff %s` to compare, --force to overwrite with rev %d", rel, name, doc.Rev)
 			}
 		}
-		if err := os.MkdirAll(filepath.Dir(abs), 0o755); err != nil {
-			return err
-		}
-		if err := os.WriteFile(abs, []byte(doc.Body), 0o644); err != nil {
+		if err := confine.WriteFile(dir, abs, []byte(doc.Body), 0o644); err != nil {
 			return err
 		}
 		c.DocSyncRecord(projID, name, doc.Rev, hashHex([]byte(doc.Body)))
@@ -229,6 +230,9 @@ func docsCmd(args []string) error {
 			return fmt.Errorf("%q has no bound local file — merge needs one (read_doc/update_doc is the unbound flow)", name)
 		}
 		abs := filepath.Join(dir, filepath.FromSlash(rel))
+		if err := confine.Check(dir, abs); err != nil {
+			return err
+		}
 		local, err := os.ReadFile(abs)
 		if err != nil {
 			return fmt.Errorf("no local file to merge (%v) — `aimem docs pull %s` instead", err, name)
@@ -262,7 +266,7 @@ func docsCmd(args []string) error {
 		if err != nil {
 			return err
 		}
-		if err := os.WriteFile(abs, []byte(merged), 0o644); err != nil {
+		if err := confine.WriteFile(dir, abs, []byte(merged), 0o644); err != nil {
 			return err
 		}
 		// A completed merge consumes any reconcile preview beacon.
@@ -299,7 +303,7 @@ func docsCmd(args []string) error {
 		if rel == "" {
 			return fmt.Errorf("%q has no bound local file to diff against", name)
 		}
-		local, err := os.ReadFile(filepath.Join(dir, filepath.FromSlash(rel)))
+		local, err := confine.ReadFile(dir, filepath.Join(dir, filepath.FromSlash(rel)))
 		if err != nil {
 			return err
 		}

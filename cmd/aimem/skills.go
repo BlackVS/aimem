@@ -364,7 +364,11 @@ func skillsTargets(dir, home string, user bool, tool string) ([]skills.Target, e
 			continue
 		}
 		seen[d] = true
-		out = append(out, skills.Target{Client: n, Dir: d})
+		t := skills.Target{Client: n, Dir: d}
+		if !user {
+			t.Root = dir // a project directory is never written through a link
+		}
+		out = append(out, t)
 	}
 	return out, nil
 }
