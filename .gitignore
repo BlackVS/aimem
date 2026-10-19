@@ -13,6 +13,9 @@ bin/
 .creds/
 providers.json
 
+# Temporary scripts and private working artifacts (see AGENTS.md)
+/.work/
+
 # aimem's OWN handoff. The installer creates docs/SESSION-STATE.md in every
 # project it wires, and in YOUR project you should commit it - that is how
 # the handoff reaches your other machines and your teammates. This repo is
