@@ -15,11 +15,11 @@ currently 24); a binary refuses a database newer than it understands.
 
 ## [0.10.9] — 2026-10-19
 
-A hub host without `git` now stores the process sets of a public
-repository on upgrade by itself. `aimem process select`, `refresh` and
-`export` read the forge's commit tarball over https when Git is absent or
-cannot read the commit, and the hub one-liner warns at its start when
-`git` is missing. No schema or API change. Includes PR #247.
+The refresh that the hub one-liner runs after an upgrade now stores the
+process sets of a public repository on a hub host without `git`, with no
+manual step. `aimem process select`, `refresh` and `export` read the
+forge's commit tarball over https when Git is absent or cannot read the
+commit, and the hub one-liner warns at its start when `git` is missing. No schema or API change. Includes PR #247.
 
 ### Upgrade notes
 
