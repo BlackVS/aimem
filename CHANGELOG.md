@@ -13,6 +13,31 @@ currently 24); a binary refuses a database newer than it understands.
 
 ## [Unreleased]
 
+### Upgrade notes
+
+- **Hub hosts: `git`, or https to the forge.** The hub service needs
+  neither, but `aimem process select` and `aimem process refresh` (which
+  the hub one-liner runs after an upgrade) read a process set on the hub
+  host. With `git` they use it; without it they now read the forge's
+  commit tarball over https, so a hub host without `git` refreshes the
+  sets of a public repository on its own. A private or ssh-only
+  repository without `git` still needs the archive import, and selecting
+  by tag needs `git`. The hub one-liner warns at its start when `git` is
+  missing.
+
+### Changed
+
+- **Process sets are read from the forge's tarball when Git cannot read
+  them.** `aimem process select`, `refresh` and `export` try Git first
+  when the host has it, then fetch `<repository>/archive/<commit>.tar.gz`
+  over https (the GitHub and Gitea form; ssh and scp-like repositories
+  have none). The tarball must record the selected commit in its pax
+  header, as `git archive` writes it on both forges, and must hold the
+  manifest; its files are read as an imported archive's are, so the set
+  and its digest are those Git gives. The report says whether a set came
+  from Git, the forge tarball or an archive, and a set read from neither
+  is reported with both reasons and the export command.
+
 ## [0.10.8] — 2026-10-19
 
 People select a project's process by its release tag, and upgrading a

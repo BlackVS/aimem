@@ -446,7 +446,12 @@ that moment (an annotated tag to the commit it points at); the selection
 stores both, the tag for people and the commit as the pin. A name that is
 both a tag and a branch, on different commits, is refused. `select` runs
 on the hub host and reads the set at the commit from Git
-with that host's access, or, with `--from-archive FILE`, from a tar.gz
+with that host's access; on a host without `git`, or when Git cannot read
+it, from the forge's tarball of the commit over https
+(`<repository>/archive/<commit>.tar.gz`, the GitHub and Gitea form,
+fetched anonymously), which must record that commit (`git archive` writes
+it in the tarball's header), and the report names the source. With
+`--from-archive FILE` it reads a tar.gz
 verified against the `SHA256SUMS` beside it (`--sums` names another
 file); a forge's source tarball of the commit works as the archive. For
 a hub host without access to the repository, `aimem process export
@@ -454,6 +459,10 @@ a hub host without access to the repository, `aimem process export
 `<name>-<commit12>.tar.gz` and its `SHA256SUMS` line, to carry over and
 import. The hub keeps the sets of the last five selections, so an earlier
 one is re-selected without an import; the hub itself never runs Git.
+The prerequisites on the hub host are therefore those of these admin
+commands only: `git`, or https to the forge for a public repository
+selected by commit. Resolving a tag needs `git`, and a private or
+ssh-only repository without `git` needs the archive import.
 
 The manifest is JSON (`version` 1 or 2): `handbook` (Markdown path),
 `checklists` (task state to a JSON file of `{state, items:[{id,text}]}`),
@@ -491,8 +500,9 @@ no set, and the member fetches the commit from Git with its own access, as
 before. `aimem process refresh` on the hub host stores those sets from
 the recorded repository, commit, manifest and ref, with the same
 compare-and-swap a re-select makes, and reports each project; the hub
-installer runs it after an upgrade. A set the host cannot read from Git
-is reported with the `aimem process export` command that writes its
+installer runs it after an upgrade, and warns at its start when the host
+has no `git`. A set the host can read neither from Git nor from the
+forge's tarball is reported with the `aimem process export` command that writes its
 archive elsewhere, and `aimem process refresh -p <project> --from-archive
 FILE` imports it. Because the commit comes from the record and is not
 typed, the archive's file name must carry the commit's first 12

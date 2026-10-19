@@ -26,6 +26,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 
@@ -145,12 +146,12 @@ func processCmd(args []string) error {
 				fmt.Fprintf(os.Stderr, "set %s is already kept on this hub: re-selecting it without an import\n", kept[:12])
 				body["digest"] = kept
 			} else {
-				bundle, err := importBundle(sel, *archive, *sums)
+				bundle, source, err := importBundle(sel, *archive, *sums)
 				if err != nil {
 					return err
 				}
 				body["files"] = bundle.Files
-				fmt.Fprintf(os.Stderr, "importing set %s (%d files, %d bytes)\n", bundle.Digest()[:12], len(bundle.Files), bundle.Bytes())
+				fmt.Fprintf(os.Stderr, "importing set %s (%d files, %d bytes, from %s)\n", bundle.Digest()[:12], len(bundle.Files), bundle.Bytes(), source)
 			}
 		}
 		raw, _ := json.Marshal(body)
@@ -297,25 +298,54 @@ func keptSetFor(proj string, sel process.Ref) string {
 }
 
 // importBundle builds the set to send: from the archive when one is named
-// (verified against its SHA256SUMS first), otherwise from Git, through the
-// same bounded fetch a member used to make, into a directory that is
-// removed afterwards.
-func importBundle(sel process.Ref, archive, sums string) (*process.Bundle, error) {
+// (verified against its SHA256SUMS first), otherwise as fetchBundle reads
+// it. It also says where the set came from.
+func importBundle(sel process.Ref, archive, sums string) (*process.Bundle, string, error) {
 	if archive != "" {
 		if sums == "" {
 			sums = filepath.Join(filepath.Dir(archive), "SHA256SUMS")
 		}
 		b, err := process.ReadArchiveFile(archive, sums, sel.Manifest)
 		if err != nil {
-			return nil, fmt.Errorf("archive %s: %w", archive, err)
+			return nil, "", fmt.Errorf("archive %s: %w", archive, err)
 		}
-		return b, nil
+		return b, filepath.Base(archive), nil
 	}
 	return fetchBundle(sel)
 }
 
-// fetchBundle reads the set at the selection's commit from Git.
-func fetchBundle(sel process.Ref) (*process.Bundle, error) {
+// The sources fetchBundle reads, as seams for tests: whether this host has
+// git, the Git read, and the client for the forge's tarball.
+var (
+	gitPresent  = func() bool { _, err := exec.LookPath("git"); return err == nil }
+	fetchGit    = fetchGitBundle
+	forgeClient = http.DefaultClient
+)
+
+// fetchBundle reads the set at the selection's commit from Git when this
+// host has it, and otherwise (or when Git cannot read it) from the forge's
+// tarball of that commit over https, so a hub host without git still reads
+// a set from a public forge. It says which source it read.
+func fetchBundle(sel process.Ref) (*process.Bundle, string, error) {
+	gitErr := errors.New("git is not installed on this host")
+	if gitPresent() {
+		b, err := fetchGit(sel)
+		if err == nil {
+			return b, "Git", nil
+		}
+		gitErr = err
+	}
+	b, err := process.FetchForgeArchive(context.Background(), forgeClient, sel)
+	if err != nil {
+		return nil, "", fmt.Errorf("reading the set from Git: %v; from the forge tarball: %v", gitErr, err)
+	}
+	return b, "the forge tarball", nil
+}
+
+// fetchGitBundle reads the set at the selection's commit from Git, through
+// the same bounded fetch a member used to make, into a directory that is
+// removed afterwards.
+func fetchGitBundle(sel process.Ref) (*process.Bundle, error) {
 	tmp, err := os.MkdirTemp("", "aimem-process-")
 	if err != nil {
 		return nil, err
@@ -325,12 +355,12 @@ func fetchBundle(sel process.Ref) (*process.Bundle, error) {
 	defer cancel()
 	res := process.Fetch(ctx, tmp, sel)
 	if res.Set == nil {
-		return nil, fmt.Errorf("reading the set from Git (%s): %v", res.Status, res.Err)
+		return nil, fmt.Errorf("%s: %v", res.Status, res.Err)
 	}
 	return process.BundleFromDir(res.Set.Dir, sel)
 }
 
-// processExport fetches the set from Git and writes it as
+// processExport reads the set as fetchBundle does and writes it as
 // <name>-<commit12>.tar.gz under out, with its line in out/SHA256SUMS
 // (added, or replaced when the file already names that archive), so the
 // pair can be carried to a hub host without access and imported there with
@@ -339,7 +369,7 @@ func processExport(sel process.Ref, out string) error {
 	if err := sel.Validate(); err != nil {
 		return err
 	}
-	b, err := fetchBundle(sel)
+	b, _, err := fetchBundle(sel)
 	if err != nil {
 		return err
 	}

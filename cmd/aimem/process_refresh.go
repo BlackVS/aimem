@@ -209,7 +209,7 @@ func refreshOne(s projectSelection, archive, sums string) (string, refreshOutcom
 		if archive != "" && !strings.Contains(filepath.Base(archive), sel.Commit[:12]) {
 			return fmt.Sprintf("the archive %s is not named for commit %s (aimem process export names it <set>-%s.tar.gz); nothing stored", filepath.Base(archive), sel.Commit[:12], sel.Commit[:12]), refreshFailed
 		}
-		b, err := importBundle(sel, archive, sums)
+		b, source, err := importBundle(sel, archive, sums)
 		if err != nil {
 			// The commands are pasted into a shell: a manifest path may
 			// hold $, ; or a quote, so each value is quoted where needed.
@@ -220,10 +220,7 @@ func refreshOne(s projectSelection, archive, sums string) (string, refreshOutcom
 			return fmt.Sprintf("needs an archive: %v. On a machine with access: %s; then here: aimem process refresh -p %s --from-archive <file>", err, shellCommand(false, export), shellArg(s.Project, false)), refreshFailed
 		}
 		body["files"] = b.Files
-		from = fmt.Sprintf("%d files", len(b.Files))
-		if archive != "" {
-			from += " from " + filepath.Base(archive)
-		}
+		from = fmt.Sprintf("%d files from %s", len(b.Files), source)
 	}
 	raw, _ := json.Marshal(body)
 	var out struct {
