@@ -26,10 +26,11 @@ func TestForgeArchiveURL(t *testing.T) {
 }
 
 // gitArchive is what a forge serves for a commit: git archive of it, with
-// the forge's leading directory.
+// the forge's leading directory. A forge's git converts no line endings; a
+// Windows runner's core.autocrlf would, and git show never does.
 func gitArchive(t *testing.T, repo, commit, prefix string) []byte {
 	t.Helper()
-	out, err := exec.Command("git", "-C", repo, "archive", "--format=tar.gz", "--prefix="+prefix, commit).Output()
+	out, err := exec.Command("git", "-c", "core.autocrlf=false", "-C", repo, "archive", "--format=tar.gz", "--prefix="+prefix, commit).Output()
 	if err != nil {
 		t.Fatal(err)
 	}
