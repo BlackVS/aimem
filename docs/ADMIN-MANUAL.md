@@ -428,17 +428,24 @@ that version (the set), and serves them to each member under its project
 grant. A member machine needs neither Git nor access to the repository.
 
 ```sh
+aimem process select https://example.com/team/process.git v1.4.0 -p <project>
+aimem process select https://example.com/team/process.git v1.5.0 --expect v1.4.0 -p <project>   # change it later
 aimem process select https://example.com/team/process.git \
-    3f2a…(40-hex commit) process/manifest.json --ref main -p <project>
-aimem process select … --expect <current commit>     # change it later
-aimem process clear --expect <current commit>
+    3f2a…(40-hex commit) process/manifest.json --ref main -p <project>   # by commit, another manifest
+aimem process clear --expect <current tag or commit>
 aimem process show -p <project>                      # what a session gets
 aimem process show --full -p <project>               # the whole unit, plus the repository URL
 aimem process list                                   # every project's selection, and whether its set is stored
 aimem process refresh                                # store the sets of selections that have none
 ```
 
-`select` runs on the hub host and reads the set at the commit from Git
+`select` takes a tag (or a branch) or a full commit, and the manifest
+path, which defaults to `processes/aimem/manifest.json`. A tag is
+resolved on the hub host with `git ls-remote` to the commit it holds at
+that moment (an annotated tag to the commit it points at); the selection
+stores both, the tag for people and the commit as the pin. A name that is
+both a tag and a branch, on different commits, is refused. `select` runs
+on the hub host and reads the set at the commit from Git
 with that host's access, or, with `--from-archive FILE`, from a tar.gz
 verified against the `SHA256SUMS` beside it (`--sums` names another
 file); a forge's source tarball of the commit works as the archive. For
@@ -457,12 +464,17 @@ requires: plain names in version 1; in version 2 each one pinned as
 `budget_bytes` for the injected unit (24 KiB by default). An aimem from
 before version 2 refuses a version 2 manifest outright (a decoding error
 on the skill objects, not a message naming the version), so move to
-version 2 once every member runs a release that reads it. A selection names a full commit id, so what a
-session sees is exactly what was reviewed; the `--ref` lets a machine
-fetch from a server that refuses fetch-by-hash, and the commit must be
-what that ref holds. Changing the selection needs the currently selected
-commit (`--expect`), so two admins cannot overwrite each other unseen;
-every selection stays in the project's history.
+version 2 once every member runs a release that reads it. A selection is
+pinned to a full commit id, so what a session sees is exactly what was
+reviewed, even if the tag it was selected by later moved (release tags of
+a process repository are best protected as immutable); the session's
+`Process set:` line names the tag and the commit. With a commit, `--ref`
+lets a machine fetch from a server that refuses fetch-by-hash, and the
+commit must be what that ref holds. Changing the selection needs the
+current one named in `--expect`, by its commit or by its tag, so two
+admins cannot overwrite each other unseen; re-selecting the commit
+already selected needs no `--expect`. Every selection stays in the
+project's history.
 
 A session names the set by its name (the manifest's directory, else the
 repository's name), commit and manifest, never by the repository URL,

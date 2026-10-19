@@ -29,6 +29,18 @@ currently 24); a binary refuses a database newer than it understands.
 
 ### Added
 
+- **A process is selected by its tag.** `aimem process select <repo>
+  <tag> -p <project>` takes a tag, or a branch, where the commit went.
+  The command on the hub host resolves it with `git ls-remote` (an
+  annotated tag to the commit it points at), and the selection stores
+  both: the tag for people, the commit as the pin, so a session still
+  sees exactly the reviewed commit. The manifest path defaults to
+  `processes/aimem/manifest.json`. `--expect` takes the current
+  selection's tag or commit, and re-selecting the commit already
+  selected needs no `--expect`. A full commit, with `--ref` as the fetch
+  hint, works as before. The session's `Process set:` line names the tag
+  beside the commit. No schema or API change: the selection's existing
+  `ref` field holds the tag.
 - **`aimem process refresh` and `aimem process list`.** Both run on the
   hub host. `list` prints every project with a selection: its commit, its
   ref, its manifest, and whether its set is stored. `refresh` stores the

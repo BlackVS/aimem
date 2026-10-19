@@ -258,8 +258,11 @@ the set as an archive from a machine that can, see the manual).
 On the hub as the service user:
 
 ```sh
-aimem process select https://example.com/team/process.git FULL_40_HEX_COMMIT process/manifest.json --ref main -p my-project
+aimem process select https://example.com/team/process.git v1.4.0 process/manifest.json -p my-project
 ```
+
+The tag is resolved to the commit it holds now, and the selection is
+pinned to that commit; a full 40-character commit works in its place.
 
 Replace the commit placeholder with the reviewed immutable commit. The
 optional `--ref` must resolve to that commit. To replace an existing
