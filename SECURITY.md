@@ -14,6 +14,16 @@ Include the version (`aimem version`), whether the issue affects the
 client, the hub server, or the sync path, and reproduction steps.
 You should receive an initial response within a week.
 
+## Independent security review
+
+Besides the review every change gets before it merges, aimem is reviewed
+as a whole product by an independent, model-assisted security review.
+The first was done on 2026-10-18 with Claude Mythos 5.1. Each release
+that fixes a finding lists it in the Security section of `CHANGELOG.md`,
+one line per finding, saying what was fixed and not how to exploit it.
+Findings that are still open are not published. To report a
+vulnerability yourself, use the advisory form above.
+
 ## Supported versions
 
 The latest release is supported. Versions ≤ 0.1.90 (the MIT-licensed
