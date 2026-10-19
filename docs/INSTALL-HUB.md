@@ -34,6 +34,17 @@ and prints its report; a project it cannot refresh is reported there and
 does not fail the upgrade. An existing `env` file is never overwritten, so re-running is safe. See
 [ADMIN-MANUAL](ADMIN-MANUAL.md#upgrades).
 
+The hub service needs neither Git nor access to a process repository. The
+admin commands that read a process set on the hub host do (`aimem process
+select`, and `aimem process refresh`, which an upgrade runs): with `git`
+installed they read the commit from Git with the host's access; without
+it, or when Git cannot read it, they read the forge's tarball of the
+commit over https (`<repository>/archive/<commit>.tar.gz`, as GitHub and
+Gitea serve it), anonymously. A repository reached over ssh, a private
+one, or a forge the host cannot reach over https then needs the archive
+import, and selecting by tag needs `git`. The script warns at the start
+when `git` is missing and goes on; `apt-get install -y git` adds it.
+
 ## 2. Options
 
 All of these are environment variables set before the command above.

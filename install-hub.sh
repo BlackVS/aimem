@@ -56,6 +56,19 @@ REPO=${AIMEM_REPO:-BlackVS/aimem}
 BASE="https://github.com/$REPO"
 fetch() { curl -fsSL "$@"; }
 
+# BEGIN git-check
+# The hub service never runs git, but the admin commands that read a
+# process set on this host do (aimem process select and refresh, which an
+# upgrade runs). Without git they read the forge's commit tarball over
+# https instead. Said at the start, not after the upgrade; never fatal.
+check_git() {
+  command -v git >/dev/null 2>&1 && return 0
+  echo "WARNING: git is not installed on this host. aimem process select and refresh (run after an upgrade) will read process sets from the forge's commit tarball over https instead. A process repository reached over ssh, private, or on a forge this host cannot reach over https then needs the archive import: aimem process export on a machine with access, then aimem process refresh -p <project> --from-archive <file> here. The hub service itself needs neither. To use git: apt-get install -y git" >&2
+  return 0
+}
+# END git-check
+check_git
+
 # --- service user -----------------------------------------------------------
 if ! id "$HUB_USER" >/dev/null 2>&1; then
   useradd -m -s /bin/bash "$HUB_USER"
