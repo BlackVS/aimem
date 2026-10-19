@@ -211,11 +211,13 @@ func refreshOne(s projectSelection, archive, sums string) (string, refreshOutcom
 		}
 		b, err := importBundle(sel, archive, sums)
 		if err != nil {
-			export := fmt.Sprintf("aimem process export %s %s %s", sel.Repo, sel.Commit, sel.Manifest)
+			// The commands are pasted into a shell: a manifest path may
+			// hold $, ; or a quote, so each value is quoted where needed.
+			export := []string{"aimem", "process", "export", sel.Repo, sel.Commit, sel.Manifest}
 			if sel.Ref != "" {
-				export += " --ref " + sel.Ref
+				export = append(export, "--ref", sel.Ref)
 			}
-			return fmt.Sprintf("needs an archive: %v. On a machine with access: %s; then here: aimem process refresh -p %s --from-archive <file>", err, export, s.Project), refreshFailed
+			return fmt.Sprintf("needs an archive: %v. On a machine with access: %s; then here: aimem process refresh -p %s --from-archive <file>", err, shellCommand(false, export), shellArg(s.Project, false)), refreshFailed
 		}
 		body["files"] = b.Files
 		from = fmt.Sprintf("%d files", len(b.Files))

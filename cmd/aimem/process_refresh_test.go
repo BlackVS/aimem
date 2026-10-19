@@ -7,6 +7,7 @@ package main
 
 import (
 	"encoding/json"
+	"os/exec"
 	"strings"
 	"testing"
 
@@ -173,5 +174,46 @@ func TestProcessRefreshStoresTheSetsOfOldSelections(t *testing.T) {
 	}
 	if _, err := stdoutOf(t, func() error { return processCmd([]string{"refresh", "-p", "none"}) }); err == nil || !strings.Contains(err.Error(), "no process selected") {
 		t.Fatalf("refresh of a project without a selection: %v", err)
+	}
+}
+
+// The fallback command refresh prints is pasted into a shell: a selection
+// may hold characters a shell interprets (a manifest path accepts
+// ' " $ ; & |), and a POSIX shell must read every argument back unchanged.
+func TestProcessRefreshQuotesTheFallbackCommand(t *testing.T) {
+	reg := projectService(t)
+	sel := process.Ref{Repo: "https://127.0.0.1:1/team$1;x.git", Ref: "main", Commit: strings.Repeat("ab", 20), Manifest: `process/team's"$HOME;&|~x.json`, SelectedAt: "2026-10-01T00:00:00Z"}
+	if err := sel.Validate(); err != nil {
+		t.Fatalf("the test selection must be one the hub accepts: %v", err)
+	}
+	db, err := reg.Open("quoted")
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw, _ := json.Marshal(sel)
+	if err := db.SetMeta("process", string(raw)); err != nil {
+		t.Fatal(err)
+	}
+	out, err := stdoutOf(t, func() error { return processCmd([]string{"refresh", "-p", "quoted"}) })
+	if err != nil {
+		t.Fatalf("refresh: %v\n%s", err, out)
+	}
+	const before, after = "On a machine with access: aimem process export ", "; then here: aimem process refresh -p quoted --from-archive <file>"
+	i, j := strings.Index(out, before), strings.LastIndex(out, after)
+	if i < 0 || j < i {
+		t.Fatalf("no fallback command in:\n%s", out)
+	}
+	args := out[i+len(before) : j]
+	sh, err := exec.LookPath("sh")
+	if err != nil {
+		t.Skip("no sh on this machine to read the command back")
+	}
+	got, err := exec.Command(sh, "-c", `printf '%s\n' `+args).Output()
+	if err != nil {
+		t.Fatalf("sh could not read %q: %v", args, err)
+	}
+	want := strings.Join([]string{sel.Repo, sel.Commit, sel.Manifest, "--ref", "main"}, "\n") + "\n"
+	if string(got) != want {
+		t.Fatalf("sh read back\n%q\nwant\n%q", got, want)
 	}
 }
