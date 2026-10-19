@@ -1,9 +1,11 @@
 package ident
 
 import (
+	"encoding/json"
 	"errors"
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 )
 
@@ -146,6 +148,28 @@ func TestProjectDocsBinding(t *testing.T) {
 	docs := ProjectDocs(dir)
 	if len(docs) != 2 || docs[0] != DefaultDocPath || docs[1] != "docs/RUNBOOK.md" {
 		t.Fatalf("extras wrong: %v", docs)
+	}
+	// Every spelling that leaves the checkout is dropped: a parent, a
+	// mid-path "..", a rooted path, and on Windows a volume (absolute or
+	// drive-relative), a UNC share and backslashed parents.
+	escapes := []string{"..", "docs/../../escape.md", "docs/./../../escape.md", "/abs.md", "//server/share/x.md"}
+	if runtime.GOOS == "windows" {
+		escapes = append(escapes, `C:\x.md`, "C:x.md", `\\server\share\x.md`, `..\escape.md`, `docs\..\..\escape.md`)
+	}
+	for _, e := range escapes {
+		raw, _ := json.Marshal(map[string]any{"docs": []string{e}, "collections": []map[string]string{{"name": "c", "render": e}}})
+		os.WriteFile(filepath.Join(dir, ".aimem.json"), raw, 0o600)
+		if docs := ProjectDocs(dir); len(docs) != 1 || docs[0] != DefaultDocPath {
+			t.Errorf("docs binding %q kept: %v", e, docs)
+		}
+		if cols := ProjectCollections(dir); len(cols) != 1 || cols[0].Render != "" {
+			t.Errorf("render path %q kept: %+v", e, cols)
+		}
+	}
+	// A path that merely mentions ".." inside the checkout stays bound.
+	os.WriteFile(filepath.Join(dir, ".aimem.json"), []byte(`{"docs":["docs/x/../RUNBOOK.md"]}`), 0o600)
+	if docs := ProjectDocs(dir); len(docs) != 2 || docs[1] != "docs/RUNBOOK.md" {
+		t.Fatalf("an inside path was dropped: %v", docs)
 	}
 	// Explicit empty list opts out of everything, default included.
 	os.WriteFile(filepath.Join(dir, ".aimem.json"), []byte(`{"docs":[]}`), 0o600)

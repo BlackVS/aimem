@@ -17,6 +17,7 @@ import (
 	"strings"
 
 	"aimem/internal/adapter"
+	"aimem/internal/confine"
 	"aimem/internal/ident"
 	"aimem/internal/redact"
 )
@@ -289,11 +290,16 @@ conflict. Declare bindings in .aimem.json {"collections":[{"name","scope","rende
 		if err != nil {
 			return err
 		}
-		target := *out
+		// root confines the writes. A target the binding names lies in the
+		// checkout and is never written through a link there; an explicit
+		// --out is the caller's own choice, and only directory mode's file
+		// names, which come from record ids, are held inside it.
+		target, root := *out, ""
 		if target == "" {
 			if b := binding(name); b != nil && b.Render != "" {
 				// Render paths are relative to the governing .aimem.json.
-				target = filepath.Join(ident.ProjectDir(dir), filepath.FromSlash(b.Render))
+				root = ident.ProjectDir(dir)
+				target = filepath.Join(root, filepath.FromSlash(b.Render))
 			}
 		}
 		recs, err := c.ListHubRecords(hub, p, name, true)
@@ -315,10 +321,15 @@ conflict. Declare bindings in .aimem.json {"collections":[{"name","scope","rende
 				fmt.Print(doc)
 				return nil
 			}
-			if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
-				return err
+			if root == "" {
+				err = os.MkdirAll(filepath.Dir(target), 0o755)
+				if err == nil {
+					err = os.WriteFile(target, []byte(doc), 0o644)
+				}
+			} else {
+				err = confine.WriteFile(root, target, []byte(doc), 0o644)
 			}
-			if err := os.WriteFile(target, []byte(doc), 0o644); err != nil {
+			if err != nil {
 				return err
 			}
 			fmt.Printf("%s: %d records -> %s\n", name, len(live), target)
@@ -334,12 +345,15 @@ conflict. Declare bindings in .aimem.json {"collections":[{"name","scope","rende
 			}
 			branches[top] = append(branches[top], r)
 		}
-		if err := os.MkdirAll(target, 0o755); err != nil {
+		if root == "" {
+			root = target
+		}
+		if err := confine.MkdirAll(root, target, 0o755); err != nil {
 			return err
 		}
 		for _, top := range order {
 			doc := renderCollection(name, branches[top], top)
-			if err := os.WriteFile(filepath.Join(target, top+".md"), []byte(doc), 0o644); err != nil {
+			if err := confine.WriteFile(root, filepath.Join(target, top+".md"), []byte(doc), 0o644); err != nil {
 				return err
 			}
 		}

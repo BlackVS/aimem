@@ -20,6 +20,7 @@ import (
 	"strings"
 
 	"aimem/internal/adapter"
+	"aimem/internal/confine"
 	"aimem/internal/ident"
 	"aimem/internal/redact"
 	"aimem/internal/store"
@@ -926,8 +927,9 @@ func (s *srv) docTool(p *toolParams) (string, error) {
 		// conflict, and the local file would silently go stale.
 		if !strings.HasPrefix(a.Scope, "group:") {
 			if rel := boundDocPath(".", a.Name); rel != "" {
-				path := filepath.Join(ident.ProjectDir("."), filepath.FromSlash(rel))
-				if werr := writeFileAtomic(path, []byte(a.Body)); werr == nil {
+				root := ident.ProjectDir(".")
+				path := filepath.Join(root, filepath.FromSlash(rel))
+				if werr := confine.WriteFile(root, path, []byte(a.Body), 0o644); werr == nil {
 					c.DocSyncRecord(project, a.Name, doc.Rev, adapter.DocBodyHash([]byte(a.Body)))
 					msg += ", bound file " + rel + " rewritten"
 				} else {
@@ -1021,16 +1023,6 @@ func boundDocPath(dir, name string) string {
 		}
 	}
 	return ""
-}
-
-// writeFileAtomic mirrors the codebase's tmp+rename habit so a crash
-// mid-write can never leave a half-written bound file.
-func writeFileAtomic(path string, body []byte) error {
-	tmp := path + ".tmp"
-	if err := os.WriteFile(tmp, body, 0o644); err != nil {
-		return err
-	}
-	return os.Rename(tmp, path)
 }
 
 // mcpStateRoot mirrors the CLI's state-root resolution: docs tools reach
