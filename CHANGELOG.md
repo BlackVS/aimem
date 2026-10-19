@@ -43,8 +43,9 @@ currently 24); a binary refuses a database newer than it understands.
   `ref` field holds the tag. The next step that `aimem tasks on`,
   `aimem project show` and the admin API print for a project with no
   process, and a member's not-ready message, now show the tag form. A
-  process the hub already uses is offered by the tag it was selected by,
-  with the commit it is at as a note, or by its commit when it has no tag.
+  process the hub already uses is still offered by its exact commit, with
+  the tag it was selected by as `--ref`, so the new project follows the
+  same version as the others.
 - **`aimem process refresh` and `aimem process list`.** Both run on the
   hub host. `list` prints every project with a selection: its commit, its
   ref, its manifest, and whether its set is stored. `refresh` stores the

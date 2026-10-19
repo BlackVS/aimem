@@ -27,10 +27,11 @@ const inUseShown = 5
 // process selected: the selection command for it, complete with the
 // values of each process the hub already uses (most used first), or, when
 // it uses none, with the values explained. A process in use is offered by
-// the tag it was selected by, with the commit the other projects follow,
-// or by that commit when it was selected by commit alone. It names
-// commands only; the admin chooses and runs one, which records the pin
-// like any other selection.
+// its exact commit, with the tag or branch it was selected by as --ref, so
+// the new project follows the same version as the others: running a ref
+// again would resolve it anew, and a branch or a moved tag would give
+// another commit. It names commands only; the admin chooses and runs one,
+// which records the pin like any other selection.
 func NextStep(project string, inUse []InUse) string {
 	var b strings.Builder
 	if len(inUse) == 0 {
@@ -49,11 +50,11 @@ func NextStep(project string, inUse []InUse) string {
 			break
 		}
 		fmt.Fprintf(&b, "  as %s:\n", strings.Join(u.Projects, ", "))
+		fmt.Fprintf(&b, "    aimem process select %s %s %s", shellArg(u.Repo), shellArg(u.Commit), shellArg(u.Manifest))
 		if u.Ref != "" {
-			fmt.Fprintf(&b, "    aimem process select %s %s %s -p %s  # at %s\n", shellArg(u.Repo), shellArg(u.Ref), shellArg(u.Manifest), shellArg(project), u.Commit)
-		} else {
-			fmt.Fprintf(&b, "    aimem process select %s %s %s -p %s\n", shellArg(u.Repo), shellArg(u.Commit), shellArg(u.Manifest), shellArg(project))
+			fmt.Fprintf(&b, " --ref %s", shellArg(u.Ref))
 		}
+		fmt.Fprintf(&b, " -p %s\n", shellArg(project))
 	}
 	fmt.Fprintf(&b, "  or another process: aimem process select <repo> <tag> [<manifest>] -p %s\n", shellArg(project))
 	return b.String()

@@ -9,8 +9,8 @@ import (
 
 // With no process in use on the hub, the next step explains the values
 // with an example each; with some, it offers each one as a complete
-// command, in the order given, and at most inUseShown of them: by the tag
-// it was selected by, naming the commit it is at, or by its commit.
+// command, in the order given, and at most inUseShown of them: by its
+// exact commit, with the tag it was selected by as --ref.
 func TestNextStep(t *testing.T) {
 	got := NextStep("new", nil)
 	for _, want := range []string{
@@ -29,12 +29,12 @@ func TestNextStep(t *testing.T) {
 		{Repo: "https://example.com/p.git", Ref: "v1.4.0", Commit: c1, Manifest: "m.json", Projects: []string{"alpha", "beta"}},
 		{Repo: "git@example.com:o/q.git", Commit: c2, Manifest: "x/m.json", Projects: []string{"gamma"}},
 	})
-	first := "  as alpha, beta:\n    aimem process select https://example.com/p.git v1.4.0 m.json -p new  # at " + c1 + "\n"
+	first := "  as alpha, beta:\n    aimem process select https://example.com/p.git " + c1 + " m.json --ref v1.4.0 -p new\n"
 	second := "  as gamma:\n    aimem process select git@example.com:o/q.git " + c2 + " x/m.json -p new\n"
 	if !strings.Contains(got, first) || !strings.Contains(got, second) || strings.Index(got, first) > strings.Index(got, second) {
 		t.Fatalf("processes in use:\n%s", got)
 	}
-	if strings.Contains(got, "<repo>      ") || strings.Contains(got, "--ref") {
+	if strings.Contains(got, "<repo>      ") {
 		t.Fatalf("the example explanation is printed although processes are in use:\n%s", got)
 	}
 
@@ -50,7 +50,7 @@ func TestNextStep(t *testing.T) {
 
 // An offered command runs as printed: a selection may hold characters a
 // shell interprets (the manifest path accepts ' " $ ; & |), and a POSIX
-// shell must read every argument back unchanged and skip the commit note.
+// shell must read every argument back unchanged.
 func TestNextStepQuotesForTheShell(t *testing.T) {
 	sel := Ref{Repo: "https://example.com/team$1;x.git", Ref: "main", Commit: strings.Repeat("1", 40), Manifest: `process/team's"$HOME;&|~x.json`}
 	if err := sel.Validate(); err != nil {
@@ -74,7 +74,7 @@ func TestNextStepQuotesForTheShell(t *testing.T) {
 	if err != nil {
 		t.Fatalf("sh could not read the command: %v", err)
 	}
-	want := strings.Join([]string{sel.Repo, "main", sel.Manifest, "-p", "beta"}, "\n") + "\n"
+	want := strings.Join([]string{sel.Repo, sel.Commit, sel.Manifest, "--ref", "main", "-p", "beta"}, "\n") + "\n"
 	if string(out) != want {
 		t.Fatalf("sh read back\n%q\nwant\n%q", out, want)
 	}

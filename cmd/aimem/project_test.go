@@ -176,7 +176,7 @@ func TestTasksOnWithoutProcessIsAnUnfinishedSetup(t *testing.T) {
 
 	// A second project is offered the process the hub already uses, as a
 	// complete command; turning its tasks on selects nothing.
-	offered := "aimem process select https://example.com/process.git main process/manifest.json -p beta  # at " + commit
+	offered := "aimem process select https://example.com/process.git " + commit + " process/manifest.json --ref main -p beta"
 	if out := tasks("on", "beta"); !strings.Contains(out, notReady) || !strings.Contains(out, "as example:") || !strings.Contains(out, offered) || strings.Contains(out, values) {
 		t.Fatalf("tasks on, a process in use elsewhere:\n%s", out)
 	}
