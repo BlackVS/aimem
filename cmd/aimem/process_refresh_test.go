@@ -104,6 +104,38 @@ func TestProcessRefreshStoresTheSetsOfOldSelections(t *testing.T) {
 		t.Fatalf("a stored selection changed:\n%+v\n%+v", before, after)
 	}
 
+	// A selection the hub cannot read is that project's outcome: the run
+	// goes on to the others and succeeds. Named alone, it is the error.
+	broken, err := reg.Open("broken")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := broken.SetMeta("process", "{not json"); err != nil {
+		t.Fatal(err)
+	}
+	out = run("refresh")
+	if l := lineOf(out, "broken"); !strings.Contains(l, "selection unreadable, nothing stored") {
+		t.Fatalf("refresh, broken: %q", l)
+	}
+	for _, p := range []string{"legacy", "nogit"} {
+		if l := lineOf(out, p); !strings.Contains(l, "needs an archive") {
+			t.Fatalf("refresh with a broken project, %s: %q", p, l)
+		}
+	}
+	if !strings.Contains(out, "0 refreshed, 1 already stored, 3 need attention") {
+		t.Fatalf("refresh summary with a broken project:\n%s", out)
+	}
+	out = run("list")
+	if l := lineOf(out, "broken"); !strings.Contains(l, "unreadable") {
+		t.Fatalf("list, broken: %q", l)
+	}
+	if !strings.Contains(out, "2 selection(s) without a stored set") || !strings.Contains(out, "1 selection(s) the hub cannot read") {
+		t.Fatalf("list with a broken project:\n%s", out)
+	}
+	if _, err := stdoutOf(t, func() error { return processCmd([]string{"refresh", "-p", "broken"}) }); err == nil || !strings.Contains(err.Error(), "project broken") {
+		t.Fatalf("refresh -p of an unreadable selection: %v", err)
+	}
+
 	// An archive is one selection's set: it needs -p, and it must be the
 	// one exported for that commit.
 	if _, err := stdoutOf(t, func() error { return processCmd([]string{"refresh", "--from-archive", archive2}) }); err == nil || !strings.Contains(err.Error(), "-p") {

@@ -24,15 +24,20 @@ import (
 	"aimem/internal/store"
 )
 
-// projectSelection is one project's current selection.
+// projectSelection is one project's current selection, or the error that
+// kept it from being read.
 type projectSelection struct {
 	Project string
 	Ref     process.Ref
+	Err     error
 }
 
 // processSelections returns the current selection of the named project,
 // or of every ordinary project on this hub that has one, in the hub's
-// project order.
+// project order. Only listing the projects is fatal for the whole hub: a
+// project whose selection cannot be read is returned with its error, so
+// the others are still listed and refreshed. For a named project, that
+// error is the result.
 func processSelections(only string) ([]projectSelection, error) {
 	ids := []string{only}
 	if only == "" {
@@ -51,7 +56,11 @@ func processSelections(only string) ([]projectSelection, error) {
 		}
 		ref, err := currentSelection(p)
 		if err != nil {
-			return nil, fmt.Errorf("project %s: %w", p, err)
+			if only != "" {
+				return nil, fmt.Errorf("project %s: %w", p, err)
+			}
+			out = append(out, projectSelection{Project: p, Err: err})
+			continue
 		}
 		if ref == nil {
 			if only != "" {
@@ -106,8 +115,13 @@ func processListCmd(args []string) error {
 		width = max(width, len(s.Project))
 	}
 	fmt.Printf("%-*s  %-12s  %-40s  %s\n", width, "PROJECT", "SET", "COMMIT", "REF  MANIFEST")
-	missing := 0
+	missing, unreadable := 0, 0
 	for _, s := range sels {
+		if s.Err != nil {
+			fmt.Printf("%-*s  %-12s  selection unreadable: %v\n", width, s.Project, "unreadable", s.Err)
+			unreadable++
+			continue
+		}
 		set := "stored"
 		if s.Ref.Digest == "" {
 			set, missing = "not stored", missing+1
@@ -120,6 +134,9 @@ func processListCmd(args []string) error {
 	}
 	if missing > 0 {
 		fmt.Printf("\n%d selection(s) without a stored set: run `aimem process refresh` on this host.\n", missing)
+	}
+	if unreadable > 0 {
+		fmt.Printf("%d selection(s) the hub cannot read: select the process again with `aimem process select` (see `aimem health` and the hub log).\n", unreadable)
 	}
 	return nil
 }
@@ -170,6 +187,9 @@ const (
 // says what it did. A set it cannot read is reported with the commands
 // that supply it, never as a failure of the whole run.
 func refreshOne(s projectSelection, archive, sums string) (string, refreshOutcome) {
+	if s.Err != nil {
+		return "selection unreadable, nothing stored: " + s.Err.Error(), refreshFailed
+	}
 	sel := s.Ref.Key()
 	if s.Ref.Digest != "" {
 		return fmt.Sprintf("already stored (set %s, commit %s)", s.Ref.Digest[:12], sel.Commit[:12]), refreshStored
