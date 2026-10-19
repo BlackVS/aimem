@@ -258,12 +258,17 @@ the set as an archive from a machine that can, see the manual).
 On the hub as the service user:
 
 ```sh
-aimem process select https://example.com/team/process.git FULL_40_HEX_COMMIT process/manifest.json --ref main -p my-project
+aimem process select https://example.com/team/process.git v1.4.0 process/manifest.json -p my-project
 ```
 
-Replace the commit placeholder with the reviewed immutable commit. The
-optional `--ref` must resolve to that commit. To replace an existing
-selection, also pass `--expect CURRENT_40_HEX_COMMIT`.
+The tag is resolved to the commit it holds now, and the selection is
+pinned to that commit; a full 40-character commit works in its place.
+
+Use a release tag of the process repository; without a manifest path the
+default `processes/aimem/manifest.json` is used. To replace an existing
+selection, also pass `--expect` with the current selection's tag or
+commit (`aimem process show -p my-project` names both); re-selecting the
+same commit and manifest needs no `--expect`.
 
 On the agent machine, inside the project:
 

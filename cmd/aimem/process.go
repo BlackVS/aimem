@@ -34,16 +34,21 @@ import (
 	"aimem/internal/processctx"
 )
 
-const processUsage = `usage: aimem process select <repo> <commit> <manifest> [--ref <branch|tag>] [--from-archive <file>] [--sums <file>] [--expect <commit>] [-p <project>]
+const processUsage = `usage: aimem process select <repo> <tag|commit> [<manifest>] [--ref <branch|tag>] [--from-archive <file>] [--sums <file>] [--expect <tag|commit>] [-p <project>]
        aimem process export <repo> <commit> <manifest> [--ref <branch|tag>] [--out <dir>]
-       aimem process clear --expect <commit> [-p <project>]
+       aimem process clear --expect <tag|commit> [-p <project>]
        aimem process list
        aimem process refresh [-p <project>] [--from-archive <file>] [--sums <file>]
        aimem process show [--full] [--template <kind>] [-p <project>]
 
-select, clear, list and refresh run on the hub host (admin). select reads
-the set at the commit from Git, or with --from-archive from a tar.gz
-verified against the SHA256SUMS beside it (--sums names another file), and
+select, clear, list and refresh run on the hub host (admin). select takes
+a tag (or a branch) or a full commit: a tag is resolved to the commit it
+holds now (git ls-remote on this host), and the selection stores both and
+stays pinned to that commit. The manifest defaults to
+processes/aimem/manifest.json. --expect names the current selection by
+its commit or its tag; re-selecting the commit and manifest already selected needs
+none. select reads the set at the commit from Git, or with --from-archive
+from a tar.gz verified against the SHA256SUMS beside it (--sums names another file), and
 stores it on the hub with the selection; a set the hub already keeps (the
 last 5 selections) is re-selected without a new import. export writes that
 archive and its SHA256SUMS line on a machine with access to the
@@ -68,8 +73,8 @@ func processCmd(args []string) error {
 	case "select", "clear", "export":
 		fs := flag.NewFlagSet("process "+args[0], flag.ExitOnError)
 		p := projectFlag(fs, "project id (default: current directory's project)")
-		ref := fs.String("ref", "", "branch or tag to fetch when the server refuses fetch-by-hash")
-		expect := fs.String("expect", "", "the commit currently selected (compare-and-swap); empty when none")
+		ref := fs.String("ref", "", "with a commit: the branch or tag to fetch when the server refuses fetch-by-hash")
+		expect := fs.String("expect", "", "the commit or tag currently selected (compare-and-swap); empty when none or when re-selecting the same commit")
 		archive := fs.String("from-archive", "", "import the set from this tar.gz instead of Git")
 		sums := fs.String("sums", "", "the SHA256SUMS file that names the archive (default: SHA256SUMS beside it)")
 		out := fs.String("out", ".", "export: the directory to write the archive and SHA256SUMS into")
@@ -94,17 +99,44 @@ func processCmd(args []string) error {
 		if err != nil {
 			return err
 		}
-		body := map[string]any{"expected_commit": *expect}
+		body := map[string]any{}
 		if args[0] == "clear" {
 			body["clear"] = true
+			expected, err := expectedCommit(proj, *expect, nil)
+			if err != nil {
+				return err
+			}
+			body["expected_commit"] = expected
 		} else {
-			if len(pos) != 3 {
+			if len(pos) != 2 && len(pos) != 3 {
 				return fmt.Errorf("%s", usage)
 			}
-			sel := process.Ref{Repo: pos[0], Commit: pos[1], Manifest: pos[2], Ref: *ref}
+			sel := process.Ref{Repo: pos[0], Commit: pos[1], Manifest: process.DefaultManifest, Ref: *ref}
+			if len(pos) == 3 {
+				sel.Manifest = pos[2]
+			}
+			if !process.IsCommit(pos[1]) {
+				if *ref != "" {
+					return errors.New("--ref goes with a commit; a tag or branch is resolved to its commit and stored as the ref")
+				}
+				commit, err := resolveRef(sel.Repo, pos[1])
+				if err != nil {
+					if looksLikeCommit(pos[1]) {
+						return fmt.Errorf("resolving %s: %w (a commit must be the full 40-character lowercase hex id)", pos[1], err)
+					}
+					return fmt.Errorf("resolving %s: %w", pos[1], err)
+				}
+				sel.Ref, sel.Commit = pos[1], commit
+				fmt.Fprintf(os.Stderr, "%s holds commit %s: selecting it\n", pos[1], commit)
+			}
 			if err := sel.Validate(); err != nil {
 				return err
 			}
+			expected, err := expectedCommit(proj, *expect, &sel)
+			if err != nil {
+				return err
+			}
+			body["expected_commit"] = expected
 			body["repo"], body["commit"], body["manifest"] = sel.Repo, sel.Commit, sel.Manifest
 			if sel.Ref != "" {
 				body["ref"] = sel.Ref
@@ -168,6 +200,66 @@ func processCmd(args []string) error {
 		return nil
 	}
 	return fmt.Errorf("%s", usage)
+}
+
+// looksLikeCommit reports whether s could be meant as a commit id that is
+// not in the full lowercase form select takes: an abbreviation, or
+// uppercase hex.
+func looksLikeCommit(s string) bool {
+	if len(s) < 7 || len(s) > 40 {
+		return false
+	}
+	for _, c := range strings.ToLower(s) {
+		if !strings.ContainsRune("0123456789abcdef", c) {
+			return false
+		}
+	}
+	return true
+}
+
+// resolveRef resolves a tag or branch to its commit with git ls-remote on
+// this host; tests replace it.
+var resolveRef = func(repo, name string) (string, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 3*process.FetchTimeout)
+	defer cancel()
+	return process.Resolve(ctx, repo, name)
+}
+
+// expectedCommit turns --expect into the commit the hub's compare-and-swap
+// needs. A full commit passes as given. A tag or branch must be the
+// current selection's ref, and stands for its commit. Without --expect,
+// re-selecting the same process version (next: the same commit and
+// manifest as the current selection) needs no confirmation, so the
+// current commit is sent; anything else sends nothing, and the hub refuses
+// a change of an existing selection. A clear passes next nil.
+func expectedCommit(proj, expect string, next *process.Ref) (string, error) {
+	if process.IsCommit(expect) {
+		return expect, nil
+	}
+	cur, err := currentSelection(proj)
+	if err != nil {
+		if expect == "" {
+			return "", nil // the hub decides; a read failure here hides nothing
+		}
+		return "", fmt.Errorf("--expect %s: reading the current selection: %w", expect, err)
+	}
+	if expect == "" {
+		if cur != nil && next != nil && cur.Commit == next.Commit && cur.Manifest == next.Manifest {
+			return cur.Commit, nil
+		}
+		return "", nil
+	}
+	if cur == nil {
+		return "", fmt.Errorf("--expect %s: project %s has no process selected; leave --expect out", expect, proj)
+	}
+	if cur.Ref == "" || cur.Ref != expect {
+		ref := cur.Ref
+		if ref == "" {
+			ref = "none"
+		}
+		return "", fmt.Errorf("--expect %s is neither the selected commit nor the selected ref (selected: ref %s, commit %s)", expect, ref, cur.Commit)
+	}
+	return cur.Commit, nil
 }
 
 // keptSetFor asks the hub whether it still keeps a set for exactly this

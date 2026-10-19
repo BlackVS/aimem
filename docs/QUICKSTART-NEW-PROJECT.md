@@ -82,21 +82,21 @@ and requires the `oh-code-review` skill from step 3.2. Read its
 before you select it; a project with other rules copies the
 set into a repository of its own and selects that instead.
 
-A selection names a full 40-character commit, never a branch, so the
-agents read exactly what you reviewed. Look up the commit `main` holds
-now (`git ls-remote` runs on any machine with Git), then select it:
+Select a release tag of the repository. The hub host resolves the tag to
+the commit it holds now and pins the selection to that commit, so the
+agents read exactly what you reviewed; the manifest path defaults to
+`processes/aimem/manifest.json`:
 
 ```sh
-git ls-remote https://github.com/BlackVS/aiskills.git refs/heads/main
-aimem process select https://github.com/BlackVS/aiskills.git FULL_40_HEX_COMMIT processes/aimem/manifest.json --ref main -p my-project
+aimem process select https://github.com/BlackVS/aiskills.git TAG -p my-project
 ```
 
-Replace `FULL_40_HEX_COMMIT` with the first column of the `git
-ls-remote` output. The command reads the files at that commit on the hub
+Replace `TAG` with a release tag of that repository. A full 40-character
+commit works in its place too. The command reads the files at that commit on the hub
 host and stores them on the hub with the selection; each workstation reads
 them from the hub, and step 3.6 checks that it does. To move to a
-newer commit later, select it with `--expect` and the commit selected
-now; see
+newer release later, select its tag with `--expect` and the tag (or
+commit) selected now; see
 [the administrator manual](ADMIN-MANUAL.md#selecting-a-projects-process-documents).
 
 **The user and the grant.** List the users first and skip `user-add` if

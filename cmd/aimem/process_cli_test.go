@@ -8,6 +8,7 @@ package main
 import (
 	"encoding/json"
 	"os"
+	"path"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -19,7 +20,7 @@ import (
 // the export's own writer and returns both paths.
 func exportFixture(t *testing.T, repo, commit, manifest string) (archive, sums string) {
 	t.Helper()
-	dir := filepath.Dir(manifest)
+	dir := path.Dir(manifest) // a repository path, slash-separated on every platform
 	b := &process.Bundle{Version: 1, Manifest: manifest, Files: map[string][]byte{
 		manifest:             []byte(`{"version":1,"handbook":"` + dir + `/HANDBOOK.md","templates":{"task":"` + dir + `/task.json"}}`),
 		dir + "/HANDBOOK.md": []byte("# Handbook\n\nExported rules.\n"),

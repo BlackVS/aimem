@@ -33,7 +33,7 @@ import (
 // exact version of it this project follows.
 type Ref struct {
 	Repo       string `json:"repo"`
-	Ref        string `json:"ref,omitempty"`    // branch or tag to fetch when the server refuses fetch-by-hash
+	Ref        string `json:"ref,omitempty"`    // the tag or branch the commit was selected by (resolved at selection), or the fetch hint given with a commit
 	Commit     string `json:"commit"`           // full 40-hex commit id
 	Manifest   string `json:"manifest"`         // manifest path in the repository at that commit
 	Digest     string `json:"digest,omitempty"` // SHA-256 of the stored set (Digest); empty for a selection made before the hub stored sets
@@ -52,13 +52,8 @@ var (
 // commit id, a relative manifest path that stays inside the repository,
 // and an optional plain ref name.
 func (r Ref) Validate() error {
-	if len(r.Repo) == 0 || len(r.Repo) > 512 || strings.ContainsAny(r.Repo, " \t\r\n\"'") || strings.HasPrefix(r.Repo, "-") {
-		return errors.New("repo must be a Git URL (at most 512 bytes, no whitespace)")
-	}
-	switch {
-	case strings.HasPrefix(r.Repo, "https://"), strings.HasPrefix(r.Repo, "ssh://"), strings.HasPrefix(r.Repo, "git@"):
-	default:
-		return errors.New("repo must start with https://, ssh:// or git@")
+	if err := checkRepo(r.Repo); err != nil {
+		return err
 	}
 	if !commitRE.MatchString(r.Commit) {
 		return errors.New("commit must be the full 40-character lowercase hex id")
@@ -76,6 +71,20 @@ func (r Ref) Validate() error {
 		return errors.New("name must be one word of at most 128 bytes")
 	}
 	return nil
+}
+
+// checkRepo checks that repo is a Git URL a client can hand to git: https,
+// ssh, or the scp-like form, without whitespace or a leading dash.
+func checkRepo(repo string) error {
+	if len(repo) == 0 || len(repo) > 512 || strings.ContainsAny(repo, " \t\r\n\"'") || strings.HasPrefix(repo, "-") {
+		return errors.New("repo must be a Git URL (at most 512 bytes, no whitespace)")
+	}
+	switch {
+	case strings.HasPrefix(repo, "https://"), strings.HasPrefix(repo, "ssh://"), strings.HasPrefix(repo, "git@"):
+		return nil
+	default:
+		return errors.New("repo must start with https://, ssh:// or git@")
+	}
 }
 
 // Key is the selection without its stamps and derived fields: what makes
@@ -628,7 +637,7 @@ var TaskTools = []string{"list_tasks", "get_task", "create_task", "update_task",
 func Bootstrap(set *Set, projectID string, installed func(name string) SkillState) (string, error) {
 	var b strings.Builder
 	fmt.Fprintf(&b, "Tasks (Kanban) are ON for project %s. Task tools: %s.\n", projectID, strings.Join(TaskTools, ", "))
-	fmt.Fprintf(&b, "Process set: %s @ %s (manifest %s)%s.\n", set.Ref.DisplayName(), set.Ref.Commit[:12], set.Ref.Manifest, map[bool]string{true: ", from this machine's cache", false: ""}[set.FromCache])
+	fmt.Fprintf(&b, "Process set: %s%s @ %s (manifest %s)%s.\n", set.Ref.DisplayName(), map[bool]string{true: " " + set.Ref.Ref, false: ""}[set.Ref.Ref != ""], set.Ref.Commit[:12], set.Ref.Manifest, map[bool]string{true: ", from this machine's cache", false: ""}[set.FromCache])
 	if len(set.Manifest.Skills) > 0 {
 		b.WriteString("Required skills: ")
 		parts := make([]string, 0, len(set.Manifest.Skills))
