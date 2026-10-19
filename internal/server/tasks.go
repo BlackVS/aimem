@@ -100,6 +100,14 @@ const repositoryReadRoute = "GET /v1/projects/{p}/repository"
 // served by its handler only under a current grant on the project.
 const processSetReadRoute = "GET /v1/projects/{p}/process/set"
 
+// The hub-served skills set (skills.go): the index of the imported sets
+// with the effective skills, and one set's files; both on the ordinary
+// surface under the same grant rule as the process set.
+const (
+	skillsIndexReadRoute = "GET /v1/projects/{p}/skills"
+	skillsSetReadRoute   = "GET /v1/projects/{p}/skills/set"
+)
+
 var ordinaryRoutes = func() map[string]bool {
 	m := maps.Clone(taskRoutes)
 	maps.Copy(m, knowledgeRoute)
@@ -108,6 +116,8 @@ var ordinaryRoutes = func() map[string]bool {
 	m["GET /v1/projects/{p}/process"] = true // the selected process reference: what an agent needs to find its rules; grants no repository access
 	m[repositoryReadRoute] = true            // the project's repository; the handler requires a grant on the project
 	m[processSetReadRoute] = true            // the stored process set; the handler requires a grant on the project
+	m[skillsIndexReadRoute] = true           // the imported skills sets and the effective skills; the handler requires a grant on the project
+	m[skillsSetReadRoute] = true             // one skills set's files; the handler requires a grant on the project
 	m["GET /v1/access/directory"] = true     // id, kind, name, enabled of every user and group: what the board labels assignees with
 	m["POST /v1/identity/proofs"] = true     // identity.v1 proof receipt: the handler requires a live user-scoped token and TLS
 	return m

@@ -41,7 +41,7 @@ func TestManifestAndChecklist(t *testing.T) {
 		t.Fatalf("manifest: %+v %v", m, err)
 	}
 	for _, raw := range []string{
-		`{"version":2,"handbook":"h.md"}`,
+		`{"version":3,"handbook":"h.md"}`,
 		`{"version":1}`,
 		`{"version":1,"handbook":"../h.md"}`,
 		`{"version":1,"handbook":"h.md","checklists":{"ready":"x"}}`,
@@ -193,7 +193,7 @@ func TestClassify(t *testing.T) {
 func TestBootstrapBudgetAndSkills(t *testing.T) {
 	set := &Set{
 		Ref:      Ref{Repo: "https://example.com/p.git", Commit: strings.Repeat("c", 40), Manifest: "m.json"},
-		Manifest: Manifest{Version: 1, Handbook: "h.md", Skills: []string{"oh-code-review", "missing-one"}, BudgetBytes: 4096},
+		Manifest: Manifest{Version: 1, Handbook: "h.md", Skills: []SkillPin{{Name: "oh-code-review"}, {Name: "missing-one"}}, BudgetBytes: 4096},
 		Handbook: "# Handbook\nRules.\n",
 		Checklists: map[string]Checklist{
 			"READY": {State: "READY", Items: []ChecklistItem{{ID: "dor-1", Text: "scoped"}}},
@@ -201,7 +201,7 @@ func TestBootstrapBudgetAndSkills(t *testing.T) {
 		},
 		Templates: map[string]json.RawMessage{"task": json.RawMessage(`{}`)},
 	}
-	installed := func(n string) bool { return n == "oh-code-review" }
+	installed := func(n string) SkillState { return SkillState{Installed: n == "oh-code-review"} }
 	text, err := Bootstrap(set, "alpha", installed)
 	if err != nil {
 		t.Fatal(err)
@@ -225,9 +225,92 @@ func TestBootstrapBudgetAndSkills(t *testing.T) {
 	}
 	home := t.TempDir()
 	os.MkdirAll(filepath.Join(home, ".claude", "skills", "oh-code-review"), 0o700)
-	is := SkillInstalled(t.TempDir(), home)
-	if !is("oh-code-review") || is("nope") || is("Bad Name") {
+	os.WriteFile(filepath.Join(home, ".claude", "skills", "oh-code-review", "SKILL.md"), []byte("---\nname: oh-code-review\n---\n"), 0o600)
+	is := SkillStateOn(t.TempDir(), home)
+	if st := is("oh-code-review"); !st.Installed || st.Version != "" {
+		t.Fatalf("skill without a record: %+v", st)
+	}
+	if is("nope").Installed || is("Bad Name").Installed {
 		t.Fatal("skill detection")
+	}
+	// A directory without SKILL.md is not a skill.
+	os.MkdirAll(filepath.Join(home, ".claude", "skills", "empty-dir"), 0o700)
+	if is("empty-dir").Installed {
+		t.Fatal("a directory without SKILL.md counted as installed")
+	}
+	// The installers' record beside it gives the version; a hub install's
+	// per-skill entries win over the record's one version.
+	os.WriteFile(filepath.Join(home, ".claude", "skills", InstalledRecordName), []byte(`{"version":"1.33.13","skills":["oh-code-review"],"installed_at":"2026-10-18T00:00:00Z"}`), 0o600)
+	if st := is("oh-code-review"); st.Version != "1.33.13" || st.Source != "" {
+		t.Fatalf("record version: %+v", st)
+	}
+	os.WriteFile(filepath.Join(home, ".claude", "skills", InstalledRecordName), []byte(`{"version":"1.33.13","skills":["oh-code-review"],"installed_at":"2026-10-18T00:00:00Z","versions":{"oh-code-review":"2.0"},"sources":{"oh-code-review":"instance"}}`), 0o600)
+	if st := is("oh-code-review"); st.Version != "2.0" || st.Source != "instance" {
+		t.Fatalf("per-skill record: %+v", st)
+	}
+}
+
+// Version 2 of the manifest pins each skill's version and source; version
+// 1 names skills only. (An aimem from before version 2 refuses a version 2
+// manifest by a decoding error on the skill objects; from this release on,
+// an unknown version is refused by a message naming it.)
+func TestManifestVersion2PinsSkills(t *testing.T) {
+	v2 := `{"version":2,"handbook":"h.md","skills":[{"name":"oh-code-review","version":"1.33.13","source":"release"},{"name":"house-style","version":"3","source":"instance"}]}`
+	m, err := ParseManifest([]byte(v2))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !m.Pinned() || len(m.Skills) != 2 || !m.Skills[0].Pinned() || m.Skills[1].Source != "instance" || strings.Join(m.SkillNames(), ",") != "oh-code-review,house-style" {
+		t.Fatalf("pins: %+v", m.Skills)
+	}
+	// Round trip: the shortest form that holds each pin.
+	out, _ := json.Marshal(m.Skills)
+	if string(out) != `[{"name":"oh-code-review","version":"1.33.13","source":"release"},{"name":"house-style","version":"3","source":"instance"}]` {
+		t.Fatalf("marshal: %s", out)
+	}
+	out, _ = json.Marshal([]SkillPin{{Name: "x"}})
+	if string(out) != `["x"]` {
+		t.Fatalf("marshal v1 form: %s", out)
+	}
+	for _, c := range []struct{ name, manifest, want string }{
+		{"v1 names", `{"version":1,"handbook":"h.md","skills":["oh-code-review"]}`, ""},
+		{"v1 with a pin", `{"version":1,"handbook":"h.md","skills":[{"name":"a","version":"1","source":"release"}]}`, "needs manifest version 2"},
+		{"v2 without a pin", `{"version":2,"handbook":"h.md","skills":["a"]}`, "must name its version and source"},
+		{"v2 bad source", `{"version":2,"handbook":"h.md","skills":[{"name":"a","version":"1","source":"github"}]}`, "not release or instance"},
+		{"v2 bad version", `{"version":2,"handbook":"h.md","skills":[{"name":"a","version":"1 2","source":"release"}]}`, "not one plain word"},
+		{"twice", `{"version":2,"handbook":"h.md","skills":[{"name":"a","version":"1","source":"release"},{"name":"a","version":"2","source":"instance"}]}`, "named twice"},
+		{"unknown pin field", `{"version":2,"handbook":"h.md","skills":[{"name":"a","version":"1","source":"release","url":"x"}]}`, "unknown field"},
+		{"v3", `{"version":3,"handbook":"h.md"}`, "version 3 is not supported"},
+	} {
+		_, err := ParseManifest([]byte(c.manifest))
+		if c.want == "" && err != nil {
+			t.Errorf("%s: %v", c.name, err)
+		} else if c.want != "" && (err == nil || !strings.Contains(err.Error(), c.want)) {
+			t.Errorf("%s: got %v, want %q", c.name, err, c.want)
+		}
+	}
+	// The bootstrap line per pin: version and source, what this machine
+	// has, and the command for a missing or outdated skill; no URL.
+	pin := SkillPin{Name: "oh-code-review", Version: "1.33.13", Source: "release"}
+	for _, c := range []struct {
+		st   SkillState
+		want string
+	}{
+		{SkillState{}, "oh-code-review 1.33.13 (release; NOT FOUND, run `aimem skills install`)"},
+		{SkillState{Installed: true}, "oh-code-review 1.33.13 (release; installed, version unknown)"},
+		{SkillState{Installed: true, Version: "1.33.13"}, "oh-code-review 1.33.13 (release; installed)"},
+		{SkillState{Installed: true, Version: "1.33.12"}, "oh-code-review 1.33.13 (release; installed 1.33.12, run `aimem skills install`)"},
+		// The same version from the other source is another skill.
+		{SkillState{Installed: true, Version: "1.33.13", Source: "instance"}, "oh-code-review 1.33.13 (release; installed 1.33.13 (instance), run `aimem skills install`)"},
+		{SkillState{Installed: true, Source: "instance"}, "oh-code-review 1.33.13 (release; installed (instance), run `aimem skills install`)"},
+		{SkillState{Installed: true, Version: "1.33.13", Source: "release"}, "oh-code-review 1.33.13 (release; installed)"},
+	} {
+		if got := SkillLine(pin, c.st); got != c.want {
+			t.Errorf("SkillLine(%+v) = %q, want %q", c.st, got, c.want)
+		}
+	}
+	if got := SkillLine(SkillPin{Name: "x"}, SkillState{}); got != "x (NOT FOUND on this machine; run `aimem skills install`)" {
+		t.Errorf("v1 line: %q", got)
 	}
 }
 

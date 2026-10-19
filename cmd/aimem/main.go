@@ -122,6 +122,8 @@ func main() {
 		err = taskTokenCmd(args)
 	case "process":
 		err = processCmd(args)
+	case "skills":
+		err = skillsCmd(args)
 	case "group":
 		err = groupCmd(args)
 	case "drop-project":
@@ -277,6 +279,7 @@ const mainUsage = `usage: aimem <command> [flags]
   teams      setup TEAM <worker|coordinator>  verified team onboarding from a checkout
                              (checks, join or reconcile, role entry; aimem teams setup for flags)
   process    select|clear|show|export  the project's process (Git repo, commit, manifest) and its files, stored on the hub; show prints the session bootstrap
+  skills     import|export|list|install  the hub-served skills sets: import a release or the instance's skills on the hub host; install the process's required skills from the hub on a member (run without args for usage)
   dedup      [-p|--all] [--sim 0.90] [--dry-run]
                              fold near-identical memories onto one survivor
                              (pinned wins, else newest; tags/sources merged,

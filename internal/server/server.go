@@ -27,6 +27,7 @@ import (
 	"aimem/internal/isolation"
 	"aimem/internal/llmrate"
 	"aimem/internal/schema"
+	"aimem/internal/skills"
 	"aimem/internal/store"
 )
 
@@ -61,6 +62,8 @@ type Server struct {
 	readLimit    *readScopeLimiter // aicrew's read scope, per credential (reservation_readscope.go)
 	actionOnce   sync.Once
 	actionMux    *http.ServeMux // names a refused request's route (refusal_actions.go)
+	skillsOnce   sync.Once
+	skillsSt     *skills.Store // the hub-wide skills store under the state root (skills.go)
 }
 
 func New(reg *store.Registry, log *slog.Logger) *Server {
@@ -197,6 +200,8 @@ func (s *Server) Routes() []Route {
 		{"GET", "/v1/tasks/{id}/comments/{c}", s.getTaskComment, false},
 		{"GET", "/v1/projects/{p}/process", s.getProcessRef, false},
 		{"GET", strings.TrimPrefix(processSetReadRoute, "GET "), s.getProcessSet, false},
+		{"GET", strings.TrimPrefix(skillsIndexReadRoute, "GET "), s.getProjectSkills, false},
+		{"GET", strings.TrimPrefix(skillsSetReadRoute, "GET "), s.getProjectSkillsSet, false},
 		{"GET", "/v1/projects/{p}/repository", s.getRepository, false},
 		{"GET", "/v1/projects/{p}/epics", s.listEpics, false},
 		{"POST", "/v1/projects/{p}/epics", s.createEpic, false},
@@ -205,6 +210,9 @@ func (s *Server) Routes() []Route {
 		{"GET", "/v1/access/directory", s.accessDirectory, false},
 		{"PUT", "/v1/projects/{p}/process", s.putProcessRef, true},
 		{"GET", "/v1/processes", s.listProcesses, true},
+		{"GET", "/v1/skills", s.getSkills, true},
+		{"GET", "/v1/skills/{source}", s.getSkillsSet, true},
+		{"PUT", "/v1/skills/{source}", s.putSkillsSet, true},
 		{"PUT", "/v1/projects/{p}/repository", s.putRepository, true},
 		{"GET", "/v1/projects/{p}/grants", s.getProjectGrants, true},
 		{"GET", "/v1/projects/{p}/teams", s.listTeams, true},
@@ -844,6 +852,10 @@ func (s *Server) health(w http.ResponseWriter, _ *http.Request) {
 	// the first thing to look at when curation output goes quiet
 	// (2026-09-04: upstream Cloudflare blocked curation bursts).
 	body["llm_pace"] = llmrate.Status()
+	// The skills store: which sets are imported, or that its index exists
+	// and cannot be read, which is a fault of the state root, never "no
+	// skills".
+	body["skills"] = s.skillsHealth()
 	s.ok(w, body)
 }
 

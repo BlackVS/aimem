@@ -264,9 +264,13 @@ selected process is known, where each client finds every required skill: a
 skill is a directory holding `SKILL.md` in a location that client reads
 (`.claude/skills`, `.agents/skills`, `.opencode/skills`, and the user-level
 `~/.claude/skills`, `~/.agents/skills`, `~/.codex/skills`,
-`~/.config/opencode/skills`), reported as found or NOT FOUND per client.
-Installing skills and the user-level pieces (binary, checkpoint hooks, the
-OpenCode plugin) stay with the installers.
+`~/.config/opencode/skills`), reported as found or NOT FOUND per client,
+with the version and source the manifest pins and what the machine has.
+A missing or outdated skill is installed from the hub with `aimem skills
+install` in the checkout (it writes the required skills, at the pinned
+versions, where the clients on this machine read them, and never reads a
+URL). The user-level pieces (binary, checkpoint hooks, the OpenCode
+plugin) stay with the installers.
 
 ### Continuing after a restart
 

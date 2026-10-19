@@ -70,6 +70,9 @@ var teamRoutes = append(append([]string{
 	// and the stored process set under the same rule (DESIGN-portable-team-context 1d).
 	"GET /v1/projects/{p}/repository",
 	"GET /v1/projects/{p}/process/set",
+	// The hub-served skills sets under the same rule (increment 1e).
+	"GET /v1/projects/{p}/skills",
+	"GET /v1/projects/{p}/skills/set",
 	// The coordinator's triage writes (DESIGN-AIFORGE-PILOT-1 §4); the
 	// handlers refuse every other role.
 	"POST /v1/tasks/{id}/triage",

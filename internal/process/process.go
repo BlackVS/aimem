@@ -93,15 +93,78 @@ func checkRepoPath(p string) error {
 	return nil
 }
 
-// Manifest names the files of one process set at one commit. Version 1.
+// Manifest names the files of one process set at one commit. Version 1
+// names the required skills by name; version 2 pins each one as name,
+// version and source (docs/DESIGN-portable-team-context.md, increment 1e).
+// An aimem from before version 2 refuses it outright: its decoder rejects
+// the skill objects (skills was a list of strings) before it checks the
+// version, so it never misreads the pins; the message here names the
+// version only from this release on.
 type Manifest struct {
 	Version     int               `json:"version"`
 	Handbook    string            `json:"handbook"`
 	Checklists  map[string]string `json:"checklists,omitempty"` // task state -> checklist file
 	Templates   map[string]string `json:"templates,omitempty"`  // kind -> template file
-	Skills      []string          `json:"skills,omitempty"`     // installed skill names the process requires
+	Skills      []SkillPin        `json:"skills,omitempty"`     // the skills the process requires
 	BudgetBytes int               `json:"budget_bytes,omitempty"`
 }
+
+// SkillPin is one required skill: its name alone (version 1), or its name
+// with the version of the skills set it comes from and that set's source,
+// release or instance (version 2). An instance skill of a name the release
+// also has is the one meant, by the sources' precedence.
+type SkillPin struct {
+	Name    string `json:"name"`
+	Version string `json:"version,omitempty"`
+	Source  string `json:"source,omitempty"`
+}
+
+// UnmarshalJSON accepts the version 1 form (a name) and the version 2 form
+// (an object); ParseManifest decides which the manifest's version allows.
+func (p *SkillPin) UnmarshalJSON(b []byte) error {
+	if len(b) > 0 && b[0] == '"' {
+		p.Version, p.Source = "", ""
+		return json.Unmarshal(b, &p.Name)
+	}
+	type plain SkillPin
+	var v plain
+	dec := json.NewDecoder(bytes.NewReader(b))
+	dec.DisallowUnknownFields()
+	if err := dec.Decode(&v); err != nil {
+		return err
+	}
+	*p = SkillPin(v)
+	return nil
+}
+
+// MarshalJSON writes the shortest form that holds the pin.
+func (p SkillPin) MarshalJSON() ([]byte, error) {
+	if p.Version == "" && p.Source == "" {
+		return json.Marshal(p.Name)
+	}
+	type plain SkillPin
+	return json.Marshal(plain(p))
+}
+
+// Pinned reports whether the pin names a version and a source.
+func (p SkillPin) Pinned() bool { return p.Version != "" && p.Source != "" }
+
+// SkillNames lists the required skills' names, in manifest order.
+func (m Manifest) SkillNames() []string {
+	out := make([]string, 0, len(m.Skills))
+	for _, p := range m.Skills {
+		out = append(out, p.Name)
+	}
+	return out
+}
+
+// Pinned reports whether the manifest pins its skills (version 2).
+func (m Manifest) Pinned() bool { return m.Version >= 2 }
+
+// The sources a version 2 manifest may pin a skill to.
+var skillSources = map[string]bool{"release": true, "instance": true}
+
+var skillVersionRE = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._+-]{0,63}$`)
 
 // DefaultBudgetBytes bounds the bootstrap injected into a session when the
 // manifest does not say: the handbook plus the checklists.
@@ -121,8 +184,8 @@ func ParseManifest(b []byte) (Manifest, error) {
 	if err := dec.Decode(&m); err != nil {
 		return m, fmt.Errorf("manifest: %w", err)
 	}
-	if m.Version != 1 {
-		return m, fmt.Errorf("manifest: version %d is not supported (want 1)", m.Version)
+	if m.Version != 1 && m.Version != 2 {
+		return m, fmt.Errorf("manifest: version %d is not supported (want 1 or 2)", m.Version)
 	}
 	if err := checkRepoPath(m.Handbook); err != nil {
 		return m, fmt.Errorf("manifest: handbook: %w", err)
@@ -143,9 +206,24 @@ func ParseManifest(b []byte) (Manifest, error) {
 			return m, fmt.Errorf("manifest: template %s: %w", kind, err)
 		}
 	}
-	for _, s := range m.Skills {
-		if !skillRE.MatchString(s) {
-			return m, fmt.Errorf("manifest: skill %q is not a plain name", s)
+	seenSkill := map[string]bool{}
+	for _, p := range m.Skills {
+		if !skillRE.MatchString(p.Name) {
+			return m, fmt.Errorf("manifest: skill %q is not a plain name", p.Name)
+		}
+		if seenSkill[p.Name] {
+			return m, fmt.Errorf("manifest: skill %s is named twice", p.Name)
+		}
+		seenSkill[p.Name] = true
+		switch {
+		case m.Version == 1 && (p.Version != "" || p.Source != ""):
+			return m, fmt.Errorf("manifest: skill %s carries a version or source, which needs manifest version 2", p.Name)
+		case m.Version >= 2 && !p.Pinned():
+			return m, fmt.Errorf("manifest: skill %s must name its version and source (release or instance) in a version 2 manifest", p.Name)
+		case m.Version >= 2 && !skillSources[p.Source]:
+			return m, fmt.Errorf("manifest: skill %s: source %q is not release or instance", p.Name, p.Source)
+		case m.Version >= 2 && !skillVersionRE.MatchString(p.Version):
+			return m, fmt.Errorf("manifest: skill %s: version %q is not one plain word", p.Name, p.Version)
 		}
 	}
 	if m.BudgetBytes < 0 {
@@ -546,20 +624,16 @@ var TaskTools = []string{"list_tasks", "get_task", "create_task", "update_task",
 // checklists — as one unit. If the unit exceeds the manifest's budget it
 // is not injected at all; the error names the size and the retrieval
 // path, because a policy with a gate cut off is worse than none.
-// installed reports whether a named skill is present on this machine.
-func Bootstrap(set *Set, projectID string, installed func(name string) bool) (string, error) {
+// installed reports what this machine has of a named skill.
+func Bootstrap(set *Set, projectID string, installed func(name string) SkillState) (string, error) {
 	var b strings.Builder
 	fmt.Fprintf(&b, "Tasks (Kanban) are ON for project %s. Task tools: %s.\n", projectID, strings.Join(TaskTools, ", "))
 	fmt.Fprintf(&b, "Process set: %s @ %s (manifest %s)%s.\n", set.Ref.DisplayName(), set.Ref.Commit[:12], set.Ref.Manifest, map[bool]string{true: ", from this machine's cache", false: ""}[set.FromCache])
 	if len(set.Manifest.Skills) > 0 {
 		b.WriteString("Required skills: ")
 		parts := make([]string, 0, len(set.Manifest.Skills))
-		for _, s := range set.Manifest.Skills {
-			if installed(s) {
-				parts = append(parts, s+" (installed)")
-			} else {
-				parts = append(parts, s+" (NOT FOUND on this machine — check before the step that needs it)")
-			}
+		for _, p := range set.Manifest.Skills {
+			parts = append(parts, SkillLine(p, installed(p.Name)))
 		}
 		b.WriteString(strings.Join(parts, "; "))
 		b.WriteString(".\n")
@@ -596,7 +670,7 @@ func Bootstrap(set *Set, projectID string, installed func(name string) bool) (st
 // BootstrapFull is Bootstrap without the budget: the retrieval path the
 // over-budget notice names, for a person or an agent reading the whole
 // unit on demand rather than receiving it at session start.
-func BootstrapFull(set *Set, projectID string, installed func(name string) bool) string {
+func BootstrapFull(set *Set, projectID string, installed func(name string) SkillState) string {
 	saved := set.Manifest.BudgetBytes
 	set.Manifest.BudgetBytes = int(^uint(0) >> 1)
 	unit, _ := Bootstrap(set, projectID, installed)
@@ -604,23 +678,160 @@ func BootstrapFull(set *Set, projectID string, installed func(name string) bool)
 	return unit
 }
 
-// SkillInstalled reports whether a skill directory of that name exists in
-// the places the installers put them, for this project or this machine.
-func SkillInstalled(projectDir, homeDir string) func(name string) bool {
-	return func(name string) bool {
-		if !skillRE.MatchString(name) {
-			return false
+// SkillState is what this machine has of one required skill: whether a
+// directory of its name exists where the installers put skills, and, when
+// the installer's record beside it says, which set version and source it
+// came from ("" when unknown: a copy made by hand).
+type SkillState struct {
+	Installed bool
+	Version   string
+	Source    string
+	Dir       string // the skill's directory, when installed
+}
+
+// SkillDirs lists where the installers put skills, for this project and
+// this user: the project locations first.
+func SkillDirs(projectDir, homeDir string) []string {
+	var dirs []string
+	if projectDir != "" {
+		for _, rel := range [][]string{{".claude", "skills"}, {".agents", "skills"}, {".opencode", "skills"}, {".openhands", "skills"}} {
+			dirs = append(dirs, filepath.Join(append([]string{projectDir}, rel...)...))
 		}
-		for _, d := range []string{
-			filepath.Join(projectDir, ".claude", "skills", name),
-			filepath.Join(projectDir, ".agents", "skills", name),
-			filepath.Join(homeDir, ".claude", "skills", name),
-			filepath.Join(homeDir, ".codex", "skills", name),
-		} {
-			if fi, err := os.Stat(d); err == nil && fi.IsDir() {
-				return true
+	}
+	if homeDir != "" {
+		for _, rel := range [][]string{{".claude", "skills"}, {".agents", "skills"}, {".codex", "skills"}, {".config", "opencode", "skills"}, {".openhands", "skills"}} {
+			dirs = append(dirs, filepath.Join(append([]string{homeDir}, rel...)...))
+		}
+	}
+	return dirs
+}
+
+// InstalledRecordName is the installers' record in a skills directory:
+// which set version its skills came from, and per skill where a hub
+// install mixes sources.
+const InstalledRecordName = ".ai-skills.json"
+
+// InstalledRecord is that record's content, as the aiskills installers
+// write it (version, commit, skills, archive_sha256, installed_at) and as
+// `aimem skills install` extends it (versions and sources per skill).
+type InstalledRecord struct {
+	Version       string            `json:"version"`
+	Commit        string            `json:"commit,omitempty"`
+	Skills        []string          `json:"skills"`
+	ArchiveSHA256 string            `json:"archive_sha256,omitempty"`
+	InstalledAt   string            `json:"installed_at"`
+	Versions      map[string]string `json:"versions,omitempty"`
+	Sources       map[string]string `json:"sources,omitempty"`
+}
+
+// ReadInstalledRecord reads the record of a skills directory; none, or an
+// unreadable one, is nil.
+func ReadInstalledRecord(dir string) *InstalledRecord {
+	raw, err := os.ReadFile(filepath.Join(dir, InstalledRecordName))
+	if err != nil {
+		return nil
+	}
+	var rec InstalledRecord
+	if json.Unmarshal(raw, &rec) != nil {
+		return nil
+	}
+	return &rec
+}
+
+// Of returns the version and source the record gives a skill: its own
+// entries, else the record's version for a skill it lists.
+func (rec *InstalledRecord) Of(name string) (version, source string) {
+	if rec == nil {
+		return "", ""
+	}
+	if v, ok := rec.Versions[name]; ok {
+		return v, rec.Sources[name]
+	}
+	for _, s := range rec.Skills {
+		if s == name {
+			return rec.Version, rec.Sources[name]
+		}
+	}
+	return "", ""
+}
+
+// SkillStateOn reports, per name, what this project or this machine has
+// of a skill: the first directory of that name holding SKILL.md in the
+// installers' locations, with the record beside it.
+func SkillStateOn(projectDir, homeDir string) func(name string) SkillState {
+	dirs := SkillDirs(projectDir, homeDir)
+	return func(name string) SkillState {
+		if !skillRE.MatchString(name) {
+			return SkillState{}
+		}
+		for _, d := range dirs {
+			if fi, err := os.Stat(filepath.Join(d, name, "SKILL.md")); err == nil && fi.Mode().IsRegular() {
+				st := SkillState{Installed: true, Dir: filepath.Join(d, name)}
+				st.Version, st.Source = ReadInstalledRecord(d).Of(name)
+				return st
 			}
 		}
+		return SkillState{}
+	}
+}
+
+// SkillInstallCommand is what a member runs to install or update the
+// required skills from the hub; no text names where the hub got them.
+const SkillInstallCommand = "aimem skills install"
+
+// Mismatch reports whether an installed copy is known to be another one
+// than the pin: its recorded version or its recorded source differs. An
+// unknown version or source (a copy by hand) is not a mismatch; the line
+// says it is unknown.
+func (st SkillState) Mismatch(p SkillPin) bool {
+	if !p.Pinned() || !st.Installed {
 		return false
 	}
+	return (st.Version != "" && st.Version != p.Version) || (st.Source != "" && st.Source != p.Source)
+}
+
+// Have is what the copy is, as far as its record says: "1.0 (instance)",
+// "1.0", "(instance)" or "".
+func (st SkillState) Have() string {
+	switch {
+	case st.Version != "" && st.Source != "":
+		return st.Version + " (" + st.Source + ")"
+	case st.Version != "":
+		return st.Version
+	case st.Source != "":
+		return "(" + st.Source + ")"
+	}
+	return ""
+}
+
+// PinLabel is the pin alone: the name, or the name with its version and
+// source.
+func PinLabel(p SkillPin) string {
+	if !p.Pinned() {
+		return p.Name
+	}
+	return p.Name + " " + p.Version + " (" + p.Source + ")"
+}
+
+// SkillLine is one required skill as the bootstrap and the readiness
+// checks print it: the pin, then what this machine has. A missing skill or
+// one recorded at another version or source names the command, never a
+// URL.
+func SkillLine(p SkillPin, st SkillState) string {
+	if !p.Pinned() {
+		if st.Installed {
+			return p.Name + " (installed)"
+		}
+		return p.Name + " (NOT FOUND on this machine; run `" + SkillInstallCommand + "`)"
+	}
+	head := p.Name + " " + p.Version + " (" + p.Source + "; "
+	switch {
+	case !st.Installed:
+		return head + "NOT FOUND, run `" + SkillInstallCommand + "`)"
+	case st.Mismatch(p):
+		return head + "installed " + st.Have() + ", run `" + SkillInstallCommand + "`)"
+	case st.Version == "":
+		return head + "installed, version unknown)"
+	}
+	return head + "installed)"
 }

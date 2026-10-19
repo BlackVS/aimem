@@ -47,10 +47,14 @@ aimem tasks on -p my-project
 ```
 
 This can create a missing project, so check the name before running it.
-Select the project's process and skills using the
-[Kanban quickstart](KANBAN-QUICKSTART.md) before any member joins: with
-tasks on and no process selected, no member is ready for work, workers are
-announced unavailable and the coordinator is told to issue no offers.
+Select the project's process using the
+[Kanban quickstart](KANBAN-QUICKSTART.md) and import the skills release
+on the hub host (`aimem skills import --from-archive aiskills-X.Y.Z.tar.gz`,
+[admin manual](ADMIN-MANUAL.md#importing-the-skills-sets)) before any
+member joins: with tasks on and no process selected, no member is ready
+for work, workers are announced unavailable and the coordinator is told to
+issue no offers. Each member then installs the required skills from the
+hub with `aimem skills install` in the checkout.
 
 On Debian, from a root shell, switch with a login shell:
 

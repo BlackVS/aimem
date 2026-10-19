@@ -446,11 +446,16 @@ a hub host without access to the repository, `aimem process export
 import. The hub keeps the sets of the last five selections, so an earlier
 one is re-selected without an import; the hub itself never runs Git.
 
-The manifest is JSON (`version` 1): `handbook` (Markdown path),
+The manifest is JSON (`version` 1 or 2): `handbook` (Markdown path),
 `checklists` (task state to a JSON file of `{state, items:[{id,text}]}`),
-`templates` (kind to a JSON file), `skills` (installed skill names the
-process requires) and an optional `budget_bytes` for the injected unit
-(24 KiB by default). A selection names a full commit id, so what a
+`templates` (kind to a JSON file), `skills` (the skills the process
+requires: plain names in version 1; in version 2 each one pinned as
+`{"name", "version", "source"}`, the source `release` or `instance`, see
+[Importing the skills sets](#importing-the-skills-sets)) and an optional
+`budget_bytes` for the injected unit (24 KiB by default). An aimem from
+before version 2 refuses a version 2 manifest outright (a decoding error
+on the skill objects, not a message naming the version), so move to
+version 2 once every member runs a release that reads it. A selection names a full commit id, so what a
 session sees is exactly what was reviewed; the `--ref` lets a machine
 fetch from a server that refuses fetch-by-hash, and the commit must be
 what that ref holds. Changing the selection needs the currently selected
@@ -470,6 +475,56 @@ not injected and the notice says to read it with `aimem process show`. A
 hub from before sets were stored, or a selection it recorded then, serves
 no set, and the member fetches the commit from Git with its own access, as
 before; re-selecting on the new hub imports the files.
+
+### Importing the skills sets
+
+The skills a process requires reach a member from the hub too, never from
+a URL. Two sources, one stored form: the public skills release
+(`release`), and the instance's own skills and any modified copy of a
+public one (`instance`, kept in the instance's configuration repository).
+The effective set is the release plus the instance set; an instance skill
+replaces a release skill of the same name, and every listing names each
+skill's source, so an override is visible.
+
+```sh
+aimem skills import --from-archive aiskills-1.33.13.tar.gz             # the release (SHA256SUMS beside it)
+aimem skills import --from-archive skills.tar.gz --source instance --version site-3
+aimem skills list --hub                                                # this hub's imports and the effective set
+aimem skills export [--source instance] --out /srv/transfer            # the archive pair, to carry to another hub
+```
+
+`import` runs on the hub host: it verifies the archive against the
+`SHA256SUMS` beside it (`--sums` names another file), reads
+`skills/<name>/…` below the archive's leading directory (a skills release
+archive is laid out so; its `VERSION` file is the version, `--version`
+names it otherwise, and an instance archive without one needs it),
+requires `SKILL.md` in every skill directory, bounds the sizes and stores
+the set on the hub with its digest; a set that does not validate stores
+nothing. The hub keeps the last five imports per source, so a process
+that pins an earlier version is still served, and removes the files of
+sets no source keeps. The archive never leaves the hub host's disk for the
+import, and the API imports from no URL and no file: `PUT
+/v1/skills/{source}` takes the files from the admin's command only.
+
+A member runs `aimem skills install` in the project checkout. It reads the
+process manifest's pins, takes each skill from the hub at the pinned
+version (the source's current import, else a kept one), caches the sets by
+digest under its state root and writes the skills into the skills
+directories of the agent clients found on the machine, the same the
+aiskills installers use (`--tool claude,codex,opencode,openhands` names
+them, `--user` installs for the user instead of the checkout, `--all`
+installs every effective skill); it replaces a skill directory whole and
+records each skill's version and source in the directory's
+`.ai-skills.json`, which is also what the session bootstrap reads to say
+`installed`, `installed 1.33.12, run aimem skills install` or `NOT FOUND`.
+`aimem skills list` shows the effective set and what the machine has.
+
+The skills store is hub state: `skills/index.json` and `skills/sets/` under
+the state root travel with a backup or a migration of the state root
+(section 7). `aimem health` reports it under `skills`: `none` before any
+import, `ok` with the version per source, or `fault` with the error when
+the index exists and cannot be read, which is a damaged state root to
+restore, not an empty store.
 
 ## 5. Releases
 
@@ -515,7 +570,9 @@ request.
 ## 7. Data locations
 
 - State root: `~/.local/state/aimem/` (per-project `*.db`, `sync/` cursors,
-  `spool/`).
+  `spool/`, `process/sets/` the cached process sets, and on a hub
+  `skills/` the imported skills sets with their `index.json`, hub state a
+  backup must carry).
 - `aimem state-root` prints it; `aimem project-id .` prints a project's ID.
 - Backups: the hub holds a merged copy of all journals and memories;
   any machine can re-seed another via `sync`.

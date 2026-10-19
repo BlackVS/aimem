@@ -13,8 +13,64 @@ currently 24); a binary refuses a database newer than it understands.
 
 ## [Unreleased]
 
+### Upgrade notes
+
+- **Re-select each project's process on each hub after the hub host runs
+  this release.** A selection recorded before it carries no set: the
+  upgraded hub answers 404 on `GET /v1/projects/{p}/process/set` for it,
+  members on the new client keep fetching that commit from Git with their
+  own access as before, and a member without Git access is not ready for
+  that project. The admin re-selects on the hub host with the current
+  commit as `--expect` (`aimem process select <repo> <commit> <manifest>
+  --ref <branch> --expect <commit> -p <project>`); that reads the files
+  from Git on the hub host, or from an archive with `--from-archive`, and
+  stores them with the selection. Once per project on each hub. No schema
+  change: the sets live in the project's meta table.
+- **The skills store is hub state.** `root/skills/` under the hub's state
+  root (`index.json` and `sets/<digest>/`) holds the imported skills sets;
+  a backup or a migration of the state root carries it. `aimem health`
+  reports it under `skills`: `none` before any import, `ok` with the
+  versions per source, or `fault` with the error when the index exists
+  and cannot be read.
+
 ### Added
 
+- **The hub serves the skills; a member installs them from the hub, never
+  from a URL.** `aimem skills import --from-archive FILE [--sums FILE]
+  [--source release|instance] [--version V]` on the hub host verifies a
+  skills release archive (`skills/<name>/…` under one leading directory,
+  with its `VERSION` file) or the instance's own skills against the
+  `SHA256SUMS` beside it and stores the set on the hub with its digest,
+  as the public `release` set or the `instance` set; the hub keeps the
+  last five imports per source and never half-stores a set that does not
+  validate (each skill a directory with `SKILL.md`, 1 MiB per file, 4 MiB
+  per set). `aimem skills export` writes the archive pair back. Two routes
+  on the ordinary surface under the process set's grant rule:
+  `GET /v1/projects/{p}/skills` (the imports per source and the effective
+  skills, an instance skill overriding a release skill of the same name,
+  each with its version and source) and `GET /v1/projects/{p}/skills/set`
+  (`?source=` the current import, `?digest=` a kept one; ETag by digest).
+  `aimem skills install [--user] [--tool …] [--all]` in a checkout
+  installs the skills the project's process requires, at the pinned
+  versions (a kept earlier import serves a pin the current one no longer
+  matches), into the skills directories of the agent clients found on the
+  machine, the same the aiskills installers use, replacing a skill
+  directory whole and recording each skill's version and source in the
+  directory's `.ai-skills.json`; it reads nothing but the hub and works
+  from its cache offline. `aimem skills list` prints the effective set
+  with each skill's source and what this machine has of it; `--hub` prints
+  the hub host's own index. The admin's import routes (`GET /v1/skills`,
+  `GET|PUT /v1/skills/{source}`) are outside the ordinary surface: the API
+  lists and reads, never imports.
+  (docs/DESIGN-portable-team-context.md, increment 1e.)
+- **The process manifest pins each required skill, version 2.** A
+  version 2 manifest names each skill as `{"name", "version", "source"}`
+  (source `release` or `instance`); a version 1 manifest with plain names
+  is still accepted (any version present on the hub). An aimem from before
+  this release refuses a version 2 manifest outright (its decoder rejects
+  the skill objects, before it looks at the version), so it never misreads
+  one; the process owner moves to version 2 once every member runs this
+  release.
 - **The hub serves the process files; a member needs no Git and no access
   to the process repository.** `aimem process select` on the hub host now
   reads the set at the selected commit (the manifest and every file it
@@ -37,6 +93,16 @@ currently 24); a binary refuses a database newer than it understands.
 
 ### Changed
 
+- **The required skills line names the version, the source and the
+  command.** The session bootstrap, `process_context`, `aimem process
+  show` and the `team_setup`/`team_continue` process check print each
+  required skill as `oh-code-review 1.33.13 (release; installed)`, with
+  `installed 1.33.12, run \`aimem skills install\`` for another version
+  and `NOT FOUND, run \`aimem skills install\`` for a missing one (a
+  version 1 manifest's skills keep the name-only form with the same
+  command); the installed version comes from the installers' record
+  beside the skill, `version unknown` without one. No text names a URL.
+  `aimem teams setup`'s skills list gives the same command as the fix.
 - **The session bootstrap names the process set, not the repository
   URL.** `Process set: <name> @ <commit> (manifest <path>)`, in the
   session-start hook, `process_context`, `team_setup` and `team_continue`

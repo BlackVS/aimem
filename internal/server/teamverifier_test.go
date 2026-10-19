@@ -150,6 +150,8 @@ func TestTeamRoutesAreTheApprovedMatrix(t *testing.T) {
 		// and the stored process set under the same rule (DESIGN-portable-team-context 1d).
 		"GET /v1/projects/{p}/repository",
 		"GET /v1/projects/{p}/process/set",
+		"GET /v1/projects/{p}/skills",
+		"GET /v1/projects/{p}/skills/set",
 		// The coordinator's triage writes (DESIGN-AIFORGE-PILOT-1 §4).
 		"POST /v1/tasks/{id}/triage", "POST /v1/tasks/{id}/comments",
 		// A member's report as a hub document (aicrew's control-plane design, A0c).

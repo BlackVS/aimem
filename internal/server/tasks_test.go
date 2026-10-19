@@ -395,9 +395,10 @@ func TestOrdinaryTokenGateMatrix(t *testing.T) {
 		"GET /v1/projects/{p}/teams/{team}/assignments/reserved", "POST /v1/projects/{p}/teams/{team}/assignments/{attempt}/submit", "POST /v1/projects/{p}/teams/{team}/assignments/{attempt}/review", "POST /v1/projects/{p}/teams/{team}/assignments/{attempt}/block", "POST /v1/projects/{p}/teams/{team}/assignments/{attempt}/resume-work", "POST /v1/projects/{p}/teams/{team}/assignments/{attempt}/cancel", "POST /v1/projects/{p}/teams/{team}/assignments/{attempt}/stopped", "POST /v1/projects/{p}/teams/{team}/assignments/{attempt}/close-stop",
 		"POST /v1/projects/{p}/teams/{team}/handoff", "POST /v1/projects/{p}/teams/{team}/tasks/{task}/edit", "POST /v1/projects/{p}/teams/{team}/tasks/{task}/finalize",
 		"GET /v1/tasks/{id}/history", "GET /v1/tasks/{id}/comments", "POST /v1/tasks/{id}/comments", "GET /v1/tasks/{id}/comments/{c}", "POST /mcp",
-		"GET /v1/projects",                                                                                                              // the listing, read only, reserved stores filtered (TestProjectListForOrdinaryTokens)
-		"GET /v1/projects/{p}/process",                                                                                                  // the selected process reference (TestProcessReferenceSelection)
-		"GET /v1/projects/{p}/process/set",                                                                                              // the stored process set, grant-checked in the handler (TestProcessSet*)
+		"GET /v1/projects",                                               // the listing, read only, reserved stores filtered (TestProjectListForOrdinaryTokens)
+		"GET /v1/projects/{p}/process",                                   // the selected process reference (TestProcessReferenceSelection)
+		"GET /v1/projects/{p}/process/set",                               // the stored process set, grant-checked in the handler (TestProcessSet*)
+		"GET /v1/projects/{p}/skills", "GET /v1/projects/{p}/skills/set", // the hub-served skills sets, grant-checked in the handler (TestSkills*)
 		"GET /v1/projects/{p}/repository",                                                                                               // the project's repository, grant-checked in the handler (TestProjectRepository*)
 		"GET /v1/projects/{p}/epics", "POST /v1/projects/{p}/epics", "GET /v1/projects/{p}/epics/{e}", "PUT /v1/projects/{p}/epics/{e}", // epics (TestEpicRoutes)
 		"GET /v1/access/directory", // the identity directory (TestAccessDirectory)

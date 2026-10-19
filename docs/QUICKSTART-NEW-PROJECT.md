@@ -179,28 +179,27 @@ ID, a session would journal under an ID derived from the directory.
 ### 3.2 Install the agent skills (optional)
 
 Skip this step for plain journaling. A project that uses the process
-from step 2, the review gates or a team process needs it: the review
-skill (`oh-code-review`), the delivery check and the team processes
-come from the [aiskills](https://github.com/BlackVS/aiskills) set, not
-from aimem.
-
-macOS and Linux:
+from step 2, the review gates or a team process needs the skills the
+process names (the review skill `oh-code-review` among them). They come
+from the hub: the admin imports the skills release once on the hub host
+(`aimem skills import --from-archive aiskills-X.Y.Z.tar.gz`, verified
+against the `SHA256SUMS` beside it; see the
+[admin manual](ADMIN-MANUAL.md#importing-the-skills-sets)), and each
+member installs them in the checkout after step 3.5, once the checkout is
+bound to the hub:
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/BlackVS/aiskills/main/boot.sh | bash
+aimem skills install
 ```
 
-Windows (PowerShell):
-
-```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -Command "irm https://raw.githubusercontent.com/BlackVS/aiskills/main/boot.ps1 | iex"
-```
-
-Either line installs, for your user, every skill and the prompts for
-Claude Code and Codex, plus the review-gates block in the agents'
-instructions. To install them into the project instead, so that every
-clone gets them, see the project-level form in
-[the aiskills README](https://github.com/BlackVS/aiskills#quick-install).
+It installs the skills the process requires, at the versions the manifest
+pins, into the skills directories of the agent clients found on this
+machine (`--tool claude,codex` names them; `--user` installs for your
+user instead of the checkout), and records each one's version and source
+beside them. `aimem skills list` shows the hub's effective set and what
+this machine has. The admin's connected machine may still use the aiskills
+installers to obtain the release archive and the prompts; a member needs
+neither Git nor internet access for its skills.
 
 ### 3.3 Register the hub with the writer token
 
@@ -314,7 +313,9 @@ aimem process show
   first 12 characters of the commit you selected, then names the
   manifest, `processes/aimem/manifest.json` (the repository URL is not
   part of what a session sees; `--full` prints it). Then come
-  `Required skills: oh-code-review (installed)`, the handbook and the
+  `Required skills: oh-code-review (installed)` (with a version 2
+  manifest, `oh-code-review 1.33.13 (release; installed)`; a missing or
+  outdated skill reads `run aimem skills install`), the handbook and the
   READY and DONE checklists. A notice in their place (no process
   selected, access denied, unavailable) names its cause. The command
   succeeds either way, so read the output.
