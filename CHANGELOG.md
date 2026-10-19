@@ -134,6 +134,20 @@ currently 24); a binary refuses a database newer than it understands.
   as not ready, with the command; `aimem projects` still prints the raw
   id list.
 
+### Security
+
+- **A-1: the admin console no longer places stored values inside inline
+  event handlers.** HTML escaping cannot protect a value inside an
+  inline handler's script, because the browser decodes the attribute
+  before it runs it. Rendered controls now name an allowlisted handler
+  and carry their arguments as JSON data attributes, and one delegated
+  listener per event type dispatches them. The escape helper of every
+  hub page encodes the apostrophe as well. On the hub, imported and
+  synced memory ids must be 1 to 64 letters, digits, `-` or `_`, tags
+  and sources drop control and markup characters, and chapter names
+  with them are refused from the console and from group-config sync.
+  A test fails on any new data-bearing inline handler in the console.
+
 ## [0.10.6] — 2026-10-16
 
 A new project set up by the quickstart now ends at a board its agent

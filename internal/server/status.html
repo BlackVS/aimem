@@ -41,7 +41,7 @@ function dur(s){
 }
 function row(k,v,cls){
   return "<dt>"+k+"</dt><dd"+(cls?' class="'+cls+'"':"")+">"+
-    String(v).replace(/[<&]/g,c=>c=="<"?"&lt;":"&amp;")+"</dd>";
+    String(v).replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]))+"</dd>";
 }
 (async function(){
   const f=document.getElementById("fields");

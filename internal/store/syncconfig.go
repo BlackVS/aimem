@@ -136,6 +136,11 @@ func ImportGroupConfigRecord(reg *Registry, rec ConfigRecord) (msg string, appli
 	if !slices.Contains(GroupConfigKeys, rec.Key) {
 		return "", false
 	}
+	if rec.Key == "chapters" {
+		if err := CheckChapters(rec.Value); err != nil {
+			return fmt.Sprintf("group config %s/chapters from peer refused: %v", rec.Project, err), false
+		}
+	}
 	db, err := reg.Open(rec.Project)
 	if err != nil {
 		return "", false
@@ -150,4 +155,30 @@ func ImportGroupConfigRecord(reg *Registry, rec ConfigRecord) (msg string, appli
 			rec.Project, rec.Key), false
 	}
 	return "", false
+}
+
+// CheckChapters keeps the chapters meta a list of named chapters whose
+// names a page can show and file under: non-empty, at most 64
+// bytes (the tag bound), and free of control and markup characters. The
+// text in "about" is free prose and is only ever shown escaped.
+func CheckChapters(v string) error {
+	var chs []struct {
+		Name  string `json:"name"`
+		About string `json:"about"`
+	}
+	if err := json.Unmarshal([]byte(v), &chs); err != nil {
+		return fmt.Errorf("chapters must be a JSON list of {name, about}")
+	}
+	for _, c := range chs {
+		n := strings.TrimSpace(c.Name)
+		switch {
+		case n == "":
+			return fmt.Errorf("a chapter needs a name")
+		case len(n) > 64:
+			return fmt.Errorf("chapter name %q is longer than 64 bytes", n)
+		case HasMarkup(n):
+			return fmt.Errorf("chapter name %q holds a control or markup character (< > \" ' ` \\)", StripMarkup(n))
+		}
+	}
+	return nil
 }

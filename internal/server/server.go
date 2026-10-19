@@ -426,6 +426,10 @@ func (s *Server) importMemory(w http.ResponseWriter, r *http.Request) {
 		s.fail(w, http.StatusBadRequest, err)
 		return
 	}
+	if err := store.CheckImportedMemory(&req.Memory); err != nil {
+		s.fail(w, http.StatusBadRequest, err)
+		return
+	}
 	if err := db.ImportMemory(&req.Memory); err != nil {
 		s.fail(w, http.StatusBadRequest, err)
 		return

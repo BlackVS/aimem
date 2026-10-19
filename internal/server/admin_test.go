@@ -380,7 +380,7 @@ func TestConsoleMergeUsesDropdown(t *testing.T) {
 	// in merge mode.
 	menu := page[strings.Index(page, `kbMenu==="scope:"+g.id`):]
 	menu = menu[:strings.Index(menu, "</div>`;")]
-	if !strings.Contains(menu, "mergeProjectUI(") || !strings.Contains(menu, `kbMenu==="merge:"+g.id ? mergeChooser(g.id)`) {
+	if !strings.Contains(menu, `act("mergeProjectUI",`) || !strings.Contains(menu, `kbMenu==="merge:"+g.id ? mergeChooser(g.id)`) {
 		t.Fatal("scope menu must offer the merge action and render the chooser in merge mode")
 	}
 	if strings.Contains(page, "mergeFor") {

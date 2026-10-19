@@ -22,9 +22,11 @@ import (
 	"errors"
 	"fmt"
 	"maps"
+	"regexp"
 	"sort"
 	"strings"
 	"time"
+	"unicode"
 
 	"aimem/internal/embed"
 	"aimem/internal/redact"
@@ -77,11 +79,49 @@ func validKind(k string) string {
 }
 
 func normTag(t string) string {
-	t = strings.ToLower(strings.TrimSpace(t))
+	t = strings.ToLower(strings.TrimSpace(StripMarkup(t)))
 	if len(t) > 64 {
 		t = t[:64]
 	}
 	return t
+}
+
+// StripMarkup removes control characters and the characters that can end
+// an HTML attribute or a script string (< > " ' ` \). Tags, sources and
+// chapter names are short identifiers that never need them, and a stored
+// value that cannot carry them cannot break out of the page that shows
+// it, whatever that page's escaping does.
+func StripMarkup(s string) string {
+	return strings.Map(func(r rune) rune {
+		if unicode.IsControl(r) || strings.ContainsRune("<>\"'`\\", r) {
+			return -1
+		}
+		return r
+	}, s)
+}
+
+// HasMarkup reports whether StripMarkup would change s.
+func HasMarkup(s string) bool { return StripMarkup(s) != s }
+
+// memoryIDPattern is the id shape an imported memory must have. Ids this
+// hub mints are UUIDv7; the pattern is wider so that ids minted by other
+// tools stay importable, but it admits nothing that can end a quoted
+// string or an attribute.
+var memoryIDPattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$`)
+
+// ValidMemoryID reports whether id may name a memory arriving by import
+// or sync.
+func ValidMemoryID(id string) bool { return memoryIDPattern.MatchString(id) }
+
+// CheckImportedMemory is the id rule for a memory arriving from outside
+// this hub (the import route and sync-in). It is not applied inside
+// ImportMemory: a project merge replays rows this store already holds,
+// and a merge drops a row that fails to import.
+func CheckImportedMemory(m *Memory) error {
+	if !ValidMemoryID(m.ID) || (m.SupersededBy != "" && !ValidMemoryID(m.SupersededBy)) {
+		return errors.New("invalid memory id: want 1-64 letters, digits, '-' or '_', starting with a letter or digit")
+	}
+	return nil
 }
 
 // Remember stores a curated fact. If an identical active fact already
@@ -224,7 +264,7 @@ func (d *DB) ApplyOriginAliases(add map[string]string) (touched int, changed boo
 func (d *DB) addSources(memoryID string, eventIDs []string) error {
 	aliases := d.originAliases()
 	for _, ev := range eventIDs {
-		if ev == "" {
+		if ev = StripMarkup(ev); ev == "" {
 			continue
 		}
 		if len(aliases) > 0 {

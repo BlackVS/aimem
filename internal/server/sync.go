@@ -179,7 +179,7 @@ func (s *Server) syncMemoriesIn(w http.ResponseWriter, r *http.Request) {
 				continue
 			}
 		case rec.Memory != nil:
-			if db.ImportMemory(rec.Memory) != nil {
+			if store.CheckImportedMemory(rec.Memory) != nil || db.ImportMemory(rec.Memory) != nil {
 				failed++
 				continue
 			}
