@@ -13,6 +13,32 @@ currently 24); a binary refuses a database newer than it understands.
 
 ## [Unreleased]
 
+### Upgrade notes
+
+- **Hubs: the process sets are stored on upgrade.** The hub one-liner
+  now runs `aimem process refresh` after the upgraded hub answers its
+  health check. For each selection made before 0.10.7, it stores the set
+  from the recorded repository, commit, manifest and ref, and prints a
+  line per project. This replaces the manual re-select step of the 0.10.7
+  notes. On a hub upgraded by hand, run `aimem process refresh` as the
+  service user on the hub host. A project whose set the host cannot read
+  from Git is reported with the `aimem process export` command to run on
+  a machine that has access, and `aimem process refresh -p <project>
+  --from-archive FILE` then imports the archive. The refresh never fails
+  the upgrade.
+
+### Added
+
+- **`aimem process refresh` and `aimem process list`.** Both run on the
+  hub host. `list` prints every project with a selection: its commit, its
+  ref, its manifest, and whether its set is stored. `refresh` stores the
+  set of every selection that has none, from Git at the recorded commit or
+  from a verified archive (`-p` with `--from-archive`; the archive's file
+  name must carry the commit, as `aimem process export` names it). It uses the compare-and-swap of a re-select
+  and leaves a selection that has its set unchanged. It reports each
+  project as refreshed, already stored, or needing an archive, and a
+  project it cannot refresh does not fail the run.
+
 ## [0.10.7] — 2026-10-19
 
 A security release. It addresses three findings of an independent security

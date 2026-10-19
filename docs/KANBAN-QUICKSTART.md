@@ -299,7 +299,7 @@ direct grant removes that grant, but a group grant may still allow writes.
 | Required local credential fails | Check project/hub binding, expiry, revocation and grant; run `set` with a valid project token, or deliberately `clear` to restore per-hub selection |
 | Token rejected | Correct hub, ordinary token, expiry, revocation and enabled user |
 | Reads work, writes fail | Tasks enabled, enabled user, current user/group grant and token scope; a recreated project needs a new grant and, for project-scoped tokens, a new token |
-| Process context unavailable | Selected manifest/commit, the member's grant on the project (denied) and hub reachability, required files and bootstrap budget; a hub that stores no set for the selection needs re-selecting on the hub host |
+| Process context unavailable | Selected manifest/commit, the member's grant on the project (denied) and hub reachability, required files and bootstrap budget; a hub that stores no set for the selection needs `aimem process refresh` on the hub host |
 | CLI cannot reach service | Run as the configured service user; export `XDG_RUNTIME_DIR="/run/user/$(id -u)"` and check `aimem health`. If that runtime directory/socket is absent too, inspect `systemctl --user status aimem` |
 
 For deployment and API details, see [the administrator manual](ADMIN-MANUAL.md)

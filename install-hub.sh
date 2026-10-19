@@ -173,6 +173,20 @@ aimem_as() { runuser -u "$HUB_USER" -- env "HOME=$HOME_DIR" "XDG_RUNTIME_DIR=/ru
 STATE_ROOT_DEFAULT="$HOME_DIR/.local/state/aimem"
 # END hub-service-hooks
 
+# BEGIN process-refresh
+# After an upgrade: store the process sets of the selections made before
+# the hub stored sets, from their recorded repository, commit, manifest and
+# ref, so an upgrade needs no manual step. The report is printed per
+# project; a set Git cannot read is reported with the commands that supply
+# it, and nothing here fails the upgrade.
+refresh_processes() { # aimem-binary
+  echo "==> process sets: aimem process refresh"
+  if ! aimem_as "$1" process refresh; then
+    echo "WARNING: aimem process refresh did not complete; as $HUB_USER on this host run: aimem process refresh" >&2
+  fi
+}
+# END process-refresh
+
 # --- binary -----------------------------------------------------------------
 mkdir -p "$HOME_DIR/.local/bin" "$HOME_DIR/.local/sbin"
 if [ -n "${AIMEM_PREBUILT:-}" ]; then
@@ -319,7 +333,9 @@ chown -R "$HUB_USER:$HUB_USER" "$HOME_DIR/.local" "$HOME_DIR/.config"
 
 sysuser daemon-reload
 sysuser enable aimem.service aimem-curate.timer >/dev/null 2>&1 || true
+UPGRADED=
 if [ -e "$AIMEM_BIN" ]; then
+  UPGRADED=1
   upgrade_txn "$AIMEM_BIN.new" || exit 1
 else
   mv "$AIMEM_BIN.new" "$AIMEM_BIN"
@@ -337,6 +353,9 @@ SCHEME=http; [ -n "${AIMEM_TLS_CERT:-}" ] && SCHEME=https
 HOST=${AIMEM_DOMAIN:-<this-host>}
 if curl -fsSk -H "Authorization: Bearer $TOKEN" "$SCHEME://127.0.0.1:$PORT/v1/health" >/dev/null; then
   echo "hub is up: $SCHEME://$HOST:$PORT ($(as_user "$HOME_DIR/.local/bin/aimem" version))"
+  if [ -n "$UPGRADED" ]; then
+    refresh_processes "$AIMEM_BIN"
+  fi
 else
   echo "WARNING: health check failed — inspect: journalctl --user -u aimem (as $HUB_USER)" >&2
 fi
