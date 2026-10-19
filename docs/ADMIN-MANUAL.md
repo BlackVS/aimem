@@ -434,6 +434,8 @@ aimem process select … --expect <current commit>     # change it later
 aimem process clear --expect <current commit>
 aimem process show -p <project>                      # what a session gets
 aimem process show --full -p <project>               # the whole unit, plus the repository URL
+aimem process list                                   # every project's selection, and whether its set is stored
+aimem process refresh                                # store the sets of selections that have none
 ```
 
 `select` runs on the hub host and reads the set at the commit from Git
@@ -474,7 +476,16 @@ selection as last observed and a warning; a unit larger than the budget is
 not injected and the notice says to read it with `aimem process show`. A
 hub from before sets were stored, or a selection it recorded then, serves
 no set, and the member fetches the commit from Git with its own access, as
-before; re-selecting on the new hub imports the files.
+before. `aimem process refresh` on the hub host stores those sets from
+the recorded repository, commit, manifest and ref, with the same
+compare-and-swap a re-select makes, and reports each project; the hub
+installer runs it after an upgrade. A set the host cannot read from Git
+is reported with the `aimem process export` command that writes its
+archive elsewhere, and `aimem process refresh -p <project> --from-archive
+FILE` imports it. Because the commit comes from the record and is not
+typed, the archive's file name must carry the commit's first 12
+characters, as the exported `<name>-<commit12>.tar.gz` does.
+`aimem process list` shows which selections still lack a set.
 
 ### Importing the skills sets
 

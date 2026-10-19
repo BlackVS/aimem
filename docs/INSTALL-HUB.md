@@ -28,7 +28,10 @@ socket) to `<state root>.backup-<UTC time>` beside it, by default
 `~sessiond/.local/state/aimem.backup-…`, swaps the binary and waits for
 health at the new version. If the new release does not come up, the
 previous binary and the state copy both go back and the script says so.
-An existing `env` file is never overwritten, so re-running is safe. See
+Once the upgraded hub is healthy, the script runs `aimem process refresh`
+to store the process sets of selections made before the hub stored them,
+and prints its report; a project it cannot refresh is reported there and
+does not fail the upgrade. An existing `env` file is never overwritten, so re-running is safe. See
 [ADMIN-MANUAL](ADMIN-MANUAL.md#upgrades).
 
 ## 2. Options

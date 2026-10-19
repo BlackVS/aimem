@@ -9,7 +9,9 @@ package main
 // SHA256SUMS, and sends it with the selection, so the hub never runs Git
 // and a member never needs access to the repository. `aimem process
 // export` writes that archive on a machine that has the access, for a hub
-// that has none. `aimem process show` runs on any machine and prints
+// that has none. `aimem process list|refresh` on the hub host show which
+// selections lack a stored set and store them (process_refresh.go).
+// `aimem process show` runs on any machine and prints
 // exactly what the session-start hook injects, with the same availability
 // notices, so a person can see what an agent saw.
 
@@ -35,16 +37,23 @@ import (
 const processUsage = `usage: aimem process select <repo> <commit> <manifest> [--ref <branch|tag>] [--from-archive <file>] [--sums <file>] [--expect <commit>] [-p <project>]
        aimem process export <repo> <commit> <manifest> [--ref <branch|tag>] [--out <dir>]
        aimem process clear --expect <commit> [-p <project>]
+       aimem process list
+       aimem process refresh [-p <project>] [--from-archive <file>] [--sums <file>]
        aimem process show [--full] [--template <kind>] [-p <project>]
 
-select and clear run on the hub host (admin). select reads the set at the
-commit from Git, or with --from-archive from a tar.gz verified against the
-SHA256SUMS beside it (--sums names another file), and stores it on the hub
-with the selection; a set the hub already keeps (the last 5 selections) is
-re-selected without a new import. export writes that archive and its
-SHA256SUMS line on a machine with access to the repository. show runs
-anywhere and prints what the session-start hook injects for this project;
---full adds the repository URL, for the admin.`
+select, clear, list and refresh run on the hub host (admin). select reads
+the set at the commit from Git, or with --from-archive from a tar.gz
+verified against the SHA256SUMS beside it (--sums names another file), and
+stores it on the hub with the selection; a set the hub already keeps (the
+last 5 selections) is re-selected without a new import. export writes that
+archive and its SHA256SUMS line on a machine with access to the
+repository. list prints every project's selection and whether its set is
+stored. refresh stores the set of every selection that has none (made
+before the hub stored sets) from its recorded repository, commit, manifest
+and ref, and reports each project; a set it cannot read from Git is
+reported as needing an archive, which refresh -p <project> --from-archive
+then imports. show runs anywhere and prints what the session-start hook
+injects for this project; --full adds the repository URL, for the admin.`
 
 func processCmd(args []string) error {
 	usage := processUsage
@@ -52,6 +61,10 @@ func processCmd(args []string) error {
 		return fmt.Errorf("%s", usage)
 	}
 	switch args[0] {
+	case "list":
+		return processListCmd(args[1:])
+	case "refresh":
+		return processRefreshCmd(args[1:])
 	case "select", "clear", "export":
 		fs := flag.NewFlagSet("process "+args[0], flag.ExitOnError)
 		p := projectFlag(fs, "project id (default: current directory's project)")
