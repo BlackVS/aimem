@@ -13,6 +13,17 @@ currently 24); a binary refuses a database newer than it understands.
 
 ## [Unreleased]
 
+## [0.10.8] — 2026-10-19
+
+People select a project's process by its release tag, and upgrading a
+hub stores the process sets of older selections without a manual step.
+`aimem process select <repo> <tag>` resolves the tag on the hub host and
+pins the commit it points at; the manifest path has a default. The hub
+one-liner now runs `aimem process refresh`, which replaces the manual
+re-select step of the 0.10.7 notes. The next step that `aimem tasks on` prints
+shows the tag form. No schema or API change. Includes PR #242, #243,
+#244 and #245.
+
 ### Upgrade notes
 
 - **Hubs: the process sets are stored on upgrade.** The hub one-liner
@@ -26,6 +37,9 @@ currently 24); a binary refuses a database newer than it understands.
   a machine that has access, and `aimem process refresh -p <project>
   --from-archive FILE` then imports the archive. The refresh never fails
   the upgrade.
+- **Workstations: the client one-liner is optional.** It brings the tag
+  into the session's `Process set:` line and the tag form into a
+  member's not-ready message. Nothing else changes on a workstation.
 
 ### Added
 
