@@ -13,6 +13,29 @@ currently 24); a binary refuses a database newer than it understands.
 
 ## [Unreleased]
 
+## [0.10.10] — 2026-10-20
+
+A hub host without `git` now selects a process by its release tag, and
+reads a private process repository with a forge token from the hub
+user's env file: one token for every host (`AIMEM_PROCESS_FORGE_TOKEN`),
+or one per host (`AIMEM_PROCESS_FORGE_TOKENS`) when the hub's projects
+use more than one forge. No schema or API change. Includes PR #249, #250, #251 and
+#252.
+
+### Upgrade notes
+
+- **Workstations: the client one-liner is optional.** The new settings
+  are read by `aimem process select` and `aimem process refresh` on the
+  hub host; nothing changes on a workstation.
+- **Hub hosts: a token only for a private repository.** A hub whose
+  process repositories are public needs no setting. For a private
+  repository on a hub host without `git` (or where Git cannot read it),
+  put `AIMEM_PROCESS_FORGE_TOKEN`, or `AIMEM_PROCESS_FORGE_TOKENS` with
+  one `host=token` entry per forge, in the hub user's
+  `~/.config/aimem/env` before the hub one-liner's refresh (ADMIN-MANUAL
+  names both). A malformed entry fails the forge read with its position
+  only. Selecting by tag no longer needs `git`.
+
 ### Added
 
 - **A forge token for process repositories, and tags without Git.** On a
@@ -31,6 +54,23 @@ currently 24); a binary refuses a database newer than it understands.
   case and with the port, `:443` implied), so each forge receives only
   its own. `AIMEM_PROCESS_FORGE_TOKEN` stays the token for any other
   host.
+
+### Fixed
+
+- **A flaky enrollment test.** The first-run expiry test issued an
+  enrollment that expired three seconds later by the wall clock, so on a
+  loaded runner the hub could refuse it as already in the past. The
+  client now reads a first run's expiry through a clock the test
+  advances, and the test uses the default expiry. Behaviour is
+  unchanged.
+
+### Docs
+
+- **Agent instructions hold in every mode.** The repository's
+  `AGENTS.md` and `CLAUDE.md` now hold both in an operator's checkout and
+  in an agent team member's worktree: where a workflow rule differs by
+  mode, the agent home's `START.md` and the project's process set
+  decide. Every rule about the code is unchanged.
 
 ## [0.10.9] — 2026-10-19
 

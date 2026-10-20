@@ -10,13 +10,13 @@ One-liner in any project directory (installs the binary if missing, then
 wires the project):
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/BlackVS/aimem/v0.10.9/boot.sh | bash
+curl -fsSL https://raw.githubusercontent.com/BlackVS/aimem/v0.10.10/boot.sh | bash
 ```
 
 Windows (PowerShell; supported, tested less than Linux):
 
 ```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -Command "irm https://raw.githubusercontent.com/BlackVS/aimem/v0.10.9/boot.ps1 | iex"
+powershell -NoProfile -ExecutionPolicy Bypass -Command "irm https://raw.githubusercontent.com/BlackVS/aimem/v0.10.10/boot.ps1 | iex"
 ```
 
 Environment knobs for the boot script:
@@ -63,11 +63,11 @@ that already holds `.aimem.json`, and it never wires the home directory.
 `AIMEM_USER_ONLY=1` upgrades the user level and wires nothing:
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/BlackVS/aimem/v0.10.9/boot.sh | AIMEM_USER_ONLY=1 bash
+curl -fsSL https://raw.githubusercontent.com/BlackVS/aimem/v0.10.10/boot.sh | AIMEM_USER_ONLY=1 bash
 ```
 
 ```powershell
-$env:AIMEM_USER_ONLY = '1'; powershell -NoProfile -ExecutionPolicy Bypass -Command "irm https://raw.githubusercontent.com/BlackVS/aimem/v0.10.9/boot.ps1 | iex"
+$env:AIMEM_USER_ONLY = '1'; powershell -NoProfile -ExecutionPolicy Bypass -Command "irm https://raw.githubusercontent.com/BlackVS/aimem/v0.10.10/boot.ps1 | iex"
 ```
 
 On an existing installation the installer:
@@ -112,7 +112,7 @@ Fresh host (Debian/Ubuntu LXC or VM), as root — one command does user,
 binary, env, units, timers:
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/BlackVS/aimem/v0.10.9/install-hub.sh | bash
+curl -fsSL https://raw.githubusercontent.com/BlackVS/aimem/v0.10.10/install-hub.sh | bash
 ```
 
 Knobs (env): `AIMEM_HUB_USER` (default sessiond), `AIMEM_HTTP_LISTEN`
