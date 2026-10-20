@@ -13,6 +13,19 @@ currently 24); a binary refuses a database newer than it understands.
 
 ## [Unreleased]
 
+### Added
+
+- **A forge token for process repositories, and tags without Git.** On a
+  hub host without `git` (or where Git cannot read the repository),
+  `aimem process select` and `aimem process refresh` now read a private
+  repository's commit tarball with `AIMEM_PROCESS_FORGE_TOKEN` from the
+  hub user's `~/.config/aimem/env`, and `select <repo> <tag>` resolves the
+  tag through the forge's ref advertisement
+  (`<repository>/info/refs?service=git-upload-pack`) to the commit `git
+  ls-remote` gives. The token is sent as `Authorization: token <token>`
+  to the repository's own host only, dropped on a redirect to another
+  host, and never printed or stored.
+
 ## [0.10.9] — 2026-10-19
 
 The refresh that the hub one-liner runs after an upgrade now stores the

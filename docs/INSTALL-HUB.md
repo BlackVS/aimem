@@ -40,10 +40,15 @@ select`, and `aimem process refresh`, which an upgrade runs): with `git`
 installed they read the commit from Git with the host's access; without
 it, or when Git cannot read it, they read the forge's tarball of the
 commit over https (`<repository>/archive/<commit>.tar.gz`, as GitHub and
-Gitea serve it), anonymously. A repository reached over ssh, a private
-one, or a forge the host cannot reach over https then needs the archive
-import, and selecting by tag needs `git`. The script warns at the start
-when `git` is missing and goes on; `apt-get install -y git` adds it.
+Gitea serve it), and resolve a tag through the forge's ref advertisement.
+Those reads are anonymous; for a private repository or a forge that
+requires authentication, add `AIMEM_PROCESS_FORGE_TOKEN=<read-only
+token>` to the hub user's `~/.config/aimem/env` (sent only to the
+repository's host, never stored; see
+[ADMIN-MANUAL](ADMIN-MANUAL.md#selecting-a-projects-process-documents)). A repository reached
+only over ssh, or a forge the host cannot reach over https, then needs
+the archive import. The script warns at the start when `git` is missing
+and goes on; `apt-get install -y git` adds it.
 
 ## 2. Options
 

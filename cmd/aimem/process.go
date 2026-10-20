@@ -44,14 +44,19 @@ const processUsage = `usage: aimem process select <repo> <tag|commit> [<manifest
 
 select, clear, list and refresh run on the hub host (admin). select takes
 a tag (or a branch) or a full commit: a tag is resolved to the commit it
-holds now (git ls-remote on this host), and the selection stores both and
-stays pinned to that commit. The manifest defaults to
+holds now (git ls-remote on this host, or without git the forge's ref
+advertisement over https), and the selection stores both and stays
+pinned to that commit. The manifest defaults to
 processes/aimem/manifest.json. --expect names the current selection by
-its commit or its tag; re-selecting the commit and manifest already selected needs
-none. select reads the set at the commit from Git, or with --from-archive
-from a tar.gz verified against the SHA256SUMS beside it (--sums names another file), and
-stores it on the hub with the selection; a set the hub already keeps (the
-last 5 selections) is re-selected without a new import. export writes that
+its commit or its tag; re-selecting the commit and manifest already
+selected needs none. select reads the set at the commit from Git (without
+git, from the forge's tarball of the commit over https), or with
+--from-archive from a tar.gz verified against the SHA256SUMS beside it
+(--sums names another file), and stores it on the hub with the
+selection. Without git, a private repository needs
+AIMEM_PROCESS_FORGE_TOKEN in the hub's env file: a token the forge
+accepts, sent only to the repository's host. A set the hub already keeps
+(the last 5 selections) is re-selected without a new import. export writes that
 archive and its SHA256SUMS line on a machine with access to the
 repository. list prints every project's selection and whether its set is
 stored. refresh stores the set of every selection that has none (made
@@ -219,12 +224,37 @@ func looksLikeCommit(s string) bool {
 }
 
 // resolveRef resolves a tag or branch to its commit with git ls-remote on
-// this host; tests replace it.
+// this host when it has git, and otherwise (or when git cannot) from the
+// forge's ref advertisement over https, as fetchBundle reads a set. A
+// repository or name no selection could hold is refused once, before
+// either is asked. Tests replace it.
 var resolveRef = func(repo, name string) (string, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), 3*process.FetchTimeout)
-	defer cancel()
-	return process.Resolve(ctx, repo, name)
+	if err := process.CheckResolvable(repo, name); err != nil {
+		return "", err
+	}
+	gitErr := errors.New("git is not installed on this host")
+	if gitPresent() {
+		ctx, cancel := context.WithTimeout(context.Background(), 3*process.FetchTimeout)
+		defer cancel()
+		commit, err := process.Resolve(ctx, repo, name)
+		if err == nil {
+			return commit, nil
+		}
+		gitErr = err
+	}
+	commit, err := process.ResolveForge(context.Background(), forgeClient, repo, name, forgeToken())
+	if err != nil {
+		return "", fmt.Errorf("with git: %v; from the forge: %v", gitErr, err)
+	}
+	return commit, nil
 }
+
+// forgeTokenEnv names the hub host's setting (in the env file, as every
+// AIMEM_ setting) for a token the forge accepts for the process
+// repository: sent on the forge tarball and ref reads, never stored.
+const forgeTokenEnv = "AIMEM_PROCESS_FORGE_TOKEN"
+
+func forgeToken() string { return strings.TrimSpace(os.Getenv(forgeTokenEnv)) }
 
 // expectedCommit turns --expect into the commit the hub's compare-and-swap
 // needs. A full commit passes as given. A tag or branch must be the
@@ -325,7 +355,8 @@ var (
 // fetchBundle reads the set at the selection's commit from Git when this
 // host has it, and otherwise (or when Git cannot read it) from the forge's
 // tarball of that commit over https, so a hub host without git still reads
-// a set from a public forge. It says which source it read.
+// a set from the forge (a private one with the forge token). It says which
+// source it read.
 func fetchBundle(sel process.Ref) (*process.Bundle, string, error) {
 	gitErr := errors.New("git is not installed on this host")
 	if gitPresent() {
@@ -335,7 +366,7 @@ func fetchBundle(sel process.Ref) (*process.Bundle, string, error) {
 		}
 		gitErr = err
 	}
-	b, err := process.FetchForgeArchive(context.Background(), forgeClient, sel)
+	b, err := process.FetchForgeArchive(context.Background(), forgeClient, sel, forgeToken())
 	if err != nil {
 		return nil, "", fmt.Errorf("reading the set from Git: %v; from the forge tarball: %v", gitErr, err)
 	}
