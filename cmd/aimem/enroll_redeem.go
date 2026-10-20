@@ -62,8 +62,10 @@ const (
 const enrollRecordLimit = 16384
 
 // Test hooks: a test stops the command at a phase, as a crash would, or
-// pauses it where another run can overtake it.
+// pauses it where another run can overtake it; enrollNow is the clock a
+// first run's expiry is judged by.
 var (
+	enrollNow           = time.Now
 	enrollBeforePublish func()
 	enrollBackoff       = func(attempt int) time.Duration { return time.Duration(1<<attempt) * time.Second }
 	enrollCrashAt       func(phase string) bool
@@ -197,7 +199,7 @@ func enrollRedeem(root, hubName, label string, stdin io.Reader, stderr io.Writer
 	switch {
 	case pending == nil:
 		until = rec.ExpiresAt
-		if !time.Now().Before(rec.ExpiresAt) {
+		if !enrollNow().Before(rec.ExpiresAt) {
 			return enrollResult{}, refuse(enrollExitFinal, "enrollment_invalid: the onboarding code expired at %s; ask the operator for a new one", rec.ExpiresAt.Format(time.RFC3339))
 		}
 		// A credential already stored and accepted: nothing to spend. The
@@ -410,7 +412,7 @@ func enrollSend(client *http.Client, rec enrollRecordIn, label, k1 string, priv 
 	for attempt := range 5 {
 		if attempt > 0 {
 			time.Sleep(enrollBackoff(attempt - 1))
-			if !until.IsZero() && !time.Now().Before(until) {
+			if !until.IsZero() && !enrollNow().Before(until) {
 				// Stop retrying a first redemption at the expiry. An earlier
 				// attempt may have reached the hub, so the outcome is
 				// unknown: the rerun is a recovery, which the hub replays.
