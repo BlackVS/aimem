@@ -6,16 +6,26 @@
   context section at the bottom with your own.
 -->
 
+## Where these rules apply
+
+These rules hold in every checkout of this repository: an operator's own
+checkout and an agent team member's worktree alike. The place of launch
+sets the mode and the agent's identity, never this file. Where a workflow
+rule below differs by mode (where the handoff lives, who chooses the next
+task, who waives a finding or postpones a PR), the agent home's START.md
+and the project's process set decide for a team member; the text below is
+the rule for a session without them. The code rules apply unchanged.
+
 ## Session handoff protocol
 
-The canonical handoff is `docs/SESSION-STATE.md`. It is the single source
-for current task state; Git, test output, and CI remain authoritative for
-their respective facts.
+Unless the agent home names its own handoff, the canonical handoff is
+`docs/SESSION-STATE.md`. It is the single source for current task state;
+Git, test output, and CI remain authoritative for their respective facts.
 
-1. Read `docs/SESSION-STATE.md` at session start and again after any
-   compaction. (Claude Code injects it via a SessionStart hook; OpenCode
-   loads it via `opencode.json` instructions — but reread it explicitly
-   after compaction.)
+1. Read the handoff at session start and again after any
+   compaction. (Where aimem installed them, Claude Code injects it via a
+   SessionStart hook and OpenCode loads it via `opencode.json`
+   instructions — but reread it explicitly after compaction.)
 2. Treat every claim in the handoff as unverified until its evidence
    command is re-run or checked against Git. The file is a lead, not a
    contract.
@@ -43,11 +53,11 @@ STRICT: before pushing to the remote, the pending changes MUST be
 reviewed with the `oh-code-review` skill at level **medium** (the
 standard single pass — speed matters here; depth belongs to the
 pre-merge review) and the review must come back clean — every finding
-either fixed or explicitly waived by the user. Run the review on the
+either fixed or explicitly waived by the operator. Run the review on the
 final state of the changes (after the last edit), fix, re-verify
 tests, then push. No exceptions for "small" changes; a docs-only edit
 still gets the review (it is cheap). If the skill is unavailable in
-the running environment, say so and get the user's explicit go-ahead
+the running environment, say so and get the operator's explicit go-ahead
 before pushing.
 
 ## Full PR review before merge
@@ -66,7 +76,8 @@ from another model family.
 POST the review as a comment on the PR, so the record lives with the
 code and survives the session. Only BLOCKER findings return the PR to
 implementation; track follow-ups separately. Blockers are fixed or
-explicitly accepted by the user before merge; the merge click stays the user's.
+explicitly accepted by the operator before merge; the merge click stays the
+operator's.
 
 A review binds to the head it reviewed and to your change's patch. A
 new commit, or a base update that changes your own change (a conflict
@@ -100,7 +111,7 @@ to the operator. Watch the result and read the comment for the reviewed head.
 Work PRs SERIALLY: the next PR is opened ONLY after the previous one
 is MERGED (or explicitly closed) — never merely "ready". Drive each
 one all the way (review, fixes, green checks, merge), then branch the
-next from fresh master. A PR the user has explicitly POSTPONED (a
+next from fresh master. A PR the operator has explicitly POSTPONED (a
 deliberate hold — e.g. the 7-day supply-chain wait) steps out of the
 line: it does not block new PRs, and when it resumes it rejoins as an
 ordinary next-in-line (rebase first, stale review rules apply).
@@ -111,7 +122,7 @@ would have avoided entirely. Two exceptions: PRs from external
 automation (dependabot) arrive in parallel by nature — merge those
 one at a time, `@dependabot rebase` before each; and a genuinely
 independent pair (disjoint files, no shared CHANGELOG entry) may
-overlap when the user says so.
+overlap when the operator says so.
 
 ## Working in this repo
 
@@ -161,7 +172,8 @@ pinned to real routes by a parity test — update both together.
 
 Delivery order and agent task-pickup policy live in `docs/ROADMAP.md`;
 the task board owns live state and evidence. Read the roadmap before
-selecting work; list order is not priority and dependencies are advisory.
+selecting work yourself (an assigned task follows its assignment); list
+order is not priority and dependencies are advisory.
 
 aimem itself: session resilience and shared memory for AI coding
 agents. Public repo; PolyForm Noncommercial from v0.2.0 (≤ v0.1.90
