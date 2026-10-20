@@ -1,1 +1,1 @@
-See @AGENTS.md for the shared session handoff protocol.
+See @AGENTS.md for this repository's rules, which hold in every mode.
