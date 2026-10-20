@@ -25,6 +25,12 @@ currently 24); a binary refuses a database newer than it understands.
   ls-remote` gives. The token is sent as `Authorization: token <token>`
   to the repository's own host only, dropped on a redirect to another
   host, and never printed or stored.
+- **A forge token per host.** A hub whose projects use more than one
+  forge gives each host its own token in `AIMEM_PROCESS_FORGE_TOKENS`
+  (`host=token` entries separated by commas, matched without
+  case and with the port, `:443` implied), so each forge receives only
+  its own. `AIMEM_PROCESS_FORGE_TOKEN` stays the token for any other
+  host.
 
 ## [0.10.9] — 2026-10-19
 

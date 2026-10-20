@@ -471,9 +471,24 @@ unless `AIMEM_PROCESS_FORGE_TOKEN` is set in the hub user's
 process repository. It is sent as `Authorization: token
 <token>` to the repository's own host only, and a redirect to another
 host (GitHub sends tarballs to `codeload.github.com`) is followed
-without it. There is one token for the hub: `refresh` sends it to the
-host of every selected repository, so it must be accepted by, and safe
-to send to, every forge the hub's projects use. It is never
+without it. That one token goes to the host of every selected
+repository (`refresh` reads them all), so it must be accepted by, and
+safe to send to, every forge the hub's projects use. When they use more
+than one forge, give each host its own token in
+`AIMEM_PROCESS_FORGE_TOKENS`, as `host=token` entries separated by commas
+(the env file is also read by a shell, so a value with spaces would need
+quotes):
+
+```sh
+AIMEM_PROCESS_FORGE_TOKENS=github.com=<token>,git.example.org:3000=<token>
+```
+
+A host is matched without case and with its port, `:443` implied, so
+`github.com` covers `https://github.com/...` and a forge on another port
+is named with that port. A host with its own entry gets that token; any
+other host gets `AIMEM_PROCESS_FORGE_TOKEN` when it is set, and an
+anonymous read otherwise. A malformed entry fails the read with the
+entry's position, never its text. A token is never
 printed or stored with the selection, and Git
 does not use it: with `git` installed, Git reads with the host's own
 credentials first. A repository reached only over ssh, or a forge the

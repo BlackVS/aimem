@@ -159,7 +159,7 @@ func TestProcessForgeTokenFromTheEnvFile(t *testing.T) {
 		t.Fatal(err)
 	}
 	loadEnvFile()
-	if forgeToken() != token {
+	if got, err := forgeTokenFor(repo); err != nil || got != token {
 		t.Fatal("the env file's token was not loaded")
 	}
 

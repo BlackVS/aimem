@@ -43,8 +43,9 @@ commit over https (`<repository>/archive/<commit>.tar.gz`, as GitHub and
 Gitea serve it), and resolve a tag through the forge's ref advertisement.
 Those reads are anonymous; for a private repository or a forge that
 requires authentication, add `AIMEM_PROCESS_FORGE_TOKEN=<read-only
-token>` to the hub user's `~/.config/aimem/env` (sent only to the
-repository's host, never stored; see
+token>` to the hub user's `~/.config/aimem/env`, or one per forge host
+in `AIMEM_PROCESS_FORGE_TOKENS` (sent only to the repository's host,
+never stored; see
 [ADMIN-MANUAL](ADMIN-MANUAL.md#selecting-a-projects-process-documents)). A repository reached
 only over ssh, or a forge the host cannot reach over https, then needs
 the archive import. The script warns at the start when `git` is missing

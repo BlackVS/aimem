@@ -29,6 +29,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"unicode"
 
 	"aimem/internal/ident"
 	"aimem/internal/process"
@@ -55,7 +56,8 @@ git, from the forge's tarball of the commit over https), or with
 (--sums names another file), and stores it on the hub with the
 selection. Without git, a private repository needs
 AIMEM_PROCESS_FORGE_TOKEN in the hub's env file: a token the forge
-accepts, sent only to the repository's host. A set the hub already keeps
+accepts, sent only to the repository's host (AIMEM_PROCESS_FORGE_TOKENS,
+host=token entries, gives each forge host its own). A set the hub already keeps
 (the last 5 selections) is re-selected without a new import. export writes that
 archive and its SHA256SUMS line on a machine with access to the
 repository. list prints every project's selection and whether its set is
@@ -242,19 +244,53 @@ var resolveRef = func(repo, name string) (string, error) {
 		}
 		gitErr = err
 	}
-	commit, err := process.ResolveForge(context.Background(), forgeClient, repo, name, forgeToken())
+	token, err := forgeTokenFor(repo)
+	commit := ""
+	if err == nil {
+		commit, err = process.ResolveForge(context.Background(), forgeClient, repo, name, token)
+	}
 	if err != nil {
 		return "", fmt.Errorf("with git: %v; from the forge: %v", gitErr, err)
 	}
 	return commit, nil
 }
 
-// forgeTokenEnv names the hub host's setting (in the env file, as every
-// AIMEM_ setting) for a token the forge accepts for the process
-// repository: sent on the forge tarball and ref reads, never stored.
-const forgeTokenEnv = "AIMEM_PROCESS_FORGE_TOKEN"
+// The hub host's settings (in the env file, as every AIMEM_ setting) for
+// the token a forge accepts for a process repository, sent on the forge
+// tarball and ref reads and never stored: one token for every forge, and
+// host=token entries (separated by spaces or commas) for hubs whose
+// projects use more than one.
+const (
+	forgeTokenEnv  = "AIMEM_PROCESS_FORGE_TOKEN"
+	forgeTokensEnv = "AIMEM_PROCESS_FORGE_TOKENS"
+)
 
-func forgeToken() string { return strings.TrimSpace(os.Getenv(forgeTokenEnv)) }
+// forgeTokenFor is the token for repo's forge: the entry for its host
+// (compared without case, :443 implied), else the one token, else none.
+// An error names a malformed entry by its position, never its text.
+func forgeTokenFor(repo string) (string, error) {
+	host := ""
+	if u, err := url.Parse(repo); err == nil && u.Host != "" {
+		host = forgeHost(u.Host)
+	}
+	sep := func(r rune) bool { return r == ',' || unicode.IsSpace(r) }
+	token := ""
+	for i, entry := range strings.FieldsFunc(os.Getenv(forgeTokensEnv), sep) {
+		h, t, ok := strings.Cut(entry, "=")
+		if !ok || h == "" || t == "" || strings.Contains(h, "/") {
+			return "", fmt.Errorf("%s: entry %d is not host=token (a host such as github.com, not a URL)", forgeTokensEnv, i+1)
+		}
+		if token == "" && host != "" && forgeHost(h) == host {
+			token = t
+		}
+	}
+	if token == "" {
+		token = strings.TrimSpace(os.Getenv(forgeTokenEnv))
+	}
+	return token, nil
+}
+
+func forgeHost(h string) string { return strings.TrimSuffix(strings.ToLower(h), ":443") }
 
 // expectedCommit turns --expect into the commit the hub's compare-and-swap
 // needs. A full commit passes as given. A tag or branch must be the
@@ -366,7 +402,11 @@ func fetchBundle(sel process.Ref) (*process.Bundle, string, error) {
 		}
 		gitErr = err
 	}
-	b, err := process.FetchForgeArchive(context.Background(), forgeClient, sel, forgeToken())
+	token, err := forgeTokenFor(sel.Repo)
+	var b *process.Bundle
+	if err == nil {
+		b, err = process.FetchForgeArchive(context.Background(), forgeClient, sel, token)
+	}
 	if err != nil {
 		return nil, "", fmt.Errorf("reading the set from Git: %v; from the forge tarball: %v", gitErr, err)
 	}
