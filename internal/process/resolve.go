@@ -29,15 +29,21 @@ func CheckRefName(name string) error {
 	return nil
 }
 
+// CheckResolvable checks that repo and name could make a selection by
+// name, before any source is asked to resolve it.
+func CheckResolvable(repo, name string) error {
+	if err := checkRepo(repo); err != nil {
+		return err
+	}
+	return CheckRefName(name)
+}
+
 // Resolve returns the commit the tag or branch name holds in repo: a tag
 // (an annotated one peeled to the commit it points at) or a branch of
 // that exact name. A name that is both a tag and a branch, holding
 // different commits, is refused as ambiguous.
 func Resolve(ctx context.Context, repo, name string) (string, error) {
-	if err := checkRepo(repo); err != nil {
-		return "", err
-	}
-	if err := CheckRefName(name); err != nil {
+	if err := CheckResolvable(repo, name); err != nil {
 		return "", err
 	}
 	return resolveNoValidate(ctx, repo, name)

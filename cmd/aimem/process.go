@@ -225,9 +225,13 @@ func looksLikeCommit(s string) bool {
 
 // resolveRef resolves a tag or branch to its commit with git ls-remote on
 // this host when it has git, and otherwise (or when git cannot) from the
-// forge's ref advertisement over https, as fetchBundle reads a set; tests
-// replace it.
+// forge's ref advertisement over https, as fetchBundle reads a set. A
+// repository or name no selection could hold is refused once, before
+// either is asked. Tests replace it.
 var resolveRef = func(repo, name string) (string, error) {
+	if err := process.CheckResolvable(repo, name); err != nil {
+		return "", err
+	}
 	gitErr := errors.New("git is not installed on this host")
 	if gitPresent() {
 		ctx, cancel := context.WithTimeout(context.Background(), 3*process.FetchTimeout)

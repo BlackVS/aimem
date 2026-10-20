@@ -8,11 +8,13 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io/fs"
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -83,10 +85,14 @@ func TestProcessForgeTokenFromTheEnvFile(t *testing.T) {
 	repo := srv.URL + "/team/process.git"
 
 	oldPresent, oldGit, oldClient := gitPresent, fetchGit, forgeClient
-	gitPresent = func() bool { return false }
+	present, gitReads := false, 0
+	gitPresent = func() bool { return present }
 	fetchGit = func(process.Ref) (*process.Bundle, error) {
-		t.Fatal("git called on a host without it")
-		return nil, nil
+		if !present {
+			t.Fatal("git called on a host without it")
+		}
+		gitReads++
+		return nil, errors.New("unavailable: git cannot read it")
 	}
 	forgeClient = srv.Client()
 	t.Cleanup(func() { gitPresent, fetchGit, forgeClient = oldPresent, oldGit, oldClient })
@@ -186,6 +192,31 @@ func TestProcessForgeTokenFromTheEnvFile(t *testing.T) {
 	}
 	if err := run("select", repo, "v9", manifest, "-p", "tagged"); err == nil || !strings.Contains(err.Error(), `no tag or branch "v9"`) {
 		t.Fatalf("an unknown tag: %v", err)
+	}
+	// A name no selection could hold is refused once, and nothing is asked.
+	before := len(sent)
+	if err := run("select", repo, "v1..v2", manifest, "-p", "tagged"); err == nil || err.Error() != "resolving v1..v2: ref must be a plain branch or tag name" {
+		t.Fatalf("a name no selection could hold: %v", err)
+	}
+	if len(sent) != before {
+		t.Fatalf("a refused name reached the forge (%d requests)", len(sent)-before)
+	}
+
+	// Git present but unable to resolve or read (git ls-remote refuses the
+	// test server's certificate, which only the forge client trusts): the
+	// forge is the fallback for both.
+	if _, err := exec.LookPath("git"); err == nil {
+		present = true
+		if _, err := reg.Open("gitfails"); err != nil {
+			t.Fatal(err)
+		}
+		if err := run("select", repo, "v1", manifest, "-p", "gitfails"); err != nil {
+			t.Fatalf("select by tag when git cannot resolve it: %v", err)
+		}
+		if got := selection("gitfails"); got.Commit != c1 || got.Ref != "v1" || got.Digest != want.Digest() || gitReads != 1 {
+			t.Fatalf("git present but failing stored %+v (%d git reads)", got, gitReads)
+		}
+		present = false
 	}
 
 	// The token is nowhere: not in what the commands said, not in the

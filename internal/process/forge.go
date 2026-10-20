@@ -89,10 +89,7 @@ func ArchiveCommit(data []byte) (string, error) {
 // reads, on GitHub, Gitea and any smart-HTTP server), and picks the name
 // from it as Resolve does. A non-empty token is sent as forgeGet sends it.
 func ResolveForge(ctx context.Context, client *http.Client, repo, name, token string) (string, error) {
-	if err := checkRepo(repo); err != nil {
-		return "", err
-	}
-	if err := CheckRefName(name); err != nil {
+	if err := CheckResolvable(repo, name); err != nil {
 		return "", err
 	}
 	if !strings.HasPrefix(repo, "https://") {

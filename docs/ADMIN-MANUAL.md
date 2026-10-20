@@ -471,7 +471,10 @@ unless `AIMEM_PROCESS_FORGE_TOKEN` is set in the hub user's
 process repository. It is sent as `Authorization: token
 <token>` to the repository's own host only, and a redirect to another
 host (GitHub sends tarballs to `codeload.github.com`) is followed
-without it. It is never printed or stored with the selection, and Git
+without it. There is one token for the hub: `refresh` sends it to the
+host of every selected repository, so it must be accepted by, and safe
+to send to, every forge the hub's projects use. It is never
+printed or stored with the selection, and Git
 does not use it: with `git` installed, Git reads with the host's own
 credentials first. A repository reached only over ssh, or a forge the
 host cannot reach over https, still needs the archive import. A
