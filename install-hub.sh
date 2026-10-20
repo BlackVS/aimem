@@ -63,7 +63,7 @@ fetch() { curl -fsSL "$@"; }
 # https instead. Said at the start, not after the upgrade; never fatal.
 check_git() {
   command -v git >/dev/null 2>&1 && return 0
-  echo "WARNING: git is not installed on this host. aimem process select and refresh (run after an upgrade) will read process sets from the forge's commit tarball over https instead. A process repository reached over ssh, private, or on a forge this host cannot reach over https then needs the archive import: aimem process export on a machine with access, then aimem process refresh -p <project> --from-archive <file> here. The hub service itself needs neither. To use git: apt-get install -y git" >&2
+  echo "WARNING: git is not installed on this host. aimem process select and refresh (run after an upgrade) will read process sets from the forge's commit tarball over https instead. A private process repository needs AIMEM_PROCESS_FORGE_TOKEN in ~/.config/aimem/env; one reached only over ssh, or on a forge this host cannot reach over https, needs the archive import: aimem process export on a machine with access, then aimem process refresh -p <project> --from-archive <file> here. The hub service itself needs neither. To use git: apt-get install -y git" >&2
   return 0
 }
 # END git-check

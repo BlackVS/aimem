@@ -69,7 +69,7 @@ func TestFetchForgeArchiveReadsTheSetGitGives(t *testing.T) {
 		t.Fatalf("the test selection must be one the hub accepts: %v", err)
 	}
 	path := "/team/process/archive/" + sha + ".tar.gz"
-	fetch := func(r Ref) (*Bundle, error) { return FetchForgeArchive(context.Background(), srv.Client(), r) }
+	fetch := func(r Ref) (*Bundle, error) { return FetchForgeArchive(context.Background(), srv.Client(), r, "") }
 
 	for layout, prefix := range map[string]string{"GitHub": "process-" + sha + "/", "Gitea": "process/"} {
 		served[path] = gitArchive(t, repo, sha, prefix)

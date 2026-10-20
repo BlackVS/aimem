@@ -442,14 +442,17 @@ aimem process refresh                                # store the sets of selecti
 `select` takes a tag (or a branch) or a full commit, and the manifest
 path, which defaults to `processes/aimem/manifest.json`. A tag is
 resolved on the hub host with `git ls-remote` to the commit it holds at
-that moment (an annotated tag to the commit it points at); the selection
+that moment (an annotated tag to the commit it points at); without `git`,
+or when Git cannot resolve it, from the forge's ref advertisement over
+https (`<repository>/info/refs?service=git-upload-pack`, what `git
+ls-remote` reads, with the same result); the selection
 stores both, the tag for people and the commit as the pin. A name that is
 both a tag and a branch, on different commits, is refused. `select` runs
 on the hub host and reads the set at the commit from Git
 with that host's access; on a host without `git`, or when Git cannot read
 it, from the forge's tarball of the commit over https
-(`<repository>/archive/<commit>.tar.gz`, the GitHub and Gitea form,
-fetched anonymously), which must record that commit (`git archive` writes
+(`<repository>/archive/<commit>.tar.gz`, the GitHub and Gitea form),
+which must record that commit (`git archive` writes
 it in the tarball's header), and the report names the source. With
 `--from-archive FILE` it reads a tar.gz
 verified against the `SHA256SUMS` beside it (`--sums` names another
@@ -460,9 +463,21 @@ a hub host without access to the repository, `aimem process export
 import. The hub keeps the sets of the last five selections, so an earlier
 one is re-selected without an import; the hub itself never runs Git.
 The prerequisites on the hub host are therefore those of these admin
-commands only: `git`, or https to the forge for a public repository
-selected by commit. Resolving a tag needs `git`, and a private or
-ssh-only repository without `git` needs the archive import.
+commands only: `git`, or https to the forge.
+
+The forge reads (the tarball and the ref advertisement) are anonymous
+unless `AIMEM_PROCESS_FORGE_TOKEN` is set in the hub user's
+`~/.config/aimem/env`: a read-only token the forge accepts for the
+process repository. It is sent as `Authorization: token
+<token>` to the repository's own host only, and a redirect to another
+host (GitHub sends tarballs to `codeload.github.com`) is followed
+without it. It is never printed or stored with the selection, and Git
+does not use it: with `git` installed, Git reads with the host's own
+credentials first. A repository reached only over ssh, or a forge the
+host cannot reach over https, still needs the archive import. A
+`.gitattributes` with `export-subst` or `eol` rules can make a forge
+tarball's set differ from the one Git gives; the hub serves the set it
+stored.
 
 The manifest is JSON (`version` 1 or 2): `handbook` (Markdown path),
 `checklists` (task state to a JSON file of `{state, items:[{id,text}]}`),
