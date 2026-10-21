@@ -245,7 +245,10 @@ The tools include `list_tasks`, `search_tasks` (find tasks by words in
 their content or comments), `get_task`, `create_task`, `update_task`,
 comments/history and epic tools. `list_tasks` answers "what changed since
 my last look" in one call with `updated_since` and `order: updated_desc`,
-and `mine: true` lists the tasks assigned to the caller's own user identity. With an explicitly agreed test task,
+and `mine: true` lists the tasks assigned to the caller's own user identity.
+Its first page also carries `counts`, the number of active tasks in each
+state plus the archived and the total, so the board's shape needs no full
+listing (`GET /v1/projects/{p}/tasks/counts` over HTTP). With an explicitly agreed test task,
 verify creation and read-back through the agent before assigning real work.
 
 Enabling tools does not install a scheduler. Your process must say which

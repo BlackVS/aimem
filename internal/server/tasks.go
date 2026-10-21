@@ -15,6 +15,7 @@ import (
 	"io"
 	"maps"
 	"net/http"
+	"net/url"
 	"path"
 	"strconv"
 	"strings"
@@ -57,6 +58,7 @@ var taskRoutes = map[string]bool{
 	"POST /v1/projects/{p}/teams/{team}/leave":                             true,
 	"POST /v1/projects/{p}/teams/{team}/profile":                           true,
 	"GET /v1/projects/{p}/tasks":                                           true,
+	"GET /v1/projects/{p}/tasks/counts":                                    true,
 	"POST /v1/projects/{p}/tasks":                                          true,
 	"GET /v1/tasks/{id}":                                                   true,
 	"PUT /v1/tasks/{id}":                                                   true,
@@ -470,13 +472,9 @@ func (s *Server) listTasks(w http.ResponseWriter, r *http.Request) {
 		s.fail(w, http.StatusBadRequest, errors.New("include_archived must be true or false"))
 		return
 	}
-	if a := q.Get("assignee"); a != "" {
-		kind, id, ok := strings.Cut(a, "/")
-		if !ok {
-			s.fail(w, http.StatusBadRequest, errors.New("assignee filter must be kind/id"))
-			return
-		}
-		f.Assignee = &store.TaskAssignee{Kind: kind, ID: id}
+	if f.Assignee, err = assigneeFilter(q); err != nil {
+		s.fail(w, http.StatusBadRequest, err)
+		return
 	}
 	f.Epic = q.Get("epic")
 	page, err := db.ListTasks(f)
@@ -491,6 +489,43 @@ func (s *Server) listTasks(w http.ResponseWriter, r *http.Request) {
 		out.Tasks = append(out.Tasks, row)
 	}
 	s.ok(w, out)
+}
+
+// countTasks is the board's shape: the active tasks per state and the
+// archived ones, under the list's assignee and epic filters.
+func (s *Server) countTasks(w http.ResponseWriter, r *http.Request) {
+	project, db := s.taskProject(w, r)
+	if db == nil {
+		return
+	}
+	q := r.URL.Query()
+	assignee, err := assigneeFilter(q)
+	if err != nil {
+		s.fail(w, http.StatusBadRequest, err)
+		return
+	}
+	counts, err := db.CountTasks(store.TaskFilter{Assignee: assignee, Epic: q.Get("epic")})
+	if err != nil {
+		s.taskError(w, err)
+		return
+	}
+	s.ok(w, struct {
+		Project string `json:"project"`
+		store.TaskCounts
+	}{project, counts})
+}
+
+// assigneeFilter reads the assignee query parameter, kind/id.
+func assigneeFilter(q url.Values) (*store.TaskAssignee, error) {
+	a := q.Get("assignee")
+	if a == "" {
+		return nil, nil
+	}
+	kind, id, ok := strings.Cut(a, "/")
+	if !ok {
+		return nil, errors.New("assignee filter must be kind/id")
+	}
+	return &store.TaskAssignee{Kind: kind, ID: id}, nil
 }
 
 func (s *Server) createTask(w http.ResponseWriter, r *http.Request) {

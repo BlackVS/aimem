@@ -190,6 +190,7 @@ func (s *Server) Routes() []Route {
 		{"GET", "/v1/admin/reservations/{task_id}/recovery", s.recoveryStatus, true},
 		{"GET", "/v1/admin/reservations/{task_id}/recovery/receipts/{operation}/{request_key_digest}", s.recoveryReceipts, true},
 		{"GET", "/v1/projects/{p}/tasks", s.listTasks, false},
+		{"GET", "/v1/projects/{p}/tasks/counts", s.countTasks, false},
 		{"POST", "/v1/projects/{p}/tasks", s.createTask, false},
 		{"GET", "/v1/tasks/{id}", s.getTask, false},
 		{"PUT", "/v1/tasks/{id}", s.updateTask, false},

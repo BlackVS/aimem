@@ -996,6 +996,59 @@ func (d *DB) ListTasks(f TaskFilter) (TaskPage, error) {
 	return out, rows.Err()
 }
 
+// TaskCounts is the shape of a board: the active (unarchived) tasks per
+// state, every state present, and the archived ones apart.
+type TaskCounts struct {
+	Counts   map[string]int `json:"counts"`
+	Archived int            `json:"archived"`
+	Total    int            `json:"total"`
+}
+
+// CountTasks counts the tasks under f's assignee and epic filters; the
+// other fields of f are not read.
+func (d *DB) CountTasks(f TaskFilter) (TaskCounts, error) {
+	out := TaskCounts{Counts: make(map[string]int, len(TaskStates))}
+	for _, st := range TaskStates {
+		out.Counts[st] = 0
+	}
+	if f.Assignee != nil && ((f.Assignee.Kind != "user" && f.Assignee.Kind != "group") || !taskIDRE.MatchString(f.Assignee.ID)) {
+		return out, invalid(errors.New("invalid assignee filter"))
+	}
+	if f.Epic != "" && !taskIDRE.MatchString(f.Epic) {
+		return out, invalid(errors.New("invalid epic filter"))
+	}
+	query := `SELECT state, archived, COUNT(*) FROM tasks WHERE 1`
+	var args []any
+	if f.Assignee != nil {
+		query += ` AND assignee = ?`
+		args = append(args, f.Assignee.column())
+	}
+	if f.Epic != "" {
+		query += ` AND epic = ?`
+		args = append(args, f.Epic)
+	}
+	rows, err := d.sql.Query(query+` GROUP BY state, archived`, args...)
+	if err != nil {
+		return out, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var state string
+		var archived bool
+		var n int
+		if err := rows.Scan(&state, &archived, &n); err != nil {
+			return out, err
+		}
+		if archived {
+			out.Archived += n
+		} else {
+			out.Counts[state] += n
+		}
+		out.Total += n
+	}
+	return out, rows.Err()
+}
+
 type TaskHistoryPage struct {
 	Changes []TaskChange `json:"changes"`
 	Next    int64        `json:"next_cursor,omitempty"`

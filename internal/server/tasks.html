@@ -57,6 +57,7 @@
   .chip.on{color:var(--moss-deep);background:var(--moss);border-color:var(--moss)}
   .chip.click{cursor:pointer;font:inherit;font-size:12px}
   .chip.click:hover{border-color:var(--moss);color:var(--bone)}
+  .chip.click .n{color:var(--amber)} .chip.click.on .n{color:inherit}
   .dim{color:var(--dim)} .warn{color:var(--amber)} .bad{color:var(--rust)} .ok{color:var(--moss)}
   input,textarea,select{background:var(--well);border:1px solid var(--edge);color:var(--bone);
         font:inherit;padding:6px 8px;width:100%}
@@ -232,12 +233,13 @@ let EPICS = {};           // id -> epic, for this project (labels and the filter
 let EPICS_PROJ = "";      // the project EPICS was loaded for
 let EPICS_GEN = 0;        // one per load: a response from a superseded load touches nothing shared
 let CURSOR = "";                    // list paging
+let COUNTS = null;                  // the board's shape for the state chips (the counts route), null until loaded
 let CUR = null;                     // open task (served view)
 let CAN_WRITE = false;              // for CUR's project, this credential, this attempt
 let HIST = {after:0}, CMT = {after:0};
 let KEYS = {};                      // idempotency keys per open form: retry-safe until success
 let NAV = 0;                        // navigation epoch: a load that outlives its view must not render
-let SEQ = {list:0, hist:0, cmt:0, board:0}; // per-loader request sequence: only the latest request renders
+let SEQ = {list:0, hist:0, cmt:0, board:0, counts:0}; // per-loader request sequence: only the latest request renders
 let VIEW = localStorage.getItem("aimem_task_view")==="board" ? "board" : "list";
 // The list's order, kept per browser; newest updated first by default, so
 // a task created or changed a minute ago is on the first page. The hub
@@ -399,7 +401,19 @@ function setOrder(o){ if(!ORDERS.includes(o)) return; ORDER = o; localStorage.se
 function setSearch(v){ v = String(v||"").trim(); if(v===SEARCH) return; SEARCH = v; $("orderSel").disabled = !!SEARCH; listTasks(true); }
 function markLoaded(){ $("loadedAt").textContent = "loaded "+new Date().toLocaleTimeString([], {hour:"2-digit", minute:"2-digit"}); }
 function stateChipsHTML(){
-  return ['',...STATES].map(s=>`<button type="button" class="chip click${FILTER.state===s?' on':''}" onclick="FILTER.state='${s}';listTasks(true)">${s||'all'}</button>`).join("");
+  const n = s => !COUNTS ? "" : ` <span class="n">${s ? COUNTS.counts[s]||0 : COUNTS.total-(FILTER.archived?0:COUNTS.archived)}</span>`;
+  return ['',...STATES].map(s=>`<button type="button" class="chip click${FILTER.state===s?' on':''}" onclick="FILTER.state='${s}';listTasks(true)">${s||'all'}${n(s)}</button>`).join("");
+}
+// loadCounts reads the active tasks per state (and the archived) under the
+// epic filter for the chips; a failure leaves the chips without numbers.
+async function loadCounts(){
+  const my = NAV, seq = ++SEQ.counts; COUNTS = null;
+  const q = new URLSearchParams(); if(FILTER.epic) q.set("epic", FILTER.epic);
+  try{
+    const c = await api("/v1/projects/"+encodeURIComponent(PROJ)+"/tasks/counts?"+q);
+    if(my!==NAV || seq!==SEQ.counts) return;
+    COUNTS = c; $("stateChips").innerHTML = stateChipsHTML();
+  }catch(_){}
 }
 
 async function boot(){
@@ -455,7 +469,7 @@ function showList(){
 // project or filter change always reloads and a double "more" cannot
 // append a page twice.
 async function listTasks(reset){
-  if(reset){ CURSOR=""; $("list").innerHTML=""; FILTER.archived = $("archChk").checked; }
+  if(reset){ CURSOR=""; $("list").innerHTML=""; FILTER.archived = $("archChk").checked; loadCounts(); }
   const my = NAV, seq = ++SEQ.list; $("moreBtn").disabled = true;
   const q = new URLSearchParams();
   if(FILTER.state) q.set("state", FILTER.state);

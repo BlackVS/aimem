@@ -49,7 +49,8 @@ var taskToolDefs = append([]map[string]any{
 		"description": "List task summaries of a project (archived excluded unless asked). " +
 			"Pages of up to 100; pass the returned next_cursor as `after` with the same order. " +
 			"What changed since a time, newest first, in one call: `updated_since` with `order: updated_desc`. " +
-			"`mine: true` lists the tasks assigned to your own user identity." + taskReadScope,
+			"`mine: true` lists the tasks assigned to your own user identity. " +
+			"A first page (no `after`) carries `counts`: the active tasks per state, the archived and the total, under the assignee, epic and mine filters." + taskReadScope,
 		"inputSchema": objSchema(map[string]any{
 			"project":          prop("string", "project id (defaults to the current project; it selects what to read, it is not a limit)"),
 			"state":            propEnum("only this state", "BACKLOG", "READY", "IN_PROGRESS", "REVIEW", "BLOCKED", "DONE", "CANCELLED"),
@@ -527,7 +528,13 @@ func (s *srv) taskTool(ctx context.Context, name string, raw json.RawMessage) (s
 		if len(q) > 0 {
 			path += "?" + q.Encode()
 		}
-		return call("GET", path, nil, "")
+		page, err := call("GET", path, nil, "")
+		// A team conversation reads only the team routes, which do not
+		// include the counts.
+		if err != nil || name != "list_tasks" || after != "" || s.team != nil {
+			return page, err
+		}
+		return withCounts(call, p, q, page), nil
 	case "get_task":
 		id, err := taskID(a.ID)
 		if err != nil {
@@ -680,6 +687,42 @@ func (s *srv) taskTool(ctx context.Context, name string, raw json.RawMessage) (s
 		return call("POST", "/v1/tasks/"+id+"/comments", map[string]string{"body": a.Body}, k)
 	}
 	return "", fmt.Errorf("unknown tool %q", name)
+}
+
+// withCounts adds the board's shape to a first list page: the counts
+// under the page's assignee and epic filters (not its state or time,
+// since the counts are per state). A hub that cannot count (one older
+// than the counts route) leaves the page as it was.
+func withCounts(call func(method, path string, body any, key string) (string, error), project string, q url.Values, page string) string {
+	cq := url.Values{}
+	for _, k := range []string{"assignee", "epic"} {
+		if v := q.Get(k); v != "" {
+			cq.Set(k, v)
+		}
+	}
+	path := "/v1/projects/" + project + "/tasks/counts"
+	if len(cq) > 0 {
+		path += "?" + cq.Encode()
+	}
+	text, err := call("GET", path, nil, "")
+	if err != nil {
+		return page
+	}
+	var counts struct {
+		Counts   map[string]int `json:"counts"`
+		Archived int            `json:"archived"`
+		Total    int            `json:"total"`
+	}
+	var fields map[string]json.RawMessage
+	if json.Unmarshal([]byte(text), &counts) != nil || counts.Counts == nil || json.Unmarshal([]byte(page), &fields) != nil {
+		return page
+	}
+	fields["counts"], _ = json.Marshal(counts)
+	out, err := json.MarshalIndent(fields, "", "  ")
+	if err != nil {
+		return page
+	}
+	return string(out)
 }
 
 // callerUserID asks the hub who the task credential is, for mine: the
