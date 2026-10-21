@@ -13,6 +13,16 @@ currently 25); a binary refuses a database newer than it understands.
 
 ## [Unreleased]
 
+### Fixed
+
+- **A NUL byte in a search query is refused as an invalid query.** A
+  journal search or memory recall whose terms held a NUL reached SQLite,
+  which ends a string there, and the 400 carried SQLite's own "SQL logic
+  error: unterminated string". The journal search, memory recall and task
+  search now run one shared check before the query reaches SQLite and
+  answer 400 "invalid query: search terms must not contain NUL". Queries
+  without a NUL are unchanged.
+
 ## [0.10.11] — 2026-10-21
 
 Tasks are easier to find and to read at a glance. The `/tasks` list sorts

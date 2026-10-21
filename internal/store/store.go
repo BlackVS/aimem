@@ -1351,6 +1351,19 @@ WHERE session_id=? ORDER BY id DESC LIMIT 1`, sessionID)
 	return &evs[0], nil
 }
 
+// ErrInvalidQuery refuses search terms that cannot reach an FTS5 MATCH.
+var ErrInvalidQuery = errors.New("invalid query")
+
+// checkFTSTerms is the one check every FTS entry point runs on its terms:
+// SQLite ends a string at NUL, so a quoted MATCH term holding one fails as
+// an unterminated string.
+func checkFTSTerms(q string) error {
+	if strings.ContainsRune(q, 0) {
+		return fmt.Errorf("%w: search terms must not contain NUL", ErrInvalidQuery)
+	}
+	return nil
+}
+
 // ftsQuote turns a raw user query into a literal FTS5 phrase-per-token
 // query: every token is double-quoted so hyphens, dots, and FTS operators
 // in ordinary text cannot become syntax errors. Tokens AND together.
@@ -1364,6 +1377,9 @@ func ftsQuote(q string) string {
 
 // Search runs deterministic FTS5 full-text search within this project.
 func (d *DB) Search(query string, limit int) ([]StoredEvent, error) {
+	if err := checkFTSTerms(query); err != nil {
+		return nil, err
+	}
 	if limit <= 0 || limit > 200 {
 		limit = 20
 	}
