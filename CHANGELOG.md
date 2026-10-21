@@ -13,6 +13,25 @@ currently 24); a binary refuses a database newer than it understands.
 
 ## [Unreleased]
 
+### Added
+
+- **The task list sorts newest first, and refreshes.** The `/tasks` list
+  was in creation order, 50 at a time, so on a large project a task
+  created a minute ago sat on the last page (on a 305-task project, at
+  positions 301 to 305), and a list left open never showed it. The list
+  now sorts by update time (newest first, the default), title, state or
+  creation, a choice kept per browser. The board shows the newest tasks
+  first in each column, so past its 500-card cap it is the oldest that are
+  left out. A **refresh** control reloads the list or the board without a
+  page load, and the view shows when it was last loaded.
+- **`order` on the task list route.** `GET /v1/projects/{p}/tasks` takes
+  `order`: `id` (the default, unchanged), `updated_desc`, `updated_asc`,
+  `title` (case-insensitive) or `state` (lifecycle order, newest updated
+  first within a state). Every order breaks ties by id and pages exactly
+  with `after`. Under `id` the cursor is still the last task id; under the
+  others it is an opaque token that only its own order accepts. The MCP
+  `list_tasks` tool is unchanged.
+
 ### Fixed
 
 - **`aimem process show` on the hub host.** Run as the service user in a

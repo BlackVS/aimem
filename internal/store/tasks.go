@@ -15,6 +15,7 @@ package store
 import (
 	"crypto/sha256"
 	"database/sql"
+	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -681,8 +682,113 @@ type TaskFilter struct {
 	Assignee        *TaskAssignee
 	Epic            string // only tasks under this epic
 	IncludeArchived bool
+	Order           string // a TaskOrder*; empty is TaskOrderID
 	After           string
 	Limit           int
+}
+
+// The list orders. Every order ends in the task id, so it is total and a
+// keyset cursor resumes exactly after the last row of a page. TaskOrderID
+// (creation order) is the default and keeps the bare task id as its
+// cursor; the others issue an opaque cursor bound to its order.
+const (
+	TaskOrderID          = "id"
+	TaskOrderUpdatedDesc = "updated_desc"
+	TaskOrderUpdatedAsc  = "updated_asc"
+	TaskOrderTitle       = "title" // case-insensitive (ASCII), A to Z
+	TaskOrderState       = "state" // lifecycle order, newest updated first within a state
+)
+
+var taskOrders = []string{TaskOrderID, TaskOrderUpdatedDesc, TaskOrderUpdatedAsc, TaskOrderTitle, TaskOrderState}
+
+// Sort keys as SQL over the stored body: title and update time are not
+// columns. updated_at is RFC3339 UTC, so text order is time order.
+const (
+	taskUpdatedSQL = `COALESCE(json_extract(tasks.body,'$.updated_at'),'')`
+	taskTitleSQL   = `COALESCE(json_extract(tasks.body,'$.title'),'') COLLATE NOCASE`
+)
+
+// taskStateRankSQL ranks tasks.state in TaskStates order.
+var taskStateRankSQL = func() string {
+	var b strings.Builder
+	b.WriteString("CASE tasks.state")
+	for i, st := range TaskStates {
+		fmt.Fprintf(&b, " WHEN '%s' THEN %d", st, i)
+	}
+	fmt.Fprintf(&b, " ELSE %d END", len(TaskStates))
+	return b.String()
+}()
+
+func taskStateRank(state string) int {
+	if i := slices.Index(TaskStates, state); i >= 0 {
+		return i
+	}
+	return len(TaskStates)
+}
+
+// taskCursor is the position after which the next page of a non-id order
+// starts: the order it belongs to, the last row's sort key and its id.
+type taskCursor struct {
+	Order string `json:"o"`
+	Key   string `json:"k"`
+	Rank  int    `json:"r,omitempty"`
+	ID    string `json:"id"`
+}
+
+func (c taskCursor) encode() string {
+	raw, _ := json.Marshal(c)
+	return base64.RawURLEncoding.EncodeToString(raw)
+}
+
+func decodeTaskCursor(s, order string) (taskCursor, error) {
+	var c taskCursor
+	raw, err := base64.RawURLEncoding.DecodeString(s)
+	if err != nil || len(raw) > 4096 || json.Unmarshal(raw, &c) != nil || !taskIDRE.MatchString(c.ID) {
+		return c, invalid(errors.New("invalid task cursor"))
+	}
+	if !slices.Contains(taskOrders, c.Order) { // never echo text the caller chose
+		return c, invalid(errors.New("invalid task cursor"))
+	}
+	if c.Order != order {
+		return c, invalid(fmt.Errorf("the task cursor belongs to order %q, not %q: start again without after", c.Order, order))
+	}
+	return c, nil
+}
+
+// taskListOrder returns the ORDER BY of an order, the keyset condition
+// that starts after the cursor c, and its arguments.
+func taskListOrder(order string, c taskCursor) (by, after string, args []any) {
+	switch order {
+	case TaskOrderUpdatedDesc:
+		return taskUpdatedSQL + ` DESC, tasks.id DESC`,
+			`(` + taskUpdatedSQL + ` < ? OR (` + taskUpdatedSQL + ` = ? AND tasks.id < ?))`, []any{c.Key, c.Key, c.ID}
+	case TaskOrderUpdatedAsc:
+		return taskUpdatedSQL + `, tasks.id`,
+			`(` + taskUpdatedSQL + ` > ? OR (` + taskUpdatedSQL + ` = ? AND tasks.id > ?))`, []any{c.Key, c.Key, c.ID}
+	case TaskOrderTitle:
+		return taskTitleSQL + `, tasks.id`,
+			`(` + taskTitleSQL + ` > ? OR (` + taskTitleSQL + ` = ? AND tasks.id > ?))`, []any{c.Key, c.Key, c.ID}
+	default: // TaskOrderState
+		return taskStateRankSQL + `, ` + taskUpdatedSQL + ` DESC, tasks.id DESC`,
+			`(` + taskStateRankSQL + ` > ? OR (` + taskStateRankSQL + ` = ? AND (` + taskUpdatedSQL + ` < ? OR (` + taskUpdatedSQL + ` = ? AND tasks.id < ?))))`,
+			[]any{c.Rank, c.Rank, c.Key, c.Key, c.ID}
+	}
+}
+
+// taskCursorAfter is the cursor that resumes after row t under order.
+func taskCursorAfter(order string, t TaskSummary) string {
+	c := taskCursor{Order: order, ID: t.ID}
+	switch order {
+	case TaskOrderID:
+		return t.ID
+	case TaskOrderTitle:
+		c.Key = t.Title
+	case TaskOrderState:
+		c.Key, c.Rank = t.UpdatedAt, taskStateRank(t.State)
+	default:
+		c.Key = t.UpdatedAt
+	}
+	return c.encode()
 }
 
 // TaskSummary is the bounded list row: never the discussion or history.
@@ -703,7 +809,7 @@ type TaskPage struct {
 	Next  string        `json:"next_cursor,omitempty"`
 }
 
-// ListTasks pages task summaries in ID (creation) order.
+// ListTasks pages task summaries in f.Order, by default ID (creation) order.
 func (d *DB) ListTasks(f TaskFilter) (TaskPage, error) {
 	out := TaskPage{Tasks: []TaskSummary{}}
 	limit, err := taskPageLimit(f.Limit)
@@ -713,7 +819,14 @@ func (d *DB) ListTasks(f TaskFilter) (TaskPage, error) {
 	if f.State != "" && !validTaskState(f.State) {
 		return out, invalid(errors.New("invalid task state filter"))
 	}
-	if f.After != "" && !taskIDRE.MatchString(f.After) {
+	order := f.Order
+	if order == "" {
+		order = TaskOrderID
+	}
+	if !slices.Contains(taskOrders, order) {
+		return out, invalid(errors.New("invalid task order (want id, updated_desc, updated_asc, title or state)"))
+	}
+	if order == TaskOrderID && f.After != "" && !taskIDRE.MatchString(f.After) {
 		return out, invalid(errors.New("invalid task cursor"))
 	}
 	if f.Assignee != nil && ((f.Assignee.Kind != "user" && f.Assignee.Kind != "group") || !taskIDRE.MatchString(f.Assignee.ID)) {
@@ -724,6 +837,23 @@ func (d *DB) ListTasks(f TaskFilter) (TaskPage, error) {
 	}
 	query := taskReadQuery + ` WHERE tasks.id > ?`
 	args := []any{f.After}
+	by := `tasks.id`
+	if order != TaskOrderID {
+		query, args = taskReadQuery+` WHERE 1`, nil
+		var c taskCursor
+		if f.After != "" {
+			if c, err = decodeTaskCursor(f.After, order); err != nil {
+				return out, err
+			}
+		}
+		var after string
+		var afterArgs []any
+		by, after, afterArgs = taskListOrder(order, c)
+		if f.After != "" {
+			query += ` AND ` + after
+			args = append(args, afterArgs...)
+		}
+	}
 	if !f.IncludeArchived {
 		query += ` AND archived = 0`
 	}
@@ -739,7 +869,7 @@ func (d *DB) ListTasks(f TaskFilter) (TaskPage, error) {
 		query += ` AND epic = ?`
 		args = append(args, f.Epic)
 	}
-	query += ` ORDER BY tasks.id LIMIT ?`
+	query += ` ORDER BY ` + by + ` LIMIT ?`
 	args = append(args, limit+1)
 	rows, err := d.sql.Query(query, args...)
 	if err != nil {
@@ -748,7 +878,7 @@ func (d *DB) ListTasks(f TaskFilter) (TaskPage, error) {
 	defer rows.Close()
 	for rows.Next() {
 		if len(out.Tasks) == limit {
-			out.Next = out.Tasks[limit-1].ID
+			out.Next = taskCursorAfter(order, out.Tasks[limit-1])
 			break
 		}
 		t, err := scanCurrentTask(rows)
