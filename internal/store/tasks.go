@@ -24,6 +24,7 @@ import (
 	"regexp"
 	"slices"
 	"strings"
+	"time"
 	"unicode"
 	"unicode/utf8"
 
@@ -687,6 +688,7 @@ type TaskFilter struct {
 	Epic            string // only tasks under this epic
 	IncludeArchived bool
 	Query           string // search terms: the matches ranked by relevance, no Order
+	UpdatedSince    string // RFC 3339: only tasks updated at or after it
 	Order           string // a TaskOrder*; empty is TaskOrderID
 	After           string
 	Limit           int
@@ -822,6 +824,22 @@ func taskCursorAfter(order string, t TaskSummary) string {
 	return c.encode()
 }
 
+// taskSinceKey turns an RFC 3339 time into the stored updated_at form
+// (UTC, whole seconds) for a string comparison. A fractional time rounds
+// up: updated_at has whole seconds, so a task stamped in the second before
+// it was updated before it.
+func taskSinceKey(s string) (string, error) {
+	t, err := time.Parse(time.RFC3339Nano, s)
+	if err != nil {
+		return "", invalid(errors.New("updated_since must be an RFC 3339 time, such as 2026-10-21T08:00:00Z"))
+	}
+	t = t.UTC()
+	if t.Nanosecond() != 0 {
+		t = t.Truncate(time.Second).Add(time.Second)
+	}
+	return t.Format(time.RFC3339), nil
+}
+
 // scanner adapts a Scan function to scanCurrentTask's row interface.
 type scanner func(dest ...any) error
 
@@ -880,6 +898,12 @@ func (d *DB) ListTasks(f TaskFilter) (TaskPage, error) {
 	if f.Epic != "" && !taskIDRE.MatchString(f.Epic) {
 		return out, invalid(errors.New("invalid epic filter"))
 	}
+	var since string
+	if f.UpdatedSince != "" {
+		if since, err = taskSinceKey(f.UpdatedSince); err != nil {
+			return out, err
+		}
+	}
 	query := taskReadQuery + ` WHERE tasks.id > ?`
 	args := []any{f.After}
 	by := `tasks.id`
@@ -933,6 +957,10 @@ func (d *DB) ListTasks(f TaskFilter) (TaskPage, error) {
 	if f.Epic != "" {
 		query += ` AND epic = ?`
 		args = append(args, f.Epic)
+	}
+	if since != "" {
+		query += ` AND ` + taskUpdatedSQL + ` >= ?`
+		args = append(args, since)
 	}
 	query += ` ORDER BY ` + by + ` LIMIT ?`
 	args = append(args, limit+1)

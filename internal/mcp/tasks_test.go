@@ -36,6 +36,7 @@ type hubFixture struct {
 	aliceTokenID       string
 	// stranger is a user-scoped token of a user with no project grant.
 	stranger string
+	bobID    string // the stranger's user
 }
 
 func newHub(t *testing.T) *hubFixture {
@@ -98,7 +99,7 @@ func newHub(t *testing.T) *hubFixture {
 		}
 		return call, only
 	})
-	return &hubFixture{h: srv.TCPHandler("env-secret", map[string]http.Handler{"/mcp": mcpHandler}), reg: reg, env: "env-secret", alice: aliceSecret, reader: readerSecret, aliceID: alice.ID, aliceTokenID: aliceToken.ID, stranger: strangerSecret}
+	return &hubFixture{h: srv.TCPHandler("env-secret", map[string]http.Handler{"/mcp": mcpHandler}), reg: reg, env: "env-secret", alice: aliceSecret, reader: readerSecret, aliceID: alice.ID, aliceTokenID: aliceToken.ID, stranger: strangerSecret, bobID: bob.ID}
 }
 
 func TestMCPGenericTaskWriteRefusedDuringReservation(t *testing.T) {
