@@ -58,6 +58,13 @@ currently 25); a binary refuses a database newer than it understands.
   (not its groups; refused with `assignee`, and for a token without a user
   identity). The hub's `/mcp` endpoint now lets task tools read the
   caller's own identity, which `mine` needs.
+- **A board's shape in one call.** `GET /v1/projects/{p}/tasks/counts`
+  returns the active tasks per state (every state, zero included), the
+  archived ones and the total, under the list's `assignee` and `epic`
+  filters. The first page of the MCP `list_tasks` tool (no `after`)
+  carries the same `counts`, so an agent sees how many tasks are in each
+  state without listing them all. The `/tasks` list shows the numbers on
+  its state chips.
 
 ### Fixed
 

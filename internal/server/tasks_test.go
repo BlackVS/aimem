@@ -383,7 +383,9 @@ func TestOrdinaryTokenGateMatrix(t *testing.T) {
 	f := newTaskFixture(t)
 	// The admitted set is pinned here, independently of the map the gate
 	// consults: widening it is a deliberate, reviewed change.
-	want := []string{"GET /v1/projects/{p}/tasks", "POST /v1/projects/{p}/tasks", "GET /v1/tasks/{id}", "PUT /v1/tasks/{id}",
+	want := []string{"GET /v1/projects/{p}/tasks", "POST /v1/projects/{p}/tasks",
+		"GET /v1/projects/{p}/tasks/counts", // the list's shape: what the list reads, counted (TestTaskCountsRoute)
+		"GET /v1/tasks/{id}", "PUT /v1/tasks/{id}",
 		"POST /v1/tasks/{id}/triage", // the partial triage write, under the same task-write check (TestTriage*)
 		"POST /v1/projects/{p}/teams/{team}/join", "GET /v1/projects/{p}/teams/{team}/members", "GET /v1/projects/{p}/teams/mine",
 		"POST /v1/projects/{p}/teams/{team}/heartbeat", "POST /v1/projects/{p}/teams/{team}/resume",
@@ -872,6 +874,7 @@ func TestTasksPageIsPublicChrome(t *testing.T) {
 		`"/v1/access/identity"`:                                                              true,
 		`"/v1/projects?tasks_enabled=true"`:                                                  true,
 		`"/v1/projects/"+encodeURIComponent(PROJ)+"/tasks?"+q`:                               true,
+		`"/v1/projects/"+encodeURIComponent(PROJ)+"/tasks/counts?"+q`:                        true,
 		`"/v1/projects/"+encodeURIComponent(project)+"/tasks"`:                               true,
 		`"/v1/projects/"+encodeURIComponent(project)+"/epics?include_retired=true"`:          true,
 		`"/v1/tasks/"+encodeURIComponent(id)`:                                                true,
