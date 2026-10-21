@@ -10,7 +10,7 @@ import (
 // agent assume the current project bounds what it or another agent can see.
 func TestTaskReadToolsStateTheHubWideRead(t *testing.T) {
 	reads := map[string]bool{
-		"list_tasks": true, "get_task": true, "get_task_history": true,
+		"list_tasks": true, "search_tasks": true, "get_task": true, "get_task_history": true,
 		"list_task_comments": true, "get_task_comment": true,
 		"list_epics": true, "get_epic": true,
 	}

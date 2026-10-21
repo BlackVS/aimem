@@ -12,7 +12,7 @@ var keptTextExempt = map[string]string{
 	// reads
 	"recall_memory": "read", "review_memories": "read", "search_journal": "read", "get_design_doc": "read",
 	"list_docs": "read", "read_doc": "read", "list_records": "read", "get_record": "read",
-	"list_tasks": "read", "get_task": "read", "get_task_history": "read", "list_task_comments": "read",
+	"list_tasks": "read", "search_tasks": "read", "get_task": "read", "get_task_history": "read", "list_task_comments": "read",
 	"get_task_comment": "read", "list_epics": "read", "get_epic": "read", "team_members": "read", "project_repository": "read",
 	"team_messages": "read", "team_inbox": "read", "team_list": "read", "team_assignment": "read",
 	"team_reserved": "read", "task_reservation_status": "read", "task_reservation_receipt": "read",

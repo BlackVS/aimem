@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 	"sync"
@@ -146,7 +147,7 @@ func TestTeamModeToolListMatchesHubTeamRoutes(t *testing.T) {
 	sort.Strings(names)
 	// Each team tool reaches exactly one route the hub serves in team mode.
 	toolRoute := map[string]string{
-		"list_tasks": "GET /v1/projects/{p}/tasks", "get_task": "GET /v1/tasks/{id}", "get_task_history": "GET /v1/tasks/{id}/history",
+		"list_tasks": "GET /v1/projects/{p}/tasks", "search_tasks": "GET /v1/projects/{p}/tasks", "get_task": "GET /v1/tasks/{id}", "get_task_history": "GET /v1/tasks/{id}/history",
 		"list_task_comments": "GET /v1/tasks/{id}/comments", "get_task_comment": "GET /v1/tasks/{id}/comments/{c}",
 		"list_epics": "GET /v1/projects/{p}/epics", "get_epic": "GET /v1/projects/{p}/epics/{e}",
 		sessionContextTool: "GET /v1/access/identity",
@@ -203,6 +204,7 @@ func TestTeamModeToolListMatchesHubTeamRoutes(t *testing.T) {
 	}
 	sort.Strings(hubRoutes)
 	sort.Strings(toolRoutes)
+	toolRoutes = slices.Compact(toolRoutes) // list_tasks and search_tasks share one route
 	if strings.Join(hubRoutes, ",") != strings.Join(toolRoutes, ",") {
 		t.Fatalf("hub team routes %v, team tools reach %v", hubRoutes, toolRoutes)
 	}

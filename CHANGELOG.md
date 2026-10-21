@@ -9,7 +9,7 @@ upgrading a fleet.
 The format follows [Keep a Changelog](https://keepachangelog.com/1.1.0/);
 this project does not yet promise semantic versioning. The on-disk schema
 version is tracked separately (`currentSchema` in `internal/store/store.go`,
-currently 24); a binary refuses a database newer than it understands.
+currently 25); a binary refuses a database newer than it understands.
 
 ## [Unreleased]
 
@@ -31,6 +31,19 @@ currently 24); a binary refuses a database newer than it understands.
   with `after`. Under `id` the cursor is still the last task id; under the
   others it is an opaque token that only its own order accepts. The MCP
   `list_tasks` tool is unchanged.
+- **Task search.** A task can be found by words: the `/tasks` list has a
+  search field, `GET /v1/projects/{p}/tasks` takes `q`, and agents get a
+  `search_tasks` MCP tool (also in team mode, as a read). Every term must
+  appear, literally and case-insensitively, in the task's title,
+  objective, acceptance criteria or non-goals, or in one of its comments.
+  Matches come best first, and each row says whether the best hit was in
+  the task or in a comment and shows it in context. The state, assignee,
+  epic and archived filters still apply; a search takes no `order` (the
+  console's sort is off while one is active, and refresh still works).
+  Schema 25 adds the search index, kept in step by triggers on every task
+  and comment write; the upgrade indexes the existing tasks and comments
+  once, when a project is first opened, and `aimem fts-rebuild` rebuilds
+  it with the other indexes.
 
 ### Fixed
 
