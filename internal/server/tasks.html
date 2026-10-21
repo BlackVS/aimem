@@ -162,7 +162,12 @@
     <div id="filters" hidden>
     <div class="row">
       <span class="viewsw"><button type="button" class="act" id="vwList" onclick="setView('list')">list</button><button type="button" class="act" id="vwBoard" onclick="setView('board')">board</button></span>
-      <span id="listOnly"><span class="dim" style="margin-left:8px">state</span><span id="stateChips"></span></span>
+      <button type="button" class="act" id="refreshBtn" onclick="refreshView()" title="reload this view from the hub">↻ refresh</button><span id="loadedAt" class="dim"></span>
+      <span id="listOnly"><label for="orderSel" class="dim" style="margin-left:8px">sort</label>
+        <select id="orderSel" class="inline" onchange="setOrder(this.value)" style="width:auto">
+          <option value="updated_desc">updated, newest first</option><option value="updated_asc">updated, oldest first</option>
+          <option value="title">title</option><option value="state">state</option><option value="id">created</option></select>
+        <span class="dim" style="margin-left:8px">state</span><span id="stateChips"></span></span>
       <label class="dim" style="margin-left:auto" id="archLbl"><input type="checkbox" id="archChk" style="width:auto" onchange="listTasks(true)"> archived</label>
     </div>
     <div class="epic-filter">
@@ -230,6 +235,11 @@ let KEYS = {};                      // idempotency keys per open form: retry-saf
 let NAV = 0;                        // navigation epoch: a load that outlives its view must not render
 let SEQ = {list:0, hist:0, cmt:0, board:0}; // per-loader request sequence: only the latest request renders
 let VIEW = localStorage.getItem("aimem_task_view")==="board" ? "board" : "list";
+// The list's order, kept per browser; newest updated first by default, so
+// a task created or changed a minute ago is on the first page. The hub
+// sorts and pages (the cursor belongs to the order); nothing sorts here.
+const ORDERS = ["updated_desc","updated_asc","title","state","id"];
+let ORDER = ORDERS.includes(localStorage.getItem("aimem_task_order")) ? localStorage.getItem("aimem_task_order") : "updated_desc";
 let CMT_PENDING = 0;                // the comment submit that owns the button; a late completion of another does not release it
 let NEW_PROJ = "";                  // the project an open create form was opened for
 
@@ -378,6 +388,8 @@ function renderEpicDetails(){
     <p class="dim">Tasks below belong to this epic; the current state and archive filters still apply.</p>` : "";
 }
 function refreshView(){ if(VIEW==="board") loadBoard(); else listTasks(true); }
+function setOrder(o){ if(!ORDERS.includes(o)) return; ORDER = o; localStorage.setItem("aimem_task_order", o); listTasks(true); }
+function markLoaded(){ $("loadedAt").textContent = "loaded "+new Date().toLocaleTimeString([], {hour:"2-digit", minute:"2-digit"}); }
 function stateChipsHTML(){
   return ['',...STATES].map(s=>`<button type="button" class="chip click${FILTER.state===s?' on':''}" onclick="FILTER.state='${s}';listTasks(true)">${s||'all'}</button>`).join("");
 }
@@ -420,6 +432,7 @@ function showList(){
   // listNote on every page and filter, and must not erase it.
   if(PROJ){ const asked = PROJ; canWrite(asked).then(ok => { if(PROJ===asked && CUR===null){ $("newBtn").hidden = !ok; $("tasksOff").textContent = TASKS_OFF_NOTE; $("tasksOff").hidden = !TASKS_OFF[asked]; } }); }
   $("stateChips").innerHTML = stateChipsHTML();
+  $("orderSel").value = ORDER; $("loadedAt").textContent = "";
   $("archChk").checked = FILTER.archived;
   if(PROJ) loadEpics(PROJ); // clears the epic filter synchronously on a project change
   const board = VIEW==="board";
@@ -440,6 +453,7 @@ async function listTasks(reset){
   if(FILTER.state) q.set("state", FILTER.state);
   if(FILTER.archived) q.set("include_archived","true");
   if(FILTER.epic) q.set("epic", FILTER.epic);
+  q.set("order", ORDER);
   if(CURSOR) q.set("after", CURSOR);
   q.set("limit","50");
   try{
@@ -451,6 +465,7 @@ async function listTasks(reset){
         <span class="meta">r${t.revision} · ${ago(t.updated_at)}${t.assignee?' · '+esc(t.assignee.kind)+'/'+esc(short(t.assignee.id)):''}${t.epic?' · '+esc(epicLabel(t.epic)):''}</span></a>`);
     }
     CURSOR = page.next_cursor||"";
+    if(reset) markLoaded();
     $("moreBtn").hidden = !CURSOR;
     $("listNote").textContent = $("list").children.length ? "" : "no tasks"+(FILTER.state?" in "+FILTER.state:"");
     $("stateChips").innerHTML = stateChipsHTML();
@@ -477,12 +492,15 @@ async function loadBoard(){
   let after = "", n = 0;
   try{
     do{
-      const q = new URLSearchParams({limit:"100"}); if(after) q.set("after", after); if(FILTER.epic) q.set("epic", FILTER.epic);
+      // Newest updated first: past BOARD_MAX it is the oldest tasks that
+      // are left out, and each column shows its newest cards on top.
+      const q = new URLSearchParams({limit:"100", order:"updated_desc"}); if(after) q.set("after", after); if(FILTER.epic) q.set("epic", FILTER.epic);
       const page = await api("/v1/projects/"+encodeURIComponent(PROJ)+"/tasks?"+q);
       if(my!==NAV || seq!==SEQ.board) return;
       for(const t of page.tasks){ placeCard(t); n++; }
       after = page.next_cursor||"";
     }while(after && n < BOARD_MAX);
+    markLoaded();
     $("boardNote").textContent = n===0 ? "no active tasks" : (after ? `showing the first ${n} tasks; the list view pages through the rest` : (BOARD_CAN ? "drag a card to change its state (an ordinary revision-checked update)" : (TASKS_OFF[project] ? TASKS_OFF_NOTE : "read-only: this credential cannot change tasks in this project")));
   }catch(e){ if(e.auth) return boot(); if(my===NAV && seq===SEQ.board) $("boardNote").textContent = e.message; }
 }
@@ -501,7 +519,8 @@ function placeCard(t){
     <a href="${taskURL(t.id)}" onclick="return go('${taskURL(t.id)}')">${esc(t.title)}</a>
     <div class="meta"><span>r${t.revision}</span><span>${ago(t.updated_at)}</span>${t.assignee?`<span>${esc(t.assignee.kind)}/${esc(short(t.assignee.id))}</span>`:''}${t.epic?`<span>${esc(epicLabel(t.epic))}</span>`:''}
       ${BOARD_CAN?`<select aria-label="move to" onchange="moveTask('${esc(t.id)}', this.value)"><option value="">move to…</option>${STATES.filter(s=>s!==t.state).map(s=>`<option>${s}</option>`).join("")}</select>`:''}</div></div>`;
-  $("col-"+t.state).insertAdjacentHTML("beforeend", html);
+  // A board page arrives newest first; a card just changed is the newest.
+  $("col-"+t.state).insertAdjacentHTML(old ? "afterbegin" : "beforeend", html);
   countCol(t.state); if(from && from!==t.state) countCol(from);
 }
 function dragStart(ev, id){ ev.dataTransfer.setData("text/plain", id); ev.dataTransfer.effectAllowed = "move"; ev.target.classList.add("moving"); }

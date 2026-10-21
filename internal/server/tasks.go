@@ -449,7 +449,7 @@ func (s *Server) listTasks(w http.ResponseWriter, r *http.Request) {
 		s.fail(w, http.StatusBadRequest, err)
 		return
 	}
-	f := store.TaskFilter{State: q.Get("state"), After: q.Get("after"), Limit: int(limit)}
+	f := store.TaskFilter{State: q.Get("state"), Order: q.Get("order"), After: q.Get("after"), Limit: int(limit)}
 	switch q.Get("include_archived") {
 	case "", "false", "0":
 	case "true", "1":

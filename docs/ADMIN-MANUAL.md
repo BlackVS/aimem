@@ -157,7 +157,7 @@ lives outside the binary — config
 | `/` | none | Status card: liveness, build, hostname, uptime. Nothing about what the hub holds. |
 | `/v1/status` | none | The JSON behind that card. |
 | `/admin` | none to load | The console shell. Holds no data; it asks for the hub token once (browser localStorage) and calls the API with it. |
-| `/tasks` | none to load | The task page (list, detail, history, discussion). Holds no data; it asks for a token in the browser — an ordinary project token works, and sees exactly what the task service allows it. `/tasks?task=<id>` and `/tasks?task=<id>&comment=<id>` are the copyable links. |
+| `/tasks` | none to load | The task page (list, detail, history, discussion). Holds no data; it asks for a token in the browser — an ordinary project token works, and sees exactly what the task service allows it. The list sorts by update time (newest first, the default), title, state or creation, a choice kept per browser; the board shows the newest tasks first in each column. **↻ refresh** reloads the list or the board from the hub without reloading the page, and the view shows when it was last loaded; nothing refreshes on its own. The list route takes the same choice as `order` (`id`, the API's default, `updated_desc`, `updated_asc`, `title`, `state`). `/tasks?task=<id>` and `/tasks?task=<id>&comment=<id>` are the copyable links. |
 | everything else | `Authorization: Bearer $AIMEM_HTTP_TOKEN` | The whole API — projects, memories, usage, logs, config. |
 
 Those first four are the complete unauthenticated surface. Adding a
