@@ -2,6 +2,7 @@ package store
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"runtime"
@@ -96,6 +97,22 @@ func TestSearchFTS(t *testing.T) {
 	}
 	if hits2, _ := db.Search("nonexistentword", 0); len(hits2) != 0 {
 		t.Errorf("unexpected hits: %+v", hits2)
+	}
+}
+
+// Every FTS entry point refuses a NUL in its terms with ErrInvalidQuery
+// before SQLite sees the query.
+func TestFTSEntryPointsRefuseNUL(t *testing.T) {
+	r := newTestRegistry(t)
+	db, _ := r.Open("proj-a")
+	if _, err := db.Search("a \x00", 5); !errors.Is(err, ErrInvalidQuery) {
+		t.Errorf("search: %v", err)
+	}
+	if _, err := db.Recall("a \x00", RecallOpts{}); !errors.Is(err, ErrInvalidQuery) {
+		t.Errorf("recall: %v", err)
+	}
+	if _, err := db.ListTasks(TaskFilter{Query: "a \x00"}); !errors.Is(err, ErrInvalidQuery) || !errors.Is(err, ErrTaskInvalid) {
+		t.Errorf("task search: %v", err)
 	}
 }
 

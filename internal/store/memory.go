@@ -606,6 +606,9 @@ VALUES(?,?,?,?) ON CONFLICT(memory_id, model) DO UPDATE SET dim=excluded.dim, ve
 // fact); pinned facts surface first, then rank; confidence and
 // corroboration ride along for the consumer. Every hit carries provenance.
 func (d *DB) Recall(query string, opts RecallOpts) ([]Memory, error) {
+	if err := checkFTSTerms(query); err != nil {
+		return nil, err
+	}
 	budget := opts.TokenBudget
 	if budget <= 0 {
 		budget = 1000
