@@ -24,6 +24,24 @@ currently 25); a binary refuses a database newer than it understands.
   comes back without `counts`, and the next tool verifies the context
   again.
 
+### Security
+
+- **The hub installer no longer hands clients its admin token.** A fresh
+  `install-hub.sh` printed the env token (`AIMEM_HTTP_TOKEN`, an implicit
+  admin) as the credential to configure clients with, and added
+  `--insecure` for its self-signed certificate. It now prints two steps
+  instead: `aimem token add <machine>` on the hub, which gives that
+  machine its own writer token, then `aimem hub add` with that token. For
+  a self-signed certificate it adds `--pin sha256-...`, the certificate's
+  key pin, computed on every run, so the connection is verified.
+  `--insecure` is mentioned only as a warned last resort. The env token
+  is never printed, on a fresh install or a re-run. A hub with no TLS
+  gets a warning that bearer tokens cross the network in clear.
+  INSTALL-HUB, INSTALL-CLIENT, QUICKSTART and ADMIN-MANUAL say the env
+  token belongs on no client, and ADMIN-MANUAL has the steps for moving a
+  client that holds it to its own writer token. This is part 1 of 3 of
+  audit finding A-3.
+
 ### Fixed
 
 - **A NUL byte in a search query is refused as an invalid query.** A

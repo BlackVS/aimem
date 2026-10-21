@@ -8,8 +8,10 @@
 # the release this script was fetched from (RELEASE below), checked
 # against that release's SHA256SUMS, writes ~/.config/aimem/env, installs
 # the serve unit + hourly curation timer (+ memory caps), starts
-# everything, and prints the health check + bearer token to configure
-# clients with. Idempotent: an existing env file is never overwritten.
+# everything, and prints the health check and how to configure clients:
+# each with its own writer token, and the self-signed certificate's pin.
+# The env token is this host's admin credential and is never printed.
+# Idempotent: an existing env file is never overwritten.
 #
 # Upgrades: re-run the one-liner of the newer release. On an existing hub
 # it stops this hub's service and curation, copies the state root (without
@@ -20,14 +22,15 @@
 # Environment knobs:
 #   AIMEM_HUB_USER=sessiond        service account (created if missing)
 #   AIMEM_HTTP_LISTEN=:8440        listen address
-#   AIMEM_HTTP_TOKEN=...           bearer token (generated if unset)
+#   AIMEM_HTTP_TOKEN=...           this host's admin bearer (generated if
+#                                  unset); it belongs on no client
 #   AIMEM_HUB_NAME=...             display name in the admin console and
 #                                  browser tab (default: this hostname)
 #   AIMEM_DOMAIN=hub.example.com   generate a self-signed cert for this name
 #                                  into ~/.config/aimem/tls/ and serve TLS;
 #                                  clients then connect with `aimem hub add
-#                                  ... --insecure` until a real certificate
-#                                  replaces it
+#                                  ... --pin sha256-...` (printed at the end)
+#                                  until a real certificate replaces it
 #   AIMEM_TLS_CERT= AIMEM_TLS_KEY= explicit cert paths (override AIMEM_DOMAIN;
 #                                  both empty and no domain = plain HTTP)
 #   AIMEM_OPENAI_API_KEY=          enable nightly curation + embeddings
@@ -265,11 +268,9 @@ if [ ! -f "$ENVF" ]; then
     # CLAUDE_CODE_OAUTH_TOKEN=<token from `claude setup-token`> here.
   } > "$ENVF"
   chmod 600 "$ENVF"
-  FRESH_ENV=1
   echo "wrote $ENVF"
 else
   TOKEN=$(sed -n 's/^AIMEM_HTTP_TOKEN=//p' "$ENVF")
-  FRESH_ENV=""
   echo "kept existing $ENVF"
 fi
 
@@ -372,16 +373,40 @@ if curl -fsSk -H "Authorization: Bearer $TOKEN" "$SCHEME://127.0.0.1:$PORT/v1/he
 else
   echo "WARNING: health check failed — inspect: journalctl --user -u aimem (as $HUB_USER)" >&2
 fi
-EXTRA=""
-case "${AIMEM_TLS_CERT:-}" in */selfsigned.pem) EXTRA=" --insecure" ;; esac
-echo
-echo "Configure clients with:"
-if [ -n "$FRESH_ENV" ]; then
-  # The secret is shown once, at creation — the same rule named tokens
-  # follow. Upgrades must not re-echo a live credential into logs.
-  echo "  aimem hub add <name> $SCHEME://$HOST:$PORT $TOKEN$EXTRA"
-else
-  echo "  aimem hub add <name> $SCHEME://$HOST:$PORT <token>$EXTRA   # token kept in $ENVF (not re-shown)"
+# BEGIN client-hint
+# How to configure a client. The env token is this host's admin credential:
+# it is never printed and belongs on no client, so each client gets its own
+# writer token. A self-signed certificate is verified by its SPKI pin, which
+# is public and printed on every run.
+spki_pin() {
+  local pub b64
+  pub=$(openssl x509 -in "$1" -noout -pubkey 2>/dev/null) || return 1
+  [ -n "$pub" ] || return 1
+  b64=$(printf '%s\n' "$pub" | openssl pkey -pubin -outform der 2>/dev/null | openssl dgst -sha256 -binary | base64) || return 1
+  [ "${#b64}" -eq 44 ] || return 1
+  printf 'sha256-%s\n' "$b64"
+}
+TRUST=""
+SELF_SIGNED=""
+case "${AIMEM_TLS_CERT:-}" in */selfsigned.pem) SELF_SIGNED=1 ;; esac
+if [ -n "$SELF_SIGNED" ] && PIN=$(spki_pin "$AIMEM_TLS_CERT"); then
+  TRUST=" --pin $PIN"
 fi
-echo "  (better: mint one per machine — \`aimem token add <machine>\` as $HUB_USER on this host)"
-[ -n "$EXTRA" ] && echo "  (drop --insecure after a real certificate replaces the self-signed one)"
+echo
+echo "Configure each client with its own writer token:"
+echo "  1. on this host, as $HUB_USER:  aimem token add <machine>    (prints that machine's token once)"
+echo "  2. on the client:  aimem hub add <name> $SCHEME://$HOST:$PORT \"<writer-token>\"$TRUST"
+echo "  AIMEM_HTTP_TOKEN in $ENVF is this host's admin credential: keep it on this host, never on a client."
+if [ -n "$TRUST" ]; then
+  echo "  --pin verifies the self-signed certificate. --insecure would skip verification: use it only as a last resort."
+  echo "  When a real certificate replaces the self-signed one, run hub add again without --pin."
+elif [ -n "$SELF_SIGNED" ]; then
+  echo "WARNING: could not compute the self-signed certificate's pin. Compute it on this host with" >&2
+  echo "  openssl x509 -in $AIMEM_TLS_CERT -noout -pubkey | openssl pkey -pubin -outform der | openssl dgst -sha256 -binary | base64" >&2
+  echo "and give clients --pin sha256-<that value>. --insecure skips verification: use it only as a last resort." >&2
+fi
+if [ "$SCHEME" = http ]; then
+  echo "WARNING: this hub serves plain http, so every bearer token crosses the network in clear." >&2
+  echo "  Set AIMEM_DOMAIN (a self-signed certificate that clients pin) or AIMEM_TLS_CERT and AIMEM_TLS_KEY, and re-run." >&2
+fi
+# END client-hint

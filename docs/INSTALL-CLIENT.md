@@ -134,11 +134,16 @@ documents, but not hub administration, and revokes alone) — then:
 aimem hub add home https://hub.example.com:8440 "<writer-token>"
 ```
 
+Never give a client the hub's env token (`AIMEM_HTTP_TOKEN`): it is the
+hub's admin credential, and a machine holding it acts as hub admin.
+
 If the hub's certificate is not in the system roots (a private CA or a
 self-signed certificate), record its trust with the entry: add
 `--ca-file /path/to/hub-ca.pem` or `--pin sha256-BASE64` (the SHA-256 of
-the certificate's public key). Every aimem path to that hub uses it; a
-later `hub add` of the same hub keeps it unless you give a new one.
+the certificate's public key; the hub installer prints it for its
+self-signed certificate). Every aimem path to that hub uses it; a later
+`hub add` of the same hub keeps it unless you give a new one.
+`--insecure` skips verification instead; use it only as a last resort.
 
 To keep the token off the command line and out of shell history, give it
 with `--token-file PATH` (a file only you can read) or `--token-file -`

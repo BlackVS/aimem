@@ -121,11 +121,15 @@ aimem token add my-laptop        # prints the secret ONCE — copy it now
 Back on your workstation:
 
 ```sh
-aimem hub add home https://hub.example.com:8440 "<writer-token>" --insecure
+aimem hub add home https://hub.example.com:8440 "<writer-token>" --pin sha256-...
 ```
 
-Drop `--insecure` once you install a real certificate. Checkpoints now
-push to the hub as they happen; if it is unreachable they spool locally
+Use the `--pin` value the hub installer printed: it verifies the hub's
+self-signed certificate. Run `hub add` again without it once you install
+a real certificate. Never use the hub's env token here; it is the hub's
+admin credential.
+
+Checkpoints now push to the hub as they happen; if it is unreachable they spool locally
 and flush on the next contact, so capture never depends on the network.
 Periodic sync — the leg that pulls curated knowledge back down — rides
 the same token (`bash ./install.sh enable-sync` on Linux; Windows gets a
@@ -244,7 +248,8 @@ user and project level. Remove the project-level ones: they belong at
 user level only.
 
 **Hub push failing.** Check the token, and that the client trusts the
-certificate (`--insecure` for a self-signed one). Nothing is lost while
+certificate (`--pin`, as the hub installer printed it, for a self-signed
+one). Nothing is lost while
 it fails — events spool and flush later.
 
 **Curation produces nothing.** Check the model's test button in the
