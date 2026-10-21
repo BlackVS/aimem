@@ -18,9 +18,9 @@ currently 24); a binary refuses a database newer than it understands.
 - **The Windows one-liner in both forms.** The docs show the direct
   `irm .../boot.ps1 | iex` for a PowerShell window that is already open,
   and the `powershell -NoProfile -ExecutionPolicy Bypass -Command` wrapper
-  for cmd (or the Run dialog, for an upgrade). In an open window the
-  wrapper starts another `powershell.exe`, which a host policy may refuse
-  (`Program 'powershell.exe' failed to run: Access is denied`).
+  for cmd (or the Run dialog, for an upgrade). On one host the wrapper
+  typed in an open window was refused (`Program 'powershell.exe' failed
+  to run: Access is denied`) while the direct form ran.
 
 ## [0.10.10] — 2026-10-20
 

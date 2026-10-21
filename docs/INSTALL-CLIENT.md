@@ -33,10 +33,10 @@ your home directory, which is never wired):
 powershell -NoProfile -ExecutionPolicy Bypass -Command "irm https://raw.githubusercontent.com/BlackVS/aimem/v0.10.10/boot.ps1 | iex"
 ```
 
-In an open PowerShell window, use the direct form: the wrapper starts
-another `powershell.exe`, which a host policy may refuse there
-(`Program 'powershell.exe' failed to run: Access is denied`). From cmd
-the wrapper is the way in, and it matters on a fresh machine: Windows
+In an open PowerShell window, use the direct form. On one host the
+wrapper typed there was refused (`Program 'powershell.exe' failed to
+run: Access is denied`) while the direct form ran. From cmd the wrapper
+is the way in, and it matters on a fresh machine: Windows
 clients default to the `Restricted` execution policy, and while
 `irm | iex` itself is exempt, script files are not. The bypass is
 process-scoped — it changes no machine state — and is overridden only by
