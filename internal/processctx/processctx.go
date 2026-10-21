@@ -123,7 +123,12 @@ func (r *Result) set(state State, detail, fix, notice string) *Result {
 // The returned Set is non-nil only when a process set was obtained. full
 // skips the injection budget: the read path the over-budget notice names.
 func Bootstrap(dir, root, projectID string, full bool) (string, *process.Set) {
-	r := Load(dir, root, projectID)
+	return Load(dir, root, projectID).Bootstrap(dir, full)
+}
+
+// Bootstrap renders a loaded result as the package-level Bootstrap does,
+// for a caller that also needs the result's state when the text is empty.
+func (r *Result) Bootstrap(dir string, full bool) (string, *process.Set) {
 	if r.Set == nil {
 		return r.notice, nil
 	}

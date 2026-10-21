@@ -559,6 +559,17 @@ typed, the archive's file name must carry the commit's first 12
 characters, as the exported `<name>-<commit12>.tar.gz` does.
 `aimem process list` shows which selections still lack a set.
 
+`aimem process show` prints what a session receives for the project. In
+a checkout bound to a hub, or on a machine with a default hub, it asks
+that hub with this machine's credential, exactly as the session-start hook
+does. In a directory with no hub binding, on a machine with no hub
+configured, such as the service user's home on the hub host where
+`select` runs, it reads the project's selection and its stored set from
+this host's service, as `list` and `select` do, and prints the same unit;
+`--full` and `--template` work there too. A project with no selection, or
+a selection without a stored set, is an error that says so, never an
+empty line.
+
 ### Importing the skills sets
 
 The skills a process requires reach a member from the hub too, never from

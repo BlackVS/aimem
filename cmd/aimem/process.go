@@ -13,7 +13,9 @@ package main
 // selections lack a stored set and store them (process_refresh.go).
 // `aimem process show` runs on any machine and prints
 // exactly what the session-start hook injects, with the same availability
-// notices, so a person can see what an agent saw.
+// notices, so a person can see what an agent saw; in a directory with no
+// hub binding on a machine with no hub, the hub host's admin shell, it
+// reads the selection and the set this host stores.
 
 import (
 	"bytes"
@@ -31,6 +33,7 @@ import (
 	"strings"
 	"unicode"
 
+	"aimem/internal/adapter"
 	"aimem/internal/ident"
 	"aimem/internal/process"
 	"aimem/internal/processctx"
@@ -66,7 +69,9 @@ before the hub stored sets) from its recorded repository, commit, manifest
 and ref, and reports each project; a set it cannot read from Git is
 reported as needing an archive, which refresh -p <project> --from-archive
 then imports. show runs anywhere and prints what the session-start hook
-injects for this project; --full adds the repository URL, for the admin.`
+injects for this project; in a directory with no hub binding on a machine
+with no hub configured (the hub host), it reads this host's stored
+selection and set. --full adds the repository URL, for the admin.`
 
 func processCmd(args []string) error {
 	usage := processUsage
@@ -184,9 +189,10 @@ func processCmd(args []string) error {
 		tmpl := fs.String("template", "", "print this template from the process set instead of the bootstrap")
 		full := fs.Bool("full", false, "print the whole unit regardless of the manifest's injection budget, and the repository URL")
 		fs.Parse(args[1:])
-		// A named project is still resolved through this directory's hub
-		// binding: the reference lives on the hub the project is bound to.
-		text, set := processBootstrap(".", *p, *full)
+		text, set, err := processShowText(".", *p, *full)
+		if err != nil {
+			return err
+		}
 		if *tmpl != "" {
 			if set == nil {
 				return errors.New("process set unavailable: " + strings.TrimSpace(text))
@@ -497,6 +503,108 @@ func projectOrCurrent(p string) (string, error) {
 // processBootstrap is processctx.Bootstrap for this process's state root.
 func processBootstrap(dir, projectID string, full bool) (string, *process.Set) {
 	return processctx.Bootstrap(dir, stateRoot(), projectID, full)
+}
+
+// processShowText is the bootstrap `process show` prints. A directory
+// bound to a hub, or any directory on a machine with a default hub, gets
+// what the session-start hook builds there: a named project is still
+// resolved through that hub, where its reference lives. A directory with
+// neither, such as the hub host's admin shell where select runs, reads
+// the selection and the set this host's service stores, as list and
+// select do. An outcome with nothing to print is an error, never an
+// empty success.
+func processShowText(dir, projectID string, full bool) (string, *process.Set, error) {
+	if name, err := ident.ProjectHubNameStrict(dir); err == nil && name == "" {
+		if _, hub := adapter.ResolveHub(stateRoot(), ""); hub == nil {
+			return storedProcessBootstrap(dir, projectID, full)
+		}
+	}
+	r := processctx.Load(dir, stateRoot(), projectID)
+	text, set := r.Bootstrap(dir, full)
+	if strings.TrimSpace(text) == "" {
+		if err := r.Problem(); err != nil {
+			return "", nil, err
+		}
+		return "", nil, fmt.Errorf("process context for project %s: nothing to show", r.Project)
+	}
+	return text, set, nil
+}
+
+// storedProcessBootstrap builds the bootstrap from this host's service:
+// the project's selection and its stored set, verified against the
+// selection's digest, rendered as a member of the project receives it.
+func storedProcessBootstrap(dir, projectID string, full bool) (string, *process.Set, error) {
+	proj, err := projectOrCurrent(projectID)
+	if err != nil {
+		return "", nil, err
+	}
+	unbound := func(format string, a ...any) error {
+		return fmt.Errorf("this directory has no hub binding and this machine has no hub configured, so show read this host's store: "+format+"; in a checkout bound to the project's hub, show prints what a session there receives", a...)
+	}
+	var sel struct {
+		Current *process.Ref `json:"current"`
+	}
+	if err := localJSON(http.MethodGet, "/v1/projects/"+url.PathEscape(proj)+"/process", nil, &sel); err != nil {
+		return "", nil, unbound("project %s: %v", proj, err)
+	}
+	if sel.Current == nil {
+		return "", nil, unbound("project %s has no process selected (aimem process select on the hub host)", proj)
+	}
+	ref := *sel.Current
+	if ref.Digest == "" {
+		return "", nil, unbound("project %s's selection has no stored set (aimem process refresh on the hub host)", proj)
+	}
+	bundle, err := storedSet(proj, ref)
+	if err != nil {
+		return "", nil, unbound("project %s: %v", proj, err)
+	}
+	set, err := bundle.Set(ref)
+	if err != nil {
+		return "", nil, unbound("project %s: the stored set does not load: %v", proj, err)
+	}
+	home, _ := os.UserHomeDir()
+	if full {
+		return process.BootstrapFull(set, proj, process.SkillStateOn(dir, home)), set, nil
+	}
+	text, err := process.Bootstrap(set, proj, process.SkillStateOn(dir, home))
+	if err != nil {
+		return "process context unavailable: " + err.Error(), set, nil
+	}
+	return text, set, nil
+}
+
+// storedSet reads the stored set of the selection ref from this host's
+// service and checks that its files digest to the selection's digest.
+func storedSet(proj string, ref process.Ref) (*process.Bundle, error) {
+	resp, err := client().Get("http://aimem/v1/projects/" + url.PathEscape(proj) + "/process/set")
+	if err != nil {
+		return nil, fmt.Errorf("%w (is the local aimem service running?)", err)
+	}
+	defer resp.Body.Close()
+	const max = 2 * process.MaxSetBytes // base64 in JSON, with room for the envelope
+	data, err := io.ReadAll(io.LimitReader(resp.Body, max+1))
+	if err != nil {
+		return nil, err
+	}
+	if len(data) > max {
+		return nil, fmt.Errorf("the stored set's answer is larger than %d bytes", max)
+	}
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("reading the stored set: HTTP %d: %s", resp.StatusCode, strings.TrimSpace(string(data)))
+	}
+	var got struct {
+		Selection struct {
+			Digest string `json:"digest"`
+		} `json:"selection"`
+		Set process.Bundle `json:"set"`
+	}
+	if err := json.Unmarshal(data, &got); err != nil {
+		return nil, fmt.Errorf("the stored set's answer is not a set: %w", err)
+	}
+	if got.Selection.Digest != ref.Digest || got.Set.Digest() != ref.Digest {
+		return nil, fmt.Errorf("the stored set does not match the selection's digest %s", ref.Digest)
+	}
+	return &got.Set, nil
 }
 
 // processNotice is the session-start hook's slice: the bootstrap, or the

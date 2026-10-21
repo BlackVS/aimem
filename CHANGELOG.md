@@ -13,6 +13,16 @@ currently 24); a binary refuses a database newer than it understands.
 
 ## [Unreleased]
 
+### Fixed
+
+- **`aimem process show` on the hub host.** Run as the service user in a
+  directory with no hub binding, right after `aimem process select`, it
+  printed an empty line and exited 0. In a directory with no hub binding,
+  on a machine with no hub configured, it now reads the project's
+  selection and stored set from this host's service, as `list` and
+  `select` do, and prints the unit a session receives. Whatever `show`
+  cannot print is an error that names why, never an empty success.
+
 ### Docs
 
 - **The Windows one-liner in both forms.** The docs show the direct
