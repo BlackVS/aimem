@@ -13,9 +13,16 @@ wires the project):
 curl -fsSL https://raw.githubusercontent.com/BlackVS/aimem/v0.10.10/boot.sh | bash
 ```
 
-Windows (PowerShell; supported, tested less than Linux):
+Windows (supported, tested less than Linux), in a PowerShell window
+that is already open:
 
 ```powershell
+irm https://raw.githubusercontent.com/BlackVS/aimem/v0.10.10/boot.ps1 | iex
+```
+
+From cmd, or from the Run dialog (Win+R) for an upgrade:
+
+```bat
 powershell -NoProfile -ExecutionPolicy Bypass -Command "irm https://raw.githubusercontent.com/BlackVS/aimem/v0.10.10/boot.ps1 | iex"
 ```
 
@@ -66,8 +73,18 @@ that already holds `.aimem.json`, and it never wires the home directory.
 curl -fsSL https://raw.githubusercontent.com/BlackVS/aimem/v0.10.10/boot.sh | AIMEM_USER_ONLY=1 bash
 ```
 
+In a PowerShell window that is already open (the setting stays for that
+window):
+
 ```powershell
-$env:AIMEM_USER_ONLY = '1'; powershell -NoProfile -ExecutionPolicy Bypass -Command "irm https://raw.githubusercontent.com/BlackVS/aimem/v0.10.10/boot.ps1 | iex"
+$env:AIMEM_USER_ONLY = '1'; irm https://raw.githubusercontent.com/BlackVS/aimem/v0.10.10/boot.ps1 | iex
+```
+
+From cmd (likewise for that window):
+
+```bat
+set AIMEM_USER_ONLY=1
+powershell -NoProfile -ExecutionPolicy Bypass -Command "irm https://raw.githubusercontent.com/BlackVS/aimem/v0.10.10/boot.ps1 | iex"
 ```
 
 On an existing installation the installer:

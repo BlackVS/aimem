@@ -28,7 +28,12 @@ curl -fsSL https://raw.githubusercontent.com/BlackVS/aimem/v0.10.10/boot.sh | ba
 ```
 
 ```powershell
-# Windows
+# Windows, in a PowerShell window that is already open
+irm https://raw.githubusercontent.com/BlackVS/aimem/v0.10.10/boot.ps1 | iex
+```
+
+```bat
+:: Windows, from cmd
 powershell -NoProfile -ExecutionPolicy Bypass -Command "irm https://raw.githubusercontent.com/BlackVS/aimem/v0.10.10/boot.ps1 | iex"
 ```
 
