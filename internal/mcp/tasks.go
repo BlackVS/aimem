@@ -47,13 +47,18 @@ var taskToolDefs = append([]map[string]any{
 	{
 		"name": "list_tasks",
 		"description": "List task summaries of a project (archived excluded unless asked). " +
-			"Pages of up to 100; pass the returned next_cursor as `after`." + taskReadScope,
+			"Pages of up to 100; pass the returned next_cursor as `after` with the same order. " +
+			"What changed since a time, newest first, in one call: `updated_since` with `order: updated_desc`. " +
+			"`mine: true` lists the tasks assigned to your own user identity." + taskReadScope,
 		"inputSchema": objSchema(map[string]any{
 			"project":          prop("string", "project id (defaults to the current project; it selects what to read, it is not a limit)"),
 			"state":            propEnum("only this state", "BACKLOG", "READY", "IN_PROGRESS", "REVIEW", "BLOCKED", "DONE", "CANCELLED"),
 			"assignee":         assigneeProp("only this assignee"),
 			"epic":             prop("string", "only tasks under this epic id"),
 			"include_archived": prop("boolean", "include archived tasks"),
+			"updated_since":    prop("string", "only tasks updated at or after this RFC 3339 time, such as 2026-10-21T08:00:00Z"),
+			"order":            propEnum("sort order (default id: creation order)", "id", "updated_desc", "updated_asc", "title", "state"),
+			"mine":             prop("boolean", "only tasks assigned to your own user identity (not your groups); not with assignee"),
 			"after":            prop("string", "next_cursor from the previous page"),
 			"limit":            prop("integer", "page size (default 20, max 100)"),
 		}),
@@ -280,6 +285,9 @@ type taskArgs struct {
 	Body             string          `json:"body"`
 	Query            string          `json:"query"`
 	Last             *int            `json:"last"` // a pointer: an explicit 0 is refused, not taken as absent
+	UpdatedSince     string          `json:"updated_since"`
+	Order            string          `json:"order"`
+	Mine             bool            `json:"mine"`
 }
 
 func decodeTaskArgs(raw json.RawMessage) (taskArgs, error) {
@@ -466,6 +474,10 @@ func (s *srv) taskTool(ctx context.Context, name string, raw json.RawMessage) (s
 		switch {
 		case name == "list_tasks" && a.Query != "":
 			return "", errors.New("list_tasks takes no query: use search_tasks to find tasks by words")
+		case name == "search_tasks" && (a.Order != "" || a.UpdatedSince != "" || a.Mine):
+			return "", errors.New("order, updated_since and mine belong to list_tasks: a search is ranked by relevance")
+		case a.Mine && a.Assignee != nil:
+			return "", errors.New("mine and assignee are exclusive: mine is your own user identity")
 		case name == "search_tasks" && strings.TrimSpace(a.Query) == "":
 			return "", errors.New("query is required: the words to find")
 		case name == "search_tasks" && a.Limit > 50:
@@ -479,8 +491,21 @@ func (s *srv) taskTool(ctx context.Context, name string, raw json.RawMessage) (s
 		if a.State != "" {
 			q.Set("state", a.State)
 		}
+		if a.Mine {
+			me, err := callerUserID(call)
+			if err != nil {
+				return "", err
+			}
+			q.Set("assignee", "user/"+me)
+		}
 		if a.Assignee != nil {
 			q.Set("assignee", a.Assignee.Kind+"/"+a.Assignee.ID)
+		}
+		if a.UpdatedSince != "" {
+			q.Set("updated_since", a.UpdatedSince)
+		}
+		if a.Order != "" {
+			q.Set("order", a.Order)
 		}
 		if a.IncludeArchived {
 			q.Set("include_archived", "true")
@@ -655,6 +680,23 @@ func (s *srv) taskTool(ctx context.Context, name string, raw json.RawMessage) (s
 		return call("POST", "/v1/tasks/"+id+"/comments", map[string]string{"body": a.Body}, k)
 	}
 	return "", fmt.Errorf("unknown tool %q", name)
+}
+
+// callerUserID asks the hub who the task credential is, for mine: the
+// user identity an assignee filter names. A token without one (admin,
+// legacy writer) cannot have tasks of its own.
+func callerUserID(call func(method, path string, body any, key string) (string, error)) (string, error) {
+	text, err := call("GET", "/v1/access/identity", nil, "")
+	if err != nil {
+		return "", fmt.Errorf("mine: could not read your identity: %w", err)
+	}
+	var id struct {
+		UserID string `json:"user_id"`
+	}
+	if json.Unmarshal([]byte(text), &id) != nil || id.UserID == "" {
+		return "", errors.New("mine needs a user credential: this token has no user identity to assign tasks to")
+	}
+	return id.UserID, nil
 }
 
 // argGiven reports whether the call's arguments name key with a non-null

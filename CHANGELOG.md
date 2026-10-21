@@ -50,6 +50,14 @@ currently 25); a binary refuses a database newer than it understands.
   the newest comment and `after` continues toward older ones. The MCP
   `list_task_comments` tool takes `last` (1 to 100): the N newest
   comments, newest first, with a cursor for the ones before them.
+- **What changed, and my tasks, in one call.** `GET /v1/projects/{p}/tasks`
+  takes `updated_since` (an RFC 3339 time: only the tasks updated at or
+  after it), with any order or a search. The MCP `list_tasks` tool takes
+  `updated_since`, the list's `order` (the default stays creation order)
+  and `mine: true`, the tasks assigned to the caller's own user identity
+  (not its groups; refused with `assignee`, and for a token without a user
+  identity). The hub's `/mcp` endpoint now lets task tools read the
+  caller's own identity, which `mine` needs.
 
 ### Fixed
 

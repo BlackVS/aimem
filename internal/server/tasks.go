@@ -96,6 +96,14 @@ var taskRoutes = map[string]bool{
 // surface and, through the project_repository tool, on /mcp.
 const repositoryReadRoute = "GET /v1/projects/{p}/repository"
 
+// isIdentityRead is the caller's own identity (GET /v1/access/identity),
+// which list_tasks' mine reads for the caller's user id. Every token may
+// already call it directly (the bearer middleware exempts it from the
+// ordinary-route table), and it answers only about the caller.
+func isIdentityRead(r *http.Request) bool {
+	return r.Method == http.MethodGet && r.URL.Path == "/v1/access/identity"
+}
+
 // processSetReadRoute is the stored process set: on the ordinary surface,
 // served by its handler only under a current grant on the project.
 const processSetReadRoute = "GET /v1/projects/{p}/process/set"
@@ -449,7 +457,7 @@ func (s *Server) listTasks(w http.ResponseWriter, r *http.Request) {
 		s.fail(w, http.StatusBadRequest, err)
 		return
 	}
-	f := store.TaskFilter{State: q.Get("state"), Query: q.Get("q"), Order: q.Get("order"), After: q.Get("after"), Limit: int(limit)}
+	f := store.TaskFilter{State: q.Get("state"), Query: q.Get("q"), UpdatedSince: q.Get("updated_since"), Order: q.Get("order"), After: q.Get("after"), Limit: int(limit)}
 	if q.Has("q") && strings.TrimSpace(f.Query) == "" { // a present but blank q is a search with no terms, not a list
 		s.fail(w, http.StatusBadRequest, errors.New("search terms are blank"))
 		return
@@ -727,7 +735,7 @@ func (s *Server) MCPPrincipal(r *http.Request) (func(ctx context.Context, method
 		if err != nil {
 			return 0, nil, err
 		}
-		if _, pattern := s.ordinaryMux().Handler(req); !canonicalPath(req) || !(taskRoutes[pattern] || knowledgeRoute[pattern] || pattern == repositoryReadRoute || pattern == processSetReadRoute) {
+		if _, pattern := s.ordinaryMux().Handler(req); !canonicalPath(req) || !(taskRoutes[pattern] || knowledgeRoute[pattern] || pattern == repositoryReadRoute || pattern == processSetReadRoute || isIdentityRead(req)) {
 			return 0, nil, errors.New("not a task, project repository, process set or pilot knowledge route")
 		}
 		req.Header.Set("Content-Type", "application/json")
