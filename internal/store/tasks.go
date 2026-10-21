@@ -885,8 +885,8 @@ func (d *DB) ListTasks(f TaskFilter) (TaskPage, error) {
 	by := `tasks.id`
 	var match string
 	if order == taskOrderRelevance {
-		if len(f.Query) > MaxTaskQueryBytes || !utf8.ValidString(f.Query) {
-			return out, invalid(fmt.Errorf("search terms must be valid UTF-8 of at most %d bytes", MaxTaskQueryBytes))
+		if len(f.Query) > MaxTaskQueryBytes || !utf8.ValidString(f.Query) || strings.ContainsRune(f.Query, 0) { // SQLite ends a string at NUL
+			return out, invalid(fmt.Errorf("search terms must be valid UTF-8 of at most %d bytes, without NUL", MaxTaskQueryBytes))
 		}
 		if match = ftsQuote(f.Query); match == "" {
 			return out, invalid(errors.New("search terms are blank"))

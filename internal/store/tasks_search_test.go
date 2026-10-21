@@ -151,6 +151,7 @@ func TestTaskSearchPagesAndRefusesForeignCursors(t *testing.T) {
 		"blank":          {Query: "   "},
 		"too long":       {Query: strings.Repeat("a", MaxTaskQueryBytes+1)},
 		"invalid utf-8":  {Query: "kiwi \xff"},
+		"nul":            {Query: "kiwi \x00"},
 	} {
 		if _, err := db.ListTasks(f); !errors.Is(err, ErrTaskInvalid) {
 			t.Fatalf("%s: %v", name, err)
