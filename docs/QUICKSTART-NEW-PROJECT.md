@@ -138,7 +138,7 @@ the periodic sync as launchd user agents, which start at each login:
 
 ```sh
 cd ~/src/my-project
-curl -fsSL https://raw.githubusercontent.com/BlackVS/aimem/v0.10.10/boot.sh | bash
+curl -fsSL https://raw.githubusercontent.com/BlackVS/aimem/v0.10.11/boot.sh | bash
 export PATH="$HOME/.local/bin:$PATH"
 launchctl list | grep io.github.blackvs.aimem
 ```
@@ -160,7 +160,7 @@ Ubuntu) and runs the service as a systemd user unit:
 
 ```sh
 cd ~/src/my-project
-curl -fsSL https://raw.githubusercontent.com/BlackVS/aimem/v0.10.10/boot.sh | bash
+curl -fsSL https://raw.githubusercontent.com/BlackVS/aimem/v0.10.11/boot.sh | bash
 ```
 
 **Windows.** The installer registers a logon task for the
@@ -169,14 +169,14 @@ window after it finishes. In a PowerShell window that is already open:
 
 ```powershell
 cd $HOME\src\my-project
-irm https://raw.githubusercontent.com/BlackVS/aimem/v0.10.10/boot.ps1 | iex
+irm https://raw.githubusercontent.com/BlackVS/aimem/v0.10.11/boot.ps1 | iex
 ```
 
 From cmd:
 
 ```bat
 cd /d %USERPROFILE%\src\my-project
-powershell -NoProfile -ExecutionPolicy Bypass -Command "irm https://raw.githubusercontent.com/BlackVS/aimem/v0.10.10/boot.ps1 | iex"
+powershell -NoProfile -ExecutionPolicy Bypass -Command "irm https://raw.githubusercontent.com/BlackVS/aimem/v0.10.11/boot.ps1 | iex"
 ```
 
 The install puts the hooks and the agent plugins in your user profile,

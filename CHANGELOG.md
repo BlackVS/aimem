@@ -13,6 +13,40 @@ currently 25); a binary refuses a database newer than it understands.
 
 ## [Unreleased]
 
+## [0.10.11] — 2026-10-21
+
+Tasks are easier to find and to read at a glance. The `/tasks` list sorts
+newest first and refreshes in place, a task can be found by words in its
+content or its comments, and the state chips show how many tasks are in
+each state. Agents get the same over MCP: `search_tasks`, the newest
+comments first, what changed since a time, their own tasks with
+`mine: true`, and the board's counts on the first page of `list_tasks`.
+A refused reservation request now says which input was wrong. Schema 25
+adds the task search index. Includes PR #254, #255, #256, #257, #258,
+#259, #260 and #261.
+
+### Upgrade notes
+
+- **Hubs first, then workstations.** The new task arguments are read by
+  the hub: a 0.10.10 hub ignores `q`, `order` and `updated_since` on the
+  task list, so a newer client's `search_tasks` or `updated_since` against
+  it gets an unfiltered list rather than an error. Upgrade the hub with
+  its one-liner before the clients.
+- **Schema 25, and the way back.** The first 0.10.11 open of a project
+  store adds the task search index and fills it from the existing tasks
+  and comments, once. An older binary refuses the newer store ("database
+  schema v25 is newer than this binary"), so the way back is the state
+  copy the hub one-liner makes before it swaps the binary,
+  `<state root>.backup-<UTC time>`, whose path it prints. If the new
+  release does not come up healthy, the one-liner puts the previous binary
+  and that copy back itself. To go back later, stop the hub, put the
+  0.10.10 binary back and replace the state root with the copy; writes
+  made since the upgrade are not in it. The client one-liners make no
+  such copy of a workstation's state.
+- **No setting changes.** No new environment setting, and every route
+  and tool keeps its previous defaults: the list's order, the comments'
+  order, and every refusal code.
+
 ### Added
 
 - **The task list sorts newest first, and refreshes.** The `/tasks` list
