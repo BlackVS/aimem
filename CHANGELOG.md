@@ -75,6 +75,15 @@ currently 25); a binary refuses a database newer than it understands.
   selection and stored set from this host's service, as `list` and
   `select` do, and prints the unit a session receives. Whatever `show`
   cannot print is an error that names why, never an empty success.
+- **A refused reservation request says what was wrong.** A reservation
+  write the hub refused as `invalid_request` answered only "The request is
+  not a valid reservation request.", and the reason (such as a commit
+  reference that is a bare hash rather than a URL) was in the hub log,
+  where an agent cannot read it. `invalid_request` and
+  `unsupported_version` now carry a `detail` field naming the input that
+  failed, and the MCP reservation tools pass it through. Conflict refusals
+  are unchanged: their detail may describe another holder and stays in the
+  log.
 
 ### Docs
 

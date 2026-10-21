@@ -41,6 +41,9 @@ type identityRefusalBody struct {
 	Retryable     bool   `json:"retryable"`
 	NextAction    string `json:"next_action"`
 	CorrelationID string `json:"correlation_id"`
+	// Detail is what was wrong with the caller's own input, on the
+	// reservation codes that carry it (reservationDetailCodes).
+	Detail string `json:"detail,omitempty"`
 }
 
 var identityRefusals = map[string]struct {
