@@ -60,6 +60,7 @@ func teamMode(r *http.Request) bool {
 var teamRoutes = append(append([]string{
 	"GET /v1/access/identity",
 	"GET /v1/projects/{p}/tasks",
+	"GET /v1/projects/{p}/tasks/counts",
 	"GET /v1/tasks/{id}",
 	"GET /v1/tasks/{id}/history",
 	"GET /v1/tasks/{id}/comments",

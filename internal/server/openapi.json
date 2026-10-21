@@ -951,6 +951,7 @@
         "summary": "Count the tasks of a project per state",
         "description": "The board's shape in one call: counts holds the active (unarchived) tasks per state, every state present (BACKLOG, READY, IN_PROGRESS, REVIEW, BLOCKED, DONE, CANCELLED; zero included); archived is the number of archived tasks and total both together. assignee (kind/id) and epic narrow all three, as on the list; the list's other filters do not apply. Ordinary user tokens may call this route; it reads what the list reads.",
         "x-role": "writer",
+        "x-team-mode": "Team mode: with the optional header X-Aimem-Team-Context (an aimem-scoped acs1_ handle from aicrew) and a user-scoped individual bearer, over TLS terminated by the hub only (otherwise tls_required, 403, whatever forwarded headers claim), the hub verifies the session online through aicrew introspection on every request, matches it to the authenticated user and token, and serves the read only under the linked team access profile's live grant, never the caller's personal grants. Refusals use the envelope with active_mode team: context_unavailable (503, retryable), context_stale, identity_mismatch, grant_denied, role_forbidden (403).",
         "parameters": [
           {
             "name": "p",

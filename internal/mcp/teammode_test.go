@@ -145,7 +145,8 @@ func TestTeamModeToolListMatchesHubTeamRoutes(t *testing.T) {
 		names = append(names, tl.Name)
 	}
 	sort.Strings(names)
-	// Each team tool reaches exactly one route the hub serves in team mode.
+	// Each team tool reaches one route the hub serves in team mode; list_tasks'
+	// first page also reads the counts (alsoReached).
 	toolRoute := map[string]string{
 		"list_tasks": "GET /v1/projects/{p}/tasks", "search_tasks": "GET /v1/projects/{p}/tasks", "get_task": "GET /v1/tasks/{id}", "get_task_history": "GET /v1/tasks/{id}/history",
 		"list_task_comments": "GET /v1/tasks/{id}/comments", "get_task_comment": "GET /v1/tasks/{id}/comments/{c}",
@@ -202,6 +203,8 @@ func TestTeamModeToolListMatchesHubTeamRoutes(t *testing.T) {
 	for _, r := range toolRoute {
 		toolRoutes = append(toolRoutes, r)
 	}
+	alsoReached := []string{"GET /v1/projects/{p}/tasks/counts"}
+	toolRoutes = append(toolRoutes, alsoReached...)
 	sort.Strings(hubRoutes)
 	sort.Strings(toolRoutes)
 	toolRoutes = slices.Compact(toolRoutes) // list_tasks and search_tasks share one route
@@ -241,7 +244,7 @@ func TestTeamModeCarriesTheHandleAndVerifiesFirst(t *testing.T) {
 		t.Fatalf("list_tasks: %v %s", isErr, text)
 	}
 	reqs := h.requests()
-	if len(reqs) != 2 || reqs[0].path != "/v1/access/identity" || reqs[1].path != "/v1/projects/alpha/tasks" {
+	if len(reqs) != 3 || reqs[0].path != "/v1/access/identity" || reqs[1].path != "/v1/projects/alpha/tasks" || reqs[2].path != "/v1/projects/alpha/tasks/counts" {
 		t.Fatalf("requests: %+v", reqs)
 	}
 	// A verified context stands until a refusal; every call carries the
@@ -255,7 +258,7 @@ func TestTeamModeCarriesTheHandleAndVerifiesFirst(t *testing.T) {
 			t.Fatalf("a request without the handle or the individual credential: %+v", r)
 		}
 	}
-	if n := len(h.requests()); n != 4 {
+	if n := len(h.requests()); n != 5 {
 		t.Fatalf("%d requests; a standing verification must not repeat", n)
 	}
 
@@ -279,6 +282,43 @@ func TestTeamModeCarriesTheHandleAndVerifiesFirst(t *testing.T) {
 	text, isErr = teamCall(t, s, "get_task", map[string]any{"id": "t-1"})
 	if !isErr || !strings.Contains(text, "not verified") || len(h.requests()) != before+1 || h.requests()[before].path != "/v1/access/identity" {
 		t.Fatalf("after a refusal the next call must re-verify and stop: %v %s", isErr, text)
+	}
+}
+
+// A team conversation's first list page carries the board's counts, read
+// under the same handle and credential as the list; a later page does not.
+func TestTeamModeListTasksCarriesCounts(t *testing.T) {
+	h := newTeamHub(t)
+	root := teamRoot(t, h, nil)
+	h.addSession(teamHandle('A'), "sess-1")
+	path := writeSession(t, root, h.ts.URL, "sess-1", teamHandle('A'))
+	s := newTeamSrv(path, root, "alpha")
+	h.custom = func(w http.ResponseWriter, r *http.Request, session string) bool {
+		switch r.URL.Path {
+		case "/v1/projects/alpha/tasks":
+			json.NewEncoder(w).Encode(map[string]any{"project": "alpha", "tasks": []any{}, "next_cursor": "c-1"})
+		case "/v1/projects/alpha/tasks/counts":
+			json.NewEncoder(w).Encode(map[string]any{"project": "alpha", "counts": map[string]int{"READY": 2, "DONE": 1}, "archived": 4, "total": 7})
+		default:
+			return false
+		}
+		return true
+	}
+	text, isErr := teamCall(t, s, "list_tasks", map[string]any{"project": "alpha"})
+	if isErr || !strings.Contains(text, `"counts"`) || !strings.Contains(text, `"READY": 2`) || !strings.Contains(text, `"total": 7`) {
+		t.Fatalf("first page: %v %s", isErr, text)
+	}
+	for _, r := range h.requests() {
+		if r.handle != teamHandle('A') || r.auth != "Bearer "+teamToken {
+			t.Fatalf("a request without the handle or the individual credential: %+v", r)
+		}
+	}
+	before := len(h.requests())
+	if text, isErr := teamCall(t, s, "list_tasks", map[string]any{"project": "alpha", "after": "c-1"}); isErr || strings.Contains(text, `"counts"`) {
+		t.Fatalf("later page: %v %s", isErr, text)
+	}
+	if reqs := h.requests()[before:]; len(reqs) != 1 || reqs[0].path != "/v1/projects/alpha/tasks" {
+		t.Fatalf("a later page must read only the list: %+v", reqs)
 	}
 }
 
