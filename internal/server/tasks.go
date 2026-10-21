@@ -450,6 +450,10 @@ func (s *Server) listTasks(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	f := store.TaskFilter{State: q.Get("state"), Query: q.Get("q"), Order: q.Get("order"), After: q.Get("after"), Limit: int(limit)}
+	if q.Has("q") && strings.TrimSpace(f.Query) == "" { // a present but blank q is a search with no terms, not a list
+		s.fail(w, http.StatusBadRequest, errors.New("search terms are blank"))
+		return
+	}
 	switch q.Get("include_archived") {
 	case "", "false", "0":
 	case "true", "1":

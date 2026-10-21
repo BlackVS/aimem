@@ -33,7 +33,7 @@ func TestTaskListRouteSearch(t *testing.T) {
 			t.Fatalf("row: %+v", row)
 		}
 	}
-	for _, q := range []string{"q=gecko&order=title", "q=%20", "q=" + url.QueryEscape(strings.Repeat("x", 257))} {
+	for _, q := range []string{"q=gecko&order=title", "q=%20", "q=", "q=&order=title", "state=READY&q", "q=" + url.QueryEscape(strings.Repeat("x", 257))} {
 		if w := taskReq(t, f.h, "GET", "/v1/projects/alpha/tasks?"+q, f.bob, "", ""); w.Code != 400 {
 			t.Fatalf("%.40s: %d %s", q, w.Code, w.Body)
 		}
