@@ -59,6 +59,23 @@ var taskToolDefs = append([]map[string]any{
 		}),
 	},
 	{
+		"name": "search_tasks",
+		"description": "Find tasks of a project by words: every term must appear in the task's title, objective, " +
+			"acceptance criteria or non-goals, or in one of its comments (terms are literal, case-insensitive). " +
+			"Best match first; each row says where the best hit was (matched: task or comment) and shows it (snippet, " +
+			"the hit in [brackets]). Archived excluded unless asked. Pages of up to 50; pass the returned next_cursor as `after`." + taskReadScope,
+		"inputSchema": objSchema(map[string]any{
+			"project":          prop("string", "project id (defaults to the current project; it selects what to read, it is not a limit)"),
+			"query":            prop("string", "the words to find (at most 256 bytes)"),
+			"state":            propEnum("only this state", "BACKLOG", "READY", "IN_PROGRESS", "REVIEW", "BLOCKED", "DONE", "CANCELLED"),
+			"assignee":         assigneeProp("only this assignee"),
+			"epic":             prop("string", "only tasks under this epic id"),
+			"include_archived": prop("boolean", "include archived tasks"),
+			"after":            prop("string", "next_cursor from the previous page of this search"),
+			"limit":            prop("integer", "page size (default 10, max 50)"),
+		}, "query"),
+	},
+	{
 		"name":        "get_task",
 		"description": "Read one task by id: current content, revision, owning project and links." + taskReadScope,
 		"inputSchema": objSchema(map[string]any{"id": prop("string", "task id")}, "id"),
@@ -259,6 +276,7 @@ type taskArgs struct {
 	After            json.RawMessage `json:"after"` // list: task id; history/comments: integer
 	Limit            int             `json:"limit"`
 	Body             string          `json:"body"`
+	Query            string          `json:"query"`
 }
 
 func decodeTaskArgs(raw json.RawMessage) (taskArgs, error) {
@@ -436,12 +454,25 @@ func (s *srv) taskTool(ctx context.Context, name string, raw json.RawMessage) (s
 			return "", err
 		}
 		return call("GET", "/v1/projects/"+url.PathEscape(p)+"/repository", nil, "")
-	case "list_tasks":
+	case "list_tasks", "search_tasks":
 		p, err := project()
 		if err != nil {
 			return "", err
 		}
 		q := url.Values{}
+		switch {
+		case name == "list_tasks" && a.Query != "":
+			return "", errors.New("list_tasks takes no query: use search_tasks to find tasks by words")
+		case name == "search_tasks" && strings.TrimSpace(a.Query) == "":
+			return "", errors.New("query is required: the words to find")
+		case name == "search_tasks" && a.Limit > 50:
+			return "", errors.New("limit is at most 50 for a search: page with after for more")
+		case name == "search_tasks":
+			q.Set("q", a.Query)
+			if a.Limit == 0 {
+				a.Limit = 10
+			}
+		}
 		if a.State != "" {
 			q.Set("state", a.State)
 		}

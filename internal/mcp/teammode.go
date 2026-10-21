@@ -30,7 +30,7 @@ import (
 // teamReadTools are the task tools whose hub routes team mode serves
 // (internal/server teamRoutes); session_context reports the verified context.
 var teamReadTools = map[string]bool{
-	"list_tasks": true, "get_task": true, "get_task_history": true, "list_task_comments": true,
+	"list_tasks": true, "search_tasks": true, "get_task": true, "get_task_history": true, "list_task_comments": true,
 	"get_task_comment": true, "list_epics": true, "get_epic": true,
 	// The project's repository under the profile's grant (DESIGN-AIFORGE-PILOT-1 §1).
 	"project_repository": true,

@@ -558,9 +558,13 @@ type rowQuerier interface {
 	QueryRow(query string, args ...any) *sql.Row
 }
 
-const taskReadQuery = `SELECT tasks.body,COALESCE(m.team_id,''),COALESCE(a.id,''),COALESCE(a.state,'') FROM tasks
+const (
+	taskReadColumns = `tasks.body,COALESCE(m.team_id,''),COALESCE(a.id,''),COALESCE(a.state,'')`
+	taskReadJoins   = `
 LEFT JOIN team_managed_tasks m ON m.task_id=tasks.id AND m.managed=1
 LEFT JOIN team_assignments a ON a.task_id=tasks.id AND a.reserved=1`
+	taskReadQuery = `SELECT ` + taskReadColumns + ` FROM tasks` + taskReadJoins
+)
 
 func scanCurrentTask(row interface{ Scan(...any) error }) (Task, error) {
 	var body string
@@ -682,6 +686,7 @@ type TaskFilter struct {
 	Assignee        *TaskAssignee
 	Epic            string // only tasks under this epic
 	IncludeArchived bool
+	Query           string // search terms: the matches ranked by relevance, no Order
 	Order           string // a TaskOrder*; empty is TaskOrderID
 	After           string
 	Limit           int
@@ -700,6 +705,31 @@ const (
 )
 
 var taskOrders = []string{TaskOrderID, TaskOrderUpdatedDesc, TaskOrderUpdatedAsc, TaskOrderTitle, TaskOrderState}
+
+// taskOrderRelevance is the order of a search (TaskFilter.Query): best
+// match first, ties by id. A caller never names it; its cursors carry it.
+const taskOrderRelevance = "relevance"
+
+// MaxTaskQueryBytes bounds a task search's terms.
+const MaxTaskQueryBytes = 256
+
+// taskSearchSQL ranks the tasks that match: a task matches when its own
+// row or any of its comments does, and its score and snippet are those of
+// its best row (SQLite takes a bare column of a MIN() aggregate from the
+// row holding the minimum). bm25 is lower for a better match; the hits
+// are MATERIALIZED because bm25 and snippet need the FTS scan itself,
+// which flattening into the aggregate would lose.
+const taskSearchSQL = `WITH hits AS MATERIALIZED (
+  SELECT task_id, kind, bm25(task_fts) AS score, snippet(task_fts, -1, '[', ']', '…', 12) AS snip
+  FROM task_fts WHERE task_fts MATCH ?),
+best AS (SELECT task_id, MIN(score) AS score, kind, snip FROM hits GROUP BY task_id)
+SELECT ` + taskReadColumns + `,best.score,best.kind,best.snip FROM tasks JOIN best ON best.task_id=tasks.id` + taskReadJoins
+
+// taskQueryDigest binds a search cursor to its terms.
+func taskQueryDigest(match string) string {
+	sum := sha256.Sum256([]byte(match))
+	return hex.EncodeToString(sum[:8])
+}
 
 // Sort keys as SQL over the stored body: title and update time are not
 // columns. updated_at is RFC3339 UTC, so text order is time order.
@@ -729,10 +759,11 @@ func taskStateRank(state string) int {
 // taskCursor is the position after which the next page of a non-id order
 // starts: the order it belongs to, the last row's sort key and its id.
 type taskCursor struct {
-	Order string `json:"o"`
-	Key   string `json:"k"`
-	Rank  int    `json:"r,omitempty"`
-	ID    string `json:"id"`
+	Order string  `json:"o"`
+	Key   string  `json:"k"`
+	Rank  int     `json:"r,omitempty"`
+	Score float64 `json:"s,omitempty"` // relevance: the last row's bm25
+	ID    string  `json:"id"`
 }
 
 func (c taskCursor) encode() string {
@@ -746,7 +777,7 @@ func decodeTaskCursor(s, order string) (taskCursor, error) {
 	if err != nil || len(raw) > 4096 || json.Unmarshal(raw, &c) != nil || !taskIDRE.MatchString(c.ID) {
 		return c, invalid(errors.New("invalid task cursor"))
 	}
-	if !slices.Contains(taskOrders, c.Order) { // never echo text the caller chose
+	if !slices.Contains(taskOrders, c.Order) && c.Order != taskOrderRelevance { // never echo text the caller chose
 		return c, invalid(errors.New("invalid task cursor"))
 	}
 	if c.Order != order {
@@ -791,7 +822,14 @@ func taskCursorAfter(order string, t TaskSummary) string {
 	return c.encode()
 }
 
+// scanner adapts a Scan function to scanCurrentTask's row interface.
+type scanner func(dest ...any) error
+
+func (s scanner) Scan(dest ...any) error { return s(dest...) }
+
 // TaskSummary is the bounded list row: never the discussion or history.
+// A search row also says where the best match was (Matched: task or
+// comment) and shows it (Snippet, the hit in [brackets]).
 type TaskSummary struct {
 	Coordination *TaskCoordination `json:"coordination,omitempty"`
 	ID           string            `json:"id"`
@@ -802,6 +840,8 @@ type TaskSummary struct {
 	Archived     bool              `json:"archived"`
 	Revision     int64             `json:"revision"`
 	UpdatedAt    string            `json:"updated_at"`
+	Matched      string            `json:"matched,omitempty"`
+	Snippet      string            `json:"snippet,omitempty"`
 }
 
 type TaskPage struct {
@@ -823,7 +863,12 @@ func (d *DB) ListTasks(f TaskFilter) (TaskPage, error) {
 	if order == "" {
 		order = TaskOrderID
 	}
-	if !slices.Contains(taskOrders, order) {
+	if f.Query != "" {
+		if f.Order != "" {
+			return out, invalid(errors.New("a search is ranked by relevance: it takes no order"))
+		}
+		order = taskOrderRelevance
+	} else if !slices.Contains(taskOrders, order) {
 		return out, invalid(errors.New("invalid task order (want id, updated_desc, updated_asc, title or state)"))
 	}
 	if order == TaskOrderID && f.After != "" && !taskIDRE.MatchString(f.After) {
@@ -838,7 +883,27 @@ func (d *DB) ListTasks(f TaskFilter) (TaskPage, error) {
 	query := taskReadQuery + ` WHERE tasks.id > ?`
 	args := []any{f.After}
 	by := `tasks.id`
-	if order != TaskOrderID {
+	var match string
+	if order == taskOrderRelevance {
+		if len(f.Query) > MaxTaskQueryBytes || !utf8.ValidString(f.Query) || strings.ContainsRune(f.Query, 0) { // SQLite ends a string at NUL
+			return out, invalid(fmt.Errorf("search terms must be valid UTF-8 of at most %d bytes, without NUL", MaxTaskQueryBytes))
+		}
+		if match = ftsQuote(f.Query); match == "" {
+			return out, invalid(errors.New("search terms are blank"))
+		}
+		query, args, by = taskSearchSQL+` WHERE 1`, []any{match}, `best.score, tasks.id`
+		if f.After != "" {
+			c, err := decodeTaskCursor(f.After, order)
+			if err != nil {
+				return out, err
+			}
+			if c.Key != taskQueryDigest(match) {
+				return out, invalid(errors.New("the task cursor belongs to another search: start again without after"))
+			}
+			query += ` AND (best.score > ? OR (best.score = ? AND tasks.id > ?))`
+			args = append(args, c.Score, c.Score, c.ID)
+		}
+	} else if order != TaskOrderID {
 		query, args = taskReadQuery+` WHERE 1`, nil
 		var c taskCursor
 		if f.After != "" {
@@ -876,17 +941,29 @@ func (d *DB) ListTasks(f TaskFilter) (TaskPage, error) {
 		return out, err
 	}
 	defer rows.Close()
+	var score, last float64
+	var kind, snip string
+	row := scanner(rows.Scan)
+	if order == taskOrderRelevance {
+		row = scanner(func(dest ...any) error { return rows.Scan(append(dest, &score, &kind, &snip)...) })
+	}
 	for rows.Next() {
 		if len(out.Tasks) == limit {
-			out.Next = taskCursorAfter(order, out.Tasks[limit-1])
+			if order == taskOrderRelevance {
+				out.Next = taskCursor{Order: order, Key: taskQueryDigest(match), Score: last, ID: out.Tasks[limit-1].ID}.encode()
+			} else {
+				out.Next = taskCursorAfter(order, out.Tasks[limit-1])
+			}
 			break
 		}
-		t, err := scanCurrentTask(rows)
+		t, err := scanCurrentTask(row)
 		if err != nil {
 			return out, err
 		}
 		out.Tasks = append(out.Tasks, TaskSummary{ID: t.ID, Title: t.Title, State: t.State, Assignee: t.Assignee, Epic: t.Epic,
-			Archived: t.Archived, Revision: t.Revision, UpdatedAt: t.UpdatedAt, Coordination: t.Coordination})
+			Archived: t.Archived, Revision: t.Revision, UpdatedAt: t.UpdatedAt, Coordination: t.Coordination, Matched: kind,
+			Snippet: strings.Join(strings.Fields(snip), " ")}) // one line: the indexed fields are joined by newlines
+		last = score
 	}
 	return out, rows.Err()
 }

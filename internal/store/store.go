@@ -492,7 +492,7 @@ func (r *Registry) Close() {
 	r.dbs = map[string]*DB{}
 }
 
-const currentSchema = 24
+const currentSchema = 25
 
 // SetMeta / GetMeta store small key-value project metadata (e.g. the
 // project's declared knowledge groups, stamped from event pushes so the
@@ -1109,8 +1109,51 @@ UPDATE meta SET value='24' WHERE key='schema_version';`); err != nil {
 			return err
 		}
 	}
+	// v25: task search. One FTS5 table holds a row per task (its title,
+	// and its objective, acceptance criteria and non-goals as text) and a
+	// row per comment. Triggers keep it in step with every writer of
+	// tasks and task_comments, so no writer can forget it; it stores its
+	// own copy of the text, so a VACUUM that renumbers the base tables'
+	// rowids cannot desynchronize it.
+	if v < 25 {
+		if err := d.step(`
+CREATE VIRTUAL TABLE IF NOT EXISTS task_fts USING fts5(task_id UNINDEXED, kind UNINDEXED, title, text);
+CREATE TRIGGER IF NOT EXISTS tasks_fts_ai AFTER INSERT ON tasks BEGIN
+  INSERT INTO task_fts(task_id, kind, title, text) VALUES (new.id, 'task', ` + taskFTSTitle("new.body") + `, ` + taskFTSText("new.body") + `);
+END;
+CREATE TRIGGER IF NOT EXISTS tasks_fts_au AFTER UPDATE OF body ON tasks BEGIN
+  DELETE FROM task_fts WHERE task_id = old.id AND kind = 'task';
+  INSERT INTO task_fts(task_id, kind, title, text) VALUES (new.id, 'task', ` + taskFTSTitle("new.body") + `, ` + taskFTSText("new.body") + `);
+END;
+CREATE TRIGGER IF NOT EXISTS tasks_fts_ad AFTER DELETE ON tasks BEGIN
+  DELETE FROM task_fts WHERE task_id = old.id;
+END;
+CREATE TRIGGER IF NOT EXISTS task_comments_fts_ai AFTER INSERT ON task_comments BEGIN
+  INSERT INTO task_fts(task_id, kind, title, text) VALUES (new.task_id, 'comment', '', new.body);
+END;
+` + taskFTSFill + `
+UPDATE meta SET value='25' WHERE key='schema_version';`); err != nil {
+			return err
+		}
+	}
 	return nil
 }
+
+// taskFTSTitle and taskFTSText read a task's indexed text from its stored
+// body (the JSON column body names).
+func taskFTSTitle(body string) string {
+	return `COALESCE(json_extract(` + body + `,'$.title'),'')`
+}
+
+func taskFTSText(body string) string {
+	return `COALESCE(json_extract(` + body + `,'$.objective'),'')||char(10)||COALESCE(json_extract(` + body + `,'$.acceptance_criteria'),'')||char(10)||COALESCE(json_extract(` + body + `,'$.non_goals'),'')`
+}
+
+// taskFTSFill refills the task search index from the base tables: the
+// migration's first fill and RebuildFTS.
+var taskFTSFill = `DELETE FROM task_fts;
+INSERT INTO task_fts(task_id, kind, title, text) SELECT id, 'task', ` + taskFTSTitle("body") + `, ` + taskFTSText("body") + ` FROM tasks;
+INSERT INTO task_fts(task_id, kind, title, text) SELECT task_id, 'comment', '', body FROM task_comments;`
 
 // CurateRun is one recorded curation run (the maintenance cost meter).
 type CurateRun struct {
@@ -1386,11 +1429,23 @@ func (d *DB) Retention(maxAge time.Duration, maxBytes int64) (deleted int64, err
 	return deleted, nil
 }
 
-// RebuildFTS rebuilds both external-content FTS indexes from their base
-// tables — the recovery path for any rowid/index desynchronization
-// (VACUUM on the implicit-rowid base tables is the known cause). Safe to
-// run any time; cost is proportional to the journal and KB size.
+// RebuildFTS rebuilds the search indexes from their base tables: both
+// external-content indexes — the recovery path for any rowid/index
+// desynchronization (VACUUM on the implicit-rowid base tables is the
+// known cause) — and the task index. Safe to run any time; cost is
+// proportional to the journal, KB and task sizes.
 func (d *DB) RebuildFTS() error {
+	tx, err := d.sql.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	if _, err := tx.Exec(taskFTSFill); err != nil {
+		return fmt.Errorf("rebuild task_fts: %w", err)
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("rebuild task_fts: %w", err)
+	}
 	if _, err := d.sql.Exec(`INSERT INTO events_fts(events_fts) VALUES('rebuild')`); err != nil {
 		return fmt.Errorf("rebuild events_fts: %w", err)
 	}

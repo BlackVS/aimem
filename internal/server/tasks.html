@@ -93,6 +93,8 @@
   .trow .title{flex:1;font:15px/1.4 var(--text);min-width:0;overflow:hidden;text-overflow:ellipsis}
   .trow .meta{color:var(--dim);font-size:12px;white-space:nowrap}
   .trow.archived .title{opacity:.6}
+  .trow:has(.snip){flex-wrap:wrap}
+  .trow .meta.snip{flex-basis:100%;white-space:normal;overflow-wrap:anywhere}
   /* Detail: fields are prose, metadata is chrome. */
   .field{margin:10px 0}
   .field .k{color:var(--dim);font-size:12px;text-transform:uppercase;letter-spacing:.08em;margin-bottom:2px}
@@ -163,7 +165,9 @@
     <div class="row">
       <span class="viewsw"><button type="button" class="act" id="vwList" onclick="setView('list')">list</button><button type="button" class="act" id="vwBoard" onclick="setView('board')">board</button></span>
       <button type="button" class="act" id="refreshBtn" onclick="refreshView()" title="reload this view from the hub">↻ refresh</button><span id="loadedAt" class="dim"></span>
-      <span id="listOnly"><label for="orderSel" class="dim" style="margin-left:8px">sort</label>
+      <span id="listOnly"><input id="searchIn" type="search" class="inline" placeholder="search" title="find tasks by words in their title, objective, criteria, non-goals or comments (Enter)" style="width:14em;margin-left:8px"
+          onkeydown="if(event.key==='Enter')setSearch(this.value)" onsearch="setSearch(this.value)">
+        <label for="orderSel" class="dim" style="margin-left:8px">sort</label>
         <select id="orderSel" class="inline" onchange="setOrder(this.value)" style="width:auto">
           <option value="updated_desc">updated, newest first</option><option value="updated_asc">updated, oldest first</option>
           <option value="title">title</option><option value="state">state</option><option value="id">created</option></select>
@@ -240,6 +244,9 @@ let VIEW = localStorage.getItem("aimem_task_view")==="board" ? "board" : "list";
 // sorts and pages (the cursor belongs to the order); nothing sorts here.
 const ORDERS = ["updated_desc","updated_asc","title","state","id"];
 let ORDER = ORDERS.includes(localStorage.getItem("aimem_task_order")) ? localStorage.getItem("aimem_task_order") : "updated_desc";
+// The list's search terms: while set, the hub ranks the matches by
+// relevance, so the sort is off; refresh and paging work as usual.
+let SEARCH = "";
 let CMT_PENDING = 0;                // the comment submit that owns the button; a late completion of another does not release it
 let NEW_PROJ = "";                  // the project an open create form was opened for
 
@@ -389,6 +396,7 @@ function renderEpicDetails(){
 }
 function refreshView(){ if(VIEW==="board") loadBoard(); else listTasks(true); }
 function setOrder(o){ if(!ORDERS.includes(o)) return; ORDER = o; localStorage.setItem("aimem_task_order", o); listTasks(true); }
+function setSearch(v){ v = String(v||"").trim(); if(v===SEARCH) return; SEARCH = v; $("orderSel").disabled = !!SEARCH; listTasks(true); }
 function markLoaded(){ $("loadedAt").textContent = "loaded "+new Date().toLocaleTimeString([], {hour:"2-digit", minute:"2-digit"}); }
 function stateChipsHTML(){
   return ['',...STATES].map(s=>`<button type="button" class="chip click${FILTER.state===s?' on':''}" onclick="FILTER.state='${s}';listTasks(true)">${s||'all'}</button>`).join("");
@@ -432,7 +440,7 @@ function showList(){
   // listNote on every page and filter, and must not erase it.
   if(PROJ){ const asked = PROJ; canWrite(asked).then(ok => { if(PROJ===asked && CUR===null){ $("newBtn").hidden = !ok; $("tasksOff").textContent = TASKS_OFF_NOTE; $("tasksOff").hidden = !TASKS_OFF[asked]; } }); }
   $("stateChips").innerHTML = stateChipsHTML();
-  $("orderSel").value = ORDER; $("loadedAt").textContent = "";
+  $("orderSel").value = ORDER; $("orderSel").disabled = !!SEARCH; $("searchIn").value = SEARCH; $("loadedAt").textContent = "";
   $("archChk").checked = FILTER.archived;
   if(PROJ) loadEpics(PROJ); // clears the epic filter synchronously on a project change
   const board = VIEW==="board";
@@ -453,7 +461,7 @@ async function listTasks(reset){
   if(FILTER.state) q.set("state", FILTER.state);
   if(FILTER.archived) q.set("include_archived","true");
   if(FILTER.epic) q.set("epic", FILTER.epic);
-  q.set("order", ORDER);
+  if(SEARCH) q.set("q", SEARCH); else q.set("order", ORDER);
   if(CURSOR) q.set("after", CURSOR);
   q.set("limit","50");
   try{
@@ -462,12 +470,12 @@ async function listTasks(reset){
     for(const t of page.tasks){
       $("list").insertAdjacentHTML("beforeend", `<a class="trow${t.archived?' archived':''}" href="${taskURL(t.id)}" onclick="return go('${taskURL(t.id)}')">
         <span class="title">${esc(t.title)}</span>${stChip(t.state)}
-        <span class="meta">r${t.revision} · ${ago(t.updated_at)}${t.assignee?' · '+esc(t.assignee.kind)+'/'+esc(short(t.assignee.id)):''}${t.epic?' · '+esc(epicLabel(t.epic)):''}</span></a>`);
+        <span class="meta">r${t.revision} · ${ago(t.updated_at)}${t.assignee?' · '+esc(t.assignee.kind)+'/'+esc(short(t.assignee.id)):''}${t.epic?' · '+esc(epicLabel(t.epic)):''}</span>${t.snippet?`<span class="meta snip">${t.matched==="comment"?"in a comment: ":""}${esc(t.snippet)}</span>`:''}</a>`);
     }
     CURSOR = page.next_cursor||"";
     if(reset) markLoaded();
     $("moreBtn").hidden = !CURSOR;
-    $("listNote").textContent = $("list").children.length ? "" : "no tasks"+(FILTER.state?" in "+FILTER.state:"");
+    $("listNote").textContent = $("list").children.length ? "" : (SEARCH?"no tasks match":"no tasks")+(FILTER.state?" in "+FILTER.state:"");
     $("stateChips").innerHTML = stateChipsHTML();
   }catch(e){ if(e.auth) return boot(); if(my!==NAV || seq!==SEQ.list) return; $("listNote").textContent = e.message; if(reset) $("list").innerHTML = ""; }
   finally{ if(seq===SEQ.list) $("moreBtn").disabled = false; }
