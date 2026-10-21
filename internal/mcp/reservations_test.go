@@ -48,6 +48,19 @@ func TestReservationToolsThroughTheHub(t *testing.T) {
 	bad["version"] = 2
 	text, isErr = call("task_reservation_claim", bad)
 	envelope("version 2", text, isErr, "unsupported_version")
+	// The two codes about the caller's own input carry their detail
+	// through the tool; a conflict carries none.
+	detail := func(what, text, want string) {
+		t.Helper()
+		var e struct {
+			Detail *string `json:"detail"`
+		}
+		json.Unmarshal([]byte(text), &e)
+		if (want == "") != (e.Detail == nil) || e.Detail != nil && !strings.Contains(*e.Detail, want) {
+			t.Fatalf("%s: want detail %q, got %s", what, want, text)
+		}
+	}
+	detail("version 2", text, "X-Aimem-Reservation-Version")
 
 	text, isErr = call("task_reservation_claim", claim)
 	var o struct {
@@ -81,6 +94,7 @@ func TestReservationToolsThroughTheHub(t *testing.T) {
 	}
 	text, isErr = call("task_reservation_update", update2(update, "mcp-stale"))
 	envelope("an update on the old fence", text, isErr, "stale_fence")
+	detail("an update on the old fence", text, "")
 	if text, isErr = call("task_reservation_receipt", map[string]any{"version": 1, "project": "alpha", "task_id": task.ID,
 		"operation": "update", "request_key": "mcp-update"}); isErr || !strings.Contains(text, `"state":"committed"`) {
 		t.Fatalf("receipt: %v %s", isErr, text)
@@ -90,7 +104,14 @@ func TestReservationToolsThroughTheHub(t *testing.T) {
 		"content": map[string]any{"title": "reserve me", "state": "DONE"}}
 	text, isErr = call("task_reservation_finalize", finalize)
 	envelope("DONE without evidence", text, isErr, "invalid_request")
+	detail("DONE without evidence", text, "DONE requires terminal evidence")
 	finalize["terminal_evidence"] = []string{"review-head", "human-merge"}
+	finalize["content"] = map[string]any{"title": "reserve me", "state": "DONE",
+		"candidate_refs": []map[string]any{{"kind": "commit", "ref": "034be0d42550534889a1cccf7b5ce98c3ef751f2"}}}
+	text, isErr = call("task_reservation_finalize", finalize)
+	envelope("a bare-hash commit reference", text, isErr, "invalid_request")
+	detail("a bare-hash commit reference", text, "candidate_refs[0]: a commit reference is an http(s) URL")
+	finalize["content"] = map[string]any{"title": "reserve me", "state": "DONE"}
 	if text, isErr = call("task_reservation_finalize", finalize); isErr || !strings.Contains(text, `"active":false`) {
 		t.Fatalf("finalize: %v %s", isErr, text)
 	}

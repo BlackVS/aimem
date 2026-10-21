@@ -271,10 +271,16 @@ type Refusal struct {
 	Retryable     bool   `json:"retryable"`
 	NextAction    string `json:"next_action"`
 	CorrelationID string `json:"correlation_id"`
+	// Detail names what was wrong with the caller's own input, when the
+	// hub sends it (a reservation invalid_request or unsupported_version).
+	Detail string `json:"detail,omitempty"`
 }
 
 func (r *Refusal) Error() string {
 	msg := r.Code + ": " + r.Message
+	if r.Detail != "" {
+		msg += " (" + r.Detail + ")"
+	}
 	if r.NextAction != "" {
 		msg += " Next: " + r.NextAction
 	}

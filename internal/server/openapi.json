@@ -2989,7 +2989,7 @@
             }
           },
           "400": {
-            "description": "unsupported_version (missing or unsupported X-Aimem-Reservation-Version) or invalid_request",
+            "description": "unsupported_version (missing or unsupported X-Aimem-Reservation-Version) or invalid_request; both carry detail, naming the input that failed",
             "content": {
               "application/json": {
                 "schema": {
@@ -3031,6 +3031,10 @@
                     },
                     "correlation_id": {
                       "type": "string"
+                    },
+                    "detail": {
+                      "type": "string",
+                      "description": "Only on invalid_request and unsupported_version: what was wrong with the caller's own input, such as \"invalid task input: candidate_refs[6]: a commit reference is an http(s) URL naming the service and the target\" (at most 512 bytes). Every other code omits it: its detail may describe another holder and stays in the hub log."
                     }
                   }
                 }
@@ -3080,6 +3084,10 @@
                     },
                     "correlation_id": {
                       "type": "string"
+                    },
+                    "detail": {
+                      "type": "string",
+                      "description": "Only on invalid_request and unsupported_version: what was wrong with the caller's own input, such as \"invalid task input: candidate_refs[6]: a commit reference is an http(s) URL naming the service and the target\" (at most 512 bytes). Every other code omits it: its detail may describe another holder and stays in the hub log."
                     }
                   }
                 }
@@ -3129,6 +3137,10 @@
                     },
                     "correlation_id": {
                       "type": "string"
+                    },
+                    "detail": {
+                      "type": "string",
+                      "description": "Only on invalid_request and unsupported_version: what was wrong with the caller's own input, such as \"invalid task input: candidate_refs[6]: a commit reference is an http(s) URL naming the service and the target\" (at most 512 bytes). Every other code omits it: its detail may describe another holder and stays in the hub log."
                     }
                   }
                 }
@@ -3178,6 +3190,10 @@
                     },
                     "correlation_id": {
                       "type": "string"
+                    },
+                    "detail": {
+                      "type": "string",
+                      "description": "Only on invalid_request and unsupported_version: what was wrong with the caller's own input, such as \"invalid task input: candidate_refs[6]: a commit reference is an http(s) URL naming the service and the target\" (at most 512 bytes). Every other code omits it: its detail may describe another holder and stays in the hub log."
                     }
                   }
                 }
@@ -3227,6 +3243,10 @@
                     },
                     "correlation_id": {
                       "type": "string"
+                    },
+                    "detail": {
+                      "type": "string",
+                      "description": "Only on invalid_request and unsupported_version: what was wrong with the caller's own input, such as \"invalid task input: candidate_refs[6]: a commit reference is an http(s) URL naming the service and the target\" (at most 512 bytes). Every other code omits it: its detail may describe another holder and stays in the hub log."
                     }
                   }
                 }
@@ -3276,6 +3296,10 @@
                     },
                     "correlation_id": {
                       "type": "string"
+                    },
+                    "detail": {
+                      "type": "string",
+                      "description": "Only on invalid_request and unsupported_version: what was wrong with the caller's own input, such as \"invalid task input: candidate_refs[6]: a commit reference is an http(s) URL naming the service and the target\" (at most 512 bytes). Every other code omits it: its detail may describe another holder and stays in the hub log."
                     }
                   }
                 }
@@ -3477,7 +3501,7 @@
             }
           },
           "400": {
-            "description": "unsupported_version (missing or unsupported X-Aimem-Reservation-Version) or invalid_request",
+            "description": "unsupported_version (missing or unsupported X-Aimem-Reservation-Version) or invalid_request; both carry detail, naming the input that failed",
             "content": {
               "application/json": {
                 "schema": {
@@ -3519,6 +3543,10 @@
                     },
                     "correlation_id": {
                       "type": "string"
+                    },
+                    "detail": {
+                      "type": "string",
+                      "description": "Only on invalid_request and unsupported_version: what was wrong with the caller's own input, such as \"invalid task input: candidate_refs[6]: a commit reference is an http(s) URL naming the service and the target\" (at most 512 bytes). Every other code omits it: its detail may describe another holder and stays in the hub log."
                     }
                   }
                 }
@@ -3568,6 +3596,10 @@
                     },
                     "correlation_id": {
                       "type": "string"
+                    },
+                    "detail": {
+                      "type": "string",
+                      "description": "Only on invalid_request and unsupported_version: what was wrong with the caller's own input, such as \"invalid task input: candidate_refs[6]: a commit reference is an http(s) URL naming the service and the target\" (at most 512 bytes). Every other code omits it: its detail may describe another holder and stays in the hub log."
                     }
                   }
                 }
@@ -3617,6 +3649,10 @@
                     },
                     "correlation_id": {
                       "type": "string"
+                    },
+                    "detail": {
+                      "type": "string",
+                      "description": "Only on invalid_request and unsupported_version: what was wrong with the caller's own input, such as \"invalid task input: candidate_refs[6]: a commit reference is an http(s) URL naming the service and the target\" (at most 512 bytes). Every other code omits it: its detail may describe another holder and stays in the hub log."
                     }
                   }
                 }
@@ -3666,6 +3702,10 @@
                     },
                     "correlation_id": {
                       "type": "string"
+                    },
+                    "detail": {
+                      "type": "string",
+                      "description": "Only on invalid_request and unsupported_version: what was wrong with the caller's own input, such as \"invalid task input: candidate_refs[6]: a commit reference is an http(s) URL naming the service and the target\" (at most 512 bytes). Every other code omits it: its detail may describe another holder and stays in the hub log."
                     }
                   }
                 }
@@ -3715,6 +3755,10 @@
                     },
                     "correlation_id": {
                       "type": "string"
+                    },
+                    "detail": {
+                      "type": "string",
+                      "description": "Only on invalid_request and unsupported_version: what was wrong with the caller's own input, such as \"invalid task input: candidate_refs[6]: a commit reference is an http(s) URL naming the service and the target\" (at most 512 bytes). Every other code omits it: its detail may describe another holder and stays in the hub log."
                     }
                   }
                 }
@@ -3764,6 +3808,10 @@
                     },
                     "correlation_id": {
                       "type": "string"
+                    },
+                    "detail": {
+                      "type": "string",
+                      "description": "Only on invalid_request and unsupported_version: what was wrong with the caller's own input, such as \"invalid task input: candidate_refs[6]: a commit reference is an http(s) URL naming the service and the target\" (at most 512 bytes). Every other code omits it: its detail may describe another holder and stays in the hub log."
                     }
                   }
                 }
@@ -3953,7 +4001,7 @@
             }
           },
           "400": {
-            "description": "unsupported_version (missing or unsupported X-Aimem-Reservation-Version) or invalid_request",
+            "description": "unsupported_version (missing or unsupported X-Aimem-Reservation-Version) or invalid_request; both carry detail, naming the input that failed",
             "content": {
               "application/json": {
                 "schema": {
@@ -3995,6 +4043,10 @@
                     },
                     "correlation_id": {
                       "type": "string"
+                    },
+                    "detail": {
+                      "type": "string",
+                      "description": "Only on invalid_request and unsupported_version: what was wrong with the caller's own input, such as \"invalid task input: candidate_refs[6]: a commit reference is an http(s) URL naming the service and the target\" (at most 512 bytes). Every other code omits it: its detail may describe another holder and stays in the hub log."
                     }
                   }
                 }
@@ -4044,6 +4096,10 @@
                     },
                     "correlation_id": {
                       "type": "string"
+                    },
+                    "detail": {
+                      "type": "string",
+                      "description": "Only on invalid_request and unsupported_version: what was wrong with the caller's own input, such as \"invalid task input: candidate_refs[6]: a commit reference is an http(s) URL naming the service and the target\" (at most 512 bytes). Every other code omits it: its detail may describe another holder and stays in the hub log."
                     }
                   }
                 }
@@ -4093,6 +4149,10 @@
                     },
                     "correlation_id": {
                       "type": "string"
+                    },
+                    "detail": {
+                      "type": "string",
+                      "description": "Only on invalid_request and unsupported_version: what was wrong with the caller's own input, such as \"invalid task input: candidate_refs[6]: a commit reference is an http(s) URL naming the service and the target\" (at most 512 bytes). Every other code omits it: its detail may describe another holder and stays in the hub log."
                     }
                   }
                 }
@@ -4142,6 +4202,10 @@
                     },
                     "correlation_id": {
                       "type": "string"
+                    },
+                    "detail": {
+                      "type": "string",
+                      "description": "Only on invalid_request and unsupported_version: what was wrong with the caller's own input, such as \"invalid task input: candidate_refs[6]: a commit reference is an http(s) URL naming the service and the target\" (at most 512 bytes). Every other code omits it: its detail may describe another holder and stays in the hub log."
                     }
                   }
                 }
@@ -4191,6 +4255,10 @@
                     },
                     "correlation_id": {
                       "type": "string"
+                    },
+                    "detail": {
+                      "type": "string",
+                      "description": "Only on invalid_request and unsupported_version: what was wrong with the caller's own input, such as \"invalid task input: candidate_refs[6]: a commit reference is an http(s) URL naming the service and the target\" (at most 512 bytes). Every other code omits it: its detail may describe another holder and stays in the hub log."
                     }
                   }
                 }
@@ -4240,6 +4308,10 @@
                     },
                     "correlation_id": {
                       "type": "string"
+                    },
+                    "detail": {
+                      "type": "string",
+                      "description": "Only on invalid_request and unsupported_version: what was wrong with the caller's own input, such as \"invalid task input: candidate_refs[6]: a commit reference is an http(s) URL naming the service and the target\" (at most 512 bytes). Every other code omits it: its detail may describe another holder and stays in the hub log."
                     }
                   }
                 }
@@ -4429,7 +4501,7 @@
             }
           },
           "400": {
-            "description": "unsupported_version (missing or unsupported X-Aimem-Reservation-Version) or invalid_request",
+            "description": "unsupported_version (missing or unsupported X-Aimem-Reservation-Version) or invalid_request; both carry detail, naming the input that failed",
             "content": {
               "application/json": {
                 "schema": {
@@ -4471,6 +4543,10 @@
                     },
                     "correlation_id": {
                       "type": "string"
+                    },
+                    "detail": {
+                      "type": "string",
+                      "description": "Only on invalid_request and unsupported_version: what was wrong with the caller's own input, such as \"invalid task input: candidate_refs[6]: a commit reference is an http(s) URL naming the service and the target\" (at most 512 bytes). Every other code omits it: its detail may describe another holder and stays in the hub log."
                     }
                   }
                 }
@@ -4520,6 +4596,10 @@
                     },
                     "correlation_id": {
                       "type": "string"
+                    },
+                    "detail": {
+                      "type": "string",
+                      "description": "Only on invalid_request and unsupported_version: what was wrong with the caller's own input, such as \"invalid task input: candidate_refs[6]: a commit reference is an http(s) URL naming the service and the target\" (at most 512 bytes). Every other code omits it: its detail may describe another holder and stays in the hub log."
                     }
                   }
                 }
@@ -4569,6 +4649,10 @@
                     },
                     "correlation_id": {
                       "type": "string"
+                    },
+                    "detail": {
+                      "type": "string",
+                      "description": "Only on invalid_request and unsupported_version: what was wrong with the caller's own input, such as \"invalid task input: candidate_refs[6]: a commit reference is an http(s) URL naming the service and the target\" (at most 512 bytes). Every other code omits it: its detail may describe another holder and stays in the hub log."
                     }
                   }
                 }
@@ -4618,6 +4702,10 @@
                     },
                     "correlation_id": {
                       "type": "string"
+                    },
+                    "detail": {
+                      "type": "string",
+                      "description": "Only on invalid_request and unsupported_version: what was wrong with the caller's own input, such as \"invalid task input: candidate_refs[6]: a commit reference is an http(s) URL naming the service and the target\" (at most 512 bytes). Every other code omits it: its detail may describe another holder and stays in the hub log."
                     }
                   }
                 }
@@ -4667,6 +4755,10 @@
                     },
                     "correlation_id": {
                       "type": "string"
+                    },
+                    "detail": {
+                      "type": "string",
+                      "description": "Only on invalid_request and unsupported_version: what was wrong with the caller's own input, such as \"invalid task input: candidate_refs[6]: a commit reference is an http(s) URL naming the service and the target\" (at most 512 bytes). Every other code omits it: its detail may describe another holder and stays in the hub log."
                     }
                   }
                 }
@@ -4716,6 +4808,10 @@
                     },
                     "correlation_id": {
                       "type": "string"
+                    },
+                    "detail": {
+                      "type": "string",
+                      "description": "Only on invalid_request and unsupported_version: what was wrong with the caller's own input, such as \"invalid task input: candidate_refs[6]: a commit reference is an http(s) URL naming the service and the target\" (at most 512 bytes). Every other code omits it: its detail may describe another holder and stays in the hub log."
                     }
                   }
                 }
@@ -4913,7 +5009,7 @@
             }
           },
           "400": {
-            "description": "unsupported_version (missing or unsupported X-Aimem-Reservation-Version) or invalid_request",
+            "description": "unsupported_version (missing or unsupported X-Aimem-Reservation-Version) or invalid_request; both carry detail, naming the input that failed",
             "content": {
               "application/json": {
                 "schema": {
@@ -4955,6 +5051,10 @@
                     },
                     "correlation_id": {
                       "type": "string"
+                    },
+                    "detail": {
+                      "type": "string",
+                      "description": "Only on invalid_request and unsupported_version: what was wrong with the caller's own input, such as \"invalid task input: candidate_refs[6]: a commit reference is an http(s) URL naming the service and the target\" (at most 512 bytes). Every other code omits it: its detail may describe another holder and stays in the hub log."
                     }
                   }
                 }
@@ -5004,6 +5104,10 @@
                     },
                     "correlation_id": {
                       "type": "string"
+                    },
+                    "detail": {
+                      "type": "string",
+                      "description": "Only on invalid_request and unsupported_version: what was wrong with the caller's own input, such as \"invalid task input: candidate_refs[6]: a commit reference is an http(s) URL naming the service and the target\" (at most 512 bytes). Every other code omits it: its detail may describe another holder and stays in the hub log."
                     }
                   }
                 }
@@ -5053,6 +5157,10 @@
                     },
                     "correlation_id": {
                       "type": "string"
+                    },
+                    "detail": {
+                      "type": "string",
+                      "description": "Only on invalid_request and unsupported_version: what was wrong with the caller's own input, such as \"invalid task input: candidate_refs[6]: a commit reference is an http(s) URL naming the service and the target\" (at most 512 bytes). Every other code omits it: its detail may describe another holder and stays in the hub log."
                     }
                   }
                 }
@@ -5102,6 +5210,10 @@
                     },
                     "correlation_id": {
                       "type": "string"
+                    },
+                    "detail": {
+                      "type": "string",
+                      "description": "Only on invalid_request and unsupported_version: what was wrong with the caller's own input, such as \"invalid task input: candidate_refs[6]: a commit reference is an http(s) URL naming the service and the target\" (at most 512 bytes). Every other code omits it: its detail may describe another holder and stays in the hub log."
                     }
                   }
                 }
@@ -5151,6 +5263,10 @@
                     },
                     "correlation_id": {
                       "type": "string"
+                    },
+                    "detail": {
+                      "type": "string",
+                      "description": "Only on invalid_request and unsupported_version: what was wrong with the caller's own input, such as \"invalid task input: candidate_refs[6]: a commit reference is an http(s) URL naming the service and the target\" (at most 512 bytes). Every other code omits it: its detail may describe another holder and stays in the hub log."
                     }
                   }
                 }
@@ -5200,6 +5316,10 @@
                     },
                     "correlation_id": {
                       "type": "string"
+                    },
+                    "detail": {
+                      "type": "string",
+                      "description": "Only on invalid_request and unsupported_version: what was wrong with the caller's own input, such as \"invalid task input: candidate_refs[6]: a commit reference is an http(s) URL naming the service and the target\" (at most 512 bytes). Every other code omits it: its detail may describe another holder and stays in the hub log."
                     }
                   }
                 }
@@ -5282,7 +5402,7 @@
             }
           },
           "400": {
-            "description": "unsupported_version (missing or unsupported X-Aimem-Reservation-Version) or invalid_request",
+            "description": "unsupported_version (missing or unsupported X-Aimem-Reservation-Version) or invalid_request; both carry detail, naming the input that failed",
             "content": {
               "application/json": {
                 "schema": {
@@ -5324,6 +5444,10 @@
                     },
                     "correlation_id": {
                       "type": "string"
+                    },
+                    "detail": {
+                      "type": "string",
+                      "description": "Only on invalid_request and unsupported_version: what was wrong with the caller's own input, such as \"invalid task input: candidate_refs[6]: a commit reference is an http(s) URL naming the service and the target\" (at most 512 bytes). Every other code omits it: its detail may describe another holder and stays in the hub log."
                     }
                   }
                 }
@@ -5373,6 +5497,10 @@
                     },
                     "correlation_id": {
                       "type": "string"
+                    },
+                    "detail": {
+                      "type": "string",
+                      "description": "Only on invalid_request and unsupported_version: what was wrong with the caller's own input, such as \"invalid task input: candidate_refs[6]: a commit reference is an http(s) URL naming the service and the target\" (at most 512 bytes). Every other code omits it: its detail may describe another holder and stays in the hub log."
                     }
                   }
                 }
@@ -5422,6 +5550,10 @@
                     },
                     "correlation_id": {
                       "type": "string"
+                    },
+                    "detail": {
+                      "type": "string",
+                      "description": "Only on invalid_request and unsupported_version: what was wrong with the caller's own input, such as \"invalid task input: candidate_refs[6]: a commit reference is an http(s) URL naming the service and the target\" (at most 512 bytes). Every other code omits it: its detail may describe another holder and stays in the hub log."
                     }
                   }
                 }
@@ -5471,6 +5603,10 @@
                     },
                     "correlation_id": {
                       "type": "string"
+                    },
+                    "detail": {
+                      "type": "string",
+                      "description": "Only on invalid_request and unsupported_version: what was wrong with the caller's own input, such as \"invalid task input: candidate_refs[6]: a commit reference is an http(s) URL naming the service and the target\" (at most 512 bytes). Every other code omits it: its detail may describe another holder and stays in the hub log."
                     }
                   }
                 }
@@ -5520,6 +5656,10 @@
                     },
                     "correlation_id": {
                       "type": "string"
+                    },
+                    "detail": {
+                      "type": "string",
+                      "description": "Only on invalid_request and unsupported_version: what was wrong with the caller's own input, such as \"invalid task input: candidate_refs[6]: a commit reference is an http(s) URL naming the service and the target\" (at most 512 bytes). Every other code omits it: its detail may describe another holder and stays in the hub log."
                     }
                   }
                 }
@@ -5708,7 +5848,7 @@
             }
           },
           "400": {
-            "description": "unsupported_version (missing or unsupported X-Aimem-Reservation-Version) or invalid_request",
+            "description": "unsupported_version (missing or unsupported X-Aimem-Reservation-Version) or invalid_request; both carry detail, naming the input that failed",
             "content": {
               "application/json": {
                 "schema": {
@@ -5750,6 +5890,10 @@
                     },
                     "correlation_id": {
                       "type": "string"
+                    },
+                    "detail": {
+                      "type": "string",
+                      "description": "Only on invalid_request and unsupported_version: what was wrong with the caller's own input, such as \"invalid task input: candidate_refs[6]: a commit reference is an http(s) URL naming the service and the target\" (at most 512 bytes). Every other code omits it: its detail may describe another holder and stays in the hub log."
                     }
                   }
                 }
@@ -5799,6 +5943,10 @@
                     },
                     "correlation_id": {
                       "type": "string"
+                    },
+                    "detail": {
+                      "type": "string",
+                      "description": "Only on invalid_request and unsupported_version: what was wrong with the caller's own input, such as \"invalid task input: candidate_refs[6]: a commit reference is an http(s) URL naming the service and the target\" (at most 512 bytes). Every other code omits it: its detail may describe another holder and stays in the hub log."
                     }
                   }
                 }
@@ -5848,6 +5996,10 @@
                     },
                     "correlation_id": {
                       "type": "string"
+                    },
+                    "detail": {
+                      "type": "string",
+                      "description": "Only on invalid_request and unsupported_version: what was wrong with the caller's own input, such as \"invalid task input: candidate_refs[6]: a commit reference is an http(s) URL naming the service and the target\" (at most 512 bytes). Every other code omits it: its detail may describe another holder and stays in the hub log."
                     }
                   }
                 }
@@ -5897,6 +6049,10 @@
                     },
                     "correlation_id": {
                       "type": "string"
+                    },
+                    "detail": {
+                      "type": "string",
+                      "description": "Only on invalid_request and unsupported_version: what was wrong with the caller's own input, such as \"invalid task input: candidate_refs[6]: a commit reference is an http(s) URL naming the service and the target\" (at most 512 bytes). Every other code omits it: its detail may describe another holder and stays in the hub log."
                     }
                   }
                 }
@@ -5946,6 +6102,10 @@
                     },
                     "correlation_id": {
                       "type": "string"
+                    },
+                    "detail": {
+                      "type": "string",
+                      "description": "Only on invalid_request and unsupported_version: what was wrong with the caller's own input, such as \"invalid task input: candidate_refs[6]: a commit reference is an http(s) URL naming the service and the target\" (at most 512 bytes). Every other code omits it: its detail may describe another holder and stays in the hub log."
                     }
                   }
                 }

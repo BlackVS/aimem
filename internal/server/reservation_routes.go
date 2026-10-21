@@ -11,9 +11,11 @@ package server
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"strconv"
+	"strings"
 
 	"aimem/internal/store"
 	"aimem/internal/uuidv7"
@@ -92,7 +94,8 @@ var reservationRefusals = map[string]reservationRefusalSpec{
 }
 
 // reservationMessages are short, nonsecret messages per code. A refusal's
-// detail is logged, never sent: it may describe another holder.
+// detail is logged, and sent only for the codes in reservationDetailCodes:
+// any other code's detail may describe another holder.
 var reservationMessages = map[string]string{
 	"invalid_credential":    "The individual credential is missing, revoked or not an individual credential.",
 	"context_unavailable":   "The context or the coordination fact could not be verified now.",
@@ -114,9 +117,23 @@ var reservationMessages = map[string]string{
 	"tasks_disabled":        "Tasks are not enabled for this project.",
 }
 
+// reservationDetailCodes are the codes whose detail describes only the
+// caller's own input, so the envelope carries it: which field is wrong and
+// why.
+var reservationDetailCodes = map[string]bool{"invalid_request": true, "unsupported_version": true}
+
+// reservationDetailMax bounds the detail sent; the log keeps the whole.
+const reservationDetailMax = 512
+
 // reservationRefuse answers a refusal in the reservation envelope. The active
 // mode is shown only once the credential is known to be an individual's.
 func (s *Server) reservationRefuse(w http.ResponseWriter, r *http.Request, code string) {
+	s.reservationRefuseDetail(w, r, code, "")
+}
+
+// reservationRefuseDetail is reservationRefuse with the refusal's detail,
+// sent only for a code in reservationDetailCodes.
+func (s *Server) reservationRefuseDetail(w http.ResponseWriter, r *http.Request, code, detail string) {
 	spec, ok := reservationRefusals[code]
 	if !ok {
 		code, spec = "context_unavailable", reservationRefusals["context_unavailable"]
@@ -135,6 +152,12 @@ func (s *Server) reservationRefuse(w http.ResponseWriter, r *http.Request, code 
 	if msg == "" {
 		msg = "The reservation request was refused."
 	}
+	if !reservationDetailCodes[code] {
+		detail = ""
+	}
+	if len(detail) > reservationDetailMax {
+		detail = strings.ToValidUTF8(detail[:reservationDetailMax], "")
+	}
 	cid := uuidv7.New()
 	s.log.Warn("reservation request refused", "code", code, "correlation_id", cid)
 	w.Header().Set("Content-Type", "application/json")
@@ -142,7 +165,8 @@ func (s *Server) reservationRefuse(w http.ResponseWriter, r *http.Request, code 
 	w.WriteHeader(spec.status)
 	rc := s.deniedContext(r, "")
 	json.NewEncoder(w).Encode(identityRefusalBody{Code: code, Message: msg, ActiveMode: mode, DeniedAction: rc.Action, ActiveRole: rc.Role,
-		Retryable: code == "context_unavailable" || code == "receipt_unresolved", NextAction: nextActionFor(code, rc, spec.next), CorrelationID: cid})
+		Retryable: code == "context_unavailable" || code == "receipt_unresolved", NextAction: nextActionFor(code, rc, spec.next), CorrelationID: cid,
+		Detail: detail})
 }
 
 // reservationFail answers an error from the authorizer.
@@ -150,7 +174,7 @@ func (s *Server) reservationFail(w http.ResponseWriter, r *http.Request, err err
 	var ref *reservationRefusal
 	if errors.As(reservationError(err), &ref) {
 		s.log.Info("reservation refusal detail", "code", ref.Code, "detail", ref.Detail)
-		s.reservationRefuse(w, r, ref.Code)
+		s.reservationRefuseDetail(w, r, ref.Code, ref.Detail)
 		return
 	}
 	s.log.Error("reservation", "err", err)
@@ -161,7 +185,7 @@ func (s *Server) reservationFail(w http.ResponseWriter, r *http.Request, err err
 // project against the task's current locator. It answers any refusal itself.
 func (s *Server) reservationPreamble(w http.ResponseWriter, r *http.Request) (string, bool) {
 	if r.Header.Get(reservationVersionHeader) != "1" {
-		s.reservationRefuse(w, r, "unsupported_version")
+		s.reservationRefuseDetail(w, r, "unsupported_version", "the "+reservationVersionHeader+" header must be 1")
 		return "", false
 	}
 	taskID := r.PathValue("task_id")
@@ -197,7 +221,7 @@ func (s *Server) reservationMutate(op store.ReservationOperation) http.HandlerFu
 		}
 		key := r.Header.Get("Idempotency-Key")
 		if key == "" || len(key) > store.MaxTaskKeyBytes {
-			s.reservationRefuse(w, r, "invalid_request")
+			s.reservationRefuseDetail(w, r, "invalid_request", fmt.Sprintf("an Idempotency-Key header of 1 to %d bytes is required", store.MaxTaskKeyBytes))
 			return
 		}
 		var body reservationMutationBody
@@ -205,8 +229,12 @@ func (s *Server) reservationMutate(op store.ReservationOperation) http.HandlerFu
 		// EOF, so trailing data beyond it cannot pass the check below.
 		dec := json.NewDecoder(http.MaxBytesReader(w, r.Body, reservationBodyMax))
 		dec.DisallowUnknownFields()
-		if err := dec.Decode(&body); err != nil || dec.Decode(&struct{}{}) != io.EOF {
-			s.reservationRefuse(w, r, "invalid_request")
+		if err := dec.Decode(&body); err != nil {
+			s.reservationRefuseDetail(w, r, "invalid_request", "the body is not a reservation request: "+err.Error())
+			return
+		}
+		if dec.Decode(&struct{}{}) != io.EOF {
+			s.reservationRefuseDetail(w, r, "invalid_request", "the body holds more than one JSON value")
 			return
 		}
 		in := store.TaskReservationInput{TaskID: taskID, ID: body.ReservationID, ExpectedRevision: body.ExpectedRevision,
@@ -214,7 +242,7 @@ func (s *Server) reservationMutate(op store.ReservationOperation) http.HandlerFu
 		if body.Fence != "" {
 			f, err := strconv.ParseInt(body.Fence, 10, 64)
 			if err != nil || f < 1 || strconv.FormatInt(f, 10) != body.Fence {
-				s.reservationRefuse(w, r, "invalid_request")
+				s.reservationRefuseDetail(w, r, "invalid_request", "fence must be a positive decimal string")
 				return
 			}
 			in.Fence = f
@@ -258,11 +286,11 @@ func (s *Server) reservationReceiptRoute(w http.ResponseWriter, r *http.Request)
 	switch op {
 	case store.ReservationClaim, store.ReservationTransfer, store.ReservationUpdate, store.ReservationRelease, store.ReservationFinalize:
 	default:
-		s.reservationRefuse(w, r, "invalid_request")
+		s.reservationRefuseDetail(w, r, "invalid_request", "the operation is claim, transfer, update, release or finalize")
 		return
 	}
 	if key == "" || len(key) > store.MaxTaskKeyBytes {
-		s.reservationRefuse(w, r, "invalid_request")
+		s.reservationRefuseDetail(w, r, "invalid_request", fmt.Sprintf("the request key is 1 to %d bytes", store.MaxTaskKeyBytes))
 		return
 	}
 	out, found, err := s.reservationReceipt(r.Context(), op, taskID, key)
