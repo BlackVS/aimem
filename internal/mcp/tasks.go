@@ -63,7 +63,7 @@ var taskToolDefs = append([]map[string]any{
 		"description": "Find tasks of a project by words: every term must appear in the task's title, objective, " +
 			"acceptance criteria or non-goals, or in one of its comments (terms are literal, case-insensitive). " +
 			"Best match first; each row says where the best hit was (matched: task or comment) and shows it (snippet, " +
-			"the hit in [brackets]). Archived excluded unless asked. Pages of up to 100; pass the returned next_cursor as `after`." + taskReadScope,
+			"the hit in [brackets]). Archived excluded unless asked. Pages of up to 50; pass the returned next_cursor as `after`." + taskReadScope,
 		"inputSchema": objSchema(map[string]any{
 			"project":          prop("string", "project id (defaults to the current project; it selects what to read, it is not a limit)"),
 			"query":            prop("string", "the words to find (at most 256 bytes)"),
@@ -72,7 +72,7 @@ var taskToolDefs = append([]map[string]any{
 			"epic":             prop("string", "only tasks under this epic id"),
 			"include_archived": prop("boolean", "include archived tasks"),
 			"after":            prop("string", "next_cursor from the previous page of this search"),
-			"limit":            prop("integer", "page size (default 10, max 100)"),
+			"limit":            prop("integer", "page size (default 10, max 50)"),
 		}, "query"),
 	},
 	{
@@ -465,6 +465,8 @@ func (s *srv) taskTool(ctx context.Context, name string, raw json.RawMessage) (s
 			return "", errors.New("list_tasks takes no query: use search_tasks to find tasks by words")
 		case name == "search_tasks" && strings.TrimSpace(a.Query) == "":
 			return "", errors.New("query is required: the words to find")
+		case name == "search_tasks" && a.Limit > 50:
+			return "", errors.New("limit is at most 50 for a search: page with after for more")
 		case name == "search_tasks":
 			q.Set("q", a.Query)
 			if a.Limit == 0 {

@@ -276,6 +276,9 @@ func TestRemoteMCPTaskToolsUseTheCallersAuthority(t *testing.T) {
 	if isErr || !strings.Contains(text, task.ID) || !strings.Contains(text, `"matched": "comment"`) || !strings.Contains(text, "[good]") {
 		t.Fatalf("search_tasks finds the comment: %v %s", isErr, text)
 	}
+	if text, isErr = toolText(f.rpc(t, f.reader, "tools/call", map[string]any{"name": "search_tasks", "arguments": map[string]any{"project": "alpha", "query": "good", "limit": 51}})); !isErr || !strings.Contains(text, "at most 50") {
+		t.Fatalf("search_tasks over the cap: %v %s", isErr, text)
+	}
 	for _, args := range []map[string]any{{"project": "alpha"}, {"project": "alpha", "query": "  "}} {
 		if text, isErr = toolText(f.rpc(t, f.reader, "tools/call", map[string]any{"name": "search_tasks", "arguments": args})); !isErr || !strings.Contains(text, "query is required") {
 			t.Fatalf("search_tasks without words: %v %s", isErr, text)
