@@ -20,7 +20,7 @@ It creates the service user, installs the release named in the URL
 (checked against that release's `SHA256SUMS`), writes
 `~/.config/aimem/env`, installs the serve unit and the hourly curation
 timer with memory caps, starts everything, and prints a health check plus
-the bearer token you will give to clients.
+the steps to configure a client with its own writer token.
 
 To upgrade, run the one-liner of the newer release. On an existing hub it
 stops the hub's service and curation, copies the state root (without the
@@ -59,7 +59,7 @@ All of these are environment variables set before the command above.
 |---|---|---|
 | `AIMEM_HUB_USER` | `sessiond` | service account, created if missing |
 | `AIMEM_HTTP_LISTEN` | `:8440` | listen address |
-| `AIMEM_HTTP_TOKEN` | generated | bearer token; printed at the end |
+| `AIMEM_HTTP_TOKEN` | generated | the hub's admin bearer, for the console; kept in `~/.config/aimem/env`, never printed, never put on a client |
 | `AIMEM_HUB_NAME` | hostname | display name in the console and browser tab |
 | `AIMEM_DOMAIN` | — | generate a self-signed certificate for this name and serve TLS |
 | `AIMEM_TLS_CERT`, `AIMEM_TLS_KEY` | — | explicit certificate paths; override `AIMEM_DOMAIN` |
@@ -80,11 +80,18 @@ AIMEM_HUB_NAME=home AIMEM_DOMAIN=hub.example.com bash install-hub.sh
 
 ## 3. TLS
 
-Nothing set means plain HTTP, which is only reasonable on a trusted
-segment. `AIMEM_DOMAIN=hub.example.com` generates a self-signed
-certificate into `~/.config/aimem/tls/` and serves TLS immediately;
-clients then connect with `aimem hub add ... --insecure` until you install
-a real certificate.
+Nothing set means plain HTTP: every bearer token crosses the network in
+clear, which is only reasonable on a trusted segment, and the installer
+warns about it. `AIMEM_DOMAIN=hub.example.com` generates a self-signed
+certificate into `~/.config/aimem/tls/` and serves TLS immediately. The
+installer prints that certificate's pin at the end, on every run, and
+clients connect with `aimem hub add ... --pin sha256-...`, which verifies
+the certificate. When a real certificate replaces it, the recorded pin
+stops matching: a later `hub add` keeps it, so on each client run
+`aimem hub rm <name>`, then `hub add` without `--pin` (and
+`aimem hub task-token` again if the entry had a task credential).
+`--insecure` skips verification altogether: use it only as a last
+resort.
 
 For a real certificate, point `AIMEM_TLS_CERT` and `AIMEM_TLS_KEY` at the
 files and restart. Prefer delivering renewed certificates **onto** the hub
@@ -128,18 +135,20 @@ From anywhere:
 
 ```sh
 curl -s https://hub.example.com:8440/v1/status
-curl -s -H "Authorization: Bearer $TOKEN" https://hub.example.com:8440/v1/projects
+curl -s -H "Authorization: Bearer <env token>" https://hub.example.com:8440/v1/projects
 ```
 
-Then open `https://hub.example.com:8440/admin` and paste the token. The
+Then open `https://hub.example.com:8440/admin` and paste the env token
+(`AIMEM_HTTP_TOKEN` in `~/.config/aimem/env` on the hub). The
 console is the normal way to run a hub: browse the knowledge base, edit
 chapters, review stale facts, edit shared documents, configure models,
 watch spend, read logs.
 
-Prefer handing each workstation its **own named token** over sharing
-the installer's: `aimem token add <machine>` on the hub prints a
-writer-role secret once and stores only its hash — see ADMIN-MANUAL
-"Named tokens". The API is described at `/v1/openapi.json` (bearer-
+The env token is the hub's admin credential: it stays on the hub and
+belongs on no client. Each workstation gets its **own named token**
+instead: `aimem token add <machine>` on the hub prints a writer-role
+secret once and stores only its hash — see ADMIN-MANUAL "Named tokens".
+The API is described at `/v1/openapi.json` (bearer-
 gated; the same file ships in the repo).
 
 ### What a hub serves
@@ -181,9 +190,14 @@ register it there (see [INSTALL-CLIENT.md](INSTALL-CLIENT.md)):
 
 ```sh
 aimem token add <machine>                # on the hub; secret shown once
-# on the workstation:
-aimem hub add <name> https://hub.example.com:8440 "<writer-token>"
+# on the workstation (--pin as the installer printed it, for a self-signed certificate):
+aimem hub add <name> https://hub.example.com:8440 "<writer-token>" --pin sha256-...
 ```
+
+A client configured with the env token acts as hub admin. Installers
+before 0.10.12 printed the env token as the client credential; to move
+such a client to its own token, see ADMIN-MANUAL "Clients that hold the
+env token".
 
 For day-to-day operation — timers, curation tuning, budgets, multi-hub
 partitioning, troubleshooting — see [ADMIN-MANUAL.md](ADMIN-MANUAL.md).

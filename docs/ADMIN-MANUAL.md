@@ -133,13 +133,14 @@ curl -fsSL https://raw.githubusercontent.com/BlackVS/aimem/v0.10.11/install-hub.
 ```
 
 Knobs (env): `AIMEM_HUB_USER` (default sessiond), `AIMEM_HTTP_LISTEN`
-(:8440), `AIMEM_HTTP_TOKEN` (generated if unset — printed at the end),
-`AIMEM_DOMAIN=<fqdn>` (generates a **self-signed** cert for that name
-into `~/.config/aimem/tls/` and serves TLS — clients either record that
-certificate with `aimem hub add ... --ca-file cert.pem` (or its key with
-`--pin sha256-BASE64`) and keep verification on, or connect with
-`aimem hub add ... --insecure` until you install a real certificate and
-then drop the flag; team mode accepts only the first),
+(:8440), `AIMEM_HTTP_TOKEN` (generated if unset; the hub's admin
+credential, kept in the env file, never printed and never put on a
+client), `AIMEM_DOMAIN=<fqdn>` (generates a **self-signed** cert for that
+name into `~/.config/aimem/tls/` and serves TLS — the installer prints
+the certificate's pin at the end, and clients record it with
+`aimem hub add ... --pin sha256-BASE64` (or the certificate with
+`--ca-file cert.pem`) and keep verification on; `--insecure` skips
+verification, is a last resort, and team mode refuses it),
 `AIMEM_TLS_CERT`/`AIMEM_TLS_KEY` (explicit cert paths; nothing set =
 plain HTTP), `AIMEM_OPENAI_API_KEY` + `AIMEM_OPENAI_BASE_URL` + models
 (enables the curation timer's LLM work). Idempotent: run the newer
@@ -215,16 +216,17 @@ Manual equivalent (what the script sets up):
 
 ### Named tokens (per-machine credentials)
 
-One shared bearer token works, but named tokens are better the moment a
-second machine connects: each is revocable alone, carries a role, and
-stamps shared-document writes with its name (so "who overwrote my
-handoff" is answered by authentication). On the hub host:
+Every machine gets its own named token; the `AIMEM_HTTP_TOKEN` env token
+is the hub's admin credential and belongs on no client. A named token is
+revocable alone, carries a role, and stamps shared-document writes with
+its name (so "who overwrote my handoff" is answered by authentication).
+On the hub host:
 
 ```sh
-aimem token add dmbunker              # role writer (default); secret printed ONCE
+aimem token add laptop                # role writer (default); secret printed ONCE
 aimem token add ops --role admin
 aimem token list                      # names and roles — no secrets exist to show
-aimem token rm dmbunker               # revoke = delete one line
+aimem token rm laptop                 # revoke = delete one line
 ```
 
 A **writer** token covers what a workstation needs: events, sync,
@@ -235,6 +237,29 @@ synced); the `AIMEM_HTTP_TOKEN` env token keeps working as an implicit
 admin. No restart needed — the registry is read per request. The full
 route-by-route contract is served at `GET /v1/openapi.json` (bearer)
 and shipped in the repo (`internal/server/openapi.json`).
+
+#### Clients that hold the env token
+
+Installers before 0.10.12 printed the env token as the client
+credential, so a client set up from that output acts as hub admin: its
+checkpoint pushes, syncs and document tools all carry admin authority. A
+client holds the env token when the token in its hub entry (`hub.json`
+in the client's aimem state directory; `aimem hub list` shows its first
+six characters) is the hub's `AIMEM_HTTP_TOKEN`. To move each such
+client to its own writer token:
+
+1. On the hub host, as the service user: `aimem token add <machine>`.
+2. On the client: `aimem hub add <name> <url> "<writer-token>"`, with
+   `--pin sha256-...` (as the installer prints it) for a self-signed
+   certificate. The entry keeps its task credential and its recorded
+   trust; an `--insecure` flag that is not restated is dropped.
+3. When no client holds the env token any more, replace
+   `AIMEM_HTTP_TOKEN` in `~/.config/aimem/env` on the hub with a new
+   random value, restart the service (`systemctl --user -M sessiond@
+   restart aimem`), and paste the new value into the console.
+
+Step 3 ends the old token everywhere at once, so finish steps 1 and 2 on
+every client first.
 
 ### Hub timers
 
@@ -271,6 +296,10 @@ Mint the machine a writer token on the hub (`aimem token add
 ```sh
 aimem hub add home https://hub.example.com:8440 "$(cat ~/.config/aimem/hub_token)"
 ```
+
+Add `--pin sha256-...`, as the hub installer printed it, when the hub
+serves its self-signed certificate. The token is the machine's own
+writer token, never the hub's env token.
 
 Real-time push is then automatic on every checkpoint (hub outage spools
 locally, flushes on next contact). Anti-entropy sync — the leg that
