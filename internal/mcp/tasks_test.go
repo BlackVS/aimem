@@ -312,6 +312,33 @@ func TestRemoteMCPTaskToolsUseTheCallersAuthority(t *testing.T) {
 	if isErr || !strings.Contains(text, "looks **good**") || strings.Contains(text, "next_cursor") {
 		t.Fatalf("list_task_comments: %v %s", isErr, text)
 	}
+	// last: the N newest, newest first, and a cursor toward the older ones.
+	for i, body := range []string{"second note", "third note"} {
+		if text, isErr = toolText(f.rpc(t, f.alice, "tools/call", map[string]any{"name": "add_task_comment", "arguments": map[string]any{
+			"id": task.ID, "body": body, "idempotency_key": fmt.Sprintf("m-last-%d", i)}})); isErr {
+			t.Fatalf("add comment: %s", text)
+		}
+	}
+	text, isErr = toolText(f.rpc(t, f.reader, "tools/call", map[string]any{"name": "list_task_comments", "arguments": map[string]any{"id": task.ID, "last": 2}}))
+	var newest struct {
+		Comments []struct {
+			Body string `json:"body"`
+		} `json:"comments"`
+		Next int64 `json:"next_cursor"`
+	}
+	if isErr || json.Unmarshal([]byte(text), &newest) != nil || len(newest.Comments) != 2 || newest.Comments[0].Body != "third note" ||
+		newest.Comments[1].Body != "second note" || newest.Next == 0 {
+		t.Fatalf("last 2: %v %s", isErr, text)
+	}
+	text, isErr = toolText(f.rpc(t, f.reader, "tools/call", map[string]any{"name": "list_task_comments", "arguments": map[string]any{"id": task.ID, "last": 2, "after": newest.Next}}))
+	if isErr || !strings.Contains(text, "looks **good**") || strings.Contains(text, "second note") || strings.Contains(text, "next_cursor") {
+		t.Fatalf("older than the last 2: %v %s", isErr, text)
+	}
+	for _, args := range []map[string]any{{"id": task.ID, "last": 101}, {"id": task.ID, "last": -1}, {"id": task.ID, "last": 2, "limit": 5}} {
+		if text, isErr = toolText(f.rpc(t, f.reader, "tools/call", map[string]any{"name": "list_task_comments", "arguments": args})); !isErr || !strings.Contains(text, "last is 1 to 100") {
+			t.Fatalf("bad last %v: %v %s", args, isErr, text)
+		}
+	}
 	text, isErr = toolText(f.rpc(t, f.reader, "tools/call", map[string]any{"name": "get_task_history", "arguments": map[string]any{"id": task.ID, "after": "1"}}))
 	if isErr || !strings.Contains(text, `"revision": 2`) || strings.Contains(text, `"revision": 1`) {
 		t.Fatalf("history after cursor as string: %v %s", isErr, text)

@@ -44,6 +44,12 @@ currently 25); a binary refuses a database newer than it understands.
   and comment write; the upgrade indexes the existing tasks and comments
   once, when a project is first opened, and `aimem fts-rebuild` rebuilds
   it with the other indexes.
+- **Task comments, newest first.** Reading the latest comment of a long
+  discussion meant paging to its end. `GET /v1/tasks/{id}/comments` takes
+  `order=desc` (the default `asc` is unchanged): the first page starts at
+  the newest comment and `after` continues toward older ones. The MCP
+  `list_task_comments` tool takes `last` (1 to 100): the N newest
+  comments, newest first, with a cursor for the ones before them.
 
 ### Fixed
 

@@ -1148,8 +1148,8 @@
     "/v1/tasks/{id}/comments": {
       "get": {
         "x-team-mode": "Team mode: with the optional header X-Aimem-Team-Context (an aimem-scoped acs1_ handle from aicrew) and a user-scoped individual bearer, over TLS terminated by the hub only (otherwise tls_required, 403, whatever forwarded headers claim), the hub verifies the session online through aicrew introspection on every request, matches it to the authenticated user and token, and serves the read only under the linked team access profile's live grant, never the caller's personal grants. Refusals use the envelope with active_mode team: context_unavailable (503, retryable), context_stale, identity_mismatch, grant_denied, role_forbidden (403).",
-        "summary": "Comments in append order",
-        "description": "after is the last sequence seen; the cursor is stable while later comments arrive. Ordinary user tokens may call this route; writes are authorized per attempt against the task's owning project (user-scoped token or token issued for that project instance, plus a current grant), legacy writer tokens read only, admin tokens do everything.",
+        "summary": "Comments in append order, or newest first",
+        "description": "order is asc (the default: oldest first) or desc (newest first). after is the last sequence seen: under asc the next page holds later comments and the cursor is stable while later comments arrive; under desc the first page starts at the newest comment and the next page holds older ones. Ordinary user tokens may call this route; writes are authorized per attempt against the task's owning project (user-scoped token or token issued for that project instance, plus a current grant), legacy writer tokens read only, admin tokens do everything.",
         "x-role": "writer",
         "parameters": [
           {
@@ -1158,6 +1158,18 @@
             "required": true,
             "schema": {
               "type": "string"
+            }
+          },
+          {
+            "name": "order",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "asc",
+                "desc"
+              ]
             }
           },
           {

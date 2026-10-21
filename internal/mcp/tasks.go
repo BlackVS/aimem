@@ -132,12 +132,14 @@ var taskToolDefs = append([]map[string]any{
 		}, "id"),
 	},
 	{
-		"name":        "list_task_comments",
-		"description": "Discussion of a task in append order (immutable Markdown comments)." + taskReadScope,
+		"name": "list_task_comments",
+		"description": "Discussion of a task (immutable Markdown comments), oldest first; " +
+			"`last: N` reads the N newest instead, newest first, and its next_cursor (passed as `after` with `last` again) continues toward older ones." + taskReadScope,
 		"inputSchema": objSchema(map[string]any{
 			"id":    prop("string", "task id"),
 			"after": prop("integer", "next_cursor from the previous page"),
 			"limit": prop("integer", "page size (default 20, max 100)"),
+			"last":  prop("integer", "read the N newest comments, newest first (1 to 100; instead of limit)"),
 		}, "id"),
 	},
 	{
@@ -277,6 +279,7 @@ type taskArgs struct {
 	Limit            int             `json:"limit"`
 	Body             string          `json:"body"`
 	Query            string          `json:"query"`
+	Last             int             `json:"last"`
 }
 
 func decodeTaskArgs(raw json.RawMessage) (taskArgs, error) {
@@ -624,7 +627,13 @@ func (s *srv) taskTool(ctx context.Context, name string, raw json.RawMessage) (s
 		if err != nil {
 			return "", err
 		}
-		return call("GET", "/v1/tasks/"+id+"/comments?"+pageQuery(after, a.Limit), nil, "")
+		if a.Last == 0 {
+			return call("GET", "/v1/tasks/"+id+"/comments?"+pageQuery(after, a.Limit), nil, "")
+		}
+		if a.Last < 1 || a.Last > 100 || a.Limit != 0 {
+			return "", errors.New("last is 1 to 100 and replaces limit: the N newest comments, newest first")
+		}
+		return call("GET", "/v1/tasks/"+id+"/comments?order=desc&"+pageQuery(after, a.Last), nil, "")
 	case "get_task_comment":
 		id, err := taskID(a.TaskID)
 		if err != nil {

@@ -1019,6 +1019,13 @@ type TaskCommentPage struct {
 // sequence of the previous page (0 from the start). The cursor is stable
 // while later comments arrive.
 func (d *DB) TaskComments(id string, after int64, limit int) (TaskCommentPage, error) {
+	return d.TaskCommentsOrdered(id, after, limit, false)
+}
+
+// TaskCommentsOrdered pages discussion oldest first, or newest first when
+// desc: then after 0 starts at the newest comment and a cursor continues
+// toward older ones.
+func (d *DB) TaskCommentsOrdered(id string, after int64, limit int, desc bool) (TaskCommentPage, error) {
 	out := TaskCommentPage{Comments: []TaskComment{}}
 	limit, err := taskPageLimit(limit)
 	if err != nil {
@@ -1030,7 +1037,15 @@ func (d *DB) TaskComments(id string, after int64, limit int) (TaskCommentPage, e
 	if _, err := d.GetTask(id); err != nil {
 		return out, err
 	}
-	rows, err := d.sql.Query(`SELECT id, task_id, sequence, body, actor, created_at FROM task_comments WHERE task_id=? AND sequence > ? ORDER BY sequence LIMIT ?`, id, after, limit+1)
+	query := `SELECT id, task_id, sequence, body, actor, created_at FROM task_comments WHERE task_id=? AND sequence > ? ORDER BY sequence LIMIT ?`
+	if desc {
+		query = `SELECT id, task_id, sequence, body, actor, created_at FROM task_comments WHERE task_id=? AND (? = 0 OR sequence < ?) ORDER BY sequence DESC LIMIT ?`
+	}
+	args := []any{id, after, limit + 1}
+	if desc {
+		args = []any{id, after, after, limit + 1}
+	}
+	rows, err := d.sql.Query(query, args...)
 	if err != nil {
 		return out, err
 	}

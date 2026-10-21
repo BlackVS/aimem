@@ -610,7 +610,16 @@ func (s *Server) listTaskComments(w http.ResponseWriter, r *http.Request) {
 		s.fail(w, http.StatusBadRequest, err)
 		return
 	}
-	page, err := db.TaskComments(r.PathValue("id"), after, int(limit))
+	var desc bool
+	switch r.URL.Query().Get("order") {
+	case "", "asc":
+	case "desc":
+		desc = true
+	default:
+		s.fail(w, http.StatusBadRequest, errors.New("order must be asc or desc"))
+		return
+	}
+	page, err := db.TaskCommentsOrdered(r.PathValue("id"), after, int(limit), desc)
 	if err != nil {
 		s.taskError(w, err)
 		return
