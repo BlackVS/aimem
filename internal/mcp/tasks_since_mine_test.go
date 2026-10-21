@@ -19,14 +19,19 @@ func TestListTasksSinceOrderAndMine(t *testing.T) {
 		t.Fatal(err)
 	}
 	admin := store.TaskActor{Kind: "admin", Name: "host-admin"}
-	mk := func(title string, assignee *store.TaskAssignee) store.Task {
+	epic, err := db.CreateEpic(store.EpicContent{Title: "release"}, admin, "k-epic")
+	if err != nil {
+		t.Fatal(err)
+	}
+	mkIn := func(title, epicID string, assignee *store.TaskAssignee) store.Task {
 		t.Helper()
-		task, err := db.CreateTask(store.TaskContent{Title: title, State: "READY", Assignee: assignee}, admin, "k-"+title)
+		task, err := db.CreateTask(store.TaskContent{Title: title, State: "READY", Assignee: assignee, Epic: epicID}, admin, "k-"+title)
 		if err != nil {
 			t.Fatal(err)
 		}
 		return task
 	}
+	mk := func(title string, assignee *store.TaskAssignee) store.Task { return mkIn(title, "", assignee) }
 	old := mk("old", nil)
 	// updated_at has whole seconds: start the next ones in a later second
 	// than old's, so updated_since tells them apart.
@@ -35,6 +40,7 @@ func TestListTasksSinceOrderAndMine(t *testing.T) {
 	}
 	alices := mk("alices", &store.TaskAssignee{Kind: "user", ID: f.aliceID})
 	mk("bobs", &store.TaskAssignee{Kind: "user", ID: f.bobID})
+	alicesEpic := mkIn("alices-epic", epic.ID, &store.TaskAssignee{Kind: "user", ID: f.aliceID})
 	titles := func(token string, args map[string]any) ([]string, string) {
 		t.Helper()
 		args["project"] = "alpha"
@@ -56,28 +62,37 @@ func TestListTasksSinceOrderAndMine(t *testing.T) {
 		return out, p.Next
 	}
 	// The default page is unchanged: creation order.
-	if got, _ := titles(f.reader, map[string]any{}); strings.Join(got, ",") != "old,alices,bobs" {
+	if got, _ := titles(f.reader, map[string]any{}); strings.Join(got, ",") != "old,alices,bobs,alices-epic" {
 		t.Fatalf("default page: %v", got)
 	}
 	// What changed since a time, newest first, in one call.
 	// alices and bobs may share a second; updated_desc breaks the tie by id, newest first.
-	if got, _ := titles(f.reader, map[string]any{"updated_since": alices.UpdatedAt, "order": "updated_desc"}); strings.Join(got, ",") != "bobs,alices" {
+	if got, _ := titles(f.reader, map[string]any{"updated_since": alices.UpdatedAt, "order": "updated_desc"}); strings.Join(got, ",") != "alices-epic,bobs,alices" {
 		t.Fatalf("since + updated_desc: %v", got)
 	}
 	// A fractional time keeps the "at or after" meaning: half a second
 	// into old's second excludes old.
-	if got, _ := titles(f.reader, map[string]any{"updated_since": strings.TrimSuffix(old.UpdatedAt, "Z") + ".5Z"}); strings.Join(got, ",") != "alices,bobs" {
+	if got, _ := titles(f.reader, map[string]any{"updated_since": strings.TrimSuffix(old.UpdatedAt, "Z") + ".5Z"}); strings.Join(got, ",") != "alices,bobs,alices-epic" {
 		t.Fatalf("fractional since: %v", got)
 	}
 	// Paging with the order's cursor.
 	first, next := titles(f.reader, map[string]any{"order": "title", "limit": 2})
 	rest, _ := titles(f.reader, map[string]any{"order": "title", "limit": 2, "after": next})
-	if strings.Join(first, ",")+"|"+strings.Join(rest, ",") != "alices,bobs|old" {
+	if strings.Join(first, ",")+"|"+strings.Join(rest, ",") != "alices,alices-epic|bobs,old" {
 		t.Fatalf("order=title paged: %v %v", first, rest)
 	}
 	// mine is each caller's own user identity, combined with the filters.
-	if got, _ := titles(f.alice, map[string]any{"mine": true}); strings.Join(got, ",") != "alices" {
+	if got, _ := titles(f.alice, map[string]any{"mine": true}); strings.Join(got, ",") != "alices,alices-epic" {
 		t.Fatalf("alice's mine: %v", got)
+	}
+	// mine with an epic, and mine paged one at a time.
+	if got, _ := titles(f.alice, map[string]any{"mine": true, "epic": epic.ID}); strings.Join(got, ",") != "alices-epic" || alicesEpic.Epic != epic.ID {
+		t.Fatalf("mine + epic: %v", got)
+	}
+	page1, cursor := titles(f.alice, map[string]any{"mine": true, "limit": 1})
+	page2, end := titles(f.alice, map[string]any{"mine": true, "limit": 1, "after": cursor})
+	if strings.Join(page1, ",") != "alices" || strings.Join(page2, ",") != "alices-epic" || cursor == "" || end != "" {
+		t.Fatalf("mine paged: %v %q %v %q", page1, cursor, page2, end)
 	}
 	if got, _ := titles(f.stranger, map[string]any{"mine": true}); strings.Join(got, ",") != "bobs" {
 		t.Fatalf("bob's mine: %v", got)
