@@ -550,6 +550,16 @@ func TestTaskComments(t *testing.T) {
 	if again, err := db.AddTaskComment(task.ID, "first note", aliceActor, "c-1"); err != nil || again.ID != c1.ID {
 		t.Fatalf("committed append must replay after archival: %+v %v", again, err)
 	}
+	// Newest first: after 0 starts at the newest, a cursor continues older.
+	desc, err := db.TaskCommentsOrdered(task.ID, 0, 3, true)
+	if err != nil || len(desc.Comments) != 3 || desc.Next != desc.Comments[2].Sequence ||
+		desc.Comments[0].Sequence <= desc.Comments[1].Sequence || desc.Comments[1].Sequence <= desc.Comments[2].Sequence {
+		t.Fatalf("desc page: %+v %v", desc, err)
+	}
+	if rest, err := db.TaskCommentsOrdered(task.ID, desc.Next, 3, true); err != nil || len(rest.Comments) != 1 || rest.Next != 0 ||
+		rest.Comments[0].Sequence >= desc.Comments[2].Sequence {
+		t.Fatalf("desc rest: %+v %v", rest, err)
+	}
 	if all, _ := db.TaskComments(task.ID, 0, 100); len(all.Comments) != 4 {
 		t.Fatalf("comments remain readable after archival: %d", len(all.Comments))
 	}

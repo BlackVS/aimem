@@ -11,6 +11,7 @@ import (
 	"strings"
 	"testing"
 
+	"aimem/internal/store"
 	"aimem/internal/uuidv7"
 )
 
@@ -131,6 +132,15 @@ func TestTeamRefusalsNameTheActionAndTheRole(t *testing.T) {
 	if e := decodeRefusal(t, r); e.Code != "grant_denied" || e.ActiveRole != "worker" || e.DeniedAction != "GET /v1/tasks/{id}" ||
 		strings.Contains(string(r.body), other.Title) {
 		t.Fatalf("grant denied: %d %s", r.status, r.body)
+	}
+	// Reading its comments newest first is the same read: refused, with no
+	// comment in the answer.
+	if _, err := beta.AddTaskComment(other.ID, "the beta-only remark", store.TaskActor{Kind: "admin", Name: "host-admin"}, "k-beta-c"); err != nil {
+		t.Fatal(err)
+	}
+	r = g.call(t, g.tls, "GET", "/v1/tasks/"+other.ID+"/comments?order=desc&limit=1", g.alice, g.teamAs(t, "worker", "agent-worker", "sess-w"), "", true)
+	if e := decodeRefusal(t, r); e.Code != "grant_denied" || strings.Contains(string(r.body), "beta-only") {
+		t.Fatalf("newest comments of an ungranted project: %d %s", r.status, r.body)
 	}
 	// A project-scoped token in team mode is told to start through aicrew,
 	// not to use another credential.
