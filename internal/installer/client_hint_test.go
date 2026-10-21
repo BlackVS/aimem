@@ -27,13 +27,19 @@ import (
 const envToken = "env-admin-token-never-printed"
 
 // runClientHint runs install-hub.sh's client-hint block with the given
-// certificate and scheme, the env token set as the installer has it.
+// certificate and scheme, the env token set everywhere the installer has
+// it: TOKEN, AIMEM_HTTP_TOKEN and the env file.
 func runClientHint(t *testing.T, cert, scheme string) (stdout, stderr string) {
 	t.Helper()
+	envf := filepath.Join(t.TempDir(), "env")
+	if err := os.WriteFile(envf, []byte("AIMEM_HTTP_TOKEN="+envToken+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
 	script := "set -euo pipefail\nAIMEM_TLS_CERT=" + filepath.ToSlash(cert) + "\nSCHEME=" + scheme +
-		"\nHOST=hub.test\nPORT=8440\nHUB_USER=sessiond\nENVF=/home/sessiond/.config/aimem/env\nTOKEN=" + envToken + "\n" +
+		"\nHOST=hub.test\nPORT=8440\nHUB_USER=sessiond\nENVF=" + filepath.ToSlash(envf) + "\nTOKEN=" + envToken + "\n" +
 		extract(t, "install-hub.sh", "client-hint")
 	cmd := exec.Command("bash", "-c", script)
+	cmd.Env = append(os.Environ(), "AIMEM_HTTP_TOKEN="+envToken)
 	var out, errb strings.Builder
 	cmd.Stdout, cmd.Stderr = &out, &errb
 	if err := cmd.Run(); err != nil {
@@ -130,6 +136,21 @@ func TestClientHintWarnsWithoutAPinAndOnPlainHTTP(t *testing.T) {
 	}
 	if !strings.Contains(errOut, "could not compute the self-signed certificate's pin") || !strings.Contains(errOut, "openssl x509 -in "+filepath.ToSlash(missing)) {
 		t.Errorf("no pin warning:\n%s", errOut)
+	}
+	// An operator's own certificate is trusted through the system roots or
+	// --ca-file: no pin and no warning.
+	selfCert, _ := selfSigned(t, t.TempDir())
+	pemBytes, err := os.ReadFile(selfCert)
+	if err != nil {
+		t.Fatal(err)
+	}
+	owned := filepath.Join(t.TempDir(), "fullchain.pem")
+	if err := os.WriteFile(owned, pemBytes, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	out, errOut = runClientHint(t, owned, "https")
+	if !strings.Contains(out, `aimem hub add <name> https://hub.test:8440 "<writer-token>"`+"\n") || errOut != "" {
+		t.Errorf("a real certificate got a trust flag or a warning:\n%s%s", out, errOut)
 	}
 	out, errOut = runClientHint(t, "", "http")
 	if !strings.Contains(out, `aimem hub add <name> http://hub.test:8440 "<writer-token>"`+"\n") {

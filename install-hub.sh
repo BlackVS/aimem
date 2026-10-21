@@ -399,7 +399,8 @@ echo "  2. on the client:  aimem hub add <name> $SCHEME://$HOST:$PORT \"<writer-
 echo "  AIMEM_HTTP_TOKEN in $ENVF is this host's admin credential: keep it on this host, never on a client."
 if [ -n "$TRUST" ]; then
   echo "  --pin verifies the self-signed certificate. --insecure would skip verification: use it only as a last resort."
-  echo "  When a real certificate replaces the self-signed one, run hub add again without --pin."
+  echo "  When a real certificate replaces the self-signed one, the pin stops matching: on each client run"
+  echo "  aimem hub rm <name>, then hub add without --pin (and hub task-token again, if it had one)."
 elif [ -n "$SELF_SIGNED" ]; then
   echo "WARNING: could not compute the self-signed certificate's pin. Compute it on this host with" >&2
   echo "  openssl x509 -in $AIMEM_TLS_CERT -noout -pubkey | openssl pkey -pubin -outform der | openssl dgst -sha256 -binary | base64" >&2

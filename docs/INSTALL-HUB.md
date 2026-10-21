@@ -20,7 +20,7 @@ It creates the service user, installs the release named in the URL
 (checked against that release's `SHA256SUMS`), writes
 `~/.config/aimem/env`, installs the serve unit and the hourly curation
 timer with memory caps, starts everything, and prints a health check plus
-the bearer token you will give to clients.
+the steps to configure a client with its own writer token.
 
 To upgrade, run the one-liner of the newer release. On an existing hub it
 stops the hub's service and curation, copies the state root (without the
@@ -86,9 +86,12 @@ warns about it. `AIMEM_DOMAIN=hub.example.com` generates a self-signed
 certificate into `~/.config/aimem/tls/` and serves TLS immediately. The
 installer prints that certificate's pin at the end, on every run, and
 clients connect with `aimem hub add ... --pin sha256-...`, which verifies
-the certificate. When a real certificate replaces it, run `hub add` again
-without `--pin`. `--insecure` skips verification altogether: use it only
-as a last resort.
+the certificate. When a real certificate replaces it, the recorded pin
+stops matching: a later `hub add` keeps it, so on each client run
+`aimem hub rm <name>`, then `hub add` without `--pin` (and
+`aimem hub task-token` again if the entry had a task credential).
+`--insecure` skips verification altogether: use it only as a last
+resort.
 
 For a real certificate, point `AIMEM_TLS_CERT` and `AIMEM_TLS_KEY` at the
 files and restart. Prefer delivering renewed certificates **onto** the hub
@@ -132,7 +135,7 @@ From anywhere:
 
 ```sh
 curl -s https://hub.example.com:8440/v1/status
-curl -s -H "Authorization: Bearer $TOKEN" https://hub.example.com:8440/v1/projects
+curl -s -H "Authorization: Bearer <env token>" https://hub.example.com:8440/v1/projects
 ```
 
 Then open `https://hub.example.com:8440/admin` and paste the env token

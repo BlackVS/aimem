@@ -142,7 +142,9 @@ self-signed certificate), record its trust with the entry: add
 `--ca-file /path/to/hub-ca.pem` or `--pin sha256-BASE64` (the SHA-256 of
 the certificate's public key; the hub installer prints it for its
 self-signed certificate). Every aimem path to that hub uses it; a later
-`hub add` of the same hub keeps it unless you give a new one.
+`hub add` of the same hub keeps it unless you give a new one. To drop a
+pin once the hub has a real certificate, remove the entry with
+`aimem hub rm <name>` and add it again without `--pin`.
 `--insecure` skips verification instead; use it only as a last resort.
 
 To keep the token off the command line and out of shell history, give it
@@ -152,10 +154,8 @@ takes the same flag.
 
 Every checkpoint now pushes there as well as landing locally. If the hub
 is unreachable the event spools locally and flushes on the next contact —
-capture never depends on the network. The hub's admin token (printed
-once at hub install) also works, but keep it for the console and the
-operator: a per-machine token is individually revocable and cannot
-touch hub configuration.
+capture never depends on the network. A per-machine token is
+individually revocable and cannot touch hub configuration.
 
 ### Several hubs on one machine
 

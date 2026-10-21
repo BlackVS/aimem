@@ -92,10 +92,12 @@ Substitute your own hostname. `AIMEM_DOMAIN` generates a self-signed
 certificate and serves TLS immediately; `AIMEM_HUB_NAME` labels the
 console, which matters the moment you run a second hub.
 
-The installer prints a **bearer token** at the end (once — re-runs
-never re-show it). Keep it: it is the hub's **admin** credential — the
-one you paste into the console, and the one that can change
-configuration. Workstations get their own tokens in the next step.
+The hub's **admin** credential is the env token, `AIMEM_HTTP_TOKEN` in
+`~/.config/aimem/env` on the hub: the one you paste into the console,
+and the one that can change configuration. The installer never prints
+it, and it stays on the hub. At the end the installer prints how to
+give each workstation its own token, and for its self-signed
+certificate a `--pin` value.
 
 ### 2.2 Check it is up
 
@@ -125,9 +127,9 @@ aimem hub add home https://hub.example.com:8440 "<writer-token>" --pin sha256-..
 ```
 
 Use the `--pin` value the hub installer printed: it verifies the hub's
-self-signed certificate. Run `hub add` again without it once you install
-a real certificate. Never use the hub's env token here; it is the hub's
-admin credential.
+self-signed certificate. Once you install a real certificate, the pin
+stops matching: run `aimem hub rm home`, then `hub add` without it.
+Never use the hub's env token here; it is the hub's admin credential.
 
 Checkpoints now push to the hub as they happen; if it is unreachable they spool locally
 and flush on the next contact, so capture never depends on the network.
@@ -136,10 +138,7 @@ the same token (`bash ./install.sh enable-sync` on Linux; Windows gets a
 scheduled task automatically).
 
 Repeat — one minted token per machine — for every machine you code
-from. That is the whole of "shared memory across machines". (The admin
-token from 2.1 also works everywhere, but then every machine holds the
-key to the hub's configuration, and revoking one machine means
-re-keying all of them.)
+from. That is the whole of "shared memory across machines".
 
 ### 2.4 Open the console
 
@@ -147,7 +146,7 @@ re-keying all of them.)
 https://hub.example.com:8440/admin
 ```
 
-Paste the token. This is where you will actually operate the hub: browse
+Paste the env token from 2.1. This is where you will actually operate the hub: browse
 the knowledge base, organize chapters, review stale facts, edit shared
 documents, configure models, watch spend, read logs.
 
