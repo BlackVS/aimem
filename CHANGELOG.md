@@ -13,6 +13,17 @@ currently 25); a binary refuses a database newer than it understands.
 
 ## [Unreleased]
 
+### Added
+
+- **Task counts in a team conversation.** `GET /v1/projects/{p}/tasks/counts`
+  is now a team-mode route: a verified team session reads it under the
+  linked team access profile's live grant, with the same refusals as the
+  task list. A team conversation's first `list_tasks` page now carries
+  `counts`, as an ordinary one's has since 0.10.11. Upgrade the hub
+  first: an older hub refuses the counts read in team mode, the page then
+  comes back without `counts`, and the next tool verifies the context
+  again.
+
 ### Fixed
 
 - **A NUL byte in a search query is refused as an invalid query.** A

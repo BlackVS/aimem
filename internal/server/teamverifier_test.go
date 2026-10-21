@@ -109,13 +109,13 @@ func (g *teamRig) team(t *testing.T, method, path string) identityResp {
 func (g *teamRig) readPaths(granted bool) []string {
 	if granted {
 		return []string{
-			"/v1/projects/alpha/tasks", "/v1/tasks/" + g.alphaTask, "/v1/tasks/" + g.alphaTask + "/history",
+			"/v1/projects/alpha/tasks", "/v1/projects/alpha/tasks/counts", "/v1/tasks/" + g.alphaTask, "/v1/tasks/" + g.alphaTask + "/history",
 			"/v1/tasks/" + g.alphaTask + "/comments", "/v1/tasks/" + g.alphaTask + "/comments/" + g.comment,
 			"/v1/projects/alpha/epics", "/v1/projects/alpha/epics/" + g.epic,
 		}
 	}
 	return []string{
-		"/v1/projects/beta/tasks", "/v1/tasks/" + g.betaTk, "/v1/tasks/" + g.betaTk + "/history",
+		"/v1/projects/beta/tasks", "/v1/projects/beta/tasks/counts", "/v1/tasks/" + g.betaTk, "/v1/tasks/" + g.betaTk + "/history",
 		"/v1/tasks/" + g.betaTk + "/comments", "/v1/projects/beta/epics", "/v1/projects/beta/epics/missing",
 	}
 }
@@ -144,7 +144,11 @@ func refusal(t *testing.T, r identityResp) (code, mode, cid string) {
 // the C6a member reservation routes, all real routes of the hub.
 func TestTeamRoutesAreTheApprovedMatrix(t *testing.T) {
 	want := []string{
-		"GET /v1/access/identity", "GET /v1/projects/{p}/tasks", "GET /v1/tasks/{id}", "GET /v1/tasks/{id}/history",
+		"GET /v1/access/identity", "GET /v1/projects/{p}/tasks",
+		// The board's counts, the same read as the list under the same grant
+		// (01a15e64): a deliberate widening.
+		"GET /v1/projects/{p}/tasks/counts",
+		"GET /v1/tasks/{id}", "GET /v1/tasks/{id}/history",
 		"GET /v1/tasks/{id}/comments", "GET /v1/tasks/{id}/comments/{c}", "GET /v1/projects/{p}/epics", "GET /v1/projects/{p}/epics/{e}",
 		// The project's repository under the profile's grant (DESIGN-AIFORGE-PILOT-1 §1),
 		// and the stored process set under the same rule (DESIGN-portable-team-context 1d).

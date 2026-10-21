@@ -529,9 +529,7 @@ func (s *srv) taskTool(ctx context.Context, name string, raw json.RawMessage) (s
 			path += "?" + q.Encode()
 		}
 		page, err := call("GET", path, nil, "")
-		// A team conversation reads only the team routes, which do not
-		// include the counts.
-		if err != nil || name != "list_tasks" || after != "" || s.team != nil {
+		if err != nil || name != "list_tasks" || after != "" {
 			return page, err
 		}
 		return withCounts(call, p, q, page), nil
