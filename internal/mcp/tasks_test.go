@@ -334,7 +334,8 @@ func TestRemoteMCPTaskToolsUseTheCallersAuthority(t *testing.T) {
 	if isErr || !strings.Contains(text, "looks **good**") || strings.Contains(text, "second note") || strings.Contains(text, "next_cursor") {
 		t.Fatalf("older than the last 2: %v %s", isErr, text)
 	}
-	for _, args := range []map[string]any{{"id": task.ID, "last": 101}, {"id": task.ID, "last": -1}, {"id": task.ID, "last": 2, "limit": 5}} {
+	for _, args := range []map[string]any{{"id": task.ID, "last": 101}, {"id": task.ID, "last": -1}, {"id": task.ID, "last": 0},
+		{"id": task.ID, "last": 2, "limit": 5}, {"id": task.ID, "last": 2, "limit": 0}} {
 		if text, isErr = toolText(f.rpc(t, f.reader, "tools/call", map[string]any{"name": "list_task_comments", "arguments": args})); !isErr || !strings.Contains(text, "last is 1 to 100") {
 			t.Fatalf("bad last %v: %v %s", args, isErr, text)
 		}

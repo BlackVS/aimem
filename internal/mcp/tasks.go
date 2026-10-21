@@ -279,7 +279,7 @@ type taskArgs struct {
 	Limit            int             `json:"limit"`
 	Body             string          `json:"body"`
 	Query            string          `json:"query"`
-	Last             int             `json:"last"`
+	Last             *int            `json:"last"` // a pointer: an explicit 0 is refused, not taken as absent
 }
 
 func decodeTaskArgs(raw json.RawMessage) (taskArgs, error) {
@@ -627,13 +627,13 @@ func (s *srv) taskTool(ctx context.Context, name string, raw json.RawMessage) (s
 		if err != nil {
 			return "", err
 		}
-		if a.Last == 0 {
+		if a.Last == nil {
 			return call("GET", "/v1/tasks/"+id+"/comments?"+pageQuery(after, a.Limit), nil, "")
 		}
-		if a.Last < 1 || a.Last > 100 || a.Limit != 0 {
+		if *a.Last < 1 || *a.Last > 100 || argGiven(raw, "limit") {
 			return "", errors.New("last is 1 to 100 and replaces limit: the N newest comments, newest first")
 		}
-		return call("GET", "/v1/tasks/"+id+"/comments?order=desc&"+pageQuery(after, a.Last), nil, "")
+		return call("GET", "/v1/tasks/"+id+"/comments?order=desc&"+pageQuery(after, *a.Last), nil, "")
 	case "get_task_comment":
 		id, err := taskID(a.TaskID)
 		if err != nil {
@@ -655,6 +655,17 @@ func (s *srv) taskTool(ctx context.Context, name string, raw json.RawMessage) (s
 		return call("POST", "/v1/tasks/"+id+"/comments", map[string]string{"body": a.Body}, k)
 	}
 	return "", fmt.Errorf("unknown tool %q", name)
+}
+
+// argGiven reports whether the call's arguments name key with a non-null
+// value, which a zero-valued field cannot tell from an omitted one.
+func argGiven(raw json.RawMessage, key string) bool {
+	var args map[string]json.RawMessage
+	if json.Unmarshal(raw, &args) != nil {
+		return false
+	}
+	v, ok := args[key]
+	return ok && string(v) != "null"
 }
 
 func pageQuery(after int64, limit int) string {
