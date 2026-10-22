@@ -4,6 +4,7 @@ import (
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -127,6 +128,13 @@ func TestHubAddWarnsWhenTheRoleCannotBeChecked(t *testing.T) {
 // probe finds, including when the hub cannot be reached.
 func TestHubAddStoresTheEntryWhateverTheWarnings(t *testing.T) {
 	t.Setenv("AIMEM_STATE_DIR", t.TempDir())
+	var ran atomic.Int32
+	quiet := hubAddWarn
+	hubAddWarn = func(w io.Writer, name string, h *adapter.HubConfig) {
+		ran.Add(1)
+		hubAddWarnings(w, name, h)
+	}
+	t.Cleanup(func() { hubAddWarn = quiet })
 	srv := httptest.NewTLSServer(http.HandlerFunc(identityHub))
 	defer srv.Close()
 	if err := hubCmd([]string{"add", "home", srv.URL, "env-secret", "--pin", pinOf(srv)}); err != nil {
@@ -143,5 +151,8 @@ func TestHubAddStoresTheEntryWhateverTheWarnings(t *testing.T) {
 	}
 	if h := storedHub(t, "away"); h == nil || h.URL != goneURL {
 		t.Fatalf("an unreachable hub was not stored: %+v", h)
+	}
+	if ran.Load() != 2 {
+		t.Fatalf("hub add ran the warnings %d times, want 2", ran.Load())
 	}
 }

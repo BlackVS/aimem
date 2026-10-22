@@ -2447,7 +2447,7 @@ func hubCmd(args []string) error {
 			return err
 		}
 		fmt.Printf("hub %q configured (default: %s)\n", name, def)
-		hubAddWarnings(os.Stderr, name, hubs[name])
+		hubAddWarn(os.Stderr, name, hubs[name])
 		return nil
 	case "rm":
 		if len(args) != 2 {

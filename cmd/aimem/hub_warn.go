@@ -15,6 +15,10 @@ import (
 // hubAddProbeTimeout bounds the identity call `aimem hub add` makes.
 var hubAddProbeTimeout = 10 * time.Second
 
+// hubAddWarn is what `aimem hub add` runs after storing an entry; the
+// package's tests keep it off the network unless a test restores it.
+var hubAddWarn = hubAddWarnings
+
 // hubAddWarnings prints what is risky about a stored hub entry: a URL that
 // is not https, --insecure, and a token that authenticates as role admin
 // (one GET /v1/access/identity through the entry's own trust). It only
