@@ -136,6 +136,10 @@ aimem hub add home https://hub.example.com:8440 "<writer-token>"
 
 Never give a client the hub's env token (`AIMEM_HTTP_TOKEN`): it is the
 hub's admin credential, and a machine holding it acts as hub admin.
+`hub add` asks the hub once who the token is and warns when it is the
+env token or another admin token. It also warns about a URL that is not
+https and about `--insecure`, and when the hub cannot be reached to
+check. The warnings never stop the entry from being stored.
 
 If the hub's certificate is not in the system roots (a private CA or a
 self-signed certificate), record its trust with the entry: add

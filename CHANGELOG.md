@@ -41,6 +41,18 @@ currently 25); a binary refuses a database newer than it understands.
   token belongs on no client, and ADMIN-MANUAL has the steps for moving a
   client that holds it to its own writer token. This is part 1 of 3 of
   audit finding A-3.
+- **`aimem hub add` warns about a risky hub entry.** After storing the
+  entry, it asks the hub once who the token is (`GET
+  /v1/access/identity`, through the entry's own trust, following no
+  redirect). It warns when the token authenticates as role admin. When
+  the token is the hub's env token, the warning says so and names
+  `aimem token add <machine>` as the way to give the machine its own
+  writer token. It also warns when the URL is not https, and when
+  `--insecure` is given. A hub that cannot be reached, refuses the
+  token or answers something else gets a warning that the role could
+  not be checked. These are warnings only: the entry is stored as
+  before, and `hub add` still succeeds. This is part 2 of 3 of audit
+  finding A-3.
 
 ### Fixed
 
