@@ -11,9 +11,11 @@ import (
 	"runtime"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 
 	"aimem/internal/adapter"
+	"aimem/internal/hubtest"
 	"aimem/internal/store"
 	"aimem/internal/taskcred"
 	"aimem/internal/teamstate"
@@ -27,7 +29,7 @@ const testToken = "aimem_user_" + "e" + "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee
 // caller is the seam.
 func identityHub(t *testing.T) *httptest.Server {
 	t.Helper()
-	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	ts := hubtest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		switch {
 		case r.URL.Path == "/v1/status":
@@ -54,7 +56,7 @@ func checkout(t *testing.T, ts *httptest.Server) (string, string) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
 	t.Setenv("USERPROFILE", home)
-	if err := adapter.SaveHubs(root, map[string]*adapter.HubConfig{"hub": {URL: ts.URL, Token: "checkpoint"}}, "hub"); err != nil {
+	if err := adapter.SaveHubs(root, map[string]*adapter.HubConfig{"hub": {URL: ts.URL, Pin: hubtest.Pin(ts), Token: "checkpoint"}}, "hub"); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(filepath.Join(repo, ".aimem.json"), []byte(`{"project":"alpha"}`), 0600); err != nil {
@@ -285,5 +287,41 @@ func TestCredentialFixByClass(t *testing.T) {
 		if fix := CredentialFix(err, "acct"); !strings.HasPrefix(fix, "if the checkout was set up by another account, run onboarding as that account") || !strings.Contains(fix, "instead of installing anything as acct") {
 			t.Errorf("%v: %s", err, fix)
 		}
+	}
+}
+
+// Team setup reads the hub with the selected individual credential, so an
+// insecure entry is refused before any read, with the re-add fix, and no
+// session operation follows.
+func TestRunRefusesAnInsecureHubEntry(t *testing.T) {
+	inner := identityHub(t)
+	var hits atomic.Int32
+	ts := hubtest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hits.Add(1)
+		inner.Config.Handler.ServeHTTP(w, r)
+	}))
+	defer ts.Close()
+	repo, root := checkout(t, ts) // installing the credential validates it once
+	if err := adapter.SaveHubs(root, map[string]*adapter.HubConfig{"hub": {URL: ts.URL, Insecure: true, Token: "checkpoint"}}, "hub"); err != nil {
+		t.Fatal(err)
+	}
+	hits.Store(0)
+	caller := &sessionCaller{}
+	env := Env{Dir: repo, Root: root, Version: "v0.7.1", TeamCall: caller.call}
+	rep := Run(env, &Options{Team: "Pilot", Role: "worker", Profile: store.TeamProfile{Label: "w", Platform: "codex", PlatformVersion: "1", Model: store.TeamModel{Provider: "unknown", ID: "unknown", Version: "unknown", Source: "unknown"}}, PlatformSet: true, ProfileSet: true})
+	if rep.Joined() || caller.names() != "" || hits.Load() != 0 {
+		t.Fatalf("joined %v, operations %q, hub reads %d", rep.Joined(), caller.names(), hits.Load())
+	}
+	found := false
+	for _, c := range rep.Checks {
+		if c.Name == "identity" {
+			found = true
+			if c.Level != "fail" || !strings.Contains(c.Detail, "configured with insecure") || !strings.Contains(c.Fix, "aimem hub list") || strings.Contains(c.Detail, testToken) {
+				t.Fatalf("identity: %+v", c)
+			}
+		}
+	}
+	if !found {
+		t.Fatalf("no identity check: %+v", rep.Checks)
 	}
 }

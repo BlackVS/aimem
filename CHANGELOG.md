@@ -13,6 +13,50 @@ currently 25); a binary refuses a database newer than it understands.
 
 ## [Unreleased]
 
+### Upgrade notes
+
+- **Move every hub entry that holds an individual credential to verified
+  https before upgrading a client.** Run `aimem hub list` on each client.
+  An entry whose URL starts with `http://`, or that shows
+  `[insecure: self-signed]`, is refused for task credentials after this
+  upgrade. That covers an entry with an `aimem hub task-token`, and one
+  that a checkout's project-local credential (`aimem task-token set`) is
+  bound to. Re-add it with its pin or CA: `aimem hub add NAME
+  https://HOST:PORT TOKEN --pin sha256-BASE64` (the hub installer prints
+  the pin) or `--ca-file PATH`. A re-add over the same URL with `--pin`
+  or `--ca-file` drops `--insecure` on its own, so no `hub rm` is needed
+  here; `hub rm` first is only for dropping a recorded pin or CA, as the
+  0.10.12 note on a replaced certificate says. An entry moved from
+  `http://` to `https://` is a new URL: run `aimem hub task-token` and
+  `aimem task-token set` for it again.
+
+### Security
+
+- **Individual credentials go only to a verified https hub.** Every
+  request that carries an individual credential now uses one strict
+  client. It accepts an https URL only, verified against the entry's
+  `--ca-file`, its `--pin` or the system roots. It refuses an entry
+  configured with `--insecure`, even when a pin is also recorded, and a
+  plain `http://` entry, loopback included. It uses no proxy from the
+  environment and follows no redirect. The refusal is made before any
+  request is sent. For an http or `--insecure` entry it names
+  `aimem hub list` and the `hub add` that fixes it; an entry whose
+  `--ca-file` or `--pin` cannot be loaded is refused with that error. The
+  paths it covers:
+  - the MCP task tools (the user-scoped `aimem hub task-token` and a
+    checkout's project-local credential alike);
+  - process context with a project-local credential;
+  - team setup's identity and status reads;
+  - the task-credential check behind `aimem task-token set`.
+
+  Team mode, `aimem hub credential` and enrollment already
+  worked this way; team mode now shares the same client and wording. One
+  path is deliberately left as it was: process context for a checkout
+  without a project-local credential reads with the hub's shared
+  checkpoint (writer) token, not an individual credential, and keeps the
+  entry's own trust, as checkpoint pushes do. This is part 3 of 3 of
+  audit finding A-3.
+
 ## [0.10.12] — 2026-10-22
 
 Clients no longer get the hub's admin token by default. The hub installer

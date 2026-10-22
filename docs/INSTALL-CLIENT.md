@@ -150,6 +150,10 @@ self-signed certificate). Every aimem path to that hub uses it; a later
 pin once the hub has a real certificate, remove the entry with
 `aimem hub rm <name>` and add it again without `--pin`.
 `--insecure` skips verification instead; use it only as a last resort.
+An entry with `--insecure`, or with a plain `http://` URL, still carries
+checkpoints, but aimem refuses to send an individual credential to it:
+the MCP task tools, team setup and team mode, and a checkout's
+project-local credential need verified https.
 
 To keep the token off the command line and out of shell history, give it
 with `--token-file PATH` (a file only you can read) or `--token-file -`

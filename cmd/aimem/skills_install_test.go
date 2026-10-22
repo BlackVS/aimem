@@ -11,13 +11,13 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
-	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
 	"aimem/internal/adapter"
+	"aimem/internal/hubtest"
 	"aimem/internal/process"
 	"aimem/internal/processctx"
 	"aimem/internal/skills"
@@ -48,7 +48,7 @@ func TestSkillsInstallFromTheHubWithoutGit(t *testing.T) {
 	bundle := &process.Bundle{Version: 1, Manifest: "proc/manifest.json", Files: map[string][]byte{"proc/manifest.json": []byte(manifest), "proc/handbook.md": []byte("# Handbook\n")}}
 	ref := process.Ref{Repo: "https://127.0.0.1:1/process.git", Commit: strings.Repeat("ab", 20), Manifest: "proc/manifest.json", Digest: bundle.Digest(), Name: "proc"}
 	var other []string
-	hub := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	hub := hubtest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Header.Get("Authorization") != "Bearer "+secret {
 			w.WriteHeader(http.StatusUnauthorized)
 			return
@@ -81,7 +81,7 @@ func TestSkillsInstallFromTheHubWithoutGit(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
 	t.Setenv("USERPROFILE", home)
-	if err := adapter.SaveHubs(state, map[string]*adapter.HubConfig{"hub": {URL: hub.URL, Token: "checkpoint"}}, "hub"); err != nil {
+	if err := adapter.SaveHubs(state, map[string]*adapter.HubConfig{"hub": {URL: hub.URL, Pin: hubtest.Pin(hub), Token: "checkpoint"}}, "hub"); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(filepath.Join(dir, ".aimem.json"), []byte(`{"project":"alpha"}`), 0o600); err != nil {

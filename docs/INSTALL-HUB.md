@@ -82,7 +82,9 @@ AIMEM_HUB_NAME=home AIMEM_DOMAIN=hub.example.com bash install-hub.sh
 
 Nothing set means plain HTTP: every bearer token crosses the network in
 clear, which is only reasonable on a trusted segment, and the installer
-warns about it. `AIMEM_DOMAIN=hub.example.com` generates a self-signed
+warns about it. Clients still push checkpoints to a plain-HTTP hub, but
+they refuse to send it an individual credential: the task tools, team
+setup and team mode need TLS. `AIMEM_DOMAIN=hub.example.com` generates a self-signed
 certificate into `~/.config/aimem/tls/` and serves TLS immediately. The
 installer prints that certificate's pin at the end, on every run, and
 clients connect with `aimem hub add ... --pin sha256-...`, which verifies
@@ -91,7 +93,8 @@ stops matching: a later `hub add` keeps it, so on each client run
 `aimem hub rm <name>`, then `hub add` without `--pin` (and
 `aimem hub task-token` again if the entry had a task credential).
 `--insecure` skips verification altogether: use it only as a last
-resort.
+resort. Such an entry still carries checkpoints, but the task tools,
+team setup and team mode refuse it.
 
 For a real certificate, point `AIMEM_TLS_CERT` and `AIMEM_TLS_KEY` at the
 files and restart. Prefer delivering renewed certificates **onto** the hub

@@ -1,7 +1,6 @@
 package mcp
 
 import (
-	"aimem/internal/ident"
 	"bytes"
 	"context"
 	"encoding/json"
@@ -21,6 +20,8 @@ import (
 
 	"aimem/internal/access"
 	"aimem/internal/adapter"
+	"aimem/internal/hubtest"
+	"aimem/internal/ident"
 	"aimem/internal/server"
 	"aimem/internal/store"
 )
@@ -360,7 +361,7 @@ func TestRemoteMCPTaskToolsUseTheCallersAuthority(t *testing.T) {
 func TestTaskCallerForUsesHubTaskToken(t *testing.T) {
 	var mu sync.Mutex
 	var seen []string
-	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	ts := hubtest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		mu.Lock()
 		seen = append(seen, r.Header.Get("Authorization"))
 		mu.Unlock()
@@ -370,8 +371,8 @@ func TestTaskCallerForUsesHubTaskToken(t *testing.T) {
 	defer ts.Close()
 	root := t.TempDir()
 	if err := adapter.SaveHubs(root, map[string]*adapter.HubConfig{
-		"home": {URL: ts.URL, Token: "checkpoint-secret", TaskToken: "aimem_user_alice"},
-		"bare": {URL: ts.URL, Token: "checkpoint-secret"},
+		"home": {URL: ts.URL, Pin: hubtest.Pin(ts), Token: "checkpoint-secret", TaskToken: "aimem_user_alice"},
+		"bare": {URL: ts.URL, Pin: hubtest.Pin(ts), Token: "checkpoint-secret"},
 	}, "home"); err != nil {
 		t.Fatal(err)
 	}
@@ -435,7 +436,7 @@ func TestFacadeTaskStateListing(t *testing.T) {
 	// The probe against a hub.
 	var enabled atomic.Bool
 	var say atomic.Int32 // 0: answer with tasks_enabled; 1: omit it (older hub); 2: 500
-	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	ts := hubtest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/v1/access/identity" || r.URL.Query().Get("project") != "alpha" {
 			t.Errorf("unexpected probe: %s %s", r.Method, r.URL)
 		}
@@ -450,7 +451,7 @@ func TestFacadeTaskStateListing(t *testing.T) {
 	}))
 	defer ts.Close()
 	root := t.TempDir()
-	if err := adapter.SaveHubs(root, map[string]*adapter.HubConfig{"home": {URL: ts.URL, Token: "checkpoint", TaskToken: "aimem_user_alice"}}, "home"); err != nil {
+	if err := adapter.SaveHubs(root, map[string]*adapter.HubConfig{"home": {URL: ts.URL, Pin: hubtest.Pin(ts), Token: "checkpoint", TaskToken: "aimem_user_alice"}}, "home"); err != nil {
 		t.Fatal(err)
 	}
 	dir := t.TempDir()
@@ -492,12 +493,12 @@ func TestFacadeTaskStateListing(t *testing.T) {
 // from the task tools, not a silent trip to the default hub with that
 // hub's credential; the model sees why, and the fixed file works.
 func TestTaskCallerRefusesUnreadableConfig(t *testing.T) {
-	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	ts := hubtest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		t.Errorf("hub must not be called for an unreadable config: %s %s", r.Method, r.URL.Path)
 	}))
 	defer ts.Close()
 	root := t.TempDir()
-	if err := adapter.SaveHubs(root, map[string]*adapter.HubConfig{"home": {URL: ts.URL, Token: "checkpoint", TaskToken: "aimem_user_alice"}}, "home"); err != nil {
+	if err := adapter.SaveHubs(root, map[string]*adapter.HubConfig{"home": {URL: ts.URL, Pin: hubtest.Pin(ts), Token: "checkpoint", TaskToken: "aimem_user_alice"}}, "home"); err != nil {
 		t.Fatal(err)
 	}
 	dir := t.TempDir()
@@ -538,10 +539,10 @@ func callTool(t *testing.T, s *srv, name string, args map[string]any) (string, b
 // error too.
 func TestLocalTaskCallerLargePages(t *testing.T) {
 	f := newHub(t)
-	ts := httptest.NewServer(f.h)
+	ts := hubtest.NewServer(f.h)
 	defer ts.Close()
 	root := t.TempDir()
-	if err := adapter.SaveHubs(root, map[string]*adapter.HubConfig{"home": {URL: ts.URL, Token: "checkpoint", TaskToken: f.alice}}, "home"); err != nil {
+	if err := adapter.SaveHubs(root, map[string]*adapter.HubConfig{"home": {URL: ts.URL, Pin: hubtest.Pin(ts), Token: "checkpoint", TaskToken: f.alice}}, "home"); err != nil {
 		t.Fatal(err)
 	}
 	s := &srv{project: "alpha", taskSetup: func() (TaskCallFunc, error) { return taskCallerIn(root, root) }}
@@ -591,10 +592,10 @@ func TestLocalTaskCallerLargePages(t *testing.T) {
 // The stdio facade end to end against a real hub surface.
 func TestLocalTaskCallerAgainstHub(t *testing.T) {
 	f := newHub(t)
-	ts := httptest.NewServer(f.h)
+	ts := hubtest.NewServer(f.h)
 	defer ts.Close()
 	root := t.TempDir()
-	if err := adapter.SaveHubs(root, map[string]*adapter.HubConfig{"home": {URL: ts.URL, Token: "checkpoint", TaskToken: f.alice}}, "home"); err != nil {
+	if err := adapter.SaveHubs(root, map[string]*adapter.HubConfig{"home": {URL: ts.URL, Pin: hubtest.Pin(ts), Token: "checkpoint", TaskToken: f.alice}}, "home"); err != nil {
 		t.Fatal(err)
 	}
 	s := &srv{project: "alpha", taskSetup: func() (TaskCallFunc, error) { return taskCallerIn(root, root) }}
@@ -612,7 +613,7 @@ func TestLocalTaskCallerAgainstHub(t *testing.T) {
 	}
 	// No credential configured: actionable, and the setup error is not cached as success.
 	root2 := t.TempDir()
-	if err := adapter.SaveHubs(root2, map[string]*adapter.HubConfig{"home": {URL: ts.URL, Token: "checkpoint"}}, "home"); err != nil {
+	if err := adapter.SaveHubs(root2, map[string]*adapter.HubConfig{"home": {URL: ts.URL, Pin: hubtest.Pin(ts), Token: "checkpoint"}}, "home"); err != nil {
 		t.Fatal(err)
 	}
 	s3 := &srv{project: "alpha", taskSetup: func() (TaskCallFunc, error) { return taskCallerIn(root2, root2) }}
@@ -695,7 +696,7 @@ func TestHubTaskTokenRoundTrips(t *testing.T) {
 // with them, and dispatched to the project-scoped epic routes.
 func TestEpicToolsDispatch(t *testing.T) {
 	var got []string
-	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	ts := hubtest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		got = append(got, r.Method+" "+r.URL.String())
 		w.Header().Set("Content-Type", "application/json")
 		w.Write([]byte(`{"epics":[]}`))
@@ -849,5 +850,50 @@ func TestMCPTaskRequiredCapability(t *testing.T) {
 	if text, isErr = call("update_task", map[string]any{"id": task.ID, "title": "needs x", "state": "READY",
 		"expected_revision": task.Revision, "idempotency_key": "cap-clear"}); isErr || strings.Contains(text, "required_capability") {
 		t.Fatalf("an update without the field keeps it: %v %s", isErr, text)
+	}
+}
+
+// The task tools refuse an http or insecure hub entry before anything is
+// sent, and say so; the pinned https entry beside them works.
+func TestTaskCallerRefusesAnUntrustedHubEntry(t *testing.T) {
+	var hits atomic.Int32
+	count := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hits.Add(1)
+		w.Write([]byte(`{"tasks":[]}`))
+	})
+	plain := httptest.NewServer(count)
+	defer plain.Close()
+	secure := hubtest.NewServer(count)
+	defer secure.Close()
+	root, dir := t.TempDir(), t.TempDir()
+	if err := adapter.SaveHubs(root, map[string]*adapter.HubConfig{
+		"plain":  {URL: plain.URL, Token: "checkpoint", TaskToken: "aimem_user_alice"},
+		"loose":  {URL: secure.URL, Insecure: true, Token: "checkpoint", TaskToken: "aimem_user_alice"},
+		"pinned": {URL: secure.URL, Pin: hubtest.Pin(secure), Token: "checkpoint", TaskToken: "aimem_user_alice"},
+	}, "pinned"); err != nil {
+		t.Fatal(err)
+	}
+	callFor := func(name string) (TaskCallFunc, error) {
+		raw, _ := json.Marshal(map[string]string{"project": "alpha", "hub": name})
+		if err := os.WriteFile(filepath.Join(dir, ".aimem.json"), raw, 0600); err != nil {
+			t.Fatal(err)
+		}
+		return taskCallerIn(dir, root)
+	}
+	for _, name := range []string{"plain", "loose"} {
+		_, err := callFor(name)
+		if !errors.Is(err, adapter.ErrUntrustedHub) || !strings.Contains(err.Error(), "nothing was sent") || strings.Contains(err.Error(), "aimem_user_alice") {
+			t.Fatalf("%s: %v", name, err)
+		}
+	}
+	if hits.Load() != 0 {
+		t.Fatalf("a refused entry received %d requests", hits.Load())
+	}
+	call, err := callFor("pinned")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if status, _, err := call(context.Background(), "GET", "/v1/projects/alpha/tasks", nil, nil); err != nil || status != 200 || hits.Load() != 1 {
+		t.Fatalf("pinned: %d %v, %d requests", status, err, hits.Load())
 	}
 }

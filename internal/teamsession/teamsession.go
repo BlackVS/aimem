@@ -22,7 +22,6 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"net/url"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -223,29 +222,11 @@ func Save(path string, f File) error {
 	}
 }
 
-// HubClient is the team-mode client for a hub: https only, with the
-// certificate verified against the hub's ca_file or the system roots.
-// A hub configured with insecure (verification skipped) is refused: a
-// team-mode request carries the individual bearer and a session handle.
-// No proxy, no redirect.
+// HubClient is the team-mode client for a hub: adapter's StrictClient,
+// since a team-mode request carries the individual bearer and a session
+// handle.
 func HubClient(h *adapter.HubConfig) (*http.Client, error) {
-	u, err := url.Parse(h.URL)
-	if err != nil || u.Scheme != "https" || u.Host == "" {
-		return nil, errors.New("team mode needs an https hub URL; the hub's own TLS carries the handle")
-	}
-	if h.Insecure {
-		return nil, errors.New("team mode refuses a hub configured with insecure (certificate verification skipped); " +
-			"record its CA or pin instead (aimem hub add NAME URL TOKEN --ca-file PATH or --pin sha256-BASE64)")
-	}
-	cfg, err := h.TLSConfig() // the hub's ca_file or pin; never skips verification here
-	if err != nil {
-		return nil, err
-	}
-	return &http.Client{
-		Timeout:       30 * time.Second,
-		Transport:     &http.Transport{Proxy: nil, TLSClientConfig: cfg},
-		CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse },
-	}, nil
+	return h.StrictClient(30 * time.Second)
 }
 
 // Credential returns the installation's individual credential for the hub:

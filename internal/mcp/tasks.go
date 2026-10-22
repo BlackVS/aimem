@@ -817,15 +817,10 @@ func taskCallerIn(dir, root string) (TaskCallFunc, error) {
 	if err != nil {
 		return nil, err
 	}
-	client := selected.Hub.HTTPClient()
-	if selected.Source == "project-local" {
-		client = selected.Client()
+	client, err := selected.Client()
+	if err != nil {
+		return nil, fmt.Errorf("task tools refused: %w; nothing was sent to any hub", err)
 	}
-	// Task/team calls may wait up to 25 seconds for an inbox. Clone rather
-	// than changing the shared five-second checkpoint/hook client.
-	taskClient := *client
-	taskClient.Timeout = 30 * time.Second
-	client = &taskClient
 	call := hubCaller(selected.Hub.URL, selected.Token, client)
 	return func(ctx context.Context, method, path string, headers map[string]string, body []byte) (int, []byte, error) {
 		checkCtx, cancel := context.WithTimeout(ctx, 5*time.Second)

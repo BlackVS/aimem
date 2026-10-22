@@ -15,6 +15,7 @@ import (
 	"testing"
 
 	"aimem/internal/adapter"
+	"aimem/internal/hubtest"
 	"aimem/internal/process"
 	"aimem/internal/taskcred"
 )
@@ -41,12 +42,17 @@ type fakeHub struct {
 	setDigest string
 	setCut    bool // answer the set with its body cut short, as a dropped connection leaves it
 	setCalls  atomic.Int64
+	bearers   map[string]bool // every Authorization header received
 }
 
 func (h *fakeHub) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	h.calls.Add(1)
 	h.mu.Lock()
 	defer h.mu.Unlock()
+	if h.bearers == nil {
+		h.bearers = map[string]bool{}
+	}
+	h.bearers[r.Header.Get("Authorization")] = true
 	if h.gatewayStatus != 0 {
 		w.WriteHeader(h.gatewayStatus)
 		return
@@ -141,13 +147,13 @@ func cache(t *testing.T, root string, ref process.Ref, handbook string) {
 // otherwise the hub's own token is what the lookup presents.
 func checkout(t *testing.T, h *fakeHub, local bool) (dir, root string, ts *httptest.Server) {
 	t.Helper()
-	ts = httptest.NewServer(h)
+	ts = hubtest.NewServer(h)
 	t.Cleanup(ts.Close)
 	root, dir = t.TempDir(), t.TempDir()
 	home := t.TempDir()
 	t.Setenv("HOME", home)
 	t.Setenv("USERPROFILE", home)
-	if err := adapter.SaveHubs(root, map[string]*adapter.HubConfig{"hub": {URL: ts.URL, Token: "checkpoint", TaskToken: "aimem_user_global"}}, "hub"); err != nil {
+	if err := adapter.SaveHubs(root, map[string]*adapter.HubConfig{"hub": {URL: ts.URL, Pin: hubtest.Pin(ts), Token: "checkpoint", TaskToken: "aimem_user_global"}}, "hub"); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(filepath.Join(dir, ".aimem.json"), []byte(`{"project":"alpha"}`), 0o600); err != nil {
@@ -498,5 +504,44 @@ func TestLoadRefHonorsADeniedSelectionRead(t *testing.T) {
 		if _, err := r.Deliver(); err == nil {
 			t.Fatalf("status %d: a denied pin delivered", status)
 		}
+	}
+}
+
+// A project-local credential is refused on an insecure hub entry before
+// any request, with the re-add fix rather than a retry. The checkout's
+// default lookup presents the shared checkpoint token, not an individual
+// credential, and keeps the entry's own trust: that is the one exception.
+func TestLocalCredentialRefusesAnInsecureHubEntry(t *testing.T) {
+	h := &fakeHub{}
+	h.change(ready)
+	dir, root, ts := checkout(t, h, true)
+	cache(t, root, selection, "# Handbook\n")
+	if err := adapter.SaveHubs(root, map[string]*adapter.HubConfig{"hub": {URL: ts.URL, Insecure: true, Token: "checkpoint", TaskToken: "aimem_user_global"}}, "hub"); err != nil {
+		t.Fatal(err)
+	}
+	before := h.calls.Load()
+	r := Load(dir, root, "")
+	if r.State != Unavailable || !strings.Contains(r.Fix, "aimem hub list") || strings.Contains(r.Fix, "retry") ||
+		!strings.Contains(r.Detail, "configured with insecure") || strings.Contains(r.Detail, projectSecret) {
+		t.Fatalf("insecure entry: %+v", r)
+	}
+	if h.calls.Load() != before {
+		t.Fatal("the hub was called for a refused entry")
+	}
+
+	h2 := &fakeHub{}
+	h2.change(ready)
+	dir, root, ts = checkout(t, h2, false)
+	cache(t, root, selection, "# Handbook\n")
+	if err := adapter.SaveHubs(root, map[string]*adapter.HubConfig{"hub": {URL: ts.URL, Insecure: true, Token: "checkpoint", TaskToken: "aimem_user_global"}}, "hub"); err != nil {
+		t.Fatal(err)
+	}
+	if r := Load(dir, root, ""); r.State != Ready {
+		t.Fatalf("checkpoint-token lookup on an insecure entry: %+v", r)
+	}
+	h2.mu.Lock()
+	defer h2.mu.Unlock()
+	if len(h2.bearers) != 1 || !h2.bearers["Bearer checkpoint"] {
+		t.Fatalf("the insecure entry must see only the checkpoint token: %v", h2.bearers)
 	}
 }

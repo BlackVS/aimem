@@ -140,9 +140,11 @@ name into `~/.config/aimem/tls/` and serves TLS — the installer prints
 the certificate's pin at the end, and clients record it with
 `aimem hub add ... --pin sha256-BASE64` (or the certificate with
 `--ca-file cert.pem`) and keep verification on; `--insecure` skips
-verification, is a last resort, and team mode refuses it),
+verification, is a last resort, and every path that carries an
+individual credential (task tools, team setup, team mode) refuses it),
 `AIMEM_TLS_CERT`/`AIMEM_TLS_KEY` (explicit cert paths; nothing set =
-plain HTTP), `AIMEM_OPENAI_API_KEY` + `AIMEM_OPENAI_BASE_URL` + models
+plain HTTP, which carries checkpoints but not the task tools, team setup
+or team mode), `AIMEM_OPENAI_API_KEY` + `AIMEM_OPENAI_BASE_URL` + models
 (enables the curation timer's LLM work). Idempotent: run the newer
 release's one-liner to upgrade, with the backup and rollback of
 [Upgrades](#upgrades) (the hub's backup lands in

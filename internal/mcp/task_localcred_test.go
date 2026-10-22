@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"aimem/internal/adapter"
+	"aimem/internal/hubtest"
 	"aimem/internal/taskcred"
 )
 
@@ -37,10 +38,10 @@ func TestConcurrentProjectCredentialsAndRevocation(t *testing.T) {
 	if err := json.Unmarshal(raw, &global); err != nil {
 		t.Fatal(err)
 	}
-	ts := httptest.NewServer(f.h)
+	ts := hubtest.NewServer(f.h)
 	defer ts.Close()
 	root, alpha, beta := t.TempDir(), t.TempDir(), t.TempDir()
-	if err := adapter.SaveHubs(root, map[string]*adapter.HubConfig{"home": {URL: ts.URL, Token: f.env, TaskToken: global.Secret}}, "home"); err != nil {
+	if err := adapter.SaveHubs(root, map[string]*adapter.HubConfig{"home": {URL: ts.URL, Pin: hubtest.Pin(ts), Token: f.env, TaskToken: global.Secret}}, "home"); err != nil {
 		t.Fatal(err)
 	}
 	for dir, project := range map[string]string{alpha: "alpha", beta: "beta"} {

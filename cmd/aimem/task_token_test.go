@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"net/http"
-	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
@@ -12,14 +11,15 @@ import (
 	"testing"
 
 	"aimem/internal/adapter"
+	"aimem/internal/hubtest"
 	"aimem/internal/taskcred"
 )
 
 func TestTaskTokenCLI(t *testing.T) {
 	root, repo := t.TempDir(), t.TempDir()
-	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { w.Write([]byte(`{"scope":"project","task_write":true}`)) }))
+	ts := hubtest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { w.Write([]byte(`{"scope":"project","task_write":true}`)) }))
 	defer ts.Close()
-	if err := adapter.SaveHubs(root, map[string]*adapter.HubConfig{"hub": {URL: ts.URL, TaskToken: "global"}}, "hub"); err != nil {
+	if err := adapter.SaveHubs(root, map[string]*adapter.HubConfig{"hub": {URL: ts.URL, Pin: hubtest.Pin(ts), TaskToken: "global"}}, "hub"); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(filepath.Join(repo, ".aimem.json"), []byte(`{"project":"alpha"}`), 0600); err != nil {
@@ -65,7 +65,7 @@ func TestProcessBootstrapHonorsLocalRequirement(t *testing.T) {
 	t.Setenv("AIMEM_STATE_DIR", root)
 	secret := "aimem_user_" + strings.Repeat("d", 64)
 	var calls atomic.Int32
-	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	ts := hubtest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		calls.Add(1)
 		if r.Header.Get("Authorization") != "Bearer "+secret {
 			t.Error("bootstrap used a broader credential")
@@ -73,7 +73,7 @@ func TestProcessBootstrapHonorsLocalRequirement(t *testing.T) {
 		w.Write([]byte(`{"scope":"project","task_write":true,"tasks_enabled":false}`))
 	}))
 	defer ts.Close()
-	if err := adapter.SaveHubs(root, map[string]*adapter.HubConfig{"hub": {URL: ts.URL, Token: "checkpoint", TaskToken: "global"}}, "hub"); err != nil {
+	if err := adapter.SaveHubs(root, map[string]*adapter.HubConfig{"hub": {URL: ts.URL, Pin: hubtest.Pin(ts), Token: "checkpoint", TaskToken: "global"}}, "hub"); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(filepath.Join(repo, ".aimem.json"), []byte(`{"project":"alpha"}`), 0600); err != nil {
