@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -102,6 +103,29 @@ func TestHubCredentialCommand(t *testing.T) {
 	save(&adapter.HubConfig{URL: g.ts.URL, Token: checkpoint, TaskToken: "legacy-token", CAFile: g.caFile})
 	if st, _ := report("hub"); st.Credential != "other" || st.State != "absent" {
 		t.Fatalf("other: %+v", st)
+	}
+
+	// An entry the strict client refuses: untrusted, with the fix, and the
+	// credential is not sent.
+	before = g.requests.Load()
+	missing := filepath.Join(t.TempDir(), "absent.pem")
+	for name, h := range map[string]*adapter.HubConfig{
+		"http":     {URL: strings.Replace(g.ts.URL, "https://", "http://", 1), Token: checkpoint, TaskToken: secret},
+		"insecure": {URL: g.ts.URL, Token: checkpoint, TaskToken: secret, Insecure: true},
+		"ca_file":  {URL: g.ts.URL, Token: checkpoint, TaskToken: secret, CAFile: missing},
+	} {
+		save(h)
+		want := "aimem hub list"
+		if name == "ca_file" {
+			want = "absent.pem"
+		}
+		if st, txt := report("hub"); st.Credential != "set" || st.State != "untrusted" || !strings.Contains(st.Detail, want) ||
+			!strings.Contains(txt, "not sent") || strings.Contains(txt, "unreachable") {
+			t.Fatalf("%s: %+v %q", name, st, txt)
+		}
+	}
+	if g.requests.Load() != before {
+		t.Fatal("the hub was asked through an untrusted entry")
 	}
 
 	// No answer: unreachable, the credential still reported as set.

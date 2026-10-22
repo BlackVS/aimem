@@ -56,6 +56,19 @@ currently 25); a binary refuses a database newer than it understands.
   checkpoint (writer) token, not an individual credential, and keeps the
   entry's own trust, as checkpoint pushes do. This is part 3 of 3 of
   audit finding A-3.
+- **`aimem hub task-token` warns when the credential will not be sent.**
+  Storing a task credential on an entry the strict client refuses (an
+  `http://` URL, `--insecure`, or a `--ca-file` or `--pin` that cannot be
+  loaded) still succeeds, but now prints `WARNING: hub NAME: the task
+  credential is stored, but aimem will not send it to this entry`,
+  followed by the reason and the fix. The check is local: nothing is sent
+  to the hub.
+- **`aimem hub credential` reports such an entry as `untrusted`.** It
+  used to show it as `unreachable`. The new state, also in `--json`, says
+  the credential was not sent and how to re-add the entry; `unreachable`
+  now means only that the hub did not answer or answered wrongly, and
+  `refused` still means the hub rejected the credential. Scripts that
+  read `aimem hub credential --json` see one new `state` value.
 
 ## [0.10.12] — 2026-10-22
 
