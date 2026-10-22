@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"strings"
 	"sync"
@@ -92,6 +93,58 @@ func (h *HubConfig) Client(timeout time.Duration) *http.Client {
 		IdleConnTimeout: 90 * time.Second,
 	}}
 }
+
+// ErrUntrustedHub matches every StrictClient refusal (errors.Is), so a
+// caller tells a hub entry that must be re-added from a hub that is down.
+var ErrUntrustedHub = errors.New("hub entry refused for an individual credential")
+
+type untrustedHub string
+
+func (e untrustedHub) Error() string        { return string(e) }
+func (e untrustedHub) Is(target error) bool { return target == ErrUntrustedHub }
+
+// StrictClient is the client for every request that carries an individual
+// credential (a user-scoped or project-local task token, a team session):
+// https only, the certificate verified against the hub's ca_file, pin or
+// the system roots, no proxy, no redirect. An entry configured with
+// insecure is refused even when it also records a pin, and loopback gets
+// no exception.
+func (h *HubConfig) StrictClient(timeout time.Duration) (*http.Client, error) {
+	u, err := url.Parse(h.URL)
+	if err != nil || u.Scheme != "https" || u.Host == "" {
+		return nil, untrustedHub("an individual credential is sent only over https; this hub entry is not an https URL — " +
+			"re-add it with an https URL and its pin or CA (aimem hub add NAME https://HOST TOKEN --pin sha256-BASE64 or --ca-file PATH); " +
+			"aimem hub list shows each entry's trust")
+	}
+	if h.Insecure {
+		return nil, untrustedHub("an individual credential is refused on a hub entry configured with insecure (certificate verification skipped) — " +
+			"re-add it with its pin or CA (aimem hub add NAME URL TOKEN --pin sha256-BASE64 or --ca-file PATH); " +
+			"aimem hub list shows each entry's trust")
+	}
+	k := trustKey{caFile: h.CAFile, pin: h.Pin}
+	t, ok := strictTransports.Load(k)
+	if !ok {
+		cfg, err := h.TLSConfig()
+		if err != nil {
+			return nil, err // not cached: a fixed ca_file is picked up by the next call
+		}
+		t, _ = strictTransports.LoadOrStore(k, &http.Transport{
+			Proxy:           nil,
+			TLSClientConfig: cfg,
+			DialContext:     (&net.Dialer{Timeout: 30 * time.Second, KeepAlive: 30 * time.Second}).DialContext,
+			IdleConnTimeout: 90 * time.Second,
+		})
+	}
+	return &http.Client{
+		Timeout:       timeout,
+		Transport:     t.(*http.Transport),
+		CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse },
+	}, nil
+}
+
+// strictTransports shares one transport per trust among strict clients, so
+// callers that build a client per request still reuse connections.
+var strictTransports sync.Map // trustKey -> *http.Transport
 
 // hubClients caches the push client per trust, so frequent checkpoint
 // pushes reuse connections; a trust is read once per process.

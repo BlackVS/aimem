@@ -91,7 +91,8 @@ stops matching: a later `hub add` keeps it, so on each client run
 `aimem hub rm <name>`, then `hub add` without `--pin` (and
 `aimem hub task-token` again if the entry had a task credential).
 `--insecure` skips verification altogether: use it only as a last
-resort.
+resort. Such an entry still carries checkpoints, but the task tools,
+team setup and team mode refuse it.
 
 For a real certificate, point `AIMEM_TLS_CERT` and `AIMEM_TLS_KEY` at the
 files and restart. Prefer delivering renewed certificates **onto** the hub

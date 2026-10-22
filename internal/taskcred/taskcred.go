@@ -15,6 +15,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"aimem/internal/adapter"
 	"aimem/internal/ident"
@@ -272,11 +273,15 @@ func validToken(token string) bool {
 	return err == nil
 }
 
-// Client refuses redirects: a local override is bound to one exact hub URL.
-func (s *Selection) Client() *http.Client {
-	c := *s.Hub.HTTPClient()
-	c.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
-	return &c
+// Client is the hub's strict client: every selection carries an
+// individual credential, project-local or the hub entry's own. A refusal
+// names the hub and wraps adapter.ErrUntrustedHub.
+func (s *Selection) Client() (*http.Client, error) {
+	c, err := s.Hub.StrictClient(30 * time.Second)
+	if err != nil {
+		return nil, fmt.Errorf("hub %q: %w", s.HubName, err)
+	}
+	return c, nil
 }
 
 // Validate uses only the selected credential. Legacy per-hub credentials
@@ -289,8 +294,12 @@ func (s *Selection) Validate(ctx context.Context) error {
 	if err != nil {
 		return errors.New("invalid hub URL for local task credential")
 	}
+	client, err := s.Client()
+	if err != nil {
+		return err
+	}
 	req.Header.Set("Authorization", "Bearer "+s.Token)
-	resp, err := s.Client().Do(req)
+	resp, err := client.Do(req)
 	if err != nil {
 		return fmt.Errorf("cannot validate local task credential: %w", err)
 	}

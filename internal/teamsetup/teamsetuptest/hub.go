@@ -19,6 +19,7 @@ import (
 	"testing"
 
 	"aimem/internal/adapter"
+	"aimem/internal/hubtest"
 	"aimem/internal/process"
 	"aimem/internal/taskcred"
 )
@@ -134,7 +135,7 @@ func New(t *testing.T) (*Hub, *httptest.Server) {
 	sel := Selection
 	h := &Hub{Secret: "aimem_user_" + strings.Repeat("e", 64), Sessions: map[string]*Session{}, ResumeKeys: map[string]string{}, Selection: &sel}
 	h.Identity = map[string]any{"user_id": "u-1", "token_id": "t-1", "name": "pilot-a", "role": "user", "scope": "project", "task_read": "all-projects", "project": "alpha", "task_write": true, "tasks_enabled": true}
-	ts := httptest.NewServer(http.HandlerFunc(h.serve))
+	ts := hubtest.NewServer(http.HandlerFunc(h.serve))
 	t.Cleanup(ts.Close)
 	return h, ts
 }
@@ -472,7 +473,7 @@ func Checkout(t *testing.T, h *Hub, ts *httptest.Server) (string, string) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
 	t.Setenv("USERPROFILE", home)
-	if err := adapter.SaveHubs(root, map[string]*adapter.HubConfig{"hub": {URL: ts.URL, Token: "checkpoint"}}, "hub"); err != nil {
+	if err := adapter.SaveHubs(root, map[string]*adapter.HubConfig{"hub": {URL: ts.URL, Pin: hubtest.Pin(ts), Token: "checkpoint"}}, "hub"); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(filepath.Join(repo, ".aimem.json"), []byte(`{"project":"alpha"}`), 0600); err != nil {

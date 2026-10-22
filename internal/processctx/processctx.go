@@ -307,6 +307,12 @@ func (r *Result) connect(dir, root string) (*adapter.HubConfig, *http.Client, bo
 		if err != nil {
 			return fail(Unavailable, err.Error(), "install this checkout's project credential with `aimem task-token set`, as the account that runs aimem; no other credential is used", "process context unavailable: "+err.Error())
 		}
+		// An entry that may not carry the credential is refused before
+		// anything is sent; it is not an outage, so no retry is offered.
+		strict, err := selected.Client()
+		if err != nil {
+			return fail(Unavailable, err.Error(), "re-add the hub entry with an https URL and its pin or CA (aimem hub add NAME URL TOKEN --pin sha256-BASE64 or --ca-file PATH); aimem hub list shows each entry's trust", "process context unavailable: "+err.Error())
+		}
 		ctx, cancel := context.WithTimeout(context.Background(), hubLookupTimeout)
 		err = selected.Validate(ctx)
 		cancel()
@@ -322,7 +328,7 @@ func (r *Result) connect(dir, root string) (*adapter.HubConfig, *http.Client, bo
 		copyHub := *hub
 		copyHub.Token = selected.Token
 		hub = &copyHub
-		hubClient = selected.Client()
+		hubClient = strict
 	}
 	r.hub, r.hubClient = hub, hubClient
 	return hub, hubClient, true

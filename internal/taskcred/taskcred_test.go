@@ -3,22 +3,25 @@ package taskcred
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"runtime"
 	"strings"
+	"sync/atomic"
 	"testing"
 
 	"aimem/internal/adapter"
+	"aimem/internal/hubtest"
 )
 
 func fixture(t *testing.T) (string, string, *httptest.Server, *string) {
 	t.Helper()
 	root, repo := t.TempDir(), t.TempDir()
 	reply := `{"scope":"project","task_write":true}`
-	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	ts := hubtest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/v1/access/identity" || r.URL.Query().Get("project") != "alpha" {
 			t.Errorf("wrong identity target %s", r.URL)
 		}
@@ -26,7 +29,7 @@ func fixture(t *testing.T) (string, string, *httptest.Server, *string) {
 		w.Write([]byte(reply))
 	}))
 	t.Cleanup(ts.Close)
-	if err := adapter.SaveHubs(root, map[string]*adapter.HubConfig{"hub": {URL: ts.URL, TaskToken: "global", Token: "checkpoint"}}, "hub"); err != nil {
+	if err := adapter.SaveHubs(root, map[string]*adapter.HubConfig{"hub": {URL: ts.URL, Pin: hubtest.Pin(ts), TaskToken: "global", Token: "checkpoint"}}, "hub"); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(filepath.Join(repo, ".aimem.json"), []byte(`{"project":"alpha","hub":"hub","future":{"keep":true}}`), 0600); err != nil {
@@ -163,7 +166,7 @@ func TestRequiredOverrideFailsClosed(t *testing.T) {
 			case "project":
 				err = os.WriteFile(cfg, []byte(`{"project":"beta","task_credential":"local"}`), 0600)
 			case "url":
-				err = adapter.SaveHubs(root, map[string]*adapter.HubConfig{"hub": {URL: "http://elsewhere.invalid", TaskToken: "global"}}, "hub")
+				err = adapter.SaveHubs(root, map[string]*adapter.HubConfig{"hub": {URL: "https://elsewhere.invalid", TaskToken: "global"}}, "hub")
 			case "hub":
 				err = adapter.SaveHubs(root, map[string]*adapter.HubConfig{"other": s.Hub}, "other")
 			case "clone":
@@ -204,14 +207,14 @@ func TestRejectRemoteAndRedirect(t *testing.T) {
 	for _, status := range []int{401, 403, 500, 302} {
 		t.Run(http.StatusText(status), func(t *testing.T) {
 			received := false
-			target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { received = true }))
+			target := hubtest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { received = true }))
 			defer target.Close()
-			ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			ts := hubtest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				w.Header().Set("Location", target.URL)
 				w.WriteHeader(status)
 			}))
 			defer ts.Close()
-			if err := adapter.SaveHubs(root, map[string]*adapter.HubConfig{"hub": {URL: ts.URL, TaskToken: "global"}}, "hub"); err != nil {
+			if err := adapter.SaveHubs(root, map[string]*adapter.HubConfig{"hub": {URL: ts.URL, Pin: hubtest.Pin(ts), TaskToken: "global"}}, "hub"); err != nil {
 				t.Fatal(err)
 			}
 			if err := Set(context.Background(), repo, root, token("a")); err == nil {
@@ -306,5 +309,44 @@ func TestWorktreeAndSubdirectoryBinding(t *testing.T) {
 	}
 	if s, err := Resolve(repo, root); err != nil || s.Token != "global" {
 		t.Fatalf("main checkout after worktree set: %+v %v", s, err)
+	}
+}
+
+// Both sources carry an individual credential, so both get the strict
+// client: an http or insecure entry is refused before any request, and a
+// pinned https entry validates.
+func TestSelectionStrictClient(t *testing.T) {
+	var hits atomic.Int32
+	count := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hits.Add(1)
+		w.Write([]byte(`{"scope":"project","task_write":true}`))
+	})
+	plain := httptest.NewServer(count)
+	defer plain.Close()
+	secure := hubtest.NewServer(count)
+	defer secure.Close()
+	secret := token("s")
+	for name, hub := range map[string]*adapter.HubConfig{
+		"http":     {URL: plain.URL, Pin: hubtest.Pin(secure)},
+		"insecure": {URL: secure.URL, Insecure: true},
+	} {
+		for _, source := range []string{"project-local", "user-hub"} {
+			s := &Selection{Source: source, Project: "alpha", HubName: "hub", Hub: hub, Token: secret}
+			_, err := s.Client()
+			if !errors.Is(err, adapter.ErrUntrustedHub) || !strings.Contains(err.Error(), `hub "hub"`) || strings.Contains(err.Error(), secret) {
+				t.Fatalf("%s, %s: %v", name, source, err)
+			}
+		}
+		s := &Selection{Source: "project-local", Project: "alpha", HubName: "hub", Hub: hub, Token: secret}
+		if err := s.Validate(context.Background()); !errors.Is(err, adapter.ErrUntrustedHub) {
+			t.Fatalf("%s: validated: %v", name, err)
+		}
+	}
+	if hits.Load() != 0 {
+		t.Fatalf("a refused entry received %d requests", hits.Load())
+	}
+	s := &Selection{Source: "project-local", Project: "alpha", HubName: "hub", Hub: &adapter.HubConfig{URL: secure.URL, Pin: hubtest.Pin(secure)}, Token: secret}
+	if err := s.Validate(context.Background()); err != nil || hits.Load() != 1 {
+		t.Fatalf("pinned https: %v, %d requests", err, hits.Load())
 	}
 }

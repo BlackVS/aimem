@@ -5,7 +5,6 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
-	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"slices"
@@ -13,6 +12,7 @@ import (
 	"testing"
 
 	"aimem/internal/adapter"
+	"aimem/internal/hubtest"
 	"aimem/internal/process"
 	"aimem/internal/taskcred"
 )
@@ -25,7 +25,7 @@ import (
 func TestProcessContextThroughLocalMCPInABoundCheckout(t *testing.T) {
 	secret := "aimem_user_" + strings.Repeat("e", 64)
 	ref := process.Ref{Repo: "https://127.0.0.1:1/process.git", Commit: strings.Repeat("cd", 20), Manifest: "proc/manifest.json"}
-	hub := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	hub := hubtest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Header.Get("Authorization") != "Bearer "+secret {
 			w.WriteHeader(http.StatusUnauthorized)
 			return
@@ -42,7 +42,7 @@ func TestProcessContextThroughLocalMCPInABoundCheckout(t *testing.T) {
 	defer hub.Close()
 
 	dir, state := t.TempDir(), t.TempDir()
-	if err := adapter.SaveHubs(state, map[string]*adapter.HubConfig{"hub": {URL: hub.URL, Token: "checkpoint"}}, "hub"); err != nil {
+	if err := adapter.SaveHubs(state, map[string]*adapter.HubConfig{"hub": {URL: hub.URL, Pin: hubtest.Pin(hub), Token: "checkpoint"}}, "hub"); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(filepath.Join(dir, ".aimem.json"), []byte(`{"project":"alpha"}`), 0o600); err != nil {

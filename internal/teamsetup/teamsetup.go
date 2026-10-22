@@ -459,6 +459,9 @@ func (s *setup) checkIntegration() bool {
 // tasks are on. Enrollment is not visible here; join reveals it.
 func (s *setup) checkIdentity() bool {
 	status, body, err := s.hubGet("/v1/access/identity?project=" + url.QueryEscape(s.sel.Project))
+	if errors.Is(err, adapter.ErrUntrustedHub) {
+		return s.fail("identity", err.Error(), "re-add the hub entry with an https URL and its pin or CA, then re-run; aimem hub list shows each entry's trust")
+	}
 	if err != nil {
 		return s.fail("identity", "hub unreachable: "+err.Error(), "check the hub URL and network, then re-run")
 	}
@@ -1238,11 +1241,11 @@ func (s *setup) hubGet(path string) (int, []byte, error) {
 	if err != nil {
 		return 0, nil, err
 	}
-	req.Header.Set("Authorization", "Bearer "+s.sel.Token)
-	client := s.sel.Hub.HTTPClient()
-	if s.sel.Source == "project-local" {
-		client = s.sel.Client()
+	client, err := s.sel.Client()
+	if err != nil {
+		return 0, nil, err
 	}
+	req.Header.Set("Authorization", "Bearer "+s.sel.Token)
 	resp, err := client.Do(req)
 	if err != nil {
 		return 0, nil, err
