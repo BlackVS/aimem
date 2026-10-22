@@ -98,10 +98,16 @@ func (h *HubConfig) Client(timeout time.Duration) *http.Client {
 // caller tells a hub entry that must be re-added from a hub that is down.
 var ErrUntrustedHub = errors.New("hub entry refused for an individual credential")
 
-type untrustedHub string
+// untrustedHub is a refusal; cause is the trust's own error when the
+// entry's ca_file or pin could not be loaded.
+type untrustedHub struct {
+	msg   string
+	cause error
+}
 
-func (e untrustedHub) Error() string        { return string(e) }
-func (e untrustedHub) Is(target error) bool { return target == ErrUntrustedHub }
+func (e *untrustedHub) Error() string        { return e.msg }
+func (e *untrustedHub) Unwrap() error        { return e.cause }
+func (e *untrustedHub) Is(target error) bool { return target == ErrUntrustedHub }
 
 // StrictClient is the client for every request that carries an individual
 // credential (a user-scoped or project-local task token, a team session):
@@ -112,21 +118,22 @@ func (e untrustedHub) Is(target error) bool { return target == ErrUntrustedHub }
 func (h *HubConfig) StrictClient(timeout time.Duration) (*http.Client, error) {
 	u, err := url.Parse(h.URL)
 	if err != nil || u.Scheme != "https" || u.Host == "" {
-		return nil, untrustedHub("an individual credential is sent only over https; this hub entry is not an https URL — " +
+		return nil, &untrustedHub{msg: "an individual credential is sent only over https; this hub entry is not an https URL — " +
 			"re-add it with an https URL and its pin or CA (aimem hub add NAME https://HOST TOKEN --pin sha256-BASE64 or --ca-file PATH); " +
-			"aimem hub list shows each entry's trust")
+			"aimem hub list shows each entry's trust"}
 	}
 	if h.Insecure {
-		return nil, untrustedHub("an individual credential is refused on a hub entry configured with insecure (certificate verification skipped) — " +
+		return nil, &untrustedHub{msg: "an individual credential is refused on a hub entry configured with insecure (certificate verification skipped) — " +
 			"re-add it with its pin or CA (aimem hub add NAME URL TOKEN --pin sha256-BASE64 or --ca-file PATH); " +
-			"aimem hub list shows each entry's trust")
+			"aimem hub list shows each entry's trust"}
 	}
 	k := trustKey{caFile: h.CAFile, pin: h.Pin}
 	t, ok := strictTransports.Load(k)
 	if !ok {
 		cfg, err := h.TLSConfig()
 		if err != nil {
-			return nil, err // not cached: a fixed ca_file is picked up by the next call
+			// Not cached: a fixed ca_file is picked up by the next call.
+			return nil, &untrustedHub{msg: err.Error(), cause: err}
 		}
 		t, _ = strictTransports.LoadOrStore(k, &http.Transport{
 			Proxy:           nil,

@@ -311,7 +311,7 @@ func (r *Result) connect(dir, root string) (*adapter.HubConfig, *http.Client, bo
 		// anything is sent; it is not an outage, so no retry is offered.
 		strict, err := selected.Client()
 		if err != nil {
-			return fail(Unavailable, err.Error(), "re-add the hub entry with an https URL and its pin or CA (aimem hub add NAME URL TOKEN --pin sha256-BASE64 or --ca-file PATH); aimem hub list shows each entry's trust", "process context unavailable: "+err.Error())
+			return fail(Unavailable, err.Error(), "re-add the hub entry with an https URL and its pin or CA (aimem hub add NAME URL TOKEN --pin sha256-BASE64 or --ca-file PATH), or repair its unreadable ca_file; aimem hub list shows each entry's trust", "process context unavailable: "+err.Error())
 		}
 		ctx, cancel := context.WithTimeout(context.Background(), hubLookupTimeout)
 		err = selected.Validate(ctx)

@@ -5,6 +5,8 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -25,8 +27,9 @@ func strictGet(h *HubConfig) error {
 
 // The strict client reaches a hub only over verified https: a private CA
 // or a pin is trusted; plain http (loopback included), insecure (even with
-// a pin beside it), a wrong pin and the system roots are not. The two
-// entry refusals match ErrUntrustedHub and are made before any dial.
+// a pin beside it), a wrong pin and the system roots are not. An entry it
+// cannot use (http, insecure, a trust that does not load) is refused with
+// ErrUntrustedHub before any client exists.
 func TestStrictClientTrust(t *testing.T) {
 	srv, ca, pin := trustServer(t)
 	for name, h := range map[string]*HubConfig{
@@ -37,8 +40,7 @@ func TestStrictClientTrust(t *testing.T) {
 			t.Fatalf("%s: %v", name, err)
 		}
 	}
-	var plainHits atomic.Int32
-	plain := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) { plainHits.Add(1) }))
+	plain := httptest.NewServer(http.NotFoundHandler())
 	defer plain.Close()
 	for name, tc := range map[string]struct {
 		h    *HubConfig
@@ -54,8 +56,10 @@ func TestStrictClientTrust(t *testing.T) {
 			t.Fatalf("%s: %v", name, err)
 		}
 	}
-	if plainHits.Load() != 0 {
-		t.Fatal("a refused entry was dialed")
+	missing := filepath.Join(t.TempDir(), "absent.pem")
+	if _, err := (&HubConfig{URL: srv.URL, CAFile: missing}).StrictClient(5 * time.Second); !errors.Is(err, ErrUntrustedHub) ||
+		!errors.Is(err, os.ErrNotExist) || !strings.Contains(err.Error(), "absent.pem") {
+		t.Fatalf("unreadable ca_file: %v", err)
 	}
 	wrong := "sha256-" + base64.StdEncoding.EncodeToString(make([]byte, 32))
 	for name, h := range map[string]*HubConfig{

@@ -39,8 +39,10 @@ currently 25); a binary refuses a database newer than it understands.
   configured with `--insecure`, even when a pin is also recorded, and a
   plain `http://` entry, loopback included. It uses no proxy from the
   environment and follows no redirect. The refusal is made before any
-  request is sent, and it names `aimem hub list` and the `hub add` that
-  fixes it. The paths it covers:
+  request is sent. For an http or `--insecure` entry it names
+  `aimem hub list` and the `hub add` that fixes it; an entry whose
+  `--ca-file` or `--pin` cannot be loaded is refused with that error. The
+  paths it covers:
   - the MCP task tools (the user-scoped `aimem hub task-token` and a
     checkout's project-local credential alike);
   - process context with a project-local credential;

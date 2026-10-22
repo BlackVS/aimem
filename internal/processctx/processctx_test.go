@@ -42,12 +42,17 @@ type fakeHub struct {
 	setDigest string
 	setCut    bool // answer the set with its body cut short, as a dropped connection leaves it
 	setCalls  atomic.Int64
+	bearers   map[string]bool // every Authorization header received
 }
 
 func (h *fakeHub) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	h.calls.Add(1)
 	h.mu.Lock()
 	defer h.mu.Unlock()
+	if h.bearers == nil {
+		h.bearers = map[string]bool{}
+	}
+	h.bearers[r.Header.Get("Authorization")] = true
 	if h.gatewayStatus != 0 {
 		w.WriteHeader(h.gatewayStatus)
 		return
@@ -528,10 +533,15 @@ func TestLocalCredentialRefusesAnInsecureHubEntry(t *testing.T) {
 	h2.change(ready)
 	dir, root, ts = checkout(t, h2, false)
 	cache(t, root, selection, "# Handbook\n")
-	if err := adapter.SaveHubs(root, map[string]*adapter.HubConfig{"hub": {URL: ts.URL, Insecure: true, Token: "checkpoint"}}, "hub"); err != nil {
+	if err := adapter.SaveHubs(root, map[string]*adapter.HubConfig{"hub": {URL: ts.URL, Insecure: true, Token: "checkpoint", TaskToken: "aimem_user_global"}}, "hub"); err != nil {
 		t.Fatal(err)
 	}
 	if r := Load(dir, root, ""); r.State != Ready {
 		t.Fatalf("checkpoint-token lookup on an insecure entry: %+v", r)
+	}
+	h2.mu.Lock()
+	defer h2.mu.Unlock()
+	if len(h2.bearers) != 1 || !h2.bearers["Bearer checkpoint"] {
+		t.Fatalf("the insecure entry must see only the checkpoint token: %v", h2.bearers)
 	}
 }

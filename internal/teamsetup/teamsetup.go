@@ -460,7 +460,7 @@ func (s *setup) checkIntegration() bool {
 func (s *setup) checkIdentity() bool {
 	status, body, err := s.hubGet("/v1/access/identity?project=" + url.QueryEscape(s.sel.Project))
 	if errors.Is(err, adapter.ErrUntrustedHub) {
-		return s.fail("identity", err.Error(), "re-add the hub entry with an https URL and its pin or CA, then re-run; aimem hub list shows each entry's trust")
+		return s.fail("identity", err.Error(), "re-add the hub entry with an https URL and its pin or CA (or repair its unreadable ca_file), then re-run; aimem hub list shows each entry's trust")
 	}
 	if err != nil {
 		return s.fail("identity", "hub unreachable: "+err.Error(), "check the hub URL and network, then re-run")
