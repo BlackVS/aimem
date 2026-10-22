@@ -2397,6 +2397,7 @@ func hubCmd(args []string) error {
 			return err
 		}
 		fmt.Printf("task credential stored for hub %q; MCP task tools use it\n", pos[0])
+		hubTaskTokenWarn(hubWarnOut, pos[0], h)
 		return nil
 	case "add":
 		fs := flag.NewFlagSet("hub add", flag.ExitOnError)

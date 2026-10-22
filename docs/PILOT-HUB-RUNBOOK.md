@@ -334,6 +334,7 @@ The last line is the check the member's identity proof (step 7) depends on, and 
 - `individual credential none`: `aimem hub task-token` was not run in this home.
 - `the stored credential is not an individual credential`: the home holds something other than the member's user token.
 - `refused by the hub`: the hub does not accept the token (revoked, expired or unknown). Issue a new one and provision the home again.
+- `not sent: aimem will not send it to this entry`: the home's `hub.json` entry is not https, is `--insecure`, or its CA file or pin cannot be loaded (state `untrusted` in `--json`); the detail in parentheses names which, and how to re-add the entry.
 - `the hub is unreachable`: the URL, the CA file or the pin in the home's `hub.json` does not match the hub's TLS listener; the detail in parentheses names the failure.
 - `active, scope project` or `scope read-only`: the token is not user-scoped and cannot enter team mode.
 

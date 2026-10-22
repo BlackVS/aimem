@@ -36,12 +36,15 @@ type hubCredentialStatus struct {
 	Credential string `json:"credential"`
 	// State is the hub's answer for the stored credential: "active",
 	// "refused" (the hub does not accept it: revoked, expired or unknown),
-	// "unreachable" (no answer), or "absent" when nothing is stored.
+	// "unreachable" (no answer), "untrusted" (not sent: the entry is not
+	// https, is --insecure, or its trust does not load), or "absent" when
+	// nothing is stored.
 	State   string `json:"state"`
 	Scope   string `json:"scope,omitempty"` // user, project or read-only, as the hub reports it
 	UserID  string `json:"user_id,omitempty"`
 	TokenID string `json:"token_id,omitempty"`
-	// Detail explains an unreachable hub; it never carries a secret.
+	// Detail explains an unreachable or untrusted hub; it never carries a
+	// secret.
 	Detail string `json:"detail,omitempty"`
 }
 
@@ -98,6 +101,9 @@ func probeHubCredential(name string, h *adapter.HubConfig) hubCredentialStatus {
 	client, err := teamsession.HubClient(h)
 	if err != nil {
 		st.State, st.Detail = "unreachable", err.Error()
+		if errors.Is(err, adapter.ErrUntrustedHub) {
+			st.State = "untrusted"
+		}
 		return st
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
@@ -153,6 +159,8 @@ func (st hubCredentialStatus) text() string {
 		return fmt.Sprintf("hub %s: the stored credential is not an individual credential (%s)", st.Hub, st.Detail)
 	case st.State == "active":
 		return fmt.Sprintf("hub %s: individual credential set, active, scope %s (user %s, token %s)", st.Hub, st.Scope, st.UserID, st.TokenID)
+	case st.State == "untrusted":
+		return fmt.Sprintf("hub %s: individual credential set, not sent: aimem will not send it to this entry (%s)", st.Hub, st.Detail)
 	case st.State == "refused":
 		return fmt.Sprintf("hub %s: individual credential set, refused by the hub (revoked, expired or unknown); install a new one with: aimem hub task-token %s <token>", st.Hub, st.Hub)
 	}

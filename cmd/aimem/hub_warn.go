@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"os"
 	"strings"
 	"time"
 
@@ -75,4 +76,16 @@ func hubTokenRole(h *adapter.HubConfig) (role, name string, err error) {
 		return "", "", fmt.Errorf("the hub's answer is not an identity report")
 	}
 	return id.Role, id.Name, nil
+}
+
+// hubWarnOut receives `aimem hub task-token`'s warning; tests replace it.
+var hubWarnOut io.Writer = os.Stderr
+
+// hubTaskTokenWarn says when a task credential was stored on an entry the
+// strict client refuses (not https, --insecure, or a trust that does not
+// load): it is kept, but no path will send it there. Offline.
+func hubTaskTokenWarn(w io.Writer, name string, h *adapter.HubConfig) {
+	if _, err := h.StrictClient(time.Second); err != nil {
+		fmt.Fprintf(w, "WARNING: hub %s: the task credential is stored, but aimem will not send it to this entry: %s\n", name, err)
+	}
 }
