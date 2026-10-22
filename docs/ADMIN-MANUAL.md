@@ -10,20 +10,20 @@ One-liner in any project directory (installs the binary if missing, then
 wires the project):
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/BlackVS/aimem/v0.10.11/boot.sh | bash
+curl -fsSL https://raw.githubusercontent.com/BlackVS/aimem/v0.10.12/boot.sh | bash
 ```
 
 Windows (supported, tested less than Linux), in a PowerShell window
 that is already open:
 
 ```powershell
-irm https://raw.githubusercontent.com/BlackVS/aimem/v0.10.11/boot.ps1 | iex
+irm https://raw.githubusercontent.com/BlackVS/aimem/v0.10.12/boot.ps1 | iex
 ```
 
 From cmd, or from the Run dialog (Win+R) for an upgrade:
 
 ```bat
-powershell -NoProfile -ExecutionPolicy Bypass -Command "irm https://raw.githubusercontent.com/BlackVS/aimem/v0.10.11/boot.ps1 | iex"
+powershell -NoProfile -ExecutionPolicy Bypass -Command "irm https://raw.githubusercontent.com/BlackVS/aimem/v0.10.12/boot.ps1 | iex"
 ```
 
 Environment knobs for the boot script:
@@ -70,21 +70,21 @@ that already holds `.aimem.json`, and it never wires the home directory.
 `AIMEM_USER_ONLY=1` upgrades the user level and wires nothing:
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/BlackVS/aimem/v0.10.11/boot.sh | AIMEM_USER_ONLY=1 bash
+curl -fsSL https://raw.githubusercontent.com/BlackVS/aimem/v0.10.12/boot.sh | AIMEM_USER_ONLY=1 bash
 ```
 
 In a PowerShell window that is already open (the setting stays for that
 window):
 
 ```powershell
-$env:AIMEM_USER_ONLY = '1'; irm https://raw.githubusercontent.com/BlackVS/aimem/v0.10.11/boot.ps1 | iex
+$env:AIMEM_USER_ONLY = '1'; irm https://raw.githubusercontent.com/BlackVS/aimem/v0.10.12/boot.ps1 | iex
 ```
 
 From cmd (likewise for that window):
 
 ```bat
 set AIMEM_USER_ONLY=1
-powershell -NoProfile -ExecutionPolicy Bypass -Command "irm https://raw.githubusercontent.com/BlackVS/aimem/v0.10.11/boot.ps1 | iex"
+powershell -NoProfile -ExecutionPolicy Bypass -Command "irm https://raw.githubusercontent.com/BlackVS/aimem/v0.10.12/boot.ps1 | iex"
 ```
 
 On an existing installation the installer:
@@ -129,7 +129,7 @@ Fresh host (Debian/Ubuntu LXC or VM), as root — one command does user,
 binary, env, units, timers:
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/BlackVS/aimem/v0.10.11/install-hub.sh | bash
+curl -fsSL https://raw.githubusercontent.com/BlackVS/aimem/v0.10.12/install-hub.sh | bash
 ```
 
 Knobs (env): `AIMEM_HUB_USER` (default sessiond), `AIMEM_HTTP_LISTEN`
