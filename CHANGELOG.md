@@ -13,6 +13,51 @@ currently 25); a binary refuses a database newer than it understands.
 
 ## [Unreleased]
 
+## [0.10.12] — 2026-10-22
+
+Clients no longer get the hub's admin token by default. The hub installer
+stops printing the env token for clients. Instead it prints `aimem token
+add <machine>`, which gives each machine its own writer token, and a
+`--pin` for its self-signed certificate. `aimem hub add` now warns about
+an admin token, a URL that is not https and `--insecure`. A team
+conversation's task list carries the board's counts, and a NUL byte in a
+search query is refused as an invalid query. No schema change. Includes
+PR #263, #264, #265 and #266.
+
+### Upgrade notes
+
+- **Hubs first, then workstations.** A 0.10.11 hub refuses the task-counts
+  read in a team conversation, so a newer client's team `list_tasks` page
+  comes back without `counts` until the hub is upgraded. Upgrade the hub
+  with its one-liner before the clients.
+- **No schema change.** The schema stays at 25, so going back is putting
+  the 0.10.11 binary back; no state copy is needed for that.
+- **The env token belongs on no client.** `AIMEM_HTTP_TOKEN` in the hub's
+  env file is the hub's admin credential. A client set up from an older
+  installer's output holds it and acts as hub admin. `aimem hub add` on
+  0.10.12 says so when it is given that token. To move such a client to
+  its own writer token, and then to replace the env token, follow
+  ADMIN-MANUAL "Clients that hold the env token".
+- **The installer prints `--pin`.** On a hub with its self-signed
+  certificate, every run of the hub one-liner, an upgrade included,
+  prints the certificate's pin. A client added with
+  `--pin sha256-...` verifies the hub instead of skipping verification
+  with `--insecure`.
+- **A replaced certificate needs `hub rm`, then `hub add`.** A later `hub
+  add` keeps a recorded pin, so once a real certificate replaces the
+  self-signed one, run `aimem hub rm <name>` on each pinned client, then
+  `hub add` without `--pin`, and `aimem hub task-token` again if the entry
+  had a task credential.
+- **The next release refuses what this one warns about.** In the release
+  after 0.10.12, the individual-credential paths (the MCP task tools,
+  process context, team setup and the task-credential check) will refuse
+  an entry that is not https or that skips verification with
+  `--insecure`. `aimem hub list` shows each entry's URL and its
+  `[insecure: self-signed]`, `ca-file:` or `pin:` trust; move every
+  entry to https with `--pin` or `--ca-file` before that release.
+- **No setting changes.** No new environment setting, and no route
+  changes beyond the team-mode counts read.
+
 ### Added
 
 - **Task counts in a team conversation.** `GET /v1/projects/{p}/tasks/counts`

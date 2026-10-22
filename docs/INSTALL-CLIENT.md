@@ -17,20 +17,20 @@ session, so wiring the home would reach every project under it.
 **Linux / macOS**
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/BlackVS/aimem/v0.10.11/boot.sh | bash
+curl -fsSL https://raw.githubusercontent.com/BlackVS/aimem/v0.10.12/boot.sh | bash
 ```
 
 **Windows**, in a PowerShell window that is already open:
 
 ```powershell
-irm https://raw.githubusercontent.com/BlackVS/aimem/v0.10.11/boot.ps1 | iex
+irm https://raw.githubusercontent.com/BlackVS/aimem/v0.10.12/boot.ps1 | iex
 ```
 
 From cmd, or from the Run dialog (Win+R) for an upgrade (it starts in
 your home directory, which is never wired):
 
 ```bat
-powershell -NoProfile -ExecutionPolicy Bypass -Command "irm https://raw.githubusercontent.com/BlackVS/aimem/v0.10.11/boot.ps1 | iex"
+powershell -NoProfile -ExecutionPolicy Bypass -Command "irm https://raw.githubusercontent.com/BlackVS/aimem/v0.10.12/boot.ps1 | iex"
 ```
 
 In an open PowerShell window, use the direct form. On one host the
