@@ -185,6 +185,7 @@ func (s *Server) testProvider(w http.ResponseWriter, r *http.Request) {
 		s.fail(w, http.StatusBadRequest, fmt.Errorf("%s", why))
 		return
 	}
+	afterProbeResolve()
 	start := time.Now()
 	var tokens int64
 	var err error
@@ -200,13 +201,7 @@ func (s *Server) testProvider(w http.ResponseWriter, r *http.Request) {
 		_, u, err = ex.Complete("Reply with the single word: ok")
 		tokens = u.InputTokens + u.OutputTokens
 	} else {
-		client := providerClient()
-		if _, bound, _ := provider.ResolveBound(s.reg.Root(), req.Model); !bound {
-			// The AIMEM_OPENAI_* pair is the host operator's own setting,
-			// which the admin API cannot change.
-			client = &http.Client{Timeout: 15 * time.Second}
-		}
-		tokens, err = probeOpenAI(client, ep, req.Op)
+		tokens, err = probeOpenAI(probeClient(ep), ep, req.Op)
 	}
 	if err != nil {
 		// Same shape as the success line below: a failure nobody can
@@ -288,6 +283,22 @@ func (s *Server) providerModels(w http.ResponseWriter, r *http.Request) {
 		ids = append(ids, strings.TrimPrefix(d.ID, "models/"))
 	}
 	s.ok(w, map[string]any{"models": ids})
+}
+
+// afterProbeResolve lets a test change the registry between resolution
+// and the probe, the window a concurrent admin request can hit.
+var afterProbeResolve = func() {}
+
+// probeClient guards every registry endpoint. The AIMEM_OPENAI_* pair
+// is the host operator's own setting, which the admin API cannot change.
+// The choice rests on ep alone, resolved in one registry read: a second
+// read could see a concurrent unbind and mistake a registry endpoint for
+// the environment's.
+func probeClient(ep provider.Endpoint) *http.Client {
+	if ep.FromEnv {
+		return &http.Client{Timeout: 15 * time.Second}
+	}
+	return providerClient()
 }
 
 // probeOpenAI is the HTTP half of the test button: one tiny embeddings or

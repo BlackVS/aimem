@@ -12,6 +12,8 @@ import (
 	"strings"
 	"sync"
 	"testing"
+
+	"aimem/internal/provider"
 )
 
 // Save-time resolution never touches real DNS in tests: every name is
@@ -180,7 +182,8 @@ func TestProviderButtonsDialGuard(t *testing.T) {
 	}))
 	defer up.Close()
 	t.Setenv(allowPrivateEnv, "1")
-	h, _ := loggedServer(t)
+	s, _ := testServer(t)
+	h := s.Handler()
 	if w := setProvider(t, h, "p", up.URL, "k"); w.Code != 200 {
 		t.Fatalf("set with the flag: %d %s", w.Code, w.Body)
 	}
@@ -208,6 +211,28 @@ func TestProviderButtonsDialGuard(t *testing.T) {
 	if w := req(t, h, "POST", "/v1/config/providers/test", `{"model":"unbound","op":"chat"}`); w.Code != 200 {
 		t.Fatalf("probe of the environment's endpoint: %d %s", w.Code, w.Body)
 	}
+
+	// The client follows the resolved endpoint, never a later read of the
+	// registry: a registry endpoint stays guarded when its binding goes
+	// away between resolution and the probe (a concurrent unbind).
+	afterProbeResolve = func() {
+		reg := provider.Load(s.reg.Root())
+		delete(reg.Models, "p/m")
+		if err := reg.Save(s.reg.Root()); err != nil {
+			t.Error(err)
+		}
+	}
+	t.Cleanup(func() { afterProbeResolve = func() {} })
+	if w := req(t, h, "POST", "/v1/config/providers/test", `{"model":"p/m","op":"chat"}`); w.Code != http.StatusBadGateway ||
+		!strings.Contains(w.Body.String(), "loopback") {
+		t.Fatalf("registry endpoint probed unguarded after a concurrent unbind: %d %s", w.Code, w.Body)
+	}
+	afterProbeResolve = func() {}
+	mu.Lock()
+	if hits != 1 {
+		t.Fatalf("only the environment probe may reach the upstream, got %d hits", hits)
+	}
+	mu.Unlock()
 
 	t.Setenv(allowPrivateEnv, "1")
 	if w := req(t, h, "GET", "/v1/config/providers/p/models", ""); w.Code != 200 || !strings.Contains(w.Body.String(), `"m"`) {
