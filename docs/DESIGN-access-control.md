@@ -1,5 +1,9 @@
 # Users, Groups, Project Access, And Tokens
 
+**Historical versions.** The releases this document names are the baseline it
+was written against, not the current minimum, which
+[client setup](INSTALL-CLIENT.md) and the quickstarts state.
+
 Status: **access foundation and task integration released; console access
 management pending (stage 4)**. Foundation: PR #35; task service and page:
 PR #39-41, released in v0.4.0; identity directory: PR #52, released in

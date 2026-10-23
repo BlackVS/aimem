@@ -1,5 +1,9 @@
 # AIForge proposal: split aimem and aicrew
 
+**Historical versions.** The releases this document names are the baseline it
+was written against, not the current minimum, which
+[client setup](INSTALL-CLIENT.md) and the quickstarts state.
+
 Status: **Architecture boundary for review**. No implementation or removal approved yet.
 Updated: 2026-09-25. Source baseline: aimem v0.7.3 (`2c23ba0`).
 The Q1-Q5 directions below are agreed with the operator; detailed protocols remain separate review gates.

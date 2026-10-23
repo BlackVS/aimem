@@ -18,14 +18,14 @@ are recorded in the rollout task. Keep private deployment details out of PRs.
    rollback requires the matching pre-upgrade state, losing any subsequent
    writes. Never run old and new binaries against the same state concurrently.
 3. Upgrade the hub using the established [administrator deployment
-   procedure](ADMIN-MANUAL.md). Verify `aimem version` and `aimem health`
+   procedure](../ADMIN-MANUAL.md). Verify `aimem version` and `aimem health`
    as the service user. Check project counts, task availability and existing
    grants/token scopes against the pre-upgrade record. Existing project and
    read-only tokens must keep their restrictions.
-4. Upgrade every participating client via [client setup](INSTALL-CLIENT.md),
+4. Upgrade every participating client via [client setup](../INSTALL-CLIENT.md),
    verify `aimem version`, and restart agent sessions. Older clients ignore
    the local marker. A marker cannot impose credential selection on them.
-5. Follow the [Kanban quickstart](KANBAN-QUICKSTART.md) with disposable test
+5. Follow the [Kanban quickstart](../KANBAN-QUICKSTART.md) with disposable test
    projects and credentials approved for the deployment. Record versions and
    results below before using the feature for real project onboarding.
 

@@ -31,7 +31,7 @@ contracts. Do not maintain a second checklist of task statuses here.
   the checkout-bound local MCP, so a sandboxed shell needs no credential:
   v0.7.2. Portable team context, increment 1a-1c of the
   [contract](DESIGN-portable-team-context.md): v0.7.3, PR #102-108, with the
-  [rollout and pilot checklist](TEAM-ROLLOUT-0.7.3.md). The live
+  [rollout and pilot checklist](archive/TEAM-ROLLOUT-0.7.3.md). The live
   cross-platform pilot is still pending.
 
 ## Next delivery sequence
@@ -48,7 +48,7 @@ No long-lived aimem redesign branch is needed; use normal reviewed feature PRs.
 
 The owner brought team coordination ahead of access-console implementation
 on 2026-09-21, and on 2026-09-23 approved the staged direction of the
-[portable teams review](TEAM-MULTIPROJECT-REVIEW.md): portable instruction
+[portable teams review](archive/TEAM-MULTIPROJECT-REVIEW.md): portable instruction
 delivery first, then user-level agent contexts and multi-project teams, each
 behind its own design and review gates.
 
@@ -60,7 +60,7 @@ behind its own design and review gates.
    `unavailable`; 1d a hub-served process bundle only if a pilot host lacks
    Git access to the process repository. 1a-1c are delivered (v0.7.3). Next
    the single-project cross-platform pilot with every member upgraded, per
-   the [rollout and pilot checklist](TEAM-ROLLOUT-0.7.3.md). The separate Codex shell
+   the [rollout and pilot checklist](archive/TEAM-ROLLOUT-0.7.3.md). The separate Codex shell
    runner failure is not fixed by this work.
 2. User-level agent context independent of the checkout (review increment 2),
    after its own design approval. It preserves checkout mode and strict

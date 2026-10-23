@@ -7,10 +7,10 @@ A shell the client sandboxes under another account (the Windows pilot's
 case) cannot read that credential; the MCP process can, so joining and
 resuming do not depend on the shell. The same tools deliver the role's team
 guidance and the project's selected process with a readiness report, so a
-member needs no aimem checkout and no playbook file. Agent machines need
-aimem v0.7.3 or later; hubs on v0.7.1 or later remain compatible. After
-upgrading, refresh the entry points and restart agent sessions so the MCP
-process restarts ([upgrading an existing team](#7-upgrade-an-existing-team)).
+member needs no aimem checkout and no playbook file. Check the versions in
+[step 1](#1-check-prerequisites) first. After upgrading, refresh the entry
+points and restart agent sessions so the MCP process restarts
+([upgrading an existing team](#7-upgrade-an-existing-team)).
 Do not replace a valid token or grant broad
 credential-directory access to work around a credential the shell cannot
 read. See [checkout-bound onboarding over local MCP](DESIGN-team-onboarding-mcp.md).
@@ -26,8 +26,15 @@ agent conversation or commit them to Git.
 
 ## 1. Check prerequisites
 
-Install aimem v0.7.1 or later on the hub and v0.7.3 or later on each
-participating agent machine.
+Install aimem 0.10.8 or later on the hub and 0.10.7 or later on each
+participating agent machine. The hub needs 0.10.8 to select the process by
+its tag (see the [Kanban quickstart](KANBAN-QUICKSTART.md)) and imports the
+skills archive below, which `aimem skills import --from-archive` does from
+0.10.7 on. Agent machines install the required skills from the hub with
+`aimem skills install`, which arrived in 0.10.7; that is why a team needs
+a newer client than the Kanban quickstart's minimum. From 0.10.13 on, a
+client sends its task credential only to a hub entry it verifies over
+https: the system roots, `--pin` or `--ca-file`.
 Complete [client installation](INSTALL-CLIENT.md) and configure the target
 hub. Run on each machine:
 
@@ -232,11 +239,11 @@ has actually stopped.
 
 1. Upgrade between attempts, not during one. An accepted attempt keeps
    the process version it was accepted under, and that version is recorded
-   only in the accepting checkout by a release that records it (v0.7.3 or
-   later). An attempt accepted before the upgrade, through the hub
-   endpoint or from another checkout has no record: after the upgrade its
-   worker is not ready and a running attempt is blocked. Let running
-   attempts finish, or have the coordinator settle them, first.
+   only in the accepting checkout. An attempt accepted before the upgrade,
+   through the hub endpoint or from another checkout has no record: after
+   the upgrade its worker is not ready and a running attempt is blocked.
+   Let running attempts finish, or have the coordinator settle them,
+   first.
 2. Upgrade aimem on every participating agent machine through the normal
    installer and check `aimem version`. The hub needs no upgrade for this
    release; upgrading it adds the guidance read to its MCP endpoint.

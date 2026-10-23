@@ -1,7 +1,11 @@
 # Portable team context and honest readiness
 
+**Historical versions.** The releases this document names are the baseline it
+was written against, not the current minimum, which
+[client setup](INSTALL-CLIENT.md) and the quickstarts state.
+
 Status: proposed contract for increment 1 of the
-[portable teams review](TEAM-MULTIPROJECT-REVIEW.md), written against
+[portable teams review](archive/TEAM-MULTIPROJECT-REVIEW.md), written against
 e3dea35 (v0.7.2). Task `01a0cf0f-d158-7000-8956-40d43405d5fe`. What is
 implemented is stated below. Tool, field and state names below are proposals until
 the implementing increment merges them; the existing single-project v1
