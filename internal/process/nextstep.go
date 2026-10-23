@@ -47,10 +47,12 @@ func NextStep(project string, inUse []InUse) string {
 	var b strings.Builder
 	if len(inUse) == 0 {
 		b.WriteString("next step: select the project's process on this hub host:\n")
+		indent := "  "
 		if releaseTag.MatchString(Release) {
-			fmt.Fprintf(&b, "  the reference process, from aimem's own repository:\n    aimem process select %s %s -p %s\n  or your own:\n", ReferenceRepo, Release, shellArg(project))
+			fmt.Fprintf(&b, "  the reference process, from aimem's own repository:\n    aimem process select %s %s -p %s\n  or a process of your own:\n", ReferenceRepo, Release, shellArg(project))
+			indent = "    "
 		}
-		fmt.Fprintf(&b, "  aimem process select <repo> <tag> [<manifest>] -p %s\n", project)
+		fmt.Fprintf(&b, "%saimem process select <repo> <tag> [<manifest>] -p %s\n", indent, project)
 		b.WriteString("    <repo>      the process repository's git URL, e.g. https://github.com/example/process.git\n")
 		b.WriteString("    <tag>       a release tag of that repository, e.g. v1.4.0; a full 40-hex commit also works\n")
 		fmt.Fprintf(&b, "    <manifest>  optional: the manifest's path in that repository, by default %s\n", DefaultManifest)

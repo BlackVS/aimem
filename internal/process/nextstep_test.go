@@ -59,7 +59,7 @@ func TestNextStepReferenceProcess(t *testing.T) {
 	Release = "v0.10.14"
 	got := NextStep("new", nil)
 	ref := "    aimem process select https://github.com/BlackVS/aimem.git v0.10.14 -p new\n"
-	generic := "  aimem process select <repo> <tag> [<manifest>] -p new\n"
+	generic := "  or a process of your own:\n    aimem process select <repo> <tag> [<manifest>] -p new\n"
 	if !strings.Contains(got, ref) || !strings.Contains(got, generic) || strings.Index(got, ref) > strings.Index(got, generic) {
 		t.Fatalf("release build:\n%s", got)
 	}
