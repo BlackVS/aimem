@@ -24,6 +24,10 @@ func TestNextStep(t *testing.T) {
 		}
 	}
 
+	if strings.Contains(got, ReferenceRepo) {
+		t.Fatalf("a dev build names a reference tag it does not have:\n%s", got)
+	}
+
 	c1, c2 := strings.Repeat("1", 40), strings.Repeat("2", 40)
 	got = NextStep("new", []InUse{
 		{Repo: "https://example.com/p.git", Ref: "v1.4.0", Commit: c1, Manifest: "m.json", Projects: []string{"alpha", "beta"}},
@@ -45,6 +49,25 @@ func TestNextStep(t *testing.T) {
 	got = NextStep("new", many)
 	if strings.Count(got, "    aimem process select ") != inUseShown || !strings.Contains(got, "(2 more not shown)") {
 		t.Fatalf("more than %d offered:\n%s", inUseShown, got)
+	}
+}
+
+// A release build names the reference process at its own tag, above the
+// generic form; a dev build or a non-release version names none.
+func TestNextStepReferenceProcess(t *testing.T) {
+	defer func(r string) { Release = r }(Release)
+	Release = "v0.10.14"
+	got := NextStep("new", nil)
+	ref := "    aimem process select https://github.com/BlackVS/aimem.git v0.10.14 -p new\n"
+	generic := "  or a process of your own:\n    aimem process select <repo> <tag> [<manifest>] -p new\n"
+	if !strings.Contains(got, ref) || !strings.Contains(got, generic) || strings.Index(got, ref) > strings.Index(got, generic) {
+		t.Fatalf("release build:\n%s", got)
+	}
+	for _, r := range []string{"dev", "", "v0.10.14-3-gabc1234", "0.10.14"} {
+		Release = r
+		if got := NextStep("new", nil); strings.Contains(got, ReferenceRepo) {
+			t.Fatalf("version %q names a reference tag:\n%s", r, got)
+		}
 	}
 }
 

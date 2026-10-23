@@ -1,0 +1,11 @@
+{
+  "title": "Investigate <specific uncertainty>",
+  "objective": "<Decision this investigation enables>",
+  "acceptance_criteria": "<Smallest safe reproducer, observed boundary, evidence and recommended next increment>",
+  "non_goals": "No production changes or speculative hardening without confirmed evidence and scoped authorization.",
+  "state": "BACKLOG",
+  "dependencies": [],
+  "next_action": "P2 / S: <rationale and first non-mutating experiment>",
+  "candidate_refs": [],
+  "evidence_refs": []
+}

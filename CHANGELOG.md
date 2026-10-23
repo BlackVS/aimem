@@ -45,6 +45,21 @@ currently 25); a binary refuses a database newer than it understands.
   curation and embeddings as separate layers: semantic recall needs an
   embed model, not a curation run.
 
+- **The reference process set lives in the aimem repository.** The
+  handbook, checklists and task templates that aimem projects select are
+  now at `processes/aimem/` in this repository, copied byte for byte from
+  the ai-skills repository at commit 89bf57d2, the set the hubs serve
+  today. The default manifest path, `processes/aimem/manifest.json`,
+  therefore names this repository's own layout, and
+  `aimem process select https://github.com/BlackVS/aimem.git <release tag> -p <project>`
+  selects it. KANBAN-QUICKSTART, ADMIN-MANUAL, QUICKSTART-NEW-PROJECT,
+  PILOT-HUB-RUNBOOK and the README say that the process repository is
+  separate from the hub, and keep `example.com` only for your own
+  repository. On a release build, `aimem tasks on` and `aimem project show`
+  print this command at the build's own tag when the hub uses no process
+  yet. Existing selections are unchanged: a hub serves its stored copy, and
+  moving a project to this repository is a re-selection with `--expect`.
+
 ### Security
 
 - **A provider's stored token no longer follows a new base URL.** In the

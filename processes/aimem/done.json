@@ -1,0 +1,11 @@
+{
+  "state": "DONE",
+  "items": [
+    {"id":"done.outcome","text":"Every acceptance criterion is satisfied by recorded evidence; exceptions have explicit owner acceptance, and no required work remains."},
+    {"id":"done.validation","text":"Required automated checks and relevant runtime/browser validation passed for the delivered candidate; material limits are stated."},
+    {"id":"done.review","text":"Required local/external reviews cover the final source head; in-scope blockers are resolved or explicitly accepted and follow-ups are separately tracked."},
+    {"id":"done.delivery","text":"Required merge or deployment is verified; a merge-only task does not imply release/deployment. Release gates are met when release is in scope."},
+    {"id":"done.handoff","text":"Task evidence, checklist IDs/process commit and canonical handoff reflect verified results; no secrets leaked and remaining follow-up ownership is clear."},
+    {"id":"done.team","text":"For a team-managed task: the accepted result was reviewed at its candidate head with evidence, questions and escalations are answered with sources or recorded as open, and the attempt is finalized or released with the audit export linked. An unmanaged task records this item as not applicable."}
+  ]
+}

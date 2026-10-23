@@ -1,0 +1,11 @@
+{
+  "title": "<Concrete outcome>",
+  "objective": "<What changes and for whom>",
+  "acceptance_criteria": "<Observable checks and required delivery evidence>",
+  "non_goals": "<Explicit boundaries>",
+  "state": "BACKLOG",
+  "dependencies": [],
+  "next_action": "P2 / S: <priority and complexity rationale, uncertainty and first action>",
+  "candidate_refs": [],
+  "evidence_refs": []
+}

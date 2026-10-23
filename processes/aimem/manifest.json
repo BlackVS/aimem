@@ -1,0 +1,14 @@
+{
+  "version": 1,
+  "handbook": "processes/aimem/handbook.md",
+  "checklists": {
+    "READY": "processes/aimem/ready.json",
+    "DONE": "processes/aimem/done.json"
+  },
+  "templates": {
+    "task": "processes/aimem/task.json",
+    "investigation": "processes/aimem/investigation.json"
+  },
+  "skills": ["oh-code-review"],
+  "budget_bytes": 12288
+}

@@ -461,7 +461,10 @@ the board's assignee labels — which is 3 at the latest.
 This repository is the first dogfood project, enabled by migration if it
 already contains tasks. An admin selects the Git repository, commit and
 manifest for its handbook, five-item DoR/DoD and task templates. The
-repository is the selected shared skills repository. Publication may be public
+product repository carries the reference set (`processes/aimem/`); a
+project may select its own copy from any Git repository. (Corrected
+2026-10-23: this section first chose the shared skills repository.)
+Publication may be public
 or private; installer access does not establish access for every agent runtime.
 The selection step verifies fetching the pinned commit and complete bootstrap
 on each participating machine before trusting it. This corrects the original

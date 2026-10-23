@@ -77,7 +77,7 @@ tasks on for project "my-project"
 not ready for work: tasks on, process not selected
 next step: select the project's process on this hub host; processes this hub already uses:
   as other-project:
-    aimem process select https://example.com/team/process.git 0123456789abcdef0123456789abcdef01234567 processes/aimem/manifest.json --ref v1.4.0 -p my-project
+    aimem process select https://github.com/BlackVS/aimem.git 0123456789abcdef0123456789abcdef01234567 processes/aimem/manifest.json --ref v0.10.14 -p my-project
   or another process: aimem process select <repo> <tag> [<manifest>] -p my-project
 ```
 
@@ -264,11 +264,25 @@ they are not changing and re-read after conflicts.
 
 A project with tasks on needs a selected process before it is ready for
 work (section 2). The process injects your handbook, readiness and
-completion checklists, templates and required-skill names; prepare a
-reviewed manifest in a Git repository the hub host can read (or export
-the set as an archive from a machine that can, see the manual).
+completion checklists, templates and required-skill names.
 
-On the hub as the service user:
+The process lives in a Git repository, which is separate from the hub:
+the hub stores the selection and a copy of the files at the selected
+commit, and serves them to members. aimem's own repository carries the
+reference set at `processes/aimem/`, the default manifest path. A project
+with other rules starts its own repository from a copy of
+`processes/aimem` and selects that instead. The hub host must be able to
+read the repository, or the set is exported as an archive from a machine
+that can (see the manual).
+
+On the hub as the service user, select the reference set at a release
+tag of aimem:
+
+```sh
+aimem process select https://github.com/BlackVS/aimem.git v0.10.14 -p my-project
+```
+
+or your own repository, here with its manifest at another path:
 
 ```sh
 aimem process select https://example.com/team/process.git v1.4.0 process/manifest.json -p my-project

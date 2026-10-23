@@ -85,7 +85,7 @@ aimem process select https://git.example.test/org/process.git 0123456789abcdef01
 {"current":{"repo":"https://git.example.test/org/process.git","commit":"0123456789abcdef0123456789abcdef01234567","manifest":"process/manifest.json","selected_at":"…","selected_by":"local"},"project":"pilot"}
 ```
 
-Use the real process repository, a full 40-character commit and the manifest path. A selection must be `https`, `ssh` or `git@`.
+Use the real process repository, a full 40-character commit and the manifest path. aimem's own reference set is `https://github.com/BlackVS/aimem.git` with the manifest `processes/aimem/manifest.json`; the process repository is separate from the hub. A selection must be `https`, `ssh` or `git@`.
 
 Set the project's repository: the one repository the pilot's work happens in. `--kind` is the forge's API dialect (`github`, `gitea` or `gitlab`), and the host of `--url`, with its port when the URL names one, names the credential a member needs. `--access` is `write` (the default) or `read`. The hub stores the URL as given, never fetches it and stores no default branch. A URL carrying a user name on `https`, or any password, is refused.
 
