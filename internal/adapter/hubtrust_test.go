@@ -102,3 +102,22 @@ func TestHubTrustOver(t *testing.T) {
 		t.Fatalf("re-pointed: %+v", got)
 	}
 }
+
+// `hub add --system-roots` drops the recorded trust and keeps everything
+// else Over carries over; a re-pointed hub still inherits nothing.
+func TestHubTrustOverSystemRoots(t *testing.T) {
+	for _, prev := range []*HubConfig{
+		{URL: "https://hub.example", Token: "a", TaskToken: "aimem_user_x", Sync: "aimem@hub", CAFile: "/ca.pem"},
+		{URL: "https://hub.example", Token: "a", TaskToken: "aimem_user_x", Sync: "aimem@hub", Pin: "sha256-x"},
+	} {
+		got := (&HubConfig{URL: "https://hub.example", Token: "b"}).OverSystemRoots(prev)
+		want := HubConfig{URL: "https://hub.example", Token: "b", TaskToken: "aimem_user_x", Sync: "aimem@hub"}
+		if *got != want {
+			t.Fatalf("from %+v: got %+v want %+v", *prev, *got, want)
+		}
+	}
+	prev := &HubConfig{URL: "https://hub.example", TaskToken: "aimem_user_x", Pin: "sha256-x"}
+	if got := (&HubConfig{URL: "https://other.example"}).OverSystemRoots(prev); *got != (HubConfig{URL: "https://other.example"}) {
+		t.Fatalf("re-pointed: %+v", *got)
+	}
+}

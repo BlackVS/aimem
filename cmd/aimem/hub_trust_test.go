@@ -78,6 +78,52 @@ func TestHubAddTrust(t *testing.T) {
 	}
 }
 
+// `aimem hub add --system-roots` drops a recorded pin or CA file and keeps
+// the task credential and the default mark; a re-add without it keeps the
+// trust, and the flag together with another trust choice is refused before
+// anything is stored.
+func TestHubAddSystemRoots(t *testing.T) {
+	t.Setenv("AIMEM_STATE_DIR", t.TempDir())
+	hubWarnOut = io.Discard
+	t.Cleanup(func() { hubWarnOut = os.Stderr })
+	srv, ca, pin := privateHub(t)
+	if err := hubCmd([]string{"add", "work", srv.URL, "other", "--pin", pin}); err != nil {
+		t.Fatal(err)
+	}
+	if err := hubCmd([]string{"add", "pilot", srv.URL, "checkpoint", "--pin", pin}); err != nil {
+		t.Fatal(err)
+	}
+	if err := hubCmd([]string{"task-token", "pilot", "aimem_user_abc"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := hubCmd([]string{"add", "pilot", srv.URL, "rotated"}); err != nil {
+		t.Fatal(err)
+	}
+	if h := storedHub(t, "pilot"); h.Pin != pin {
+		t.Fatalf("a re-add without --system-roots must keep the pin: %+v", h)
+	}
+	before := storedHub(t, "pilot")
+	for _, args := range []string{"--pin " + pin, "--ca-file " + ca, "--insecure"} {
+		err := hubCmd(append([]string{"add", "pilot", srv.URL, "rotated", "--system-roots"}, strings.Fields(args)...))
+		if err == nil || !strings.Contains(err.Error(), "--system-roots drops the recorded trust") {
+			t.Fatalf("%s: %v", args, err)
+		}
+	}
+	if h := storedHub(t, "pilot"); *h != *before {
+		t.Fatalf("a refused add changed the entry: %+v", h)
+	}
+	if err := hubCmd([]string{"add", "pilot", srv.URL, "rotated", "--system-roots"}); err != nil {
+		t.Fatal(err)
+	}
+	h := storedHub(t, "pilot")
+	if h.Pin != "" || h.CAFile != "" || h.TaskToken != "aimem_user_abc" || h.Token != "rotated" {
+		t.Fatalf("--system-roots: %+v", h)
+	}
+	if _, def := adapter.LoadHubs(stateRoot()); def != "work" {
+		t.Fatalf("--system-roots moved the default hub to %q", def)
+	}
+}
+
 // The other client paths to the hub use its recorded trust: the sync
 // client, the team-session client (which still refuses a bare insecure
 // hub) and, through HTTPClient, the MCP server, docs and the read clients.

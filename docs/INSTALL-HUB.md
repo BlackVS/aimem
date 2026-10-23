@@ -89,9 +89,9 @@ certificate into `~/.config/aimem/tls/` and serves TLS immediately. The
 installer prints that certificate's pin at the end, on every run, and
 clients connect with `aimem hub add ... --pin sha256-...`, which verifies
 the certificate. When a real certificate replaces it, the recorded pin
-stops matching: a later `hub add` keeps it, so on each client run
-`aimem hub rm <name>`, then `hub add` without `--pin` (and
-`aimem hub task-token` again if the entry had a task credential).
+stops matching, and a later `hub add` keeps it. On each client, run
+`hub add` again with `--system-roots` in place of `--pin`: it drops the
+recorded pin and keeps the entry's task credential and default mark.
 `--insecure` skips verification altogether: use it only as a last
 resort. Such an entry still carries checkpoints, but the task tools,
 team setup and team mode refuse it.

@@ -249,6 +249,15 @@ func (c *HubConfig) Over(prev *HubConfig) *HubConfig {
 	return &out
 }
 
+// OverSystemRoots is Over for `hub add --system-roots`: the entry keeps
+// everything Over carries over except its recorded trust, so it verifies
+// against the system roots again.
+func (c *HubConfig) OverSystemRoots(prev *HubConfig) *HubConfig {
+	out := c.Over(prev)
+	out.CAFile, out.Pin = "", ""
+	return out
+}
+
 // ResolveHub maps a project's hub binding to a configured hub: the named
 // QuarantineHubName is the reserved routing target for a project whose
 // .aimem.json carries a hub name that fails validation. It is never a
