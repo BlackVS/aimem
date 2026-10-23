@@ -130,7 +130,7 @@ func newTeamSessionRig(t *testing.T) *teamSessionRig {
 	}
 	fh.WriteString("aicrew_introspect_TESTSECRET_e5a\n")
 	fh.Close()
-	g.s.SetIntrospectionClient(&introspect.Client{TokenFile: credFile, RootCAs: g.fake.CA.Pool})
+	g.s.SetIntrospectionClient(&introspect.Client{TokenFile: credFile, RootCAs: g.fake.CA.Pool, Budget: introspecttest.Budget})
 	g.mustRun(t, "peer", "register", "aicrew-example", "--endpoint", g.fake.Endpoint(), "--peer-trust-pin", g.fake.Pin)
 
 	// Project alpha, with a task, granted to team-1.

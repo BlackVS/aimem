@@ -25,6 +25,11 @@ import (
 	"time"
 )
 
+// Budget is the call budget tests give an introspection client talking to
+// a Fake: long enough that a loaded machine never decides the outcome.
+// A test of the production budget leaves the client's Budget zero.
+const Budget = time.Minute
+
 // Path is aicrew's introspection route; CoordinationPath its coordination
 // facts route (coordination.v1).
 const (

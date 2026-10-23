@@ -59,7 +59,7 @@ func credentialFile(t *testing.T, content string) string {
 }
 
 func newClient(t *testing.T, f *fake) *Client {
-	return &Client{TokenFile: credentialFile(t, testBearer+"\n"), RootCAs: f.CA.Pool}
+	return &Client{TokenFile: credentialFile(t, testBearer+"\n"), RootCAs: f.CA.Pool, Budget: introspecttest.Budget}
 }
 
 func handle(t *testing.T) string {
@@ -335,6 +335,7 @@ func TestIntrospectBudgetAndCancellation(t *testing.T) {
 		}
 	})
 	c := newClient(t, f)
+	c.Budget = 0 // the production budget is what this test measures
 	start := time.Now()
 	_, err := c.Introspect(context.Background(), peerOf(f, "ca_dns"), handle(t))
 	wantFailure(t, err, CodeUnavailable, "timeout")
@@ -423,7 +424,7 @@ func TestIntrospectCredentialFile(t *testing.T) {
 		"too large":      {credentialFile(t, strings.Repeat("a", maxCredential+1)), "credential_file"},
 		"only a newline": {credentialFile(t, "\n"), "credential_file"},
 	} {
-		c := &Client{TokenFile: tc.file, RootCAs: f.CA.Pool}
+		c := &Client{TokenFile: tc.file, RootCAs: f.CA.Pool, Budget: introspecttest.Budget}
 		_, err := c.Introspect(context.Background(), p, handle(t))
 		var fl *Failure
 		if !errors.As(err, &fl) || fl.Reason != tc.reason {

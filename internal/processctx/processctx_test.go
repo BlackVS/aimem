@@ -13,12 +13,20 @@ import (
 	"sync"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"aimem/internal/adapter"
 	"aimem/internal/hubtest"
 	"aimem/internal/process"
 	"aimem/internal/taskcred"
 )
+
+// The fake hubs answer on loopback; on a loaded machine they can answer
+// later than the session-start bound, which is not what these tests check.
+func TestMain(m *testing.M) {
+	hubLookupTimeout = time.Minute
+	os.Exit(m.Run())
+}
 
 var projectSecret = "aimem_user_" + strings.Repeat("e", 64)
 

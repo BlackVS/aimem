@@ -253,7 +253,7 @@ func newIntrospectionRig(t *testing.T, endpointPath string) *introspectionRig {
 	}
 	fh.WriteString(testIntrospectionBearer + "\n")
 	fh.Close()
-	g.s.SetIntrospectionClient(&introspect.Client{TokenFile: tokenFile, RootCAs: f.CA.Pool})
+	g.s.SetIntrospectionClient(&introspect.Client{TokenFile: tokenFile, RootCAs: f.CA.Pool, Budget: introspecttest.Budget})
 	g.secrets = append(g.secrets, testIntrospectionBearer)
 	body := `{"service_id":"aicrew-example","introspection_endpoint":"` + f.Srv.URL + endpointPath + `","tls_trust":{"mode":"spki_sha256","value":"` + f.Pin + `"}}`
 	if r := g.call(t, g.tls, "POST", "/v1/identity/peers", g.env, nil, body, true); r.status != 201 {
@@ -383,9 +383,9 @@ func TestPeerCheckNotOperational(t *testing.T) {
 		outcome string
 	}{
 		{"no credential file configured", func() {
-			g.s.SetIntrospectionClient(&introspect.Client{RootCAs: g.fake.CA.Pool})
+			g.s.SetIntrospectionClient(&introspect.Client{RootCAs: g.fake.CA.Pool, Budget: introspecttest.Budget})
 		}, func() {
-			g.s.SetIntrospectionClient(&introspect.Client{TokenFile: g.tokenFile, RootCAs: g.fake.CA.Pool})
+			g.s.SetIntrospectionClient(&introspect.Client{TokenFile: g.tokenFile, RootCAs: g.fake.CA.Pool, Budget: introspecttest.Budget})
 		}, "not_configured"},
 		{"credential file readable by others", func() {
 			if err := privatefile.Expose(g.tokenFile); err != nil {

@@ -124,6 +124,10 @@ type Client struct {
 	RootCAs *x509.CertPool
 	// Now is the hub clock that judges handle expiry; nil means time.Now.
 	Now func() time.Time
+	// Budget, when set, replaces the package Budget for this client. Tests
+	// set it so a fake peer on a loaded machine is not cut off; the hub
+	// leaves it zero.
+	Budget time.Duration
 }
 
 // ReadCredential returns the bearer held in path, which must be a private
@@ -316,7 +320,11 @@ func (c *Client) exchange(ctx context.Context, p Peer, endpoint, versionHeader s
 	if err != nil {
 		return nil, unavailable("peer_record")
 	}
-	callCtx, cancel := context.WithTimeout(ctx, Budget)
+	budget := Budget
+	if c.Budget > 0 {
+		budget = c.Budget
+	}
+	callCtx, cancel := context.WithTimeout(ctx, budget)
 	defer cancel()
 	req, err := http.NewRequestWithContext(callCtx, http.MethodPost, endpoint, bytes.NewReader(body))
 	if err != nil {

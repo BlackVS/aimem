@@ -21,6 +21,9 @@ func TestHelperMain(t *testing.T) {
 		t.Skip("helper process for the team_context end-to-end tests")
 	}
 	os.Args = append([]string{"aimem"}, strings.Split(os.Getenv("AIMEM_TEST_ARGS"), "\x1f")...)
+	// The fake store answers on a local socket; on a loaded machine it can
+	// answer later than the hook's bound, which no test here measures.
+	failureRecallTimeout = time.Minute
 	main()
 	os.Exit(0)
 }
