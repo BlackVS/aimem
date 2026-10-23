@@ -187,6 +187,11 @@ Manual equivalent (what the script sets up):
    # curation + embeddings (optional, enables LLM egress):
    AIMEM_OPENAI_API_KEY=<api key>
    AIMEM_OPENAI_BASE_URL=https://llm.example.com/v1   # omit for api.openai.com
+   # Provider registry (console, Usage tab): base URLs must be public
+   # https endpoints. Set this to allow http and loopback, private or
+   # link-local addresses (a local Ollama, a LAN gateway). The admin API
+   # cannot set it.
+   #AIMEM_PROVIDER_ALLOW_PRIVATE=1
    # LLM call pacing (optional): outbound curate/embed calls are spaced
    # AIMEM_LLM_INTERVAL seconds apart (default 2; 0 disables) and retry
    # transient upstream blocks AIMEM_LLM_RETRIES times (default 3) with

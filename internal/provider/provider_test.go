@@ -14,7 +14,7 @@ func TestResolvePrecedence(t *testing.T) {
 
 	// No registry: env fallback.
 	ep, ok := Resolve(root, "m1")
-	if !ok || ep.Token != "envkey" || ep.BaseURL != "https://env.example/v1" || ep.Kind != "openai" {
+	if !ok || ep.Token != "envkey" || ep.BaseURL != "https://env.example/v1" || ep.Kind != "openai" || !ep.FromEnv {
 		t.Fatalf("env fallback: %+v ok=%v", ep, ok)
 	}
 
@@ -30,14 +30,14 @@ func TestResolvePrecedence(t *testing.T) {
 	if fi, err := os.Stat(Path(root)); err != nil || (runtime.GOOS != "windows" && fi.Mode().Perm() != 0o600) {
 		t.Fatalf("registry mode: %v err=%v", fi.Mode(), err)
 	}
-	if ep, ok = Resolve(root, "m1"); !ok || ep.Token != "gkey" || ep.BaseURL != "https://g.example/v1" {
+	if ep, ok = Resolve(root, "m1"); !ok || ep.Token != "gkey" || ep.BaseURL != "https://g.example/v1" || ep.FromEnv {
 		t.Fatalf("registry binding: %+v ok=%v", ep, ok)
 	}
 	if ep, ok = Resolve(root, "m2"); !ok || ep.Kind != "claude" || ep.Token != "" {
 		t.Fatalf("claude kind: %+v ok=%v", ep, ok)
 	}
 	// Unbound model still falls back to env.
-	if ep, ok = Resolve(root, "other"); !ok || ep.Token != "envkey" {
+	if ep, ok = Resolve(root, "other"); !ok || ep.Token != "envkey" || !ep.FromEnv {
 		t.Fatalf("unbound fallback: %+v ok=%v", ep, ok)
 	}
 	// A BOUND model whose provider cannot serve it must NOT fall back to

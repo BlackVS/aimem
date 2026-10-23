@@ -7693,7 +7693,7 @@
         }
       },
       "put": {
-        "summary": "Update providers/bindings (blank token keeps stored)",
+        "summary": "Update providers/bindings (blank token keeps stored for the same base_url; base_url must be public https unless AIMEM_PROVIDER_ALLOW_PRIVATE=1)",
         "x-role": "admin",
         "responses": {
           "200": {

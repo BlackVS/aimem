@@ -76,7 +76,12 @@ not a host global.
 - **Providers card**: list rows (name, kind, base_url, token shown as
   `••••last4`); add / edit / delete. Token input is write-only — the
   GET endpoint returns masked values ONLY; a blank token on save means
-  "keep existing".
+  "keep existing", for the same base URL only. A save that changes the
+  base URL with a blank token is refused, because the stored token would
+  then go to the new endpoint (audit A-7). Base URLs must be public https
+  endpoints unless the hub's environment sets
+  `AIMEM_PROVIDER_ALLOW_PRIVATE=1`, and the model list and the test
+  button enforce the same address ranges when they connect.
 - **Model bindings card**: model name → provider dropdown. The current
   curate/embed model inputs stay; a bound model shows its provider.
 - **Test button per model** (user request): each binding row gets
