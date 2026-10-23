@@ -1,0 +1,11 @@
+{
+  "state": "READY",
+  "items": [
+    {"id":"ready.outcome","text":"Objective, observable acceptance criteria and non-goals are concrete; the owner-selected scope and design authority are identified."},
+    {"id":"ready.plan","text":"A bounded next action and priority/complexity rationale exist; large or uncertain work has a split assessment/proposal or justified exception."},
+    {"id":"ready.dependencies","text":"Dependencies, release gates, serial-PR constraints and any prior agent handoff have been checked; the task is eligible to start."},
+    {"id":"ready.access","text":"Required checkout, ordinary task access, complete pinned process assets and skills are available; unavailable requirements are resolved before dependent work."},
+    {"id":"ready.validation","text":"Verification evidence, review gates, risk assumptions and any operational authorization needed for the scoped outcome are understood."},
+    {"id":"ready.team","text":"For a team-managed task: complexity and required capabilities are assessed, L/XL work is split before offering, and the offer records the chosen member's suitability and cost rationale. An unmanaged task records this item as not applicable."}
+  ]
+}

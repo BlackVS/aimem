@@ -2,6 +2,7 @@ package process
 
 import (
 	"fmt"
+	"regexp"
 	"strings"
 )
 
@@ -20,6 +21,16 @@ type InUse struct {
 	Projects []string `json:"projects"`
 }
 
+// ReferenceRepo is the repository that carries the reference process set,
+// at processes/aimem: the default manifest path names it.
+const ReferenceRepo = "https://github.com/BlackVS/aimem.git"
+
+// Release is this binary's release tag, set by main. A dev build has no
+// tag that the reference repository holds, so NextStep names none.
+var Release string
+
+var releaseTag = regexp.MustCompile(`^v[0-9]+\.[0-9]+\.[0-9]+$`)
+
 // inUseShown bounds how many selections NextStep offers.
 const inUseShown = 5
 
@@ -36,6 +47,9 @@ func NextStep(project string, inUse []InUse) string {
 	var b strings.Builder
 	if len(inUse) == 0 {
 		b.WriteString("next step: select the project's process on this hub host:\n")
+		if releaseTag.MatchString(Release) {
+			fmt.Fprintf(&b, "  the reference process, from aimem's own repository:\n    aimem process select %s %s -p %s\n  or your own:\n", ReferenceRepo, Release, shellArg(project))
+		}
 		fmt.Fprintf(&b, "  aimem process select <repo> <tag> [<manifest>] -p %s\n", project)
 		b.WriteString("    <repo>      the process repository's git URL, e.g. https://github.com/example/process.git\n")
 		b.WriteString("    <tag>       a release tag of that repository, e.g. v1.4.0; a full 40-hex commit also works\n")

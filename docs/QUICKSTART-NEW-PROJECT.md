@@ -74,11 +74,13 @@ creates a second project.
 Every session then starts with the notice that no process reference is
 selected, and an agent can read that as "the board is not ready" and
 leave it alone. The process is the handbook, the checklists that gate
-READY and DONE, and the task templates the agents follow. The
-[aiskills](https://github.com/BlackVS/aiskills) repository ships a
-ready set at `processes/aimem/manifest.json`. It is aimem's own process
-and requires the `oh-code-review` skill from step 3.2. Read its
-[handbook](https://github.com/BlackVS/aiskills/blob/main/processes/aimem/handbook.md)
+READY and DONE, and the task templates the agents follow. The process
+lives in a Git repository, which is separate from the hub: the hub stores
+the selection and a copy of the files and serves them to members. aimem's
+own repository carries a ready set at `processes/aimem/manifest.json`. It
+is aimem's own process and requires the `oh-code-review` skill from step
+3.2. Read its
+[handbook](https://github.com/BlackVS/aimem/blob/master/processes/aimem/handbook.md)
 before you select it; a project with other rules copies the
 set into a repository of its own and selects that instead.
 
@@ -88,10 +90,10 @@ agents read exactly what you reviewed; the manifest path defaults to
 `processes/aimem/manifest.json`:
 
 ```sh
-aimem process select https://github.com/BlackVS/aiskills.git TAG -p my-project
+aimem process select https://github.com/BlackVS/aimem.git TAG -p my-project
 ```
 
-Replace `TAG` with a release tag of that repository. A full 40-character
+Replace `TAG` with a release tag of aimem, such as `v0.10.14`. A full 40-character
 commit works in its place too. The command reads the files at that commit on the hub
 host and stores them on the hub with the selection; each workstation reads
 them from the hub, and step 3.6 checks that it does. To move to a

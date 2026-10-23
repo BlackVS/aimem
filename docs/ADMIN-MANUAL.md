@@ -480,8 +480,15 @@ the selection (repository, commit, manifest) and, with it, the files of
 that version (the set), and serves them to each member under its project
 grant. A member machine needs neither Git nor access to the repository.
 
+The process repository is separate from the hub. aimem's own repository
+carries the reference set at `processes/aimem/`, the default manifest
+path, so `https://github.com/BlackVS/aimem.git` at a release tag selects
+it. Below, `https://example.com/team/process.git` stands for your own
+repository, started from a copy of `processes/aimem`.
+
 ```sh
-aimem process select https://example.com/team/process.git v1.4.0 -p <project>
+aimem process select https://github.com/BlackVS/aimem.git v0.10.14 -p <project>   # the reference set
+aimem process select https://example.com/team/process.git v1.4.0 -p <project>     # your own repository
 aimem process select https://example.com/team/process.git v1.5.0 --expect v1.4.0 -p <project>   # change it later
 aimem process select https://example.com/team/process.git \
     3f2a…(40-hex commit) process/manifest.json --ref main -p <project>   # by commit, another manifest
