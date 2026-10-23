@@ -1,5 +1,8 @@
 # aimem working process, version 1
 
+Ported from the ai-skills copy at 4be41c1; forge_gates.py, named below, is
+optional and comes with the ai-skills forge-gates skill, not with aimem.
+
 ## Authority and session start
 
 This handbook is selected by an aimem administrator at an immutable Git commit.
@@ -68,8 +71,17 @@ a confirmed in-scope BLOCKER returns work to implementation. Put follow-ups in
 separate tasks. Verify runtime-dependent hypotheses at the real boundary before
 changing production code to address them.
 
-Request the deployed external reviewer with plain review-this, then watch and
-read its result for the exact head. Never push while hands-reviewing is present.
+The external reviewer is the one deployed on the project's own forge, running
+whatever model its site runs. Request it with plain review-this (a
+review-this:<profile> variant only where the site offers one and the owner asks
+for a model or the default would repeat the local review's model family), then
+watch and read its result for the exact head, and before marking the PR ready
+confirm every gate at that head. Where the forge-gates skill is installed,
+`forge_gates.py wait-review --head <full SHA>` in the background and
+`forge_gates.py gates` do both, in place of a private watcher. Where no
+external reviewer is deployed, the local high review is the pre-merge gate:
+report the external gate as absent, never as passed. Never push while
+hands-reviewing is present.
 A source change makes the review stale: review the delta and re-trigger. A
 base-only update keeps both reviews when the patch identity is unchanged
 (`git diff $(git merge-base <base> <head>) <head> | git patch-id --stable`, old and
