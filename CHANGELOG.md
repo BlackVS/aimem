@@ -37,6 +37,33 @@ currently 25); a binary refuses a database newer than it understands.
   documentation table is grouped the same way, with the task and team
   guides now listed in it.
 
+### Security
+
+- **A provider's stored token no longer follows a new base URL.** In the
+  console's provider registry, saving a provider with a blank token kept
+  the stored token even when the base URL changed. The model list and
+  the test button then sent that token to the new URL, so an admin
+  bearer could collect any provider key. Such a save is now refused
+  (HTTP 409, "send the token again"); a save to the same endpoint still
+  keeps the stored token.
+- **Provider base URLs must be public https endpoints.** A save is
+  refused for a plain `http://` URL and for a host that is, or resolves
+  to, a loopback, private, link-local, unspecified or multicast address.
+  The model list and the test button also refuse such an address when
+  they connect, so a name re-pointed after the save gains nothing. A hub
+  that uses a local or LAN model server (Ollama, LM Studio, a LAN
+  gateway), or reaches providers through a proxy on a private address,
+  sets `AIMEM_PROVIDER_ALLOW_PRIVATE=1` in its environment file and
+  restarts. Only the host operator can set this; the admin API cannot.
+  Registries already on disk are not changed, and curation keeps using
+  them as before; re-saving such a provider, or using its model list or
+  test button, needs the setting. The `AIMEM_OPENAI_*` pair in the
+  environment is the operator's own and is not restricted.
+- **Provider changes are logged with the old URL.** The "admin provider
+  set" log line now carries `old_base_url` and whether the token was new,
+  replaced, kept or absent. A refused save logs its reason, and no line
+  carries a token value.
+
 ## [0.10.13] — 2026-10-23
 
 Individual credentials now go only to a verified https hub. Every request

@@ -55,7 +55,8 @@ func (s *Server) getProviders(w http.ResponseWriter, _ *http.Request) {
 }
 
 // putProviders applies exactly one mutation per request: set_provider
-// (blank token keeps the stored one), delete_provider, bind, or unbind.
+// (blank token keeps the stored one, for the same base_url only),
+// delete_provider, bind, or unbind.
 func (s *Server) putProviders(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		SetProvider *struct {
@@ -102,12 +103,33 @@ func (s *Server) putProviders(w http.ResponseWriter, r *http.Request) {
 			s.fail(w, http.StatusBadRequest, fmt.Errorf("base_url must be http(s)"))
 			return
 		}
-		token := p.Token
-		if token == "" { // blank on save means: keep what's stored
-			token = reg.Providers[p.Name].Token
+		if p.BaseURL != "" {
+			if err := checkProviderURL(r.Context(), p.BaseURL); err != nil {
+				s.log.Warn("admin provider set refused", "name", p.Name, "base_url", p.BaseURL, "why", err)
+				s.fail(w, http.StatusBadRequest, err)
+				return
+			}
+		}
+		prev, existed := reg.Providers[p.Name]
+		token, tokenState := p.Token, "new"
+		switch {
+		case p.Token == "" && prev.Token != "" && !sameEndpoint(prev.BaseURL, p.BaseURL):
+			// The stored token was issued for the old endpoint; reusing it
+			// would hand it to whatever the new base_url names.
+			s.log.Warn("admin provider set refused", "name", p.Name, "base_url", p.BaseURL,
+				"old_base_url", prev.BaseURL, "why", "base_url changed without a token")
+			s.fail(w, http.StatusConflict, fmt.Errorf("base_url changed from %q: send the token again (the stored token is not reused for a new endpoint)", prev.BaseURL))
+			return
+		case p.Token == "" && prev.Token == "":
+			tokenState = "none"
+		case p.Token == "": // blank on save means: keep what's stored
+			token, tokenState = prev.Token, "kept"
+		case prev.Token != "":
+			tokenState = "replaced"
 		}
 		reg.Providers[p.Name] = provider.Provider{Kind: p.Kind, BaseURL: p.BaseURL, Token: token}
-		s.log.Warn("admin provider set", "name", p.Name, "kind", p.Kind, "base_url", p.BaseURL)
+		s.log.Warn("admin provider set", "name", p.Name, "kind", p.Kind, "base_url", p.BaseURL,
+			"old_base_url", prev.BaseURL, "existed", existed, "token", tokenState)
 	case req.DeleteProvider != "":
 		delete(reg.Providers, req.DeleteProvider)
 		for m, b := range reg.Models {
@@ -178,7 +200,13 @@ func (s *Server) testProvider(w http.ResponseWriter, r *http.Request) {
 		_, u, err = ex.Complete("Reply with the single word: ok")
 		tokens = u.InputTokens + u.OutputTokens
 	} else {
-		tokens, err = probeOpenAI(ep, req.Op)
+		client := providerClient()
+		if _, bound, _ := provider.ResolveBound(s.reg.Root(), req.Model); !bound {
+			// The AIMEM_OPENAI_* pair is the host operator's own setting,
+			// which the admin API cannot change.
+			client = &http.Client{Timeout: 15 * time.Second}
+		}
+		tokens, err = probeOpenAI(client, ep, req.Op)
 	}
 	if err != nil {
 		// Same shape as the success line below: a failure nobody can
@@ -234,7 +262,7 @@ func (s *Server) providerModels(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	hreq.Header.Set("Authorization", "Bearer "+p.Token)
-	resp, err := (&http.Client{Timeout: 15 * time.Second}).Do(hreq)
+	resp, err := providerClient().Do(hreq)
 	if err != nil {
 		s.log.Warn("provider model list failed", "provider", name, "base_url", base, "err", err)
 		s.fail(w, http.StatusBadGateway, err)
@@ -264,7 +292,7 @@ func (s *Server) providerModels(w http.ResponseWriter, r *http.Request) {
 
 // probeOpenAI is the HTTP half of the test button: one tiny embeddings or
 // chat request with a hard 15s bound so a dead endpoint fails fast.
-func probeOpenAI(ep provider.Endpoint, op string) (int64, error) {
+func probeOpenAI(client *http.Client, ep provider.Endpoint, op string) (int64, error) {
 	path, payload := "/chat/completions", map[string]any{
 		"model":                 ep.Model,
 		"messages":              []map[string]string{{"role": "user", "content": "Reply with the single word: ok"}},
@@ -280,7 +308,7 @@ func probeOpenAI(ep provider.Endpoint, op string) (int64, error) {
 	}
 	hreq.Header.Set("Content-Type", "application/json")
 	hreq.Header.Set("Authorization", "Bearer "+ep.Token)
-	resp, err := (&http.Client{Timeout: 15 * time.Second}).Do(hreq)
+	resp, err := client.Do(hreq)
 	if err != nil {
 		return 0, err
 	}

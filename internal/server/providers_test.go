@@ -68,6 +68,7 @@ func TestProviderTestFailureCarriesElapsed(t *testing.T) {
 		w.Write([]byte(`{"error":{"message":"upstream exploded"}}`))
 	}))
 	defer up.Close()
+	t.Setenv(allowPrivateEnv, "1") // the fake upstream is plain http on loopback
 	s, _ := testServer(t)
 	h := s.Handler()
 	req(t, h, "PUT", "/v1/config/providers",
