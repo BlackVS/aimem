@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"aimem/internal/adapter"
 )
@@ -17,6 +18,9 @@ func TestTUIClientUsesHubTrust(t *testing.T) {
 		w.Write([]byte(`{"projects": 3, "resources": {}}`))
 	}))
 	defer srv.Close()
+	// The answer must not race the dashboard's bound on a loaded machine.
+	defer func(d time.Duration) { tuiHubTimeout = d }(tuiHubTimeout)
+	tuiHubTimeout = time.Minute
 	ca := filepath.Join(t.TempDir(), "hub-ca.pem")
 	os.WriteFile(ca, pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: srv.Certificate().Raw}), 0o600)
 	if _, projs, _, ok := fetchHubHealth(srv.URL, "t", tuiClient(&adapter.HubConfig{URL: srv.URL, CAFile: ca})); !ok || projs != 3 {

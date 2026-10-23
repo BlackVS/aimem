@@ -991,6 +991,9 @@ func squeeze(s string) string {
 // fetchHubHealth pulls the hub health endpoint; the dashboard must never
 // block on the hub, so failures degrade to unreachable.
 var tuiHubHTTP = &http.Client{Timeout: 1500 * time.Millisecond}
+
+// tuiHubTimeout bounds a hub with a recorded trust; tests raise it.
+var tuiHubTimeout = 1500 * time.Millisecond
 var tuiHubHTTPInsecure = &http.Client{
 	Timeout:   1500 * time.Millisecond,
 	Transport: &http.Transport{TLSClientConfig: &tls.Config{InsecureSkipVerify: true}},
@@ -1001,7 +1004,7 @@ var tuiHubHTTPInsecure = &http.Client{
 func tuiClient(h *adapter.HubConfig) *http.Client {
 	switch {
 	case h.CAFile != "" || h.Pin != "":
-		return h.Client(1500 * time.Millisecond)
+		return h.Client(tuiHubTimeout)
 	case h.Insecure:
 		return tuiHubHTTPInsecure
 	}

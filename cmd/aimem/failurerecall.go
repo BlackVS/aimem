@@ -26,10 +26,11 @@ const (
 	// failureQueryMaxTerms and failureQueryBytes bound the recall query.
 	failureQueryMaxTerms = 20
 	failureQueryBytes    = 240
-	// failureRecallTimeout bounds the whole lookup: the hook must never
-	// hold the agent up.
-	failureRecallTimeout = 2 * time.Second
 )
+
+// failureRecallTimeout bounds the whole lookup: the hook must never hold
+// the agent up. The helper process of the tests raises it.
+var failureRecallTimeout = 2 * time.Second
 
 // failureRecallCmd is Claude Code's PostToolUseFailure hook for the Bash
 // tool. A command that exited non-zero fires it with the exit line and the

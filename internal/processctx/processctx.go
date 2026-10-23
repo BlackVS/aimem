@@ -33,8 +33,8 @@ import (
 
 // hubLookupTimeout bounds each hub contact at session start; the Git
 // fetch has its own bound in the process package and is paid only on a
-// cache miss.
-const hubLookupTimeout = 1500 * time.Millisecond
+// cache miss. Tests raise it so a loaded machine never decides an outcome.
+var hubLookupTimeout = 1500 * time.Millisecond
 
 // State is what Load could establish about the project's process context.
 type State string
@@ -535,7 +535,13 @@ func hubGetJSONClient(hub *adapter.HubConfig, client *http.Client, path string, 
 		return err
 	}
 	req.Header.Set("Authorization", "Bearer "+hub.Token)
-	resp, err := client.Do(req)
+	// The context (hubLookupTimeout, 1.5s) is the single bound: the copy
+	// drops only the client's own timeout (5s, or 30s for the strict
+	// client), which never bound first in production since both exceed
+	// 1.5s, and keeps its transport and the entry's recorded trust.
+	bounded := *client
+	bounded.Timeout = 0
+	resp, err := bounded.Do(req)
 	if err != nil {
 		return fmt.Errorf("hub unreachable: %w", err)
 	}

@@ -776,7 +776,7 @@ func TestIdentityCLIPeerCheck(t *testing.T) {
 	fh.Close()
 
 	// Before the hub has a credential file, registration says so.
-	g.s.SetIntrospectionClient(&introspect.Client{RootCAs: f.CA.Pool})
+	g.s.SetIntrospectionClient(&introspect.Client{RootCAs: f.CA.Pool, Budget: introspecttest.Budget})
 	out := g.mustRun(t, "peer", "register", "aicrew-example", "--endpoint", f.Endpoint(), "--peer-trust-pin", f.Pin)
 	if !strings.Contains(out, "introspection not operational yet") || !strings.Contains(out, "peer check aicrew-example") {
 		t.Fatalf("register output: %s", out)
@@ -789,7 +789,7 @@ func TestIdentityCLIPeerCheck(t *testing.T) {
 		t.Fatal("the peer was called without a credential")
 	}
 
-	g.s.SetIntrospectionClient(&introspect.Client{TokenFile: credFile, RootCAs: f.CA.Pool})
+	g.s.SetIntrospectionClient(&introspect.Client{TokenFile: credFile, RootCAs: f.CA.Pool, Budget: introspecttest.Budget})
 	if out := g.mustRun(t, "peer", "list"); !strings.Contains(out, "(operational)") {
 		t.Fatalf("peer list: %s", out)
 	}
