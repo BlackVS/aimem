@@ -8,6 +8,7 @@ go test ./...
 gofmt -l .                       # must print nothing
 go run honnef.co/go/tools/cmd/staticcheck@latest ./...
 sh scripts/check-process-stops.sh
+sh scripts/check-doc-versions.sh
 ```
 
 ## Toolchain
@@ -18,6 +19,35 @@ aimem needs Go 1.26 (`go 1.26.0` in `go.mod`). The floor moved from 1.25 for the
 - **Only the `@latest` tools may use another Go.** staticcheck and govulncheck run with an inline `GOTOOLCHAIN=auto`, because a tool's own `go.mod` may need a newer Go. Build, vet and test stay on the pinned 1.26.
 - **Raising the floor is its own PR.** Change `go.mod`, every `go-version` in `.github/workflows/`, the toolchain checks, this section, the Go version in `README.md` and `docs/INSTALL-CLIENT.md`, and the CHANGELOG together. Do it only for a feature that needs it, and only to a Go minor release older than seven days (the supply-chain wait). Patch releases within the pinned minor are taken as they appear, because they carry security fixes.
 - **A developer machine** needs Go 1.26 or newer. With an older Go, the default `GOTOOLCHAIN=auto` downloads 1.26 for this module, and `GOTOOLCHAIN=local` stops with an error that names the version.
+
+## Version mentions in the documentation
+
+A guide that names a release reads as stating the current minimum. So every
+mention of an old release (v0.6 to v0.9) under `docs/` and in `README.md` is
+one of three things:
+
+- **The current minimum, with its reason.** Update the mention to the
+  release the documented steps need now, and say why: the feature or
+  command that arrived in it. A team guide and the Kanban guide can need
+  different releases; each states its own once.
+- **Marked historical.** A document written against a release, such as a
+  design with a source baseline, keeps its versions and carries a line
+  starting `**Historical versions.**` within its first ten lines. The line
+  says the releases it names are its baseline, not the current minimum.
+- **Archived.** A checklist or review of a past release moves to
+  `docs/archive/` unchanged, with its links into `docs/` adjusted and the
+  inbound links pointed at the new place.
+
+`CHANGELOG.md` and `docs/ROADMAP.md` are records of the past and are not
+checked.
+
+**Enforcement.** `scripts/check-doc-versions.sh` runs in CI's lint job. It
+refuses a `v0.6.x` to `v0.9.x` mention in `README.md` or a Markdown file
+under `docs/`, outside `docs/archive/` and `docs/ROADMAP.md`, unless the
+file's first ten lines carry the marker. It prints each offending line.
+
+**Why.** On 2026-10-23 several guides still stated v0.7.x minimums, while
+the team flow needed 0.10.7 or later and the hub 0.10.8.
 
 ## Processes and state in tests
 

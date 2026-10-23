@@ -59,6 +59,22 @@ currently 25); a binary refuses a database newer than it understands.
   print this command at the build's own tag when the hub uses no process
   yet. Existing selections are unchanged: a hub serves its stored copy, and
   moving a project to this repository is a re-selection with `--expect`.
+- **Version mentions in the documentation are current, marked or
+  archived.** TEAM-QUICKSTART stated v0.7.1 for the hub and v0.7.3 for
+  agent machines. It now states the hub 0.10.8 or later (selecting the
+  process by tag, importing the skills archive) and agent machines 0.10.7
+  or later (installing the required skills from the hub), and the 0.10.13
+  rule that a task credential goes only to a hub entry verified over
+  https. PILOT-HUB-RUNBOOK's socket sentence states what every supported
+  release does. DESIGN-AIFORGE, DESIGN-access-control and
+  DESIGN-portable-team-context carry a `**Historical versions.**` line:
+  the releases they name are their baseline, not the current minimum. The
+  past release checklists TOKEN-MODEL-ROLLOUT and TEAM-ROLLOUT-0.7.3 and
+  the review TEAM-MULTIPROJECT-REVIEW move unchanged to `docs/archive/`,
+  with a README there and the inbound links updated.
+  `scripts/check-doc-versions.sh`, a new step in CI's lint job, refuses an
+  unmarked v0.6 to v0.9 mention outside CHANGELOG, ROADMAP and the
+  archive; DEVELOPMENT.md documents the rule.
 - **The reference handbook takes the two later ai-skills changes.** The
   ai-skills commits b029cd3 and 4be41c1 are ported into
   `processes/aimem/handbook.md`. The external reviewer is the one deployed on

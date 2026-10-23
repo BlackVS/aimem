@@ -1,13 +1,13 @@
 # v0.7.3 rollout and pilot checklist
 
 v0.7.3 delivers portable team context (increment 1a-1c of the
-[contract](DESIGN-portable-team-context.md)): `team_setup` and
+[contract](../DESIGN-portable-team-context.md)): `team_setup` and
 `team_continue` deliver the role's guidance and the project's selected
 process with a readiness report, a worker that is not ready is announced
 unavailable and its reserved attempt is handled by state, an accepted
 attempt keeps the process version it was accepted under, and the
 `/join_team` and `/resume_team` entry points use all of it. The
-[team quickstart](TEAM-QUICKSTART.md#7-upgrade-an-existing-team) has the
+[team quickstart](../TEAM-QUICKSTART.md#7-upgrade-an-existing-team) has the
 upgrade steps; this page is the release, rollout and pilot checklist.
 
 Merged code and a published release are not evidence that any machine runs
@@ -56,7 +56,7 @@ There is no schema change and no new hub route, so no data migration.
 The member flow needs no hub upgrade: hubs on v0.7.1 or later remain
 compatible. Upgrading a hub adds `team_context` to its MCP endpoint.
 
-- [ ] Back up the state per the [administrator manual](ADMIN-MANUAL.md),
+- [ ] Back up the state per the [administrator manual](../ADMIN-MANUAL.md),
       upgrade, and check `aimem version` and `aimem health` as the service
       user.
 

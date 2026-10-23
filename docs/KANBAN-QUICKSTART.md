@@ -336,5 +336,5 @@ direct grant removes that grant, but a group grant may still allow writes.
 
 For deployment and API details, see [the administrator manual](ADMIN-MANUAL.md)
 and [the access model](DESIGN-access-control.md). Operators upgrading from
-v0.5.0 should follow the [token-model rollout checklist](TOKEN-MODEL-ROLLOUT.md)
+v0.5.0 should follow the [token-model rollout checklist](archive/TOKEN-MODEL-ROLLOUT.md)
 before enabling more projects.
