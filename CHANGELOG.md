@@ -59,6 +59,18 @@ currently 25); a binary refuses a database newer than it understands.
   print this command at the build's own tag when the hub uses no process
   yet. Existing selections are unchanged: a hub serves its stored copy, and
   moving a project to this repository is a re-selection with `--expect`.
+- **The reference handbook takes the two later ai-skills changes.** The
+  ai-skills commits b029cd3 and 4be41c1 are ported into
+  `processes/aimem/handbook.md`. The external reviewer is the one deployed on
+  the project's own forge, and a `review-this:<profile>` variant is used only
+  where the site offers one. Where no external reviewer is deployed, the local
+  high review is the pre-merge gate, and the external gate is reported as
+  absent, never as passed. Watching for the review and checking every gate at
+  the head before marking a PR ready are stated as steps. The forge-gates
+  skill's `forge_gates.py wait-review` and `gates` are named as an optional
+  way to do them, since that skill ships with ai-skills, not with aimem. The
+  handbook's opening lines record the port and that choice. The manifest is
+  unchanged, and forge-gates is not a required skill.
 
 ### Security
 
