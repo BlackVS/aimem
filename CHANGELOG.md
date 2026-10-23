@@ -48,7 +48,8 @@ currently 25); a binary refuses a database newer than it understands.
   keeps the stored token.
 - **Provider base URLs must be public https endpoints.** A save is
   refused for a plain `http://` URL and for a host that is, or resolves
-  to, a loopback, private, link-local, unspecified or multicast address.
+  to, a loopback, private, link-local or multicast address, or one in
+  0.0.0.0/8.
   The model list and the test button also refuse such an address when
   they connect, so a name re-pointed after the save gains nothing. A hub
   that uses a local or LAN model server (Ollama, LM Studio, a LAN

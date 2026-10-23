@@ -125,6 +125,8 @@ func TestProviderURLPolicy(t *testing.T) {
 		"https://[fe80::1]/v1",
 		"https://[::ffff:127.0.0.1]/v1",
 		"https://0.0.0.0/v1",
+		"https://0.0.0.1/v1",
+		"https://[::ffff:0.1.2.3]/v1",
 		"https://localhost/v1",
 		"https://api.localhost./v1",
 		"https:///v1",

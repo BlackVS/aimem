@@ -29,6 +29,11 @@ func providerAllowPrivate() bool { return os.Getenv(allowPrivateEnv) == "1" }
 var lookupIP = net.DefaultResolver.LookupIPAddr
 
 func blockedIP(ip net.IP) bool {
+	// All of 0.0.0.0/8, not only 0.0.0.0: Linux routes the block to
+	// the local host.
+	if ip4 := ip.To4(); ip4 != nil && ip4[0] == 0 {
+		return true
+	}
 	return ip.IsLoopback() || ip.IsPrivate() || ip.IsUnspecified() ||
 		ip.IsLinkLocalUnicast() || ip.IsMulticast()
 }
