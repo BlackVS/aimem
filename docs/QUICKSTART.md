@@ -128,7 +128,8 @@ aimem hub add home https://hub.example.com:8440 "<writer-token>" --pin sha256-..
 
 Use the `--pin` value the hub installer printed: it verifies the hub's
 self-signed certificate. Once you install a real certificate, the pin
-stops matching: run `aimem hub rm home`, then `hub add` without it.
+stops matching: run the same `hub add` with `--system-roots` in place of
+`--pin`, which drops the pin and keeps the rest of the entry.
 Never use the hub's env token here; it is the hub's admin credential.
 
 Checkpoints now push to the hub as they happen; if it is unreachable they spool locally

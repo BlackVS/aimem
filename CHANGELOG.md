@@ -13,6 +13,19 @@ currently 25); a binary refuses a database newer than it understands.
 
 ## [Unreleased]
 
+### Added
+
+- **`aimem hub add --system-roots` drops a recorded pin or CA file.** A
+  re-add of the same hub keeps its recorded `--pin` or `--ca-file`, so
+  once a real certificate replaced the self-signed one, the only way to
+  drop the pin was `aimem hub rm` and a fresh `hub add`. That also lost
+  the entry's task credential and could move the default hub. The new
+  flag clears the recorded trust, so the entry verifies against the
+  system roots, and keeps the task credential and the default mark. It
+  is refused together with `--pin`, `--ca-file` or `--insecure`. The hub
+  installer's hint, INSTALL-HUB, INSTALL-CLIENT and QUICKSTART now name
+  it in place of `hub rm`.
+
 ## [0.10.13] — 2026-10-23
 
 Individual credentials now go only to a verified https hub. Every request

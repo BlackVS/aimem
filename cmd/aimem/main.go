@@ -2304,7 +2304,7 @@ func embedProjects(reg *store.Registry, c *embed.Client, projects []string, batc
 
 // hubUsage is the usage text of `aimem hub`.
 const hubUsage = `usage: aimem hub <url> <token>                      set/replace the default hub
-       aimem hub add <name> <url> (<token> | --token-file PATH|-) [--sync <ssh-dest>] [--default] [--ca-file PATH | --pin sha256-BASE64]
+       aimem hub add <name> <url> (<token> | --token-file PATH|-) [--sync <ssh-dest>] [--default] [--ca-file PATH | --pin sha256-BASE64 | --system-roots]
        aimem hub rm <name>
        aimem hub default <name>
        aimem hub repair                                 rewrite hub.json owner-only, changing nothing else
@@ -2407,6 +2407,7 @@ func hubCmd(args []string) error {
 		caFile := fs.String("ca-file", "", "trust this CA bundle for the hub (a private CA)")
 		pin := fs.String("pin", "", "trust the hub certificate with this SPKI SHA-256 (sha256-BASE64)")
 		tokenFile := fs.String("token-file", "", "read the token from this private file (- for standard input)")
+		systemRoots := fs.Bool("system-roots", false, "drop the recorded --ca-file or --pin and verify the hub against the system roots")
 		rest := args[1:]
 		var pos []string
 		// flag package stops at the first non-flag arg; accept flags after
@@ -2431,6 +2432,9 @@ func hubCmd(args []string) error {
 		if _, err := ident.GroupProject(name); err != nil {
 			return fmt.Errorf("invalid hub name %q (want lowercase letters, digits, dashes)", name)
 		}
+		if *systemRoots && (*caFile != "" || *pin != "" || *insecure) {
+			return errors.New("--system-roots drops the recorded trust: give it without --ca-file, --pin or --insecure")
+		}
 		trustCA, trustPin, err := hubTrust(*caFile, *pin, *insecure)
 		if err != nil {
 			return err
@@ -2439,8 +2443,13 @@ func hubCmd(args []string) error {
 		if hubs == nil {
 			hubs = map[string]*adapter.HubConfig{}
 		}
-		hubs[name] = (&adapter.HubConfig{URL: strings.TrimRight(pos[1], "/"), Token: token, Sync: *syncDest, Insecure: *insecure,
-			CAFile: trustCA, Pin: trustPin}).Over(hubs[name])
+		next := &adapter.HubConfig{URL: strings.TrimRight(pos[1], "/"), Token: token, Sync: *syncDest, Insecure: *insecure,
+			CAFile: trustCA, Pin: trustPin}
+		if *systemRoots {
+			hubs[name] = next.OverSystemRoots(hubs[name])
+		} else {
+			hubs[name] = next.Over(hubs[name])
+		}
 		if *makeDefault || def == "" {
 			def = name
 		}

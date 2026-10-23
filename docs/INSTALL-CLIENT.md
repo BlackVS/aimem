@@ -147,8 +147,9 @@ self-signed certificate), record its trust with the entry: add
 the certificate's public key; the hub installer prints it for its
 self-signed certificate). Every aimem path to that hub uses it; a later
 `hub add` of the same hub keeps it unless you give a new one. To drop a
-pin once the hub has a real certificate, remove the entry with
-`aimem hub rm <name>` and add it again without `--pin`.
+pin or CA file once the hub has a certificate the system roots trust,
+run `hub add` again with `--system-roots`: it clears the recorded trust
+and keeps the entry's task credential and default mark.
 `--insecure` skips verification instead; use it only as a last resort.
 An entry with `--insecure`, or with a plain `http://` URL, still carries
 checkpoints, but aimem refuses to send an individual credential to it:
