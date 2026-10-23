@@ -1,14 +1,17 @@
 # Kanban quickstart
 
-Release preparation (2026-09-21): this guide describes the v0.6.0 token
-model, merged in PR #56 and #57. Further project onboarding remains on
-hold until the release is deployed and the two-project workflow verified.
-See [the roadmap](ROADMAP.md) for the required delivery sequence.
+Enable a project's task board, give a person or agent access, connect the
+agent's MCP tools, and select the process the agents follow.
 
-Enable a project's task board, give a person or agent access, and connect
-the agent's MCP tools. Use aimem v0.6.0 or a compatible newer release on
-both the hub and agent machines. For a first installation, follow
-[the general quickstart](QUICKSTART.md) and [client setup](INSTALL-CLIENT.md).
+The hub needs aimem 0.10.8 or later: step 6 selects the process by its
+tag, and `aimem process refresh` in the troubleshooting table arrived in
+the same release. Agent machines need 0.6.0 or later, the release that
+brought the task credentials of step 4. From 0.10.13 on, a client sends
+its task credential only to a hub entry it verifies over https: the
+system roots, `--pin` or `--ca-file` (see [client setup](INSTALL-CLIENT.md)).
+
+For a first installation, follow [the general quickstart](QUICKSTART.md)
+and [client setup](INSTALL-CLIENT.md).
 
 Examples use `hub.example.com`, local hub name `team`, project `my-project`,
 and the installer's default service account `sessiond`. Substitute your

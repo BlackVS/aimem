@@ -36,6 +36,14 @@ currently 25); a binary refuses a database newer than it understands.
   Each feature section says which step it belongs to, and the
   documentation table is grouped the same way, with the task and team
   guides now listed in it.
+- **Stale hold notices removed.** KANBAN-QUICKSTART opened with a
+  2026-09-21 notice that onboarding was on hold for v0.6.0; it now states
+  what the guide covers and the releases its steps need (hub 0.10.8,
+  agent machines 0.6.0), with the 0.10.13 client rule for task
+  credentials. TASK-CREDENTIALS' matching
+  note now says when the feature arrived. The README's curation note names
+  curation and embeddings as separate layers: semantic recall needs an
+  embed model, not a curation run.
 
 ### Security
 

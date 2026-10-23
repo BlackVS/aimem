@@ -116,9 +116,7 @@ This clears the requirement and local secret. It does not revoke the token
 on the hub; use `aimem access token-revoke TOKEN_ID` there when retiring it.
 Removing the secret file alone does not restore fallback.
 
-This client feature is part of the token-model rollout. Additional-project
-onboarding remains on hold until the complete hub/client release is deployed
-and the two-project workflow is verified.
+Repository-local task credentials arrived in 0.6.0.
 Older clients do not understand the local marker and continue using their
 per-hub token. Upgrade every participating agent client before relying on
 repository-local selection; the marker cannot constrain an older binary.
