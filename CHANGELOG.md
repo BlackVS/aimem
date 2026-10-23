@@ -13,6 +13,17 @@ currently 25); a binary refuses a database newer than it understands.
 
 ## [Unreleased]
 
+## [0.10.13] — 2026-10-23
+
+Individual credentials now go only to a verified https hub. Every request
+that carries one, from the MCP task tools, process context with a
+project-local credential, team setup and the task-credential check, uses
+one strict client. That client refuses a plain `http://` entry and an
+`--insecure` one before any request is sent. This is the breaking change
+0.10.12 announced. `aimem hub task-token` now warns when it stores a
+credential that will not be sent, and `aimem hub credential` reports such
+an entry as `untrusted`. No schema change. Includes PR #268 and #269.
+
 ### Upgrade notes
 
 - **Move every hub entry that holds an individual credential to verified
@@ -29,6 +40,15 @@ currently 25); a binary refuses a database newer than it understands.
   0.10.12 note on a replaced certificate says. An entry moved from
   `http://` to `https://` is a new URL: run `aimem hub task-token` and
   `aimem task-token set` for it again.
+- **Client-side only.** The change is in the client. No hub route,
+  hub setting or wire format changes, so hubs and clients can be
+  upgraded in either order.
+- **No schema change.** The schema stays at 25, so going back is putting
+  the 0.10.12 binary back; no state copy is needed for that.
+- **One new `--json` value.** `aimem hub credential --json` can now
+  report `state: "untrusted"`; a script that matches every state needs
+  that case.
+- **No setting changes.** No new environment setting.
 
 ### Security
 
