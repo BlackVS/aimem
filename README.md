@@ -47,12 +47,14 @@ one before it. Stop at whichever one you need.
 | **3. A hub with tasks** | A project task board that people use in the browser and agents use through the MCP task tools. A selected process gives the agents their handbook, checklists and templates. | Step 2, tasks enabled for the project, a user with a grant on it, and that user's own task credential on the agent machine. The hub entry must be https and verified: by the system roots, `--pin` or `--ca-file`. | `aimem tasks on -p <project>` and `aimem process select ...` on the hub; `aimem hub task-token <hub> <token>` or `aimem task-token set` on the agent machine | [KANBAN-QUICKSTART](docs/KANBAN-QUICKSTART.md), [TASK-CREDENTIALS](docs/TASK-CREDENTIALS.md), [INSTALL-CLIENT](docs/INSTALL-CLIENT.md) |
 | **4. A hub in a team** | A coordinator and workers, each an agent session in its own checkout: registration and roster, offers and assignments, each worker's reserved attempt and its execution, and messages through each member's inbox. | Step 3, and a team whose members each have their own checkout and ordinary task credential. | `aimem teams provision create` and `add` on the hub; `/join_team` in each member's client | [TEAM-QUICKSTART](docs/TEAM-QUICKSTART.md), [TEAM-AGENT-QUICKSTART](docs/TEAM-AGENT-QUICKSTART.md); the aimem and aicrew boundary is in [DESIGN-AIFORGE](docs/DESIGN-AIFORGE.md) |
 
-**Curation is optional at every step.** An LLM distils journal turns into
-typed, sourced facts and embeds them for semantic recall. A hub runs it on
-a schedule; on a workstation `aimem curate` runs it by hand. Without it,
-the knowledge base holds what agents `remember`, and recall is full-text
-only. Budgets cap the spend before each call
-([QUICKSTART](docs/QUICKSTART.md) stage 3,
+**Curation and embeddings are optional at every step, and separate.**
+Curation has an LLM distil journal turns into typed, sourced facts. A hub
+runs it on a schedule; on a workstation `aimem curate` runs it by hand.
+Without it, the knowledge base holds what agents `remember`. Embeddings
+give semantic recall over the facts, whether curated or remembered: they
+need an embed model, and `aimem embed` embeds new facts. Without
+embeddings, recall is full-text only. Budgets cap the spend before each
+call ([QUICKSTART](docs/QUICKSTART.md) stage 3,
 [USER-MANUAL](docs/USER-MANUAL.md#curation-manual-runs)).
 
 ## What you get
