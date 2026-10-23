@@ -35,9 +35,31 @@ aimem separates the two jobs that keep getting conflated:
 
 Recovery from a crash never depends on an LLM being available.
 
+## Four ways to run it
+
+aimem is useful at every step below, and each step adds a layer to the
+one before it. Stop at whichever one you need.
+
+| | What you get | What it needs | Turn it on | Read |
+|---|---|---|---|---|
+| **1. Local only** | Every turn journaled, the session handoff re-injected at session start and after compaction, the knowledge base and recall over MCP. All of it offline. | One workstation. No hub, no LLM. | The workstation one-liner, run in the project directory ([Install](#install)) | [QUICKSTART](docs/QUICKSTART.md) stage 1 |
+| **2. With a hub** | Checkpoints pushed as they happen and synced back, so every machine shares one memory. The shared handoff and documents, structured collections, the web console. Several hubs, with projects bound to them individually. | An always-on Debian or Ubuntu host, and one writer token per workstation. | `install-hub.sh` on the host; `aimem token add <machine>` there; `aimem hub add <name> <url> <token>` on each workstation, with `--pin sha256-...` for a self-signed certificate | [QUICKSTART](docs/QUICKSTART.md) stage 2, [INSTALL-HUB](docs/INSTALL-HUB.md), [QUICKSTART-NEW-PROJECT](docs/QUICKSTART-NEW-PROJECT.md) |
+| **3. A hub with tasks** | A project task board that people use in the browser and agents use through the MCP task tools. A selected process gives the agents their handbook, checklists and templates. | Step 2, tasks enabled for the project, a user with a grant on it, and that user's own task credential on the agent machine. The hub entry must be https and verified: by the system roots, `--pin` or `--ca-file`. | `aimem tasks on -p <project>` and `aimem process select ...` on the hub; `aimem hub task-token <hub> <token>` or `aimem task-token set` on the agent machine | [KANBAN-QUICKSTART](docs/KANBAN-QUICKSTART.md), [TASK-CREDENTIALS](docs/TASK-CREDENTIALS.md), [INSTALL-CLIENT](docs/INSTALL-CLIENT.md) |
+| **4. A hub in a team** | A coordinator and workers, each an agent session in its own checkout: registration and roster, offers and assignments, each worker's reserved attempt and its execution, and messages through each member's inbox. | Step 3, and a team whose members each have their own checkout and ordinary task credential. | `aimem teams provision create` and `add` on the hub; `/join_team` in each member's client | [TEAM-QUICKSTART](docs/TEAM-QUICKSTART.md), [TEAM-AGENT-QUICKSTART](docs/TEAM-AGENT-QUICKSTART.md); the aimem and aicrew boundary is in [DESIGN-AIFORGE](docs/DESIGN-AIFORGE.md) |
+
+**Curation is optional at every step.** An LLM distils journal turns into
+typed, sourced facts and embeds them for semantic recall. A hub runs it on
+a schedule; on a workstation `aimem curate` runs it by hand. Without it,
+the knowledge base holds what agents `remember`, and recall is full-text
+only. Budgets cap the spend before each call
+([QUICKSTART](docs/QUICKSTART.md) stage 3,
+[USER-MANUAL](docs/USER-MANUAL.md#curation-manual-runs)).
+
 ## What you get
 
 ### Journals — the mechanical layer
+
+*Every mode. Sharing the handoff and the collections needs a hub.*
 
 - One append-only SQLite database per project, under
   `~/.local/state/aimem/`, with an FTS5 index for search.
@@ -48,17 +70,20 @@ Recovery from a crash never depends on an LLM being available.
 - Compaction markers anchored to the last assistant message, so the
   handoff survives the summarizer.
 - A handoff file (`docs/SESSION-STATE.md`) re-injected into the agent's
-  context at session start — and **shared over the hub** with
+  context at session start — and, with a hub, **shared over it** with
   compare-and-swap versioning, so every machine reads the same current
   handoff without a git push; diverged copies get a real three-way
   merge (`aimem docs merge`).
-- **Structured collections** for the artifacts many agents edit at
+- **Structured collections** (with a hub) for the artifacts many agents edit at
   once (an API surface, a config matrix): live trees of small JSON
   records on the hub, compare-and-swap **per record** so disjoint
   edits never conflict, markdown strictly generated
   (`aimem col render`) — git gets release cuts, not merge pain.
 
 ### Knowledge base — the curated layer
+
+*Every mode. Curation fills it; without curation, agents fill it with
+`remember`.*
 
 - Facts are **typed** (fact, decision, convention, solution, preference,
   reference), tagged, and cite the journal events they came from.
@@ -88,6 +113,8 @@ Recovery from a crash never depends on an LLM being available.
 
 ### Recall
 
+*Every mode. The semantic half needs an embedding model.*
+
 - **Hybrid**: BM25 full text fused with cosine similarity over embeddings
   by Reciprocal Rank Fusion. Zero-keyword-overlap queries still find the
   right fact.
@@ -102,6 +129,8 @@ Recovery from a crash never depends on an LLM being available.
 
 ### Multi-machine
 
+*With a hub (step 2 and up).*
+
 - A **hub** is the same binary run as a server. Checkpoints push to it in
   real time; if it is unreachable they spool locally and flush later.
 - Cursor-based incremental sync provides anti-entropy for anything
@@ -115,6 +144,9 @@ Recovery from a crash never depends on an LLM being available.
   dependency.
 
 ### Operating it
+
+*The console needs a hub; the dashboard works in every mode; budgets and
+providers belong to curation.*
 
 - **Web console** on the hub: browse and edit the knowledge base, manage
   chapters, review stale facts, edit shared documents with revision
@@ -224,26 +256,33 @@ aimem tui             # operator dashboard
 
 ## Documentation
 
-| Document | For |
-|---|---|
-| [QUICKSTART.md](docs/QUICKSTART.md) | **start here** - workstation, then hub, then curation |
-| [QUICKSTART-NEW-PROJECT.md](docs/QUICKSTART-NEW-PROJECT.md) | one new project on a fresh workstation against an existing hub: tokens, tasks, handoff, design docs |
-| [INSTALL-CLIENT.md](docs/INSTALL-CLIENT.md) | putting aimem on a workstation |
-| [INSTALL-HUB.md](docs/INSTALL-HUB.md) | standing up a hub |
-| [STORAGE-GUIDE.md](docs/STORAGE-GUIDE.md) | what goes where: journal vs KB vs groups vs docs vs wiki, and full-featured project setup |
-| [USER-MANUAL.md](docs/USER-MANUAL.md) | day-to-day use: handoffs, recall, curation |
-| [ADMIN-MANUAL.md](docs/ADMIN-MANUAL.md) | operating a deployment: timers, budgets, multi-hub, troubleshooting |
-| [AI-MANUAL.md](docs/AI-MANUAL.md) | for the agent: how to read and write memory well |
-| [RECOVERY-RUNBOOK.md](docs/RECOVERY-RUNBOOK.md) | recovering a lost or compacted session |
-| [DESIGN.md](docs/DESIGN.md) | architecture, data model, and the reasoning behind both |
-| [DESIGN-scale.md](docs/DESIGN-scale.md) | what breaks first as the knowledge base grows, with measurements |
-| [DESIGN-multiprovider.md](docs/DESIGN-multiprovider.md) | the provider registry |
-| [DESIGN-shared-docs.md](docs/DESIGN-shared-docs.md) | sharing the handoff and other documents over the hub |
-| [DESIGN-hub-sync.md](docs/DESIGN-hub-sync.md) | anti-entropy sync over the hub API, named tokens, OpenAPI |
-| [DESIGN-doc-collab.md](docs/DESIGN-doc-collab.md) | git-like reconciliation for shared documents |
-| [DESIGN-structured-docs.md](docs/DESIGN-structured-docs.md) | structured collections: record-granular CAS, generated markdown |
-| [COMPARISON.md](docs/COMPARISON.md) | how aimem relates to mem0, Zep, Letta, claude-mem and friends |
-| [CHANGELOG.md](CHANGELOG.md) | what changed, with data-integrity fixes called out |
+Grouped by the steps in [Four ways to run it](#four-ways-to-run-it).
+
+| Step | Document | For |
+|---|---|---|
+| Start | [QUICKSTART.md](docs/QUICKSTART.md) | **start here** - workstation, then hub, then curation |
+| 1. Local only | [INSTALL-CLIENT.md](docs/INSTALL-CLIENT.md) | putting aimem on a workstation |
+| 1. Local only | [USER-MANUAL.md](docs/USER-MANUAL.md) | day-to-day use: handoffs, recall, curation |
+| 1. Local only | [AI-MANUAL.md](docs/AI-MANUAL.md) | for the agent: how to read and write memory well |
+| 1. Local only | [RECOVERY-RUNBOOK.md](docs/RECOVERY-RUNBOOK.md) | recovering a lost or compacted session |
+| 1. Local only | [STORAGE-GUIDE.md](docs/STORAGE-GUIDE.md) | what goes where: journal vs KB vs groups vs docs vs wiki, and full-featured project setup |
+| 2. With a hub | [INSTALL-HUB.md](docs/INSTALL-HUB.md) | standing up a hub |
+| 2. With a hub | [QUICKSTART-NEW-PROJECT.md](docs/QUICKSTART-NEW-PROJECT.md) | one new project on a fresh workstation against an existing hub: tokens, tasks, handoff, design docs |
+| 2. With a hub | [DESIGN-hub-sync.md](docs/DESIGN-hub-sync.md) | anti-entropy sync over the hub API, named tokens, OpenAPI |
+| 2. With a hub | [DESIGN-shared-docs.md](docs/DESIGN-shared-docs.md) | sharing the handoff and other documents over the hub |
+| 2. With a hub | [DESIGN-doc-collab.md](docs/DESIGN-doc-collab.md) | git-like reconciliation for shared documents |
+| 2. With a hub | [DESIGN-structured-docs.md](docs/DESIGN-structured-docs.md) | structured collections: record-granular CAS, generated markdown |
+| 3. Hub with tasks | [KANBAN-QUICKSTART.md](docs/KANBAN-QUICKSTART.md) | enabling a project's task board, granting access, connecting an agent, selecting the process |
+| 3. Hub with tasks | [TASK-CREDENTIALS.md](docs/TASK-CREDENTIALS.md) | which task credential an agent machine uses, and how to install it |
+| 4. Hub in a team | [TEAM-QUICKSTART.md](docs/TEAM-QUICKSTART.md) | starting a coordinator and workers, step by step |
+| 4. Hub in a team | [TEAM-AGENT-QUICKSTART.md](docs/TEAM-AGENT-QUICKSTART.md) | registration, messages, assignments and execution over MCP, CLI and HTTP |
+| 4. Hub in a team | [DESIGN-AIFORGE.md](docs/DESIGN-AIFORGE.md) | the boundary between aimem (knowledge and backlog) and aicrew (agent coordination) |
+| Curation | [DESIGN-multiprovider.md](docs/DESIGN-multiprovider.md) | the provider registry |
+| Operations | [ADMIN-MANUAL.md](docs/ADMIN-MANUAL.md) | operating a deployment: timers, budgets, multi-hub, troubleshooting |
+| Reference | [DESIGN.md](docs/DESIGN.md) | architecture, data model, and the reasoning behind both |
+| Reference | [DESIGN-scale.md](docs/DESIGN-scale.md) | what breaks first as the knowledge base grows, with measurements |
+| Reference | [COMPARISON.md](docs/COMPARISON.md) | how aimem relates to mem0, Zep, Letta, claude-mem and friends |
+| Reference | [CHANGELOG.md](CHANGELOG.md) | what changed, with data-integrity fixes called out |
 
 ## Privacy and egress
 
@@ -286,8 +325,6 @@ upgrading a fleet. Windows support is best-effort: the service and the
 periodic sync run as logon scheduled tasks (sync rides the hub API, so
 no ssh is needed on any platform).
 
-Set up task boards and agent access with the
-[Kanban quickstart](docs/KANBAN-QUICKSTART.md).
 See the [roadmap](docs/ROADMAP.md) for delivered milestones and the next
 delivery sequence. Issues and pull requests welcome.
 

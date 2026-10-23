@@ -26,6 +26,17 @@ currently 25); a binary refuses a database newer than it understands.
   installer's hint, INSTALL-HUB, INSTALL-CLIENT and QUICKSTART now name
   it in place of `hub rm`.
 
+### Changed
+
+- **The README names aimem's four ways of working.** A new section,
+  "Four ways to run it", sets them out as steps that each add a layer:
+  local only, with a hub, a hub with tasks, and a hub in a team. Each
+  row says what you get, what it needs, the command that turns it on
+  and the document to read. Curation is shown as optional at every step.
+  Each feature section says which step it belongs to, and the
+  documentation table is grouped the same way, with the task and team
+  guides now listed in it.
+
 ## [0.10.13] — 2026-10-23
 
 Individual credentials now go only to a verified https hub. Every request
