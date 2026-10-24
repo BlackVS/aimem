@@ -64,7 +64,7 @@ aimem projects
 ```
 
 This creates the project's store if absent and enables tasks. There is no
-separate `aimem create-project` command.
+separate `aimem create-project` command. <!-- doc-check: skip -->
 
 Until a process is selected for the project, it is not ready for work: no
 member can take a task, workers are announced unavailable and the

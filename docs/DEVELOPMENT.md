@@ -9,6 +9,7 @@ gofmt -l .                       # must print nothing
 go run honnef.co/go/tools/cmd/staticcheck@latest ./...
 sh scripts/check-process-stops.sh
 sh scripts/check-doc-versions.sh
+sh scripts/check-doc-examples.sh
 ```
 
 ## Toolchain
@@ -48,6 +49,55 @@ file's first ten lines carry the marker. It prints each offending line.
 
 **Why.** On 2026-10-23 several guides still stated v0.7.x minimums, while
 the team flow needed 0.10.7 or later and the hub 0.10.8.
+
+## Examples in the documentation
+
+A reader copies an example as printed, so every name in it must exist in
+the current code. `TestDocExamples` (`docs/examples_test.go`) reads the
+code spans of the operational documents, the fenced blocks and the inline
+code, and checks four kinds of name:
+
+- **Commands.** In an `aimem ...` invocation, the first word must be a case
+  of `main()`'s command switch in `cmd/aimem`. A following word that looks
+  like a subcommand must appear as a word in a string literal of the
+  `cmd/aimem` source: usage text after "aimem ", a case label, a compared
+  value or a map key.
+- **Flags.** A `--flag` or `-f` in an invocation must be registered on a
+  FlagSet in `cmd/aimem` or appear as a flag in its usage text. A fenced
+  line that ends in `\` (sh) or a backtick (PowerShell) continues the
+  invocation on the next line, and a failure names the physical line.
+- **Routes.** A `/v1/...` path must match a path of
+  `internal/server/openapi.json`, which the server's parity test pins to
+  the route table. A `{param}` or `<placeholder>` stands for a segment, and
+  a mention such as `/v1/sync` or `/v1/identity/` passes when it is the
+  prefix of a real route.
+- **MCP tools.** A name in inline code followed by the word "tool" (or a
+  list of such names before "tools"), and a name after the `mcp__aimem__`
+  prefix, must be one of `mcp.ToolNames()`, every tool the MCP facades
+  serve.
+
+A failure prints file:line, the name and the nearest current name.
+
+**What it skips.**
+- Designs, proposals and probe reports (`DESIGN*.md`, `*-PROPOSAL.md`,
+  `*-PROBE.md`): they describe proposed names and the corrections made to
+  them. `docs/archive/`, `docs/ROADMAP.md` and `CHANGELOG.md` are records of
+  the past.
+- Routes of other services: the model proxy's `/v1/models`, `/v1/chat/`
+  and `/v1/embeddings`, and aicrew's `/v1/crew/`.
+- A line ending in `<!-- doc-check: skip -->`, for prose that names
+  something on purpose, such as a command that does not exist.
+
+**Its limits.** The source text is the oracle, not the dispatch: a renamed
+command is caught only once its old word is gone from the `cmd/aimem`
+source, and a flag is checked against the package's flags as a whole, not
+those of its own subcommand. Snake-case words in inline code are not taken
+as tool names unless the text calls them tools, because most of them are
+JSON fields and error codes. Sample outputs, the order of steps and the
+meaning of arguments are not checked; that is a reader's pass.
+
+**Enforcement.** `scripts/check-doc-examples.sh` runs the test in CI's lint
+job; `go test ./...` runs it too.
 
 ## Processes and state in tests
 
