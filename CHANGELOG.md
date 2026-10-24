@@ -59,6 +59,21 @@ currently 25); a binary refuses a database newer than it understands.
   print this command at the build's own tag when the hub uses no process
   yet. Existing selections are unchanged: a hub serves its stored copy, and
   moving a project to this repository is a re-selection with `--expect`.
+- **The documentation's examples are checked against the code.**
+  `scripts/check-doc-examples.sh`, a new step in CI's lint job, runs
+  `TestDocExamples`. It reads the fenced blocks and inline code of the
+  operational documents and refuses an `aimem` command word or flag, a
+  `/v1/` route or an MCP tool name that the code does not have: the
+  `cmd/aimem` source, `internal/server/openapi.json` and the new
+  `mcp.ToolNames()` are its sources. It prints file:line and the nearest
+  current name. Designs, proposals, probe reports, the archive, the
+  roadmap and other services' routes are skipped, and a line can opt out
+  with `<!-- doc-check: skip -->`. DEVELOPMENT.md documents the rule and
+  its limits. On master the operational documents had no stale name; the
+  one hit, KANBAN-QUICKSTART's sentence that there is no
+  `aimem create-project`, now carries the opt-out. DESIGN-structured-docs
+  names the records route as it was built,
+  `GET /v1/projects/{p}/collections/{c}/records`.
 - **Version mentions in the documentation are current, marked or
   archived.** TEAM-QUICKSTART stated v0.7.1 for the hub and v0.7.3 for
   agent machines. It now states the hub 0.10.8 or later (selecting the

@@ -119,7 +119,7 @@ API (writer role, OpenAPI + parity test as usual):
 
 ```
 GET    /v1/projects/{p}/collections                     list
-GET    /v1/projects/{p}/collections/{c}                 all records (one call, for render)
+GET    /v1/projects/{p}/collections/{c}/records         all records (one call, for render)
 GET    /v1/projects/{p}/collections/{c}/records/{id}    one record
 PUT    /v1/projects/{p}/collections/{c}/records/{id}    CAS write {body, base_rev}
 DELETE /v1/projects/{p}/collections/{c}/records/{id}    tombstone (CAS)
