@@ -107,19 +107,19 @@ func TestStageResolution(t *testing.T) {
 	t.Setenv("AIMEM_OPENAI_BASE_URL", "http://127.0.0.1:1")
 	t.Setenv("AIMEM_CURATE_MODEL", "curate-model")
 
-	// Unset: the stage follows the curation model.
+	// Unset or empty: off, whatever curation uses. The stage is off by
+	// default, so no flagged text leaves the hub until the operator says.
 	os.Unsetenv(ModelKey)
-	if j, why := ForRoot(root); j == nil || j.Model != "curate-model" || !strings.HasPrefix(j.Source, "AIMEM_CURATE_MODEL") {
+	if j, why := ForRoot(root); j != nil || why != ModelKey+" is not set" {
 		t.Fatalf("unset key: judge %+v, why %q", j, why)
 	}
-	// Empty: off, whatever curation uses.
-	t.Setenv(ModelKey, "")
-	if j, why := ForRoot(root); j != nil || why != ModelKey+" is empty" {
+	t.Setenv(ModelKey, " ")
+	if j, why := ForRoot(root); j != nil || why != ModelKey+" is not set" {
 		t.Fatalf("empty key: judge %+v, why %q", j, why)
 	}
 	// Its own model, separate from curation's.
 	t.Setenv(ModelKey, "check-model")
-	if j, _ := ForRoot(root); j == nil || j.Model != "check-model" || j.Source != ModelKey {
+	if j, _ := ForRoot(root); j == nil || j.Model != "check-model" {
 		t.Fatalf("own key: judge %+v", j)
 	}
 	// A cap of zero is off; a malformed cap is off with the reason.

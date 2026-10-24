@@ -8,9 +8,9 @@
 //
 // The model is AIMEM_TEXT_CHECK_MODEL, resolved through the provider
 // registry like AIMEM_EMBED_MODEL, and must be an OpenAI-compatible
-// endpoint: a subscription CLI is not a server-side backend. Unset, the
-// key follows AIMEM_CURATE_MODEL, so a hub where curation runs on such an
-// endpoint has the stage on; set to the empty string, the stage is off.
+// endpoint: a subscription CLI is not a server-side backend. Unset or
+// empty, the stage is off: flagged text leaves the hub only once the
+// operator names a model for it.
 package textcheck
 
 import (
@@ -49,7 +49,6 @@ const (
 // Judge asks the configured model about flagged text.
 type Judge struct {
 	Model  string // the local model name the operator configured
-	Source string // which key named it
 	ep     provider.Endpoint
 	cap    int
 	path   string // the daily counter, <state-root>/textcheck.json
@@ -62,7 +61,6 @@ type Judge struct {
 type Config struct {
 	State      string `json:"state"` // "on" or "off"
 	Model      string `json:"model,omitempty"`
-	Source     string `json:"source,omitempty"`
 	Why        string `json:"why,omitempty"`
 	DailyCalls int    `json:"daily_calls_cap"`
 	CallsToday int    `json:"calls_today"`
@@ -71,17 +69,9 @@ type Config struct {
 // ForRoot resolves the stage from the environment and the provider
 // registry under root; nil with the reason when it is off.
 func ForRoot(root string) (*Judge, string) {
-	model, set := os.LookupEnv(ModelKey)
-	source := ModelKey
-	if !set {
-		model, source = os.Getenv("AIMEM_CURATE_MODEL"), "AIMEM_CURATE_MODEL ("+ModelKey+" is unset)"
-		if model == "" {
-			return nil, ModelKey + " and AIMEM_CURATE_MODEL are unset"
-		}
-	}
-	model = strings.TrimSpace(model)
+	model := strings.TrimSpace(os.Getenv(ModelKey))
 	if model == "" {
-		return nil, ModelKey + " is empty"
+		return nil, ModelKey + " is not set"
 	}
 	limit, err := dailyCap()
 	if err != nil {
@@ -94,7 +84,7 @@ func ForRoot(root string) (*Judge, string) {
 	if why != "" {
 		return nil, why + " (the text check needs an OpenAI-compatible endpoint; a subscription CLI cannot serve it)"
 	}
-	return &Judge{Model: model, Source: source, ep: ep, cap: limit,
+	return &Judge{Model: model, ep: ep, cap: limit,
 		path: filepath.Join(root, "textcheck.json"), client: &http.Client{Timeout: Timeout}}, ""
 }
 
@@ -118,7 +108,7 @@ func Describe(j *Judge, why string) Config {
 	}
 	j.mu.Lock()
 	defer j.mu.Unlock()
-	return Config{State: "on", Model: j.Model, Source: j.Source, DailyCalls: j.cap, CallsToday: j.loadCount().Calls}
+	return Config{State: "on", Model: j.Model, DailyCalls: j.cap, CallsToday: j.loadCount().Calls}
 }
 
 type counter struct {

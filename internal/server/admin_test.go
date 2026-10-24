@@ -141,14 +141,14 @@ func TestModelsConfig(t *testing.T) {
 		strings.Contains(got, "old-model") {
 		t.Fatalf("env file after put:\n%s", got)
 	}
-	// The text check's model is unset so far: the save above left it so,
-	// and it follows the curation model.
+	// The text check's model is unset so far, and the save above left it
+	// so: the stage is off.
 	if strings.Contains(got, "AIMEM_TEXT_CHECK") {
 		t.Fatalf("a save without the text check's keys wrote them:\n%s", got)
 	}
 	var m map[string]any
 	json.Unmarshal(req(t, h, "GET", "/v1/config/models", "").Body.Bytes(), &m)
-	if m["text_check_model_set"] != false || m["text_check"].(map[string]any)["state"] != "off" {
+	if m["text_check_model"] != "" || m["text_check"].(map[string]any)["state"] != "off" {
 		t.Fatalf("get models before the text check is set: %v", m)
 	}
 	for _, bad := range []string{`{"curate_model":"a","embed_model":"b","text_check_model":"x\"y"}`,
@@ -174,7 +174,7 @@ func TestModelsConfig(t *testing.T) {
 		t.Fatalf("env file after the text check settings:\n%s", got)
 	}
 	json.Unmarshal(req(t, h, "GET", "/v1/config/models", "").Body.Bytes(), &m)
-	if m["text_check_model_set"] != true || m["text_check_model"] != "" || m["text_check_daily_calls"] != "50" {
+	if m["text_check_model"] != "" || m["text_check_daily_calls"] != "50" {
 		t.Fatalf("get models after the text check is set: %v", m)
 	}
 }

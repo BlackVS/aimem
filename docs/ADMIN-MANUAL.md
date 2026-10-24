@@ -205,8 +205,8 @@ Manual equivalent (what the script sets up):
    #AIMEM_LLM_RETRIES=3
    AIMEM_CURATE_MODEL=gpt-4o-mini
    AIMEM_EMBED_MODEL="text-embedding-3-large"
-   # the readability check's model (section 3e); unset follows the
-   # curation model, "" switches the second stage off:
+   # the readability check's model (section 3e); unset, the second
+   # stage is off:
    #AIMEM_TEXT_CHECK_MODEL=gpt-4o-mini
    ```
 
@@ -465,24 +465,19 @@ The second stage's model is its own setting, beside the curation and
 embedding models in the console's Setup tab and in the hub's env file:
 
 ```sh
-#AIMEM_TEXT_CHECK_MODEL=small-model    # unset: follows AIMEM_CURATE_MODEL; "" : stage off
+#AIMEM_TEXT_CHECK_MODEL=small-model    # unset or empty: stage off (the default)
 #AIMEM_TEXT_CHECK_DAILY_CALLS=200      # model calls per UTC day; 0: stage off
 ```
 
-When `AIMEM_TEXT_CHECK_MODEL` is unset, the stage uses the curation model,
-so a hub whose curation runs on an OpenAI-compatible endpoint has the
-stage on and a hub without a provider has it off. Set to the empty
-string, the stage is off whatever curation uses. So on an upgraded hub
-whose curation already uses such an endpoint, flagged task text goes to
-the curation provider from the first restart; set the key to the empty
-string first if that is not wanted (see "Data sent to model providers"
-below). The model is resolved
+The stage is off until `AIMEM_TEXT_CHECK_MODEL` names a model, even on a
+hub where curation runs, so no task text goes to a model provider until
+you choose one (see "Data sent to model providers" below). The model is resolved
 through the provider registry like `AIMEM_EMBED_MODEL`, and it must be an
 OpenAI-compatible endpoint (the `openai` kind). The daily cap is counted
 before each call, a failed call included, in `textcheck.json` under the
 state root. Changes take effect when `aimem.service` restarts.
-`aimem health` shows the stage under `text_check`: on with its model,
-where the name came from and today's calls, or off with the reason. The
+`aimem health` shows the stage under `text_check`: on with its model and
+today's calls, or off with the reason. The
 console shows the same line under the models.
 
 ### Reporting text stored before the check

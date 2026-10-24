@@ -7676,7 +7676,7 @@
     },
     "/v1/config/models": {
       "get": {
-        "summary": "Curate, embed and text check model configuration (text_check_model_set says whether the text check key exists; text_check is what the running service resolved)",
+        "summary": "Curate, embed and text check model configuration (text_check is what the running service resolved)",
         "x-role": "admin",
         "responses": {
           "200": {

@@ -1220,21 +1220,16 @@ async function createGroup(){
 /* ---------- Models ---------- */
 // The pickers are real dropdowns over the BOUND local model names (plus
 // the currently configured value, which may predate the registry).
-// The text check model has three states: unset follows the curate
-// model, empty is off, a name is its own model. "@follow" stands for
-// unset and is offered only while the key is unset, since saving it
-// leaves the line out rather than removing one.
-let textSet=false;
+// The text check model is off until one is chosen.
 async function loadModels(){
   let cur="", emb="", txt="";
   try{
     const m = await api("/v1/config/models");
     cur = m.curate_model||""; emb = m.embed_model||""; txt = m.text_check_model||"";
-    textSet = !!m.text_check_model_set;
     $("mTextCap").value = m.text_check_daily_calls||"";
     const tc = m.text_check||{};
     $("mTextState").textContent = tc.state==="on"
-      ? `running: ${tc.model} (${tc.source}), ${tc.calls_today}/${tc.daily_calls_cap} calls today`
+      ? `running: ${tc.model}, ${tc.calls_today}/${tc.daily_calls_cap} calls today`
       : `running: off (${tc.why||"no model"})`;
   }catch(e){ $("mNote").textContent = String(e); }
   const bound = Object.keys(PROV.models).sort();
@@ -1253,15 +1248,14 @@ async function loadModels(){
   }
   // The text check needs an OpenAI-compatible endpoint, like embeddings.
   const topts=[...new Set([txt,...embeddable])].filter(Boolean);
-  $("mText").innerHTML = (textSet?"":'<option value="@follow" selected>(follow the curate model)</option>')+
-    `<option value=""${textSet&&!txt?" selected":""}>(off)</option>`+
-    topts.map(o=>`<option${textSet&&o===txt?" selected":""}>${esc(o)}</option>`).join("");
+  $("mText").innerHTML = `<option value=""${txt?"":" selected"}>(off)</option>`+
+    topts.map(o=>`<option${o===txt?" selected":""}>${esc(o)}</option>`).join("");
 }
 async function saveModels(){
   try{
     const body = {curate_model:$("mCurate").value, embed_model:$("mEmbed").value,
       text_check_daily_calls:$("mTextCap").value.trim()};
-    if($("mText").value!=="@follow") body.text_check_model = $("mText").value;
+    body.text_check_model = $("mText").value;
     const r = await api("/v1/config/models",{method:"PUT",body:JSON.stringify(body)});
     $("mNote").textContent = r.note||"saved";
     toast("models saved");

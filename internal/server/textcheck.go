@@ -28,7 +28,7 @@ func (s *Server) setupTextCheck() {
 	}
 	// A model the operator named that cannot serve is a misconfiguration,
 	// and this line is the only place it would show.
-	if v, set := os.LookupEnv(textcheck.ModelKey); set && v != "" {
+	if os.Getenv(textcheck.ModelKey) != "" {
 		s.log.Warn("text check second stage off", "why", why)
 	}
 }

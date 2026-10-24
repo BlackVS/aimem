@@ -180,12 +180,11 @@ func parseEnvValue(line, key string) (string, bool) {
 	return strings.Trim(rest, `"`), true
 }
 
-// getModels reads the model keys from the env file. The text check's
-// model has three states, so whether its line exists is returned too:
-// absent follows the curation model, present and empty is off.
-// text_check is what the running service resolved at start.
+// getModels reads the model keys from the env file; an empty text check
+// model is the stage off. text_check is what the running service
+// resolved at start.
 func (s *Server) getModels(w http.ResponseWriter, _ *http.Request) {
-	out := map[string]any{"curate_model": "", "embed_model": "", "text_check_model": "", "text_check_model_set": false,
+	out := map[string]any{"curate_model": "", "embed_model": "", "text_check_model": "",
 		"text_check_daily_calls": "", "text_check": textcheck.Describe(s.textCheck, s.textCheckWhy)}
 	if raw, err := os.ReadFile(envFilePath()); err == nil {
 		for line := range strings.SplitSeq(string(raw), "\n") {
@@ -193,9 +192,6 @@ func (s *Server) getModels(w http.ResponseWriter, _ *http.Request) {
 				textcheck.ModelKey: "text_check_model", textcheck.CapKey: "text_check_daily_calls"} {
 				if v, ok := parseEnvValue(line, k); ok {
 					out[field] = v
-					if k == textcheck.ModelKey {
-						out["text_check_model_set"] = true
-					}
 				}
 			}
 		}
@@ -204,8 +200,7 @@ func (s *Server) getModels(w http.ResponseWriter, _ *http.Request) {
 }
 
 // putModels rewrites the model lines. The text check's two keys are
-// optional in the body: an omitted one keeps its line as it is, so a
-// console that never touched them cannot switch the stage off; an empty
+// optional in the body: an omitted one keeps its line as it is. An empty
 // model is the stage off, an empty cap is the default.
 func (s *Server) putModels(w http.ResponseWriter, r *http.Request) {
 	var req struct {
