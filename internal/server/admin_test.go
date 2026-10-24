@@ -141,6 +141,42 @@ func TestModelsConfig(t *testing.T) {
 		strings.Contains(got, "old-model") {
 		t.Fatalf("env file after put:\n%s", got)
 	}
+	// The text check's model is unset so far: the save above left it so,
+	// and it follows the curation model.
+	if strings.Contains(got, "AIMEM_TEXT_CHECK") {
+		t.Fatalf("a save without the text check's keys wrote them:\n%s", got)
+	}
+	var m map[string]any
+	json.Unmarshal(req(t, h, "GET", "/v1/config/models", "").Body.Bytes(), &m)
+	if m["text_check_model_set"] != false || m["text_check"].(map[string]any)["state"] != "off" {
+		t.Fatalf("get models before the text check is set: %v", m)
+	}
+	for _, bad := range []string{`{"curate_model":"a","embed_model":"b","text_check_model":"x\"y"}`,
+		`{"curate_model":"a","embed_model":"b","text_check_daily_calls":"-1"}`,
+		`{"curate_model":"a","embed_model":"b","text_check_daily_calls":"many"}`} {
+		if w := req(t, h, "PUT", "/v1/config/models", bad); w.Code != 400 {
+			t.Fatalf("bad text check setting accepted: %s -> %d", bad, w.Code)
+		}
+	}
+	// Its own model and cap; then empty, which is the stage off and is
+	// kept by a later save that leaves the key out.
+	for _, body := range []string{`{"curate_model":"new-model","embed_model":"New Embed 9","text_check_model":"small-model","text_check_daily_calls":"50"}`,
+		`{"curate_model":"new-model","embed_model":"New Embed 9","text_check_model":""}`,
+		`{"curate_model":"newer-model","embed_model":"New Embed 9"}`} {
+		if w := req(t, h, "PUT", "/v1/config/models", body); w.Code != 200 {
+			t.Fatalf("put %s: %d %s", body, w.Code, w.Body)
+		}
+	}
+	raw, _ = os.ReadFile(envFile)
+	got = string(raw)
+	if !strings.Contains(got, `AIMEM_TEXT_CHECK_MODEL=""`) || !strings.Contains(got, `AIMEM_TEXT_CHECK_DAILY_CALLS="50"`) ||
+		strings.Count(got, "AIMEM_TEXT_CHECK_MODEL=") != 1 || !strings.Contains(got, `AIMEM_CURATE_MODEL="newer-model"`) {
+		t.Fatalf("env file after the text check settings:\n%s", got)
+	}
+	json.Unmarshal(req(t, h, "GET", "/v1/config/models", "").Body.Bytes(), &m)
+	if m["text_check_model_set"] != true || m["text_check_model"] != "" || m["text_check_daily_calls"] != "50" {
+		t.Fatalf("get models after the text check is set: %v", m)
+	}
 }
 
 func TestDropProject(t *testing.T) {

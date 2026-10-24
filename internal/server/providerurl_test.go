@@ -14,6 +14,7 @@ import (
 	"testing"
 
 	"aimem/internal/provider"
+	"aimem/internal/textcheck"
 )
 
 // Save-time resolution never touches real DNS in tests: every name is
@@ -22,6 +23,9 @@ func TestMain(m *testing.M) {
 	lookupIP = func(context.Context, string) ([]net.IPAddr, error) {
 		return nil, errors.New("no such host")
 	}
+	// The readability check's second stage would follow a curation model
+	// the developer's environment names; tests that want it inject a fake.
+	os.Setenv(textcheck.ModelKey, "")
 	os.Exit(m.Run())
 }
 

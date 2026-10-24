@@ -171,6 +171,39 @@ func Wait() {
 	}
 }
 
+// WaitWithin is Wait for a caller that cannot wait long, a check on a
+// write path: it takes the next slot only when that slot is at most max
+// away, and otherwise reports false without reserving anything, so a
+// widened spacing makes the caller skip its call instead of stalling.
+func WaitWithin(max time.Duration) bool {
+	iv, _ := conf()
+	deadline := time.Now().Add(max)
+	for {
+		mu.Lock()
+		gap := iv + penalty
+		slot := last.Add(gap)
+		if now := time.Now(); slot.Before(now) {
+			slot = now
+		}
+		if slot.After(deadline) {
+			mu.Unlock()
+			return false
+		}
+		gen := penGen
+		last = slot
+		mu.Unlock()
+		if d := time.Until(slot); d > 0 {
+			time.Sleep(d)
+		}
+		mu.Lock()
+		requeue := penGen != gen
+		mu.Unlock()
+		if !requeue {
+			return true
+		}
+	}
+}
+
 // Penalize widens the spacing after a detected block (doubles, from a
 // 5s floor, capped at 2 minutes), persists, and says so — these lines
 // land in the hub journal / task output where outages get diagnosed.

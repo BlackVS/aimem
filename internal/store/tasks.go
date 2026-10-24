@@ -131,6 +131,15 @@ type TaskContent struct {
 	RequiredCapability string `json:"required_capability,omitempty"`
 }
 
+// TextFields are the task's free-text fields by wire name: the ones the
+// hub's readability check reads on a write.
+func (c *TaskContent) TextFields() [][2]string {
+	return [][2]string{
+		{"title", c.Title}, {"objective", c.Objective}, {"acceptance_criteria", c.AcceptanceCriteria},
+		{"non_goals", c.NonGoals}, {"next_action", c.NextAction}, {"blocker", c.Blocker},
+	}
+}
+
 // Task is the current row. The owning project is NOT stored in the
 // snapshot: it is the partition the row lives in, resolved at read time,
 // so a project rename never rewrites task data.

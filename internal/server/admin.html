@@ -244,6 +244,13 @@
         <select id="mCurate" class="grow"></select></div>
       <div class="row"><span class="dim" style="width:110px">embed model</span>
         <select id="mEmbed" class="grow"></select></div>
+      <div class="row"><span class="dim" style="width:110px">text check model</span>
+        <select id="mText" class="grow"></select></div>
+      <div class="row"><span class="dim" style="width:110px">text check cap</span>
+        <input id="mTextCap" type="number" min="0" class="inline" placeholder="200">
+        <span class="dim">model calls per day</span></div>
+      <div class="row"><span style="width:110px"></span>
+        <span id="mTextState" class="dim"></span></div>
       <div class="row"><span style="width:110px"></span>
         <button class="act" onclick="saveModels()">save models</button>
         <span id="mNote" class="dim"></span></div>
@@ -251,6 +258,7 @@
     <div class="card">
       <h2 style="margin-top:0">providers</h2>
       <div id="provList" class="dim">loading…</div>
+      <div id="provNote" class="dim"></div>
       <div class="row">
         <input id="pvName" type="text" class="inline" placeholder="name" style="width:110px">
         <select id="pvKind"><option value="openai">openai</option><option value="claude">claude</option></select>
@@ -1212,11 +1220,22 @@ async function createGroup(){
 /* ---------- Models ---------- */
 // The pickers are real dropdowns over the BOUND local model names (plus
 // the currently configured value, which may predate the registry).
+// The text check model has three states: unset follows the curate
+// model, empty is off, a name is its own model. "@follow" stands for
+// unset and is offered only while the key is unset, since saving it
+// leaves the line out rather than removing one.
+let textSet=false;
 async function loadModels(){
-  let cur="", emb="";
+  let cur="", emb="", txt="";
   try{
     const m = await api("/v1/config/models");
-    cur = m.curate_model||""; emb = m.embed_model||"";
+    cur = m.curate_model||""; emb = m.embed_model||""; txt = m.text_check_model||"";
+    textSet = !!m.text_check_model_set;
+    $("mTextCap").value = m.text_check_daily_calls||"";
+    const tc = m.text_check||{};
+    $("mTextState").textContent = tc.state==="on"
+      ? `running: ${tc.model} (${tc.source}), ${tc.calls_today}/${tc.daily_calls_cap} calls today`
+      : `running: off (${tc.why||"no model"})`;
   }catch(e){ $("mNote").textContent = String(e); }
   const bound = Object.keys(PROV.models).sort();
   // The claude CLI cannot embed: picking such a binding as embed model
@@ -1232,11 +1251,18 @@ async function loadModels(){
       ? opts.map(o=>`<option${o===val?" selected":""}>${esc(o)}</option>`).join("")
       : (val?"":'<option value="" disabled>(bind a model first)</option>'));
   }
+  // The text check needs an OpenAI-compatible endpoint, like embeddings.
+  const topts=[...new Set([txt,...embeddable])].filter(Boolean);
+  $("mText").innerHTML = (textSet?"":'<option value="@follow" selected>(follow the curate model)</option>')+
+    `<option value=""${textSet&&!txt?" selected":""}>(off)</option>`+
+    topts.map(o=>`<option${textSet&&o===txt?" selected":""}>${esc(o)}</option>`).join("");
 }
 async function saveModels(){
   try{
-    const r = await api("/v1/config/models",{method:"PUT",body:JSON.stringify(
-      {curate_model:$("mCurate").value, embed_model:$("mEmbed").value})});
+    const body = {curate_model:$("mCurate").value, embed_model:$("mEmbed").value,
+      text_check_daily_calls:$("mTextCap").value.trim()};
+    if($("mText").value!=="@follow") body.text_check_model = $("mText").value;
+    const r = await api("/v1/config/models",{method:"PUT",body:JSON.stringify(body)});
     $("mNote").textContent = r.note||"saved";
     toast("models saved");
   }catch(e){ $("mNote").textContent = String(e); }
@@ -1294,7 +1320,10 @@ function bUpChanged(){
 function editProvider(n){const p=PROV.providers[n];$("pvName").value=n;$("pvKind").value=p.kind;
   $("pvUrl").value=p.base_url||"";$("pvTok").value="";}
 async function putProv(body,msg){
-  try{ await api("/v1/config/providers",{method:"PUT",body:JSON.stringify(body)});
+  try{ const r=await api("/v1/config/providers",{method:"PUT",body:JSON.stringify(body)});
+    // A non-local endpoint comes back with the data-exposure pointer; it
+    // stays on the page, since a toast is gone before it is read.
+    $("provNote").textContent = r.note||"";
     toast(msg); await loadProviders(); loadModels(); return true; }catch(e){ toast(String(e)); return false; }
 }
 async function saveProvider(){

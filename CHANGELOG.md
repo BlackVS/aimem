@@ -15,6 +15,37 @@ currently 25); a binary refuses a database newer than it understands.
 
 ### Added
 
+- **The hub refuses task text that is not readable prose.** A task
+  comment, and the title, objective, acceptance criteria, non-goals,
+  next action and blocker on task create, update and triage, are checked
+  against the writing rule (docs/WRITING-PERSISTED-TEXT.md). A filter
+  cuts out code, paths, ids, hashes, versions and URLs, then flags words
+  glued to numbers, text with almost no spaces, and sentences run
+  together. A flagged write answers HTTP 422 with code `unreadable_text`,
+  the field, the flagged span, the rule's section and a one-sentence fix,
+  and the MCP task tools pass the refusal through unchanged. An update or
+  triage checks only the fields it changes, so text stored earlier never
+  blocks an unrelated change. An optional second stage asks a small model
+  about flagged text only, and it can only relax the filter. It has its
+  own model key, `AIMEM_TEXT_CHECK_MODEL` (unset follows
+  `AIMEM_CURATE_MODEL`, empty is off), resolved through the provider
+  registry, and its own daily call cap, `AIMEM_TEXT_CHECK_DAILY_CALLS`
+  (default 200). Both are set in the console beside the curation and
+  embedding models, and `aimem health` shows the stage under
+  `text_check`. `aimem tasks text-check -p <project> [--since <date>]`
+  reports the stored text the filter would refuse, without changing
+  anything. ADMIN-MANUAL section 3e covers the setting, free, local and
+  paid model options, and what any external model means for the
+  project's data. Saving a provider whose endpoint is outside this
+  machine now returns a one-line pointer to that section, shown in the
+  console. **Upgrade note:** from this release, an agent that writes
+  compressed shorthand into a task comment or field gets a refusal and
+  has to rewrite the text; run `aimem tasks text-check` first to see how
+  much stored text the filter would flag. On a hub whose curation model
+  is an OpenAI-compatible endpoint, the second stage is on after the
+  upgrade and sends flagged task text to that same provider; set
+  `AIMEM_TEXT_CHECK_MODEL=""` in the env file before restarting to keep
+  it off.
 - **`aimem hub add --system-roots` drops a recorded pin or CA file.** A
   re-add of the same hub keeps its recorded `--pin` or `--ca-file`, so
   once a real certificate replaced the self-signed one, the only way to

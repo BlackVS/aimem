@@ -205,10 +205,15 @@ Manual equivalent (what the script sets up):
    #AIMEM_LLM_RETRIES=3
    AIMEM_CURATE_MODEL=gpt-4o-mini
    AIMEM_EMBED_MODEL="text-embedding-3-large"
+   # the readability check's model (section 3e); unset follows the
+   # curation model, "" switches the second stage off:
+   #AIMEM_TEXT_CHECK_MODEL=gpt-4o-mini
    ```
 
    Any OpenAI-compatible endpoint works here: the vendor API, a LiteLLM
-   or vLLM proxy, Ollama. Values containing spaces MUST be quoted (the
+   or vLLM proxy, Ollama. An endpoint outside this machine receives the
+   project's text under its vendor's terms; section 3e, "Data sent to
+   model providers", says what that means. Values containing spaces MUST be quoted (the
    file is also shell-sourced by scripts). Some newer model families
    reject a `temperature` field — the client already omits it; don't add
    one.
@@ -423,6 +428,129 @@ LiteLLM's `x-litellm-response-cost` header when present. NOTE: budget
 config is machine-local (meta does not sync) — set it on the hub too,
 where the hourly curation actually runs. The TUI AI tab shows global
 budget windows with a warning at 80%.
+
+## 3e. Readability check on task writes
+
+The hub refuses task text that is not readable prose, under the rule in
+[WRITING-PERSISTED-TEXT.md](WRITING-PERSISTED-TEXT.md). It checks the
+comment body on `POST /v1/tasks/{id}/comments`, and the title,
+objective, acceptance criteria, non-goals, next action and blocker on
+task create, update and triage. On an update or a triage it checks only
+the fields the write changes, so text stored before this check existed
+never blocks an unrelated change. A refused write answers HTTP 422 with
+code `unreadable_text`. The answer names the field, the first flagged
+span, the reason, the rule's section and a one-sentence fix, and the MCP
+task tools pass it to the agent unchanged, so the agent can correct the
+text and retry. There is no per-project switch: the rule belongs to the
+product.
+
+The check has two stages:
+
+1. **The filter** always runs first and makes no model call. It cuts out
+   exact text (code spans and fenced blocks, URLs, paths, ids and hashes,
+   versions, identifiers and flags) and then looks for words glued to
+   numbers (`Checkpoint74files`, `approval573`), text with almost no
+   spaces, and sentences run together without a space after their
+   punctuation. Text it passes is stored at once.
+2. **The model** is asked only about text the filter flagged, and it can
+   only relax the filter's verdict. A small model gets the flagged span
+   with at most 300 bytes of context on each side and answers one word:
+   READABLE stores the text, and SHORTHAND refuses it. Without a model,
+   or on a timeout (5 seconds, including the shared LLM call spacing), an
+   error, an unclear answer or a reached daily cap, the filter's verdict
+   stands and the text is refused. The refusal says which stage decided:
+   "the filter alone", or "the filter, confirmed by the model".
+
+The second stage's model is its own setting, beside the curation and
+embedding models in the console's Setup tab and in the hub's env file:
+
+```sh
+#AIMEM_TEXT_CHECK_MODEL=small-model    # unset: follows AIMEM_CURATE_MODEL; "" : stage off
+#AIMEM_TEXT_CHECK_DAILY_CALLS=200      # model calls per UTC day; 0: stage off
+```
+
+When `AIMEM_TEXT_CHECK_MODEL` is unset, the stage uses the curation model,
+so a hub whose curation runs on an OpenAI-compatible endpoint has the
+stage on and a hub without a provider has it off. Set to the empty
+string, the stage is off whatever curation uses. So on an upgraded hub
+whose curation already uses such an endpoint, flagged task text goes to
+the curation provider from the first restart; set the key to the empty
+string first if that is not wanted (see "Data sent to model providers"
+below). The model is resolved
+through the provider registry like `AIMEM_EMBED_MODEL`, and it must be an
+OpenAI-compatible endpoint (the `openai` kind). The daily cap is counted
+before each call, a failed call included, in `textcheck.json` under the
+state root. Changes take effect when `aimem.service` restarts.
+`aimem health` shows the stage under `text_check`: on with its model,
+where the name came from and today's calls, or off with the reason. The
+console shows the same line under the models.
+
+### Reporting text stored before the check
+
+On the hub host, `aimem tasks text-check` runs the filter over a
+project's existing task fields and comments and prints what it would
+refuse today. It reads through the local service and changes nothing,
+and it never asks the model, so the report is the filter's view:
+
+```sh
+aimem tasks text-check -p demo                     # every task, archived ones included
+aimem tasks text-check -p demo --since 2026-10-01  # fields updated and comments written since
+```
+
+Each flagged field or comment is one line, followed by a summary:
+
+```text
+task 01a119cc-0a7c-7000-8000-000000000001 objective: "All11containersremoved" (words and numbers joined together)
+task 01a119cc-0a7c-7000-8000-000000000001 comment 3 by rc-agent at 2026-10-08T14:02:11Z: "CI409" (words and numbers joined together)
+project demo: 12 tasks, 72 fields and 40 comments checked, 2 flagged (the filter alone; nothing was changed)
+```
+
+### Giving the stage a model at little or no cost
+
+Each option below is a provider of the existing `openai` kind, added in
+the console's Setup tab (name, base URL and token), with the model bound
+to it and chosen as the text check model. Model ids and URLs below are as
+of 2026-10-24; vendors change both, so check the vendor's model list (the
+console's model list button asks the provider).
+
+- **A hosted free tier.** Google's Gemini API has a free tier through
+  Google AI Studio, where you create the API key. Base URL
+  `https://generativelanguage.googleapis.com/v1beta/openai`, model
+  `gemini-3.5-flash-lite`. A free tier may use the submitted text to
+  improve the vendor's products, and people may review it, so it is not
+  for confidential projects. It also has rate limits: when the tier
+  throttles, the stage falls back to the filter alone and those writes
+  are refused.
+- **A local model.** An OpenAI-compatible server on the hub's own machine
+  or network, such as Ollama (`http://127.0.0.1:11434/v1`), llama.cpp's
+  server or vLLM, keeps the text inside your network. This is the choice
+  for a closed network or a confidential project. A loopback or private
+  address needs `AIMEM_PROVIDER_ALLOW_PRIVATE=1` in the hub's env file,
+  and the provider needs a token, so give any non-empty value when the
+  server checks none.
+- **A paid API.** Any vendor's API at a small, cheap model. The stage
+  sends a few hundred tokens per flagged write and only for flagged
+  writes, and the daily cap bounds the rest.
+
+A subscription CLI, such as the `claude` provider kind that curation can
+use, is not an option for this stage. The hub is a server, and the stage
+runs on every flagged write from every agent on the hub, which a
+subscription's terms of use do not cover.
+
+### Data sent to model providers
+
+Every model outside this machine receives the project's text. For the
+text check, a flagged comment or task field is sent with its context to
+the provider you configured. For curation, batches of the journal are
+sent. Whatever that text holds leaves the machine: names, hosts,
+credentials pasted by mistake, commercial or personal information. It is
+then governed by that vendor's terms, retention and training rules. This
+holds on a free tier and on a paid plan, and through an API key as much
+as through a subscription. You decide, per hub and per provider, whether
+that is acceptable for the projects the hub serves. For a confidential
+project, use a local model or leave the stage off. When you save a
+provider whose base URL is not on this machine or a private network, the
+console shows a one-line pointer to this section.
 
 ## 4. Embeddings on a workstation (optional)
 

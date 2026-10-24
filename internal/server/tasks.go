@@ -544,6 +544,10 @@ func (s *Server) createTask(w http.ResponseWriter, r *http.Request) {
 	if !s.decodeTaskBody(w, r, &content) || !s.assigneeExists(w, content.Assignee) {
 		return
 	}
+	if ref := s.checkTaskFields(r.Context(), content, nil); ref != nil {
+		s.refuseText(w, ref)
+		return
+	}
 	task, err := db.CreateTask(content, taskActor(r), key)
 	if err != nil {
 		s.taskError(w, err)
@@ -586,6 +590,14 @@ func (s *Server) updateTask(w http.ResponseWriter, r *http.Request) {
 	var body taskUpdateBody
 	if !s.decodeTaskBody(w, r, &body) || !s.assigneeExists(w, body.Assignee) {
 		return
+	}
+	// Only the fields this update changes are checked. A task the update
+	// cannot find is left to UpdateTask, which answers for it.
+	if cur, err := db.GetTask(r.PathValue("id")); err == nil {
+		if ref := s.checkTaskFields(r.Context(), body.TaskContent, &cur.TaskContent); ref != nil {
+			s.refuseText(w, ref)
+			return
+		}
 	}
 	task, err := db.UpdateTask(r.PathValue("id"), body.TaskContent, body.ExpectedRevision, taskActor(r), key)
 	if err != nil {
@@ -697,6 +709,10 @@ func (s *Server) addTaskComment(w http.ResponseWriter, r *http.Request) {
 		Body string `json:"body"`
 	}
 	if !s.decodeTaskBody(w, r, &body) {
+		return
+	}
+	if ref := s.checkText(r.Context(), "body", body.Body); ref != nil {
+		s.refuseText(w, ref)
 		return
 	}
 	add := db.AddTaskComment
