@@ -144,6 +144,19 @@ currently 25); a binary refuses a database newer than it understands.
   replaced, kept or absent. A refused save logs its reason, and no line
   carries a token value.
 
+### Fixed
+
+- **A successful answer that mentions Cloudflare is no longer read as a
+  block.** Curation's completions and the embeddings client classified
+  every response with the block-page check, a 200 included, and that
+  check matches "cloudflare", "attention required" or "<html" anywhere
+  in the body. A completion about a project's Cloudflare proxy was
+  therefore penalised as an upstream block and retried until the batch
+  failed, and the call spacing widened for every later call. The check
+  now reads a response's body only when the status is not 2xx or the
+  body is not the expected JSON. A 429, a 5xx, an HTML page where JSON
+  belongs and a proxy error carrying a block page are still blocks.
+
 ## [0.10.13] — 2026-10-23
 
 Individual credentials now go only to a verified https hub. Every request

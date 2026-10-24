@@ -4,11 +4,37 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"strings"
+	"sync/atomic"
 	"testing"
 
+	"aimem/internal/llmrate"
 	"aimem/internal/provider"
 )
+
+// A 200 answer whose text mentions Cloudflare is an answer, not a block
+// page: it is returned at once, with no retry and no widened spacing.
+func TestEmbedAnswerMentioningCloudflareIsNotABlock(t *testing.T) {
+	var calls atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls.Add(1)
+		w.Write([]byte(`{"object":"list","model":"Attention Required! | Cloudflare <html> proxy",` +
+			`"data":[{"index":0,"embedding":[0.5,0.5]}],"usage":{"total_tokens":3}}`))
+	}))
+	defer srv.Close()
+	before := llmrate.Status()["blocks"]
+	vecs, _, err := (&Client{BaseURL: srv.URL, Model: "m"}).Embed([]string{"x"})
+	if err != nil || len(vecs) != 1 {
+		t.Fatalf("Embed = %d vectors, %v; want the answer", len(vecs), err)
+	}
+	if n := calls.Load(); n != 1 {
+		t.Errorf("%d requests; a successful answer must not be retried", n)
+	}
+	if after := llmrate.Status()["blocks"]; after != before {
+		t.Errorf("blocks %v -> %v; a successful answer must not be penalised", before, after)
+	}
+}
 
 // fakeEmbedServer answers /embeddings with vectors of the given width,
 // ignoring or honouring the request's "dimensions" as configured.
@@ -131,4 +157,12 @@ func TestForModelReportsWhy(t *testing.T) {
 	if why := Why(root); !strings.Contains(why, "AIMEM_EMBED_MODEL is unset") {
 		t.Fatalf("why unset: %q", why)
 	}
+}
+
+// llmrate reads its retry count once per process: pin it before any test
+// runs, so a call misread as blocked fails at once instead of after
+// 15 s+ backoffs.
+func TestMain(m *testing.M) {
+	os.Setenv("AIMEM_LLM_RETRIES", "0")
+	os.Exit(m.Run())
 }

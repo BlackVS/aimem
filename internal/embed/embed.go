@@ -131,7 +131,7 @@ func (c *Client) Embed(texts []string) ([][]float32, int64, error) {
 		out.Data, out.Error = nil, nil
 		jsonErr := json.Unmarshal(raw, &out)
 		reason := ""
-		if llmrate.Blocked(status, string(raw)) {
+		if llmrate.Blocked(status, string(raw), jsonErr == nil) {
 			reason = fmt.Sprintf("embeddings HTTP %d", status)
 		} else if out.Error != nil && llmrate.BlockedMessage(out.Error.Message) {
 			reason = "embeddings proxy error: " + llmrate.Clip(out.Error.Message, 120)

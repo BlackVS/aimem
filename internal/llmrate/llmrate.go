@@ -225,9 +225,16 @@ func RetryDelay(attempt int) time.Duration {
 // retrying: rate-limit or server-side status, an HTML body where JSON
 // belongs (Cloudflare block pages), or a proxy error message carrying
 // one (LiteLLM wraps the upstream's HTML inside its JSON error).
-func Blocked(status int, body string) bool {
+// decoded reports that body parsed as the JSON the caller expects. A
+// 2xx answer that decoded is never a block, whatever its text says: a
+// completion about a project's Cloudflare proxy is an answer, and
+// reading it as a block page retried it until the call failed.
+func Blocked(status int, body string, decoded bool) bool {
 	if status == 429 || status >= 500 {
 		return true
+	}
+	if decoded && status/100 == 2 {
+		return false
 	}
 	return BlockedMessage(body)
 }
