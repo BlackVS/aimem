@@ -24,6 +24,7 @@ import (
 	"aimem/internal/ident"
 	"aimem/internal/server"
 	"aimem/internal/store"
+	"aimem/internal/writingrule"
 )
 
 // hub is a real hub-mode surface (route table + /mcp behind the bearer
@@ -554,7 +555,7 @@ func TestLocalTaskCallerLargePages(t *testing.T) {
 		ID string `json:"id"`
 	}
 	json.Unmarshal([]byte(text), &task)
-	body := strings.Repeat("x", 30*1024)
+	body := strings.Repeat("The worker ran the tests. ", 30*1024/26) // readable, or the hub refuses it
 	for i := range 40 {
 		if text, isErr := callTool(t, s, "add_task_comment", map[string]any{"id": task.ID, "body": body, "idempotency_key": "c" + strconv.Itoa(i)}); isErr {
 			t.Fatal(text)
@@ -567,7 +568,7 @@ func TestLocalTaskCallerLargePages(t *testing.T) {
 	var page struct {
 		Comments []struct{ Body string } `json:"comments"`
 	}
-	if err := json.Unmarshal([]byte(text), &page); err != nil || len(page.Comments) != 40 || len(page.Comments[39].Body) != 30*1024 {
+	if err := json.Unmarshal([]byte(text), &page); err != nil || len(page.Comments) != 40 || len(page.Comments[39].Body) != len(body) {
 		t.Fatalf("large page must arrive intact: %v %d", err, len(page.Comments))
 	}
 	huge := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -895,5 +896,41 @@ func TestTaskCallerRefusesAnUntrustedHubEntry(t *testing.T) {
 	}
 	if status, _, err := call(context.Background(), "GET", "/v1/projects/alpha/tasks", nil, nil); err != nil || status != 200 || hits.Load() != 1 {
 		t.Fatalf("pinned: %d %v, %d requests", status, err, hits.Load())
+	}
+}
+
+// The hub's readability refusal reaches the agent whole: the tool result is
+// the hub's error text, unchanged, for a comment, a create and an update.
+func TestTaskToolsPassTheReadabilityRefusalThrough(t *testing.T) {
+	f := newHub(t)
+	ts := hubtest.NewServer(f.h)
+	defer ts.Close()
+	root := t.TempDir()
+	if err := adapter.SaveHubs(root, map[string]*adapter.HubConfig{"home": {URL: ts.URL, Pin: hubtest.Pin(ts), Token: "checkpoint", TaskToken: f.alice}}, "home"); err != nil {
+		t.Fatal(err)
+	}
+	s := &srv{project: "alpha", taskSetup: func() (TaskCallFunc, error) { return taskCallerIn(root, root) }}
+	text, isErr := callTool(t, s, "create_task", map[string]any{"title": "Ship the fix", "idempotency_key": "ok"})
+	if isErr {
+		t.Fatal(text)
+	}
+	var task struct {
+		ID string `json:"id"`
+	}
+	json.Unmarshal([]byte(text), &task)
+	for _, c := range []struct {
+		tool  string
+		args  map[string]any
+		field string
+	}{
+		{"add_task_comment", map[string]any{"id": task.ID, "body": "CI409 SUCCESS99s", "idempotency_key": "c1"}, "body"},
+		{"create_task", map[string]any{"title": "Ship", "objective": "Checkpoint74files", "idempotency_key": "c2"}, "objective"},
+		{"update_task", map[string]any{"id": task.ID, "title": "Ship the fix", "state": "BLOCKED", "blocker": "BLOCKEDr4", "expected_revision": 1, "idempotency_key": "c3"}, "blocker"},
+	} {
+		text, isErr := callTool(t, s, c.tool, c.args)
+		want := "error: unreadable_text: " + c.field + ": the text is not readable prose ("
+		if !isErr || !strings.HasPrefix(text, want) || !strings.Contains(text, writingrule.RuleSection) || !strings.Contains(text, "Decided by the filter alone. Next: Separate the words") {
+			t.Errorf("%s: %v %q; want the hub's refusal verbatim", c.tool, isErr, text)
+		}
 	}
 }

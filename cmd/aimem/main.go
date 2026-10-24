@@ -284,6 +284,8 @@ const mainUsage = `usage: aimem <command> [flags]
   tui                        interactive dashboard (q quits)
   meta       [-p] <key>      print a project meta value
   tasks      on|off [-p]     enable or disable tasks for a project (admin; on the hub host)
+  tasks      text-check [-p] [--since]  report task fields and comments the readability check
+                             would refuse today; read-only (on the hub host)
   teams      list|show|create|configure|events  team administration (on the hub host)
   teams      setup TEAM <worker|coordinator>  verified team onboarding from a checkout
                              (checks, join or reconcile, role entry; aimem teams setup for flags)
@@ -717,7 +719,10 @@ func metaCmd(args []string) error {
 // an admin decision, recorded in the project's metadata through the
 // running service (the host console is admin), never by editing files.
 func tasksCmd(args []string) error {
-	usage := "usage: aimem tasks on|off [-p <project>]"
+	usage := "usage: aimem tasks on|off [-p <project>]\n       " + strings.TrimPrefix(textCheckUsage, "usage: ")
+	if len(args) > 0 && args[0] == "text-check" {
+		return tasksTextCheck(args[1:])
+	}
 	if len(args) == 0 || (args[0] != "on" && args[0] != "off") {
 		return fmt.Errorf("%s", usage)
 	}

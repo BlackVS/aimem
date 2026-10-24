@@ -165,3 +165,36 @@ func TestPenalizeWidensQueuedWaiters(t *testing.T) {
 		t.Fatalf("queued waiter returned at %s — old-cadence slot survived a Penalize", returns[1])
 	}
 }
+
+// A caller with a deadline skips its call rather than wait past it, and
+// a refused wait reserves nothing, so the next caller is not pushed back.
+func TestWaitWithinSkipsAWidenedSpacing(t *testing.T) {
+	mu.Lock()
+	penalty, last = time.Minute, time.Now()
+	mu.Unlock()
+	t.Cleanup(func() {
+		mu.Lock()
+		penalty, last = 0, time.Time{}
+		mu.Unlock()
+	})
+	mu.Lock()
+	before := last
+	mu.Unlock()
+	start := time.Now()
+	if WaitWithin(time.Second) {
+		t.Fatal("WaitWithin took a slot a minute away")
+	}
+	if time.Since(start) > 500*time.Millisecond {
+		t.Fatalf("a refused WaitWithin slept %s", time.Since(start))
+	}
+	mu.Lock()
+	after := last
+	penalty = 0
+	mu.Unlock()
+	if !after.Equal(before) {
+		t.Fatal("a refused WaitWithin reserved a slot")
+	}
+	if !WaitWithin(time.Second) {
+		t.Fatal("WaitWithin refused a slot within the base interval")
+	}
+}

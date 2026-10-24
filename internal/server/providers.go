@@ -11,7 +11,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -35,7 +37,33 @@ func maskToken(t string) string {
 	return "••••"
 }
 
-func (s *Server) getProviders(w http.ResponseWriter, _ *http.Request) {
+func (s *Server) getProviders(w http.ResponseWriter, _ *http.Request) { s.providersView(w, "") }
+
+// dataExposureNote is the one line a save of a non-local endpoint returns:
+// the place the operator makes the setting is where the data decision is
+// taken, so the pointer is said there.
+const dataExposureNote = "This endpoint is outside this machine: the text aimem sends it (curation's journal batches, the text check's flagged task text) leaves the hub under that vendor's terms, retention and training rules. See docs/ADMIN-MANUAL.md, \"Data sent to model providers\"."
+
+// localEndpoint reports a base URL whose host is this machine or a private
+// network, by name or literal address; a name that only resolves to one
+// counts as remote, which errs toward saying the note.
+func localEndpoint(raw string) bool {
+	if raw == "" {
+		return false // the default is the vendor's own API
+	}
+	u, err := url.Parse(raw)
+	if err != nil {
+		return false
+	}
+	host := strings.ToLower(strings.TrimSuffix(u.Hostname(), "."))
+	if host == "localhost" || strings.HasSuffix(host, ".localhost") {
+		return true
+	}
+	ip := net.ParseIP(host)
+	return ip != nil && blockedIP(ip)
+}
+
+func (s *Server) providersView(w http.ResponseWriter, note string) {
 	reg := provider.Load(s.reg.Root())
 	if reg.LoadErr != nil {
 		s.fail(w, http.StatusConflict, fmt.Errorf("provider registry could not be read (%v) — fix the file by hand", reg.LoadErr))
@@ -51,7 +79,11 @@ func (s *Server) getProviders(w http.ResponseWriter, _ *http.Request) {
 	for m, b := range reg.Models {
 		models[m] = map[string]string{"provider": b.Provider, "model": b.Model}
 	}
-	s.ok(w, map[string]any{"providers": provs, "models": models})
+	out := map[string]any{"providers": provs, "models": models}
+	if note != "" {
+		out["note"] = note
+	}
+	s.ok(w, out)
 }
 
 // putProviders applies exactly one mutation per request: set_provider
@@ -84,6 +116,7 @@ func (s *Server) putProviders(w http.ResponseWriter, r *http.Request) {
 		s.fail(w, http.StatusConflict, fmt.Errorf("provider registry could not be read (%v) — fix the file by hand before saving", reg.LoadErr))
 		return
 	}
+	note := ""
 	switch {
 	case req.SetProvider != nil:
 		p := req.SetProvider
@@ -130,6 +163,9 @@ func (s *Server) putProviders(w http.ResponseWriter, r *http.Request) {
 		reg.Providers[p.Name] = provider.Provider{Kind: p.Kind, BaseURL: p.BaseURL, Token: token}
 		s.log.Warn("admin provider set", "name", p.Name, "kind", p.Kind, "base_url", p.BaseURL,
 			"old_base_url", prev.BaseURL, "existed", existed, "token", tokenState)
+		if p.Kind == "openai" && !localEndpoint(p.BaseURL) {
+			note = dataExposureNote
+		}
 	case req.DeleteProvider != "":
 		delete(reg.Providers, req.DeleteProvider)
 		for m, b := range reg.Models {
@@ -160,7 +196,7 @@ func (s *Server) putProviders(w http.ResponseWriter, r *http.Request) {
 		s.fail(w, http.StatusInternalServerError, err)
 		return
 	}
-	s.getProviders(w, r)
+	s.providersView(w, note)
 }
 
 // testProvider makes one minimal live call through the model's resolved

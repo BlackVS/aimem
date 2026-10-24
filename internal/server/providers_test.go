@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"path/filepath"
 	"regexp"
 	"strings"
 	"testing"
@@ -285,5 +286,52 @@ func TestConsoleBindingRowLayoutRules(t *testing.T) {
 	// hides the timeout-vs-rejection signal.
 	if !strings.Contains(fn, "failed after ${ms}ms") {
 		t.Fatal("failure text must lead with the elapsed time")
+	}
+}
+
+// Saving an endpoint outside this machine returns the data-exposure
+// pointer; a local or private one, the claude kind and a read do not.
+func TestProviderSaveNamesDataExposureForRemoteEndpoints(t *testing.T) {
+	s, _ := testServer(t)
+	h := s.Handler()
+	t.Setenv(allowPrivateEnv, "1")
+	note := func(body string) string {
+		t.Helper()
+		w := req(t, h, "PUT", "/v1/config/providers", body)
+		if w.Code != 200 {
+			t.Fatalf("%s: %d %s", body, w.Code, w.Body)
+		}
+		var out struct{ Note string }
+		json.Unmarshal(w.Body.Bytes(), &out)
+		return out.Note
+	}
+	for _, body := range []string{
+		`{"set_provider":{"name":"vendor","kind":"openai","base_url":"https://api.vendor.example/v1","token":"t-123456789"}}`,
+		`{"set_provider":{"name":"default","kind":"openai","token":"t-123456789"}}`,
+	} {
+		if got := note(body); got != dataExposureNote {
+			t.Errorf("%s: note %q; want the data-exposure pointer", body, got)
+		}
+	}
+	for _, body := range []string{
+		`{"set_provider":{"name":"ollama","kind":"openai","base_url":"http://127.0.0.1:11434/v1","token":"none"}}`,
+		`{"set_provider":{"name":"lan","kind":"openai","base_url":"http://10.0.0.5:8000/v1","token":"none"}}`,
+		`{"set_provider":{"name":"local","kind":"openai","base_url":"http://localhost:8080/v1","token":"none"}}`,
+		`{"set_provider":{"name":"cli","kind":"claude"}}`,
+		`{"bind":{"model":"m","provider":"vendor"}}`,
+	} {
+		if got := note(body); got != "" {
+			t.Errorf("%s: note %q; want none", body, got)
+		}
+	}
+	manual, err := os.ReadFile(filepath.Join("..", "..", "docs", "ADMIN-MANUAL.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(dataExposureNote, `"Data sent to model providers"`) || !strings.Contains(string(manual), "\n### Data sent to model providers\n") {
+		t.Fatal("the note does not name a section the manual has")
+	}
+	if w := req(t, h, "GET", "/v1/config/providers", ""); strings.Contains(w.Body.String(), "note") {
+		t.Fatalf("a read carries the note: %s", w.Body)
 	}
 }
