@@ -416,7 +416,7 @@ function Wire-Project($dir) {
   }
   & $aimem @wireArgs
   if ($LASTEXITCODE -eq 2) { throw "the installed aimem ($aimem) has no ``aimem wire``; re-run with AIMEM_REINSTALL=1 to install the current release" }
-  if ($LASTEXITCODE -ne 0) { throw "aimem wire failed with exit code $LASTEXITCODE" }
+  if ($LASTEXITCODE -ne 0) { throw "aimem is installed, but $dir was not wired: the aimem wire message above says why and what to do next" }
 }
 
 function Uninstall-User {

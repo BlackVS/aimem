@@ -489,7 +489,7 @@ install_project() {
     return 1
   fi
   if [ "$rc" != 0 ]; then
-    echo "error: aimem wire failed with exit code $rc" >&2
+    echo "error: aimem is installed, but $dir was not wired: the aimem wire message above says why and what to do next" >&2
     return 1
   fi
 }

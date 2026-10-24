@@ -124,11 +124,11 @@ func refuseDir(dir string, o ProjectOptions) error {
 	}
 	if o.StateRoot != "" {
 		if root, err := canonical(o.StateRoot); err == nil && within(dir, root) {
-			return fmt.Errorf("refusing to wire %s as a project: it is inside aimem's state root %s. Run this inside a project directory.", dir, root)
+			return fmt.Errorf("refusing to wire %s as a project: it is inside aimem's state root %s. Run `aimem wire` inside a project directory.", dir, root)
 		}
 	}
 	if gov, _ := ident.ConfigDir(dir); !sameDir(gov, dir) {
-		return fmt.Errorf("refusing to wire %s as a project: it is inside the wired checkout %s, whose .aimem.json already governs it. Run this in %s, or in a directory of its own.", dir, gov, gov)
+		return fmt.Errorf("refusing to wire %s as a project: it is inside the wired checkout %s, whose .aimem.json already governs it, so sessions here already belong to that project. Next: start sessions from %s; to refresh its wiring, run `aimem wire` there; to make this directory a project of its own, move it out of that checkout and run `aimem wire` in it.", dir, gov, gov)
 	}
 	return nil
 }
@@ -219,7 +219,7 @@ func projectConfig(dir string, o ProjectOptions, write bool) Finding {
 		return Finding{File: rel, Level: "warn", Detail: state, Fix: "run `aimem wire` here to write it"}
 	}
 	for _, k := range changed {
-		obj[k], _ = json.Marshal(want[k])
+		obj[k] = rawPlain(want[k])
 	}
 	if err := writeObject(dir, path, obj, mode); err != nil {
 		return Finding{File: rel, Level: "fail", Detail: "cannot write: " + err.Error()}

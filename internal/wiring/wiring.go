@@ -18,6 +18,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"regexp"
+	"runtime"
 	"sort"
 	"strings"
 	"time"
@@ -85,6 +86,21 @@ var sessionStartMarkers = []string{"aimem session-start", "SESSION-STATE.md"}
 // sessionStartCommand is the portable spelling (install.ps1 and Codex use
 // it; it runs under cmd.exe and without a shell).
 const sessionStartCommand = "aimem session-start"
+
+// guardedSessionStartCommand is the spelling install.sh writes for Claude
+// Code, which runs hook commands through sh: a collaborator without aimem
+// gets no hook error.
+const guardedSessionStartCommand = "command -v aimem >/dev/null 2>&1 && aimem session-start || true"
+
+// handoffHookCommand is the command a new SessionStart hook runs for
+// client: the guarded form for Claude Code outside Windows, the portable
+// one otherwise.
+func handoffHookCommand(client string) string {
+	if client == "Claude Code" && runtime.GOOS != "windows" {
+		return guardedSessionStartCommand
+	}
+	return sessionStartCommand
+}
 
 // stopHooks at project level journal every turn twice (they belong to the
 // user-level install).
@@ -170,12 +186,35 @@ func readObject(root, path string) (object, os.FileMode, bool, error) {
 	return o, fi.Mode().Perm(), true, nil
 }
 
+// writeObject writes o indented, with &, < and > as themselves: a hook
+// command such as `a >/dev/null 2>&1 && b` stays readable in the file.
 func writeObject(root, path string, o object, mode os.FileMode) error {
-	out, err := json.MarshalIndent(o, "", "  ")
+	out, err := marshalPlain(o, "  ")
 	if err != nil {
 		return err
 	}
-	return writeAtomic(root, path, append(out, '\n'), mode)
+	return writeAtomic(root, path, out, mode)
+}
+
+// rawPlain is a member value for an object, encoded the way writeObject
+// encodes: re-encoded with json.Marshal, the user's && and > would land
+// in the file as JSON escapes.
+func rawPlain(v any) json.RawMessage {
+	b, _ := marshalPlain(v, "")
+	return bytes.TrimSuffix(b, []byte{'\n'})
+}
+
+// marshalPlain is json.MarshalIndent without HTML escaping, ending in a
+// newline; indent "" gives one compact line.
+func marshalPlain(v any, indent string) ([]byte, error) {
+	var buf bytes.Buffer
+	enc := json.NewEncoder(&buf)
+	enc.SetEscapeHTML(false)
+	enc.SetIndent("", indent)
+	if err := enc.Encode(v); err != nil {
+		return nil, err
+	}
+	return buf.Bytes(), nil
 }
 
 // writeAtomic replaces path, creating its directory, through a temporary
@@ -251,10 +290,10 @@ func checkHooks(root, path, client string, o Options) []Finding {
 	if raw, ok := hooks["SessionStart"]; ok {
 		json.Unmarshal(raw, &list)
 	}
-	entry, _ := json.Marshal(map[string]any{"hooks": []map[string]any{{"type": "command", "command": sessionStartCommand, "timeout": 10, "statusMessage": "Loading session handoff"}}})
+	entry, _ := marshalPlain(map[string]any{"hooks": []map[string]any{{"type": "command", "command": handoffHookCommand(client), "timeout": 10, "statusMessage": "Loading session handoff"}}}, "")
 	list = append(list, entry)
-	hooks["SessionStart"], _ = json.Marshal(list)
-	obj["hooks"], _ = json.Marshal(hooks)
+	hooks["SessionStart"] = rawPlain(list)
+	obj["hooks"] = rawPlain(hooks)
 	if err := writeObject(root, path, obj, mode); err != nil {
 		return append(out, Finding{File: rel, Level: "fail", Detail: "cannot write: " + err.Error()})
 	}
@@ -297,8 +336,8 @@ func checkMCPJSON(root, path string, repair bool) Finding {
 	if !repair {
 		return Finding{File: rel, Level: "warn", Detail: "Claude Code MCP registration missing", Fix: "run without --no-repair to add it"}
 	}
-	servers["aimem"], _ = json.Marshal(want)
-	obj["mcpServers"], _ = json.Marshal(servers)
+	servers["aimem"] = rawPlain(want)
+	obj["mcpServers"] = rawPlain(servers)
 	if err := writeObject(root, path, obj, mode); err != nil {
 		return Finding{File: rel, Level: "fail", Detail: "cannot write: " + err.Error()}
 	}
@@ -342,7 +381,7 @@ func checkOpenCode(root, path string, repair bool) []Finding {
 		out = append(out, Finding{File: rel, Level: "warn", Detail: "OpenCode handoff instruction missing", Fix: "run without --no-repair to add it"})
 	default:
 		instructions = append(instructions, "docs/SESSION-STATE.md")
-		obj["instructions"], _ = json.Marshal(instructions)
+		obj["instructions"] = rawPlain(instructions)
 		changed = true
 		out = append(out, Finding{File: rel, Level: "ok", Detail: "OpenCode handoff instruction added", Repaired: true})
 	}
@@ -355,14 +394,14 @@ func checkOpenCode(root, path string, repair bool) []Finding {
 	case !repair:
 		out = append(out, Finding{File: rel, Level: "warn", Detail: "OpenCode MCP registration missing", Fix: "run without --no-repair to add it"})
 	default:
-		mcp["aimem"], _ = json.Marshal(want)
-		obj["mcp"], _ = json.Marshal(mcp)
+		mcp["aimem"] = rawPlain(want)
+		obj["mcp"] = rawPlain(mcp)
 		changed = true
 		out = append(out, Finding{File: rel, Level: "ok", Detail: "OpenCode MCP registration added", Repaired: true})
 	}
 	if changed {
 		if _, ok := obj["$schema"]; !ok && !existed {
-			obj["$schema"], _ = json.Marshal("https://opencode.ai/config.json")
+			obj["$schema"] = rawPlain("https://opencode.ai/config.json")
 		}
 		if err := writeObject(root, path, obj, mode); err != nil {
 			// Nothing landed: no repair happened, whatever was drafted above.

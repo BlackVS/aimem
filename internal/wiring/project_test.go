@@ -4,6 +4,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -52,6 +53,19 @@ func TestWireEmptyDirectoryThenNothingChanges(t *testing.T) {
 		if _, ok := first[want]; !ok {
 			t.Errorf("%s not wired", want)
 		}
+	}
+	// Claude Code runs hooks through sh outside Windows: the installer's
+	// guarded form, so a collaborator without aimem sees no hook error.
+	// Codex runs them without a shell and gets the bare command.
+	claude := `"command": "aimem session-start"`
+	if runtime.GOOS != "windows" {
+		claude = `"command": "command -v aimem >/dev/null 2>&1 && aimem session-start || true"`
+	}
+	if !strings.Contains(first[".claude/settings.json"], claude) {
+		t.Errorf(".claude/settings.json lacks %s:\n%s", claude, first[".claude/settings.json"])
+	}
+	if !strings.Contains(first[".codex/hooks.json"], `"command": "aimem session-start"`) {
+		t.Errorf(".codex/hooks.json lacks the bare command:\n%s", first[".codex/hooks.json"])
 	}
 	if first["AGENTS.md"] != string(templates.AgentsMD) {
 		t.Error("AGENTS.md is not the template")
@@ -167,7 +181,7 @@ func TestWireRefusesBeforeWriting(t *testing.T) {
 		{"home", home, "refusing to wire the home directory", o},
 		{"state root", state, "inside aimem's state root", o},
 		{"inside the state root", filepath.Join(state, "inner"), "inside aimem's state root", o},
-		{"inside a wired checkout", nested, "inside the wired checkout", o},
+		{"inside a wired checkout", nested, "move it out of that checkout and run `aimem wire` in it", o},
 		{"bad project", plain, "invalid project name", ProjectOptions{Home: home, Project: "group-x"}},
 		{"bad hub", plain, "invalid hub name", ProjectOptions{Home: home, Hub: "Lab Hub"}},
 		{"bad group", plain, "invalid group name", ProjectOptions{Home: home, Groups: []string{"ok", "No"}}},
@@ -182,5 +196,17 @@ func TestWireRefusesBeforeWriting(t *testing.T) {
 				t.Errorf("a refused run wrote %d files", after-before)
 			}
 		})
+	}
+}
+
+// A rewrite keeps a user's & and > as written, not as JSON escapes.
+func TestWireKeepsShellOperatorsReadable(t *testing.T) {
+	dir, home := t.TempDir(), t.TempDir()
+	settings := filepath.Join(dir, ".claude", "settings.json")
+	write(t, settings, `{"hooks":{"PostToolUse":[{"hooks":[{"type":"command","command":"lint && fmt >/dev/null 2>&1"}]}]}}`)
+	wireOK(t, dir, ProjectOptions{Home: home})
+	got := read(t, settings)
+	if !strings.Contains(got, `"lint && fmt >/dev/null 2>&1"`) || strings.Contains(got, `\u00`) {
+		t.Fatalf("settings.json lost its literal operators:\n%s", got)
 	}
 }

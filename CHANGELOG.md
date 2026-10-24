@@ -43,9 +43,11 @@ currently 25); a binary refuses a database newer than it understands.
   governs it. `install.sh project` and `install.ps1 -Target` now run it
   for their project part, so there is one implementation. As a result,
   Windows projects also get `/aimem-analyze`, which only `install.sh`
-  wrote before. A project newly wired on Linux or macOS gets the
-  portable Claude Code hook `aimem session-start`, which Windows already
-  used; existing hooks are kept. **Upgrade note:** the hand-written
+  wrote before. The Claude Code SessionStart hook keeps each
+  installer's form: guarded on Linux and macOS, so a collaborator
+  without aimem sees no hook error, and the bare `aimem session-start`
+  on Windows. Files `aimem wire` writes keep `&`, `<` and `>` as
+  themselves rather than JSON escapes. **Upgrade note:** the hand-written
   `.aimem.json` step is gone. On a machine where aimem is installed, run
   `aimem wire` in the new project directory. The one-liner's skip
   message, README, INSTALL-CLIENT, QUICKSTART-NEW-PROJECT (3.1 and 3.5)
