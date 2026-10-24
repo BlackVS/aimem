@@ -127,7 +127,11 @@ func refuseDir(dir string, o ProjectOptions) error {
 			return fmt.Errorf("refusing to wire %s as a project: it is inside aimem's state root %s. Run `aimem wire` inside a project directory.", dir, root)
 		}
 	}
-	if gov, _ := ident.ConfigDir(dir); !sameDir(gov, dir) {
+	gov, viaWorktree := ident.ConfigDir(dir)
+	if viaWorktree {
+		return fmt.Errorf("refusing to wire %s as a project: it is a linked worktree of the wired checkout %s, whose .aimem.json governs it, so sessions here already belong to that project and need no wiring of their own. Next: commit the wired files in %s so every worktree has them; to refresh them, run `aimem wire` there.", dir, gov, gov)
+	}
+	if !sameDir(gov, dir) {
 		return fmt.Errorf("refusing to wire %s as a project: it is inside the wired checkout %s, whose .aimem.json already governs it, so sessions here already belong to that project. Next: start sessions from %s; to refresh its wiring, run `aimem wire` there; to make this directory a project of its own, move it out of that checkout and run `aimem wire` in it.", dir, gov, gov)
 	}
 	return nil

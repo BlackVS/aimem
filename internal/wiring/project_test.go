@@ -173,6 +173,10 @@ func TestWireRefusesBeforeWriting(t *testing.T) {
 		}
 	}
 	write(t, filepath.Join(checkout, ".aimem.json"), `{"groups":[]}`)
+	// A linked worktree of that checkout, the way git lays one out.
+	worktree := filepath.Join(base, "worktree")
+	write(t, filepath.Join(checkout, ".git", "worktrees", "w", "commondir"), "../..\n")
+	write(t, filepath.Join(worktree, ".git"), "gitdir: "+filepath.Join(checkout, ".git", "worktrees", "w")+"\n")
 	o := ProjectOptions{Home: home, StateRoot: state}
 	for _, c := range []struct {
 		name, dir, want string
@@ -182,6 +186,7 @@ func TestWireRefusesBeforeWriting(t *testing.T) {
 		{"state root", state, "inside aimem's state root", o},
 		{"inside the state root", filepath.Join(state, "inner"), "inside aimem's state root", o},
 		{"inside a wired checkout", nested, "move it out of that checkout and run `aimem wire` in it", o},
+		{"linked worktree of a wired checkout", worktree, "need no wiring of their own. Next: commit the wired files in", o},
 		{"bad project", plain, "invalid project name", ProjectOptions{Home: home, Project: "group-x"}},
 		{"bad hub", plain, "invalid hub name", ProjectOptions{Home: home, Hub: "Lab Hub"}},
 		{"bad group", plain, "invalid group name", ProjectOptions{Home: home, Groups: []string{"ok", "No"}}},
