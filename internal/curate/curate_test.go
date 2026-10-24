@@ -762,5 +762,8 @@ func TestMain(m *testing.M) {
 		}
 		os.Exit(0)
 	}
+	// llmrate reads its retry count once per process: pin it before any
+	// test runs, so a block answers at once instead of after 15 s+ backoffs.
+	os.Setenv("AIMEM_LLM_RETRIES", "0")
 	os.Exit(m.Run())
 }

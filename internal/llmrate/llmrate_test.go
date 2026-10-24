@@ -17,19 +17,24 @@ func TestMain(m *testing.M) {
 
 func TestBlockedClassification(t *testing.T) {
 	cases := []struct {
-		status int
-		body   string
-		want   bool
+		status  int
+		body    string
+		decoded bool
+		want    bool
 	}{
-		{200, `{"data":[]}`, false},
-		{429, `{}`, true},
-		{503, `whatever`, true},
-		{200, `<!DOCTYPE html><html>blocked</html>`, true},
-		{400, `{"error":{"message":"bad request"}}`, false},
+		{200, `{"data":[]}`, true, false},
+		{429, `{}`, true, true},
+		{503, `whatever`, false, true},
+		{200, `<!DOCTYPE html><html>blocked</html>`, false, true},
+		{400, `{"error":{"message":"bad request"}}`, true, false},
+		// An answer is never a block page, whatever it talks about.
+		{200, `{"choices":[{"message":{"content":"Attention Required: the Cloudflare proxy in front of <html> pages"}}]}`, true, false},
+		// The same words in a failed response still are.
+		{403, `{"error":{"message":"Attention Required! | Cloudflare"}}`, true, true},
 	}
 	for _, c := range cases {
-		if got := Blocked(c.status, c.body); got != c.want {
-			t.Errorf("Blocked(%d, %.20q) = %v, want %v", c.status, c.body, got, c.want)
+		if got := Blocked(c.status, c.body, c.decoded); got != c.want {
+			t.Errorf("Blocked(%d, %.20q, %v) = %v, want %v", c.status, c.body, c.decoded, got, c.want)
 		}
 	}
 	if !BlockedMessage("upstream said: <html><title>Attention Required! | Cloudflare</title>...") {

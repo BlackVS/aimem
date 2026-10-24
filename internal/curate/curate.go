@@ -851,7 +851,7 @@ func (o *OpenAIExtractor) Complete(prompt string) (string, Usage, error) {
 		}
 		resp.Body.Close()
 		reason := ""
-		if llmrate.Blocked(status, string(raw)) {
+		if llmrate.Blocked(status, string(raw), jsonErr == nil) {
 			reason = fmt.Sprintf("completions HTTP %d", status)
 		} else if out.Error != nil && llmrate.BlockedMessage(out.Error.Message) {
 			reason = "completions proxy error: " + llmrate.Clip(out.Error.Message, 120)
