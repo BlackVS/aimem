@@ -251,8 +251,9 @@ Full detail: **[INSTALL-CLIENT.md](docs/INSTALL-CLIENT.md)** ·
 
 ```sh
 aimem health          # service, state root, spool depth
-aimem timeline        # the turns just journaled
-aimem recall "how does auth work"
+aimem sessions -p "$(aimem project-id .)"                  # this project's sessions
+aimem timeline -p "$(aimem project-id .)" -s <session-id>  # the turns just journaled
+aimem recall -q "how does auth work"
 aimem tui             # operator dashboard
 ```
 

@@ -168,7 +168,7 @@ not task-read visibility. Do not treat projects as private task tenants.
 | Writer/checkpoint token (`aimem token add`) | Agent journaling, sync and memory access; cannot write tasks |
 | User-scoped ordinary token (`token-issue-user`) | Writes follow the user's live grants; normally configured per OS user and hub |
 | Project-scoped ordinary token (`token-issue`) | Writes restricted to one project instance plus live grants; use a checkout-local override |
-| Read-only ordinary token (`token-issue` with `-`) | Reads only; never task writes |
+| Read-only ordinary token (`token-issue` with `--read-only`) | Reads only; never task writes |
 
 Create users, grants and ordinary tokens through this CLI or
 the admin API. The access-management console is still planned; the

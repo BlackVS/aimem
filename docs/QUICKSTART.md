@@ -40,14 +40,17 @@ powershell -NoProfile -ExecutionPolicy Bypass -Command "irm https://raw.githubus
 **Restart your Claude Code or OpenCode session** — hooks and plugins load
 at startup, so a session already running will not journal.
 
-Now work normally for a few turns, then:
+Now work normally for a few turns, then list the project's sessions and
+read one of them by its `session_id`:
 
 ```sh
-aimem timeline
+aimem sessions -p "$(aimem project-id .)"
+aimem timeline -p "$(aimem project-id .)" -s <session-id>
 ```
 
-Every turn is there: request, reply, tools, files touched. Nothing you
-did required an LLM call or a network round trip.
+Every turn of that session is there, oldest first: request, reply,
+tools, files touched. Nothing you did required an LLM call or a network
+round trip.
 
 ### What just became true
 
@@ -56,7 +59,7 @@ did required an LLM call or a network round trip.
   journal is a query away.
 - Your agent can search its own history:
   ```sh
-  aimem search "retry logic"
+  aimem search -p "$(aimem project-id .)" -q "retry logic"
   ```
 - Secrets are stripped before anything is written, so the journal is safe
   to keep.
@@ -199,10 +202,11 @@ aimem curate --backend openai --all
 aimem embed --all
 ```
 
-Then look at what it found, in the console's **Knowledge Base** tab or:
+Then look at what it found, in the console's **Knowledge Base** tab or,
+with the ID `aimem project-id .` prints in the project:
 
 ```sh
-aimem recall "how do we handle migrations"
+aimem recall -p <project> -q "how do we handle migrations"
 ```
 
 Recall is hybrid: full-text and semantic, fused. A query that shares no
@@ -239,7 +243,7 @@ Then start a fresh session and ask how migrations run.
 
 ## If something is not working
 
-**No turns in `aimem timeline`.** The session was already running when
+**No sessions in `aimem sessions`.** The session was already running when
 you installed — restart it. Then check `aimem health` and that
 `~/.claude/settings.json` has the `Stop` hook.
 

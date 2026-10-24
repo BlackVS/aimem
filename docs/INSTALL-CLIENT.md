@@ -115,7 +115,8 @@ aimem project-id .    # the identity this directory journals under
 Run a turn in Claude Code or OpenCode, then:
 
 ```sh
-aimem timeline        # the turn you just did should be the last row
+aimem sessions -p "$(aimem project-id .)"                  # the session you just used
+aimem timeline -p "$(aimem project-id .)" -s <session-id>  # its turns; the one you just did is the last
 aimem tui             # operator dashboard: projects, groups, AI, hub
 ```
 
