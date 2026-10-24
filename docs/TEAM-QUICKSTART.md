@@ -150,7 +150,8 @@ aimem teams commands .
 ```
 
 Repeat for `worker-2` and `coordinator` with their own token files.
-Expect `source: project-local`, the correct checkout, project and hub.
+Expect `"source":"project-local"` in the JSON `show-source` prints, with
+the correct checkout (`repo`), project and hub.
 Verify the selected process is the one your project requires. Remove the
 temporary delivery copies after successful installation.
 

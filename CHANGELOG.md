@@ -74,6 +74,19 @@ currently 25); a binary refuses a database newer than it understands.
   `aimem create-project`, now carries the opt-out. DESIGN-structured-docs
   names the records route as it was built,
   `GET /v1/projects/{p}/collections/{c}/records`.
+- **The quickstarts' examples run as printed.** A manual pass ran every
+  example of the six guides (QUICKSTART, KANBAN-QUICKSTART,
+  TEAM-QUICKSTART, QUICKSTART-NEW-PROJECT, INSTALL-CLIENT, INSTALL-HUB)
+  in guide order, against the current build on a throwaway hub. The
+  forms that did not run are corrected:
+  - `aimem timeline` needs `-p` and `-s`, so QUICKSTART, INSTALL-CLIENT
+    and the README now list the sessions with `aimem sessions -p` and
+    read one with `aimem timeline -p ... -s`;
+  - `aimem search` and `aimem recall` take the query with `-q`, and
+    the recall on the hub names its project with `-p`;
+  - KANBAN-QUICKSTART's table names `--read-only` for the read-only
+    token;
+  - TEAM-QUICKSTART quotes `show-source`'s JSON as it is printed.
 - **Version mentions in the documentation are current, marked or
   archived.** TEAM-QUICKSTART stated v0.7.1 for the hub and v0.7.3 for
   agent machines. It now states the hub 0.10.8 or later (selecting the
