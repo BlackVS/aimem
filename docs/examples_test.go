@@ -88,10 +88,15 @@ func checkFile(t *testing.T, f string, v vocabulary) []string {
 	}
 	var out []string
 	fenced := false
+	// continued holds the physical lines of a fenced command whose earlier
+	// lines ended in a shell (\) or PowerShell (`) continuation.
+	var continued []physLine
 	for i, line := range strings.Split(string(b), "\n") {
 		line = strings.TrimRight(line, "\r")
 		if strings.HasPrefix(strings.TrimSpace(line), "```") {
 			fenced = !fenced
+			out = append(out, checkCommands(name, continued, v)...)
+			continued = nil
 			continue
 		}
 		if strings.Contains(line, skipMarker) {
@@ -99,10 +104,19 @@ func checkFile(t *testing.T, f string, v vocabulary) []string {
 		}
 		at := fmt.Sprintf("%s:%d", name, i+1)
 		spans := []string{line}
-		if !fenced {
+		if fenced {
+			body := strings.TrimRight(line, " \t")
+			if strings.HasSuffix(body, `\`) || strings.HasSuffix(body, "`") {
+				continued = append(continued, physLine{i + 1, body[:len(body)-1]})
+			} else {
+				out = append(out, checkCommands(name, append(continued, physLine{i + 1, line}), v)...)
+				continued = nil
+			}
+		} else {
 			spans = nil
 			for _, m := range inlineCode.FindAllStringSubmatch(line, -1) {
 				spans = append(spans, m[1])
+				out = append(out, checkCommands(name, []physLine{{i + 1, m[1]}}, v)...)
 			}
 			for _, m := range toolMention.FindAllStringSubmatch(line, -1) {
 				for _, c := range inlineCode.FindAllStringSubmatch(m[1], -1) {
@@ -113,7 +127,6 @@ func checkFile(t *testing.T, f string, v vocabulary) []string {
 			}
 		}
 		for _, s := range spans {
-			out = append(out, checkCommands(at, s, v)...)
 			out = append(out, checkRoutes(at, s, v)...)
 			for _, m := range prefixedTool.FindAllStringSubmatch(s, -1) {
 				if !v.tools[m[1]] {
@@ -122,43 +135,87 @@ func checkFile(t *testing.T, f string, v vocabulary) []string {
 			}
 		}
 	}
-	return out
+	return append(out, checkCommands(name, continued, v)...)
 }
 
 var (
 	inlineCode   = regexp.MustCompile("`([^`]+)`")
 	toolMention  = regexp.MustCompile("((?:`[a-z]+(?:_[a-z]+)+`(?:,? (?:and|or) |, ))*`[a-z]+(?:_[a-z]+)+`) (?:MCP )?tools?\\b")
 	prefixedTool = regexp.MustCompile(`mcp__aimem__([a-z_]+)`)
-	segmentSep   = regexp.MustCompile(`\s*(?:\|\||\||&&|;|\$\()\s*`)
-	invocation   = regexp.MustCompile(`^(?:\S*/)?aimem(?:\.exe)?\s+(.*)$`)
+	invocation   = regexp.MustCompile(`^(?:\S*/)?aimem(?:\.exe)?$`)
 	commandWord  = regexp.MustCompile(`^[a-z][a-z0-9-]*$`)
 	flagToken    = regexp.MustCompile(`^--?([a-z][a-z0-9-]*)`)
 	placeholder  = regexp.MustCompile(`<[^>]+>`)
 	routeMention = regexp.MustCompile(`(/v1/[A-Za-z0-9_{}<>.\-/]*)`)
 )
 
-func checkCommands(at, s string, v vocabulary) []string {
+// physLine is one physical line of a document, by its 1-based number.
+type physLine struct {
+	n    int
+	text string
+}
+
+// word is a whitespace-separated token and the line it is on.
+type word struct {
+	s string
+	n int
+}
+
+// checkCommands reads the shell commands of one logical line, which may
+// span several physical lines, and checks every aimem invocation in it.
+// Each problem names the physical line of the offending word.
+func checkCommands(name string, lines []physLine, v vocabulary) []string {
+	var words []word
+	for _, l := range lines {
+		for f := range strings.FieldsSeq(l.text) {
+			words = append(words, word{f, l.n})
+		}
+	}
 	var out []string
-	for _, seg := range segmentSep.Split(strings.TrimPrefix(strings.TrimSpace(s), "$ "), -1) {
-		m := invocation.FindStringSubmatch(strings.TrimSpace(seg))
-		if m == nil {
-			continue
-		}
-		toks := strings.Fields(m[1])
-		if len(toks) == 0 || !commandWord.MatchString(toks[0]) {
-			continue
-		}
-		if !v.top[toks[0]] {
-			out = append(out, fmt.Sprintf("%s: command \"aimem %s\" (nearest: %s)", at, toks[0], nearest(toks[0], keys(v.top))))
-			continue
-		}
-		if len(toks) > 1 && commandWord.MatchString(toks[1]) && !v.words[toks[1]] {
-			out = append(out, fmt.Sprintf("%s: subcommand \"aimem %s %s\" (nearest: %s)", at, toks[0], toks[1], nearest(toks[1], keys(v.words))))
-		}
-		for _, tok := range toks[1:] {
-			if fm := flagToken.FindStringSubmatch(tok); fm != nil && !v.flags[fm[1]] {
-				out = append(out, fmt.Sprintf("%s: flag %q of \"aimem %s\" (nearest: --%s)", at, tok, toks[0], nearest(fm[1], keys(v.flags))))
+	var seg []word
+	flush := func() {
+		out = append(out, checkInvocation(name, seg, v)...)
+		seg = nil
+	}
+	for _, w := range words {
+		switch {
+		case w.s == "|" || w.s == "||" || w.s == "&&" || w.s == ";":
+			flush()
+		case strings.Contains(w.s, "$("):
+			flush()
+			if rest := w.s[strings.LastIndex(w.s, "$(")+2:]; rest != "" {
+				seg = append(seg, word{rest, w.n})
 			}
+		case strings.HasSuffix(w.s, ";"):
+			seg = append(seg, word{strings.TrimSuffix(w.s, ";"), w.n})
+			flush()
+		default:
+			seg = append(seg, w)
+		}
+	}
+	flush()
+	return out
+}
+
+func checkInvocation(name string, seg []word, v vocabulary) []string {
+	if len(seg) > 0 && seg[0].s == "$" {
+		seg = seg[1:]
+	}
+	if len(seg) < 2 || !invocation.MatchString(seg[0].s) || !commandWord.MatchString(seg[1].s) {
+		return nil
+	}
+	at := func(w word) string { return fmt.Sprintf("%s:%d", name, w.n) }
+	cmd := seg[1]
+	if !v.top[cmd.s] {
+		return []string{fmt.Sprintf("%s: command \"aimem %s\" (nearest: %s)", at(cmd), cmd.s, nearest(cmd.s, keys(v.top)))}
+	}
+	var out []string
+	if len(seg) > 2 && commandWord.MatchString(seg[2].s) && !v.words[seg[2].s] {
+		out = append(out, fmt.Sprintf("%s: subcommand \"aimem %s %s\" (nearest: %s)", at(seg[2]), cmd.s, seg[2].s, nearest(seg[2].s, keys(v.words))))
+	}
+	for _, w := range seg[2:] {
+		if fm := flagToken.FindStringSubmatch(w.s); fm != nil && !v.flags[fm[1]] {
+			out = append(out, fmt.Sprintf("%s: flag %q of \"aimem %s\" (nearest: --%s)", at(w), w.s, cmd.s, nearest(fm[1], keys(v.flags))))
 		}
 	}
 	return out
@@ -368,4 +425,43 @@ func distance(a, b string) int {
 		prev = cur
 	}
 	return prev[len(b)]
+}
+
+// TestDocExamplesContinuedLines pins the reading of a fenced command that
+// continues over several lines: a stale flag on a continuation line is
+// refused at that line, for the shell's \ and PowerShell's `, and an
+// invocation inside a $(...) substitution is read too.
+func TestDocExamplesContinuedLines(t *testing.T) {
+	v := loadVocabulary(t)
+	doc := filepath.Join(t.TempDir(), "EXAMPLE.md")
+	body := "```sh\n" +
+		"aimem teams setup Builders worker --platform codex \\\n" +
+		"  --projekt p --model-id x\n" +
+		"```\n" +
+		"```powershell\n" +
+		"aimem tasks on `\n" +
+		"  --projekt p\n" +
+		"```\n" +
+		"```sh\n" +
+		"aimem teams setup Builders worker \\\n" +
+		"  --platform codex\n" +
+		"PID=$(aimem project-id --projekt .)\n" +
+		"```\n"
+	if err := os.WriteFile(doc, []byte(body), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	got := checkFile(t, doc, v)
+	var lines []string
+	for _, g := range got {
+		at, _, _ := strings.Cut(g, ": ")
+		lines = append(lines, at[strings.LastIndex(at, ":")+1:])
+	}
+	if strings.Join(lines, ",") != "3,7,12" {
+		t.Fatalf("want the stale --projekt flags at lines 3, 7 and 12, got:\n%s", strings.Join(got, "\n"))
+	}
+	for _, g := range got {
+		if !strings.Contains(g, `flag "--projekt"`) {
+			t.Errorf("unexpected problem: %s", g)
+		}
+	}
 }

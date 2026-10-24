@@ -63,7 +63,9 @@ code, and checks four kinds of name:
   `cmd/aimem` source: usage text after "aimem ", a case label, a compared
   value or a map key.
 - **Flags.** A `--flag` or `-f` in an invocation must be registered on a
-  FlagSet in `cmd/aimem` or appear as a flag in its usage text.
+  FlagSet in `cmd/aimem` or appear as a flag in its usage text. A fenced
+  line that ends in `\` (sh) or a backtick (PowerShell) continues the
+  invocation on the next line, and a failure names the physical line.
 - **Routes.** A `/v1/...` path must match a path of
   `internal/server/openapi.json`, which the server's parity test pins to
   the route table. A `{param}` or `<placeholder>` stands for a segment, and
