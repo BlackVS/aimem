@@ -108,6 +108,8 @@ func main() {
 		err = projectNamespaceCmd(args)
 	case "project-id":
 		err = projectID(args)
+	case "wire":
+		err = wireCmd(args, os.Stdout)
 	case "session-start":
 		err = sessionStartCmd(args)
 	case "handoff":
@@ -241,6 +243,11 @@ const mainUsage = `usage: aimem <command> [flags]
                              RRF-merged); needs AIMEM_EMBED_MODEL +
                              AIMEM_OPENAI_API_KEY
   project-id [dir]           compute stable project identity for a directory
+  wire [DIR] [--project ID] [--hub NAME] [--groups a,b] [--check]
+                             wire DIR (default .) as a project: handoff,
+                             client hooks and MCP, commands, AGENTS.md,
+                             CLAUDE.md and .aimem.json, setting only the
+                             keys given; --check reports without writing
   task-token set|show-source|clear  manage this checkout's task credential;
                              set reads a project-scoped token from stdin
   session-start [file]       SessionStart hook adapter (Claude Code and

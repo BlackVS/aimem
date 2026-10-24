@@ -6,7 +6,8 @@
 #                                   agents), Claude Code user hooks,
 #                                   OpenCode global plugin, Codex user hooks
 #                                   + MCP registration
-#   ./install.sh project [dir]      wire one project: handoff template,
+#   ./install.sh project [dir]      wire one project with the installed
+#                                   binary's `aimem wire`: handoff template,
 #                                   session-start handoff loading for all
 #                                   clients, AGENTS.md protocol stub
 #   ./install.sh uninstall-user     remove everything `user` installed
@@ -468,135 +469,29 @@ install_project() {
     echo "error: refusing to wire the home directory $dir as a project: Claude Code would read its CLAUDE.md in every session under it. Run this inside a project directory." >&2
     return 1
   fi
-  need jq
   say "wiring project $dir"
-
-  if [ ! -f "$dir/docs/SESSION-STATE.md" ]; then
-    mkdir -p "$dir/docs"
-    cat > "$dir/docs/SESSION-STATE.md" <<'EOF'
-# Session State
-
-Updated: (date) | branch: (branch) | HEAD: (sha) | by: (client/session)
-
-## Objective
-
-(current objective)
-
-## Next actions (ready)
-
-1. (first action)
-
-## Pick up here
-
-(one line)
-EOF
-    say "created docs/SESSION-STATE.md template"
+  # The binary owns the project part (`aimem wire`), the same for both
+  # installers. AIMEM_PROJECT and AIMEM_GROUPS pre-declare a new project's
+  # pinned id and shared knowledge groups; an existing .aimem.json keeps its own.
+  local bin="$BIN_DIR/aimem"
+  if [ ! -x "$bin" ]; then
+    bin=$(command -v aimem) || { echo "error: aimem is not installed; run ./install.sh user first" >&2; return 1; }
   fi
-
-  # Claude Code: load the handoff at session start (project-scoped). The
-  # `aimem session-start` adapter is portable (same hook works on Windows).
-  local psettings="$dir/.claude/settings.json"
-  mkdir -p "$dir/.claude"
-  [ -s "$psettings" ] || echo '{}' > "$psettings"
-  local loadcmd='command -v aimem >/dev/null 2>&1 && aimem session-start || true'
-  local tmp
-  tmp=$(mktemp)
-  jq --arg cmd "$loadcmd" '
-    .hooks.SessionStart = ((.hooks.SessionStart // []) |
-      if ([.[] | .hooks[]? | .command // ""]
-          | any(contains("SESSION-STATE.md") or contains("aimem session-start")))
-      then .
-      else . + [{"hooks":[{"type":"command","command":$cmd,"timeout":10,"statusMessage":"Loading session handoff"}]}]
-      end)' "$psettings" > "$tmp" && mv "$tmp" "$psettings"
-  say "Claude Code SessionStart handoff hook wired"
-
-  # Codex: same handoff at session start, project-scoped (.codex/hooks.json;
-  # Codex loads it once the user trusts the project). `aimem session-start`
-  # emits the wire format both clients share.
-  add_agent_hook "$dir/.codex/hooks.json" SessionStart "aimem session-start" \
-    "Loading session handoff" "aimem session-start"
-  say "Codex SessionStart handoff hook wired"
-
-  # MCP recall facade for both clients.
-  local mcpjson="$dir/.mcp.json"
-  [ -s "$mcpjson" ] || echo '{}' > "$mcpjson"
-  tmp=$(mktemp)
-  jq '.mcpServers.aimem //= {"command":"aimem","args":["mcp"]}' "$mcpjson" > "$tmp" && mv "$tmp" "$mcpjson"
-
-  # OpenCode: load the handoff as instructions + register the MCP facade.
-  local ocjson="$dir/opencode.json"
-  [ -s "$ocjson" ] || printf '{\n  "$schema": "https://opencode.ai/config.json"\n}\n' > "$ocjson"
-  tmp=$(mktemp)
-  jq '.instructions = ((.instructions // []) |
-      if index("docs/SESSION-STATE.md") then . else . + ["docs/SESSION-STATE.md"] end)
-      | .mcp.aimem //= {"type":"local","command":["aimem","mcp"],"enabled":true}' \
-    "$ocjson" > "$tmp" && mv "$tmp" "$ocjson"
-  say "OpenCode instructions + MCP wired"
-
-  # /aimem-analyze slash command for both clients. MANAGED: overwritten on
-  # every install so template improvements roll out with upgrades — tune it
-  # in the aimem repo (install.sh), not in the wired project.
-  mkdir -p "$dir/.claude/commands" "$dir/.opencode/command"
-  for cmdfile in "$dir/.claude/commands/aimem-analyze.md" "$dir/.opencode/command/aimem-analyze.md"; do
-    cat > "$cmdfile" <<'ANALYZE'
----
-description: Analyze this repo into the shared aimem knowledge base, subsystem by subsystem
----
-<!-- managed by aimem install.sh — edits here are overwritten on reinstall -->
-Analyze this repository to build durable knowledge, subsystem by subsystem.
-Focus area for this run (optional): $ARGUMENTS
-
-Before starting: read .aimem.json to learn this project's name and declared
-knowledge groups. Call get_design_doc to load what the group's knowledge
-base already knows, and recall_memory (scope "both") for anything about
-this repo. Do not re-derive what is already recorded — verify and extend.
-
-Then work through the codebase one subsystem at a time: entry points, core
-data flow, then supporting modules. For each, understand and summarize in
-your replies: what it does, its key invariants and assumptions, gotchas,
-cross-module contracts, and why non-obvious decisions were made.
-
-Record knowledge, don't transcribe code: use the remember tool for the most
-important findings (one self-contained sentence each; kind fact/decision/
-convention; tags = component names). Facts that hold framework-wide across
-the group's repos: scope "group:<name>". Facts specific to this repo:
-default project scope. Never record what is trivially readable from the
-code (signatures, field lists) — record behavior, invariants, and reasons.
-
-End each work chunk with a short summary reply of what you established —
-those summaries are what curation distills into the knowledge base.
-ANALYZE
-  done
-  say "/aimem-analyze command wired (Claude Code + OpenCode)"
-
-  # /join_team entry points (Claude Code skill, OpenCode command, Codex skill
-  # and custom prompt) are rendered by the binary from one source, so they
-  # refresh on upgrade. Managed files; `aimem teams setup` repeats this.
-  if command -v aimem >/dev/null 2>&1; then
-    (cd "$dir" && aimem teams commands "$dir" >/dev/null) && say "/join_team entry points written (Claude Code, OpenCode, Codex)"
-  fi
-
-  if [ ! -f "$dir/AGENTS.md" ]; then
-    cp "$REPO_DIR/templates/AGENTS.md" "$dir/AGENTS.md"
-    say "copied AGENTS.md protocol (edit its project-context section)"
-  fi
-  if [ ! -f "$dir/CLAUDE.md" ]; then
-    printf 'See @AGENTS.md for the shared session handoff protocol.\n' > "$dir/CLAUDE.md"
-    say "created CLAUDE.md import stub"
-  fi
-
-  # Group membership: sharing is opt-in, empty groups = isolated project.
-  # AIMEM_GROUPS="a,b" pre-declares shared knowledge groups at install time;
-  # AIMEM_PROJECT=name pins a stable project id so the same repo shares one
-  # journal on every machine and checkout dir.
+  local args=(wire "$dir")
   if [ ! -f "$dir/.aimem.json" ]; then
-    jq -cn --arg g "${AIMEM_GROUPS:-}" --arg p "${AIMEM_PROJECT:-}" \
-      '{groups: ($g | split(",") | map(gsub("^\\s+|\\s+$";"")) | map(select(length>0)))}
-       + (if $p != "" then {project: $p} else {} end)' \
-      > "$dir/.aimem.json"
-    say "created .aimem.json (project: ${AIMEM_PROJECT:-auto}, groups: ${AIMEM_GROUPS:-none})"
+    if [ -n "${AIMEM_PROJECT:-}" ]; then args+=(--project "$AIMEM_PROJECT"); fi
+    if [ -n "${AIMEM_GROUPS:-}" ]; then args+=(--groups "$AIMEM_GROUPS"); fi
   fi
-  say "project wired. Commit the new files if the project is tracked."
+  local rc=0
+  "$bin" "${args[@]}" || rc=$?
+  if [ "$rc" = 2 ]; then
+    echo "error: the installed aimem ($bin) has no \`aimem wire\`; re-run with AIMEM_REINSTALL=1 to install the current release" >&2
+    return 1
+  fi
+  if [ "$rc" != 0 ]; then
+    echo "error: aimem is installed, but $dir was not wired: the aimem wire message above says why and what to do next" >&2
+    return 1
+  fi
 }
 
 # deploy-server: run LOCALLY to provision a hub over ssh. Cross-builds a
@@ -753,7 +648,7 @@ bootstrap() {
   skip=$(wire_skip_reason "$dir" "$installed")
   if [ -n "$skip" ]; then
     say "user level only, no project wired: $skip"
-    say "to wire a project, run the one-liner inside it after creating its .aimem.json: echo '{\"groups\":[]}' > .aimem.json"
+    say "to wire a project, run \`aimem wire\` in the project directory"
     say "bootstrap done. Restart Claude Code / OpenCode sessions to activate."
     return
   fi

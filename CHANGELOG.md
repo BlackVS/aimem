@@ -25,6 +25,33 @@ currently 25); a binary refuses a database newer than it understands.
   is refused together with `--pin`, `--ca-file` or `--insecure`. The hub
   installer's hint, INSTALL-HUB, INSTALL-CLIENT and QUICKSTART now name
   it in place of `hub rm`.
+- **`aimem wire` wires a project from the installed binary.**
+  `aimem wire [DIR] [--project ID] [--hub NAME] [--groups a,b]` writes
+  what the installers' project part wrote:
+  - the handoff template;
+  - the SessionStart hooks for Claude Code and Codex;
+  - the MCP registrations and the OpenCode instructions;
+  - the `/join_team`, `/resume_team` and `/aimem-analyze` commands;
+  - `AGENTS.md`, `CLAUDE.md` and `.aimem.json`.
+
+  A file with the user's content is kept and a managed file is
+  refreshed. The flags set only those keys in `.aimem.json` and keep
+  every other key, written as UTF-8 without a BOM. `--check` reports
+  what is wired and what is missing without writing, and exits non-zero
+  while something is missing. It refuses the home directory, the state
+  root and a directory inside a checkout whose `.aimem.json` already
+  governs it. `install.sh project` and `install.ps1 -Target` now run it
+  for their project part, so there is one implementation. As a result,
+  Windows projects also get `/aimem-analyze`, which only `install.sh`
+  wrote before. The Claude Code SessionStart hook keeps each
+  installer's form: guarded on Linux and macOS, so a collaborator
+  without aimem sees no hook error, and the bare `aimem session-start`
+  on Windows. Files `aimem wire` writes keep `&`, `<` and `>` as
+  themselves rather than JSON escapes. **Upgrade note:** the hand-written
+  `.aimem.json` step is gone. On a machine where aimem is installed, run
+  `aimem wire` in the new project directory. The one-liner's skip
+  message, README, INSTALL-CLIENT, QUICKSTART-NEW-PROJECT (3.1 and 3.5)
+  and TEAM-QUICKSTART now say so.
 
 ### Changed
 

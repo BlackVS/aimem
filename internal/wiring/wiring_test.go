@@ -68,9 +68,9 @@ func TestEmptyCheckoutIsWiredAndIdempotent(t *testing.T) {
 	if !strings.Contains(oc, `"$schema": "https://opencode.ai/config.json"`) || !strings.Contains(oc, `"docs/SESSION-STATE.md"`) || !strings.Contains(oc, `"enabled": true`) {
 		t.Fatalf("opencode.json: %s", oc)
 	}
-	for _, f := range []string{".claude/settings.json", ".codex/hooks.json"} {
+	for f, client := range map[string]string{".claude/settings.json": "Claude Code", ".codex/hooks.json": "Codex"} {
 		s := read(t, filepath.Join(dir, f))
-		if !strings.Contains(s, `"command": "aimem session-start"`) || !strings.Contains(s, `"SessionStart"`) {
+		if !strings.Contains(s, `"command": "`+handoffHookCommand(client)+`"`) || !strings.Contains(s, `"SessionStart"`) {
 			t.Fatalf("%s: %s", f, s)
 		}
 	}

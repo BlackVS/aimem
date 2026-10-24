@@ -31,7 +31,6 @@ $FailureRecallCmd = 'aimem failure-recall'
 # Codex space-splits hook commands and spawns them directly (no shell),
 # so its command must stay a bare program + args.
 $CodexSubmitCmd = 'aimem submit-codex'
-$SessionStartCmd = 'aimem session-start'
 
 function Say($m) { Write-Host "==> $m" }
 
@@ -406,92 +405,18 @@ function Wire-Project($dir) {
   $dir = (Resolve-Path $dir).Path
   Assert-NotHome $dir
   Say "wiring project $dir"
-
-  $handoff = Join-Path $dir 'docs\SESSION-STATE.md'
-  if (-not (Test-Path $handoff)) {
-    New-Item -ItemType Directory -Force (Join-Path $dir 'docs') | Out-Null
-    Write-Text $handoff @"
-# Session State
-
-Updated: (date) | branch: (branch) | HEAD: (sha) | by: (client/session)
-
-## Objective
-
-(current objective)
-
-## Next actions (ready)
-
-1. (first action)
-
-## Pick up here
-
-(one line)
-"@
-    Say 'created docs/SESSION-STATE.md template'
+  # The binary owns the project part (`aimem wire`), the same for both
+  # installers. AIMEM_PROJECT and AIMEM_GROUPS pre-declare a new project's
+  # pinned id and shared knowledge groups; an existing .aimem.json keeps its own.
+  $aimem = if (Test-Path $Exe) { $Exe } else { (Get-Command aimem -ErrorAction Stop).Source }
+  $wireArgs = @('wire', $dir)
+  if (-not (Test-Path -LiteralPath (Join-Path $dir '.aimem.json'))) {
+    if ($env:AIMEM_PROJECT) { $wireArgs += @('--project', $env:AIMEM_PROJECT) }
+    if ($env:AIMEM_GROUPS) { $wireArgs += @('--groups', $env:AIMEM_GROUPS) }
   }
-
-  # Claude Code: SessionStart handoff + project MCP registration.
-  $ps = Join-Path $dir '.claude\settings.json'
-  Add-AgentHook $ps 'SessionStart' $SessionStartCmd 'Loading session handoff' 'aimem session-start'
-  Say 'Claude Code SessionStart handoff hook wired'
-
-  # Codex: same handoff at session start, project-scoped (.codex/hooks.json;
-  # loads once the user trusts the project). `aimem session-start` emits
-  # the wire format both clients share.
-  Add-AgentHook (Join-Path $dir '.codex\hooks.json') 'SessionStart' $SessionStartCmd 'Loading session handoff' 'aimem session-start'
-  Say 'Codex SessionStart handoff hook wired'
-
-  $mcpPath = Join-Path $dir '.mcp.json'
-  $mcp = Read-Json $mcpPath
-  if (-not $mcp.PSObject.Properties['mcpServers']) { $mcp | Add-Member mcpServers ([pscustomobject]@{}) }
-  if (-not $mcp.mcpServers.PSObject.Properties['aimem']) {
-    $mcp.mcpServers | Add-Member aimem ([pscustomobject]@{ command = 'aimem'; args = @('mcp') })
-    Write-Json $mcpPath $mcp
-  }
-
-  # OpenCode: handoff instructions + MCP.
-  $ocPath = Join-Path $dir 'opencode.json'
-  $oc = Read-Json $ocPath
-  if (-not $oc.PSObject.Properties['$schema']) { $oc | Add-Member '$schema' 'https://opencode.ai/config.json' }
-  if (-not $oc.PSObject.Properties['instructions']) { $oc | Add-Member instructions @() }
-  if (@($oc.instructions) -notcontains 'docs/SESSION-STATE.md') { $oc.instructions = @($oc.instructions) + 'docs/SESSION-STATE.md' }
-  if (-not $oc.PSObject.Properties['mcp']) { $oc | Add-Member mcp ([pscustomobject]@{}) }
-  if (-not $oc.mcp.PSObject.Properties['aimem']) {
-    $oc.mcp | Add-Member aimem ([pscustomobject]@{ type = 'local'; command = @('aimem', 'mcp'); enabled = $true })
-  }
-  Write-Json $ocPath $oc
-  Say 'OpenCode instructions + MCP wired'
-
-  # /join_team entry points (Claude Code skill, OpenCode command, Codex skill
-  # and custom prompt) are rendered by the binary from one source, so they
-  # refresh on upgrade. Managed files; `aimem teams setup` repeats this.
-  if (Get-Command aimem -ErrorAction SilentlyContinue) {
-    & aimem teams commands $dir | Out-Null
-    Say '/join_team entry points written (Claude Code, OpenCode, Codex)'
-  }
-
-  if (-not (Test-Path (Join-Path $dir 'AGENTS.md'))) {
-    Copy-Item (Join-Path $RepoDir 'templates\AGENTS.md') (Join-Path $dir 'AGENTS.md')
-    Say 'copied AGENTS.md protocol (edit its project-context section)'
-  }
-  if (-not (Test-Path (Join-Path $dir 'CLAUDE.md'))) {
-    Write-Text (Join-Path $dir 'CLAUDE.md') "See @AGENTS.md for the shared session handoff protocol.`r`n"
-    Say 'created CLAUDE.md import stub'
-  }
-
-  # Group membership: sharing is opt-in, empty groups = isolated project.
-  # AIMEM_GROUPS="a,b" pre-declares shared knowledge groups at install time.
-  $aimemJson = Join-Path $dir '.aimem.json'
-  if (-not (Test-Path $aimemJson)) {
-    $groups = @()
-    if ($env:AIMEM_GROUPS) {
-      $groups = @($env:AIMEM_GROUPS -split ',' | ForEach-Object { $_.Trim() } | Where-Object { $_ })
-    }
-    Write-Json $aimemJson ([pscustomobject]@{ groups = $groups })
-    $gdesc = if ($groups.Count) { $groups -join ',' } else { 'none' }
-    Say "created .aimem.json (groups: $gdesc - edit to join shared knowledge groups)"
-  }
-  Say 'project wired. Commit the new files if the project is tracked.'
+  & $aimem @wireArgs
+  if ($LASTEXITCODE -eq 2) { throw "the installed aimem ($aimem) has no ``aimem wire``; re-run with AIMEM_REINSTALL=1 to install the current release" }
+  if ($LASTEXITCODE -ne 0) { throw "aimem is installed, but $dir was not wired: the aimem wire message above says why and what to do next" }
 }
 
 function Uninstall-User {
@@ -581,7 +506,7 @@ if ($UserOnly) { return }
 $skip = if ($Bootstrap) { Get-WireSkipReason $Target $wasInstalled } else { '' }
 if ($skip) {
   Say "user level only, no project wired: $skip"
-  Say "to wire a project, run the one-liner inside it after creating its .aimem.json: Set-Content -Encoding ascii .aimem.json '{`"groups`":[]}'"
+  Say 'to wire a project, run `aimem wire` in the project directory'
   return
 }
 Wire-Project $Target

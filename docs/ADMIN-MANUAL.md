@@ -66,7 +66,8 @@ binaries by hand. Each one-liner fetches its boot script from a release
 tag, and the script installs that release's binary, refusing one whose
 hash is not in the release's `SHA256SUMS`. Run it from any directory:
 when aimem is already installed the one-liner wires only a directory
-that already holds `.aimem.json`, and it never wires the home directory.
+that already holds `.aimem.json` (`aimem wire` wires any other), and it
+never wires the home directory.
 `AIMEM_USER_ONLY=1` upgrades the user level and wires nothing:
 
 ```sh
