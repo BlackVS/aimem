@@ -118,12 +118,11 @@ git clone REPOSITORY_URL worker-1
 git clone REPOSITORY_URL worker-2
 ```
 
-Use the project's normal installer to wire each checkout. In each checkout,
-ensure `.aimem.json` selects the same project and intended local hub name.
-Preserve existing settings when editing it; the binding fields look like:
+Wire each checkout with `aimem wire`, which selects the same project and
+the intended local hub name in `.aimem.json` and keeps its other settings:
 
-```json
-{"project":"my-project","hub":"team"}
+```sh
+aimem wire --project my-project --hub team
 ```
 
 Deliver each token file securely to only its matching member. Keep temporary

@@ -129,11 +129,27 @@ func projectPin(dir string) (string, error) {
 	if cfg.Project == "" {
 		return "", nil
 	}
-	if !pinnedName.MatchString(cfg.Project) || cfg.Project == "user" ||
-		strings.HasPrefix(cfg.Project, "group-") {
-		return "", fmt.Errorf(".aimem.json: invalid project name %q (want letters/digits/._- , not \"user\" or \"group-*\")", cfg.Project)
+	if err := CheckProjectName(cfg.Project); err != nil {
+		return "", fmt.Errorf(".aimem.json: %w", err)
 	}
 	return cfg.Project, nil
+}
+
+// CheckProjectName reports whether name may be pinned as "project" in
+// .aimem.json.
+func CheckProjectName(name string) error {
+	if !pinnedName.MatchString(name) || name == "user" || strings.HasPrefix(name, "group-") {
+		return fmt.Errorf("invalid project name %q (want letters/digits/._- , not \"user\" or \"group-*\")", name)
+	}
+	return nil
+}
+
+// CheckHubName reports whether name may be bound as "hub" in .aimem.json.
+func CheckHubName(name string) error {
+	if !groupNameRe.MatchString(name) {
+		return fmt.Errorf("invalid hub name %q (want lowercase letters, digits, dashes)", name)
+	}
+	return nil
 }
 
 // ProjectHubName reads the project's optional hub binding: the name of a
@@ -162,8 +178,10 @@ func ProjectHubNameStrict(dir string) (string, error) {
 }
 
 func hubNameOf(cfg *projectConfig) (string, error) {
-	if cfg.Hub != "" && !groupNameRe.MatchString(cfg.Hub) {
-		return "", fmt.Errorf(".aimem.json: invalid hub name %q (want lowercase letters, digits, dashes)", cfg.Hub)
+	if cfg.Hub != "" {
+		if err := CheckHubName(cfg.Hub); err != nil {
+			return "", fmt.Errorf(".aimem.json: %w", err)
+		}
 	}
 	return cfg.Hub, nil
 }

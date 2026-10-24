@@ -218,14 +218,22 @@ directory that already holds `.aimem.json`
 ([ADMIN-MANUAL](docs/ADMIN-MANUAL.md#upgrades)). The home directory is
 never wired.
 
+To add another project once aimem is installed, run `aimem wire` inside
+it. It writes the same files the one-liner does, and its flags set the
+project's keys in `.aimem.json`; `aimem wire --check` reports what is
+wired without writing:
+
+```sh
+aimem wire --project my-project --hub team
+```
+
 The one-liner needs the raw script to arrive intact. If the Windows form
 fails with `Cannot bind argument to parameter 'Command' because it is an
 empty string`, the download returned an empty body (a transient CDN or
 network-filter hiccup, not a broken script): retry, or run the installer
 from a checkout instead. That path skips the download and the `irm | iex`
-chain entirely, and is the natural way to wire further projects once
-aimem is already installed. (With no aimem installed yet it builds the
-binary from the checkout's source, which needs Go.)
+chain entirely. (With no aimem installed yet it builds the binary from
+the checkout's source, which needs Go.)
 
 ```sh
 # Linux / macOS, from the checkout

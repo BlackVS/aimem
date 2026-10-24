@@ -9,10 +9,10 @@ except section 4 applies whether or not you ever set one up.
 Run it **inside a project directory**. The first run installs the
 user-level pieces and wires the project you are standing in. Later runs
 upgrade aimem from any directory and wire only a directory that already
-holds `.aimem.json`; to wire another project, create its `.aimem.json`
-(`{"groups":[]}`) and run the one-liner inside it. The home directory is
-never wired: Claude Code reads a `CLAUDE.md` in every directory above a
-session, so wiring the home would reach every project under it.
+holds `.aimem.json`; to wire another project, run `aimem wire` inside it
+(see "Wiring another project" below). The home directory is never wired: Claude Code reads a
+`CLAUDE.md` in every directory above a session, so wiring the home would
+reach every project under it.
 
 **Linux / macOS**
 
@@ -81,13 +81,35 @@ or `.codex/hooks.json`: registering them twice journals every turn twice.
 | `.codex/hooks.json` | the same `SessionStart` hook for Codex (runs once the project is trusted in Codex). Codex runs hook commands without a shell, so this one cannot guard on aimem's presence — a collaborator without aimem sees a one-line hook failure per session start, nothing worse |
 | `.mcp.json`, `opencode.json` | MCP registration for recall. `opencode.json` also lists `docs/SESSION-STATE.md` in `instructions`. OpenCode 1.x loads that file whole into every session, with no size limit aimem can apply, so the handoff's 50-line rule and `aimem handoff compact`, which moves history to `docs/SESSION-STATE-ARCHIVE.md`, are what keep it small there. OpenCode 2.x ignores `instructions`; the aimem plugin injects the handoff instead, with the same 8 KiB limit and note as `aimem session-start`. |
 | `.claude/skills/join_team/SKILL.md`, `.opencode/commands/join_team.md`, `.agents/skills/join-team/SKILL.md` | the `/join_team` team-onboarding entry points, rendered by `aimem teams commands` (managed files; `~/.codex/prompts/join_team.md` too when a Codex home exists) |
+| `.claude/commands/aimem-analyze.md`, `.opencode/command/aimem-analyze.md` | the `/aimem-analyze` command, which builds the shared knowledge base subsystem by subsystem (managed files) |
 | `.aimem.json` | project identity, knowledge groups, hub binding |
 
-Commit these if the project is tracked. Re-running the installer in
-another directory only wires that directory. `aimem teams setup` checks
+Commit these if the project is tracked. An existing `AGENTS.md`,
+`CLAUDE.md` or handoff is kept as it is, and a managed file is refreshed.
+Re-running the installer in another directory only wires that directory. `aimem teams setup` checks
 this wiring in a checkout before joining a team and adds what is missing
 in the same shapes (`--no-repair` to report only); see
 [TEAM-AGENT-QUICKSTART.md](TEAM-AGENT-QUICKSTART.md#one-command-onboarding).
+
+### Wiring another project
+
+Once aimem is installed, `aimem wire` wires a project from the installed
+binary: run it in the project directory, or name the directory. It writes
+everything in the table above, and both installers run it for their
+project part. Its flags set those keys in `.aimem.json` and keep every
+other key; without them a new `.aimem.json` has no groups and a derived
+project id:
+
+```sh
+aimem wire --project my-project --hub team --groups shared
+aimem wire --check        # report what is wired and what is missing; write nothing
+```
+
+`--check` exits non-zero while something is missing. `aimem wire`
+refuses the home directory, the aimem state root and a directory inside
+a checkout whose `.aimem.json` already governs it. Registering the hub
+(`aimem hub add`) and the task credential (`aimem task-token`) stay
+separate steps (section 4).
 
 ## 2. Options
 
@@ -250,7 +272,7 @@ it through `bash` for the same reason), so call it via `bash`:
 
 ```sh
 bash ./install.sh user                 # user-level only (builds from source)
-bash ./install.sh project [dir]        # wire one project
+bash ./install.sh project [dir]        # wire one project (runs `aimem wire`)
 bash ./install.sh bootstrap [dir]      # what the one-liner runs
 bash ./install.sh enable-sync <ssh>    # periodic anti-entropy sync timer
 bash ./install.sh uninstall-user       # remove everything `user` installed

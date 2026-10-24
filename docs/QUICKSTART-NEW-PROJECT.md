@@ -132,7 +132,13 @@ then remove the hub's copy.
 
 ### 3.1 Install aimem and wire the project
 
-Run the one-liner **inside the project directory**.
+Run the one-liner **inside the project directory**. When aimem is
+already installed on this machine, wire the project with the installed
+binary instead, which downloads nothing, and skip to step 3.2:
+
+```sh
+aimem wire --project my-project --hub team
+```
 
 **macOS.** The installer needs `jq` (for example `brew install jq`).
 Run it in a login session on the Mac. It registers the local service and
@@ -268,33 +274,30 @@ scope user`, with the user and token IDs. It never prints the secret.
 
 ### 3.5 Bind the project in `.aimem.json`
 
-Replace the `.aimem.json` the installer created in the project root with
-the project's identity, its hub, and the design documents to share:
+Set the project's identity and its hub in the `.aimem.json` the
+installer created, from the project root:
 
-```json
-{
-  "project": "my-project",
-  "hub": "team",
-  "groups": [],
-  "docs": ["docs/DESIGN.md", "docs/ARCHITECTURE.md"]
-}
+```sh
+aimem wire --project my-project --hub team
 ```
 
-- `project` pins the ID from step 1, so every clone on every machine
+- `--project` pins the ID from step 1, so every clone on every machine
   journals into the same project.
-- `hub` binds the project to the hub you registered as `team`.
-- `docs` lists files, relative to the project root, that are shared
-  through the hub as documents. Each is known on the hub by its file
-  name without the extension (`DESIGN`, `ARCHITECTURE`). A listed file
-  that does not exist yet is skipped without an error, so check the
-  paths. The handoff, `docs/SESSION-STATE.md`, is shared without being
-  listed.
+- `--hub` binds the project to the hub you registered as `team`.
+- `aimem wire` sets only the keys it is given and keeps the rest of
+  `.aimem.json`. `aimem wire --check` shows what is set.
 
-On Windows, save the file as UTF-8, with or without a byte order mark;
-`Set-Content -Encoding ascii` or `-Encoding UTF8` both do. Do not write it
-with `Out-File` or `>` in Windows PowerShell 5.1: they write UTF-16, which
-aimem cannot read. It then warns that `.aimem.json` is unreadable and
-treats the file as absent.
+To share design documents through the hub, add a `docs` list of paths
+relative to the project root to `.aimem.json`, for example
+`"docs": ["docs/DESIGN.md", "docs/ARCHITECTURE.md"]`. Each is known on
+the hub by its file name without the extension (`DESIGN`,
+`ARCHITECTURE`). A listed file that does not exist yet is skipped
+without an error, so check the paths. The handoff,
+`docs/SESSION-STATE.md`, is shared without being listed. On Windows,
+save the file as UTF-8, with or without a byte order mark. Do not write
+it with `Out-File` or `>` in Windows PowerShell 5.1: they write UTF-16,
+which aimem cannot read. It then warns that `.aimem.json` is unreadable
+and treats the file as absent.
 
 Commit `.aimem.json` and the other wired files if the project is tracked.
 
