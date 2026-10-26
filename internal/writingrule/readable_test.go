@@ -71,6 +71,10 @@ func TestUnreadablePassesReadableText(t *testing.T) {
 		"Investigate intermittent authentication failures",
 		"Internationalization of administrative notifications",
 		"Counterrevolutionaries misunderstanding telecommunications",
+		// Titles that name code identifiers without backticks.
+		"Fix TestTextCheckSwitchedOffStoresUncheckedText flake",
+		"Added TestTextCheckSwitchedOffStoresUncheckedText.",
+		"Rename EnableTasksWherePresentForEveryProject",
 		// A list of identifiers, one per line.
 		"Changed files:\n- internal/writingrule/readable.go\n- internal/server/tasks.go\n- docs/ADMIN-MANUAL.md\n",
 	} {

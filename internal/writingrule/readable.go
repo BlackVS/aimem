@@ -28,7 +28,7 @@ const RuleSection = `"The rule" in ` + Source + " (the writing_rule tool returns
 
 var fixes = map[string]string{
 	ReasonGlued:       `Separate the words from the numbers and write the sentence out, for example "run 409 succeeded in 99 seconds" instead of "run409 SUCCESS99s".`,
-	ReasonSpacing:     "Write complete sentences with a space between every two words.",
+	ReasonSpacing:     "Write complete sentences with a space between every two words, and put a code identifier in backticks.",
 	ReasonPunctuation: "Put a space after the punctuation that ends each sentence, and write each sentence out in full.",
 }
 
@@ -41,13 +41,14 @@ var exempt = []*regexp.Regexp{
 	regexp.MustCompile("(?s)~~~.*?(~~~|$)"),
 	regexp.MustCompile("`[^`\n]*`"),
 	regexp.MustCompile(`[A-Za-z][A-Za-z0-9+.-]*://\S+`),
-	regexp.MustCompile(`\S*[/\\]\S*`),                      // paths, and slash pairs such as and/or
-	regexp.MustCompile(`\b[0-9A-Fa-f]+(-[0-9A-Fa-f]+)+\b`), // UUIDs and other dashed hex ids
-	regexp.MustCompile(`\b[0-9A-Fa-f]{7,}\b`),              // hashes
-	regexp.MustCompile(`\b[vV]?\d+(\.\d+)+[\w.+-]*`),       // versions
-	regexp.MustCompile(`\S*[_@=<>{}\[\]|$%^~]\S*`),         // identifiers, flags' values, markup
-	regexp.MustCompile(`(^|\s)--?[A-Za-z][\w-]*`),          // command-line flags
-	regexp.MustCompile(`\b\w+\.[a-z]{1,5}\b`),              // file names and qualified names
+	regexp.MustCompile(`\S*[/\\]\S*`),                               // paths, and slash pairs such as and/or
+	regexp.MustCompile(`\b[0-9A-Fa-f]+(-[0-9A-Fa-f]+)+\b`),          // UUIDs and other dashed hex ids
+	regexp.MustCompile(`\b[0-9A-Fa-f]{7,}\b`),                       // hashes
+	regexp.MustCompile(`\b[vV]?\d+(\.\d+)+[\w.+-]*`),                // versions
+	regexp.MustCompile(`\S*[_@=<>{}\[\]|$%^~]\S*`),                  // identifiers, flags' values, markup
+	regexp.MustCompile(`(^|\s)--?[A-Za-z][\w-]*`),                   // command-line flags
+	regexp.MustCompile(`\b\w+\.[a-z]{1,5}\b`),                       // file names and qualified names
+	regexp.MustCompile(`\b[A-Za-z][a-z0-9]+([A-Z][a-z0-9]+){2,}\b`), // code identifiers such as TestTasksTextCheck
 }
 
 // A letter run glued to digits is a technical name for these prefixes
