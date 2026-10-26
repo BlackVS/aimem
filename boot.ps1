@@ -5,7 +5,7 @@
 #
 # (The wrapper survives the default Restricted execution policy on a
 # fresh Windows machine; bare `irm ... | iex` works too once fetched,
-# since this script bypasses the policy for the installer it runs.)
+# since this script sets the policy for the installer it runs.)
 #
 # It installs the release this script was fetched from ($release below):
 # the prebuilt aimem.exe (no Go needed), checked against that release's
@@ -95,10 +95,12 @@ try {
     Write-Host "checksum OK: aimem-windows-amd64.exe"
   }
 
-  # Run the installer in a child shell with an explicit policy bypass:
+  # Run the installer in a child shell with an explicit policy:
   # `irm | iex` itself is exempt from ExecutionPolicy, but invoking the
   # downloaded install.ps1 as a FILE is not — on the default Restricted
-  # policy the install died right here (lived 2026-08-31). The bypass is
+  # policy the install died right here (lived 2026-08-31). RemoteSigned
+  # is enough: the archive's files carry no Mark of the Web, because tar
+  # does not copy it from the archive to what it extracts. The policy is
   # process-scoped and changes no machine state.
 # BEGIN run-installer
   # -Bootstrap applies the one-liner's wiring rules; an older release named
@@ -106,7 +108,7 @@ try {
   $installer = Join-Path $dest 'install.ps1'
   $mode = @()
   if (Select-String -LiteralPath $installer -Pattern '\[switch\]\$Bootstrap' -Quiet) { $mode = @('-Bootstrap') }
-  & powershell -NoProfile -ExecutionPolicy Bypass -File $installer @mode -Target $PWD.Path
+  & powershell -NoProfile -ExecutionPolicy RemoteSigned -File $installer @mode -Target $PWD.Path
   if ($LASTEXITCODE -ne 0) { throw "install.ps1 failed with exit code $LASTEXITCODE" }
 # END run-installer
 } finally {

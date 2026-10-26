@@ -81,6 +81,9 @@ jobs:
           build windows amd64 aimem-windows-amd64.exe
           # The license travels with the binaries, and SHA256SUMS covers it too.
           cp LICENSE dist/LICENSE
+          # So does boot.ps1, so a Windows install can check the script
+          # against the release's SHA256SUMS before running it as a file.
+          cp boot.ps1 dist/boot.ps1
           (cd dist && sha256sum * > SHA256SUMS)
 
       # The release body is the tag's CHANGELOG section — written by a
