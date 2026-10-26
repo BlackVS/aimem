@@ -214,6 +214,15 @@ currently 25); a binary refuses a database newer than it understands.
   now reads a response's body only when the status is not 2xx or the
   body is not the expected JSON. A 429, a 5xx, an HTML page where JSON
   belongs and a proxy error carrying a block page are still blocks.
+- **A Windows one-liner knob no longer outlives its run.** The documented
+  forms set `AIMEM_USER_ONLY=1` in the caller's own window (`$env:` in
+  PowerShell, `set` in cmd), so every later one-liner in that window ran
+  user-only and wired nothing. ADMIN-MANUAL now sets the knob inside the
+  child PowerShell's `-Command`, which scopes it to the run, and says why
+  a script block cannot. boot.ps1 itself, run as `irm | iex` in an open
+  window, left `AIMEM_TARGET_VERSION` and `AIMEM_PREBUILT` set in that
+  window; it now puts both back as they were when it ends, a value the
+  user had set included, even when the run fails.
 
 ## [0.10.13] — 2026-10-23
 
