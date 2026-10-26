@@ -107,8 +107,8 @@ txn_copy() { # src dst: copy a state root without the service socket, modes kept
 # while tar read it is never kept, not even when tar only warns ("file
 # changed as we read it", exit 1): a database copied mid-write can be torn,
 # and a torn backup is worse than none. Each try starts from an empty
-# directory; after the last, lsof (where installed) names the processes
-# holding the state root.
+# directory. The installer does not run lsof itself: on macOS a `lsof +D`
+# could stall the upgrade for minutes, so the hint names the command.
 txn_backup() {
   local try=1
   while :; do
@@ -120,11 +120,7 @@ txn_backup() {
     try=$((try + 1))
   done
   rm -rf "$2"
-  echo "If tar says a file changed as it read it, a process of the service's user writes $1 (an aimem command, a curation run): stop it, then re-run." >&2
-  if command -v lsof >/dev/null 2>&1; then
-    echo "Processes holding files in $1 now:" >&2
-    lsof +D "$1" 2>/dev/null >&2 || echo "  none" >&2
-  fi
+  echo "If tar says a file changed as it read it, a process of the service's user writes $1 (an aimem command, a curation run; lsof +D $1 lists them): stop it, then re-run." >&2
   return 1
 }
 txn_wait() { # version: wait until the service answers health at that version

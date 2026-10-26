@@ -120,9 +120,9 @@ On an existing installation the installer:
    copy that changed while it was read is never kept, even though tar
    only warns "file changed as we read it": a database copied mid-write
    can be torn. The copy is taken again from scratch, up to three
-   times; after the third, the upgrade stops with tar's message, lists
-   the processes holding the state root where `lsof` is installed,
-   starts the service again and changes nothing;
+   times; after the third, the upgrade stops with tar's message and a
+   hint (`lsof +D <state root>` lists the writers), starts the service
+   again and changes nothing;
 4. swaps the binary, starts the service, and waits for health at the new
    version (`AIMEM_UPGRADE_WAIT`, 30 seconds);
 5. if the new release does not answer at its version in time, stops it,

@@ -238,9 +238,9 @@ currently 25); a binary refuses a database newer than it understands.
   copy the state root". install-hub.sh and install.sh now take the copy
   again from scratch, up to three times, and never keep a copy that
   changed while it was read, because a database copied mid-write can be
-  torn. After the third try the upgrade stops with tar's message, lists
-  the processes holding the state root where `lsof` is installed, starts
-  the service again and changes nothing. The upgrade also stops before
+  torn. After the third try the upgrade stops with tar's message and a
+  hint to find the writer with `lsof +D`, starts the service again and
+  changes nothing. The upgrade also stops before
   the copy when the service still answers after its stop, and it prints
   the size of the state it copies and how long the copy took, which is
   the main part of the downtime (about a second for 128 MiB on a local

@@ -176,7 +176,7 @@ func TestShellUpgradeRefusesAStateRootThatKeepsChanging(t *testing.T) {
 		t.Fatalf("an upgrade whose state copy changed on every try reported success:\n%s", out)
 	}
 	checkUntouched(t, s, out)
-	for _, want := range []string{"file changed as we read it", "the copy failed (try 2 of 3)", "could not copy the state root", "nothing was changed"} {
+	for _, want := range []string{"file changed as we read it", "the copy failed (try 2 of 3)", "could not copy the state root", "nothing was changed", "lsof +D "} {
 		if !strings.Contains(out, want) {
 			t.Errorf("the output lacks %q:\n%s", want, out)
 		}
