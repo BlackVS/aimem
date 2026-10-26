@@ -14,7 +14,9 @@ import (
 // when the run fails: unset stays unset, and a value the user set stays
 // theirs. The downloads are stubbed: the archive and the binary arrive as
 // placeholder files and SHA256SUMS lists nothing, so the run gets past
-// setting AIMEM_PREBUILT and fails on the checksum, offline.
+// setting AIMEM_PREBUILT and fails on the checksum, offline. Get-FileHash
+// is stubbed too: Windows PowerShell started by a test under a pwsh step
+// inherits pwsh's module path and could not load it on the CI runner.
 func TestBootPs1LeavesNoVariablesInTheCallersSession(t *testing.T) {
 	shells := powerShells(t)
 	boot, err := filepath.Abs(filepath.Join("..", "..", "boot.ps1"))
@@ -32,6 +34,7 @@ func TestBootPs1LeavesNoVariablesInTheCallersSession(t *testing.T) {
 				dir := t.TempDir()
 				script := c.before + `function Invoke-WebRequest { param($Uri, $OutFile, [switch]$UseBasicParsing) Set-Content -LiteralPath $OutFile -Value "placeholder for $Uri" }
 function tar { }
+function Get-FileHash { [pscustomobject]@{ Hash = 'PLACEHOLDER' } }
 $failure = ''
 try { Get-Content -Raw -LiteralPath $env:BOOT | Invoke-Expression } catch { $failure = "$_" }
 Write-Output "failure=[$failure]"
