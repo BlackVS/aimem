@@ -69,6 +69,11 @@ func hubSet(hub *adapter.HubConfig, client *http.Client, root, project string, r
 	}
 	defer resp.Body.Close()
 	raw, err := io.ReadAll(io.LimitReader(resp.Body, setBodyMax+1))
+	if resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden {
+		// A refusal stands whatever its body: one cut short or too large
+		// loses only the reason, never the denial.
+		return hubSetDenied, errors.New(hubErrorText(raw, resp.StatusCode))
+	}
 	if err != nil {
 		return hubSetFailed, fmt.Errorf("reading the set from the hub: %w", err)
 	}
@@ -82,8 +87,6 @@ func hubSet(hub *adapter.HubConfig, client *http.Client, root, project string, r
 			return hubSetFailed, errors.New("the hub answered 304 to a read that was not conditional")
 		}
 		return hubSetNotModified, nil
-	case http.StatusUnauthorized, http.StatusForbidden:
-		return hubSetDenied, errors.New(hubErrorText(raw, resp.StatusCode))
 	case http.StatusNotFound, http.StatusMethodNotAllowed:
 		return hubSetUnsupported, errors.New(hubErrorText(raw, resp.StatusCode))
 	default:

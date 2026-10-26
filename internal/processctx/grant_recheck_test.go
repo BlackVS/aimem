@@ -54,6 +54,25 @@ func TestACachedSetIsServedOnlyWhileTheHubVouchesForIt(t *testing.T) {
 		t.Fatalf("a refused read sent the set: %d bodies", h.setBodies.Load())
 	}
 
+	// A refusal whose body cannot be read whole is still a refusal: the
+	// status decides, the body only gives the reason.
+	for _, body := range []string{"cut", "huge"} {
+		for _, status := range []int{http.StatusForbidden, http.StatusUnauthorized} {
+			h.change(func(h *fakeHub) { h.setStatus, h.setRefusalBody = status, body })
+			r := Load(dir, root, "")
+			if r.State != Denied || r.Set != nil || r.Unit != "" {
+				t.Fatalf("revoked (%d, %s body): %+v", status, body, r)
+			}
+			if hook, _ := Bootstrap(dir, root, "", false); !strings.Contains(hook, "DENIED") || strings.Contains(hook, "granted rules") {
+				t.Fatalf("revoked (%d, %s body) hook: %q", status, body, hook)
+			}
+			if r := LoadRef(dir, root, "", sel); r.State != Denied || r.Set != nil {
+				t.Fatalf("pinned, revoked (%d, %s body): %+v", status, body, r)
+			}
+		}
+	}
+	h.change(func(h *fakeHub) { h.setRefusalBody = "" })
+
 	// The grant again: 304, the cache, Ready, after a conditional read on
 	// the digest in the form internal/server's set route sends as its ETag
 	// (strong, quoted); the cache is not rewritten.

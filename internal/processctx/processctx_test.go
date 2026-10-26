@@ -52,6 +52,9 @@ type fakeHub struct {
 	setCalls  atomic.Int64
 	setBodies atomic.Int64 // answers that carried the set's files
 	setDrop   bool         // drop the set read's connection without an answer
+	// setRefusalBody, with setStatus: "cut" sends a body shorter than its
+	// Content-Length, "huge" one over the client's limit.
+	setRefusalBody string
 	// The If-None-Match of the last set read; the hub answers 304 to the
 	// set's own strong ETag, as internal/server's route does.
 	setIfNoneMatch string
@@ -82,6 +85,17 @@ func (h *fakeHub) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		h.setCalls.Add(1)
 		if h.setDrop {
 			dropConn(w)
+			return
+		}
+		switch h.setRefusalBody {
+		case "cut": // declares more than it sends; the reader fails
+			w.Header().Set("Content-Length", "1000")
+			w.WriteHeader(h.setStatus)
+			w.Write([]byte(`{"error":"tok`))
+			return
+		case "huge": // larger than any answer the client reads
+			w.WriteHeader(h.setStatus)
+			w.Write([]byte(strings.Repeat("x", setBodyMax+1)))
 			return
 		}
 		if h.setStatus != 0 {
