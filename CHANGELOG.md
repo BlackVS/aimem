@@ -187,6 +187,21 @@ currently 25); a binary refuses a database newer than it understands.
 
 ### Security
 
+- **A revoked project grant now reaches a cached process set (audit A-5).**
+  A member that had cached the project's process set kept serving it as
+  ready after its grant on the project was revoked, because a cache hit
+  returned before any grant-checked call. Each load with a cache hit now
+  asks the hub's set route conditionally (`If-None-Match` with the set's
+  digest), and the hub checks the grant before it answers. A refusal
+  (401 or 403) is `denied`, and the cached set is not used; that is the fix
+  for the finding. A 304 serves the cache as ready, as before.
+  This changes the offline behaviour. A session start with a cache hit
+  now contacts the hub's set route once. When that read fails (it cannot
+  reach the hub, the hub no longer keeps the set, or it answers with an
+  error), the cached set is last observed instead of ready: the agent
+  still reads its rules, and the set does not authorize a task write. A
+  hub that is unreachable altogether already gave last observed.
+
 - **A provider's stored token no longer follows a new base URL.** In the
   console's provider registry, saving a provider with a blank token kept
   the stored token even when the base URL changed. The model list and

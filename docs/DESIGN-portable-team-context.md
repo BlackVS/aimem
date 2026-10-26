@@ -201,6 +201,16 @@ in its place. Only a hub that stores no set for the selection (an older
 hub, or a selection it recorded before sets) leaves the member to fetch the
 commit itself, as before.
 
+The grant is re-checked on every load, the cache included (audit A-5).
+When this machine already holds the set by its digest, the member still
+asks the set route, conditionally, with `If-None-Match: "<digest>"`, so
+the hub checks the grant before it answers. A 304 serves the cache as
+ready. 401 or 403 is denied, and the cached set is not used. Any other
+answer (the route unreachable, 404 for a set the hub no longer keeps, a
+server error) serves the cached set as last observed, which never
+authorizes a task write. A session start with a cache hit therefore costs
+one small request.
+
 ### 3. Readiness has four independent parts
 
 `status` keeps its meaning (`joined` or `blocked`: the membership outcome)
@@ -306,7 +316,9 @@ the project credential exactly as the session-start hook does.
   but no process commit or context digest. Recording them server-side is a
   schema change and a later increment.
 - Revocation is never cached: grant, token and enrollment checks stay live
-  on every hub call, whatever version the agent holds.
+  on every hub call, whatever version the agent holds. A cached process set
+  is served as ready only after the hub's conditional set read (304) under
+  a current grant (section 2).
 
 ### 7. Compatibility
 

@@ -89,6 +89,11 @@ type Result struct {
 	// is this machine's last observed one (or the pinned one, unconfirmed),
 	// so the result is never Ready.
 	FromLastObserved bool
+	// Unconfirmed: the hub answered for the selection, but the conditional
+	// read of this machine's cached set got neither 304, the set, nor a
+	// refusal; why, redacted. The cached set is then last observed, never
+	// Ready.
+	Unconfirmed string
 	// Pinned: Ref is a version the caller supplied from trusted local state
 	// (LoadRef), not the hub's current selection; Current is that current
 	// selection when the hub answered it.
@@ -142,10 +147,20 @@ func (r *Result) Bootstrap(dir string, full bool) (string, *process.Set) {
 			return "process context unavailable: " + err.Error(), r.Set
 		}
 	}
-	if r.FromLastObserved { // whether or not it fits a delivery
-		text = lastObservedNote(r.ObservedAt) + text
-	}
+	text = r.staleNote() + text // whether or not it fits a delivery
 	return text, r.Set
+}
+
+// staleNote says why a cached set is served without the hub's word for
+// it, or "" when the hub vouched for it.
+func (r *Result) staleNote() string {
+	switch {
+	case r.FromLastObserved:
+		return lastObservedNote(r.ObservedAt)
+	case r.Unconfirmed != "":
+		return "NOTE: the hub did not confirm this machine's cached process set (" + r.Unconfirmed + "); it is served as last observed, may be stale or no longer granted, and never authorizes a task write.\n"
+	}
+	return ""
 }
 
 func lastObservedNote(at string) string {
@@ -335,7 +350,8 @@ func (r *Result) connect(dir, root string) (*adapter.HubConfig, *http.Client, bo
 }
 
 // finish reads the files of r.Ref and sets the final state. A selection
-// the hub just confirmed comes from this machine's cache, from the hub's
+// the hub just confirmed comes from this machine's cache (the set route
+// vouching for it, see content), from the hub's
 // stored set (verified against the selection's digest, then cached by it)
 // or, only when the hub stored no set, from Git, bounded; one the hub did
 // not confirm now (last observed, or pinned while the hub cannot be asked)
@@ -388,29 +404,49 @@ func (r *Result) finish(dir, root string) *Result {
 	case r.FromLastObserved:
 		r.State = LastObserved
 		r.Detail = "the hub is unreachable; this is the exact cached commit of the selection last observed at " + r.ObservedAt + "; it may be stale and never authorizes a task write"
+	case r.Unconfirmed != "":
+		r.State = LastObserved
+		r.Detail = "the hub did not confirm this machine's cached set (" + r.Unconfirmed + "); this is the exact cached set of the selection, it may be stale or no longer granted, and it never authorizes a task write"
+		r.Fix = "retry when the hub answers the set read; a set the hub no longer keeps is restored or re-selected on the hub"
 	}
 	return r
 }
 
 // content obtains the set for a selection the hub just confirmed. A
 // selection that carries a digest was recorded by a hub that stores sets,
-// so its files come from this machine's cache by that digest, else from
-// the hub's stored set, verified and cached; a refusal by the hub is then
-// a denial, never masked by a Git attempt, and a hub that no longer keeps
-// the set (a pruned pinned version) leaves Git. A selection without a
+// so its files come from this machine's cache by that digest, once the
+// hub answers the conditional set read with 304 under a current grant
+// (any answer but 304, the set or a refusal leaves the cache Unconfirmed:
+// last observed), else from the hub's stored set, verified and cached; a
+// refusal by the hub is then a denial, never masked by the cache or a Git
+// attempt, and without a cache a hub that no longer keeps the set (a
+// pruned pinned version) leaves Git. A selection without a
 // digest (an older hub's, or one recorded before sets; a pinned version
 // from an accept before this record carried the digest) is fetched from
 // Git as before, and the set route is not asked: an older hub refuses the
 // route it does not know with 403, which must not read as a denial.
 func (r *Result) content(root string) process.Result {
+	var cached *process.Set
 	if r.Ref.Digest != "" {
 		if set, err := process.CachedSet(root, *r.Ref); err == nil {
-			return process.Result{Set: set, Status: process.StatusCached}
+			if r.hub == nil {
+				return process.Result{Set: set, Status: process.StatusCached}
+			}
+			cached = set
 		}
 	}
 	if r.hub != nil && r.Ref.Digest != "" {
 		byVersion := r.Pinned && (r.Current == nil || r.Current.Commit != r.Ref.Commit || r.Current.Manifest != r.Ref.Manifest)
-		outcome, err := hubSet(r.hub, r.hubClient, root, r.Project, r.Ref, byVersion)
+		outcome, err := hubSet(r.hub, r.hubClient, root, r.Project, r.Ref, byVersion, cached != nil)
+		// A cached set is served Ready only when the hub vouches for it
+		// under a current grant (304, or the set again); a refusal is a
+		// denial below; any other answer leaves it last observed.
+		if cached != nil && outcome != hubSetStored && outcome != hubSetDenied {
+			if outcome != hubSetNotModified {
+				r.Unconfirmed = redactRepo(err, r.Ref.Repo)
+			}
+			return process.Result{Set: cached, Status: process.StatusCached}
+		}
 		switch outcome {
 		case hubSetStored:
 			set, err := process.CachedSet(root, *r.Ref)
