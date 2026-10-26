@@ -74,19 +74,30 @@ never wires the home directory.
 curl -fsSL https://raw.githubusercontent.com/BlackVS/aimem/v0.10.13/boot.sh | AIMEM_USER_ONLY=1 bash
 ```
 
-In a PowerShell window that is already open (the setting stays for that
-window):
+The `VAR=value bash` form sets the knob for that `bash` only; your shell
+keeps no `AIMEM_*` variable.
+
+On Windows, set the knob inside the child PowerShell's `-Command`, so it
+lives only for that run and your window keeps no `AIMEM_*` variable.
+From a PowerShell window (single quotes, so your window does not expand
+`$env:` itself):
 
 ```powershell
-$env:AIMEM_USER_ONLY = '1'; irm https://raw.githubusercontent.com/BlackVS/aimem/v0.10.13/boot.ps1 | iex
+powershell -NoProfile -ExecutionPolicy Bypass -Command '$env:AIMEM_USER_ONLY = 1; irm https://raw.githubusercontent.com/BlackVS/aimem/v0.10.13/boot.ps1 | iex'
 ```
 
-From cmd (likewise for that window):
+From cmd (double quotes, which cmd needs around the `|`):
 
 ```bat
-set AIMEM_USER_ONLY=1
-powershell -NoProfile -ExecutionPolicy Bypass -Command "irm https://raw.githubusercontent.com/BlackVS/aimem/v0.10.13/boot.ps1 | iex"
+powershell -NoProfile -ExecutionPolicy Bypass -Command "$env:AIMEM_USER_ONLY = 1; irm https://raw.githubusercontent.com/BlackVS/aimem/v0.10.13/boot.ps1 | iex"
 ```
+
+`powershell` starts Windows PowerShell 5.1 even from a PowerShell 7
+window; `pwsh` in its place works the same. Do not shorten this to
+`$env:AIMEM_USER_ONLY = 1` in your own window, or to a `& { … }` script
+block: `$env:` is the whole process's environment, so either form leaves
+the knob set for every later run in that window. The same form passes any
+other knob boot.ps1 reads.
 
 On an existing installation the installer:
 

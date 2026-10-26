@@ -28,6 +28,13 @@
 #   AIMEM_VERSION=vX.Y.Z             install another release than $release
 #   AIMEM_UPGRADE_WAIT=30            seconds an upgrade waits for health at
 #                                    the new version before rolling back
+#
+# Set a knob inside the child's -Command, so it lives only for that run:
+#
+#   powershell -NoProfile -ExecutionPolicy Bypass -Command '$env:AIMEM_USER_ONLY = 1; irm https://raw.githubusercontent.com/BlackVS/aimem/v0.10.13/boot.ps1 | iex'
+#
+# (from cmd, the same with double quotes). Set in the caller's window, it
+# would stay there for every later run.
 $ErrorActionPreference = 'Stop'
 
 # The release this script installs. Bumped together with the CHANGELOG
@@ -39,12 +46,19 @@ $repo = if ($env:AIMEM_REPO) { $env:AIMEM_REPO } else { 'BlackVS/aimem' }
 $base = "https://github.com/$repo"
 
 $tag = if ($env:AIMEM_VERSION) { $env:AIMEM_VERSION } else { $release }
-# Tell install.ps1 which release this is, so an older install gets upgraded.
-$env:AIMEM_TARGET_VERSION = $tag
 
+# The variables this script sets for install.ps1 are put back as they were
+# when it ends: run as `irm | iex` in an open window, it runs in that
+# window's process, and a stale AIMEM_PREBUILT is a knob the next run reads.
+$saved = @{}
+foreach ($k in 'AIMEM_TARGET_VERSION', 'AIMEM_PREBUILT') {
+  $saved[$k] = [Environment]::GetEnvironmentVariable($k, 'Process')
+}
 $dest = Join-Path ([IO.Path]::GetTempPath()) ("aimem-" + [Guid]::NewGuid().ToString('N'))
 New-Item -ItemType Directory -Force $dest | Out-Null
 try {
+  # Tell install.ps1 which release this is, so an older install gets upgraded.
+  $env:AIMEM_TARGET_VERSION = $tag
   Write-Host "Fetching aimem $tag ..."
   $archive = "$base/archive/refs/tags/$tag.tar.gz"
   $tgz = Join-Path $dest 'src.tar.gz'
@@ -97,4 +111,7 @@ try {
 # END run-installer
 } finally {
   Remove-Item -Recurse -Force $dest -ErrorAction SilentlyContinue
+  foreach ($k in $saved.Keys) {
+    [Environment]::SetEnvironmentVariable($k, $saved[$k], 'Process')
+  }
 }
