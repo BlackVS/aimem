@@ -230,6 +230,22 @@ currently 25); a binary refuses a database newer than it understands.
 
 ### Fixed
 
+- **A write during a hub upgrade's state backup no longer fails the
+  upgrade.** The installer already stopped the service before copying
+  the state root, but another process of the service's user (an `aimem`
+  command, a curation run started by hand) could still write it, and
+  tar's "file changed as we read it" ended the upgrade with "could not
+  copy the state root". install-hub.sh and install.sh now take the copy
+  again from scratch, up to three times, and never keep a copy that
+  changed while it was read, because a database copied mid-write can be
+  torn. After the third try the upgrade stops with tar's message and a
+  hint to find the writer with `lsof +D`, starts the service again and
+  changes nothing. The upgrade also stops before
+  the copy when the service still answers after its stop, and it prints
+  the size of the state it copies and how long the copy took, which is
+  the main part of the downtime (about a second for 128 MiB on a local
+  disk).
+
 - **A successful answer that mentions Cloudflare is no longer read as a
   block.** Curation's completions and the embeddings client classified
   every response with the block-page check, a 200 included, and that
