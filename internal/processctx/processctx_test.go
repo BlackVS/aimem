@@ -50,7 +50,15 @@ type fakeHub struct {
 	setDigest string
 	setCut    bool // answer the set with its body cut short, as a dropped connection leaves it
 	setCalls  atomic.Int64
-	bearers   map[string]bool // every Authorization header received
+	setBodies atomic.Int64 // answers that carried the set's files
+	setDrop   bool         // drop the set read's connection without an answer
+	// setRefusalBody, with setStatus: "cut" sends a body shorter than its
+	// Content-Length, "huge" one over the client's limit.
+	setRefusalBody string
+	// The If-None-Match of the last set read; the hub answers 304 to the
+	// set's own strong ETag, as internal/server's route does.
+	setIfNoneMatch string
+	bearers        map[string]bool // every Authorization header received
 }
 
 func (h *fakeHub) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -75,6 +83,21 @@ func (h *fakeHub) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		json.NewEncoder(w).Encode(map[string]any{"scope": "project", "task_write": true, "tasks_enabled": h.tasksEnabled})
 	case strings.HasSuffix(r.URL.Path, "/process/set"):
 		h.setCalls.Add(1)
+		if h.setDrop {
+			dropConn(w)
+			return
+		}
+		switch h.setRefusalBody {
+		case "cut": // declares more than it sends; the reader fails
+			w.Header().Set("Content-Length", "1000")
+			w.WriteHeader(h.setStatus)
+			w.Write([]byte(`{"error":"tok`))
+			return
+		case "huge": // larger than any answer the client reads
+			w.WriteHeader(h.setStatus)
+			w.Write([]byte(strings.Repeat("x", setBodyMax+1)))
+			return
+		}
 		if h.setStatus != 0 {
 			w.WriteHeader(h.setStatus)
 			json.NewEncoder(w).Encode(map[string]string{"error": "set route answered " + http.StatusText(h.setStatus)})
@@ -93,6 +116,13 @@ func (h *fakeHub) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		if digest == "" {
 			digest = h.set.Digest()
 		}
+		h.setIfNoneMatch = r.Header.Get("If-None-Match")
+		if h.setIfNoneMatch == `"`+digest+`"` {
+			w.WriteHeader(http.StatusNotModified)
+			return
+		}
+		w.Header().Set("ETag", `"`+digest+`"`)
+		h.setBodies.Add(1)
 		raw, _ := json.Marshal(map[string]any{"project": "alpha",
 			"selection": map[string]string{"name": ref.DisplayName(), "commit": ref.Commit, "manifest": ref.Manifest, "digest": digest},
 			"set":       h.set})

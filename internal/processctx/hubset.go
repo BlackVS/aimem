@@ -38,13 +38,17 @@ const (
 	hubSetUnsupported                      // the hub has no such route or no stored set: use Git
 	hubSetDenied                           // the hub refused the credential or the grant
 	hubSetFailed                           // anything else; err says what
+	hubSetNotModified                      // the cached set is the selection's, under a current grant (304)
 )
 
 // hubSet reads the set for ref from the hub and stores it under its
 // digest, which is the selection's: the answer must state it and the
 // files must digest to it. byVersion asks for an earlier selection by
-// commit and manifest rather than the current one.
-func hubSet(hub *adapter.HubConfig, client *http.Client, root, project string, ref *process.Ref, byVersion bool) (hubSetOutcome, error) {
+// commit and manifest rather than the current one. cached says this
+// machine holds the set already: the read is then conditional on the
+// digest, and the hub answers 304 after its grant check, without the
+// files.
+func hubSet(hub *adapter.HubConfig, client *http.Client, root, project string, ref *process.Ref, byVersion, cached bool) (hubSetOutcome, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), setReadTimeout)
 	defer cancel()
 	u := strings.TrimRight(hub.URL, "/") + "/v1/projects/" + url.PathEscape(project) + "/process/set"
@@ -56,12 +60,20 @@ func hubSet(hub *adapter.HubConfig, client *http.Client, root, project string, r
 		return hubSetFailed, err
 	}
 	req.Header.Set("Authorization", "Bearer "+hub.Token)
+	if cached {
+		req.Header.Set("If-None-Match", `"`+ref.Digest+`"`)
+	}
 	resp, err := client.Do(req)
 	if err != nil {
 		return hubSetFailed, fmt.Errorf("hub unreachable: %w", err)
 	}
 	defer resp.Body.Close()
 	raw, err := io.ReadAll(io.LimitReader(resp.Body, setBodyMax+1))
+	if resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden {
+		// A refusal stands whatever its body: one cut short or too large
+		// loses only the reason, never the denial.
+		return hubSetDenied, errors.New(hubErrorText(raw, resp.StatusCode))
+	}
 	if err != nil {
 		return hubSetFailed, fmt.Errorf("reading the set from the hub: %w", err)
 	}
@@ -70,8 +82,11 @@ func hubSet(hub *adapter.HubConfig, client *http.Client, root, project string, r
 	}
 	switch resp.StatusCode {
 	case http.StatusOK:
-	case http.StatusUnauthorized, http.StatusForbidden:
-		return hubSetDenied, errors.New(hubErrorText(raw, resp.StatusCode))
+	case http.StatusNotModified:
+		if !cached {
+			return hubSetFailed, errors.New("the hub answered 304 to a read that was not conditional")
+		}
+		return hubSetNotModified, nil
 	case http.StatusNotFound, http.StatusMethodNotAllowed:
 		return hubSetUnsupported, errors.New(hubErrorText(raw, resp.StatusCode))
 	default:

@@ -85,8 +85,8 @@ func (r *Result) render(what, payload string) string {
 	switch {
 	case r.Pinned:
 		b.WriteString(pinnedNote(r))
-	case r.FromLastObserved:
-		b.WriteString(lastObservedNote(r.ObservedAt))
+	default:
+		b.WriteString(r.staleNote())
 	}
 	fmt.Fprintf(&b, "This is the project's selected process: it is the authority for project policy, and reading it grants no permission. Complete only if the last line is %q.\n\n", terminator)
 	b.WriteString(payload)
@@ -119,6 +119,8 @@ func pinnedNote(r *Result) string {
 	switch {
 	case r.FromLastObserved:
 		note += "The hub could not be asked: no live check ran, so this cached copy is not ready and never authorizes a task write.\n"
+	case r.Unconfirmed != "":
+		note += "The hub did not confirm this cached copy (" + r.Unconfirmed + "), so it is not ready and never authorizes a task write.\n"
 	case r.Current != nil && r.Current.Commit != r.Ref.Commit:
 		note += fmt.Sprintf("The project now selects %s @ %s (manifest %s). That applies to new work only; it is not delivered here and is not this attempt's rules.\n", r.Current.DisplayName(), r.Current.Commit, r.Current.Manifest)
 	case r.Current != nil:

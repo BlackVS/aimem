@@ -67,13 +67,12 @@ func TestHubServedSetNeedsNoGitAndNoRepositoryAccess(t *testing.T) {
 		t.Fatal("a Git cache entry appeared")
 	}
 
-	// The second load is served from the cache by digest: the set route
-	// is not asked again, and the hub failing it changes nothing.
-	h.change(func(h *fakeHub) { h.setStatus = http.StatusInternalServerError })
-	before := h.setCalls.Load()
+	// The second load is served from the cache by digest, after the hub
+	// answers the conditional read with 304: no files cross again.
+	bodies := h.setBodies.Load()
 	r = Load(dir, root, "")
-	if r.State != Ready || r.Source != SourceCache || h.setCalls.Load() != before || !strings.Contains(r.Unit, "from this machine's cache") {
-		t.Fatalf("second load: %+v (set calls %d → %d)", r, before, h.setCalls.Load())
+	if r.State != Ready || r.Source != SourceCache || h.setBodies.Load() != bodies || !strings.Contains(r.Unit, "from this machine's cache") {
+		t.Fatalf("second load: %+v (set bodies %d → %d)", r, bodies, h.setBodies.Load())
 	}
 	if hook, set := Bootstrap(dir, root, "", false); set == nil || strings.Contains(hook, selection.Repo) {
 		t.Fatalf("hook: %q", hook)
