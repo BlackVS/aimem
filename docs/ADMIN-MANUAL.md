@@ -10,20 +10,20 @@ One-liner in any project directory (installs the binary if missing, then
 wires the project):
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/BlackVS/aimem/v0.10.13/boot.sh | bash
+curl -fsSL https://raw.githubusercontent.com/BlackVS/aimem/v0.10.14/boot.sh | bash
 ```
 
 Windows (supported, tested less than Linux), in a PowerShell window
 that is already open:
 
 ```powershell
-irm https://raw.githubusercontent.com/BlackVS/aimem/v0.10.13/boot.ps1 | iex
+irm https://raw.githubusercontent.com/BlackVS/aimem/v0.10.14/boot.ps1 | iex
 ```
 
 From cmd, or from the Run dialog (Win+R) for an upgrade:
 
 ```bat
-powershell -NoProfile -ExecutionPolicy Bypass -Command "irm https://raw.githubusercontent.com/BlackVS/aimem/v0.10.13/boot.ps1 | iex"
+powershell -NoProfile -ExecutionPolicy Bypass -Command "irm https://raw.githubusercontent.com/BlackVS/aimem/v0.10.14/boot.ps1 | iex"
 ```
 
 Environment knobs for the boot script:
@@ -71,7 +71,7 @@ never wires the home directory.
 `AIMEM_USER_ONLY=1` upgrades the user level and wires nothing:
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/BlackVS/aimem/v0.10.13/boot.sh | AIMEM_USER_ONLY=1 bash
+curl -fsSL https://raw.githubusercontent.com/BlackVS/aimem/v0.10.14/boot.sh | AIMEM_USER_ONLY=1 bash
 ```
 
 The `VAR=value bash` form sets the knob for that `bash` only; your shell
@@ -83,13 +83,13 @@ From a PowerShell window (single quotes, so your window does not expand
 `$env:` itself):
 
 ```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -Command '$env:AIMEM_USER_ONLY = 1; irm https://raw.githubusercontent.com/BlackVS/aimem/v0.10.13/boot.ps1 | iex'
+powershell -NoProfile -ExecutionPolicy Bypass -Command '$env:AIMEM_USER_ONLY = 1; irm https://raw.githubusercontent.com/BlackVS/aimem/v0.10.14/boot.ps1 | iex'
 ```
 
 From cmd (double quotes, which cmd needs around the `|`):
 
 ```bat
-powershell -NoProfile -ExecutionPolicy Bypass -Command "$env:AIMEM_USER_ONLY = 1; irm https://raw.githubusercontent.com/BlackVS/aimem/v0.10.13/boot.ps1 | iex"
+powershell -NoProfile -ExecutionPolicy Bypass -Command "$env:AIMEM_USER_ONLY = 1; irm https://raw.githubusercontent.com/BlackVS/aimem/v0.10.14/boot.ps1 | iex"
 ```
 
 `powershell` starts Windows PowerShell 5.1 even from a PowerShell 7
@@ -152,7 +152,7 @@ Fresh host (Debian/Ubuntu LXC or VM), as root — one command does user,
 binary, env, units, timers:
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/BlackVS/aimem/v0.10.13/install-hub.sh | bash
+curl -fsSL https://raw.githubusercontent.com/BlackVS/aimem/v0.10.14/install-hub.sh | bash
 ```
 
 Knobs (env): `AIMEM_HUB_USER` (default sessiond), `AIMEM_HTTP_LISTEN`
