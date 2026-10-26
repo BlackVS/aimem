@@ -17,14 +17,15 @@ currently 25); a binary refuses a database newer than it understands.
 
 - **The hub refuses task text that is not readable prose.** A task
   comment, and the title, objective, acceptance criteria, non-goals,
-  next action and blocker on task create, update and triage, are checked
+  next action and blocker on task create, update and triage and on a
+  team coordinator's edit of a managed task (`team_edit`), are checked
   against the writing rule (docs/WRITING-PERSISTED-TEXT.md). A filter
   cuts out code, paths, ids, hashes, versions and URLs, then flags words
   glued to numbers, text with almost no spaces, and sentences run
   together. A flagged write answers HTTP 422 with code `unreadable_text`,
   the field, the flagged span, the rule's section and a one-sentence fix,
-  and the MCP task tools pass the refusal through unchanged. An update or
-  triage checks only the fields it changes, so text stored earlier never
+  and the MCP task tools pass the refusal through unchanged. An update,
+  triage or team edit checks only the fields it changes, so text stored earlier never
   blocks an unrelated change. An optional second stage asks a small model
   about flagged text only, and it can only relax the filter. It has its
   own model key, `AIMEM_TEXT_CHECK_MODEL`, off until the operator sets

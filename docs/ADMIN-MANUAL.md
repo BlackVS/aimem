@@ -435,8 +435,9 @@ The hub refuses task text that is not readable prose, under the rule in
 [WRITING-PERSISTED-TEXT.md](WRITING-PERSISTED-TEXT.md). It checks the
 comment body on `POST /v1/tasks/{id}/comments`, and the title,
 objective, acceptance criteria, non-goals, next action and blocker on
-task create, update and triage. On an update or a triage it checks only
-the fields the write changes, so text stored before this check existed
+task create, update and triage, and on a team coordinator's edit of a
+managed task (`team_edit`). On an update, a triage or an edit it checks
+only the fields the write changes, so text stored before this check existed
 never blocks an unrelated change. A refused write answers HTTP 422 with
 code `unreadable_text`. The answer names the field, the first flagged
 span, the reason, the rule's section and a one-sentence fix, and the MCP

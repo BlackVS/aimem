@@ -344,3 +344,41 @@ func TestManagementHTTPAdminRecoverAndUnmanage(t *testing.T) {
 		t.Fatal("malformed query accepted", w.Code, w.Body)
 	}
 }
+
+// A coordinator's edit replaces the task's content, so it meets the same
+// readability check as an update: a changed field that is not readable
+// prose is refused, and text stored before the check never blocks an edit
+// that leaves it as it is.
+func TestManagedEditRunsTheReadabilityCheck(t *testing.T) {
+	f := newAssignmentFixture(t)
+	db, err := f.reg.Open("alpha")
+	if err != nil {
+		t.Fatal(err)
+	}
+	legacy := f.task.TaskContent
+	legacy.NonGoals = "Checkpoint74files kept"
+	stored, err := db.UpdateTask(f.task.ID, legacy, f.task.Revision, store.TaskActor{Kind: "admin", Name: "host-admin"}, "legacy")
+	if err != nil {
+		t.Fatal(err)
+	}
+	f.offer.ExpectedRevision = stored.Revision
+	offer := assignmentResult(t, f.offerRequest(t, "offer"), 201)
+	assignmentResult(t, f.command(t, offer.ID, "withdraw", f.alice, "withdraw", store.TeamAssignmentCommand{TeamSessionHandle: f.sender, CoordinatorGeneration: 1, Reason: "reassess"}), 200)
+	task := f.taskState(t)
+
+	content := task.TaskContent
+	content.Objective = "All11containersremoved"
+	edit := store.TeamManagedEditCommand{TeamSessionHandle: f.sender, CoordinatorGeneration: 1, ExpectedRevision: task.Revision, Content: content, Reason: "Scope refined"}
+	refusedText(t, taskReq(t, f.h, "POST", f.base+"/tasks/"+task.ID+"/edit", f.alice, "compressed", assignmentJSON(t, edit)), "objective", "All11containersremoved", stageFilter)
+	if now := f.taskState(t); now.Revision != task.Revision || now.Objective != task.Objective {
+		t.Fatalf("a refused edit changed the task: %+v", now)
+	}
+
+	content = task.TaskContent
+	content.Title = "Re-scoped bounded change"
+	edit.Content = content
+	edited := managedTaskResult(t, taskReq(t, f.h, "POST", f.base+"/tasks/"+task.ID+"/edit", f.alice, "readable", assignmentJSON(t, edit)))
+	if edited.Title != content.Title || edited.NonGoals != legacy.NonGoals {
+		t.Fatalf("readable edit: %+v", edited)
+	}
+}

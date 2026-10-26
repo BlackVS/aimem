@@ -9751,6 +9751,9 @@
           },
           "409": {
             "description": "Stale generation, revision/state/management conflict, reserved attempt, occupied or missing designation, invalid transition or retry mismatch. Task revision conflicts include current task and project."
+          },
+          "422": {
+            "description": "Unreadable text (code unreadable_text): a free-text field of the content that the edit changes is not readable prose under docs/WRITING-PERSISTED-TEXT.md. The body is the same refusal envelope as on PUT /v1/tasks/{id}; fields the edit leaves as they are are not checked."
           }
         },
         "security": [

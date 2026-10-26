@@ -92,6 +92,21 @@ func TestTeamWorkWireContract(t *testing.T) {
 	}
 }
 
+// The hub's readability refusal on a coordinator's edit reaches the agent
+// whole: the field, the span, the rule's section and the fix.
+func TestTeamEditPassesTheReadabilityRefusalThrough(t *testing.T) {
+	refusal := "unreadable_text: objective: the text is not readable prose (words and numbers joined together at \"All11containersremoved\"). Decided by the filter alone. Next: Separate the words from the numbers."
+	body, _ := json.Marshal(map[string]any{"error": refusal, "code": "unreadable_text", "retryable": false})
+	call := func(context.Context, string, string, map[string]string, []byte) (int, []byte, error) {
+		return 422, body, nil
+	}
+	raw := `{"project":"alpha","team":"t","session_id":"s","generation":1,"task":"t1","coordinator_generation":1,"expected_revision":1,"content":{"title":"x","state":"READY"},"reason":"r","idempotency_key":"k"}`
+	_, err := callTeamTool(context.Background(), call, "", "team_edit", json.RawMessage(raw))
+	if err == nil || !strings.HasSuffix(err.Error(), ": "+refusal) {
+		t.Fatalf("team_edit error %v; want the hub's refusal whole", err)
+	}
+}
+
 // Every bridged tool has a wire-contract case above.
 func TestTeamWorkWireMatrixCoversEveryTool(t *testing.T) {
 	src, err := os.ReadFile("team_work_test.go")
