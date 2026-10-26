@@ -24,17 +24,17 @@ plenty).
 Run this **inside a project directory**:
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/BlackVS/aimem/v0.10.13/boot.sh | bash
+curl -fsSL https://raw.githubusercontent.com/BlackVS/aimem/v0.10.14/boot.sh | bash
 ```
 
 ```powershell
 # Windows, in a PowerShell window that is already open
-irm https://raw.githubusercontent.com/BlackVS/aimem/v0.10.13/boot.ps1 | iex
+irm https://raw.githubusercontent.com/BlackVS/aimem/v0.10.14/boot.ps1 | iex
 ```
 
 ```bat
 :: Windows, from cmd
-powershell -NoProfile -ExecutionPolicy Bypass -Command "irm https://raw.githubusercontent.com/BlackVS/aimem/v0.10.13/boot.ps1 | iex"
+powershell -NoProfile -ExecutionPolicy Bypass -Command "irm https://raw.githubusercontent.com/BlackVS/aimem/v0.10.14/boot.ps1 | iex"
 ```
 
 **Restart your Claude Code or OpenCode session** — hooks and plugins load
@@ -88,7 +88,7 @@ On the hub host, **as root**:
 ```sh
 AIMEM_HUB_NAME=home \
 AIMEM_DOMAIN=hub.example.com \
-bash <(curl -fsSL https://raw.githubusercontent.com/BlackVS/aimem/v0.10.13/install-hub.sh)
+bash <(curl -fsSL https://raw.githubusercontent.com/BlackVS/aimem/v0.10.14/install-hub.sh)
 ```
 
 Substitute your own hostname. `AIMEM_DOMAIN` generates a self-signed

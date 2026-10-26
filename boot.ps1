@@ -1,7 +1,7 @@
 # aimem bootstrap for Windows. A first install runs it inside a project
 # directory; an upgrade runs it from anywhere.
 #
-#   powershell -NoProfile -ExecutionPolicy Bypass -Command "irm https://raw.githubusercontent.com/BlackVS/aimem/v0.10.13/boot.ps1 | iex"
+#   powershell -NoProfile -ExecutionPolicy Bypass -Command "irm https://raw.githubusercontent.com/BlackVS/aimem/v0.10.14/boot.ps1 | iex"
 #
 # (The wrapper survives the default Restricted execution policy on a
 # fresh Windows machine; bare `irm ... | iex` works too once fetched,
@@ -31,7 +31,7 @@
 #
 # Set a knob inside the child's -Command, so it lives only for that run:
 #
-#   powershell -NoProfile -ExecutionPolicy Bypass -Command '$env:AIMEM_USER_ONLY = 1; irm https://raw.githubusercontent.com/BlackVS/aimem/v0.10.13/boot.ps1 | iex'
+#   powershell -NoProfile -ExecutionPolicy Bypass -Command '$env:AIMEM_USER_ONLY = 1; irm https://raw.githubusercontent.com/BlackVS/aimem/v0.10.14/boot.ps1 | iex'
 #
 # (from cmd, the same with double quotes). Set in the caller's window, it
 # would stay there for every later run.
@@ -39,7 +39,7 @@ $ErrorActionPreference = 'Stop'
 
 # The release this script installs. Bumped together with the CHANGELOG
 # when a release is cut (internal/installer checks they agree).
-$release = 'v0.10.13'
+$release = 'v0.10.14'
 [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
 
 $repo = if ($env:AIMEM_REPO) { $env:AIMEM_REPO } else { 'BlackVS/aimem' }

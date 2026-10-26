@@ -13,6 +13,54 @@ currently 25); a binary refuses a database newer than it understands.
 
 ## [Unreleased]
 
+## [0.10.14] — 2026-10-26
+
+The hub now refuses task text that is not readable prose (HTTP 422,
+`unreadable_text`), with an optional model second stage that stays off
+until the operator sets it. `aimem wire` wires a project from the
+installed binary, and the installers use it. A revoked project grant now
+reaches a member's cached process set (audit A-5). Provider base URLs
+must be public https endpoints, and a provider's stored token no longer
+follows a new base URL. A write during a hub upgrade's state backup no
+longer fails the upgrade. The release attaches `boot.ps1` and lists it in
+`SHA256SUMS`. No schema change. Includes PR #271 to #290.
+
+### Upgrade notes
+
+- **Hubs and clients can be upgraded in either order.** The text check
+  and the provider rules are hub-side. The client's conditional read of
+  the process set (`If-None-Match`) is answered by 0.10.13 hubs as well.
+- **No schema change.** The schema stays at 25, so going back is putting
+  the 0.10.13 binary back; no state copy is needed for that.
+- **The hub refuses shorthand task text.** From this release a task
+  write with compressed shorthand is refused with HTTP 422 and has to be
+  rewritten. After the upgrade, `aimem tasks text-check -p
+  <project>` lists the stored text the filter would refuse, without
+  changing anything. If the filter refuses readable text,
+  `AIMEM_TEXT_CHECK=off` in the hub's env file turns the check off until
+  a fixed release is installed.
+- **A hub with a local or LAN model server needs one setting to change
+  it.** A provider save, the model list and the test button now refuse a
+  plain `http://` URL and a private, loopback or link-local address.
+  Registries already on disk keep working for curation. To re-save such
+  a provider or use its model list or test button, set
+  `AIMEM_PROVIDER_ALLOW_PRIVATE=1` in the hub's env file and restart.
+- **The hub is down for its state backup during the upgrade.** The
+  output prints the size of the state and the copy's time, about a
+  second for 128 MiB on a local disk. Do not run `aimem` commands as the
+  hub's user during the upgrade: a copy that keeps changing is refused
+  after three tries, and nothing is changed.
+- **A cached process set needs the hub's set route at session start.**
+  A member with a cached set now asks the hub once per load. When that
+  read fails, the set is last observed instead of ready: the agent still
+  reads its rules, and the set does not authorize a task write.
+- **New settings, all optional:** `AIMEM_TEXT_CHECK` (the check's off
+  switch), `AIMEM_TEXT_CHECK_MODEL` and `AIMEM_TEXT_CHECK_DAILY_CALLS`
+  (the second stage, off until a model is set), and
+  `AIMEM_PROVIDER_ALLOW_PRIVATE`.
+- **The hand-written `.aimem.json` step is gone.** Run `aimem wire` in a
+  new project directory instead.
+
 ### Added
 
 - **The hub refuses task text that is not readable prose.** A task
