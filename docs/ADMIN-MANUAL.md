@@ -106,12 +106,23 @@ On an existing installation the installer:
    which reads the same environment and env file the service would);
 2. stops only this installation's service (the systemd user unit, or on
    Windows the `aimem-serve` task and the serve processes of this
-   binary), and the sync job that opens the same databases;
+   binary), and the sync job that opens the same databases. The service
+   stays down until step 4; the output names the size of the state it
+   copies. On Linux and macOS the upgrade stops there if the service
+   still answers after the stop;
 3. copies the state root, without the socket, to
    **`<state root>.backup-<UTC time>`** beside it: by default
    `~/.local/state/aimem.backup-20261007T170945Z`, on Windows
    `%USERPROFILE%\.local\state\aimem.backup-…`, on a hub
-   `~sessiond/.local/state/aimem.backup-…`;
+   `~sessiond/.local/state/aimem.backup-…`. Another process of the
+   service's user (an `aimem` command, a curation run started by hand)
+   can still write the state root during the copy. On Linux and macOS a
+   copy that changed while it was read is never kept, even though tar
+   only warns "file changed as we read it": a database copied mid-write
+   can be torn. The copy is taken again from scratch, up to three
+   times; after the third, the upgrade stops with tar's message, lists
+   the processes holding the state root where `lsof` is installed,
+   starts the service again and changes nothing;
 4. swaps the binary, starts the service, and waits for health at the new
    version (`AIMEM_UPGRADE_WAIT`, 30 seconds);
 5. if the new release does not answer at its version in time, stops it,

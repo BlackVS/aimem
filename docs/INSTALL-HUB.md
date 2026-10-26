@@ -28,6 +28,14 @@ socket) to `<state root>.backup-<UTC time>` beside it, by default
 `~sessiond/.local/state/aimem.backup-…`, swaps the binary and waits for
 health at the new version. If the new release does not come up, the
 previous binary and the state copy both go back and the script says so.
+The hub is down from the stop until the new release answers: the copy
+takes about a second for 128 MiB of state on a local disk, and the
+output prints the state's size and the copy's time. A copy that changed
+while tar read it (another `aimem` command run as `sessiond` during the
+upgrade) is never kept, because a database copied mid-write can be torn:
+the copy is taken again, up to three times, and after that the upgrade
+stops with tar's message, starts the hub again and changes nothing. Do
+not run `aimem` commands as `sessiond` during an upgrade.
 Once the upgraded hub is healthy, the script runs `aimem process refresh`
 to store the process sets of selections made before the hub stored them,
 and prints its report; a project it cannot refresh is reported there and
