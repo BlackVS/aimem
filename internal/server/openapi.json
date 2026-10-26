@@ -6818,7 +6818,7 @@
     },
     "/v1/health": {
       "get": {
-        "summary": "Service health: project count, state root, version, resources, LLM pacing, skills store, text check stage",
+        "summary": "Service health: project count, state root, version, resources, LLM pacing, skills store, text check (filter switch and model stage)",
         "x-role": "writer",
         "responses": {
           "200": {

@@ -17,9 +17,17 @@ type textJudge interface {
 	Readable(ctx context.Context, span, around string) (bool, error)
 }
 
-// setupTextCheck resolves the second stage once, at start, like the
-// embedding model.
+// setupTextCheck resolves the check once, at start, like the embedding
+// model: whether the filter runs, and the second stage.
 func (s *Server) setupTextCheck() {
+	on, err := textcheck.FilterOn()
+	if err != nil {
+		s.log.Warn("text check switch not understood", "err", err)
+	}
+	s.textOff = !on
+	if !on {
+		s.log.Warn("text check off: task text is stored unchecked", "key", textcheck.FilterKey)
+	}
 	j, why := textcheck.ForRoot(s.reg.Root())
 	s.textCheck, s.textCheckWhy = j, why
 	if j != nil {
@@ -28,7 +36,7 @@ func (s *Server) setupTextCheck() {
 	}
 	// A model the operator named that cannot serve is a misconfiguration,
 	// and this line is the only place it would show.
-	if os.Getenv(textcheck.ModelKey) != "" {
+	if on && os.Getenv(textcheck.ModelKey) != "" {
 		s.log.Warn("text check second stage off", "why", why)
 	}
 }
@@ -49,6 +57,9 @@ type textRefusal struct {
 // checkText runs the filter over one field and, for flagged text only,
 // asks the second stage, which can only relax the verdict.
 func (s *Server) checkText(ctx context.Context, field, text string) *textRefusal {
+	if s.textOff {
+		return nil
+	}
 	f := writingrule.Unreadable(text)
 	if f == nil {
 		return nil

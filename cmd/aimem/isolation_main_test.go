@@ -21,6 +21,7 @@ import (
 func TestMain(m *testing.M) {
 	isolation.ClearInherited()
 	os.Setenv(textcheck.ModelKey, "") // no real model behind an in-process hub
+	os.Setenv(textcheck.FilterKey, "")
 	hubAddWarn = func(io.Writer, string, *adapter.HubConfig) {}
 	os.Exit(m.Run())
 }

@@ -79,6 +79,10 @@ const (
 	// minSpacingRun is how much exempt-free text the spacing heuristic
 	// needs before it judges; a short label is not prose.
 	minSpacingRun = 40
+	// minGluedRun is the longest run without a space the spacing
+	// heuristic needs before it flags: English words stop near 22
+	// letters, so a short title of long words is never a glued run.
+	minGluedRun = 25
 	// minSpaceShare is the share of whitespace below which text is not
 	// prose; English prose runs at about one character in six.
 	minSpaceShare = 0.08
@@ -122,28 +126,26 @@ func gluedWord(w string) bool {
 	return m != nil && m[1] != "v"
 }
 
-// sparse reports text whose words are not separated: little whitespace
-// across a stretch long enough to be prose. The span is its longest run
-// without a space.
+// sparse reports text whose words are not separated: a run without a
+// space longer than any word, in a stretch long enough to be prose with
+// little whitespace across it. The span is that longest run.
 func sparse(prose string) (string, bool) {
 	fields := strings.Fields(prose)
 	letters := 0
+	longest := ""
 	for _, f := range fields {
 		letters += utf8.RuneCountInString(f)
+		if utf8.RuneCountInString(f) > utf8.RuneCountInString(longest) {
+			longest = f
+		}
 	}
-	if letters < minSpacingRun {
+	if letters < minSpacingRun || utf8.RuneCountInString(longest) < minGluedRun {
 		return "", false
 	}
 	// Only the gaps between the remaining words count: the exempt spans
 	// were blanked, and their blanks are not the writer's spacing.
 	if float64(len(fields)-1)/float64(letters+len(fields)-1) >= minSpaceShare {
 		return "", false
-	}
-	longest := ""
-	for _, f := range fields {
-		if len(f) > len(longest) {
-			longest = f
-		}
 	}
 	return longest, true
 }

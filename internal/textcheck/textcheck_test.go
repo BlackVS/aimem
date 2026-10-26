@@ -16,6 +16,7 @@ import (
 // not spacing.
 func TestMain(m *testing.M) {
 	os.Setenv("AIMEM_LLM_INTERVAL", "0")
+	os.Setenv(FilterKey, "")
 	os.Exit(m.Run())
 }
 
@@ -139,6 +140,25 @@ func TestStageResolution(t *testing.T) {
 	}
 	if c := Describe(nil, "why"); c.State != "off" || c.Why != "why" || c.DailyCalls != DefaultDailyCalls {
 		t.Fatalf("describe off = %+v", c)
+	}
+}
+
+func TestFilterSwitch(t *testing.T) {
+	for v, want := range map[string]bool{"": true, "on": true, " Off ": false, "off": false, "no": true} {
+		t.Setenv(FilterKey, v)
+		on, err := FilterOn()
+		if on != want || (err != nil) != (v == "no") {
+			t.Errorf("%s=%q: on %v, err %v", FilterKey, v, on, err)
+		}
+	}
+	// Off turns the model stage off with it, whatever model is named.
+	t.Setenv(FilterKey, "off")
+	t.Setenv(ModelKey, "check-model")
+	if j, why := ForRoot(t.TempDir()); j != nil || !strings.Contains(why, FilterKey) {
+		t.Fatalf("filter off: judge %+v, why %q", j, why)
+	}
+	if c := Describe(nil, "why"); c.Filter != "off" || c.State != "off" {
+		t.Fatalf("describe with the filter off = %+v", c)
 	}
 }
 

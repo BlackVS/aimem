@@ -1,0 +1,324 @@
+aimem wire wires a project from the installed binary
+a successful answer that mentions Cloudflare is not a block
+the quickstarts' examples run as printed
+examples are checked against the code in CI
+version mentions are current, marked historical, or archived
+the reference handbook takes the two later ai-skills changes
+the reference process set lives in the aimem repository
+drop the stale hold notices; separate curation from embeddings
+a provider's stored token no longer follows a new base URL
+README names aimem's four ways of working
+loopback fakes no longer race the production client deadlines
+hub add --system-roots drops a recorded pin or CA file
+prepare the v0.10.13 release
+warn when a task credential will not be sent; report such an entry as untrusted
+send individual credentials only to a verified https hub (A-3, part 3 of 3)
+prepare the v0.10.12 release
+warn on an admin token, plain http and --insecure in hub add (A-3, part 2 of 3)
+hand clients a writer token and the pin, never the admin token (A-3, part 1 of 3)
+task counts in a team conversation
+refuse a NUL in search terms as an invalid query
+prepare the v0.10.11 release
+invalid_request and unsupported_version say what was wrong
+a board's shape in one call, the task counts per state
+what changed since a time, and my own tasks, in one list call
+read task comments newest first
+find tasks by words in their content and comments
+the task list sorts newest first, and refreshes
+show reads this host's store in a directory without a hub binding
+show the Windows one-liner in both forms
+prepare the v0.10.10 release
+the repository's instructions hold in every mode
+a forge token per host
+reach the first run's expiry through a clock seam
+a forge token and tag resolution without git
+prepare the v0.10.9 release
+read a set from the forge tarball when the hub host has no git
+prepare the v0.10.8 release
+quote the fallback commands that process refresh prints
+the next step selects a process by its tag
+select a process by its tag
+store old selections' sets on upgrade (process refresh, process list)
+prepare the v0.10.7 release
+state the hub-wide task read where it is read (A-10, part 1)
+never read or write checkout files through a link (A-2)
+pass stored values to handlers as data, not inline script (A-1)
+the hub-served skills set, installed from the hub
+the hub-served process set as the default path
+turning tasks on names the missing process with values to run
+prepare the v0.10.6 release
+context knobs resolve through the governing .aimem.json
+report tasks on with no process as an unfinished setup
+the new-project quickstart ends at a working board
+prepare the v0.10.5 release
+macOS login items, verify after a pause, agent skills
+resolve project identity from a worktree or subdirectory
+prepare the v0.10.4 release
+macOS runs aimem serve and the periodic sync as launchd agents
+a .aimem.json with a UTF-8 BOM is read; UTF-16 is not
+a quickstart for one new project on a fresh workstation
+a failed shell call recalls aimem, through aimem failure-recall
+prepare the v0.10.3 release
+the 2.x plugin injects the handoff with the session-start limit
+recall aimem before reporting an environment blocker
+a failed Bash command recalls aimem before the agent reports it
+compact keeps the closing section under the names projects use
+prepare the v0.10.2 release
+bump golang.org/x/sys from 0.48.0 to 0.49.0
+aimem handoff compact moves history to the archive
+prepare the v0.10.1 release
+inject at most 8 KiB of the handoff
+prepare the v0.10.0 release
+provision adds a new operation's credential to an existing peer
+a team member writes a report document under the team's grant
+a typed required_capability field, carried by board.read
+board.read, aicrewd's cursor feed of task state changes
+prepare the v0.9.2 release
+a blank aimem-hub-id is replaced, not left to fail the write
+install.ps1 reads the user's files as UTF-8
+peer provision writes the hub ID into aimem-hub-id
+peer provision checks the expiry before the hub changes
+aimem identity peer provision sets up a peer in one command
+aimem identity peer retire removes a disabled peer's state
+the one-liner upgrades without wiring the current directory
+prepare the v0.9.1 release
+keep PowerShell's module cache out of the tree
+the one-line installer is the upgrade path too
+member home check before the proof; hub-side CRLF 401
+bump modernc.org/sqlite from 1.59.0 to 1.60.1
+bump golang.org/x/sys from 0.47.0 to 0.48.0
+bump golang.org/x/text to v0.42.0 (GO-2026-5970)
+prepare the v0.9.0 release
+classify a repeated enrollment issue before validating it
+wait for the redemption's connection wait, not 200 ms
+recover an abandoned empty pending file by its age
+enroll redeem follow-ups; aimem hub repair
+hub.json is written owner-only on every platform
+serve enrollment redemption; aimem enroll redeem (D1-b2)
+enrollment redemption in the ledger, sealed with HPKE (D1-b1)
+the hub admin issues enrollment bundles (D1-a)
+enrollment.v1 wire contract (D1-w)
+Go 1.26 toolchain (crypto/hpke for enrollment delivery)
+prepare the v0.8.0 release
+project_repository reads a project's repository, team mode included
+a triage receipt tells an omitted next_action from an empty one
+the Windows restart stops only this installation's service
+a team's coordinator triages tasks; task_held, task_not_ready
+teams provision writes the member token to --output
+a legacy identity form's notice names a new form that runs
+tests cannot reach a real aimem service or stop one
+aicrewd registers and reads its own teams
+readable admin commands and --output for issued secrets
+a project owns its one repository; project show
+aimem's side of the first-pilot proposal
+pilot members share one OS account, each with its own home
+an explicit state root keeps its socket inside it
+one rule keeps the text agents keep readable (writing_rule)
+prepare the v0.7.4 release
+attach LICENSE and its Required Notice to every release
+record a hub's private CA or pin, and read hub tokens from a file
+the update example advances the fence, as aimem does
+remove the stale hand-written systemd unit
+aimem hub credential, a non-secret individual-credential status
+a base-only update keeps reviews when the patch identity is unchanged
+first-pilot hub runbook with verified commands and outputs
+403 is a denial only as git's HTTP status, not digits in a path
+scoped recall trims its rendered answer to the token budget
+record the AIForge prerequisites in the CHANGELOG
+the finalize replay keeps aicrew inactive and counts its calls
+the first pilot's knowledge reads for scoped callers (19d8)
+refuse every transition while the project's tasks are off
+prove a reservation hold survives session end, an expired offer fact, and a tasks disable
+specify scoped knowledge access for the same agent context (19a0)
+actionable team-context refusals (19f6)
+bind a coordinated finalize to the confirmed delivery evidence (C5-w3)
+serve aicrew's read-only reservation scope (C6b)
+prove the CLI reconciles a committed step whose reply was lost
+add the member reservation CLI (C6c)
+refuse trailing data in the admin recovery body (01a0e903)
+serve the member reservation routes and MCP tools (C6a)
+measure the extractor kill bounds from when the helper runs
+coordination-backed reservation transitions (C5b)
+freeze the process pin in the coordination.v1 facts that start work (C5-w2)
+audit every recovery replay and reader refusal exactly once
+collect identity rig responses under a lock, with a race-detector CI step
+reservation recovery, the recovery reader and closure evidence (C5c)
+freeze the closed hold-status amendment for aicrew's read scope (C5c-w)
+freeze coordination.v1 and aicrew's reservation read scope (C5w)
+reservation transitions bound to the verified actor and context (C5a)
+team-session lifecycle commands never undo each other's writes
+team conversations keep knowledge off and hold their state safely (E5b)
+bind one conversation to one verified team session (E5a)
+bump modernc.org/sqlite from 1.58.0 to 1.59.0
+team mode requires TLS terminated by the hub (P5)
+hub-admin routes and CLI for team access profiles and grants
+make the OpenCode plugin work on OpenCode 2 as well as 1.x
+team-mode reads through the online context verifier (E4b)
+add the aicrew introspection client and refuse team-mode requests (E4a)
+add the aimem identity operator CLI over the hub's TLS listener (E3c)
+classify identity wire routes with the mux's own matching
+serve identity.v1 proof, redemption and peer-admin routes over hub TLS (E3b)
+add internal identity.v1 proof ledger and peer credential store (E3a)
+pin identity.v1 introspection version, secret locations and reply ceiling
+define AIForge identity proof and introspection wire v1 (E2)
+define AIForge clean-client enrollment contract
+add internal AIForge context grant substrate
+define AIForge reservation wire v1 fixtures
+Prove same-hub dependency eligibility for internal reservations
+Guard existing task writes against active reservations
+Add internal AIForge reservation ledger
+specify AIForge task reservation contract
+specify verified AIForge identity and session context
+record AIForge service boundary and decisions
+measure Claude channel wake-up with a disposable fixture
+prepare v0.7.3 portable team context release
+join/resume entry points use the delivered context
+an accepted attempt keeps the process version it was accepted under
+a worker that is not ready handles its reserved attempt by state
+readiness and inline context in team_setup and team_continue
+typed process-context retrieval and the read-only process_context MCP tool
+team guidance built into the binary, readable through team_context and aimem teams context
+portable team context and readiness contract; roadmap to v0.7.2
+prepare v0.7.2 MCP onboarding release
+team_setup and team_continue on the checkout-bound local MCP; entry points call them
+share the setup/continue core between the CLI and the local MCP facade
+roll the changelog into 0.7.1 for the team onboarding release
+guided provisioning on the hub host: create a team with its coordinator, add members with their own tokens
+aimem teams continue and /resume_team restore a member's duties after a restart
+members list their enrolled teams before joining; setup names enrollment gaps
+WIP: docs(install): explain the empty-body one-liner failure and the checkout installer path
+/join_team entry points for Claude Code, OpenCode and Codex, rendered from one source
+setup checks and repairs the checkout's client wiring and reports required skills per client
+`aimem teams setup` verifies a checkout and joins or reconciles a team session
+roll the changelog into 0.7.0 for the team coordination release
+rehearsal refusals name the expected reason and reject leaked bindings
+protocol rehearsal on an isolated hub over the real MCP wire and admin routes
+escalation expiry releases accepted work through cancel, stopped and close-stop
+coordinator and worker playbooks with validated request templates
+filtered audit timeline and JSONL export over HTTP and CLI
+rebind a session to a replacement token via operator recovery
+attribute handoff lifecycle messages and update OpenAPI readiness wording
+deliver lifecycle events to the shared inbox and advertise readiness
+bridge assignment, execution and management operations to CLI and MCP
+expose management and admin routes over HTTP
+expose execution routes over HTTP
+add managed-task edit, finalize and unmanage storage
+add coordinator handoff storage
+rebind reserved attempts on worker session resume
+add reconciled operator recovery storage
+store cooperative team work control and acknowledged stops
+store immutable team results and coordinator dispositions
+expose authorized team assignment HTTP primitives
+add exclusive team assignment storage and task guards
+expose durable team messages through HTTP CLI and MCP
+measure structured client coordination capabilities
+define optional supervisor authority and runtime contracts
+persist messages, recipient inboxes and acknowledgements
+expose credential-bound sessions through HTTP CLI and MCP
+persist session lifecycle and coordinator generations
+add administrator setup and audited enrollment
+plan agent teams and coordinated backlog execution
+expose epic details and stabilize selector layout
+limit task project picker to Kanban-enabled boards
+prepare token-model onboarding and v0.6.0 rollout
+Add repository-local task credential overrides without fallback
+upgrade an installed aimem that is older than the release
+Add explicit user-scoped task tokens
+release v0.5.0 — enablement, process reference, epics, typed references (schema 13)
+store, server, mcp: typed references (Kanban docs increment 4, schema 13)
+store, server, mcp: epics as a table in the task schema (Kanban docs increment 3)
+server, cli, hook: process reference selection and the session bootstrap (Kanban docs increment 2)
+server, mcp, cli: tasks are enabled per project, by an admin (Kanban docs increment 1)
+proposal — the documents an AI-driven Kanban needs
+ordinary tokens may list projects; the task page picker for everyone
+task page names a rejected stored token as the remembered one
+release v0.4.0 — tasks, the task page and board, the task service
+retry receipts fingerprint the input without its zero-valued fields
+task lookup hints — no full project scan per read
+refuse task and document tools when .aimem.json is unreadable
+plan stage 4 — the access section in the console
+Kanban board on the task page (stage 3, second increment)
+task page — list, detail, history and discussion (stage 3, first increment)
+server, mcp: authorized task service over HTTP and MCP (stage 2)
+task storage with CAS, history, comments and retry receipts (schema 11)
+Reuse access storage and allow grant cleanup by project instance
+Define append-only task comments and authenticated references
+Add project access users, groups, grants and scoped tokens
+CHANGELOG: roll Unreleased into 0.3.31
+merge-into-project picks the target from a dropdown
+CHANGELOG: roll Unreleased into 0.3.30
+one shared status line for all model bindings
+CHANGELOG: roll Unreleased into 0.3.29
+reserved result line per binding so provider tests never shift the layout
+CHANGELOG: roll Unreleased into 0.3.28
+Provider tests tell the truth: no silent env fallback for bound models
+CHANGELOG: roll Unreleased into 0.3.27
+Codex CLI support: hooks + rollout adapter + MCP
+CHANGELOG: roll Unreleased into 0.3.26
+Bump modernc.org/sqlite from 1.57.0 to 1.58.0
+Console: content-aware dropdowns for Review, Docs, and Wiki tabs
+CHANGELOG: roll Unreleased into 0.3.25
+Claude curation backend: llmrate pacing + hard timeout (arch review S4)
+AGENTS.md: review levels per gate (user decision, 2026-09-06)
+MCP recall_memory: one token budget for the whole answer (S7)
+Origin aliases ride group-config sync and heal ghost citations (ledger 3 / arch review S3)
+Bump softprops/action-gh-release from 2 to 3
+CHANGELOG: roll Unreleased into 0.3.24
+AGENTS.md: pre-merge full PR review + one-PR-at-a-time rules
+retention rebuilds FTS after VACUUM; fts-rebuild + curate --rewind
+sync self-verification: counted stream terminator, acted-on failure
+invalid hub binding never routes to the default hub (arch review C4)
+Installers verify release binaries against SHA256SUMS (arch review C3 + O4)
+Bump actions/checkout from 4 to 7
+Bump actions/setup-go from 5 to 7
+CI lint: inline GOTOOLCHAIN=auto - setup-go v7 clobbers job env
+CI lint: GOTOOLCHAIN=auto so @latest tools may fetch their Go
+Agent readiness: lint gate, gitattributes, templates, dependabot, SECURITY.md
+release workflow: refuse to build a tag that is not on master
+AGENTS.md: strict pre-push review gate via oh-code-review
+paced, adaptively rate-limited, retrying LLM calls (0.3.23)
+Groups tab: status messages on their own line, save button stays put (0.3.22)
+Manual organization via labels: + label with type-ahead, x to untag; new-chapter dropped (0.3.21)
+'+ chapter' works on project/user facts; 'new chapter...' for non-groups (0.3.20)
+COMPARISON: lemmalog in the category-3 list + fact-check date note
+COMPARISON: lemmalog - memory as a deductive database
+Label picker faceted: suggest only co-occurring labels (0.3.19)
+Label suggestions one line: 'label (N)' (0.3.18)
+Label picker: type-to-search combobox, alphabetical (0.3.17)
+Label filters live beside the search bar and combine (0.3.16)
+Label facet becomes a dropdown - one row, every label (0.3.15)
+KB tree: label facet — the real fix for empty project sidebars (0.3.14)
+KB tree derives project chapter filters from fact labels (0.3.13)
+Windows one-liner ships policy-wrapped everywhere
+boot.ps1 survives the default Restricted execution policy
+Docs: group NAME is the identity - collision warning
+Origin aliases make merged labels stay dead (0.3.12)
+Re-label sweeps the whole pool in one click, with live progress + cancel (0.3.11)
+Revisit batches rotate via persisted cursor; no more first-80 starvation (0.3.10)
+KB tree menu names the AI propose/re-label actions living on the Groups tab
+KB tree: no lone 'all' row for scopes with nothing to filter (0.3.9)
+Re-label pass for filed facts + chapter filter toggle (0.3.8)
+merge-into: orphaned-origin relabel + citation counts (0.3.7)
+Fact "edit" verb + multiline editor; project merge for split ids (0.3.6)
+Docs currency pass after the v0.2.6-v0.3.5 run
+TUI parity pass: conflicts, per-hub spool, hub bindings (0.3.5)
+Architecture-parity slice: wiki search + record history + console clusters (0.3.4)
+STORAGE-GUIDE: what goes where, and full-featured project setup
+Console wiki view: collapsible tree instead of flat headings (0.3.3)
+Release workflow: body from the tag's CHANGELOG section, not auto commit lists
+Console: Wiki tab with rendered-first collection view (0.3.2)
+col first-live-run fixes + the aimem API wiki's first cut (0.3.1)
+Structured collections: record-granular CAS wikis on the hub (0.3.0)
+DESIGN-structured-docs: many wikis per hub; aimem's own wiki dogfoods v1
+DESIGN-structured-docs amendment: group scope primary, tree ids, release cuts
+DESIGN-structured-docs: proposal for record-granular collections
+aimem docs sync + self-describing merge previews (0.2.6)
+Doc collab: sync-time reconcile, merge previews, console auto-merge (0.2.5)
+DESIGN-doc-collab: proposal for git-like doc reconciliation
+CHANGELOG: 0.2.4
+Console: doc-conflict hints name aimem docs merge (0.2.4)
+Install docs teach the named-token scheme
+aimem logs: local diagnostics for the warnings that used to vanish
+sync warns about projects bound to unconfigured hub names (0.2.2)
+Docs consistency pass: hourly (not nightly) curation everywhere, doc-search in AI-MANUAL, license fairness note in COMPARISON
+aimem v0.2.1 — history begins under PolyForm Noncommercial 1.0.0

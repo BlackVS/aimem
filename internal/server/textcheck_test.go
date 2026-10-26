@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"aimem/internal/store"
+	"aimem/internal/textcheck"
 	"aimem/internal/writingrule"
 )
 
@@ -160,15 +161,40 @@ func TestSecondStageCanOnlyRelaxTheFilter(t *testing.T) {
 	}
 }
 
+type healthTextCheck struct {
+	TextCheck struct {
+		Filter, State, Why string
+	} `json:"text_check"`
+}
+
 func TestHealthNamesTheTextCheck(t *testing.T) {
 	s, _ := testServer(t)
 	w := req(t, s.Handler(), "GET", "/v1/health", "")
-	var body struct {
-		TextCheck struct {
-			State, Why string
-		} `json:"text_check"`
-	}
-	if err := json.Unmarshal(w.Body.Bytes(), &body); err != nil || body.TextCheck.State != "off" || body.TextCheck.Why == "" {
+	var body healthTextCheck
+	if err := json.Unmarshal(w.Body.Bytes(), &body); err != nil || body.TextCheck.Filter != "on" || body.TextCheck.State != "off" || body.TextCheck.Why == "" {
 		t.Fatalf("health text_check: %s", w.Body)
+	}
+}
+
+// AIMEM_TEXT_CHECK=off is the operator's way out of a false positive the
+// tests did not foresee: task text is stored unchecked, and health says so.
+func TestTextCheckSwitchedOffStoresUncheckedText(t *testing.T) {
+	t.Setenv(textcheck.FilterKey, "off")
+	f := newTaskFixture(t)
+	w := taskReq(t, f.h, "POST", "/v1/projects/alpha/tasks", f.alice, "c1", `{"title":"Ship the fix","objective":"Checkpoint74files written","state":"READY"}`)
+	if w.Code != 201 {
+		t.Fatalf("create with the check off: %d %s", w.Code, w.Body)
+	}
+	var task store.Task
+	if err := json.Unmarshal(w.Body.Bytes(), &task); err != nil {
+		t.Fatal(err)
+	}
+	if w := taskReq(t, f.h, "POST", "/v1/tasks/"+task.ID+"/comments", f.alice, "m1", `{"body":"CI409 SUCCESS99s, merged."}`); w.Code != 201 {
+		t.Fatalf("comment with the check off: %d %s", w.Code, w.Body)
+	}
+	var body healthTextCheck
+	w = req(t, f.s.Handler(), "GET", "/v1/health", "")
+	if err := json.Unmarshal(w.Body.Bytes(), &body); err != nil || body.TextCheck.Filter != "off" || !strings.Contains(body.TextCheck.Why, textcheck.FilterKey) {
+		t.Fatalf("health with the check off: %s", w.Body)
 	}
 }

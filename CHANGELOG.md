@@ -40,7 +40,9 @@ currently 25); a binary refuses a database newer than it understands.
   console. **Upgrade note:** from this release, an agent that writes
   compressed shorthand into a task comment or field gets a refusal and
   has to rewrite the text; run `aimem tasks text-check` first to see how
-  much stored text the filter would flag. The second stage stays off
+  much stored text the filter would flag. If the filter refuses readable
+  text, `AIMEM_TEXT_CHECK=off` in the hub's env file turns the whole check
+  off until a fixed release is installed. The second stage stays off
   after the upgrade, so no task text goes to a model provider until
   `AIMEM_TEXT_CHECK_MODEL` is set.
 - **`aimem hub add --system-roots` drops a recorded pin or CA file.** A

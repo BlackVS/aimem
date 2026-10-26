@@ -10,7 +10,8 @@
 // registry like AIMEM_EMBED_MODEL, and must be an OpenAI-compatible
 // endpoint: a subscription CLI is not a server-side backend. Unset or
 // empty, the stage is off: flagged text leaves the hub only once the
-// operator names a model for it.
+// operator names a model for it. AIMEM_TEXT_CHECK=off turns the whole
+// check off, the filter included.
 package textcheck
 
 import (
@@ -33,6 +34,9 @@ import (
 )
 
 const (
+	// FilterKey switches the whole check: "off" stores task text
+	// unchecked; unset or "on" is the default, the filter on.
+	FilterKey = "AIMEM_TEXT_CHECK"
 	// ModelKey names the stage's model in the hub's env file.
 	ModelKey = "AIMEM_TEXT_CHECK_MODEL"
 	// CapKey is the stage's own spend cap: model calls per UTC day.
@@ -59,7 +63,8 @@ type Judge struct {
 
 // Config is what the stage resolves to, for health and the console.
 type Config struct {
-	State      string `json:"state"` // "on" or "off"
+	Filter     string `json:"filter"` // "on" or "off"
+	State      string `json:"state"`  // the model stage: "on" or "off"
 	Model      string `json:"model,omitempty"`
 	Why        string `json:"why,omitempty"`
 	DailyCalls int    `json:"daily_calls_cap"`
@@ -69,6 +74,9 @@ type Config struct {
 // ForRoot resolves the stage from the environment and the provider
 // registry under root; nil with the reason when it is off.
 func ForRoot(root string) (*Judge, string) {
+	if on, _ := FilterOn(); !on {
+		return nil, FilterKey + " is off, so the filter and the model stage are both off"
+	}
 	model := strings.TrimSpace(os.Getenv(ModelKey))
 	if model == "" {
 		return nil, ModelKey + " is not set"
@@ -88,6 +96,26 @@ func ForRoot(root string) (*Judge, string) {
 		path: filepath.Join(root, "textcheck.json"), client: &http.Client{Timeout: Timeout}}, ""
 }
 
+// FilterOn reads FilterKey. A value other than on or off is an error,
+// and the filter stays on: a mistyped switch never turns the check off.
+func FilterOn() (bool, error) {
+	switch v := strings.ToLower(strings.TrimSpace(os.Getenv(FilterKey))); v {
+	case "", "on":
+		return true, nil
+	case "off":
+		return false, nil
+	default:
+		return true, fmt.Errorf("%s=%q is neither on nor off, so the filter stays on", FilterKey, v)
+	}
+}
+
+func filterState() string {
+	if on, _ := FilterOn(); !on {
+		return "off"
+	}
+	return "on"
+}
+
 func dailyCap() (int, error) {
 	v := strings.TrimSpace(os.Getenv(CapKey))
 	if v == "" {
@@ -104,11 +132,11 @@ func dailyCap() (int, error) {
 func Describe(j *Judge, why string) Config {
 	if j == nil {
 		limit, _ := dailyCap()
-		return Config{State: "off", Why: why, DailyCalls: limit}
+		return Config{Filter: filterState(), State: "off", Why: why, DailyCalls: limit}
 	}
 	j.mu.Lock()
 	defer j.mu.Unlock()
-	return Config{State: "on", Model: j.Model, DailyCalls: j.cap, CallsToday: j.loadCount().Calls}
+	return Config{Filter: filterState(), State: "on", Model: j.Model, DailyCalls: j.cap, CallsToday: j.loadCount().Calls}
 }
 
 type counter struct {

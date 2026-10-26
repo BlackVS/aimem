@@ -68,6 +68,7 @@ type Server struct {
 	judge        textJudge     // the readability check's second stage; nil = the filter alone (textcheck.go)
 	textCheck    *textcheck.Judge
 	textCheckWhy string // why the second stage is off
+	textOff      bool   // AIMEM_TEXT_CHECK=off: task text is stored unchecked
 }
 
 func New(reg *store.Registry, log *slog.Logger) *Server {

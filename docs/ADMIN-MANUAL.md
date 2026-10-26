@@ -444,6 +444,15 @@ task tools pass it to the agent unchanged, so the agent can correct the
 text and retry. There is no per-project switch: the rule belongs to the
 product.
 
+The hub has one switch for the whole check, `AIMEM_TEXT_CHECK=off` in
+its env file. It is the way out when the filter refuses text that is
+readable, until a fixed release is installed. With the switch off, the
+hub stores task text unchecked, the model stage is off too, and
+`aimem health` shows `"filter": "off"` under `text_check`. Unset or
+`on` is the default. Any other value is logged as a warning and leaves
+the check on, so a mistyped switch never turns it off. Like the model
+keys, the switch takes effect when `aimem.service` restarts.
+
 The check has two stages:
 
 1. **The filter** always runs first and makes no model call. It cuts out
@@ -465,6 +474,7 @@ The second stage's model is its own setting, beside the curation and
 embedding models in the console's Setup tab and in the hub's env file:
 
 ```sh
+#AIMEM_TEXT_CHECK=off                  # the whole check off, the filter included
 #AIMEM_TEXT_CHECK_MODEL=small-model    # unset or empty: stage off (the default)
 #AIMEM_TEXT_CHECK_DAILY_CALLS=200      # model calls per UTC day; 0: stage off
 ```
@@ -476,8 +486,9 @@ through the provider registry like `AIMEM_EMBED_MODEL`, and it must be an
 OpenAI-compatible endpoint (the `openai` kind). The daily cap is counted
 before each call, a failed call included, in `textcheck.json` under the
 state root. Changes take effect when `aimem.service` restarts.
-`aimem health` shows the stage under `text_check`: on with its model and
-today's calls, or off with the reason. The
+`aimem health` shows the check under `text_check`: whether the filter
+runs (`filter`), and the stage, on with its model and today's calls, or
+off with the reason. The
 console shows the same line under the models.
 
 ### Reporting text stored before the check

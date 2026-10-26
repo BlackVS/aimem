@@ -26,6 +26,7 @@ func TestMain(m *testing.M) {
 	// The readability check's second stage would use a model the
 	// developer's environment names; tests that want it inject a fake.
 	os.Setenv(textcheck.ModelKey, "")
+	os.Setenv(textcheck.FilterKey, "")
 	os.Exit(m.Run())
 }
 

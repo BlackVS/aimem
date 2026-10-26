@@ -63,6 +63,14 @@ func TestUnreadablePassesReadableText(t *testing.T) {
 		"The task 01a119cc-0a7c has eleven comments; the hash 9f86d081884c7d659a2feaa0c55ad015 matches.",
 		"Calls go through store.DB and os.Getenv, as before.",
 		"Comment seq201 records the decision; UUIDv7 ids and ChaCha20-Poly1305 are unchanged.",
+		// Short titles of long words: few spaces, but every word is a word.
+		"Investigate authentication synchronization failures.",
+		"Refactor authentication middleware initialization sequence.",
+		"Implement idempotent reconciliation for provisioning workflows.",
+		"Document deployment prerequisites and troubleshooting procedures.",
+		"Investigate intermittent authentication failures",
+		"Internationalization of administrative notifications",
+		"Counterrevolutionaries misunderstanding telecommunications",
 		// A list of identifiers, one per line.
 		"Changed files:\n- internal/writingrule/readable.go\n- internal/server/tasks.go\n- docs/ADMIN-MANUAL.md\n",
 	} {
@@ -115,5 +123,25 @@ func TestRepositoryProsePasses(t *testing.T) {
 	}
 	if paragraphs < 1000 {
 		t.Fatalf("only %d paragraphs read; the corpus is missing", paragraphs)
+	}
+}
+
+// Titles are short and dense, which documentation paragraphs are not:
+// testdata/titles.txt holds this repository's commit subjects without
+// their type prefix and PR number, and every one of them passes.
+func TestRepositoryTitlesPass(t *testing.T) {
+	raw, err := os.ReadFile(filepath.Join("testdata", "titles.txt"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	titles := 0
+	for title := range strings.SplitSeq(strings.TrimSpace(string(raw)), "\n") {
+		titles++
+		if fd := Unreadable(title); fd != nil {
+			t.Errorf("flagged %q (%s) in the title %q", fd.Span, fd.Reason, title)
+		}
+	}
+	if titles < 300 {
+		t.Fatalf("only %d titles read; the corpus is missing", titles)
 	}
 }
