@@ -7,6 +7,7 @@ import (
 
 	"aimem/internal/adapter"
 	"aimem/internal/isolation"
+	"aimem/internal/textcheck"
 )
 
 // TestMain starts every test of the package without the developer's
@@ -19,6 +20,8 @@ import (
 // warning tests restore it against their own httptest hubs.
 func TestMain(m *testing.M) {
 	isolation.ClearInherited()
+	os.Setenv(textcheck.ModelKey, "") // no real model behind an in-process hub
+	os.Setenv(textcheck.FilterKey, "")
 	hubAddWarn = func(io.Writer, string, *adapter.HubConfig) {}
 	os.Exit(m.Run())
 }

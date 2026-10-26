@@ -942,6 +942,9 @@
           },
           "413": {
             "description": "Request body larger than 256 KiB"
+          },
+          "422": {
+            "description": "Unreadable text (code unreadable_text): a free-text field the write sets or changes, or the comment body, is not readable prose under docs/WRITING-PERSISTED-TEXT.md. The body is the refusal envelope (code, message, next_action with the one-sentence fix, retryable false) plus error (the same sentence whole), field, span (the first flagged text), reason, section and stage (filter, or filter_and_model when the optional second-stage model confirmed it). Only the fields an update or triage changes are checked."
           }
         }
       }
@@ -1078,6 +1081,9 @@
           },
           "413": {
             "description": "Request body larger than 256 KiB"
+          },
+          "422": {
+            "description": "Unreadable text (code unreadable_text): a free-text field the write sets or changes, or the comment body, is not readable prose under docs/WRITING-PERSISTED-TEXT.md. The body is the refusal envelope (code, message, next_action with the one-sentence fix, retryable false) plus error (the same sentence whole), field, span (the first flagged text), reason, section and stage (filter, or filter_and_model when the optional second-stage model confirmed it). Only the fields an update or triage changes are checked."
           }
         }
       }
@@ -1150,6 +1156,9 @@
           },
           "409": {
             "description": "stale revision (with the current task), managed or reserved task, task_held (team mode)"
+          },
+          "422": {
+            "description": "Unreadable text (code unreadable_text): a free-text field the write sets or changes, or the comment body, is not readable prose under docs/WRITING-PERSISTED-TEXT.md. The body is the refusal envelope (code, message, next_action with the one-sentence fix, retryable false) plus error (the same sentence whole), field, span (the first flagged text), reason, section and stage (filter, or filter_and_model when the optional second-stage model confirmed it). Only the fields an update or triage changes are checked."
           }
         }
       }
@@ -1315,6 +1324,9 @@
           },
           "413": {
             "description": "Request body larger than 256 KiB"
+          },
+          "422": {
+            "description": "Unreadable text (code unreadable_text): a free-text field the write sets or changes, or the comment body, is not readable prose under docs/WRITING-PERSISTED-TEXT.md. The body is the refusal envelope (code, message, next_action with the one-sentence fix, retryable false) plus error (the same sentence whole), field, span (the first flagged text), reason, section and stage (filter, or filter_and_model when the optional second-stage model confirmed it). Only the fields an update or triage changes are checked."
           }
         }
       }
@@ -6806,7 +6818,7 @@
     },
     "/v1/health": {
       "get": {
-        "summary": "Service health: project count, state root, version, resources",
+        "summary": "Service health: project count, state root, version, resources, LLM pacing, skills store, text check (filter switch and model stage)",
         "x-role": "writer",
         "responses": {
           "200": {
@@ -7664,7 +7676,7 @@
     },
     "/v1/config/models": {
       "get": {
-        "summary": "Curate/embed model configuration",
+        "summary": "Curate, embed and text check model configuration (text_check is what the running service resolved)",
         "x-role": "admin",
         "responses": {
           "200": {
@@ -7673,7 +7685,7 @@
         }
       },
       "put": {
-        "summary": "Update model configuration (atomic env rewrite)",
+        "summary": "Update model configuration (atomic env rewrite; text_check_model and text_check_daily_calls are optional and an omitted one keeps its line)",
         "x-role": "admin",
         "responses": {
           "200": {

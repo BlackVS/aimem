@@ -35,7 +35,8 @@ Read the exact text you are about to send or save, not your summary of it:
    limits and the next action?
 
 Fix what the check finds, then write. The check needs no extra tool call or
-model call.
+model call. The aimem hub refuses a task comment or task field that breaks
+the rule, naming the flagged text and the fix, so correct it and send it again.
 
 ## Examples
 

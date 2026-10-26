@@ -8,6 +8,7 @@ package server
 import (
 	"aimem/internal/process"
 	"aimem/internal/store"
+	"aimem/internal/textcheck"
 	_ "embed"
 	"encoding/json"
 	"fmt"
@@ -159,9 +160,9 @@ func (s *Server) addProcessGap(out map[string]any, db *store.DB, project string)
 
 // Model config lives in the aimem env file (sourced by curate-all.sh on
 // every run, and by the service unit at start). The GUI may edit ONLY
-// the two model keys; the file's other lines — API keys among them —
-// are never read out or returned.
-var modelKeys = []string{"AIMEM_CURATE_MODEL", "AIMEM_EMBED_MODEL"}
+// the model keys and the text check's cap; the file's other lines — API
+// keys among them — are never read out or returned.
+var modelKeys = []string{"AIMEM_CURATE_MODEL", "AIMEM_EMBED_MODEL", textcheck.ModelKey, textcheck.CapKey}
 
 func envFilePath() string {
 	if v := os.Getenv("AIMEM_ENV_FILE"); v != "" {
@@ -179,25 +180,34 @@ func parseEnvValue(line, key string) (string, bool) {
 	return strings.Trim(rest, `"`), true
 }
 
+// getModels reads the model keys from the env file; an empty text check
+// model is the stage off. text_check is what the running service
+// resolved at start.
 func (s *Server) getModels(w http.ResponseWriter, _ *http.Request) {
-	out := map[string]string{"curate_model": "", "embed_model": ""}
+	out := map[string]any{"curate_model": "", "embed_model": "", "text_check_model": "",
+		"text_check_daily_calls": "", "text_check": textcheck.Describe(s.textCheck, s.textCheckWhy)}
 	if raw, err := os.ReadFile(envFilePath()); err == nil {
 		for line := range strings.SplitSeq(string(raw), "\n") {
-			if v, ok := parseEnvValue(line, "AIMEM_CURATE_MODEL"); ok {
-				out["curate_model"] = v
-			}
-			if v, ok := parseEnvValue(line, "AIMEM_EMBED_MODEL"); ok {
-				out["embed_model"] = v
+			for k, field := range map[string]string{"AIMEM_CURATE_MODEL": "curate_model", "AIMEM_EMBED_MODEL": "embed_model",
+				textcheck.ModelKey: "text_check_model", textcheck.CapKey: "text_check_daily_calls"} {
+				if v, ok := parseEnvValue(line, k); ok {
+					out[field] = v
+				}
 			}
 		}
 	}
 	s.ok(w, out)
 }
 
+// putModels rewrites the model lines. The text check's two keys are
+// optional in the body: an omitted one keeps its line as it is. An empty
+// model is the stage off, an empty cap is the default.
 func (s *Server) putModels(w http.ResponseWriter, r *http.Request) {
 	var req struct {
-		CurateModel string `json:"curate_model"`
-		EmbedModel  string `json:"embed_model"`
+		CurateModel    string  `json:"curate_model"`
+		EmbedModel     string  `json:"embed_model"`
+		TextCheckModel *string `json:"text_check_model"`
+		TextCheckDaily *string `json:"text_check_daily_calls"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		s.fail(w, http.StatusBadRequest, err)
@@ -213,26 +223,44 @@ func (s *Server) putModels(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
+	if req.TextCheckModel != nil {
+		v := strings.TrimSpace(*req.TextCheckModel)
+		if strings.ContainsAny(v, "\n\"$`\\") {
+			s.fail(w, http.StatusBadRequest, fmt.Errorf("%s: model name must be without quotes/newlines (empty switches the text check off)", textcheck.ModelKey))
+			return
+		}
+		want[textcheck.ModelKey] = v
+	}
+	if req.TextCheckDaily != nil {
+		v := strings.TrimSpace(*req.TextCheckDaily)
+		if n, err := strconv.Atoi(v); v != "" && (err != nil || n < 0) {
+			s.fail(w, http.StatusBadRequest, fmt.Errorf("%s: a non-negative number of calls per day, or empty for the default %d", textcheck.CapKey, textcheck.DefaultDailyCalls))
+			return
+		}
+		want[textcheck.CapKey] = v
+	}
 	path := envFilePath()
 	raw, err := os.ReadFile(path)
 	if err != nil {
 		s.fail(w, http.StatusInternalServerError, fmt.Errorf("env file: %w", err))
 		return
 	}
-	// Rewrite only the model lines; every other line survives verbatim.
+	// Rewrite only the model lines being set; every other line survives
+	// verbatim.
 	lines := strings.Split(string(raw), "\n")
 	seen := map[string]bool{}
 	for i, line := range lines {
 		for _, k := range modelKeys {
-			if _, ok := parseEnvValue(line, k); ok {
-				lines[i] = fmt.Sprintf("%s=%q", k, want[k])
+			v, set := want[k]
+			if _, ok := parseEnvValue(line, k); ok && set {
+				lines[i] = fmt.Sprintf("%s=%q", k, v)
 				seen[k] = true
 			}
 		}
 	}
 	for _, k := range modelKeys {
-		if !seen[k] {
-			lines = append(lines, fmt.Sprintf("%s=%q", k, want[k]))
+		if v, set := want[k]; set && !seen[k] {
+			lines = append(lines, fmt.Sprintf("%s=%q", k, v))
 		}
 	}
 	// Always end with a newline: without it, anything appended later
@@ -249,10 +277,14 @@ func (s *Server) putModels(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.log.Warn("admin models updated", "curate", want["AIMEM_CURATE_MODEL"], "embed", want["AIMEM_EMBED_MODEL"])
-	s.ok(w, map[string]string{
+	out := map[string]string{
 		"curate_model": want["AIMEM_CURATE_MODEL"], "embed_model": want["AIMEM_EMBED_MODEL"],
-		"note": "takes effect on the next curation run; restart aimem.service to apply the embed model to live recall",
-	})
+		"note": "takes effect on the next curation run; restart aimem.service to apply the embed model to live recall and the text check model to task writes",
+	}
+	if v, set := want[textcheck.ModelKey]; set {
+		out["text_check_model"] = v
+	}
+	s.ok(w, out)
 }
 
 // auditLog serves a project's knowledge-mutation trail (the admin Log

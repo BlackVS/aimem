@@ -69,6 +69,15 @@ func (s *Server) triageTask(w http.ResponseWriter, r *http.Request) {
 	if !s.decodeTaskBody(w, r, &body) {
 		return
 	}
+	// Triage writes next_action too, under the same check as an update.
+	if body.NextAction != nil {
+		if cur, err := db.GetTask(r.PathValue("id")); err == nil && cur.NextAction != *body.NextAction {
+			if ref := s.checkText(r.Context(), "next_action", *body.NextAction); ref != nil {
+				s.refuseText(w, ref)
+				return
+			}
+		}
+	}
 	task, err := db.TriageTask(r.PathValue("id"), store.TaskTriage{State: body.State, NextAction: body.NextAction}, body.ExpectedRevision, taskActor(r), key)
 	if err != nil {
 		var conflict *store.TaskConflict

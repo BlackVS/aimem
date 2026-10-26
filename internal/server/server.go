@@ -29,6 +29,7 @@ import (
 	"aimem/internal/schema"
 	"aimem/internal/skills"
 	"aimem/internal/store"
+	"aimem/internal/textcheck"
 )
 
 // maxBodyBytes caps one ingestion request (all fields are further capped
@@ -64,6 +65,10 @@ type Server struct {
 	actionMux    *http.ServeMux // names a refused request's route (refusal_actions.go)
 	skillsOnce   sync.Once
 	skillsSt     *skills.Store // the hub-wide skills store under the state root (skills.go)
+	judge        textJudge     // the readability check's second stage; nil = the filter alone (textcheck.go)
+	textCheck    *textcheck.Judge
+	textCheckWhy string // why the second stage is off
+	textOff      bool   // AIMEM_TEXT_CHECK=off: task text is stored unchecked
 }
 
 func New(reg *store.Registry, log *slog.Logger) *Server {
@@ -74,6 +79,7 @@ func New(reg *store.Registry, log *slog.Logger) *Server {
 	if s.emb == nil && os.Getenv("AIMEM_EMBED_MODEL") != "" {
 		log.Warn("semantic recall off", "why", embed.Why(reg.Root()))
 	}
+	s.setupTextCheck()
 	return s
 }
 
@@ -861,6 +867,8 @@ func (s *Server) health(w http.ResponseWriter, _ *http.Request) {
 	// and cannot be read, which is a fault of the state root, never "no
 	// skills".
 	body["skills"] = s.skillsHealth()
+	// The readability check's second stage: its model, or why it is off.
+	body["text_check"] = textcheck.Describe(s.textCheck, s.textCheckWhy)
 	s.ok(w, body)
 }
 

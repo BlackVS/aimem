@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"aimem/internal/isolation"
+	"aimem/internal/textcheck"
 )
 
 // TestMain starts every test of the package without the developer's
@@ -15,5 +16,7 @@ import (
 // isolation).
 func TestMain(m *testing.M) {
 	isolation.ClearInherited()
+	os.Setenv(textcheck.ModelKey, "") // no real model behind an in-process hub
+	os.Setenv(textcheck.FilterKey, "")
 	os.Exit(m.Run())
 }
