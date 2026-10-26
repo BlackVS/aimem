@@ -93,6 +93,15 @@ func (s *Server) changeManagedTask(w http.ResponseWriter, r *http.Request) {
 			s.fail(w, 400, err)
 			return
 		}
+		// The edit replaces the content, so it meets the update's check:
+		// only the fields it changes, and a task it cannot find is left to
+		// EditManagedTask, which answers for it.
+		if cur, err := db.GetTask(task); err == nil {
+			if ref := s.checkTaskFields(r.Context(), req.Content, &cur.TaskContent); ref != nil {
+				s.refuseText(w, ref)
+				return
+			}
+		}
 		run = func(a store.TeamAuditContext) (store.Task, error) { return db.EditManagedTask(team, task, req, a, key) }
 	}
 	audit, err := sessionAudit(w, r, db)
