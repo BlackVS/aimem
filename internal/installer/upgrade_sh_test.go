@@ -27,8 +27,21 @@ func runShellUpgrade(t *testing.T, s *sandbox, newBinary, wait string, env ...st
 	}
 	script := "set -euo pipefail\n" + extract(t, "install.sh", "upgrade-transaction") + `
 SVC_PID=
+# svc_kill waits at most 5 seconds for the serve to exit after TERM, then
+# kills it: an unbounded wait turned a serve that did not exit into a test
+# that hung until go test's 10-minute timeout.
 svc_kill() {
-  if [ -n "$SVC_PID" ]; then kill "$SVC_PID" 2>/dev/null || true; wait "$SVC_PID" 2>/dev/null || true; SVC_PID=; fi
+  [ -n "$SVC_PID" ] || return 0
+  kill "$SVC_PID" 2>/dev/null || true
+  local i=0
+  while [ "$i" -lt 50 ] && kill -0 "$SVC_PID" 2>/dev/null; do sleep 0.1; i=$((i + 1)); done
+  if kill -0 "$SVC_PID" 2>/dev/null; then
+    echo "HARNESS: the serve did not exit within 5s of TERM; its log:"
+    tail -n 20 "$SANDBOX/serve.log" || true
+    kill -9 "$SVC_PID" 2>/dev/null || true
+  fi
+  wait "$SVC_PID" 2>/dev/null || true
+  SVC_PID=
 }
 # STOP_FAILS=1: a stop that leaves the service running, as a stop whose
 # error svc_stop swallowed would.
@@ -48,6 +61,11 @@ fi
 echo before > "$STATE/marker"
 rc=0
 upgrade_txn "$SANDBOX/bin/aimem.new" || rc=$?
+# A refused upgrade starts the service again: wait for it to answer, so
+# the EXIT trap stops a serve that finished starting.
+if [ "$rc" != 0 ] && [ "${EXPECT_RESTART:-}" = 1 ]; then
+  if AIMEM_UPGRADE_WAIT=20 txn_wait v0.0.1; then echo "HARNESS: the service is back at v0.0.1"; else echo "HARNESS: the service did not come back"; fi
+fi
 exit "$rc"
 `
 	cmd := exec.Command("bash", "-c", script)
@@ -61,6 +79,9 @@ exit "$rc"
 	}
 	if code == 99 {
 		t.Fatalf("setup failed:\n%s", out)
+	}
+	if strings.Contains(string(out), "HARNESS: the serve did not exit") {
+		t.Errorf("the serve did not exit on TERM:\n%s", out)
 	}
 	return string(out), code
 }
@@ -171,12 +192,12 @@ func TestShellUpgradeCopiesAgainWhenTheStateChangesDuringTheCopy(t *testing.T) {
 func TestShellUpgradeRefusesAStateRootThatKeepsChanging(t *testing.T) {
 	shellOnly(t)
 	s := newSandbox(t, binary(t, "v0.0.1"), false)
-	out, code := runShellUpgrade(t, s, binary(t, "v0.0.2"), "20", changingTar(t, s, 3)...)
+	out, code := runShellUpgrade(t, s, binary(t, "v0.0.2"), "20", append(changingTar(t, s, 3), "EXPECT_RESTART=1")...)
 	if code == 0 {
 		t.Fatalf("an upgrade whose state copy changed on every try reported success:\n%s", out)
 	}
 	checkUntouched(t, s, out)
-	for _, want := range []string{"file changed as we read it", "the copy failed (try 2 of 3)", "could not copy the state root", "nothing was changed", "lsof +D "} {
+	for _, want := range []string{"file changed as we read it", "the copy failed (try 2 of 3)", "could not copy the state root", "nothing was changed", "lsof +D ", "HARNESS: the service is back at v0.0.1"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("the output lacks %q:\n%s", want, out)
 		}
@@ -187,11 +208,14 @@ func TestShellUpgradeRefusesAStateRootThatKeepsChanging(t *testing.T) {
 func TestShellUpgradeRefusesWhileTheServiceStillAnswers(t *testing.T) {
 	shellOnly(t)
 	s := newSandbox(t, binary(t, "v0.0.1"), false)
-	out, code := runShellUpgrade(t, s, binary(t, "v0.0.2"), "20", "STOP_FAILS=1")
+	out, code := runShellUpgrade(t, s, binary(t, "v0.0.2"), "20", "STOP_FAILS=1", "EXPECT_RESTART=1")
 	if code == 0 {
 		t.Fatalf("an upgrade with the service still running reported success:\n%s", out)
 	}
 	checkUntouched(t, s, out)
+	if !strings.Contains(out, "HARNESS: the service is back at v0.0.1") {
+		t.Errorf("the service does not answer after the refusal:\n%s", out)
+	}
 	if !strings.Contains(out, "an aimem serve still answers after the service was stopped") {
 		t.Errorf("the output does not say the service did not stop:\n%s", out)
 	}
