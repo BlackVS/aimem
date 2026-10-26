@@ -65,7 +65,7 @@ func TestOneLinersNameTheReleaseTag(t *testing.T) {
 		rel, _ := filepath.Rel(repoRoot, d)
 		files = append(files, rel)
 	}
-	url := regexp.MustCompile(`raw\.githubusercontent\.com/BlackVS/aimem/([^/\s]+)/(boot\.sh|boot\.ps1|install-hub\.sh)`)
+	url := regexp.MustCompile(`(?:raw\.githubusercontent\.com/BlackVS/aimem|github\.com/BlackVS/aimem/releases/download)/([^/\s]+)/(boot\.sh|boot\.ps1|install-hub\.sh|SHA256SUMS)`)
 	seen := 0
 	for _, f := range files {
 		for _, m := range url.FindAllStringSubmatch(read(t, f), -1) {

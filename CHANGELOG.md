@@ -173,6 +173,17 @@ currently 25); a binary refuses a database newer than it understands.
   way to do them, since that skill ships with ai-skills, not with aimem. The
   handbook's opening lines record the port and that choice. The manifest is
   unchanged, and forge-gates is not a required skill.
+- **The release publishes boot.ps1, and boot.ps1 no longer bypasses the
+  execution policy.** Each release attaches `boot.ps1` and lists it in
+  `SHA256SUMS`, so a Windows install can check the script against its
+  release before running it as a file; the documented form that does
+  this follows once a release carries the asset. boot.ps1 now runs
+  `install.ps1` with `-ExecutionPolicy RemoteSigned` instead of `Bypass`.
+  The installer it extracts from the release archive carries no Mark of
+  the Web, because Windows' `tar` does not copy the mark from the archive
+  to the files it extracts, so the install runs as before on a machine
+  with the default Restricted policy. A policy set by Group Policy still
+  wins over both values.
 
 ### Security
 
