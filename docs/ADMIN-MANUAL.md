@@ -787,7 +787,8 @@ selection's digest and caches it, later sessions read the cache. A member
 the hub refuses (an expired credential, a grant removed) sees "denied" and
 nothing else; a hub that cannot be reached leaves the session with the
 selection as last observed and a warning; a unit larger than the budget is
-not injected and the notice says to read it with `aimem process show`. A
+not injected and the notice says to read it in full with
+`aimem process show --full`. A
 hub from before sets were stored, or a selection it recorded then, serves
 no set, and the member fetches the commit from Git with its own access, as
 before. `aimem process refresh` on the hub host stores those sets from

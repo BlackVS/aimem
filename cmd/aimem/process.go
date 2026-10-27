@@ -71,7 +71,8 @@ reported as needing an archive, which refresh -p <project> --from-archive
 then imports. show runs anywhere and prints what the session-start hook
 injects for this project; in a directory with no hub binding on a machine
 with no hub configured (the hub host), it reads this host's stored
-selection and set. --full adds the repository URL, for the admin.`
+selection and set. --full prints the whole unit, even one over the
+manifest's injection budget, and adds the repository URL, for the admin.`
 
 func processCmd(args []string) error {
 	usage := processUsage

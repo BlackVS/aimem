@@ -16,7 +16,7 @@ What each step means is in [CHANGELOG `[Unreleased]`](../CHANGELOG.md), "Configu
 - **Versions.** The hub runs a release that includes the AIForge prerequisites. Check with `curl -s https://hub.example.test:8443/v1/status`: `version` must name that release. The coordinator's and worker's machines run the same aimem release.
 - **Lockstep with aicrew.** aicrew must send `evidence_digest` on `accepted_for_finalization` (its counterpart of aimem's C5-w3). Without it, every coordinated finalize is refused. Deploy both together, or aicrew first.
 - **An admin bearer in a private file.** The `aimem identity` commands read the hub-admin bearer from `--admin-token-file`. That file must be one line and readable only by you:
-  - on Windows: `icacls admin.token /inheritance:r /grant:r "%USERNAME%:F"`;
+  - on Windows, in PowerShell: `icacls admin.token /inheritance:r /grant:r "${env:USERNAME}:F"` (in cmd: `"%USERNAME%:F"`);
   - on Linux or macOS: `chmod 600 admin.token`.
 
   The CLI refuses a wider file and prints the exact command to fix it. It trims the line ending, so a CRLF-written file works.
