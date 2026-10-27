@@ -42,6 +42,9 @@
 #   AIMEM_UPGRADE_WAIT=30          seconds to wait for health after a swap
 #   AIMEM_EMBED_MODEL="Text Embedding 3 Large"
 #   AIMEM_PREBUILT=                path to a prebuilt binary (skips download)
+#   AIMEM_PREBUILT_DIR=            a directory holding aimem-linux-<arch> and
+#                                  SHA256SUMS under the release names: the
+#                                  binary is verified, nothing is downloaded
 set -euo pipefail
 
 # The release this script installs. Bumped together with the CHANGELOG
@@ -232,31 +235,59 @@ refresh_processes() { # aimem-binary
 # END process-refresh
 
 # --- binary -----------------------------------------------------------------
-mkdir -p "$HOME_DIR/.local/bin" "$HOME_DIR/.local/sbin"
-if [ -n "${AIMEM_PREBUILT:-}" ]; then
-  install -m 755 "$AIMEM_PREBUILT" "$HOME_DIR/.local/bin/aimem.new"
-else
-  TAG=${AIMEM_VERSION:-$RELEASE}
-  ASSET=aimem-linux-amd64
-  case "$(uname -m)" in aarch64|arm64) ASSET=aimem-linux-arm64 ;; esac
-  echo "installing aimem $TAG ($ASSET)"
-  fetch "$BASE/releases/download/$TAG/$ASSET" -o "$HOME_DIR/.local/bin/aimem.new"
-  # Verify against the release's SHA256SUMS — this script runs as root, so
-  # an unverified binary is the worst place to skip it. Any failure aborts.
-  fetch "$BASE/releases/download/$TAG/SHA256SUMS" -o "$HOME_DIR/.local/bin/aimem.sums" || {
-    echo "ERROR: release $TAG has no SHA256SUMS; refusing unverified binary." >&2
-    rm -f "$HOME_DIR/.local/bin/aimem.new"; exit 1
-  }
-  WANT=$(awk -v a="$ASSET" '$2==a{print $1}' "$HOME_DIR/.local/bin/aimem.sums")
-  GOT=$(sha256sum "$HOME_DIR/.local/bin/aimem.new" | awk '{print $1}')
-  rm -f "$HOME_DIR/.local/bin/aimem.sums"
-  if [ -z "$WANT" ] || [ "$WANT" != "$GOT" ]; then
-    echo "ERROR: checksum mismatch for $ASSET (want ${WANT:-absent}, got $GOT)." >&2
-    rm -f "$HOME_DIR/.local/bin/aimem.new"; exit 1
+# BEGIN binary-stage
+# stage_binary dest: the binary this run installs. AIMEM_PREBUILT is the
+# operator's own file, installed as given. The release asset, from
+# AIMEM_PREBUILT_DIR or downloaded, is verified against the SHA256SUMS
+# beside it: this script runs as root, so an unverified binary is the
+# worst place to skip the check. Any failure removes the staged file and
+# aborts before anything is installed. The caller defines fetch, BASE and
+# RELEASE; the version installed is the staged binary's own (upgrade_txn).
+verify_asset() { # binary sums asset
+  local want got
+  want=$(awk -v a="$3" '$2==a{print $1}' "$2")
+  got=$(sha256sum "$1" | awk '{print $1}')
+  if [ -z "$want" ] || [ "$want" != "$got" ]; then
+    echo "ERROR: checksum mismatch for $3 (want ${want:-absent}, got $got)." >&2
+    return 1
   fi
-  echo "checksum OK: $ASSET"
-  chmod 755 "$HOME_DIR/.local/bin/aimem.new"
-fi
+  echo "checksum OK: $3"
+}
+stage_binary() { # dest
+  local dest=$1 asset=aimem-linux-amd64 dir tag ok=0
+  case "$(uname -m)" in aarch64|arm64) asset=aimem-linux-arm64 ;; esac
+  if [ -n "${AIMEM_PREBUILT:-}" ] && [ -n "${AIMEM_PREBUILT_DIR:-}" ]; then
+    echo "ERROR: AIMEM_PREBUILT and AIMEM_PREBUILT_DIR are both set; set only one of them." >&2
+    exit 1
+  fi
+  if [ -n "${AIMEM_PREBUILT:-}" ]; then
+    install -m 755 "$AIMEM_PREBUILT" "$dest"
+    return 0
+  fi
+  if [ -n "${AIMEM_PREBUILT_DIR:-}" ]; then
+    dir=$AIMEM_PREBUILT_DIR
+    echo "installing aimem from $dir ($asset)"
+    [ -f "$dir/$asset" ] || { echo "ERROR: $dir has no $asset; nothing was installed." >&2; exit 1; }
+    [ -f "$dir/SHA256SUMS" ] || { echo "ERROR: $dir has no SHA256SUMS; refusing unverified binary." >&2; exit 1; }
+    cp "$dir/$asset" "$dest"
+    verify_asset "$dest" "$dir/SHA256SUMS" "$asset" || ok=1
+  else
+    tag=${AIMEM_VERSION:-$RELEASE}
+    echo "installing aimem $tag ($asset)"
+    fetch "$BASE/releases/download/$tag/$asset" -o "$dest"
+    fetch "$BASE/releases/download/$tag/SHA256SUMS" -o "$dest.sums" || {
+      echo "ERROR: release $tag has no SHA256SUMS; refusing unverified binary." >&2
+      rm -f "$dest" "$dest.sums"; exit 1
+    }
+    verify_asset "$dest" "$dest.sums" "$asset" || ok=1
+    rm -f "$dest.sums"
+  fi
+  [ "$ok" = 0 ] || { rm -f "$dest"; exit 1; }
+  chmod 755 "$dest"
+}
+# END binary-stage
+mkdir -p "$HOME_DIR/.local/bin" "$HOME_DIR/.local/sbin"
+stage_binary "$HOME_DIR/.local/bin/aimem.new"
 
 # --- self-signed TLS (optional, until a real cert is enrolled) ---------------
 if [ -n "${AIMEM_DOMAIN:-}" ] && [ -z "${AIMEM_TLS_CERT:-}" ]; then

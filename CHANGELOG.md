@@ -15,6 +15,18 @@ currently 25); a binary refuses a database newer than it understands.
 
 ### Added
 
+- **The hub installer installs from a local directory.**
+  `AIMEM_PREBUILT_DIR=<dir> install-hub.sh` installs the binary from a
+  directory holding `aimem-linux-<arch>` and `SHA256SUMS` under the
+  release's names, instead of downloading it, and checks it against the
+  sums exactly as a download is checked: a missing binary, sums file or
+  line, or a wrong sum stops the installer before anything is installed.
+  The version installed is the binary's own, and the rest of the install
+  or upgrade is unchanged. It lets a closed network, or a container hub
+  that installs a build that has not been released, use the real
+  installer with a verified binary. `AIMEM_PREBUILT` (a file installed
+  as given) is unchanged; setting both is refused. See ADMIN-MANUAL,
+  "Installing from a local directory".
 - **The new-project quickstart has a "Saving tokens" note.** Step 4.5
   of `docs/QUICKSTART-NEW-PROJECT.md` lists the habits that keep an
   agent's token use down, the language rule first: everything an agent

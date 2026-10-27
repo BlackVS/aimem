@@ -183,13 +183,40 @@ individual credential (task tools, team setup, team mode) refuses it),
 `AIMEM_TLS_CERT`/`AIMEM_TLS_KEY` (explicit cert paths; nothing set =
 plain HTTP, which carries checkpoints but not the task tools, team setup
 or team mode), `AIMEM_OPENAI_API_KEY` + `AIMEM_OPENAI_BASE_URL` + models
-(enables the curation timer's LLM work). Idempotent: run the newer
+(enables the curation timer's LLM work), `AIMEM_PREBUILT=<file>` (a
+binary installed as given, unverified) or `AIMEM_PREBUILT_DIR=<dir>` (see
+below; set only one of the two). Idempotent: run the newer
 release's one-liner to upgrade, with the backup and rollback of
 [Upgrades](#upgrades) (the hub's backup lands in
 `~sessiond/.local/state/aimem.backup-<UTC time>`). Everything stateful
 lives outside the binary — config
 `~/.config/aimem/env`, certs `~/.config/aimem/tls/`, data
 `~/.local/state/aimem/` — so an LXC backup captures the whole hub.
+
+### Installing from a local directory
+
+A host that should not download the binary from GitHub (a closed network,
+or a container hub that installs a build that has not been released)
+installs it from a directory with `AIMEM_PREBUILT_DIR`. The directory holds
+the release's own asset names: `aimem-linux-amd64` (or
+`aimem-linux-arm64` on arm64) and `SHA256SUMS` with a line for it, which
+is what you get by downloading those two assets of a release, or by
+writing them from a local build (`sha256sum aimem-linux-amd64 > SHA256SUMS`).
+The installer checks the binary against `SHA256SUMS` exactly as it checks
+a download, and stops before anything is installed when the binary, the
+sums file or its line is missing or the sum does not match. The version
+installed is the binary's own (`AIMEM_VERSION` does not apply), and nothing
+after that changes: the backup, the rollback and the process refresh run
+as for a download.
+
+```sh
+AIMEM_PREBUILT_DIR=/srv/aimem-dist bash install-hub.sh
+```
+
+The script itself still has to reach the host: run a copy of
+`install-hub.sh` of the same version, taken from the release's tag.
+`AIMEM_PREBUILT` stays for a binary you vouch for yourself, such as one
+you just built on this host; it is installed without a check.
 
 ### What a hub serves
 
