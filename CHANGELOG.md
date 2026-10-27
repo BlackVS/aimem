@@ -129,6 +129,16 @@ currently 25); a binary refuses a database newer than it understands.
   `DOMAIN\user`, so the same line runs in both shells, and icacls's
   `*SID` form when the name cannot be resolved.
 
+### Docs
+
+- **Two commands in the docs corrected.** The admin manual said that a
+  process unit over the manifest's budget is read with
+  `aimem process show`, which prints only the bootstrap; it now names
+  `aimem process show --full`, as the notice does, and `aimem process`
+  usage says that `--full` prints the whole unit. The pilot hub runbook's
+  `icacls` line used `%USERNAME%`, which only cmd expands; it now gives
+  the PowerShell form `${env:USERNAME}`, with the cmd form beside it.
+
 ## [0.10.14] — 2026-10-26
 
 The hub now refuses task text that is not readable prose (HTTP 422,
