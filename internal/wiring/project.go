@@ -1,6 +1,7 @@
 package wiring
 
 import (
+	"bytes"
 	_ "embed"
 	"encoding/json"
 	"errors"
@@ -190,6 +191,13 @@ func keptFile(dir, rel, content string, write bool) Finding {
 func projectConfig(dir string, o ProjectOptions, write bool) Finding {
 	const rel = ".aimem.json"
 	path := filepath.Join(dir, rel)
+	// readObject takes an empty client config for an empty object, but a
+	// session's reader (ident.loadConfig) refuses an empty .aimem.json, so
+	// the project would run with no pin, hub binding or groups.
+	if raw, err := confine.ReadFile(dir, path); err == nil && len(bytes.TrimSpace(bytes.TrimPrefix(raw, []byte("\xef\xbb\xbf")))) == 0 {
+		return Finding{File: rel, Level: "fail", Detail: "empty: a session cannot read it, so the project has no pin, hub binding or groups",
+			Fix: "write `{}` into it, or remove it, and run `aimem wire` again; nothing was written"}
+	}
 	obj, mode, existed, err := readObject(dir, path)
 	if err != nil {
 		return Finding{File: rel, Level: "fail", Detail: "unreadable: " + err.Error(), Fix: "repair the file by hand; nothing was written"}
