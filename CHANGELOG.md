@@ -15,6 +15,17 @@ currently 25); a binary refuses a database newer than it understands.
 
 ### Added
 
+- **The new-project quickstart has a "Saving tokens" note.** Step 4.5
+  of `docs/QUICKSTART-NEW-PROJECT.md` lists the habits that keep an
+  agent's token use down, the language rule first: everything an agent
+  reads is English by default, because the same content in another
+  script costs two to three times the tokens and is read many times per
+  session, while the operator's own chat may be in any language. The
+  other items point at the sections that explain them: the handoff's
+  50-line rule and `aimem handoff compact`, the `session_facts` budget,
+  and `aimem process show --full` for a process unit over its budget.
+  The Kanban quickstart and the README link to it.
+
 - **Task and comment ids may be given by a unique prefix.** The task
   tools, the reservation tools and the HTTP task routes accept the short
   form people write, the first two groups such as `01a17718-4ca9` (at

@@ -293,7 +293,7 @@ Grouped by the steps in [Four ways to run it](#four-ways-to-run-it).
 | 1. Local only | [RECOVERY-RUNBOOK.md](docs/RECOVERY-RUNBOOK.md) | recovering a lost or compacted session |
 | 1. Local only | [STORAGE-GUIDE.md](docs/STORAGE-GUIDE.md) | what goes where: journal vs KB vs groups vs docs vs wiki, and full-featured project setup |
 | 2. With a hub | [INSTALL-HUB.md](docs/INSTALL-HUB.md) | standing up a hub |
-| 2. With a hub | [QUICKSTART-NEW-PROJECT.md](docs/QUICKSTART-NEW-PROJECT.md) | one new project on a fresh workstation against an existing hub: tokens, tasks, handoff, design docs |
+| 2. With a hub | [QUICKSTART-NEW-PROJECT.md](docs/QUICKSTART-NEW-PROJECT.md) | one new project on a fresh workstation against an existing hub: tokens, tasks, handoff, design docs, [saving tokens](docs/QUICKSTART-NEW-PROJECT.md#45-saving-tokens) |
 | 2. With a hub | [DESIGN-hub-sync.md](docs/DESIGN-hub-sync.md) | anti-entropy sync over the hub API, named tokens, OpenAPI |
 | 2. With a hub | [DESIGN-shared-docs.md](docs/DESIGN-shared-docs.md) | sharing the handoff and other documents over the hub |
 | 2. With a hub | [DESIGN-doc-collab.md](docs/DESIGN-doc-collab.md) | git-like reconciliation for shared documents |

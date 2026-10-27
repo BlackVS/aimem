@@ -444,6 +444,21 @@ Start one more new session in the project; hooks, the MCP server and
 - the agent lists the project's tasks and names the epic from step 4.2
   without being told where to look.
 
+### 4.5 Saving tokens
+
+Everything an agent reads is English by default: task fields and
+comments, pull request reviews, handoffs, messages between sessions and
+`AGENTS.md`. The same content in another script costs two to three times
+the tokens, and an agent reads it many times per session. The operator's
+own chat with an agent may be in any language. Three more habits:
+- the handoff stays near 50 lines, and `aimem handoff compact` moves its
+  history out ([INSTALL-CLIENT](INSTALL-CLIENT.md#what-wiring-a-project-adds-to-it));
+- `session_facts` is a token budget that every session start spends, off
+  by default ([4.3](#43-where-your-decisions-go));
+- `aimem process show --full` is needed only when the start context says
+  the process unit was over its budget and not injected
+  ([ADMIN-MANUAL](ADMIN-MANUAL.md#selecting-a-projects-process-documents)).
+
 ## The two secrets
 
 | Secret | Made by | Stored on the workstation | Revoke on the hub |
