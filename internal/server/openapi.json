@@ -1010,7 +1010,8 @@
             "required": true,
             "schema": {
               "type": "string"
-            }
+            },
+            "description": "the task id: the full id, or a unique prefix of at least 13 characters (01a17718-4ca9) that starts one task on the hub"
           }
         ],
         "responses": {
@@ -1039,7 +1040,8 @@
             "required": true,
             "schema": {
               "type": "string"
-            }
+            },
+            "description": "the task id: the full id, or a unique prefix of at least 13 characters (01a17718-4ca9) that starts one task on the hub"
           },
           {
             "name": "Idempotency-Key",
@@ -1101,7 +1103,8 @@
             "required": true,
             "schema": {
               "type": "string"
-            }
+            },
+            "description": "the task id: the full id, or a unique prefix of at least 13 characters (01a17718-4ca9) that starts one task on the hub"
           },
           {
             "name": "Idempotency-Key",
@@ -1176,7 +1179,8 @@
             "required": true,
             "schema": {
               "type": "string"
-            }
+            },
+            "description": "the task id: the full id, or a unique prefix of at least 13 characters (01a17718-4ca9) that starts one task on the hub"
           },
           {
             "name": "after",
@@ -1224,7 +1228,8 @@
             "required": true,
             "schema": {
               "type": "string"
-            }
+            },
+            "description": "the task id: the full id, or a unique prefix of at least 13 characters (01a17718-4ca9) that starts one task on the hub"
           },
           {
             "name": "order",
@@ -1282,7 +1287,8 @@
             "required": true,
             "schema": {
               "type": "string"
-            }
+            },
+            "description": "the task id: the full id, or a unique prefix of at least 13 characters (01a17718-4ca9) that starts one task on the hub"
           },
           {
             "name": "Idempotency-Key",
@@ -1344,7 +1350,8 @@
             "required": true,
             "schema": {
               "type": "string"
-            }
+            },
+            "description": "the task id: the full id, or a unique prefix of at least 13 characters (01a17718-4ca9) that starts one task on the hub"
           },
           {
             "name": "c",
@@ -1352,7 +1359,8 @@
             "required": true,
             "schema": {
               "type": "string"
-            }
+            },
+            "description": "the comment id: the full id, or a unique prefix of at least 13 characters that starts one of the task's comments"
           }
         ],
         "responses": {
@@ -2842,7 +2850,8 @@
             "required": true,
             "schema": {
               "type": "string"
-            }
+            },
+            "description": "the task id: the full id, or a unique prefix of at least 13 characters that starts one task in this project"
           },
           {
             "name": "X-Aimem-Reservation-Version",
@@ -3344,7 +3353,8 @@
             "required": true,
             "schema": {
               "type": "string"
-            }
+            },
+            "description": "the task id: the full id, or a unique prefix of at least 13 characters that starts one task in this project"
           },
           {
             "name": "X-Aimem-Reservation-Version",
@@ -3856,7 +3866,8 @@
             "required": true,
             "schema": {
               "type": "string"
-            }
+            },
+            "description": "the task id: the full id, or a unique prefix of at least 13 characters that starts one task in this project"
           },
           {
             "name": "X-Aimem-Reservation-Version",
@@ -4356,7 +4367,8 @@
             "required": true,
             "schema": {
               "type": "string"
-            }
+            },
+            "description": "the task id: the full id, or a unique prefix of at least 13 characters that starts one task in this project"
           },
           {
             "name": "X-Aimem-Reservation-Version",
@@ -4856,7 +4868,8 @@
             "required": true,
             "schema": {
               "type": "string"
-            }
+            },
+            "description": "the task id: the full id, or a unique prefix of at least 13 characters that starts one task in this project"
           },
           {
             "name": "X-Aimem-Reservation-Version",
@@ -5364,7 +5377,8 @@
             "required": true,
             "schema": {
               "type": "string"
-            }
+            },
+            "description": "the task id: the full id, or a unique prefix of at least 13 characters that starts one task in this project"
           },
           {
             "name": "X-Aimem-Reservation-Version",
@@ -5704,7 +5718,8 @@
             "required": true,
             "schema": {
               "type": "string"
-            }
+            },
+            "description": "the task id: the full id, or a unique prefix of at least 13 characters that starts one task in this project"
           },
           {
             "name": "operation",

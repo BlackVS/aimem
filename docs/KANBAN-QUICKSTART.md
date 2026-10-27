@@ -251,7 +251,13 @@ my last look" in one call with `updated_since` and `order: updated_desc`,
 and `mine: true` lists the tasks assigned to the caller's own user identity.
 Its first page also carries `counts`, the number of active tasks in each
 state plus the archived and the total, so the board's shape needs no full
-listing (`GET /v1/projects/{p}/tasks/counts` over HTTP). With an explicitly agreed test task,
+listing (`GET /v1/projects/{p}/tasks/counts` over HTTP).
+A task or comment id may be given in the short form people write, the
+first two groups such as `01a17718-4ca9` (at least 13 characters,
+lowercase as written), wherever a tool takes one. The hub resolves it to
+the one id it starts on the hub, or, on the reservation tools, in the
+project. A prefix that starts two tasks is refused with the matching ids,
+so give more of the id. With an explicitly agreed test task,
 verify creation and read-back through the agent before assigning real work.
 
 Enabling tools does not install a scheduler. Your process must say which

@@ -282,9 +282,18 @@ func (s *Server) taskProject(w http.ResponseWriter, r *http.Request) (string, *s
 
 // locateTask resolves a task ID to its owning project across every
 // existing ordinary project: the partition is the authority, so a rename
-// is reflected on the next read.
+// is reflected on the next read. A unique prefix of the task id, and of a
+// comment id in the path, is replaced by the full id before anything else
+// reads the path, so the handlers, retries and revision checks see only
+// full ids.
 func (s *Server) locateTask(w http.ResponseWriter, r *http.Request) (string, *store.DB, bool) {
-	project, db, err := s.reg.LocateTask(r.PathValue("id"))
+	id, err := s.reg.ResolveTaskID(r.PathValue("id"))
+	if err != nil {
+		s.taskIDError(w, r, err)
+		return "", nil, false
+	}
+	r.SetPathValue("id", id)
+	project, db, err := s.reg.LocateTask(id)
 	if err != nil {
 		s.taskError(w, err)
 		return "", nil, false
@@ -292,7 +301,46 @@ func (s *Server) locateTask(w http.ResponseWriter, r *http.Request) (string, *st
 	if s.teamGrantDenied(w, r, project) {
 		return "", nil, false
 	}
+	if c := r.PathValue("c"); c != "" {
+		cid, err := db.ResolveTaskCommentID(id, c)
+		if err != nil {
+			s.taskIDError(w, r, err)
+			return "", nil, false
+		}
+		r.SetPathValue("c", cid)
+	}
 	return project, db, true
+}
+
+// taskIDError answers a refused id: an ambiguous prefix names the ids it
+// matches in the projects the caller may read and counts the others.
+func (s *Server) taskIDError(w http.ResponseWriter, r *http.Request, err error) {
+	var amb *store.AmbiguousIDError
+	if !errors.As(err, &amb) {
+		s.taskError(w, err)
+		return
+	}
+	tc, team := teamContextFrom(r.Context())
+	ident, _ := IdentityFrom(r.Context())
+	var shown []string
+	hidden := 0
+	for _, m := range amb.Matches {
+		if team && m.Project != "" {
+			if ok, gerr := s.teamGrantAllows(ident, tc, m.Project); gerr != nil || !ok {
+				hidden++
+				continue
+			}
+		}
+		shown = append(shown, m.ID)
+	}
+	msg := "ambiguous id prefix " + amb.Prefix + ": it matches " + strings.Join(shown, ", ")
+	switch {
+	case len(shown) == 0:
+		msg = fmt.Sprintf("ambiguous id prefix %s: it matches %d tasks in projects this credential cannot read", amb.Prefix, hidden)
+	case hidden > 0:
+		msg += fmt.Sprintf(" and %d more in projects this credential cannot read", hidden)
+	}
+	s.fail(w, http.StatusConflict, errors.New(msg+"; give more of the id"))
 }
 
 type taskLinks struct {
