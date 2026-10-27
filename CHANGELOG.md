@@ -91,6 +91,14 @@ currently 25); a binary refuses a database newer than it understands.
 
 ### Fixed
 
+- **`aimem wire` refuses an empty `.aimem.json`.** An empty or
+  whitespace-only file (a byte order mark alone counts as empty) was
+  taken as an empty config and reported as present, or rewritten with
+  the keys the run named, while a session cannot read it and runs with
+  no project pin, hub binding or groups. `aimem wire` and
+  `aimem wire --check` now report it as a failure, write nothing to it,
+  and say to write `{}` into it or remove it. A `{}` file is still
+  accepted.
 - **A token piped from Windows PowerShell 5.1 is accepted.** Under a
   UTF-8 console, PowerShell 5.1 prepends a byte order mark to what it
   pipes into a native command, and `Out-File` writes one at the start of

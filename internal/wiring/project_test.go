@@ -118,6 +118,43 @@ func TestWireSetsOnlyTheGivenKeys(t *testing.T) {
 	}
 }
 
+// An empty or whitespace-only .aimem.json is one a session cannot read:
+// wire and --check report it and leave it alone. `{}` is a valid config.
+func TestWireRefusesAnEmptyConfig(t *testing.T) {
+	for name, content := range map[string]string{"empty": "", "whitespace": " \r\n\t\n", "BOM only": "\xef\xbb\xbf\n"} {
+		for _, check := range []bool{false, true} {
+			dir, home := t.TempDir(), t.TempDir()
+			cfg := filepath.Join(dir, ".aimem.json")
+			write(t, cfg, content)
+			out, err := Wire(dir, ProjectOptions{Home: home, Check: check, Project: "demo"})
+			if err != nil {
+				t.Fatalf("%s, check %v: %v", name, check, err)
+			}
+			var got *Finding
+			for i := range out {
+				if out[i].File == ".aimem.json" {
+					got = &out[i]
+				}
+			}
+			if got == nil || got.Level != "fail" || !strings.Contains(got.Detail, "empty") || !strings.Contains(got.Fix, "`{}`") || got.Repaired {
+				t.Errorf("%s, check %v: finding %+v", name, check, got)
+			}
+			if read(t, cfg) != content {
+				t.Errorf("%s, check %v: the file was rewritten", name, check)
+			}
+		}
+	}
+	dir, home := t.TempDir(), t.TempDir()
+	write(t, filepath.Join(dir, ".aimem.json"), "{}")
+	wireOK(t, dir, ProjectOptions{Home: home})
+	out := wireOK(t, dir, ProjectOptions{Home: home, Check: true})
+	for _, f := range out {
+		if f.File == ".aimem.json" && f.Level != "ok" {
+			t.Errorf("{} reported as %s: %s", f.Level, f.Detail)
+		}
+	}
+}
+
 func TestWireCheckWritesNothing(t *testing.T) {
 	dir, home := t.TempDir(), t.TempDir()
 	out := wireOK(t, dir, ProjectOptions{Home: home, Check: true, Project: "demo"})
