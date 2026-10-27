@@ -3,6 +3,7 @@ package store
 import (
 	"errors"
 	"fmt"
+	"strings"
 	"sync"
 	"time"
 )
@@ -34,7 +35,8 @@ func newTaskHints() *taskHints {
 	return &taskHints{loc: map[string]string{}, miss: map[string]time.Time{}, now: time.Now}
 }
 
-// put records where id was found; any remembered miss for it is void.
+// put records where id was found; any remembered miss for it, or for a
+// prefix of it, is void.
 func (h *taskHints) put(id, project string) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
@@ -42,7 +44,11 @@ func (h *taskHints) put(id, project string) {
 		h.loc = map[string]string{}
 	}
 	h.loc[id] = project
-	delete(h.miss, id)
+	for k := range h.miss {
+		if strings.HasPrefix(id, k) {
+			delete(h.miss, k)
+		}
+	}
 }
 
 func (h *taskHints) get(id string) (string, bool) {

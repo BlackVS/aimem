@@ -84,7 +84,7 @@ var taskToolDefs = append([]map[string]any{
 	{
 		"name":        "get_task",
 		"description": "Read one task by id: current content, revision, owning project and links." + taskReadScope,
-		"inputSchema": objSchema(map[string]any{"id": prop("string", "task id")}, "id"),
+		"inputSchema": objSchema(map[string]any{"id": prop("string", taskIDArg)}, "id"),
 	},
 	{
 		"name": "create_task",
@@ -100,7 +100,7 @@ var taskToolDefs = append([]map[string]any{
 		"description": "Replace a task's editable fields. Send EVERY field you want kept (omitted optional fields clear) " +
 			"and the expected_revision you read; a stale revision returns the current task instead.",
 		"inputSchema": objSchema(taskContentProps(map[string]any{
-			"id":                prop("string", "task id"),
+			"id":                prop("string", taskIDArg),
 			"expected_revision": prop("integer", "the revision you read"),
 			"idempotency_key":   prop("string", "your unique key for this update (retry-safe)"),
 		}), "id", "title", "state", "expected_revision", "idempotency_key"),
@@ -121,7 +121,7 @@ var taskToolDefs = append([]map[string]any{
 			"In a team conversation only the coordinator may triage, on a project the team is granted, and a task under a reservation " +
 			"is refused with task_held.",
 		"inputSchema": objSchema(map[string]any{
-			"id":                prop("string", "task id"),
+			"id":                prop("string", taskIDArg),
 			"expected_revision": prop("integer", "the revision you read"),
 			"state":             propEnum("BACKLOG or READY (the task must itself be BACKLOG or READY)", "BACKLOG", "READY"),
 			"next_action":       prop("string", "the next concrete step"),
@@ -132,7 +132,7 @@ var taskToolDefs = append([]map[string]any{
 		"name":        "get_task_history",
 		"description": "Accepted revisions of a task in order, each with its full snapshot and actor." + taskReadScope,
 		"inputSchema": objSchema(map[string]any{
-			"id":    prop("string", "task id"),
+			"id":    prop("string", taskIDArg),
 			"after": prop("integer", "next_cursor from the previous page"),
 			"limit": prop("integer", "page size (default 20, max 100)"),
 		}, "id"),
@@ -142,7 +142,7 @@ var taskToolDefs = append([]map[string]any{
 		"description": "Discussion of a task (immutable Markdown comments), oldest first; " +
 			"`last: N` reads the N newest instead, newest first, and its next_cursor (passed as `after` with `last` again) continues toward older ones." + taskReadScope,
 		"inputSchema": objSchema(map[string]any{
-			"id":    prop("string", "task id"),
+			"id":    prop("string", taskIDArg),
 			"after": prop("integer", "next_cursor from the previous page"),
 			"limit": prop("integer", "page size (default 20, max 100)"),
 			"last":  prop("integer", "read the N newest comments, newest first (1 to 100; instead of limit)"),
@@ -152,8 +152,8 @@ var taskToolDefs = append([]map[string]any{
 		"name":        "get_task_comment",
 		"description": "One comment by task id and comment id." + taskReadScope,
 		"inputSchema": objSchema(map[string]any{
-			"task_id":    prop("string", "task id"),
-			"comment_id": prop("string", "comment id"),
+			"task_id":    prop("string", taskIDArg),
+			"comment_id": prop("string", commentIDArg),
 		}, "task_id", "comment_id"),
 	},
 	{
@@ -204,17 +204,25 @@ var taskToolDefs = append([]map[string]any{
 		"description": "Append a Markdown comment to a task (never edits the task). Requires an idempotency_key; " +
 			"the author and time are recorded by the service.",
 		"inputSchema": objSchema(map[string]any{
-			"id":              prop("string", "task id"),
+			"id":              prop("string", taskIDArg),
 			"body":            prop("string", "Markdown body (at most 32 KiB)"),
 			"idempotency_key": prop("string", "your unique key for this comment (retry-safe)"),
 		}, "id", "body", "idempotency_key"),
 	},
 }, append(append(teamToolDefs, teamWorkToolDefs...), reservationToolDefs...)...)
 
+// taskIDArg and commentIDArg describe an id argument: the full id or the
+// short form people write (docs/KANBAN-QUICKSTART.md).
+const (
+	taskIDArg    = "task id: the full id, or a unique prefix of at least 13 characters such as 01a17718-4ca9"
+	commentIDArg = "comment id: the full id, or a unique prefix of at least 13 characters"
+)
+
 // taskRefProp is the typed reference: kind says what ref holds — task: a
 // task id; doc: a document name; record: <collection>/<record id>;
 // commit, pr, ci, url: an http(s) URL naming the service and the target;
 // text: free text. Strings are refused since schema 13.
+
 func taskRefProp() map[string]any {
 	return map[string]any{"type": "object", "description": "typed reference {kind, ref, note?, scope?}",
 		"properties": map[string]any{
@@ -241,7 +249,7 @@ func taskContentProps(extra map[string]any) map[string]any {
 		"state":               propEnum("BACKLOG (default on create), READY, IN_PROGRESS, REVIEW, BLOCKED, DONE, CANCELLED", "BACKLOG", "READY", "IN_PROGRESS", "REVIEW", "BLOCKED", "DONE", "CANCELLED"),
 		"assignee":            assigneeProp("optional assignee"),
 		"blocker":             prop("string", "what blocks it, if BLOCKED"),
-		"dependencies":        map[string]any{"type": "array", "items": prop("string", "task id"), "description": "advisory task ids this depends on"},
+		"dependencies":        map[string]any{"type": "array", "items": prop("string", "full task id"), "description": "advisory task ids this depends on"},
 		"candidate_refs":      map[string]any{"type": "array", "items": taskRefProp(), "description": "candidate references (the PR, branch, doc or task under consideration), typed"},
 		"evidence_refs":       map[string]any{"type": "array", "items": taskRefProp(), "description": "evidence references (CI runs, reviews, merged commits), typed"},
 		"next_action":         prop("string", "the next concrete step"),

@@ -13,6 +13,24 @@ currently 25); a binary refuses a database newer than it understands.
 
 ## [Unreleased]
 
+### Added
+
+- **Task and comment ids may be given by a unique prefix.** The task
+  tools, the reservation tools and the HTTP task routes accept the short
+  form people write, the first two groups such as `01a17718-4ca9` (at
+  least 13 characters, lowercase as written), wherever they take a task or
+  comment id. Before, every tool wanted the full 36-character id and
+  answered "task or comment not found" for the short form. The hub
+  resolves a prefix across the hub, the scope a full id has; the
+  reservation routes resolve it inside the route's project. A comment
+  prefix resolves among the task's own comments. The full id replaces the
+  prefix before anything reads it, so retries, revision checks,
+  coordination proofs and receipts see only full ids, and a retry by
+  prefix and a retry by full id are one request. A prefix that starts two
+  tasks is refused with 409 and the matching ids in the projects the
+  caller may read (a team session is told how many more there are
+  elsewhere); a shorter one is refused with 400 and the rule.
+
 ### Changed
 
 - **A required skill the hub lacks is reported with the command that

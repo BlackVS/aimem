@@ -188,7 +188,22 @@ func (s *Server) reservationPreamble(w http.ResponseWriter, r *http.Request) (st
 		s.reservationRefuseDetail(w, r, "unsupported_version", "the "+reservationVersionHeader+" header must be 1")
 		return "", false
 	}
+	// A unique prefix of a task id inside the route's project becomes the
+	// full id before anything reads task_id: proofs, receipts and
+	// request-key digests see only full ids.
 	taskID := r.PathValue("task_id")
+	if !store.FullTaskID(taskID) {
+		db, err := s.reg.OpenExisting(r.PathValue("p"))
+		if err != nil {
+			s.reservationRefuse(w, r, "task_unavailable")
+			return "", false
+		}
+		if taskID, err = db.ResolveProjectTaskID(taskID); err != nil {
+			s.reservationRefuse(w, r, "task_unavailable")
+			return "", false
+		}
+		r.SetPathValue("task_id", taskID)
+	}
 	project, _, err := s.reg.LocateTask(taskID)
 	if err != nil || project != r.PathValue("p") {
 		s.reservationRefuse(w, r, "task_unavailable")

@@ -31,7 +31,7 @@ func reservationCommonProps() map[string]any {
 	return map[string]any{
 		"version": map[string]any{"type": "integer", "enum": []any{1}, "description": "the reservation protocol version: 1"},
 		"project": prop("string", "the task's project (defaults to the current project)"),
-		"task_id": prop("string", "task id"),
+		"task_id": prop("string", taskIDArg),
 	}
 }
 
