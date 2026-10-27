@@ -186,7 +186,11 @@ func argv(lines []string, vars map[string]string) ([]string, error) {
 		return nil, fmt.Errorf("the command must be an aimem command")
 	}
 	for i, w := range words {
-		if bad := shellSyntax.FindString(placeholder.ReplaceAllString(w, "")); bad != "" {
+		bad := shellSyntax.FindString(placeholder.ReplaceAllString(w, ""))
+		if bad == "" && (strings.HasPrefix(w, "~") || strings.HasPrefix(w, "#")) {
+			bad = w[:1] // a home directory or a comment, at the start of a word
+		}
+		if bad != "" {
 			return nil, fmt.Errorf("%q: %q is shell syntax, and the runner runs no shell", w, bad)
 		}
 		v, err := substitute(w, vars)

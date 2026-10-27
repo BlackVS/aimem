@@ -87,6 +87,8 @@ func TestParseCardRefuses(t *testing.T) {
 		{"redirection", step("### 1. A (hub)", "aimem health >out.json", "ok"), "is shell syntax"},
 		{"variable", step("### 1. A (hub)", "aimem tasks on -p $PROJECT", "ok"), "is shell syntax"},
 		{"quoting", step("### 1. A (hub)", `aimem tasks on -p "p"`, "ok"), "is shell syntax"},
+		{"tilde", step("### 1. A (hub)", "aimem hub add team https://h --token-file ~/t", "ok"), `"~/t": "~" is shell syntax`},
+		{"comment", step("### 1. A (hub)", "aimem health # the hub", "ok"), `"#": "#" is shell syntax`},
 		{"not aimem", step("### 1. A (hub)", "curl -k https://x", "ok"), "must be an aimem command"},
 		{"two commands", step("### 1. A (hub)", "aimem health\naimem projects", "ok"), "more than one command"},
 		{"unknown placeholder", step("### 1. A (hub)", "aimem tasks on -p <projekt>", "ok"), "unknown placeholder <projekt>"},
