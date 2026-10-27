@@ -17,6 +17,12 @@ The last line runs the tasks console's script (`internal/server/tasks.html`)
 against fake page and hub objects. It needs Node and no packages; where
 Node is absent, skip it locally and CI's lint job is its runner.
 
+The documented usage scenarios run separately, under a build tag, against
+the real binary started as a hub and as a workstation:
+`go test -tags scenario -count=1 ./internal/scenario/...`. A usage path
+that is added or changed gets a scenario card; docs/scenarios/README.md
+is the card convention.
+
 ## Toolchain
 
 aimem needs Go 1.26 (`go 1.26.0` in `go.mod`). The floor moved from 1.25 for the standard library's `crypto/hpke`, which enrollment delivery (D1) will use.

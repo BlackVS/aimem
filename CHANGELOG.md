@@ -15,6 +15,22 @@ currently 25); a binary refuses a database newer than it understands.
 
 ### Added
 
+- **The documented usage scenarios run against the real binary.** A
+  scenario card in `docs/scenarios` is a usage path written as numbered
+  steps, each with its command, the reason for it and the expected output
+  lines. A person can follow it by hand, and the new suite in
+  `internal/scenario` (build tag `scenario`) runs it. The suite starts the
+  built binary as a hub, with its HTTPS listener on loopback and a test
+  CA's certificate, and as a separate workstation, each with its own state
+  root and home. It runs the card's steps on the side each names and
+  fails on the first expected line the output lacks, naming the card
+  line. The runner takes each command as an argument list, with no shell.
+  The first card checks the fixture itself: both services answer, a skills
+  release is imported, a process set is selected by tag from a local Git
+  repository standing in for the public URL, and the workstation adds the
+  hub and reads its skills over TLS. A new `scenario` CI job runs the
+  suite on Linux and Windows. docs/scenarios/README.md is the card
+  convention.
 - **The hub installer installs from a local directory.**
   `AIMEM_PREBUILT_DIR=<dir> install-hub.sh` installs the binary from a
   directory holding `aimem-linux-<arch>` and `SHA256SUMS` under the
