@@ -136,7 +136,7 @@ func TestSkillsInstallFromTheHubWithoutGit(t *testing.T) {
 	}
 	// After the install: every pin reads installed at its version.
 	unit, _ = processctx.Bootstrap(dir, state, "", true)
-	for _, want := range []string{"verify-delivery 1.33.13 (release; installed)", "oh-code-review 1.33.12 (release; installed)", "house-style site-1 (instance; installed)"} {
+	for _, want := range []string{"verify-delivery 1.33.13 (release; installed 1.33.13 from the hub (release))", "oh-code-review 1.33.12 (release; installed 1.33.12 from the hub (release))", "house-style site-1 (instance; installed site-1 from the hub (instance))"} {
 		if !strings.Contains(unit, want) {
 			t.Fatalf("bootstrap after lacks %q:\n%s", want, unit)
 		}

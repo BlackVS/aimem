@@ -170,8 +170,9 @@ func short(s string) string {
 // an unpinned name from the effective set; a pin from its source's
 // current import when the version matches, else from a kept import of
 // that version. A skill the hub cannot serve is a problem, in words a
-// member can act on (the admin imports the version, or the process pins
-// the current one); none of them names where sets come from.
+// member can act on, ending in the command that brings it to the hub
+// (ImportFix); none of them tells where sets come from by a URL or a host
+// name.
 func Resolve(ix *IndexAnswer, pins []process.SkillPin) (picks []Skill, problems []string) {
 	effective := map[string]Skill{}
 	for _, s := range ix.Effective {
@@ -181,7 +182,7 @@ func Resolve(ix *IndexAnswer, pins []process.SkillPin) (picks []Skill, problems 
 		if !p.Pinned() {
 			s, ok := effective[p.Name]
 			if !ok {
-				problems = append(problems, fmt.Sprintf("%s: no skill of that name in the hub's sets", p.Name))
+				problems = append(problems, fmt.Sprintf("%s: no skill of that name in the hub's sets; %s", p.Name, ImportFix(ix, pins, p)))
 				continue
 			}
 			picks = append(picks, s)
@@ -206,12 +207,72 @@ func Resolve(ix *IndexAnswer, pins []process.SkillPin) (picks []Skill, problems 
 					state += ", which has no skill " + p.Name
 				}
 			}
-			problems = append(problems, fmt.Sprintf("%s %s (%s) is not on the hub: %s; the admin imports that version on the hub host, or the process pins the current one", p.Name, p.Version, p.Source, state))
+			problems = append(problems, fmt.Sprintf("%s %s (%s) is not on the hub: %s; %s, or the process pins the current one", p.Name, p.Version, p.Source, state, ImportFix(ix, pins, p)))
 			continue
 		}
 		picks = append(picks, Skill{Name: p.Name, Version: found.Version, Source: p.Source, Digest: found.Digest})
 	}
 	return picks, problems
+}
+
+// ReleaseNames are the skills the aiskills release ships, copied from
+// aiskills v1.34.0. They decide which import an unpinned missing skill
+// needs only while the hub has no release set imported; a set on the hub
+// lists its own skills.
+var ReleaseNames = []string{"architecture-review", "forge-gates", "oh-agent-readiness-report", "oh-code-review", "oh-code-simplifier", "oh-improve-agent-readiness", "oh-learn-from-code-review", "oh-qa-changes", "oh-technical-writing", "verify-delivery"}
+
+// AdminManualImport is the administrator manual's section on importing
+// the skills sets.
+const AdminManualImport = "docs/ADMIN-MANUAL.md#importing-the-skills-sets"
+
+// ImportFix is the command that brings a missing required skill to the
+// hub, run by the admin on the hub host. A pin's source decides which
+// set it comes from. An unpinned name is a release skill when a release
+// set on the hub lists it, or, with none imported, when ReleaseNames
+// does; its version is the release version the manifest pins for its
+// other skills, else a placeholder.
+func ImportFix(ix *IndexAnswer, pins []process.SkillPin, p process.SkillPin) string {
+	source, version := p.Source, p.Version
+	if !p.Pinned() {
+		source, version = SourceInstance, "<version>"
+		if releaseName(ix, p.Name) {
+			source = SourceRelease
+			for _, o := range pins {
+				if o.Pinned() && o.Source == SourceRelease {
+					version = o.Version
+					break
+				}
+			}
+		}
+	}
+	if source == SourceRelease {
+		return "the admin imports the skills release on the hub host: `aimem skills import --from-archive aiskills-" + version + ".tar.gz` (" + AdminManualImport + ")"
+	}
+	fix := "the admin imports the instance set on the hub host: `aimem skills import --from-archive <file> --source instance --version " + version + "` (" + AdminManualImport + ")"
+	if !p.Pinned() {
+		fix = "it is not in the skills release, so it must come from the instance set: " + fix
+	}
+	return fix
+}
+
+// releaseName reports whether name is a skill of the release: listed by
+// the release set the hub holds (current or kept), or by ReleaseNames
+// when the hub holds none.
+func releaseName(ix *IndexAnswer, name string) bool {
+	var sets []Entry
+	if cur := ix.Sources[SourceRelease]; cur != nil {
+		sets = append(sets, *cur)
+	}
+	sets = append(sets, ix.Kept[SourceRelease]...)
+	if len(sets) == 0 {
+		return has(ReleaseNames, name)
+	}
+	for _, e := range sets {
+		if has(e.Skills, name) {
+			return true
+		}
+	}
+	return false
 }
 
 func has(list []string, name string) bool {

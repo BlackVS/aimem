@@ -341,6 +341,53 @@ func TestResolvePinsAgainstTheIndex(t *testing.T) {
 	}
 }
 
+// A required skill the hub cannot serve names the command that imports
+// it on the hub host: the release archive for a release skill, the
+// instance set for any other, with the manual's section.
+func TestImportFixNamesTheCommand(t *testing.T) {
+	const manual = " (docs/ADMIN-MANUAL.md#importing-the-skills-sets)"
+	release := func(v string) string {
+		return "the admin imports the skills release on the hub host: `aimem skills import --from-archive aiskills-" + v + ".tar.gz`" + manual
+	}
+	instance := func(v string) string {
+		return "the admin imports the instance set on the hub host: `aimem skills import --from-archive <file> --source instance --version " + v + "`" + manual
+	}
+	empty := &IndexAnswer{Sources: map[string]*Entry{SourceRelease: nil, SourceInstance: nil}}
+	onHub := &IndexAnswer{
+		Sources: map[string]*Entry{SourceRelease: {Version: "1.34.0", Skills: []string{"verify-delivery"}}},
+		Kept:    map[string][]Entry{SourceRelease: {{Version: "1.33.13", Skills: []string{"oh-qa-changes"}}}},
+	}
+	pinnedRelease := process.SkillPin{Name: "verify-delivery", Version: "1.34.0", Source: "release"}
+	for _, c := range []struct {
+		name string
+		ix   *IndexAnswer
+		pins []process.SkillPin
+		p    process.SkillPin
+		want string
+	}{
+		{"no set imported, a release name, the version another pin gives", empty, []process.SkillPin{{Name: "oh-code-review"}, pinnedRelease}, process.SkillPin{Name: "oh-code-review"}, release("1.34.0")},
+		{"no set imported, a release name, no version pinned", empty, []process.SkillPin{{Name: "oh-code-review"}}, process.SkillPin{Name: "oh-code-review"}, release("<version>")},
+		{"no set imported, another name", empty, []process.SkillPin{{Name: "house-style"}}, process.SkillPin{Name: "house-style"}, "it is not in the skills release, so it must come from the instance set: " + instance("<version>")},
+		{"a release set imported decides over the built-in names", onHub, []process.SkillPin{{Name: "forge-gates"}}, process.SkillPin{Name: "forge-gates"}, "it is not in the skills release, so it must come from the instance set: " + instance("<version>")},
+		{"a kept release set lists it", onHub, []process.SkillPin{{Name: "oh-qa-changes"}}, process.SkillPin{Name: "oh-qa-changes"}, release("<version>")},
+		{"a release pin", onHub, nil, process.SkillPin{Name: "oh-code-review", Version: "1.33.11", Source: "release"}, release("1.33.11")},
+		{"an instance pin", empty, nil, process.SkillPin{Name: "oh-code-review", Version: "site-2", Source: "instance"}, instance("site-2")},
+	} {
+		if got := ImportFix(c.ix, c.pins, c.p); got != c.want {
+			t.Errorf("%s:\n got %q\nwant %q", c.name, got, c.want)
+		}
+	}
+	// The hub without any set (2026-10-26): every problem carries its fix.
+	_, problems := Resolve(empty, []process.SkillPin{{Name: "oh-code-review"}, pinnedRelease})
+	want := []string{
+		"oh-code-review: no skill of that name in the hub's sets; " + release("1.34.0"),
+		"verify-delivery 1.34.0 (release) is not on the hub: no release set is imported; " + release("1.34.0") + ", or the process pins the current one",
+	}
+	if got, w := strings.Join(problems, "\n"), strings.Join(want, "\n"); got != w {
+		t.Fatalf("problems:\n%s\nwant:\n%s", got, w)
+	}
+}
+
 func TestInstallWritesSkillsWholeAndRecordsVersions(t *testing.T) {
 	files := releaseFiles()
 	digest := (&Set{Files: files}).Digest()
@@ -397,10 +444,10 @@ func TestInstallWritesSkillsWholeAndRecordsVersions(t *testing.T) {
 	if st := state("oh-technical-writing"); !st.Installed || st.Version != "1.20.0" || rec.Versions["oh-technical-writing"] != "1.20.0" {
 		t.Fatalf("an untouched skill took the new version: %+v %v", st, rec.Versions)
 	}
-	if line := process.SkillLine(process.SkillPin{Name: "oh-technical-writing", Version: "1.33.13", Source: "release"}, state("oh-technical-writing")); line != "oh-technical-writing 1.33.13 (release; installed 1.20.0, run `aimem skills install`)" {
+	if line := process.SkillLine(process.SkillPin{Name: "oh-technical-writing", Version: "1.33.13", Source: "release"}, state("oh-technical-writing")); line != "oh-technical-writing 1.33.13 (release; installed 1.20.0, not from the hub, run `aimem skills install`)" {
 		t.Fatalf("untouched skill line: %q", line)
 	}
-	if line := process.SkillLine(process.SkillPin{Name: "verify-delivery", Version: "1.33.13", Source: "release"}, state("verify-delivery")); line != "verify-delivery 1.33.13 (release; installed)" {
+	if line := process.SkillLine(process.SkillPin{Name: "verify-delivery", Version: "1.33.13", Source: "release"}, state("verify-delivery")); line != "verify-delivery 1.33.13 (release; installed 1.33.13 from the hub (release))" {
 		t.Fatalf("line: %q", line)
 	}
 }

@@ -785,7 +785,8 @@ func SkillStateOn(projectDir, homeDir string) func(name string) SkillState {
 }
 
 // SkillInstallCommand is what a member runs to install or update the
-// required skills from the hub; no text names where the hub got them.
+// required skills from the hub. No text tells a member where the hub got
+// a set: never a URL or a host name.
 const SkillInstallCommand = "aimem skills install"
 
 // Mismatch reports whether an installed copy is known to be another one
@@ -822,14 +823,29 @@ func PinLabel(p SkillPin) string {
 	return p.Name + " " + p.Version + " (" + p.Source + ")"
 }
 
+// Origin is what the copy is and where it came from: "installed 1.34.0
+// from the hub (release)" when `aimem skills install` recorded its source,
+// "installed, not from the hub" for a copy another installer or a hand
+// put there (with its version when the record gives one).
+func (st SkillState) Origin() string {
+	head := "installed"
+	if st.Version != "" {
+		head += " " + st.Version
+	}
+	if st.Source != "" {
+		return head + " from the hub (" + st.Source + ")"
+	}
+	return head + ", not from the hub"
+}
+
 // SkillLine is one required skill as the bootstrap and the readiness
-// checks print it: the pin, then what this machine has. A missing skill or
-// one recorded at another version or source names the command, never a
-// URL.
+// checks print it: the pin, then what this machine has and where it came
+// from. A missing skill or one recorded at another version or source
+// names the command, never a URL.
 func SkillLine(p SkillPin, st SkillState) string {
 	if !p.Pinned() {
 		if st.Installed {
-			return p.Name + " (installed)"
+			return p.Name + " (" + st.Origin() + ")"
 		}
 		return p.Name + " (NOT FOUND on this machine; run `" + SkillInstallCommand + "`)"
 	}
@@ -838,9 +854,7 @@ func SkillLine(p SkillPin, st SkillState) string {
 	case !st.Installed:
 		return head + "NOT FOUND, run `" + SkillInstallCommand + "`)"
 	case st.Mismatch(p):
-		return head + "installed " + st.Have() + ", run `" + SkillInstallCommand + "`)"
-	case st.Version == "":
-		return head + "installed, version unknown)"
+		return head + st.Origin() + ", run `" + SkillInstallCommand + "`)"
 	}
-	return head + "installed)"
+	return head + st.Origin() + ")"
 }

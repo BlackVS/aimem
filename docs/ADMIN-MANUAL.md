@@ -826,7 +826,13 @@ them, `--user` installs for the user instead of the checkout, `--all`
 installs every effective skill); it replaces a skill directory whole and
 records each skill's version and source in the directory's
 `.ai-skills.json`, which is also what the session bootstrap reads to say
-`installed`, `installed 1.33.12, run aimem skills install` or `NOT FOUND`.
+`installed 1.34.0 from the hub (release)`, `installed, not from the hub`
+(a copy the aiskills installers or a hand put there), `installed 1.33.12
+from the hub (release), run aimem skills install` or `NOT FOUND`. A
+required skill the hub does not hold makes `aimem skills install` refuse
+with the import command for it, `aimem process select` and `aimem project
+show` warn `the hub lacks required skills of the project's process`, and
+`aimem project list` marks the project not ready for work.
 `aimem skills list` shows the effective set and what the machine has.
 
 The skills store is hub state: `skills/index.json` and `skills/sets/` under

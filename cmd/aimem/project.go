@@ -20,6 +20,7 @@ import (
 	"strings"
 
 	"aimem/internal/process"
+	"aimem/internal/skills"
 	"aimem/internal/store"
 )
 
@@ -38,7 +39,9 @@ const projectUsage = `usage: aimem project repo set --project <p> --kind github|
 
 repo set|clear, show and list run on the hub host (admin). list prints
 each project's tasks and process state and marks a project with tasks on
-and no process as not ready for work, with the command that selects one.
+and no process as not ready for work, with the command that selects one;
+it marks a project whose process requires skills the hub lacks the same
+way, with the command that imports each. show warns of the same.
 The repository is the one repository the project's work happens in:
 --kind is the forge's API dialect, the host of --url names the credential
 a member needs, and --access is what members need (write, the default, or
@@ -152,6 +155,63 @@ func processesInUse() []process.InUse {
 	return out.Processes
 }
 
+// hubLacksSkills marks a project whose selected process requires skills
+// the hub's sets do not hold: a member's `aimem skills install` refuses
+// them until the admin imports them on the hub host.
+const hubLacksSkills = "the hub lacks required skills of the project's process"
+
+// hubSkillsIndex reads this host's skills index, as the admin reads it.
+func hubSkillsIndex() (*skills.IndexAnswer, error) {
+	var ix skills.IndexAnswer
+	if err := localJSON(http.MethodGet, "/v1/skills", nil, &ix); err != nil {
+		return nil, err
+	}
+	return &ix, nil
+}
+
+// missingHubSkills lists each required skill of the project's selected
+// process that the hub cannot serve, with the command that imports it.
+// None when the project has no selection with a stored set.
+func missingHubSkills(proj string, ix *skills.IndexAnswer) ([]string, error) {
+	var sel struct {
+		Current *process.Ref `json:"current"`
+	}
+	if err := localJSON(http.MethodGet, "/v1/projects/"+url.PathEscape(proj)+"/process", nil, &sel); err != nil {
+		return nil, err
+	}
+	if sel.Current == nil || sel.Current.Digest == "" {
+		return nil, nil
+	}
+	bundle, err := storedSet(proj, *sel.Current)
+	if err != nil {
+		return nil, err
+	}
+	set, err := bundle.Set(*sel.Current)
+	if err != nil {
+		return nil, fmt.Errorf("the stored set does not load: %w", err)
+	}
+	_, problems := skills.Resolve(ix, set.Manifest.Skills)
+	return problems, nil
+}
+
+// hubSkillsGap is what select and show print about the hub's skills for
+// the project: hubLacksSkills and one indented line per missing skill,
+// why the check could not run, or nothing.
+func hubSkillsGap(proj string) string {
+	ix, err := hubSkillsIndex()
+	var missing []string
+	if err == nil {
+		missing, err = missingHubSkills(proj, ix)
+	}
+	if err != nil {
+		return fmt.Sprintf("could not check the hub's skills for the project's process: %v\n", err)
+	}
+	if len(missing) == 0 {
+		return ""
+	}
+	return hubLacksSkills + ":\n  " + strings.Join(missing, "\n  ") + "\n"
+}
+
 // notReady is the line that marks a project with tasks on and no process.
 const notReady = "not ready for work: " + process.NotSelected + "\n"
 
@@ -201,6 +261,9 @@ func projectListCmd(args []string) error {
 	}
 	var inUse []process.InUse
 	inUseRead := false
+	var ix *skills.IndexAnswer
+	var ixErr error
+	ixRead := false
 	for _, p := range all.Projects {
 		fmt.Printf("%-*s  ", width, p)
 		switch {
@@ -215,7 +278,26 @@ func projectListCmd(args []string) error {
 				continue
 			}
 			if selected {
-				fmt.Println("tasks on, process selected")
+				if !ixRead {
+					ix, ixErr = hubSkillsIndex()
+					ixRead = true
+				}
+				var missing []string
+				err := ixErr
+				if err == nil {
+					missing, err = missingHubSkills(p, ix)
+				}
+				switch {
+				case err != nil:
+					fmt.Printf("tasks on, process selected; could not check the hub's skills: %v\n", err)
+				case len(missing) > 0:
+					fmt.Println("not ready for work: " + hubLacksSkills)
+					for _, line := range missing {
+						fmt.Println("  " + line)
+					}
+				default:
+					fmt.Println("tasks on, process selected")
+				}
 				continue
 			}
 			if !inUseRead {
@@ -305,6 +387,9 @@ func projectShowCmd(args []string) error {
 			fmt.Fprintf(w, " (ref %s)", c.Ref)
 		}
 		fmt.Fprintf(w, "\n  selected %s by %s\n", c.SelectedAt, c.SelectedBy)
+		if gap := hubSkillsGap(*p); gap != "" {
+			fmt.Fprint(w, "warning:    "+gap)
+		}
 	} else {
 		fmt.Fprintln(w, "process:    (none selected)")
 		if tasksOn {

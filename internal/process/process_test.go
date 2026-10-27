@@ -206,7 +206,7 @@ func TestBootstrapBudgetAndSkills(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, want := range []string{"Tasks (Kanban) are ON for project alpha", "list_tasks", "cccccccccccc", "oh-code-review (installed)", "missing-one (NOT FOUND", "Templates in the process set", "task", "--- Process handbook ---", "Rules.", "Checklist gating DONE", "[dor-1] scoped", "[dod-1] merged"} {
+	for _, want := range []string{"Tasks (Kanban) are ON for project alpha", "list_tasks", "cccccccccccc", "oh-code-review (installed, not from the hub)", "missing-one (NOT FOUND", "Templates in the process set", "task", "--- Process handbook ---", "Rules.", "Checklist gating DONE", "[dor-1] scoped", "[dod-1] merged"} {
 		if !strings.Contains(text, want) {
 			t.Fatalf("bootstrap lacks %q:\n%s", want, text)
 		}
@@ -297,13 +297,13 @@ func TestManifestVersion2PinsSkills(t *testing.T) {
 		want string
 	}{
 		{SkillState{}, "oh-code-review 1.33.13 (release; NOT FOUND, run `aimem skills install`)"},
-		{SkillState{Installed: true}, "oh-code-review 1.33.13 (release; installed, version unknown)"},
-		{SkillState{Installed: true, Version: "1.33.13"}, "oh-code-review 1.33.13 (release; installed)"},
-		{SkillState{Installed: true, Version: "1.33.12"}, "oh-code-review 1.33.13 (release; installed 1.33.12, run `aimem skills install`)"},
+		{SkillState{Installed: true}, "oh-code-review 1.33.13 (release; installed, not from the hub)"},
+		{SkillState{Installed: true, Version: "1.33.13"}, "oh-code-review 1.33.13 (release; installed 1.33.13, not from the hub)"},
+		{SkillState{Installed: true, Version: "1.33.12"}, "oh-code-review 1.33.13 (release; installed 1.33.12, not from the hub, run `aimem skills install`)"},
 		// The same version from the other source is another skill.
-		{SkillState{Installed: true, Version: "1.33.13", Source: "instance"}, "oh-code-review 1.33.13 (release; installed 1.33.13 (instance), run `aimem skills install`)"},
-		{SkillState{Installed: true, Source: "instance"}, "oh-code-review 1.33.13 (release; installed (instance), run `aimem skills install`)"},
-		{SkillState{Installed: true, Version: "1.33.13", Source: "release"}, "oh-code-review 1.33.13 (release; installed)"},
+		{SkillState{Installed: true, Version: "1.33.13", Source: "instance"}, "oh-code-review 1.33.13 (release; installed 1.33.13 from the hub (instance), run `aimem skills install`)"},
+		{SkillState{Installed: true, Source: "instance"}, "oh-code-review 1.33.13 (release; installed from the hub (instance), run `aimem skills install`)"},
+		{SkillState{Installed: true, Version: "1.33.13", Source: "release"}, "oh-code-review 1.33.13 (release; installed 1.33.13 from the hub (release))"},
 	} {
 		if got := SkillLine(pin, c.st); got != c.want {
 			t.Errorf("SkillLine(%+v) = %q, want %q", c.st, got, c.want)
