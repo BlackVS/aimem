@@ -182,6 +182,9 @@ func processCmd(args []string) error {
 			return fmt.Errorf("HTTP %d: %s", resp.StatusCode, strings.TrimSpace(string(data)))
 		}
 		fmt.Println(strings.TrimSpace(string(data)))
+		if gap := hubSkillsGap(proj); gap != "" {
+			fmt.Fprint(os.Stderr, "warning: "+gap)
+		}
 		return nil
 	case "show":
 		fs := flag.NewFlagSet("process show", flag.ExitOnError)

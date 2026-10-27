@@ -16,6 +16,7 @@ var commandUsages = map[string]string{
 	"docs":    docsUsage,
 	"hub":     hubUsage,
 	"process": processUsage,
+	"project": projectUsage,
 	"skills":  skillsUsage,
 	"token":   tokenUsage,
 }
@@ -197,6 +198,7 @@ func TestQuickstartNewProjectCommandsMatchUsage(t *testing.T) {
 		"aimem access token-issue-user ", "aimem hub add team ", "aimem hub task-token team ",
 		"aimem health", "aimem session-start", "aimem docs list",
 		"aimem process select ", "aimem process show", "aimem process show --template task",
+		"aimem skills import --from-archive ", "aimem project repo set ", "aimem skills install",
 	} {
 		found := false
 		for _, c := range cmds {
@@ -205,6 +207,29 @@ func TestQuickstartNewProjectCommandsMatchUsage(t *testing.T) {
 		if !found {
 			t.Errorf("the guide shows no %q", want)
 		}
+	}
+}
+
+// Step 2 imports the skills before it selects the process, binds the
+// repository, and quotes the warning the CLI prints when the hub lacks a
+// required skill.
+func TestQuickstartNewProjectImportsSkillsBeforeTheProcess(t *testing.T) {
+	raw, err := os.ReadFile("../../docs/QUICKSTART-NEW-PROJECT.md")
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := string(raw)
+	step2, _, _ := strings.Cut(text[strings.Index(text, "## 2. "):], "## 3. ")
+	imp := strings.Index(step2, "aimem skills import --from-archive aiskills-")
+	sel := strings.Index(step2, "aimem process select ")
+	if imp < 0 || sel < 0 || imp > sel {
+		t.Errorf("step 2 does not import the skills release before the process selection (import at %d, select at %d)", imp, sel)
+	}
+	if !strings.Contains(step2, "aimem project repo set --project my-project ") {
+		t.Error("step 2 does not bind the project's repository")
+	}
+	if strings.Count(text, "`"+hubLacksSkills+"`") < 2 {
+		t.Errorf("the guide does not quote the warning %q in step 2 and step 3.2", hubLacksSkills)
 	}
 }
 

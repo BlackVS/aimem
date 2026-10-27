@@ -84,6 +84,25 @@ is aimem's own process and requires the `oh-code-review` skill from step
 before you select it; a project with other rules copies the
 set into a repository of its own and selects that instead.
 
+**The skills, before the process.** Members install the skills a
+process requires from the hub, so the hub must hold them. Import the
+skills release on the hub host before you select the process, from the
+`aiskills-X.Y.Z.tar.gz` release archive with its `SHA256SUMS` beside it:
+
+```sh
+aimem skills import --from-archive aiskills-X.Y.Z.tar.gz
+```
+
+The [admin manual](ADMIN-MANUAL.md#importing-the-skills-sets) covers the
+import and the instance set for skills of your own. A process that
+requires a skill the hub does not hold still selects, but
+`aimem process select` and `aimem project show` warn
+`the hub lacks required skills of the project's process`, with one line
+per missing skill and the import command for it, and
+`aimem project list` marks the project `not ready for work`. Every
+member's `aimem skills install` refuses those skills until you import
+them.
+
 Select a release tag of the repository. The hub host resolves the tag to
 the commit it holds now and pins the selection to that commit, so the
 agents read exactly what you reviewed; the manifest path defaults to
@@ -100,6 +119,19 @@ them from the hub, and step 3.6 checks that it does. To move to a
 newer release later, select its tag with `--expect` and the tag (or
 commit) selected now; see
 [the administrator manual](ADMIN-MANUAL.md#selecting-a-projects-process-documents).
+
+**The repository.** Bind the project to the one repository its work
+happens in. The host of the URL names the forge credential a member
+needs:
+
+```sh
+aimem project repo set --project my-project --kind github --url https://github.com/you/my-project.git
+aimem project show --project my-project
+```
+
+`--kind` is `github`, `gitea` or `gitlab`. `aimem project show` prints
+the repository, the process and, when the hub lacks a required skill,
+the warning above.
 
 **The user and the grant.** List the users first and skip `user-add` if
 `my-agent` already exists:
@@ -204,12 +236,15 @@ ID, a session would journal under an ID derived from the directory.
 Skip this step for plain journaling. A project that uses the process
 from step 2, the review gates or a team process needs the skills the
 process names (the review skill `oh-code-review` among them). They come
-from the hub: the admin imports the skills release once on the hub host
-(`aimem skills import --from-archive aiskills-X.Y.Z.tar.gz`, verified
-against the `SHA256SUMS` beside it; see the
-[admin manual](ADMIN-MANUAL.md#importing-the-skills-sets)), and each
-member installs them in the checkout after step 3.5, once the checkout is
-bound to the hub:
+from the hub. The skills import of step 2
+(`aimem skills import --from-archive aiskills-X.Y.Z.tar.gz` on the hub
+host, verified against the `SHA256SUMS` beside it; see the
+[admin manual](ADMIN-MANUAL.md#importing-the-skills-sets)) is the
+hub-side prerequisite of the process selection: until it is done, the
+hub warns `the hub lacks required skills of the project's process` and
+this step refuses each missing skill with the command that imports it.
+Each member installs them in the checkout after step 3.5, once the
+checkout is bound to the hub:
 
 ```sh
 aimem skills install
@@ -333,10 +368,12 @@ aimem process show
   first 12 characters of the commit you selected, then names the
   manifest, `processes/aimem/manifest.json` (the repository URL is not
   part of what a session sees; `--full` prints it). Then come
-  `Required skills: oh-code-review (installed)` (with a version 2
-  manifest, `oh-code-review 1.33.13 (release; installed)`; a missing or
-  outdated skill reads `run aimem skills install`), the handbook and the
-  READY and DONE checklists. A notice in their place (no process
+  `Required skills: oh-code-review (installed 1.34.0 from the hub (release))`
+  (with a version 2 manifest,
+  `oh-code-review 1.34.0 (release; installed 1.34.0 from the hub (release))`;
+  a copy another installer put there reads `installed, not from the hub`,
+  and a missing or outdated skill reads `run aimem skills install`), the
+  handbook and the READY and DONE checklists. A notice in their place (no process
   selected, access denied, unavailable) names its cause. The command
   succeeds either way, so read the output.
 

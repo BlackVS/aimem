@@ -15,6 +15,22 @@ currently 25); a binary refuses a database newer than it understands.
 
 ### Changed
 
+- **A required skill the hub lacks is reported with the command that
+  imports it.** A hub with no skills imported reported a ready project,
+  `aimem process show` called a skill another installer had put on the
+  machine installed, and `aimem skills install` refused with no fix. Now
+  `aimem skills install` names, beside each missing skill, the hub-host
+  command that imports it: `aimem skills import --from-archive
+  aiskills-<version>.tar.gz` for a skill of the skills release, the
+  instance set for any other, with the administrator manual's section.
+  `aimem process select` and `aimem project show` warn `the hub lacks
+  required skills of the project's process` with the same lines, and
+  `aimem project list` marks such a project not ready for work. The
+  bootstrap and the session-start notice say where an installed skill
+  came from: `installed 1.34.0 from the hub (release)` or `installed,
+  not from the hub`. QUICKSTART-NEW-PROJECT step 2 now imports the
+  skills before the process selection and binds the project's
+  repository.
 - **The documented Windows install no longer pipes a download into
   `iex` or bypasses the execution policy.** README, ADMIN-MANUAL,
   INSTALL-CLIENT and both quickstarts now show one PowerShell block. It
