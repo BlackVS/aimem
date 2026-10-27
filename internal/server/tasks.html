@@ -372,6 +372,7 @@ async function canWrite(project){
 // A forced reload of the same project (refreshAll) keeps the epics, the
 // filter and the open panel until the answer arrives, and then drops the
 // filter only if its epic is gone; a failed reload keeps what it had.
+// It answers true when it dropped the filter.
 async function loadEpics(project, force){
   if(EPICS_PROJ===project && !force) return;
   const gen = ++EPICS_GEN;
@@ -386,16 +387,18 @@ async function loadEpics(project, force){
   // (or a load this one superseded) never lands in the shared cache.
   const got = {};
   try{ const r = await api("/v1/projects/"+encodeURIComponent(project)+"/epics?include_retired=true"); for(const e of (r.epics||[])) got[e.id] = e; }
-  catch(_){ if(gen===EPICS_GEN && !reload) EPICS_PROJ = ""; return; }
-  if(gen!==EPICS_GEN) return;
+  catch(_){ if(gen===EPICS_GEN && !reload) EPICS_PROJ = ""; return false; }
+  if(gen!==EPICS_GEN) return false;
   EPICS = got;
+  let dropped = false;
   if(reload){
     const was = FILTER.epic, wasOpen = $("epicDetails").open;
-    if(was && !EPICS[was]){ FILTER.epic = ""; toast("the selected epic no longer exists; showing all epics"); }
+    if(was && !EPICS[was]){ FILTER.epic = ""; dropped = true; toast("the selected epic no longer exists; showing all epics"); }
     renderEpicDetails();
     if(FILTER.epic) $("epicDetails").open = wasOpen;
   }
   $("epicSel").innerHTML = '<option value="">all epics</option>' + Object.values(EPICS).map(e => `<option value="${esc(e.id)}"${e.id===FILTER.epic?' selected':''}>${esc(e.title)}${e.state==="RETIRED"?" (retired)":""}</option>`).join("");
+  return dropped;
 }
 function epicLabel(id){ const e = EPICS[id]; return e ? e.title : short(id); }
 function renderEpicDetails(){
@@ -419,7 +422,13 @@ let LOAD_AT = 0, REFRESHING = false;
 async function refreshAll(){
   if(REFRESHING || !PROJ) return;
   const my = NAV; REFRESHING = true; LOAD_AT = Date.now();
-  try{ await loadEpics(PROJ, true); if(my===NAV) await refreshView(); } // a view opened meanwhile has loaded itself
+  try{
+    // A list or board opened meanwhile has loaded itself, but with the
+    // epic the reload then dropped: that one loads again. (A project
+    // change supersedes the reload, which then drops nothing.)
+    const dropped = await loadEpics(PROJ, true);
+    if(my===NAV || (dropped && !$("v-list").hidden)) await refreshView();
+  }
   finally{ REFRESHING = false; }
 }
 function autoRefresh(){

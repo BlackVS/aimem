@@ -56,13 +56,14 @@ assert.equal(run('FILTER.epic'), '');
 // refreshAll: the epics reload with the view. A fake hub counts the calls
 // and serves the epics the test sets.
 let calls = [], hubEpics = [], epicsFail = false;
-context.fakeApi = async path => {
+const immediateApi = async path => {
   calls.push(path);
   if (path.includes('/epics')) { if (epicsFail) throw new Error('hub down'); return {epics: hubEpics}; }
-  if (path.includes('/tasks/counts')) return {};
+  if (path.includes('/tasks/counts')) return {counts: {}, total: 0, archived: 0};
   if (path.includes('/tasks?')) return {tasks: [], next_cursor: ''};
   return {};
 };
+context.fakeApi = immediateApi;
 const settle = () => new Promise(r => setImmediate(r));
 const tasksCalls = () => calls.filter(p => p.includes('/tasks?'));
 const epicCalls = () => calls.filter(p => p.includes('/epics'));
@@ -139,6 +140,52 @@ assert.equal(tasksCalls().length, 1);
 now += 60_000; calls = [];
 const pending = run('refreshAll()'); run('NAV++'); await pending;
 assert.equal(tasksCalls().length, 0, 'a superseded refresh does not reload the view');
+// The board switched to the list while the epics reload, and the reload
+// then drops the selected epic: the list the switch loaded used that
+// epic, so it loads again without it.
+let release;
+context.fakeApi = async path => {
+  calls.push(path);
+  if (path.includes('/epics')) { await new Promise(r => { release = r; }); return {epics: hubEpics}; }
+  if (path.includes('/tasks/counts')) return {counts: {}, total: 0, archived: 0};
+  if (path.includes('/tasks?')) return {tasks: [], next_cursor: ''};
+  return {};
+};
+hubEpics = [{id: 'a', title: 'Alpha', state: 'OPEN'}, {id: 'b', title: 'Beta', state: 'OPEN'}];
+run(`api = fakeApi; EPICS = {a: {id: 'a', title: 'Alpha', state: 'OPEN'}, b: {id: 'b', title: 'Beta', state: 'OPEN'}}; FILTER.epic = 'a'; VIEW = 'board';`);
+now += 60_000; calls = [];
+const switched = run('refreshAll()');
+await settle();
+run(`VIEW = 'list'; showList();`); await settle();
+assert.ok(tasksCalls().some(p => /epic=a/.test(p)), 'the switch loads the list under the selected epic');
+hubEpics = [{id: 'b', title: 'Beta', state: 'OPEN'}];
+const before = tasksCalls().length;
+release(); await switched; await settle();
+assert.equal(run('FILTER.epic'), '');
+assert.equal(tasksCalls().length, before + 1, 'the list loads again once the epic is dropped');
+assert.doesNotMatch(tasksCalls().at(-1), /epic=/, 'and without the dropped epic');
+// The same switch with the epic still present: the list it loaded stands.
+run(`FILTER.epic = 'b'; VIEW = 'board';`);
+now += 60_000; calls = [];
+const kept = run('refreshAll()');
+await settle();
+run(`VIEW = 'list'; showList();`); await settle();
+const listed = tasksCalls().length;
+release(); await kept; await settle();
+assert.equal(tasksCalls().length, listed, 'a view opened meanwhile is not loaded twice');
+// A task opened while the epics reload is never reloaded, even when the
+// reload drops the epic.
+run(`FILTER.epic = 'b'; VIEW = 'list';`);
+now += 60_000; calls = [];
+const opened = run('refreshAll()');
+await settle();
+run('NAV++'); element('v-list').hidden = true;
+hubEpics = [];
+release(); await opened; await settle();
+assert.equal(run('FILTER.epic'), '');
+assert.equal(tasksCalls().length, 0, 'a task page is not reloaded under its form');
+element('v-list').hidden = false;
+context.fakeApi = immediateApi; run('api = fakeApi;');
 now += 60_000; calls = [];
 run(`VIEW = 'board'`); fire(); await settle();
 assert.equal(epicCalls().length, 1, 'the board reloads its epics too');
