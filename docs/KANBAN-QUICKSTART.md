@@ -270,7 +270,10 @@ they are not changing and re-read after conflicts.
 
 A project with tasks on needs a selected process before it is ready for
 work (section 2). The process injects your handbook, readiness and
-completion checklists, templates and required-skill names.
+completion checklists, templates and required-skill names. The habits
+that keep the agents' token use down, starting with English for
+everything agents read, are in
+[Saving tokens](QUICKSTART-NEW-PROJECT.md#45-saving-tokens).
 
 The process lives in a Git repository, which is separate from the hub:
 the hub stores the selection and a copy of the files at the selected
