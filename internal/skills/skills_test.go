@@ -361,30 +361,32 @@ func TestImportFixNamesTheCommand(t *testing.T) {
 	for _, c := range []struct {
 		name string
 		ix   *IndexAnswer
-		pins []process.SkillPin
 		p    process.SkillPin
 		want string
 	}{
-		{"no set imported, a release name, the version another pin gives", empty, []process.SkillPin{{Name: "oh-code-review"}, pinnedRelease}, process.SkillPin{Name: "oh-code-review"}, release("1.34.0")},
-		{"no set imported, a release name, no version pinned", empty, []process.SkillPin{{Name: "oh-code-review"}}, process.SkillPin{Name: "oh-code-review"}, release("<version>")},
-		{"no set imported, another name", empty, []process.SkillPin{{Name: "house-style"}}, process.SkillPin{Name: "house-style"}, "it is not in the skills release, so it must come from the instance set: " + instance("<version>")},
-		{"a release set imported decides over the built-in names", onHub, []process.SkillPin{{Name: "forge-gates"}}, process.SkillPin{Name: "forge-gates"}, "it is not in the skills release, so it must come from the instance set: " + instance("<version>")},
-		{"a kept release set lists it", onHub, []process.SkillPin{{Name: "oh-qa-changes"}}, process.SkillPin{Name: "oh-qa-changes"}, release("<version>")},
-		{"a release pin", onHub, nil, process.SkillPin{Name: "oh-code-review", Version: "1.33.11", Source: "release"}, release("1.33.11")},
-		{"an instance pin", empty, nil, process.SkillPin{Name: "oh-code-review", Version: "site-2", Source: "instance"}, instance("site-2")},
+		{"no set imported, a release name", empty, process.SkillPin{Name: "oh-code-review"}, release("<version>")},
+		{"no set imported, another name", empty, process.SkillPin{Name: "house-style"}, "it is not in the skills release, so it must come from the instance set: " + instance("<version>")},
+		{"a release set imported decides over the built-in names", onHub, process.SkillPin{Name: "forge-gates"}, "it is not in the skills release, so it must come from the instance set: " + instance("<version>")},
+		{"a kept release set lists it", onHub, process.SkillPin{Name: "oh-qa-changes"}, release("<version>")},
+		{"a release pin", onHub, process.SkillPin{Name: "oh-code-review", Version: "1.33.11", Source: "release"}, release("1.33.11")},
+		{"an instance pin", empty, process.SkillPin{Name: "oh-code-review", Version: "site-2", Source: "instance"}, instance("site-2")},
 	} {
-		if got := ImportFix(c.ix, c.pins, c.p); got != c.want {
+		if got := ImportFix(c.ix, c.p); got != c.want {
 			t.Errorf("%s:\n got %q\nwant %q", c.name, got, c.want)
 		}
 	}
-	// The hub without any set (2026-10-26): every problem carries its fix.
-	_, problems := Resolve(empty, []process.SkillPin{{Name: "oh-code-review"}, pinnedRelease})
-	want := []string{
-		"oh-code-review: no skill of that name in the hub's sets; " + release("1.34.0"),
-		"verify-delivery 1.34.0 (release) is not on the hub: no release set is imported; " + release("1.34.0") + ", or the process pins the current one",
-	}
-	if got, w := strings.Join(problems, "\n"), strings.Join(want, "\n"); got != w {
-		t.Fatalf("problems:\n%s\nwant:\n%s", got, w)
+	// The hub without any set (2026-10-26): every problem carries its fix,
+	// for a version 1 manifest (names only) and a version 2 one (all pinned).
+	for _, c := range []struct {
+		pins []process.SkillPin
+		want string
+	}{
+		{[]process.SkillPin{{Name: "oh-code-review"}}, "oh-code-review: no skill of that name in the hub's sets; " + release("<version>")},
+		{[]process.SkillPin{pinnedRelease}, "verify-delivery 1.34.0 (release) is not on the hub: no release set is imported; " + release("1.34.0") + ", or the process pins the current one"},
+	} {
+		if _, problems := Resolve(empty, c.pins); strings.Join(problems, "\n") != c.want {
+			t.Errorf("problems:\n%s\nwant:\n%s", strings.Join(problems, "\n"), c.want)
+		}
 	}
 }
 

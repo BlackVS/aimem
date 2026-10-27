@@ -182,7 +182,7 @@ func Resolve(ix *IndexAnswer, pins []process.SkillPin) (picks []Skill, problems 
 		if !p.Pinned() {
 			s, ok := effective[p.Name]
 			if !ok {
-				problems = append(problems, fmt.Sprintf("%s: no skill of that name in the hub's sets; %s", p.Name, ImportFix(ix, pins, p)))
+				problems = append(problems, fmt.Sprintf("%s: no skill of that name in the hub's sets; %s", p.Name, ImportFix(ix, p)))
 				continue
 			}
 			picks = append(picks, s)
@@ -207,7 +207,7 @@ func Resolve(ix *IndexAnswer, pins []process.SkillPin) (picks []Skill, problems 
 					state += ", which has no skill " + p.Name
 				}
 			}
-			problems = append(problems, fmt.Sprintf("%s %s (%s) is not on the hub: %s; %s, or the process pins the current one", p.Name, p.Version, p.Source, state, ImportFix(ix, pins, p)))
+			problems = append(problems, fmt.Sprintf("%s %s (%s) is not on the hub: %s; %s, or the process pins the current one", p.Name, p.Version, p.Source, state, ImportFix(ix, p)))
 			continue
 		}
 		picks = append(picks, Skill{Name: p.Name, Version: found.Version, Source: p.Source, Digest: found.Digest})
@@ -229,20 +229,14 @@ const AdminManualImport = "docs/ADMIN-MANUAL.md#importing-the-skills-sets"
 // hub, run by the admin on the hub host. A pin's source decides which
 // set it comes from. An unpinned name is a release skill when a release
 // set on the hub lists it, or, with none imported, when ReleaseNames
-// does; its version is the release version the manifest pins for its
-// other skills, else a placeholder.
-func ImportFix(ix *IndexAnswer, pins []process.SkillPin, p process.SkillPin) string {
+// does; its version is a placeholder, since only a version 1 manifest
+// names a skill without a version, and it pins none of its skills.
+func ImportFix(ix *IndexAnswer, p process.SkillPin) string {
 	source, version := p.Source, p.Version
 	if !p.Pinned() {
 		source, version = SourceInstance, "<version>"
 		if releaseName(ix, p.Name) {
 			source = SourceRelease
-			for _, o := range pins {
-				if o.Pinned() && o.Source == SourceRelease {
-					version = o.Version
-					break
-				}
-			}
 		}
 	}
 	if source == SourceRelease {
