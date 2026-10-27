@@ -156,7 +156,7 @@ func enrollRedeem(root, hubName, label string, stdin io.Reader, stderr io.Writer
 	if len(raw) > enrollRecordLimit {
 		return enrollResult{}, refuse(enrollExitFinal, "the subcode record is larger than %d bytes", enrollRecordLimit)
 	}
-	rec, err := parseEnrollRecord(raw)
+	rec, err := parseEnrollRecord(trimBOM(raw))
 	if err != nil {
 		return enrollResult{}, refuse(enrollExitFinal, "the subcode record is not valid: %v", err)
 	}

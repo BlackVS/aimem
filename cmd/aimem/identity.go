@@ -657,7 +657,7 @@ func newIdentityClient(hub, tokenFile, caFile, pin string) (*identityClient, err
 	if err != nil {
 		return nil, fmt.Errorf("--admin-token-file: %w", err)
 	}
-	token := strings.TrimSpace(string(raw))
+	token := strings.TrimSpace(string(trimBOM(raw)))
 	if token == "" || strings.ContainsAny(token, " \t\r\n") {
 		return nil, fmt.Errorf("--admin-token-file must hold exactly one bearer on one line")
 	}

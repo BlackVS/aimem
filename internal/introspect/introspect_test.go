@@ -439,6 +439,17 @@ func TestIntrospectCredentialFile(t *testing.T) {
 	}
 }
 
+// A credential file written by Windows PowerShell 5.1 starts with a UTF-8
+// BOM, which is not part of the bearer; a second one is still refused.
+func TestReadCredentialDropsALeadingBOM(t *testing.T) {
+	if got, err := ReadCredential(credentialFile(t, "\uFEFF"+testBearer+"\r\n")); err != nil || got != testBearer {
+		t.Fatalf("got %q, %v", got, err)
+	}
+	if _, err := ReadCredential(credentialFile(t, "\uFEFF\uFEFF"+testBearer)); err == nil {
+		t.Fatal("two BOMs accepted")
+	}
+}
+
 func TestIntrospectFailuresCarryNoSecret(t *testing.T) {
 	f := newFake(t)
 	c := newClient(t, f)

@@ -32,7 +32,7 @@ func runTaskToken(args []string, dir, root string, in io.Reader, out io.Writer) 
 		}
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
-		if err := taskcred.Set(ctx, dir, root, strings.TrimSpace(string(raw))); err != nil {
+		if err := taskcred.Set(ctx, dir, root, strings.TrimSpace(string(trimBOM(raw)))); err != nil {
 			return err
 		}
 		fmt.Fprintln(out, "Project-local task credential set; .aimem.json contains only the local requirement.")
