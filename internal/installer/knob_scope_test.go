@@ -1,6 +1,8 @@
 package installer
 
 import (
+	"crypto/sha256"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -59,58 +61,124 @@ Write-Output "target=[$env:AIMEM_TARGET_VERSION] prebuilt=[$env:AIMEM_PREBUILT]"
 	}
 }
 
-// Scenario test for the documented Windows knob forms: each one in
-// ADMIN-MANUAL, run from the shell it is written for, hands the knob to
-// the run and leaves the caller's window without it. The download is
-// replaced by a stub that reports the knob it saw.
-func TestDocumentedWindowsKnobFormsScopeTheKnobToTheRun(t *testing.T) {
+// Scenario test for the documented Windows install block: every block in
+// the install guides, run from a PowerShell window, checks boot.ps1
+// against SHA256SUMS before it runs it, runs it as a file under
+// RemoteSigned from the caller's directory, hands a knob only to the run,
+// and runs nothing when the hash does not match. The two downloads are
+// replaced by copies of a stub boot.ps1 and its SHA256SUMS, each marked
+// as coming from the internet the way PowerShell 7's Invoke-WebRequest
+// marks it, so the block's Unblock-File is exercised too.
+func TestDocumentedWindowsBlocksCheckAndRunBootPs1(t *testing.T) {
 	shells := powerShells(t)
-	manual := read(t, filepath.Join("docs", "ADMIN-MANUAL.md"))
-	fetch := regexp.MustCompile(`irm https://\S+/boot\.ps1 \| iex`)
-	forms := map[string]string{}
-	for _, lang := range []string{"powershell", "bat"} {
-		for _, m := range regexp.MustCompile("(?s)```"+lang+"\n(.*?)```").FindAllStringSubmatch(manual, -1) {
-			if strings.Contains(m[1], "AIMEM_USER_ONLY") {
-				if forms[lang] != "" {
-					t.Fatalf("ADMIN-MANUAL has more than one %s knob form; extend this test", lang)
+	download := regexp.MustCompile(`Invoke-WebRequest https://github\.com/BlackVS/aimem/releases/download/[^/\s]+/(boot\.ps1|SHA256SUMS) -OutFile (\$\w+) -UseBasicParsing`)
+	blocks := map[string]string{}
+	for _, doc := range []string{"README.md", "docs/ADMIN-MANUAL.md", "docs/INSTALL-CLIENT.md", "docs/QUICKSTART.md", "docs/QUICKSTART-NEW-PROJECT.md"} {
+		text := read(t, doc)
+		for _, m := range regexp.MustCompile("(?s)```(\\w*)\n(.*?)```").FindAllStringSubmatch(text, -1) {
+			if strings.Contains(m[2], "boot.ps1") && (strings.Contains(m[2], "| iex") || strings.Contains(m[2], "Bypass")) {
+				t.Errorf("%s still documents a boot.ps1 form with irm | iex or a policy bypass:\n%s", doc, m[2])
+			}
+			if m[1] == "powershell" && strings.Contains(m[2], "boot.ps1") && !strings.Contains(m[2], "install.ps1") {
+				if len(download.FindAllString(m[2], -1)) != 2 {
+					t.Fatalf("%s has a boot.ps1 block that does not download boot.ps1 and SHA256SUMS from the release:\n%s", doc, m[2])
 				}
-				forms[lang] = strings.TrimSpace(m[1])
+				blocks[doc+"\n"+m[2]] = m[2]
 			}
 		}
-		if forms[lang] == "" {
-			t.Fatalf("ADMIN-MANUAL has no %s form that passes AIMEM_USER_ONLY", lang)
-		}
-		if !fetch.MatchString(forms[lang]) {
-			t.Fatalf("the %s form does not fetch boot.ps1 with irm | iex: %s", lang, forms[lang])
-		}
 	}
+	if len(blocks) < 5 {
+		t.Fatalf("found %d documented Windows blocks; want one in each of the five guides at least", len(blocks))
+	}
+
 	dir := t.TempDir()
-	stub := filepath.Join(dir, "stub.ps1")
-	if err := os.WriteFile(stub, []byte("Write-Output \"run saw=[$env:AIMEM_USER_ONLY]\"\n"), 0o600); err != nil {
+	stub := filepath.Join(dir, "release")
+	project := filepath.Join(dir, "project")
+	for _, d := range []string{stub, project, filepath.Join(dir, "temp")} {
+		if err := os.Mkdir(d, 0o700); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// The runner's temp directory is a short 8.3 name (RUNNER~1), and
+	// PowerShell reports the working directory by its long name.
+	project, err := filepath.EvalSymlinks(project)
+	if err != nil {
 		t.Fatal(err)
 	}
-	local := "Get-Content -Raw -LiteralPath $env:STUB | iex"
-	env := append(withoutAimemEnv(), "STUB="+stub)
+	// The stub loads Get-FileHash, as the real boot.ps1 does, so the child
+	// Windows PowerShell has to load its own utility module.
+	boot := []byte("$null = Get-FileHash -LiteralPath $PSCommandPath\r\nWrite-Output \"run saw=[$env:AIMEM_USER_ONLY] cwd=[$($PWD.Path)]\"\r\n")
+	if err := os.WriteFile(filepath.Join(stub, "boot.ps1"), boot, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	// SHA256SUMS carries lower-case hashes and Get-FileHash answers in
+	// upper case; the block's -ne compares them case-insensitively on
+	// purpose.
+	sum := sha256.Sum256(boot)
+	good := fmt.Sprintf("%x  aimem-windows-amd64.exe\n%x  boot.ps1\n", sha256.Sum256([]byte("binary")), sum)
+	tampered := fmt.Sprintf("%x  boot.ps1\n", sha256.Sum256([]byte("another boot.ps1")))
+	copyMarked := `Copy-Item -LiteralPath (Join-Path $$env:STUB '${1}') -Destination ${2}; Set-Content -LiteralPath ${2} -Stream Zone.Identifier -Value '[ZoneTransfer]', 'ZoneId=3'`
+	// A Windows PowerShell window started by this test under a pwsh step
+	// would inherit pwsh's module path and could not load Get-FileHash; a
+	// user's window has its own shell's path. A pwsh window keeps it, so
+	// the child powershell it starts gets what a pwsh user's child gets.
+	envFor := func(ps string) []string {
+		var env []string
+		for _, kv := range withoutAimemEnv() {
+			k := strings.ToUpper(kv)
+			if strings.HasPrefix(k, "TEMP=") || (strings.HasPrefix(k, "PSMODULEPATH=") && !strings.EqualFold(filepath.Base(ps), "pwsh.exe")) {
+				continue
+			}
+			env = append(env, kv)
+		}
+		return append(env, "STUB="+stub, "TEMP="+filepath.Join(dir, "temp"))
+	}
 
-	psFile := filepath.Join(dir, "window.ps1")
-	psScript := fetch.ReplaceAllLiteralString(forms["powershell"], local) + "\nWrite-Output \"window after=[$env:AIMEM_USER_ONLY]\"\n"
-	if err := os.WriteFile(psFile, []byte(psScript), 0o600); err != nil {
-		t.Fatal(err)
+	run := func(t *testing.T, ps, block, sums string) string {
+		t.Helper()
+		if err := os.WriteFile(filepath.Join(stub, "SHA256SUMS"), []byte(sums), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		var lines []string
+		for _, l := range strings.Split(download.ReplaceAllString(block, copyMarked), "\n") {
+			if !strings.HasPrefix(l, "cd ") {
+				lines = append(lines, l)
+			}
+		}
+		script := strings.Join(lines, "\n") + "\nWrite-Output \"window after=[$env:AIMEM_USER_ONLY]\"\n"
+		file := filepath.Join(dir, "window.ps1")
+		if err := os.WriteFile(file, []byte(script), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		out, _ := runPowerShell(t, ps, project, envFor(ps), file)
+		return out
 	}
-	for _, ps := range shells {
-		out, err := runPowerShell(t, ps, dir, env, psFile)
-		checkKnobScoped(t, "PowerShell window ("+filepath.Base(ps)+")", out, err)
+	for key, block := range blocks {
+		doc := strings.SplitN(key, "\n", 2)[0]
+		want := "run saw=[]"
+		if strings.Contains(block, "AIMEM_USER_ONLY") {
+			want = "run saw=[1]"
+		}
+		for _, ps := range shells {
+			t.Run(doc+" in "+filepath.Base(ps), func(t *testing.T) {
+				out := run(t, ps, block, good)
+				if !strings.Contains(out, want+" cwd=["+project+"]") {
+					t.Fatalf("the block did not run boot.ps1 from the caller's directory with %q:\n%s", want, out)
+				}
+				if !strings.Contains(out, "window after=[]") {
+					t.Fatalf("the block left AIMEM_USER_ONLY set in the window:\n%s", out)
+				}
+				out = run(t, ps, block, tampered)
+				if strings.Contains(out, "run saw=") || !strings.Contains(out, "boot.ps1 does not match SHA256SUMS") {
+					t.Fatalf("the block ran a boot.ps1 whose hash SHA256SUMS does not list:\n%s", out)
+				}
+				out = run(t, ps, strings.Replace(block, "  Unblock-File -LiteralPath $f\n", "", 1), good)
+				if strings.Contains(out, "run saw=") {
+					t.Fatalf("a boot.ps1 marked as downloaded ran under RemoteSigned without Unblock-File, so the stub's mark does not test it:\n%s", out)
+				}
+			})
+		}
 	}
-
-	batFile := filepath.Join(dir, "window.bat")
-	bat := "@echo off\r\n" + fetch.ReplaceAllLiteralString(forms["bat"], local) + "\r\nif defined AIMEM_USER_ONLY (echo window after=[%AIMEM_USER_ONLY%]) else (echo window after=[])\r\n"
-	if err := os.WriteFile(batFile, []byte(bat), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	cmd := exec.Command("cmd", "/d", "/c", batFile)
-	cmd.Dir, cmd.Env = dir, append(env, "PSModuleAnalysisCachePath="+filepath.Join(dir, "ps-module-analysis-cache"))
-	raw, err := cmd.CombinedOutput()
-	checkKnobScoped(t, "cmd window", string(raw), err)
 }
 
 // powerShells is every PowerShell on the PATH, so a run covers both
@@ -125,16 +193,6 @@ func powerShells(t *testing.T) []string {
 		}
 	}
 	return found
-}
-
-func checkKnobScoped(t *testing.T, shell, out string, err error) {
-	t.Helper()
-	if err != nil || !strings.Contains(out, "run saw=[1]") {
-		t.Fatalf("%s: the documented form did not hand AIMEM_USER_ONLY=1 to the run (%v):\n%s", shell, err, out)
-	}
-	if !strings.Contains(out, "window after=[]") {
-		t.Fatalf("%s: the documented form left AIMEM_USER_ONLY set in the window:\n%s", shell, out)
-	}
 }
 
 // withoutAimemEnv is the test's environment without any AIMEM_ variable,

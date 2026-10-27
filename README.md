@@ -197,15 +197,31 @@ already run, with tasks, the handoff and design documents, is
 curl -fsSL https://raw.githubusercontent.com/BlackVS/aimem/v0.10.14/boot.sh | bash
 ```
 
+Windows, in a PowerShell window (from cmd or Win+R, type `powershell`
+first and paste the block there):
+
 ```powershell
-# Windows, in a PowerShell window that is already open
-irm https://raw.githubusercontent.com/BlackVS/aimem/v0.10.14/boot.ps1 | iex
+& {
+  $ErrorActionPreference = 'Stop'
+  $d = New-Item -ItemType Directory -Force (Join-Path $env:TEMP 'aimem-boot')
+  $f = Join-Path $d 'boot.ps1'; $s = Join-Path $d 'SHA256SUMS'
+  Invoke-WebRequest https://github.com/BlackVS/aimem/releases/download/v0.10.14/boot.ps1 -OutFile $f -UseBasicParsing
+  Invoke-WebRequest https://github.com/BlackVS/aimem/releases/download/v0.10.14/SHA256SUMS -OutFile $s -UseBasicParsing
+  $want = ((Select-String -LiteralPath $s -Pattern '\sboot\.ps1$').Line -split '\s+')[0]
+  if ((Get-FileHash -LiteralPath $f).Hash -ne $want) { throw 'boot.ps1 does not match SHA256SUMS' }
+  Unblock-File -LiteralPath $f
+  powershell -NoProfile -ExecutionPolicy RemoteSigned -File $f
+}
 ```
 
-```bat
-:: Windows, from cmd
-powershell -NoProfile -ExecutionPolicy Bypass -Command "irm https://raw.githubusercontent.com/BlackVS/aimem/v0.10.14/boot.ps1 | iex"
-```
+The block downloads `boot.ps1` and `SHA256SUMS` from the release,
+refuses a `boot.ps1` whose hash the release does not list, and runs it
+in a child PowerShell under the `RemoteSigned` policy for that process
+only. There is no `irm | iex` and no execution-policy bypass. There is
+no one-line cmd form: the check and the run in one line would be too
+long to read before running it. Releases up to 0.10.13 publish no
+`boot.ps1` asset; they were installed with `irm …/boot.ps1 | iex`, as
+their own README shows.
 
 Then restart any running Claude Code or OpenCode session. The first run
 installs the binary, hooks, plugin and background service, and wires the
@@ -227,12 +243,11 @@ wired without writing:
 aimem wire --project my-project --hub team
 ```
 
-The one-liner needs the raw script to arrive intact. If the Windows form
-fails with `Cannot bind argument to parameter 'Command' because it is an
-empty string`, the download returned an empty body (a transient CDN or
-network-filter hiccup, not a broken script): retry, or run the installer
-from a checkout instead. That path skips the download and the `irm | iex`
-chain entirely. (With no aimem installed yet it builds the binary from
+The one-liner needs the script to arrive intact. If the Windows block
+stops with `boot.ps1 does not match SHA256SUMS`, the download was cut or
+changed on the way (often a transient CDN or network-filter hiccup):
+retry, or run the installer from a checkout instead. That path skips the
+download entirely. (With no aimem installed yet it builds the binary from
 the checkout's source, which needs Go.)
 
 ```sh

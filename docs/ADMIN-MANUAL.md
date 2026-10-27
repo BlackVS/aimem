@@ -13,18 +13,32 @@ wires the project):
 curl -fsSL https://raw.githubusercontent.com/BlackVS/aimem/v0.10.14/boot.sh | bash
 ```
 
-Windows (supported, tested less than Linux), in a PowerShell window
-that is already open:
+Windows (supported, tested less than Linux), in a PowerShell window.
+From cmd, or from the Run dialog (Win+R) for an upgrade, type
+`powershell` first and paste the block there:
 
 ```powershell
-irm https://raw.githubusercontent.com/BlackVS/aimem/v0.10.14/boot.ps1 | iex
+& {
+  $ErrorActionPreference = 'Stop'
+  $d = New-Item -ItemType Directory -Force (Join-Path $env:TEMP 'aimem-boot')
+  $f = Join-Path $d 'boot.ps1'; $s = Join-Path $d 'SHA256SUMS'
+  Invoke-WebRequest https://github.com/BlackVS/aimem/releases/download/v0.10.14/boot.ps1 -OutFile $f -UseBasicParsing
+  Invoke-WebRequest https://github.com/BlackVS/aimem/releases/download/v0.10.14/SHA256SUMS -OutFile $s -UseBasicParsing
+  $want = ((Select-String -LiteralPath $s -Pattern '\sboot\.ps1$').Line -split '\s+')[0]
+  if ((Get-FileHash -LiteralPath $f).Hash -ne $want) { throw 'boot.ps1 does not match SHA256SUMS' }
+  Unblock-File -LiteralPath $f
+  powershell -NoProfile -ExecutionPolicy RemoteSigned -File $f
+}
 ```
 
-From cmd, or from the Run dialog (Win+R) for an upgrade:
-
-```bat
-powershell -NoProfile -ExecutionPolicy Bypass -Command "irm https://raw.githubusercontent.com/BlackVS/aimem/v0.10.14/boot.ps1 | iex"
-```
+The block checks `boot.ps1` against the release's `SHA256SUMS` before it
+runs it, and runs it under `RemoteSigned` for that one process; there is
+no `irm | iex` and no execution-policy bypass
+([INSTALL-CLIENT](INSTALL-CLIENT.md) has the details). The block's
+`powershell` starts Windows PowerShell 5.1 even from a PowerShell 7
+window, so the block works the same pasted into `pwsh`. Releases up to
+0.10.13 publish no `boot.ps1` asset; they were installed with
+`irm …/boot.ps1 | iex`, as their own README shows.
 
 Environment knobs for the boot script:
 
@@ -77,27 +91,28 @@ curl -fsSL https://raw.githubusercontent.com/BlackVS/aimem/v0.10.14/boot.sh | AI
 The `VAR=value bash` form sets the knob for that `bash` only; your shell
 keeps no `AIMEM_*` variable.
 
-On Windows, set the knob inside the child PowerShell's `-Command`, so it
-lives only for that run and your window keeps no `AIMEM_*` variable.
-From a PowerShell window (single quotes, so your window does not expand
-`$env:` itself):
+On Windows, set the knob inside the block, just before the run, and take
+it out again in a `finally`, so it lives only for that run and your
+window keeps no `AIMEM_*` variable:
 
 ```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -Command '$env:AIMEM_USER_ONLY = 1; irm https://raw.githubusercontent.com/BlackVS/aimem/v0.10.14/boot.ps1 | iex'
+& {
+  $ErrorActionPreference = 'Stop'
+  $d = New-Item -ItemType Directory -Force (Join-Path $env:TEMP 'aimem-boot')
+  $f = Join-Path $d 'boot.ps1'; $s = Join-Path $d 'SHA256SUMS'
+  Invoke-WebRequest https://github.com/BlackVS/aimem/releases/download/v0.10.14/boot.ps1 -OutFile $f -UseBasicParsing
+  Invoke-WebRequest https://github.com/BlackVS/aimem/releases/download/v0.10.14/SHA256SUMS -OutFile $s -UseBasicParsing
+  $want = ((Select-String -LiteralPath $s -Pattern '\sboot\.ps1$').Line -split '\s+')[0]
+  if ((Get-FileHash -LiteralPath $f).Hash -ne $want) { throw 'boot.ps1 does not match SHA256SUMS' }
+  Unblock-File -LiteralPath $f
+  $env:AIMEM_USER_ONLY = 1
+  try { powershell -NoProfile -ExecutionPolicy RemoteSigned -File $f } finally { Remove-Item Env:AIMEM_USER_ONLY }
+}
 ```
 
-From cmd (double quotes, which cmd needs around the `|`):
-
-```bat
-powershell -NoProfile -ExecutionPolicy Bypass -Command "$env:AIMEM_USER_ONLY = 1; irm https://raw.githubusercontent.com/BlackVS/aimem/v0.10.14/boot.ps1 | iex"
-```
-
-`powershell` starts Windows PowerShell 5.1 even from a PowerShell 7
-window; `pwsh` in its place works the same. Do not shorten this to
-`$env:AIMEM_USER_ONLY = 1` in your own window, or to a `& { … }` script
-block: `$env:` is the whole process's environment, so either form leaves
-the knob set for every later run in that window. The same form passes any
-other knob boot.ps1 reads.
+`$env:` is the whole process's environment: a knob set in your window
+without the `finally` would stay set for every later run there. The
+same form passes any other knob boot.ps1 reads.
 
 On an existing installation the installer:
 
