@@ -27,14 +27,23 @@ Run this **inside a project directory**:
 curl -fsSL https://raw.githubusercontent.com/BlackVS/aimem/v0.10.14/boot.sh | bash
 ```
 
-```powershell
-# Windows, in a PowerShell window that is already open
-irm https://raw.githubusercontent.com/BlackVS/aimem/v0.10.14/boot.ps1 | iex
-```
+On Windows, in a PowerShell window (from cmd, type `powershell` first),
+download the release's boot script, check it against the release's
+`SHA256SUMS` and run it
+([README](../README.md#install) says why there is no one-line form):
 
-```bat
-:: Windows, from cmd
-powershell -NoProfile -ExecutionPolicy Bypass -Command "irm https://raw.githubusercontent.com/BlackVS/aimem/v0.10.14/boot.ps1 | iex"
+```powershell
+& {
+  $ErrorActionPreference = 'Stop'
+  $d = New-Item -ItemType Directory -Force (Join-Path $env:TEMP 'aimem-boot')
+  $f = Join-Path $d 'boot.ps1'; $s = Join-Path $d 'SHA256SUMS'
+  Invoke-WebRequest https://github.com/BlackVS/aimem/releases/download/v0.10.14/boot.ps1 -OutFile $f -UseBasicParsing
+  Invoke-WebRequest https://github.com/BlackVS/aimem/releases/download/v0.10.14/SHA256SUMS -OutFile $s -UseBasicParsing
+  $want = ((Select-String -LiteralPath $s -Pattern '\sboot\.ps1$').Line -split '\s+')[0]
+  if ((Get-FileHash -LiteralPath $f).Hash -ne $want) { throw 'boot.ps1 does not match SHA256SUMS' }
+  Unblock-File -LiteralPath $f
+  powershell -NoProfile -ExecutionPolicy RemoteSigned -File $f
+}
 ```
 
 **Restart your Claude Code or OpenCode session** — hooks and plugins load

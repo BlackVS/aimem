@@ -13,6 +13,26 @@ currently 25); a binary refuses a database newer than it understands.
 
 ## [Unreleased]
 
+### Changed
+
+- **The documented Windows install no longer pipes a download into
+  `iex` or bypasses the execution policy.** README, ADMIN-MANUAL,
+  INSTALL-CLIENT and both quickstarts now show one PowerShell block. It
+  downloads the release's `boot.ps1` asset and `SHA256SUMS`, refuses a
+  `boot.ps1` whose hash the release does not list, and runs it as a file
+  in a child PowerShell under `RemoteSigned` for that process only. The
+  old `irm | iex` chain drew a Windows Defender behavioral warning on an
+  upgrade. From cmd or the Run dialog, start `powershell` first: a
+  one-line cmd form of the check and the run would be too long to read.
+  The knob form sets `AIMEM_USER_ONLY` just before the run and removes it
+  in a `finally`. `boot.ps1` itself is unchanged apart from its header
+  comment, and `irm | iex` still works. Releases up to 0.10.13 publish
+  no `boot.ps1` asset. A scenario test runs every documented block
+  against a stub release. It checks that the block runs from the
+  caller's directory, keeps the knob out of the window, refuses a
+  tampered `boot.ps1`, and needs its `Unblock-File` for a file marked as
+  downloaded.
+
 ## [0.10.14] — 2026-10-26
 
 The hub now refuses task text that is not readable prose (HTTP 422,

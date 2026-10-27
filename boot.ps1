@@ -1,11 +1,12 @@
 # aimem bootstrap for Windows. A first install runs it inside a project
 # directory; an upgrade runs it from anywhere.
 #
-#   powershell -NoProfile -ExecutionPolicy Bypass -Command "irm https://raw.githubusercontent.com/BlackVS/aimem/v0.10.14/boot.ps1 | iex"
+#   Invoke-WebRequest https://github.com/BlackVS/aimem/releases/download/v0.10.14/boot.ps1 -OutFile $f -UseBasicParsing
+#   (check $f against the same release's SHA256SUMS, then Unblock-File $f)
+#   powershell -NoProfile -ExecutionPolicy RemoteSigned -File $f
 #
-# (The wrapper survives the default Restricted execution policy on a
-# fresh Windows machine; bare `irm ... | iex` works too once fetched,
-# since this script sets the policy for the installer it runs.)
+# README.md has the documented block. Run as `irm ... | iex` it works too,
+# in the caller's own process.
 #
 # It installs the release this script was fetched from ($release below):
 # the prebuilt aimem.exe (no Go needed), checked against that release's
@@ -29,12 +30,9 @@
 #   AIMEM_UPGRADE_WAIT=30            seconds an upgrade waits for health at
 #                                    the new version before rolling back
 #
-# Set a knob inside the child's -Command, so it lives only for that run:
-#
-#   powershell -NoProfile -ExecutionPolicy Bypass -Command '$env:AIMEM_USER_ONLY = 1; irm https://raw.githubusercontent.com/BlackVS/aimem/v0.10.14/boot.ps1 | iex'
-#
-# (from cmd, the same with double quotes). Set in the caller's window, it
-# would stay there for every later run.
+# Set a knob just before the run and remove it in a `finally`, so it lives
+# only for that run (docs/ADMIN-MANUAL.md, Upgrades, has the form). Set in
+# the caller's window and left there, it would stay for every later run.
 $ErrorActionPreference = 'Stop'
 
 # The release this script installs. Bumped together with the CHANGELOG
