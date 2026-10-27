@@ -34,7 +34,9 @@ From cmd, or from the Run dialog (Win+R) for an upgrade, type
 The block checks `boot.ps1` against the release's `SHA256SUMS` before it
 runs it, and runs it under `RemoteSigned` for that one process; there is
 no `irm | iex` and no execution-policy bypass
-([INSTALL-CLIENT](INSTALL-CLIENT.md) has the details). Releases up to
+([INSTALL-CLIENT](INSTALL-CLIENT.md) has the details). The block's
+`powershell` starts Windows PowerShell 5.1 even from a PowerShell 7
+window, so the block works the same pasted into `pwsh`. Releases up to
 0.10.13 publish no `boot.ps1` asset; they were installed with
 `irm …/boot.ps1 | iex`, as their own README shows.
 

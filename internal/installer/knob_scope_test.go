@@ -99,7 +99,15 @@ func TestDocumentedWindowsBlocksCheckAndRunBootPs1(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	boot := []byte("Write-Output \"run saw=[$env:AIMEM_USER_ONLY] cwd=[$($PWD.Path)]\"\r\n")
+	// The runner's temp directory is a short 8.3 name (RUNNER~1), and
+	// PowerShell reports the working directory by its long name.
+	project, err := filepath.EvalSymlinks(project)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// The stub loads Get-FileHash, as the real boot.ps1 does, so the child
+	// Windows PowerShell has to load its own utility module.
+	boot := []byte("$null = Get-FileHash -LiteralPath $PSCommandPath\r\nWrite-Output \"run saw=[$env:AIMEM_USER_ONLY] cwd=[$($PWD.Path)]\"\r\n")
 	if err := os.WriteFile(filepath.Join(stub, "boot.ps1"), boot, 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -110,16 +118,21 @@ func TestDocumentedWindowsBlocksCheckAndRunBootPs1(t *testing.T) {
 	good := fmt.Sprintf("%x  aimem-windows-amd64.exe\n%x  boot.ps1\n", sha256.Sum256([]byte("binary")), sum)
 	tampered := fmt.Sprintf("%x  boot.ps1\n", sha256.Sum256([]byte("another boot.ps1")))
 	copyMarked := `Copy-Item -LiteralPath (Join-Path $$env:STUB '${1}') -Destination ${2}; Set-Content -LiteralPath ${2} -Stream Zone.Identifier -Value '[ZoneTransfer]', 'ZoneId=3'`
-	// Windows PowerShell started under a pwsh step inherits pwsh's module
-	// path and cannot load Get-FileHash from it; a user's window has its
-	// own shell's path.
-	var env []string
-	for _, kv := range withoutAimemEnv() {
-		if !strings.HasPrefix(strings.ToUpper(kv), "PSMODULEPATH=") && !strings.HasPrefix(strings.ToUpper(kv), "TEMP=") {
+	// A Windows PowerShell window started by this test under a pwsh step
+	// would inherit pwsh's module path and could not load Get-FileHash; a
+	// user's window has its own shell's path. A pwsh window keeps it, so
+	// the child powershell it starts gets what a pwsh user's child gets.
+	envFor := func(ps string) []string {
+		var env []string
+		for _, kv := range withoutAimemEnv() {
+			k := strings.ToUpper(kv)
+			if strings.HasPrefix(k, "TEMP=") || (strings.HasPrefix(k, "PSMODULEPATH=") && !strings.EqualFold(filepath.Base(ps), "pwsh.exe")) {
+				continue
+			}
 			env = append(env, kv)
 		}
+		return append(env, "STUB="+stub, "TEMP="+filepath.Join(dir, "temp"))
 	}
-	env = append(env, "STUB="+stub, "TEMP="+filepath.Join(dir, "temp"))
 
 	run := func(t *testing.T, ps, block, sums string) string {
 		t.Helper()
@@ -137,7 +150,7 @@ func TestDocumentedWindowsBlocksCheckAndRunBootPs1(t *testing.T) {
 		if err := os.WriteFile(file, []byte(script), 0o600); err != nil {
 			t.Fatal(err)
 		}
-		out, _ := runPowerShell(t, ps, project, env, file)
+		out, _ := runPowerShell(t, ps, project, envFor(ps), file)
 		return out
 	}
 	for key, block := range blocks {
