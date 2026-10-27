@@ -44,6 +44,17 @@ currently 25); a binary refuses a database newer than it understands.
 
 ### Changed
 
+- **The tasks console refreshes the epics too, and refreshes itself when
+  its tab comes back.** The ↻ refresh button reloads the epic list and the
+  open epic panel before the list or the board, so a renamed or new epic
+  shows without F5. A selected epic that still exists stays selected; one
+  that is gone falls back to "all epics" with a note. When the tab becomes
+  visible again, or the window regains focus, at least 30 seconds after
+  the last load, the list or the board and the epics reload once. A task
+  page never reloads by itself, since a form there may be open, and
+  nothing runs while the tab is hidden. CI's lint job now runs the
+  console's harness, `node scripts/test-epic-details.mjs`.
+
 - **A required skill the hub lacks is reported with the command that
   imports it.** A hub with no skills imported reported a ready project,
   `aimem process show` called a skill another installer had put on the

@@ -165,7 +165,7 @@
     <div id="filters" hidden>
     <div class="row">
       <span class="viewsw"><button type="button" class="act" id="vwList" onclick="setView('list')">list</button><button type="button" class="act" id="vwBoard" onclick="setView('board')">board</button></span>
-      <button type="button" class="act" id="refreshBtn" onclick="refreshView()" title="reload this view from the hub">↻ refresh</button><span id="loadedAt" class="dim"></span>
+      <button type="button" class="act" id="refreshBtn" onclick="refreshAll()" title="reload this view and the epics from the hub">↻ refresh</button><span id="loadedAt" class="dim"></span>
       <span id="listOnly"><input id="searchIn" type="search" class="inline" placeholder="search" title="find tasks by words in their title, objective, criteria, non-goals or comments (Enter)" style="width:14em;margin-left:8px"
           onkeydown="if(event.key==='Enter')setSearch(this.value)" onsearch="setSearch(this.value)">
         <label for="orderSel" class="dim" style="margin-left:8px">sort</label>
@@ -369,20 +369,32 @@ async function canWrite(project){
 // this loader is the one place a project change happens — from the list,
 // the board or a task opened directly — so it clears the filter
 // synchronously, before any query that follows can be built.
-async function loadEpics(project){
-  if(EPICS_PROJ===project) return;
+// A forced reload of the same project (refreshAll) keeps the epics, the
+// filter and the open panel until the answer arrives, and then drops the
+// filter only if its epic is gone; a failed reload keeps what it had.
+async function loadEpics(project, force){
+  if(EPICS_PROJ===project && !force) return;
   const gen = ++EPICS_GEN;
-  EPICS = {}; EPICS_PROJ = project; FILTER.epic = "";
-  renderEpicDetails();
-  $("epicSel").innerHTML = '<option value="">all epics</option>';
+  const reload = EPICS_PROJ===project;
+  if(!reload){
+    EPICS = {}; EPICS_PROJ = project; FILTER.epic = "";
+    renderEpicDetails();
+    $("epicSel").innerHTML = '<option value="">all epics</option>';
+  }
   // The response is collected locally; only the load that is still the
   // current one may publish it, so a late answer from a previous project
   // (or a load this one superseded) never lands in the shared cache.
   const got = {};
   try{ const r = await api("/v1/projects/"+encodeURIComponent(project)+"/epics?include_retired=true"); for(const e of (r.epics||[])) got[e.id] = e; }
-  catch(_){ if(gen===EPICS_GEN) EPICS_PROJ = ""; return; }
+  catch(_){ if(gen===EPICS_GEN && !reload) EPICS_PROJ = ""; return; }
   if(gen!==EPICS_GEN) return;
   EPICS = got;
+  if(reload){
+    const was = FILTER.epic, wasOpen = $("epicDetails").open;
+    if(was && !EPICS[was]){ FILTER.epic = ""; toast("the selected epic no longer exists; showing all epics"); }
+    renderEpicDetails();
+    if(FILTER.epic) $("epicDetails").open = wasOpen;
+  }
   $("epicSel").innerHTML = '<option value="">all epics</option>' + Object.values(EPICS).map(e => `<option value="${esc(e.id)}"${e.id===FILTER.epic?' selected':''}>${esc(e.title)}${e.state==="RETIRED"?" (retired)":""}</option>`).join("");
 }
 function epicLabel(id){ const e = EPICS[id]; return e ? e.title : short(id); }
@@ -396,10 +408,30 @@ function renderEpicDetails(){
     ${e.objective?md2html(e.objective):'<p class="dim">No objective provided.</p>'}
     <p class="dim">Tasks below belong to this epic; the current state and archive filters still apply.</p>` : "";
 }
-function refreshView(){ if(VIEW==="board") loadBoard(); else listTasks(true); }
+function refreshView(){ return VIEW==="board" ? loadBoard() : listTasks(true); }
+// The refresh button and a tab that comes back reload the epics first and
+// the view after them, so the view is never queried for an epic that is
+// gone. LOAD_AT is when a view last started or finished loading; a tab
+// that comes back reloads only when that is AUTO_REFRESH_MS old, and only
+// the list or the board: a task page may hold an open form.
+const AUTO_REFRESH_MS = 30000;
+let LOAD_AT = 0, REFRESHING = false;
+async function refreshAll(){
+  if(REFRESHING || !PROJ) return;
+  const my = NAV; REFRESHING = true; LOAD_AT = Date.now();
+  try{ await loadEpics(PROJ, true); if(my===NAV) await refreshView(); } // a view opened meanwhile has loaded itself
+  finally{ REFRESHING = false; }
+}
+function autoRefresh(){
+  if(document.visibilityState==="hidden" || !ME || !PROJ || $("v-list").hidden) return;
+  if(Date.now() - LOAD_AT < AUTO_REFRESH_MS) return;
+  refreshAll();
+}
+document.addEventListener("visibilitychange", autoRefresh);
+window.addEventListener("focus", autoRefresh);
 function setOrder(o){ if(!ORDERS.includes(o)) return; ORDER = o; localStorage.setItem("aimem_task_order", o); listTasks(true); }
 function setSearch(v){ v = String(v||"").trim(); if(v===SEARCH) return; SEARCH = v; $("orderSel").disabled = !!SEARCH; listTasks(true); }
-function markLoaded(){ $("loadedAt").textContent = "loaded "+new Date().toLocaleTimeString([], {hour:"2-digit", minute:"2-digit"}); }
+function markLoaded(){ LOAD_AT = Date.now(); $("loadedAt").textContent = "loaded "+new Date().toLocaleTimeString([], {hour:"2-digit", minute:"2-digit"}); }
 function stateChipsHTML(){
   const n = s => !COUNTS ? "" : ` <span class="n">${s ? COUNTS.counts[s]||0 : COUNTS.total-(FILTER.archived?0:COUNTS.archived)}</span>`;
   return ['',...STATES].map(s=>`<button type="button" class="chip click${FILTER.state===s?' on':''}" onclick="FILTER.state='${s}';listTasks(true)">${s||'all'}${n(s)}</button>`).join("");
@@ -454,7 +486,7 @@ function showList(){
   // listNote on every page and filter, and must not erase it.
   if(PROJ){ const asked = PROJ; canWrite(asked).then(ok => { if(PROJ===asked && CUR===null){ $("newBtn").hidden = !ok; $("tasksOff").textContent = TASKS_OFF_NOTE; $("tasksOff").hidden = !TASKS_OFF[asked]; } }); }
   $("stateChips").innerHTML = stateChipsHTML();
-  $("orderSel").value = ORDER; $("orderSel").disabled = !!SEARCH; $("searchIn").value = SEARCH; $("loadedAt").textContent = "";
+  $("orderSel").value = ORDER; $("orderSel").disabled = !!SEARCH; $("searchIn").value = SEARCH; $("loadedAt").textContent = ""; LOAD_AT = Date.now();
   $("archChk").checked = FILTER.archived;
   if(PROJ) loadEpics(PROJ); // clears the epic filter synchronously on a project change
   const board = VIEW==="board";
