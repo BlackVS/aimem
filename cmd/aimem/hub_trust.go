@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"crypto/x509"
 	"errors"
 	"fmt"
@@ -51,6 +52,13 @@ var hubStdin io.Reader = os.Stdin
 // maxHubToken bounds a token read from a file or standard input.
 const maxHubToken = 4096
 
+// trimBOM drops one leading UTF-8 byte order mark from a secret read from
+// a file or standard input: Windows PowerShell 5.1 prepends one to what it
+// pipes under a UTF-8 console, and writes one with Out-File and
+// Set-Content -Encoding utf8. A second one stays, for the reader's own
+// validation to refuse.
+func trimBOM(raw []byte) []byte { return bytes.TrimPrefix(raw, []byte{0xEF, 0xBB, 0xBF}) }
+
 // readHubToken reads `aimem hub add|task-token --token-file`: a private
 // file (only its owner can read it), or "-" for standard input, holding one
 // token on one line. A trailing LF or CRLF is dropped (a stray CR would make
@@ -78,7 +86,7 @@ func readHubToken(path string) (string, error) {
 	if len(raw) > maxHubToken {
 		return "", fmt.Errorf("%s is larger than a token", src)
 	}
-	tok := strings.TrimSuffix(strings.TrimSuffix(string(raw), "\n"), "\r")
+	tok := strings.TrimSuffix(strings.TrimSuffix(string(trimBOM(raw)), "\n"), "\r")
 	if tok == "" {
 		return "", fmt.Errorf("%s holds no token", src)
 	}

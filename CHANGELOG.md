@@ -89,6 +89,26 @@ currently 25); a binary refuses a database newer than it understands.
   tampered `boot.ps1`, and needs its `Unblock-File` for a file marked as
   downloaded.
 
+### Fixed
+
+- **A token piped from Windows PowerShell 5.1 is accepted.** Under a
+  UTF-8 console, PowerShell 5.1 prepends a byte order mark to what it
+  pipes into a native command, and `Out-File` writes one at the start of
+  a file, so `$token | aimem task-token set` and the documented
+  `Get-Content -Raw FILE | aimem task-token set` refused a valid token.
+  `aimem task-token set`, `aimem hub add` and `aimem hub task-token` with
+  `--token-file` (a file or `-`), `--admin-token-file` of the identity
+  commands, `aimem enroll redeem`'s record on standard input, and the
+  hub's introspection credential file now drop one leading UTF-8 byte
+  order mark. A second one, or one inside the token, is still refused.
+- **The fix a Windows token-file refusal prints runs in PowerShell.** The
+  refusal of a token file other accounts can read printed
+  `icacls ... /grant:r "%USERNAME%:F"`, which only cmd expands; in
+  PowerShell it failed with "No mapping between account names and
+  security IDs was done". It now names the account itself, as
+  `DOMAIN\user`, so the same line runs in both shells, and icacls's
+  `*SID` form when the name cannot be resolved.
+
 ## [0.10.14] — 2026-10-26
 
 The hub now refuses task text that is not readable prose (HTTP 422,

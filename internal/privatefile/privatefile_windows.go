@@ -5,10 +5,32 @@ package privatefile
 import (
 	"fmt"
 	"os"
+	"strings"
 	"unsafe"
 
 	"golang.org/x/sys/windows"
 )
+
+// icaclsFix is the command a refusal prints to restrict path to account.
+// It names the account itself, so the same line runs in PowerShell and in
+// cmd: an environment variable such as %USERNAME% expands in only one.
+func icaclsFix(path, account string) string {
+	return fmt.Sprintf("restrict it to your account, for example: icacls \"%s\" /inheritance:r /grant:r \"%s:F\"", path, account)
+}
+
+// icaclsAccount names sid for icacls: DOMAIN\user, or icacls's *SID form
+// when the name cannot be resolved or holds a character that PowerShell or
+// cmd would expand inside double quotes.
+func icaclsAccount(sid *windows.SID) string {
+	user, domain, _, err := sid.LookupAccount("")
+	if err != nil || user == "" || strings.ContainsAny(domain+user, "$%`\"") {
+		return "*" + sid.String()
+	}
+	if domain == "" {
+		return user
+	}
+	return domain + `\` + user
+}
 
 func currentUserSID() (*windows.SID, error) {
 	u, err := windows.GetCurrentProcessToken().GetTokenUser()
@@ -85,20 +107,20 @@ func Check(path string) error {
 		}
 		return false
 	}
-	fix := fmt.Sprintf("restrict it to your account, for example: icacls \"%s\" /inheritance:r /grant:r \"%%USERNAME%%:F\"", path)
+	fix := func() string { return icaclsFix(path, icaclsAccount(me)) } // resolved only for a refusal
 	owner, _, err := sd.Owner()
 	if err != nil {
 		return err
 	}
 	if owner == nil || !isTrusted(owner) {
-		return fmt.Errorf("%s is owned by another account; %s", path, fix)
+		return fmt.Errorf("%s is owned by another account; %s", path, fix())
 	}
 	dacl, _, err := sd.DACL()
 	if err != nil {
 		return err
 	}
 	if dacl == nil {
-		return fmt.Errorf("%s has no access control list, so every account can read it; %s", path, fix)
+		return fmt.Errorf("%s has no access control list, so every account can read it; %s", path, fix())
 	}
 	for i := uint32(0); i < uint32(dacl.AceCount); i++ {
 		var ace *windows.ACCESS_ALLOWED_ACE
@@ -113,14 +135,14 @@ func Check(path string) error {
 			continue
 		case windows.ACCESS_ALLOWED_ACE_TYPE:
 		default:
-			return fmt.Errorf("%s has an access entry of a type this check does not understand (%d); %s", path, ace.Header.AceType, fix)
+			return fmt.Errorf("%s has an access entry of a type this check does not understand (%d); %s", path, ace.Header.AceType, fix())
 		}
 		if uint32(ace.Mask)&privateFileRisky == 0 {
 			continue
 		}
 		sid := (*windows.SID)(unsafe.Pointer(&ace.SidStart))
 		if !isTrusted(sid) {
-			return fmt.Errorf("%s is readable by %s; %s", path, sid.String(), fix)
+			return fmt.Errorf("%s is readable by %s; %s", path, sid.String(), fix())
 		}
 	}
 	return nil

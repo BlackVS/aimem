@@ -152,7 +152,9 @@ func ReadCredential(path string) (string, error) {
 	if len(raw) > maxCredential {
 		return "", fmt.Errorf("%s is larger than a credential", path)
 	}
-	s := strings.TrimSuffix(strings.TrimSuffix(string(raw), "\n"), "\r")
+	// One leading UTF-8 BOM, as Windows PowerShell 5.1 writes, is not part
+	// of the credential.
+	s := strings.TrimSuffix(strings.TrimSuffix(string(bytes.TrimPrefix(raw, []byte{0xEF, 0xBB, 0xBF})), "\n"), "\r")
 	if s == "" {
 		return "", fmt.Errorf("%s is empty", path)
 	}

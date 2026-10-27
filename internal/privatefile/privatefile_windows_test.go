@@ -87,3 +87,42 @@ func TestPrivateFileEffectiveAccess(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+// The refusal's fix names the account itself, so the same line runs in
+// PowerShell and in cmd; an account icacls cannot be given by name is given
+// by its SID.
+func TestIcaclsFixRunsInBothShells(t *testing.T) {
+	if got, want := icaclsFix(`C:\keys\hub.token`, `CORP\alice`),
+		`restrict it to your account, for example: icacls "C:\keys\hub.token" /inheritance:r /grant:r "CORP\alice:F"`; got != want {
+		t.Fatalf("got  %s\nwant %s", got, want)
+	}
+	me, err := currentUserSID()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if name := icaclsAccount(me); name == "" || strings.ContainsAny(name, "%$`\"") {
+		t.Fatalf("the current account is named %q", name)
+	}
+	// A SID with no account behind it falls back to icacls's *SID form.
+	orphan, err := windows.StringToSid("S-1-5-21-1-2-3-4242")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := icaclsAccount(orphan); got != "*S-1-5-21-1-2-3-4242" {
+		t.Fatalf("unresolvable SID named %q", got)
+	}
+	// The refusal itself carries no environment variable.
+	p := filepath.Join(t.TempDir(), "wide")
+	f, err := Create(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	f.Close()
+	if err := Expose(p); err != nil {
+		t.Fatal(err)
+	}
+	err = Check(p)
+	if err == nil || strings.Contains(err.Error(), "%USERNAME%") || !strings.Contains(err.Error(), `/grant:r "`+icaclsAccount(me)+`:F"`) {
+		t.Fatalf("refusal: %v", err)
+	}
+}
