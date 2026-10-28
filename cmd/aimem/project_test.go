@@ -144,7 +144,7 @@ func TestTasksOnWithoutProcessIsAnUnfinishedSetup(t *testing.T) {
 	const (
 		notReady = "not ready for work: tasks on, process not selected"
 		example  = "aimem process select <repo> <tag> [<manifest>] -p example"
-		values   = "<tag>       a release tag of that repository, e.g. v1.4.0; a full 40-hex commit also works"
+		values   = "<tag>       a release tag of that repository, e.g. v1.4.0\n"
 	)
 
 	if out := show("example"); !strings.Contains(out, "tasks:      off") || strings.Contains(out, "warning") {
@@ -165,7 +165,7 @@ func TestTasksOnWithoutProcessIsAnUnfinishedSetup(t *testing.T) {
 	// a hub host without access to the repository.
 	archive, _ := exportFixture(t, "https://example.com/process.git", commit, "process/manifest.json")
 	run(func() error {
-		return processCmd([]string{"select", "https://example.com/process.git", commit, "process/manifest.json", "--ref", "main", "--from-archive", archive, "-p", "example"})
+		return processCmd([]string{"select", "https://example.com/process.git", commit, "process/manifest.json", "--commit", "--ref", "main", "--from-archive", archive, "-p", "example"})
 	})
 	if out := tasks("on", "example"); strings.Contains(out, "next step") || strings.Contains(out, "not ready") {
 		t.Fatalf("tasks on with a process selected:\n%s", out)
@@ -176,7 +176,7 @@ func TestTasksOnWithoutProcessIsAnUnfinishedSetup(t *testing.T) {
 
 	// A second project is offered the process the hub already uses, as a
 	// complete command; turning its tasks on selects nothing.
-	offered := "aimem process select https://example.com/process.git " + commit + " process/manifest.json --ref main -p beta"
+	offered := "aimem process select https://example.com/process.git main process/manifest.json -p beta"
 	if out := tasks("on", "beta"); !strings.Contains(out, notReady) || !strings.Contains(out, "as example:") || !strings.Contains(out, offered) || strings.Contains(out, values) {
 		t.Fatalf("tasks on, a process in use elsewhere:\n%s", out)
 	}

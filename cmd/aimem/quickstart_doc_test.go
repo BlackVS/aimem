@@ -197,7 +197,7 @@ func TestQuickstartNewProjectCommandsMatchUsage(t *testing.T) {
 		"aimem token add ", "aimem tasks on ", "aimem access user-add ", "aimem access grant add ",
 		"aimem access token-issue-user ", "aimem hub add team ", "aimem hub task-token team ",
 		"aimem health", "aimem session-start", "aimem docs list",
-		"aimem process select ", "aimem process show", "aimem process show --template task",
+		"aimem process select ", "aimem process default set ", "aimem process show", "aimem process show --template task",
 		"aimem skills import --from-archive ", "aimem project repo set ", "aimem skills install",
 	} {
 		found := false

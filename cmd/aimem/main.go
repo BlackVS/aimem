@@ -721,7 +721,7 @@ func metaCmd(args []string) error {
 // an admin decision, recorded in the project's metadata through the
 // running service (the host console is admin), never by editing files.
 func tasksCmd(args []string) error {
-	usage := "usage: aimem tasks on|off [-p <project>]\n       " + strings.TrimPrefix(textCheckUsage, "usage: ")
+	usage := "usage: aimem tasks on [-p <project>] [--no-process]\n       aimem tasks off [-p <project>]\n       " + strings.TrimPrefix(textCheckUsage, "usage: ")
 	if len(args) > 0 && args[0] == "text-check" {
 		return tasksTextCheck(args[1:])
 	}
@@ -730,7 +730,11 @@ func tasksCmd(args []string) error {
 	}
 	fs := flag.NewFlagSet("tasks", flag.ExitOnError)
 	p := projectFlag(fs, "project id (default: current directory's project)")
+	noProcess := fs.Bool("no-process", false, "on: leave a project with no process without one, even when the hub has a default process")
 	fs.Parse(args[1:])
+	if *noProcess && args[0] != "on" {
+		return fmt.Errorf("%s", usage)
+	}
 	proj := *p
 	if proj == "" {
 		id, err := ident.ProjectID(".")
@@ -755,8 +759,26 @@ func tasksCmd(args []string) error {
 		return fmt.Errorf("HTTP %d: %s", resp.StatusCode, strings.TrimSpace(string(data)))
 	}
 	fmt.Printf("tasks %s for project %q\n", args[0], proj)
-	if args[0] == "on" {
-		fmt.Print(tasksOnGap(proj, data))
+	if args[0] != "on" {
+		return nil
+	}
+	gap := tasksOnGap(proj, data)
+	if !strings.HasPrefix(gap, notReady) || *noProcess {
+		fmt.Print(gap)
+		return nil
+	}
+	applied, err := applyProcessDefault(proj)
+	if err != nil {
+		fmt.Print(gap)
+		return fmt.Errorf("tasks are on, but the hub's default process was not applied: %w", err)
+	}
+	if applied == "" {
+		fmt.Print(gap)
+		return nil
+	}
+	fmt.Print(applied)
+	if skills := hubSkillsGap(proj); skills != "" {
+		fmt.Fprint(os.Stderr, "warning: "+skills)
 	}
 	return nil
 }

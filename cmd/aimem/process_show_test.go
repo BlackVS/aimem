@@ -27,7 +27,7 @@ func TestProcessShowReadsThisHostsStoreWithoutABinding(t *testing.T) {
 	commit := strings.Repeat("ab", 20)
 	archive, sums := exportFixture(t, repo, commit, manifest)
 	if _, err := stdoutOf(t, func() error {
-		return processCmd([]string{"select", repo, commit, manifest, "--from-archive", archive, "-p", "example"})
+		return processCmd([]string{"select", repo, commit, manifest, "--commit", "--from-archive", archive, "-p", "example"})
 	}); err != nil {
 		t.Fatal(err)
 	}

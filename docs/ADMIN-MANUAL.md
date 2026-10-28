@@ -720,12 +720,48 @@ path, so `https://github.com/BlackVS/aimem.git` at a release tag selects
 it. Below, `https://example.com/team/process.git` stands for your own
 repository, started from a copy of `processes/aimem`.
 
+**The hub's default process.** Most hubs run one process for every
+project. Set it once, by a tag, and `aimem tasks on -p <project>` selects
+it for each project that has no process:
+
+```sh
+aimem process default set https://github.com/BlackVS/aimem.git v0.10.14   # or: <repo> <tag> <manifest>
+aimem process default show
+aimem process default clear
+```
+
+`default set` resolves the tag and reads and checks the set exactly as
+`select` does, so a tag the repository lacks, or a set that does not
+validate, is refused before anything is stored. The hub stores the
+repository, the tag, the commit the tag held, the manifest and the set's
+digest in `process-default.json` in its state root: instance
+configuration, which the installer's state backup carries. `default
+show` prints them, with when and by whom the default was set.
+
+`tasks on` for a project with no process then selects the default's
+commit, with its tag recorded as the selection's ref, reads the set at
+that commit again, checks that it is the set the default was stored
+with, and prints `applied the hub's default process: <set> (tag <tag>,
+commit <commit>)`. The selection is an ordinary one: `process show`,
+`--expect` and the history treat it like any other. A tag moved after
+`default set` does not change what is applied; set the default again to
+follow it. A project that already has a process keeps it, `--no-process`
+turns tasks on without selecting anything, and with no default `tasks on`
+prints the next step as before. Changing or clearing the default never
+re-selects an existing project. If the default cannot be applied (the
+set cannot be read, or reads differently), tasks stay on and the command
+fails with the reason and the next step. The admin console's tasks
+switch does not apply the default.
+
+**An explicit selection** is for a project that needs another process,
+and for changing a project's process later:
+
 ```sh
 aimem process select https://github.com/BlackVS/aimem.git v0.10.14 -p <project>   # the reference set
 aimem process select https://example.com/team/process.git v1.4.0 -p <project>     # your own repository
 aimem process select https://example.com/team/process.git v1.5.0 --expect v1.4.0 -p <project>   # change it later
 aimem process select https://example.com/team/process.git \
-    3f2a…(40-hex commit) process/manifest.json --ref main -p <project>   # by commit, another manifest
+    3f2a…(40-hex commit) process/manifest.json --commit --ref main -p <project>   # by commit: the exception
 aimem process clear --expect <current tag or commit>
 aimem process show -p <project>                      # what a session gets
 aimem process show --full -p <project>               # the whole unit, plus the repository URL
@@ -733,8 +769,10 @@ aimem process list                                   # every project's selection
 aimem process refresh                                # store the sets of selections that have none
 ```
 
-`select` takes a tag (or a branch) or a full commit, and the manifest
-path, which defaults to `processes/aimem/manifest.json`. A tag is
+`select` takes a tag (or a branch) and the manifest path, which defaults
+to `processes/aimem/manifest.json`. A full 40-character commit is taken
+only with `--commit`, for a repository with no tag for it; without the
+flag it is refused with a message that names it. A tag is
 resolved on the hub host with `git ls-remote` to the commit it holds at
 that moment (an annotated tag to the commit it points at); without `git`,
 or when Git cannot resolve it, from the forge's ref advertisement over
