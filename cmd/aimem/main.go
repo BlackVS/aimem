@@ -249,7 +249,9 @@ const mainUsage = `usage: aimem <command> [flags]
                              CLAUDE.md and .aimem.json, setting only the
                              keys given; --check reports without writing
   task-token set|show-source|clear  manage this checkout's task credential;
-                             set reads a project-scoped token from stdin
+                             set reads a project-scoped token from stdin,
+                             or with --token-file FILE from an owner-only
+                             file
   session-start [file]       SessionStart hook adapter (Claude Code and
                              Codex share the wire format): emit the handoff
                              (docs/SESSION-STATE.md, at most its first

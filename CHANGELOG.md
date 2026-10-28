@@ -15,6 +15,15 @@ currently 25); a binary refuses a database newer than it understands.
 
 ### Added
 
+- **`aimem task-token set --token-file FILE` reads the project token
+  from a file.** The project-local task credential could only be piped
+  in on standard input. It can now come from a file only its owner can
+  read, such as the one `aimem access token-issue --output` writes. The
+  file is read and refused exactly as `aimem hub task-token --token-file`
+  does: a file other accounts can read is refused with the command that
+  restricts it, and no error quotes the content. Standard input stays the
+  default without the flag, and `--token-file -` is refused because it
+  would add nothing. See TASK-CREDENTIALS.md, "Project-local override".
 - **The documented usage scenarios run against the real binary.** A
   scenario card in `docs/scenarios` is a usage path written as numbered
   steps, each with its command, the reason for it and the expected output

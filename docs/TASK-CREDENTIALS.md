@@ -76,6 +76,20 @@ $ProjectToken | aimem task-token set
 aimem task-token show-source
 ```
 
+When the token is in a file, such as the one `token-issue --output`
+wrote, give the file instead of piping it. The file must be readable only
+by you, as for `aimem hub task-token --token-file`, and holds the token
+alone on one line:
+
+```sh
+aimem task-token set --token-file project.token
+aimem task-token show-source
+```
+
+`set` refuses a file other accounts can read and names the command that
+restricts it; on Windows a file in your profile folder is private
+already. Delete the file once `set` has stored the token.
+
 `set` checks the token with the hub and requires project scope and current
 write access to the configured project. It preserves other `.aimem.json`
 fields and adds only the nonsecret local requirement. `show-source` reports
