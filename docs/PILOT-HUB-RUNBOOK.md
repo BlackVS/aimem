@@ -177,7 +177,13 @@ Retirement removes the peer with its credentials, team profiles and their grants
 
 ## 4. The introspection credential
 
-**The hub's outbound introspection credential.** aicrew issues it. Put it in a private file on the hub host, set `AIMEM_INTROSPECTION_TOKEN_FILE` to that file's path for the hub service, and restart the service. The hub rereads the file on every call, so a later rotation needs no restart.
+**The hub's outbound introspection credential.** aicrew issues it. Put it in a private file on the hub host, readable only by the hub's service account, and name that file with the installer setting `AIMEM_INTROSPECTION_TOKEN_FILE` (an absolute path). The installer writes it into the hub's env file, so no hand edit is needed. On a hub that is already installed, run the same installer command again with the setting: the upgrade adds the line to the env file and keeps everything else. Then restart the service (with `AIMEM_NO_SERVICE=1`, restart it with your supervisor):
+
+```sh
+AIMEM_INTROSPECTION_TOKEN_FILE=/home/sessiond/.config/aimem/introspection.token bash install-hub.sh
+```
+
+The installer refuses a relative path or one with characters other than letters, digits and `. _ / -`, before it changes anything. A line the env file already holds is kept: the installer never rewrites or duplicates it, and warns when the value you passed differs. The hub rereads the file on every call, so a later rotation needs no restart.
 
 **Check it end to end.** The hub sends aicrew one introspection with a random handle and expects the inactive answer:
 

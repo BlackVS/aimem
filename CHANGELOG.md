@@ -40,6 +40,15 @@ currently 25); a binary refuses a database newer than it understands.
   - Changing the default never re-selects an existing project, and the
     admin console's tasks switch does not apply it.
 
+- **`install-hub.sh` writes `AIMEM_INTROSPECTION_TOKEN_FILE` into the env
+  file.** A hub for an identity peer needs no hand edit after the install:
+  pass the setting (an absolute path) to the installer, on a fresh install
+  or on an upgrade.
+  - A line the env file already holds is kept and never duplicated; a
+    different value is reported, not rewritten.
+  - An invalid path is refused before anything changes.
+  - Unset, the env file is as before.
+
 - **`task.read`: aicrew reads one task's text.** A new peer operation,
   `GET /v1/identity/peers/{service_id}/task-reads/{project}/{task_id}`,
   answers a task's title, objective, acceptance criteria, non-goals,

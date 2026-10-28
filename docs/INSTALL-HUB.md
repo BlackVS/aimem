@@ -80,6 +80,7 @@ All of these are environment variables set before the command above.
 | `AIMEM_REPO` | `BlackVS/aimem` | install from a fork |
 | `AIMEM_PREBUILT_DIR` | — | install the binary from this directory instead of downloading it: it holds `aimem-linux-<arch>` and `SHA256SUMS`, and the binary is checked against them ([ADMIN-MANUAL](ADMIN-MANUAL.md#installing-from-a-local-directory)) |
 | `AIMEM_PREBUILT` | — | install this binary file as given, without a check; not together with `AIMEM_PREBUILT_DIR` |
+| `AIMEM_INTROSPECTION_TOKEN_FILE` | — | absolute path of the private file that holds the identity peer's introspection credential ([pilot runbook](PILOT-HUB-RUNBOOK.md#4-the-introspection-credential)); written into `~/.config/aimem/env` on a fresh install and on an upgrade. A line the env file already holds is kept, never rewritten or duplicated; a different value is reported. |
 
 Name your hubs if you run more than one — two consoles that both say
 "aimem hub" are genuinely confusing:

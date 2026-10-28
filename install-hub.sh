@@ -47,6 +47,11 @@
 #                                  binary is verified, nothing is downloaded
 #   AIMEM_NO_SERVICE=1             install-only: no systemd unit, linger or
 #                                  start; a supervisor of your choice runs it
+#   AIMEM_INTROSPECTION_TOKEN_FILE=/abs/path
+#                                  the private file holding the identity
+#                                  peer's introspection credential: written
+#                                  into the env file on install and upgrade;
+#                                  a line already there is kept
 #
 # Install-only mode (AIMEM_NO_SERVICE=1), for a host or container without
 # systemd: the same binary, env file, certificate and curation script,
@@ -73,6 +78,44 @@ LISTEN=${AIMEM_HTTP_LISTEN:-:8440}
 REPO=${AIMEM_REPO:-BlackVS/aimem}
 BASE="https://github.com/$REPO"
 fetch() { curl -fsSL "$@"; }
+
+# BEGIN env-settings
+# Settings this installer writes into an env file that already exists, on
+# a fresh install and on an upgrade alike. The env file is read by
+# systemd's EnvironmentFile and by a shell, so a value is a plain absolute
+# path, checked before anything changes. A line the file already holds is
+# never rewritten or duplicated: the operator's file wins, and a different
+# value is reported with the file to edit.
+env_setting_check() { # key value
+  [ -z "$2" ] && return 0
+  case "$2" in
+    /*) ;;
+    *) echo "ERROR: $1 must be an absolute path, not '$2'. Nothing was changed." >&2; return 1 ;;
+  esac
+  case "$2" in
+    *[!ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789._/-]*)
+      echo "ERROR: $1 may hold only letters, digits and . _ / - ('$2'). Nothing was changed." >&2
+      return 1 ;;
+  esac
+}
+env_setting() { # envfile key value
+  local envf=$1 key=$2 value=$3 cur
+  [ -z "$value" ] && return 0
+  cur=$(sed -n "s/^[[:space:]]*$key=//p" "$envf" | tail -n 1 | tr -d '"')
+  if grep -q "^[[:space:]]*$key=" "$envf"; then
+    if [ "$cur" = "$value" ]; then
+      echo "kept $key in $envf"
+    else
+      echo "WARNING: $envf already sets $key=$cur; kept it, not $value. Edit the file to change it." >&2
+    fi
+    return 0
+  fi
+  [ ! -s "$envf" ] || [ -z "$(tail -c 1 "$envf")" ] || echo >> "$envf"
+  echo "$key=$value" >> "$envf"
+  echo "wrote $key into $envf"
+}
+# END env-settings
+env_setting_check AIMEM_INTROSPECTION_TOKEN_FILE "${AIMEM_INTROSPECTION_TOKEN_FILE:-}" || exit 1
 
 # BEGIN git-check
 # The hub service never runs git, but the admin commands that read a
@@ -393,6 +436,7 @@ else
   TOKEN=$(sed -n 's/^AIMEM_HTTP_TOKEN=//p' "$ENVF")
   echo "kept existing $ENVF"
 fi
+env_setting "$ENVF" AIMEM_INTROSPECTION_TOKEN_FILE "${AIMEM_INTROSPECTION_TOKEN_FILE:-}"
 
 # --- curation script + systemd user units -----------------------------------
 cat > "$HOME_DIR/.local/sbin/curate-all.sh" <<'EOS'
