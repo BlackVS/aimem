@@ -96,6 +96,10 @@ func TestParseCardRefuses(t *testing.T) {
 		{"no side", step("### 1. A", "aimem health", "ok"), "a step heading is"},
 		{"no expected line", step("### 1. A (hub)", "aimem health", ""), "needs a reason line, an sh block and a text block"},
 		{"numbering", step("### 2. A (hub)", "aimem health", "ok"), "step 2 follows step 0"},
+		// sh would read demo\project as demoproject; the error is matched
+		// without the backslash, which ToSlash would turn into a slash.
+		{"backslash", step("### 1. A (hub)", `aimem tasks on -p demo\project`, "ok"), "card.md:8: step 1: "},
+		{"unclosed fence", strings.TrimSuffix(step("### 1. A (hub)", "aimem health", "ok"), "```\n"), "card.md:11: the fenced block opened here is not closed"},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			p := filepath.Join(t.TempDir(), "card.md")
@@ -120,5 +124,17 @@ func TestParseCardRefuses(t *testing.T) {
 	st := c.Steps[0]
 	if strings.Join(st.Args, " ") != "aimem tasks on -p p" || st.Side != "workstation" || st.Expect[0].Text != `project "p"` || st.Line != 8 {
 		t.Fatalf("parsed: %+v", st)
+	}
+
+	// The backslash refusal reads the card's own words: a placeholder's
+	// value, such as a Windows path, may hold backslashes.
+	win := `C:\Users\runner\AppData\Local\Temp\aimem-sc1\fx\ca.pem`
+	os.WriteFile(p, []byte(step("### 1. A (workstation)", "aimem hub add team https://h --ca-file <ca-file>", "ok")), 0o600)
+	c, err = ParseCard(p, map[string]string{"ca-file": win})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := c.Steps[0].Args; got[len(got)-1] != win {
+		t.Fatalf("substituted path: %q", got)
 	}
 }
