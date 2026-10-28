@@ -157,6 +157,16 @@ currently 25); a binary refuses a database newer than it understands.
 
 ### Fixed
 
+- **A token passed to `--token-file` is no longer repeated in the error.**
+  `hub add`, `hub task-token` and `task-token set` take the path of a
+  file that holds the token. When the token itself was given instead,
+  the "cannot be read" error quoted it, and so did any log that captured
+  the error. Now, a value that names no file and has a token's shape is
+  refused with a fixed message that does not repeat it. A token's shape
+  is an `aimem_user_` or `aimem_peer_` credential, or a word of 32 or
+  more token characters such as a writer token. A missing path still
+  gets the message that names it.
+
 - **`aimem wire` refuses an empty `.aimem.json`.** An empty or
   whitespace-only file (a byte order mark alone counts as empty) was
   taken as an empty config and reported as present, or rewritten with

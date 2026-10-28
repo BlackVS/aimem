@@ -4,6 +4,7 @@ import (
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/pem"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -247,5 +248,55 @@ func TestHubTokenFile(t *testing.T) {
 	}
 	if after := *storedHub(t, "pilot"); after != before {
 		t.Fatalf("a refused command changed the entry: %+v", after)
+	}
+}
+
+// A token passed where --token-file wants a path is refused before any
+// read, by a message that never repeats it: hub add, hub task-token and
+// task-token set share the reader. A missing file with a path's shape
+// keeps the message that names it.
+func TestTokenFileRefusesATokenWithoutQuotingIt(t *testing.T) {
+	t.Setenv("AIMEM_STATE_DIR", t.TempDir())
+	t.Chdir(t.TempDir())
+	if err := hubCmd([]string{"add", "pilot", "https://hub.example", "env-secret"}); err != nil {
+		t.Fatal(err)
+	}
+	before := *storedHub(t, "pilot")
+	tokens := []string{
+		"aimem_user_" + strings.Repeat("a", 64),
+		"aimem_peer_" + strings.Repeat("b", 64),
+		strings.Repeat("c0", 32), // a writer token
+		strings.Repeat("d1", 24), // the installer's env token
+	}
+	for _, tok := range tokens {
+		for name, run := range map[string]func() error{
+			"hub add":        func() error { return hubCmd([]string{"add", "pilot", "https://hub.example", "--token-file", tok}) },
+			"hub task-token": func() error { return hubCmd([]string{"task-token", "pilot", "--token-file", tok}) },
+			"task-token set": func() error {
+				return runTaskToken([]string{"set", "--token-file=" + tok}, t.TempDir(), t.TempDir(), strings.NewReader(""), io.Discard)
+			},
+		} {
+			err := run()
+			if !errors.Is(err, errTokenAsPath) || strings.Contains(err.Error(), tok) || strings.Contains(err.Error(), tok[:16]) {
+				t.Errorf("%s with a %d-character token: %v", name, len(tok), err)
+			}
+		}
+	}
+	if after := *storedHub(t, "pilot"); after != before {
+		t.Fatalf("a refused command changed the entry: %+v", after)
+	}
+
+	// Paths keep today's message, which names them.
+	for _, p := range []string{"absent.token", filepath.Join("dir", "aimem_user_x"), "short-name", "aimem_token"} {
+		_, err := readHubToken(p)
+		if err == nil || errors.Is(err, errTokenAsPath) || !strings.Contains(err.Error(), p) {
+			t.Errorf("%s: %v", p, err)
+		}
+	}
+	// A file that exists is read, whatever its name looks like.
+	named := tokens[2]
+	writePrivate(t, named, "file-held-secret\n")
+	if tok, err := readHubToken(named); err != nil || tok != "file-held-secret" {
+		t.Fatalf("an existing token-named file: %q %v", tok, err)
 	}
 }
