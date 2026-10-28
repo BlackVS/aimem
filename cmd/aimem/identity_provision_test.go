@@ -472,31 +472,32 @@ func TestIdentityOperationsMatchTheStore(t *testing.T) {
 
 // A peer provisioned before an operation existed gets only the new
 // credential: rerunning provision with the same flags issues the missing
-// board.read credential into its own file, keeps every earlier file and
-// the hub ID unchanged, and a further rerun issues nothing.
+// credential of the newest operation into its own file, keeps every
+// earlier file and the hub ID unchanged, and a further rerun issues nothing.
 func TestPeerProvisionAddsANewOperationToAnExistingPeer(t *testing.T) {
 	g := newIdentityCLIRig(t, nil)
 	dir := filepath.Join(g.dir, "aicrew-creds")
-	// Provision as v0.9.2 did: the four operations before board.read.
+	// Provision as the release before the newest operation did.
 	all := provisionFiles
-	provisionFiles = slices.DeleteFunc(slices.Clone(all), func(f struct{ operation, name string }) bool { return f.operation == "board.read" })
+	newest := all[len(all)-1]
+	provisionFiles = slices.Clone(all[:len(all)-1])
 	if out, err := g.provision(t, "aicrew-example", dir); err != nil {
 		provisionFiles = all
-		t.Fatalf("provision with four operations: %v\n%s", err, out)
+		t.Fatalf("provision without %s: %v\n%s", newest.operation, err, out)
 	}
 	provisionFiles = all
-	if len(g.credsOf(t, "aicrew-example")) != 4 {
+	if len(g.credsOf(t, "aicrew-example")) != len(all)-1 {
 		t.Fatalf("the old provisioning issued %v", g.credsOf(t, "aicrew-example"))
 	}
 	before := readFiles(t, dir)
-	boardPath := filepath.Join(dir, "aimem-board-read.token")
-	if _, ok := before["aimem-board-read.token"]; ok {
-		t.Fatal("the old provisioning wrote a board.read file")
+	newPath := filepath.Join(dir, newest.name)
+	if _, ok := before[newest.name]; ok {
+		t.Fatalf("the old provisioning wrote a %s file", newest.operation)
 	}
 
 	out, err := g.provision(t, "aicrew-example", dir)
-	if err != nil || linesWith(out, "issued ") != 1 || !strings.Contains(out, "issued board.read credential") ||
-		!strings.Contains(out, "into "+boardPath) || linesWith(out, "kept ") != 4 ||
+	if err != nil || linesWith(out, "issued ") != 1 || !strings.Contains(out, "issued "+newest.operation+" credential") ||
+		!strings.Contains(out, "into "+newPath) || linesWith(out, "kept ") != len(all)-1 ||
 		!strings.Contains(out, "already registered with this endpoint and trust") || !strings.Contains(out, "already holds this hub ID") {
 		t.Fatalf("rerun after the upgrade: %v\n%s", err, out)
 	}
@@ -526,7 +527,7 @@ func TestPeerProvisionAddsANewOperationToAnExistingPeer(t *testing.T) {
 	if err != nil || linesWith(out, "issued ") != 0 || linesWith(out, "kept ") != len(provisionFiles) || !strings.Contains(out, "nothing was issued") {
 		t.Fatalf("second rerun: %v\n%s", err, out)
 	}
-	if again := readFiles(t, dir); len(again) != len(after) || again["aimem-board-read.token"] != after["aimem-board-read.token"] {
+	if again := readFiles(t, dir); len(again) != len(after) || again[newest.name] != after[newest.name] {
 		t.Error("the second rerun changed a file")
 	}
 	if n := len(g.credsOf(t, "aicrew-example")); n != len(provisionFiles) {

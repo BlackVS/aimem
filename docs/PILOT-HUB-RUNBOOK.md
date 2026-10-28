@@ -105,7 +105,7 @@ project.repository.set for project "pilot"
 
 ## 3. Provision aicrew as the identity peer
 
-One command registers aicrew as the hub's identity peer and writes aicrew's five credentials into a directory, one file each, readable only by you. Each credential permits exactly one operation. Beside them, `aimem-hub-id` holds the hub's ID on one line, also readable only by you:
+One command registers aicrew as the hub's identity peer and writes aicrew's six credentials into a directory, one file each, readable only by you. Each credential permits exactly one operation. Beside them, `aimem-hub-id` holds the hub's ID on one line, also readable only by you:
 
 | File | Operation | What aicrew uses it for |
 |---|---|---|
@@ -114,6 +114,7 @@ One command registers aicrew as the hub's identity peer and writes aicrew's five
 | `aimem-team-register.token` | `team.register` | create and name its own teams' profiles (step 5) |
 | `aimem-team-read.token` | `team.read` | read its own teams' grants, each granted project's repository and its process pin |
 | `aimem-board-read.token` | `board.read` | read the task state changes of its teams' granted projects (the board feed) |
+| `aimem-task-read.token` | `task.read` | read one task's text in its teams' granted projects |
 
 `--endpoint` is aicrew's introspection route. `--peer-trust-dns` trusts the endpoint's certificate by its name and the system roots; `--peer-trust-pin sha256-BASE64` pins it instead. The credentials expire after 90 days unless `--expires` says otherwise.
 
@@ -132,6 +133,7 @@ issued reservation.read credential 01a0…-… into aicrew-creds/aimem-read.toke
 issued team.register credential 01a0…-… into aicrew-creds/aimem-team-register.token, expiring …
 issued team.read credential 01a0…-… into aicrew-creds/aimem-team-read.token, expiring …
 issued board.read credential 01a0…-… into aicrew-creds/aimem-board-read.token, expiring …
+issued task.read credential 01a0…-… into aicrew-creds/aimem-task-read.token, expiring …
 hub ID 01a0…-…
 wrote the hub ID into aicrew-creds/aimem-hub-id
 ```
@@ -140,20 +142,21 @@ aicrew reads the directory with `aicrew hub add --cred-dir aicrew-creds`, the hu
 
 **Running it again** is safe. It keeps every file that holds a credential, issues only for a file that is missing or empty, and says so; a provisioning that was cut short is finished this way. A file that holds a credential is never overwritten: for a peer that is not registered yet, the command refuses before it changes anything. `aimem-hub-id` is kept when it holds this hub's ID; a directory whose `aimem-hub-id` names another hub is refused before anything changes, and so is one that holds an ID while the hub has no peer yet to confirm it against.
 
-**After an upgrade that adds an operation.** A release can add a peer operation that an existing peer has no credential for, as `board.read` did (aicrew's board feed). Upgrade the hub first, then run the same `peer provision` command again, with the same service, `--endpoint`, trust flag and `--output-dir`. It issues a credential for each new operation into its own file and leaves every other file and credential as it was. Running it once more issues nothing:
+**After an upgrade that adds an operation.** A release can add a peer operation that an existing peer has no credential for, as `task.read` did (one task's text for aicrew). Upgrade the hub first, then run the same `peer provision` command again, with the same service, `--endpoint`, trust flag and `--output-dir`. It issues a credential for each new operation into its own file and leaves every other file and credential as it was. Running it once more issues nothing:
 
 ```
 identity peer aicrew-example already registered with this endpoint and trust
-issued board.read credential 01a1…-… into aicrew-creds/aimem-board-read.token, expiring …
+issued task.read credential 01a1…-… into aicrew-creds/aimem-task-read.token, expiring …
 kept aicrew-creds/aimem-redeem.token (exists; nothing issued for it)
 kept aicrew-creds/aimem-read.token (exists; nothing issued for it)
 kept aicrew-creds/aimem-team-register.token (exists; nothing issued for it)
 kept aicrew-creds/aimem-team-read.token (exists; nothing issued for it)
+kept aicrew-creds/aimem-board-read.token (exists; nothing issued for it)
 hub ID 01a0…-…
 aicrew-creds/aimem-hub-id already holds this hub ID
 ```
 
-Check with `aimem identity cred list aicrew-example $HUB`: one active credential per operation, `board.read` included. A different endpoint or trust is refused before anything changes, so take them from `aimem identity peer list $HUB`.
+Check with `aimem identity cred list aicrew-example $HUB`: one active credential per operation, `task.read` included. A different endpoint or trust is refused before anything changes, so take them from `aimem identity peer list $HUB`.
 
 **Replacing the peer.** The hub allows one enabled peer. To move aicrew to another service ID, name the old peer with `--replace`: it is disabled in the same step (and enabled again if the new registration fails). Then retire the old peer, so the new one can take its teams; `team.register` refuses a team UUID that another peer's profile holds, even a disabled one:
 
@@ -380,7 +383,7 @@ The operator never sees a receipt. `HUB_ID` is the hub ID from `aimem identity p
 | Pilot project | `aimem tasks on --project pilot`; `aimem process select …` echoes the selection; `aimem project show --project pilot` prints the repository and the pin |
 | aicrew peer | `aimem identity peer list $HUB` shows it `enabled` |
 | Introspection credential | `aimem identity peer check aicrew-example $HUB` says it works |
-| aicrew's five credentials | `aimem identity cred list aicrew-example $HUB` shows `identity.redeem`, `reservation.read`, `team.register`, `team.read` and `board.read` active |
+| aicrew's six credentials | `aimem identity cred list aicrew-example $HUB` shows `identity.redeem`, `reservation.read`, `team.register`, `team.read`, `board.read` and `task.read` active |
 | Team profile and grant | `aimem identity team grants --peer aicrew-example --team-name pilot $HUB` lists `pilot` |
 | Member tokens | `GET /v1/access/identity` answers `scope: user` for each member |
 | Member homes, before the first proof | with each home's `AIMEM_STATE_DIR` and `AIMEM_SOCKET`, `aimem hub credential pilot-hub` answers `set, active, scope user`; `~/.config/aimem/env` sets neither variable |

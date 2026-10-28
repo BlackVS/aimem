@@ -139,7 +139,7 @@ The owner approved splitting E3 and made four implementation decisions (E3 task 
 
 **Peer credential lifecycle.**
 - **Format.** A peer credential is `aimem_peer_` followed by 256 random bits in hex. It is returned once, when issued, and stored only as a SHA-256 digest.
-- **Scope.** It is bound to one registered peer and to the `identity.redeem` operation family. Since task C6b, a peer credential permits exactly one operation. The same peer can also hold `reservation.read` credentials for aicrew's read scope ([coordination contract](DESIGN-AIFORGE-COORDINATION-WIRE.md) §2), which cannot redeem, and, since the first pilot's follow-ups, `team.register` and `team.read` credentials ([Team registration and read](#team-registration-and-read-teamregister-teamread)), and `board.read` credentials for the board feed ([Board feed](#board-feed-boardread)). Each reaches only the routes of its own operation.
+- **Scope.** It is bound to one registered peer and to the `identity.redeem` operation family. Since task C6b, a peer credential permits exactly one operation. The same peer can also hold `reservation.read` credentials for aicrew's read scope ([coordination contract](DESIGN-AIFORGE-COORDINATION-WIRE.md) §2), which cannot redeem, and, since the first pilot's follow-ups, `team.register` and `team.read` credentials ([Team registration and read](#team-registration-and-read-teamregister-teamread)), `board.read` credentials for the board feed ([Board feed](#board-feed-boardread)), and `task.read` credentials for one task's text ([Task text](#task-text-taskread)). Each reaches only the routes of its own operation.
 - **Limits.** It lives at most 366 days. A peer has at most two active credentials, so a rotation can overlap.
 - **Lost issuance response.** The bearer cannot be recovered. The admin lists the peer's credential metadata, revokes the credential that was never received, and issues a new one.
 - **Expiry.** An expired credential is refused as if unknown and no longer counts toward the limit of two.
@@ -266,6 +266,19 @@ aicrew's control plane wakes its coordinator when a task of a granted project ch
   - The position of a project whose grant was revoked is carried forward unchanged, so a grant given back resumes where the peer stopped.
   - With no cursor the feed starts at each project's first change. The migration to project schema 24 fills the feed from the task history, so a reader without a cursor also sees the changes made before the upgrade.
 - **Refusals.** A cursor that does not decode, holds a position below 1, or was issued to another peer is `invalid_cursor` (400). A cursor past a project's last change is `cursor_ahead` (409): the hub's state was restored or replaced, and the reader reconciles by reading the board, then starts again without a cursor.
+- **MCP.** Not exposed as an MCP tool.
+
+## Task text (`task.read`)
+
+aicrewd freezes a task's text on an attempt when it offers the task to a member (aicrew task 01a157fb-4942). The board feed names the task and its revision; this operation reads that one task's text. It reads nothing else of the board.
+
+**`task.read`: `GET /v1/identity/peers/{service_id}/task-reads/{project}/{task_id}`**.
+- **Credential, transport, bound and audit.** As for `board.read`: a peer credential issued for exactly `task.read` (`aimem identity cred issue --operation task.read`, and `aimem identity peer provision` writes one into `aimem-task-read.token`), the path's own `service_id`, TLS the hub terminated, `X-Aimem-Identity-Version: 1`, and the read scope's bound of 60 calls per minute per credential. A successful read is audited as `task.read` with the service, project, task and revision; a refusal as `task.read.refused.<code>`.
+- **Scope.** Exactly `board.read`'s: a project granted to one of the calling peer's enabled team profiles. A disabled profile grants nothing, and a revoked grant hides the project's tasks at once.
+- **Answer.** `{project, task_id, revision, state, title, objective, acceptance_criteria, non_goals}` at the task's current revision. Comments, evidence, history, the blocker, the next action, dependencies, reservations and members are never returned. The answer is not cached (`Cache-Control: no-store`).
+- **Bound of the answer.** The title is at most 256 bytes and the task's editable content at most 32 KiB of JSON (the store's own write limits), so an answer stays under 40 KiB.
+- **Refusals.** A project that is not granted to the peer's enabled teams, a reserved project (the user store, a knowledge group), an unknown project and an unknown task all get the same `task_not_found` (404), so a probe learns nothing about what exists outside the grant. The audit records which one it was (`reason=not_granted`, `reserved_project`, `unknown_project` or `unknown_task`).
+- **Access-store schema.** The credential table's operation check gains `task.read` in access schema 9. The migration rebuilds the table and keeps every credential with its operation. It is one-way: a hub on schema 9 does not start under an earlier release.
 - **MCP.** Not exposed as an MCP tool.
 
 ## Team-mode report documents

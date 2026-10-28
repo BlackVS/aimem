@@ -39,10 +39,13 @@ const (
 	// aicrewd's board feed (aicrew's control-plane design, A0): the state
 	// changes of the tasks in its teams' granted projects.
 	PeerOperationBoardRead = "board.read"
+	// One task's text in its teams' granted projects, which aicrew freezes
+	// on an attempt at the offer.
+	PeerOperationTaskRead = "task.read"
 )
 
 // PeerOperations lists every operation a peer credential can be issued for.
-var PeerOperations = []string{PeerOperationRedeem, PeerOperationReservationRead, PeerOperationTeamRegister, PeerOperationTeamRead, PeerOperationBoardRead}
+var PeerOperations = []string{PeerOperationRedeem, PeerOperationReservationRead, PeerOperationTeamRegister, PeerOperationTeamRead, PeerOperationBoardRead, PeerOperationTaskRead}
 
 const (
 	peerCredentialPrefix      = "aimem_peer_"

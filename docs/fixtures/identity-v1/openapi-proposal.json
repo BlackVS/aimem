@@ -31,6 +31,7 @@
     "team_operation_unsupported": 403,
     "profile_disabled": 403,
     "not_found": 404,
+    "task_not_found": 404,
     "team_name_taken": 409,
     "cursor_ahead": 409,
     "task_held": 409,

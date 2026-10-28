@@ -13,6 +13,28 @@ currently 25); a binary refuses a database newer than it understands.
 
 ## [Unreleased]
 
+### Upgrade notes
+
+- **Access schema 9 is one-way.** The hub rebuilds its peer credential
+  table to accept `task.read` and keeps every credential. A hub on
+  schema 9 does not start under 0.10.15 or earlier; to roll back,
+  restore the state backup the installer took before the upgrade.
+
+### Added
+
+- **`task.read`: aicrew reads one task's text.** A new peer operation,
+  `GET /v1/identity/peers/{service_id}/task-reads/{project}/{task_id}`,
+  answers a task's title, objective, acceptance criteria, non-goals,
+  state and revision, for aicrewd to freeze on an attempt when it offers
+  the task. Nothing else of the task is returned.
+  - Its scope is `board.read`'s: the projects granted to the peer's
+    enabled team profiles. An ungranted, reserved or unknown project and
+    an unknown task all get the same `task_not_found` (404); the audit
+    keeps the reason.
+  - It needs its own credential (`--operation task.read`). After the
+    upgrade, rerun `aimem identity peer provision` with the same flags;
+    it issues only `aimem-task-read.token`.
+
 ### Security
 
 - **A revoked project grant now also reaches a process selection without
