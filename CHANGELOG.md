@@ -13,8 +13,23 @@ currently 25); a binary refuses a database newer than it understands.
 
 ## [Unreleased]
 
+## [0.10.16] — 2026-10-28
+
+A hub can hold a default process that `aimem tasks on` applies to a
+project with none. aicrew can read one task's text through a new peer
+operation, `task.read`, with its own credential. `install-hub.sh` writes
+`AIMEM_INTROSPECTION_TOKEN_FILE` into the hub's env file. A revoked
+project grant now also reaches a process selection without a digest. On
+the tasks page, a long epic title no longer squeezes the task title in
+the list view. The access schema moves to 9 (one-way); the on-disk
+schema stays at 25. Includes PR #284 and #311 to #316.
+
 ### Upgrade notes
 
+- **Upgrade the hub before aicrew's sixth credential is issued.**
+  `task.read` exists only on an upgraded hub. After the hub upgrade,
+  rerun `aimem identity peer provision` with the same flags; it issues
+  only the new `aimem-task-read.token` and keeps the other five.
 - **Access schema 9 is one-way.** The hub rebuilds its peer credential
   table to accept `task.read` and keeps every credential. A hub on
   schema 9 does not start under 0.10.15 or earlier; to roll back,
@@ -24,6 +39,16 @@ currently 25); a binary refuses a database newer than it understands.
   by a full 40-character commit fails with a message naming `--commit`
   until the flag is added. The `tasks on` hint now offers processes in
   use by their tags only.
+- **Clients and hubs can otherwise be upgraded in either order.** An
+  upgraded client's `aimem tasks on` against an older hub finds no
+  default process and behaves as before; `aimem process default` itself
+  needs an upgraded hub.
+- **The on-disk schema stays at 25.** Only the access schema changes, so
+  going back to 0.10.15 on a hub that reached access schema 9 needs the
+  installer's state backup (see above); a client goes back by putting
+  the 0.10.15 binary back.
+- **`AIMEM_INTROSPECTION_TOKEN_FILE` is a new optional installer
+  setting.** Without it, the install and upgrade are unchanged.
 
 ### Added
 
@@ -61,6 +86,11 @@ currently 25); a binary refuses a database newer than it understands.
   - It needs its own credential (`--operation task.read`). After the
     upgrade, rerun `aimem identity peer provision` with the same flags;
     it issues only `aimem-task-read.token`.
+
+### Changed
+
+- **modernc.org/sqlite v1.60.1 to v1.61.0** (SQLite 3.54.1, libc
+  v1.79.0); on-disk schema unchanged.
 
 ### Security
 
