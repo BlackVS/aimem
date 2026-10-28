@@ -78,6 +78,7 @@ var identityRefusals = map[string]struct {
 	"not_found":                  {404, false, "This peer has no team with this ID on the hub.", "Register the team with team.register, or check the team ID."},
 	"invalid_cursor":             {400, false, "The board cursor is malformed or was issued to another peer.", "Read the feed with the cursor this hub last returned to this peer, or without one."},
 	"cursor_ahead":               {409, false, "The board cursor is past this hub's board feed; the hub's state was restored or replaced.", "Reconcile the board by reading its tasks, then read the feed without a cursor."},
+	"task_not_found":             {404, false, "No such task in a project granted to this peer's teams.", "Check the project and task ID against the board feed, and the team's grant on the hub."},
 }
 
 func (s *Server) identityRefuse(w http.ResponseWriter, code string) {
@@ -123,7 +124,7 @@ func identityTLS(r *http.Request) bool {
 var identityWireMux = func() *http.ServeMux {
 	m := http.NewServeMux()
 	for _, p := range []string{identityProofPattern, identityRedeemPattern, readReceiptByProofPattern, readReceiptByKeyPattern, readHoldPattern,
-		teamRegisterPattern, teamReadAllPattern, teamReadOnePattern, boardReadPattern} {
+		teamRegisterPattern, teamReadAllPattern, teamReadOnePattern, boardReadPattern, taskReadPattern} {
 		m.HandleFunc(p, func(http.ResponseWriter, *http.Request) {})
 	}
 	return m
@@ -142,6 +143,8 @@ const (
 	teamReadOnePattern  = "GET /v1/identity/peers/{service_id}/team-reads/{team_id}"
 	// aicrewd's board feed (aicrew's control-plane design, A0).
 	boardReadPattern = "GET /v1/identity/peers/{service_id}/board-changes"
+	// One task's text, which aicrew freezes on an attempt at the offer.
+	taskReadPattern = "GET /v1/identity/peers/{service_id}/task-reads/{project}/{task_id}"
 )
 
 // identityWireRoute names the peer-facing wire route a request targets:
@@ -164,6 +167,8 @@ func identityWireRoute(r *http.Request) string {
 		return "team_read"
 	case boardReadPattern:
 		return "board_read"
+	case taskReadPattern:
+		return "task_read"
 	}
 	return ""
 }
@@ -175,7 +180,7 @@ var gateAuthHook func(*http.Request)
 // identityUnauthenticated is the envelope code for a wire request whose bearer
 // is missing, unknown, or not the kind of credential the route requires.
 var identityUnauthenticated = map[string]string{"proof": "invalid_credential", "redeem": "peer_unauthenticated", "read": "peer_unauthenticated",
-	"team_register": "peer_unauthenticated", "team_read": "peer_unauthenticated", "board_read": "peer_unauthenticated"}
+	"team_register": "peer_unauthenticated", "team_read": "peer_unauthenticated", "board_read": "peer_unauthenticated", "task_read": "peer_unauthenticated"}
 
 // peerOperationRoutes is the whole surface of a peer credential, by the one
 // operation it permits: redemption's POST shape, or the read scope's three
@@ -183,7 +188,7 @@ var identityUnauthenticated = map[string]string{"proof": "invalid_credential", "
 // peer.
 var peerOperationRoutes = map[string]string{access.PeerOperationRedeem: "redeem", access.PeerOperationReservationRead: "read",
 	access.PeerOperationTeamRegister: "team_register", access.PeerOperationTeamRead: "team_read",
-	access.PeerOperationBoardRead: "board_read"}
+	access.PeerOperationBoardRead: "board_read", access.PeerOperationTaskRead: "task_read"}
 
 func peerRouteAllowed(r *http.Request, p access.PeerIdentity) bool {
 	route := peerOperationRoutes[p.Operation]

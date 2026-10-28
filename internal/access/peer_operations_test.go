@@ -288,7 +288,7 @@ PRAGMA user_version=7;`); err != nil {
 			t.Fatal(err)
 		}
 		var version int
-		if err := s.db.QueryRow("PRAGMA user_version").Scan(&version); err != nil || version != accessSchema || accessSchema != 8 {
+		if err := s.db.QueryRow("PRAGMA user_version").Scan(&version); err != nil || version != accessSchema {
 			t.Fatalf("schema version %d: %v", version, err)
 		}
 		for _, c := range creds {
@@ -311,5 +311,85 @@ PRAGMA user_version=7;`); err != nil {
 	}
 	if p, err := s.AuthenticatePeer(secret); err != nil || p.CredentialID != c.ID || p.Operation != PeerOperationBoardRead {
 		t.Fatalf("a board.read credential authenticates as %+v: %v", p, err)
+	}
+}
+
+// Schema 9 widens the credential table for task.read and keeps every
+// credential of the five earlier operations authenticating as it was.
+func TestAccessSchema9KeepsCredentialsAndAllowsTaskRead(t *testing.T) {
+	root := t.TempDir()
+	s, err := Open(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	hub, err := s.HubID()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.RegisterIdentityPeer("admin", IdentityPeer{ServiceID: "aicrew-example", HubID: hub,
+		Endpoint: "https://aicrew.example/v1/crew/introspect", TLSMode: "ca_dns", TLSValue: "aicrew.example"}); err != nil {
+		t.Fatal(err)
+	}
+	type issued struct{ id, secret, op string }
+	var creds []issued
+	for _, op := range []string{PeerOperationRedeem, PeerOperationReservationRead, PeerOperationTeamRegister, PeerOperationTeamRead, PeerOperationBoardRead} {
+		c, secret, err := s.IssuePeerCredential("admin", "aicrew-example", op, time.Now().Add(time.Hour))
+		if err != nil {
+			t.Fatal(err)
+		}
+		creds = append(creds, issued{c.ID, secret, op})
+	}
+	// Back to schema 8: the CHECK without task.read.
+	if _, err := s.db.Exec(`
+CREATE TABLE c8(
+ id TEXT PRIMARY KEY,
+ service_id TEXT NOT NULL REFERENCES identity_peers(service_id),
+ digest TEXT NOT NULL UNIQUE,
+ created_at INTEGER NOT NULL,
+ expires_at INTEGER NOT NULL,
+ revoked INTEGER NOT NULL DEFAULT 0 CHECK(revoked IN (0,1)),
+ operation TEXT NOT NULL DEFAULT 'identity.redeem'
+  CHECK(operation IN ('identity.redeem','reservation.read','team.register','team.read','board.read'))
+);
+INSERT INTO c8 SELECT id,service_id,digest,created_at,expires_at,revoked,operation FROM identity_peer_credentials;
+DROP TABLE identity_peer_credentials;
+ALTER TABLE c8 RENAME TO identity_peer_credentials;
+PRAGMA user_version=8;`); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := s.IssuePeerCredential("admin", "aicrew-example", PeerOperationTaskRead, time.Now().Add(time.Hour)); err == nil {
+		t.Fatal("the schema-8 table took a task.read credential")
+	}
+	if err := s.Close(); err != nil {
+		t.Fatal(err)
+	}
+	for range 2 { // migration, then an ordinary reopen
+		if s, err = Open(root); err != nil {
+			t.Fatal(err)
+		}
+		var version int
+		if err := s.db.QueryRow("PRAGMA user_version").Scan(&version); err != nil || version != accessSchema || accessSchema != 9 {
+			t.Fatalf("schema version %d: %v", version, err)
+		}
+		for _, c := range creds {
+			p, err := s.AuthenticatePeer(c.secret)
+			if err != nil || p.CredentialID != c.id || p.Operation != c.op {
+				t.Fatalf("a migrated %s credential: %+v %v", c.op, p, err)
+			}
+		}
+		if err := s.Close(); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if s, err = Open(root); err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	c, secret, err := s.IssuePeerCredential("admin", "aicrew-example", PeerOperationTaskRead, time.Now().Add(time.Hour))
+	if err != nil {
+		t.Fatalf("issue task.read after the migration: %v", err)
+	}
+	if p, err := s.AuthenticatePeer(secret); err != nil || p.CredentialID != c.ID || p.Operation != PeerOperationTaskRead {
+		t.Fatalf("a task.read credential authenticates as %+v: %v", p, err)
 	}
 }

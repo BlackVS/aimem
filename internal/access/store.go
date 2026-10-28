@@ -115,7 +115,7 @@ func OpenExisting(root string) (*Store, error) {
 }
 
 // accessSchema is the access database version this binary writes.
-const accessSchema = 8
+const accessSchema = 9
 
 func (s *Store) migrate() error {
 	var current int
@@ -325,6 +325,30 @@ INSERT INTO identity_peer_credentials_v8(id,service_id,digest,created_at,expires
 DROP TABLE identity_peer_credentials;
 ALTER TABLE identity_peer_credentials_v8 RENAME TO identity_peer_credentials;
 PRAGMA user_version=8;`); err != nil {
+			return err
+		}
+		version = 8
+	}
+	if version == 8 {
+		// task.read, one task's text for aicrew's offer: the credential
+		// table is rebuilt as in schema 8 to widen its CHECK, keeping every
+		// row and its operation.
+		if _, err := tx.Exec(`
+CREATE TABLE identity_peer_credentials_v9(
+ id TEXT PRIMARY KEY,
+ service_id TEXT NOT NULL REFERENCES identity_peers(service_id),
+ digest TEXT NOT NULL UNIQUE,
+ created_at INTEGER NOT NULL,
+ expires_at INTEGER NOT NULL,
+ revoked INTEGER NOT NULL DEFAULT 0 CHECK(revoked IN (0,1)),
+ operation TEXT NOT NULL DEFAULT 'identity.redeem'
+  CHECK(operation IN ('identity.redeem','reservation.read','team.register','team.read','board.read','task.read'))
+);
+INSERT INTO identity_peer_credentials_v9(id,service_id,digest,created_at,expires_at,revoked,operation)
+ SELECT id,service_id,digest,created_at,expires_at,revoked,operation FROM identity_peer_credentials;
+DROP TABLE identity_peer_credentials;
+ALTER TABLE identity_peer_credentials_v9 RENAME TO identity_peer_credentials;
+PRAGMA user_version=9;`); err != nil {
 			return err
 		}
 	}

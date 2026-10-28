@@ -60,6 +60,8 @@ func teamOperation(r *http.Request) string {
 		return "team.register"
 	case "board_read":
 		return "board.read"
+	case "task_read":
+		return "task.read"
 	}
 	return "team.read"
 }
@@ -69,11 +71,20 @@ func teamOperation(r *http.Request) string {
 // An audit that cannot be written does not change the answer, which is a
 // refusal either way; it is logged.
 func (s *Server) teamOpRefuse(w http.ResponseWriter, r *http.Request, peer access.PeerIdentity, code string) {
+	s.teamOpRefuseWhy(w, r, peer, code, "")
+}
+
+// teamOpRefuseWhy is teamOpRefuse with the exact reason added to the audit
+// subject, for a refusal whose answer does not say it.
+func (s *Server) teamOpRefuseWhy(w http.ResponseWriter, r *http.Request, peer access.PeerIdentity, code, reason string) {
 	action := teamOperation(r) + ".refused." + code
 	cid := uuidv7.New()
 	subject := fmt.Sprintf("service=%s credential=%s", peer.ServiceID, peer.CredentialID)
 	if team := pathTeamID(r); team != "" {
 		subject += " team=" + team
+	}
+	if reason != "" {
+		subject += " reason=" + reason
 	}
 	subject += fmt.Sprintf(" path=%q correlation=%s", r.URL.EscapedPath(), cid)
 	if db, err := s.openAccess(false); err != nil {
@@ -86,8 +97,12 @@ func (s *Server) teamOpRefuse(w http.ResponseWriter, r *http.Request, peer acces
 
 // pathTeamID is the team UUID a team route names, when its last segment
 // parses as one. The bearer gate refuses before the mux sets path values,
-// so it reads the path itself.
+// so it reads the path itself. Other routes name no team (a task read's
+// last segment is a task ID).
 func pathTeamID(r *http.Request) string {
+	if route := identityWireRoute(r); route != "team_register" && route != "team_read" {
+		return ""
+	}
 	seg := r.URL.Path[strings.LastIndexByte(r.URL.Path, '/')+1:]
 	if teamUUID.MatchString(seg) {
 		return seg

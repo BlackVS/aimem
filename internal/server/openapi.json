@@ -1952,6 +1952,72 @@
         }
       }
     },
+    "/v1/identity/peers/{service_id}/task-reads/{project}/{task_id}": {
+      "get": {
+        "summary": "identity.v1 task.read: one task's text in a project granted to the calling peer's teams",
+        "description": "identity.v1 task.read: only an aimem_peer_ credential issued for task.read, for the path's service, may call this; every other credential is refused with peer_forbidden. Returns {project, task_id, revision, state, title, objective, acceptance_criteria, non_goals} for one task of a project granted to one of the calling peer's enabled team profiles. Nothing else of the task: no comments, evidence, history, reservations or members. A project that is not granted, a disabled profile, a reserved or unknown project and an unknown task are all refused with the same task_not_found, so the answer does not reveal what exists outside the grant. The title is at most 256 bytes and the text fields together at most 32 KiB, so the answer stays under 40 KiB. Audited as task.read. Requires TLS terminated by this hub (plain HTTP, a TLS-terminating proxy and the unix socket are refused with tls_required) and X-Aimem-Identity-Version: 1. Bounded with the read scope at 60 calls per minute per credential (rate_limited). Not exposed as an MCP tool.",
+        "x-role": "writer",
+        "x-identity-auth": "peer",
+        "x-requires-tls": true,
+        "parameters": [
+          {
+            "name": "service_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "project",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "task_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "X-Aimem-Identity-Version",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "1"
+              ]
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "{project, task_id, revision, state, title, objective, acceptance_criteria, non_goals}"
+          },
+          "400": {
+            "description": "unsupported_version"
+          },
+          "401": {
+            "description": "peer_unauthenticated"
+          },
+          "403": {
+            "description": "tls_required or peer_forbidden"
+          },
+          "404": {
+            "description": "task_not_found"
+          },
+          "429": {
+            "description": "rate_limited"
+          }
+        }
+      }
+    },
     "/v1/identity/peers/{service_id}/team-reads": {
       "get": {
         "summary": "identity.v1 team.read: the calling peer's own teams, grants, repositories and process pins",
@@ -2736,10 +2802,11 @@
                       "reservation.read",
                       "team.register",
                       "team.read",
-                      "board.read"
+                      "board.read",
+                      "task.read"
                     ],
                     "default": "identity.redeem",
-                    "description": "The one operation the credential permits: identity.v1 redemption, aicrew's read scope, team.register, team.read or board.read (the board feed). A credential never permits two."
+                    "description": "The one operation the credential permits: identity.v1 redemption, aicrew's read scope, team.register, team.read, board.read (the board feed) or task.read (one task's text). A credential never permits two."
                   }
                 }
               }

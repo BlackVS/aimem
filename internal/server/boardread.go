@@ -18,6 +18,8 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+
+	"aimem/internal/access"
 )
 
 const (
@@ -116,24 +118,10 @@ func (s *Server) readBoard(w http.ResponseWriter, r *http.Request) {
 		s.identityRefuse(w, "identity_unavailable")
 		return
 	}
-	profiles, err := db.ListTeamProfiles(peer.ServiceID)
+	granted, err := peerGrantedInstances(db, peer.ServiceID)
 	if err != nil {
 		s.teamReadFailed(w, err)
 		return
-	}
-	granted := map[string]bool{}
-	for _, p := range profiles {
-		if p.Disabled {
-			continue
-		}
-		instances, err := db.TeamGrantInstances(p.ID)
-		if err != nil {
-			s.teamReadFailed(w, err)
-			return
-		}
-		for _, inst := range instances {
-			granted[inst] = true
-		}
 	}
 	names, err := s.projectNamesByInstance()
 	if err != nil {
@@ -181,4 +169,28 @@ func (s *Server) readBoard(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Header().Set("Cache-Control", "no-store")
 	s.ok(w, out)
+}
+
+// peerGrantedInstances is the set of project instances granted to the
+// peer's enabled team profiles: what board.read and task.read may read.
+// A disabled profile contributes nothing.
+func peerGrantedInstances(db *access.Store, service string) (map[string]bool, error) {
+	profiles, err := db.ListTeamProfiles(service)
+	if err != nil {
+		return nil, err
+	}
+	granted := map[string]bool{}
+	for _, p := range profiles {
+		if p.Disabled {
+			continue
+		}
+		instances, err := db.TeamGrantInstances(p.ID)
+		if err != nil {
+			return nil, err
+		}
+		for _, inst := range instances {
+			granted[inst] = true
+		}
+	}
+	return granted, nil
 }
