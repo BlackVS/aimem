@@ -13,6 +13,26 @@ currently 25); a binary refuses a database newer than it understands.
 
 ## [Unreleased]
 
+### Security
+
+- **A revoked project grant now also reaches a process selection without
+  a digest (audit A-5, follow-up).** A selection that carries no digest
+  comes from an older hub, from before stored sets, or from a pinned
+  version accepted before records carried the digest. A checkout that
+  presents the hub entry's own credential kept serving such a selection
+  as ready from this machine's Git cache after its grant on the project
+  was revoked. The set route is not asked for such a selection, because
+  an older hub refuses a route it does not know with 403.
+  - The hub's identity answer, which every load already reads, is now
+    the grant check. Its `task_write` applies the same grant rule as the
+    set route. When it is `false`, the selection is `denied`, the cache
+    and Git are not read, and the selection is not recorded as last
+    observed.
+  - When the field is absent (an admin token, or a hub before project
+    grants), when it is `true`, or when the hub is unreachable, the load
+    behaves as before. A project-local credential was already refused on
+    the same field before any read.
+
 ## [0.10.15] — 2026-10-28
 
 `install-hub.sh` now installs a hub without systemd (`AIMEM_NO_SERVICE=1`),

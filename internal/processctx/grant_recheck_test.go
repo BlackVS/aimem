@@ -163,3 +163,86 @@ func dropConn(w http.ResponseWriter) {
 		}
 	}
 }
+
+// A selection without a digest (an older hub's, or one recorded before
+// sets) is served from this machine's Git cache, and the set route is not
+// asked. Its grant is the identity answer's task_write: no current grant is
+// a denial, and the cached commit is not used. The checkout presents the
+// hub entry's own credential; a project-local one is checked by the same
+// field before anything is read (taskcred), shown at the end.
+func TestAGitCachedSelectionIsServedOnlyUnderACurrentGrant(t *testing.T) {
+	h := &fakeHub{}
+	h.change(ready)
+	dir, root, _ := checkout(t, h, false)
+	cache(t, root, selection, "# Handbook\n\ngranted rules\n")
+	if r := Load(dir, root, ""); r.State != Ready || r.Source != SourceCache {
+		t.Fatalf("granted: %+v", r)
+	}
+
+	// The grant is revoked. The last-observed record is removed first, so
+	// the denied load is seen not to write one.
+	last := filepath.Join(root, "process", "last-alpha.json")
+	if err := os.Remove(last); err != nil {
+		t.Fatal(err)
+	}
+	h.change(func(h *fakeHub) { h.noGrant = true })
+	r := Load(dir, root, "")
+	if r.State != Denied || r.Set != nil || r.Unit != "" || !strings.Contains(r.Detail, "no current grant on project alpha") {
+		t.Fatalf("revoked: %+v", r)
+	}
+	if _, err := r.Deliver(); err == nil {
+		t.Fatal("a denied result delivered a unit")
+	}
+	if hook, _ := Bootstrap(dir, root, "", false); !strings.Contains(hook, "DENIED") || strings.Contains(hook, "granted rules") {
+		t.Fatalf("revoked hook: %q", hook)
+	}
+	if _, err := os.Stat(last); !os.IsNotExist(err) {
+		t.Fatalf("a denied selection was recorded as last observed: %v", err)
+	}
+	if r := LoadRef(dir, root, "", selection); r.State != Denied || r.Set != nil || r.Unit != "" {
+		t.Fatalf("pinned, revoked: %+v", r)
+	}
+
+	// The grant again: the cache, Ready, for both loads.
+	h.change(func(h *fakeHub) { h.noGrant = false })
+	if r := Load(dir, root, ""); r.State != Ready || !strings.Contains(r.Unit, "granted rules") {
+		t.Fatalf("granted again: %+v", r)
+	}
+	if r := LoadRef(dir, root, "", selection); r.State != Ready || !strings.Contains(r.Unit, "granted rules") {
+		t.Fatalf("pinned, granted again: %+v", r)
+	}
+
+	// An older hub: identity without task_write, and a set route it does
+	// not know (403). Neither reads as a denial, and the set route is not
+	// asked for a selection without a digest.
+	h.change(func(h *fakeHub) { h.omitTaskWrite, h.setStatus = true, http.StatusForbidden })
+	if r := Load(dir, root, ""); r.State != Ready || !strings.Contains(r.Unit, "granted rules") {
+		t.Fatalf("older hub: %+v", r)
+	}
+	if r := LoadRef(dir, root, "", selection); r.State != Ready || !strings.Contains(r.Unit, "granted rules") {
+		t.Fatalf("pinned, older hub: %+v", r)
+	}
+	if n := h.setCalls.Load(); n != 0 {
+		t.Fatalf("the set route was asked %d times for a selection without a digest", n)
+	}
+
+	// The hub cannot be asked: the last observed selection, as before.
+	h.change(func(h *fakeHub) {
+		h.omitTaskWrite, h.setStatus, h.gatewayStatus = false, 0, http.StatusServiceUnavailable
+	})
+	if r := Load(dir, root, ""); r.State != LastObserved || !strings.Contains(r.Unit, "granted rules") {
+		t.Fatalf("unreachable: %+v", r)
+	}
+
+	// A project-local credential without a current grant: refused before
+	// any read, so nothing is served either.
+	h.change(func(h *fakeHub) { h.gatewayStatus = 0 })
+	dir, root, _ = checkout(t, h, true)
+	cache(t, root, selection, "# Handbook\n\ngranted rules\n")
+	h.change(func(h *fakeHub) { h.noGrant = true })
+	for _, r := range []*Result{Load(dir, root, ""), LoadRef(dir, root, "", selection)} {
+		if r.State == Ready || r.Set != nil || r.Unit != "" {
+			t.Fatalf("local credential, revoked: %+v", r)
+		}
+	}
+}
