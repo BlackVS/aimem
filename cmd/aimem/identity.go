@@ -650,6 +650,9 @@ func newIdentityClient(hub, tokenFile, caFile, pin string) (*identityClient, err
 	if tokenFile == "" {
 		return nil, fmt.Errorf("--admin-token-file is required: a hub-admin bearer in a file only you can read")
 	}
+	if err := checkTokenPath("--admin-token-file", tokenFile); err != nil {
+		return nil, err
+	}
 	if err := privatefile.Check(tokenFile); err != nil {
 		return nil, fmt.Errorf("--admin-token-file: %w", err)
 	}

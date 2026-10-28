@@ -931,3 +931,44 @@ func TestIdentityCLICredentialOperation(t *testing.T) {
 	}
 	g.assertNoSecrets(t)
 }
+
+// The admin token passed where --admin-token-file wants a path is refused
+// before any read or request, by the check the --token-file commands share
+// (checkTokenPath), and never repeated. A missing path keeps the message
+// that names it; an existing file with a token-like name is read.
+func TestIdentityCLIAdminTokenFileRefusesATokenWithoutQuotingIt(t *testing.T) {
+	g := newIdentityCLIRig(t, nil)
+	t.Chdir(t.TempDir())
+	before := g.requests.Load()
+	for _, tok := range []string{
+		"aimem_user_" + strings.Repeat("a", 64),
+		"aimem_peer_" + strings.Repeat("b", 64),
+		strings.Repeat("c0", 32), // a writer token
+		strings.Repeat("d1", 24), // the installer's env token
+	} {
+		_, err := g.runRaw(t, "peer", "list", "--hub", g.ts.URL, "--hub-ca-file", g.caFile, "--admin-token-file", tok)
+		if !errors.Is(err, errTokenAsPath) || !strings.HasPrefix(err.Error(), "--admin-token-file takes the path of a file") ||
+			strings.Contains(err.Error(), tok) || strings.Contains(err.Error(), tok[:16]) {
+			t.Errorf("a %d-character token: %v", len(tok), err)
+		}
+	}
+	if got := g.requests.Load() - before; got != 0 {
+		t.Errorf("%d requests sent with a token in place of the file", got)
+	}
+	missing := g.secretPath("absent.token")
+	if _, err := g.runRaw(t, "peer", "list", "--hub", g.ts.URL, "--hub-ca-file", g.caFile, "--admin-token-file", missing); err == nil ||
+		errors.Is(err, errTokenAsPath) || !strings.Contains(err.Error(), missing) {
+		t.Errorf("a missing path: %v", err)
+	}
+	named := strings.Repeat("e2", 32)
+	f, err := privatefile.Create(named)
+	if err != nil {
+		t.Fatal(err)
+	}
+	f.WriteString(identityAdminToken + "\n")
+	f.Close()
+	if out, err := g.runRaw(t, "peer", "list", "--hub", g.ts.URL, "--hub-ca-file", g.caFile, "--admin-token-file", named); err != nil {
+		t.Errorf("an existing token-named file: %v\n%s", err, out)
+	}
+	g.assertNoSecrets(t)
+}

@@ -277,7 +277,7 @@ func TestTokenFileRefusesATokenWithoutQuotingIt(t *testing.T) {
 			},
 		} {
 			err := run()
-			if !errors.Is(err, errTokenAsPath) || strings.Contains(err.Error(), tok) || strings.Contains(err.Error(), tok[:16]) {
+			if !errors.Is(err, errTokenAsPath) || !strings.HasPrefix(err.Error(), "--token-file takes the path of a file") || strings.Contains(err.Error(), tok) || strings.Contains(err.Error(), tok[:16]) {
 				t.Errorf("%s with a %d-character token: %v", name, len(tok), err)
 			}
 		}
