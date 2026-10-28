@@ -243,14 +243,14 @@ individual credential set, active, scope user
 
 ### 17. The process's skills are installed from the hub (workstation)
 
-The process names the review skill, and the hub serves it.
+The process names the review skill and the hub serves it; `--tool` names the client, which is found on `PATH` otherwise.
 
 ```sh
-aimem skills install
+aimem skills install --tool claude
 ```
 
 ```text
-installed oh-code-review <skills-version> (release)
+installed oh-code-review <skills-version> (release) for claude
 ```
 
 ### 18. The local service answers (workstation)
