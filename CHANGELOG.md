@@ -13,6 +13,37 @@ currently 25); a binary refuses a database newer than it understands.
 
 ## [Unreleased]
 
+## [0.10.15] — 2026-10-28
+
+`install-hub.sh` now installs a hub without systemd (`AIMEM_NO_SERVICE=1`),
+for a container or a host with its own supervisor. It can also install a
+verified binary from a local directory (`AIMEM_PREBUILT_DIR`). Task and
+comment ids may be given by a unique prefix. `aimem task-token set` reads
+the project token from `--token-file`. A token passed where a token file
+belongs is refused without being repeated. The documented usage scenarios
+run as release-gate cards against the real binary. The Windows install
+block checks `boot.ps1` against the release's `SHA256SUMS` before it runs
+it. No schema change. Includes PR #292 to #309.
+
+### Upgrade notes
+
+- **Hubs and clients can be upgraded in either order.** A short task or
+  comment id works only against an upgraded hub: until the hub is
+  upgraded, use the full id.
+- **No schema change.** The schema stays at 25, so going back is putting
+  the 0.10.14 binary back; no state copy is needed for that.
+- **The hub installer has two new optional settings.**
+  - `AIMEM_PREBUILT_DIR` installs from a directory instead of downloading.
+  - `AIMEM_NO_SERVICE=1` installs without systemd and prints the command
+    that starts the hub. Its upgrade refuses while that hub answers:
+    stop the hub, run the installer, then start the hub again.
+  - Without either setting, the install and upgrade are unchanged.
+- **A token-shaped value of `--token-file` or `--admin-token-file` is
+  refused when it names no file.** A token's shape is an `aimem_user_` or
+  `aimem_peer_` credential, or a word of 32 or more token characters. A
+  script that names its token file by such a bare word needs a path with
+  a directory or an extension, such as `./<name>`.
+
 ### Added
 
 - **install-hub.sh installs a hub without systemd (`AIMEM_NO_SERVICE=1`).**
@@ -161,9 +192,9 @@ currently 25); a binary refuses a database newer than it understands.
   repeated in the error.** `hub add`, `hub task-token` and
   `task-token set` take `--token-file`, and `identity`,
   `identity enroll` and `reservation recover` take `--admin-token-file`.
-  Both flags take the path of a file that holds the token. When the token itself was given instead,
-  the error that the file cannot be read quoted it, and so did any log that captured
-  the error. Now, a value that names no file and has a token's shape is
+  Both flags take the path of a file that holds the token. When the token
+  itself was given instead, the error that the file cannot be read quoted
+  it, and so did any log that captured the error. Now, a value that names no file and has a token's shape is
   refused with a fixed message that does not repeat it. A token's shape
   is an `aimem_user_` or `aimem_peer_` credential, or a word of 32 or
   more token characters such as a writer token. A missing path still
