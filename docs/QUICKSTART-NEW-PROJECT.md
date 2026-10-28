@@ -66,7 +66,8 @@ The secret is printed once. Copy it into the workstation's private file
 in step 3.3 now, or keep this terminal open until you get there.
 
 **The task board.** This creates the project on the hub if it is new and
-switches its tasks on:
+switches its tasks on. When the hub has a default process (below), it
+also selects that process for the project and says so:
 
 ```sh
 aimem tasks on -p my-project
@@ -109,21 +110,37 @@ per missing skill and the import command for it, and
 member's `aimem skills install` refuses those skills until you import
 them.
 
-Select a release tag of the repository. The hub host resolves the tag to
-the commit it holds now and pins the selection to that commit, so the
-agents read exactly what you reviewed; the manifest path defaults to
-`processes/aimem/manifest.json`:
+Set the hub's default process once, by a release tag of the repository.
+The hub host resolves the tag to the commit it holds now, reads the
+files at that commit and checks them; the manifest path defaults to
+`processes/aimem/manifest.json`. Then turn tasks on again: for a project
+with no process, `tasks on` selects the default, pinned to that commit,
+so the agents read exactly what you reviewed:
+
+```sh
+aimem process default set https://github.com/BlackVS/aimem.git TAG
+aimem process default show
+aimem tasks on -p my-project
+```
+
+Replace `TAG` with a release tag of aimem, such as `v0.10.14`. `tasks on`
+prints `applied the hub's default process:` with the set, the tag and
+the commit. The files are stored on the hub with the selection; each
+workstation reads them from the hub, and step 3.6 checks that it does.
+Every later project gets the same process from its `tasks on`, and a
+project that already has a process keeps it. `--no-process` turns tasks
+on without selecting one.
+
+A project that needs another process is the exception: select it
+explicitly instead, by a tag of its repository:
 
 ```sh
 aimem process select https://github.com/BlackVS/aimem.git TAG -p my-project
 ```
 
-Replace `TAG` with a release tag of aimem, such as `v0.10.14`. A full 40-character
-commit works in its place too. The command reads the files at that commit on the hub
-host and stores them on the hub with the selection; each workstation reads
-them from the hub, and step 3.6 checks that it does. To move to a
-newer release later, select its tag with `--expect` and the tag (or
-commit) selected now; see
+To move a project to a newer release later, select its tag with
+`--expect` and the tag selected now; changing the default never
+re-selects an existing project. See
 [the administrator manual](ADMIN-MANUAL.md#selecting-a-projects-process-documents).
 
 **The repository.** Bind the project to the one repository its work

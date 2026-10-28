@@ -66,7 +66,7 @@ func TestProcessSelectImportsTheSetAndReusesAKeptOne(t *testing.T) {
 		Imported bool        `json:"imported"`
 	}
 	selectOut := func(args ...string) (string, error) {
-		return stdoutOf(t, func() error { return processCmd(append([]string{"select"}, args...)) })
+		return stdoutOf(t, func() error { return processCmd(append([]string{"select", "--commit"}, args...)) })
 	}
 	// A tampered archive is refused before anything reaches the hub.
 	tampered := filepath.Join(t.TempDir(), filepath.Base(archive))

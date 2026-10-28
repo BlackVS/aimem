@@ -9,14 +9,15 @@ import (
 
 // With no process in use on the hub, the next step explains the values
 // with an example each; with some, it offers each one as a complete
-// command, in the order given, and at most inUseShown of them: by its
-// exact commit, with the tag it was selected by as --ref.
+// command, in the order given, and at most inUseShown of them: by the tag
+// it was selected by, or with a <tag> placeholder and its commit when it
+// was selected by a commit alone. The commit form is never offered.
 func TestNextStep(t *testing.T) {
 	got := NextStep("new", nil)
 	for _, want := range []string{
 		"aimem process select <repo> <tag> [<manifest>] -p new",
 		"<repo>      the process repository's git URL, e.g. https://",
-		"<tag>       a release tag of that repository, e.g. v1.4.0; a full 40-hex commit also works",
+		"<tag>       a release tag of that repository, e.g. v1.4.0\n",
 		"<manifest>  optional: the manifest's path in that repository, by default processes/aimem/manifest.json",
 	} {
 		if !strings.Contains(got, want) {
@@ -33,10 +34,13 @@ func TestNextStep(t *testing.T) {
 		{Repo: "https://example.com/p.git", Ref: "v1.4.0", Commit: c1, Manifest: "m.json", Projects: []string{"alpha", "beta"}},
 		{Repo: "git@example.com:o/q.git", Commit: c2, Manifest: "x/m.json", Projects: []string{"gamma"}},
 	})
-	first := "  as alpha, beta:\n    aimem process select https://example.com/p.git " + c1 + " m.json --ref v1.4.0 -p new\n"
-	second := "  as gamma:\n    aimem process select git@example.com:o/q.git " + c2 + " x/m.json -p new\n"
+	first := "  as alpha, beta:\n    aimem process select https://example.com/p.git v1.4.0 m.json -p new\n"
+	second := "  as gamma:\n    aimem process select git@example.com:o/q.git <tag> x/m.json -p new\n      (selected by commit " + c2 + " with no tag recorded: name that commit's tag)\n"
 	if !strings.Contains(got, first) || !strings.Contains(got, second) || strings.Index(got, first) > strings.Index(got, second) {
 		t.Fatalf("processes in use:\n%s", got)
+	}
+	if strings.Contains(got, c1) || strings.Contains(got, "--commit") || strings.Contains(got, "--ref") {
+		t.Fatalf("the commit form is offered:\n%s", got)
 	}
 	if strings.Contains(got, "<repo>      ") {
 		t.Fatalf("the example explanation is printed although processes are in use:\n%s", got)
@@ -97,7 +101,7 @@ func TestNextStepQuotesForTheShell(t *testing.T) {
 	if err != nil {
 		t.Fatalf("sh could not read the command: %v", err)
 	}
-	want := strings.Join([]string{sel.Repo, sel.Commit, sel.Manifest, "--ref", "main", "-p", "beta"}, "\n") + "\n"
+	want := strings.Join([]string{sel.Repo, sel.Ref, sel.Manifest, "-p", "beta"}, "\n") + "\n"
 	if string(out) != want {
 		t.Fatalf("sh read back\n%q\nwant\n%q", out, want)
 	}

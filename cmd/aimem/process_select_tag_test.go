@@ -101,7 +101,7 @@ func TestProcessSelectByTag(t *testing.T) {
 	}
 	// A full commit and an explicit manifest work as before, with --ref
 	// as the fetch hint; --ref beside a tag is refused.
-	if err := sel(repo, c3, manifest, "--ref", "main", "--from-archive", archives[c3], "--expect", "v1"); err != nil {
+	if err := sel(repo, c3, manifest, "--commit", "--ref", "main", "--from-archive", archives[c3], "--expect", "v1"); err != nil {
 		t.Fatal(err)
 	}
 	if got := current(); got.Ref != "main" || got.Commit != c3 {

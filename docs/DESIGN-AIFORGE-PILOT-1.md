@@ -12,7 +12,7 @@ The first pilot (2026-10-03) proved the identity chain and the attempt protocol 
 
 ## 1. A project owns its one repository [2.1]
 
-**Today.** A project has a process pin (`aimem process select REPO COMMIT MANIFEST -p PROJECT`), its data and its grants. Nothing records the repository its work happens in.
+**Today.** A project has a process pin (`aimem process select REPO TAG MANIFEST -p PROJECT`), its data and its grants. Nothing records the repository its work happens in.
 
 **Decision.** The repository is a property of the project. The hub owns it, next to the process pin:
 

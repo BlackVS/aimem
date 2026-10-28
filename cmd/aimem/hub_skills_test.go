@@ -70,7 +70,7 @@ func TestHubWithoutRequiredSkillsSaysHowToImportThem(t *testing.T) {
 	stderr, err := stderrOf(t, func() error {
 		var err error
 		stdout, err = stdoutOf(t, func() error {
-			return processCmd([]string{"select", "https://example.com/process.git", commit, "process/manifest.json", "--from-archive", archive, "-p", "example"})
+			return processCmd([]string{"select", "https://example.com/process.git", commit, "process/manifest.json", "--commit", "--from-archive", archive, "-p", "example"})
 		})
 		return err
 	})
@@ -113,7 +113,7 @@ func TestHubWithoutRequiredSkillsSaysHowToImportThem(t *testing.T) {
 	}
 	stderr, err = stderrOf(t, func() error {
 		_, err := stdoutOf(t, func() error {
-			return processCmd([]string{"select", "https://example.com/process.git", commit, "process/manifest.json", "--from-archive", archive, "-p", "example", "--expect", commit})
+			return processCmd([]string{"select", "https://example.com/process.git", commit, "process/manifest.json", "--commit", "--from-archive", archive, "-p", "example", "--expect", commit})
 		})
 		return err
 	})

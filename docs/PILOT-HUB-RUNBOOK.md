@@ -76,16 +76,16 @@ tasks on for project "pilot"
 Select the project's process: a coordinated claim needs the process pin. The reference is recorded as given; it is not fetched here.
 
 ```sh
-aimem process select https://git.example.test/org/process.git 0123456789abcdef0123456789abcdef01234567 process/manifest.json --project pilot
+aimem process select https://git.example.test/org/process.git v1.0.0 process/manifest.json --project pilot
 ```
 
 **Expected:**
 
 ```
-{"current":{"repo":"https://git.example.test/org/process.git","commit":"0123456789abcdef0123456789abcdef01234567","manifest":"process/manifest.json","selected_at":"…","selected_by":"local"},"project":"pilot"}
+{"current":{"repo":"https://git.example.test/org/process.git","ref":"v1.0.0","commit":"0123456789abcdef0123456789abcdef01234567","manifest":"process/manifest.json","selected_at":"…","selected_by":"local"},"project":"pilot"}
 ```
 
-Use the real process repository, a full 40-character commit and the manifest path. aimem's own reference set is `https://github.com/BlackVS/aimem.git` with the manifest `processes/aimem/manifest.json`; the process repository is separate from the hub. A selection must be `https`, `ssh` or `git@`.
+Use the real process repository, a release tag of it and the manifest path; the hub host resolves the tag to the commit it holds and pins the selection to that commit. A hub with a default process (`aimem process default set`, [admin manual](ADMIN-MANUAL.md#selecting-a-projects-process-documents)) selects it at `tasks on` instead, and this step is then only for a different process. aimem's own reference set is `https://github.com/BlackVS/aimem.git` with the manifest `processes/aimem/manifest.json`; the process repository is separate from the hub. A selection must be `https`, `ssh` or `git@`.
 
 Set the project's repository: the one repository the pilot's work happens in. `--kind` is the forge's API dialect (`github`, `gitea` or `gitlab`), and the host of `--url`, with its port when the URL names one, names the credential a member needs. `--access` is `write` (the default) or `read`. The hub stores the URL as given, never fetches it and stores no default branch. A URL carrying a user name on `https`, or any password, is refused.
 

@@ -19,8 +19,26 @@ currently 25); a binary refuses a database newer than it understands.
   table to accept `task.read` and keeps every credential. A hub on
   schema 9 does not start under 0.10.15 or earlier; to roll back,
   restore the state backup the installer took before the upgrade.
+- **`process select` takes a bare commit only with `--commit`.** A
+  selection names a tag of the process repository. A script that selects
+  by a full 40-character commit fails with a message naming `--commit`
+  until the flag is added. The `tasks on` hint now offers processes in
+  use by their tags only.
 
 ### Added
+
+- **A hub default process that `tasks on` applies.** On the hub host,
+  `aimem process default set <repo> <tag> [<manifest>]` resolves the tag
+  and checks the set as `process select` does, and stores the default
+  in `process-default.json` in the state root. `show` prints it and
+  `clear` removes it.
+  - `aimem tasks on -p ID` for a project with no process now selects the
+    default's commit with its tag, and prints
+    `applied the hub's default process: <set> (tag, commit)`.
+  - A project with a process keeps it, and `--no-process` skips the
+    step. With no default, the output is unchanged.
+  - Changing the default never re-selects an existing project, and the
+    admin console's tasks switch does not apply it.
 
 - **`task.read`: aicrew reads one task's text.** A new peer operation,
   `GET /v1/identity/peers/{service_id}/task-reads/{project}/{task_id}`,

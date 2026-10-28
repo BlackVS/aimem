@@ -45,7 +45,7 @@ func TestProcessRefreshStoresTheSetsOfOldSelections(t *testing.T) {
 	}
 	archive2, _ := exportFixture(t, repo, c2, manifest)
 	if _, err := stdoutOf(t, func() error {
-		return processCmd([]string{"select", repo, c2, manifest, "--from-archive", archive2, "-p", "current"})
+		return processCmd([]string{"select", repo, c2, manifest, "--commit", "--from-archive", archive2, "-p", "current"})
 	}); err != nil {
 		t.Fatal(err)
 	}

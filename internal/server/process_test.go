@@ -209,14 +209,14 @@ func TestTasksOnWithoutProcessNamesTheGap(t *testing.T) {
 		t.Fatalf("tasks on with no process: %s", w.Body)
 	}
 	for _, want := range []string{
-		"aimem process select https://example.com/p.git " + c1 + " m.json --ref main -p delta",
-		"aimem process select https://example.com/other.git " + c2 + " x/m.json -p delta",
+		"aimem process select https://example.com/p.git main m.json -p delta",
+		"aimem process select https://example.com/other.git <tag> x/m.json -p delta\n      (selected by commit " + c2 + " with no tag recorded",
 	} {
 		if !strings.Contains(on.NextStep, want) {
 			t.Fatalf("next step lacks %q:\n%s", want, on.NextStep)
 		}
 	}
-	if strings.Index(on.NextStep, c1) > strings.Index(on.NextStep, c2) {
+	if strings.Index(on.NextStep, "p.git main") > strings.Index(on.NextStep, c2) {
 		t.Fatalf("the most used process is not offered first:\n%s", on.NextStep)
 	}
 	// Nothing was selected for delta by turning its tasks on.

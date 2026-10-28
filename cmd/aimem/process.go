@@ -39,18 +39,23 @@ import (
 	"aimem/internal/processctx"
 )
 
-const processUsage = `usage: aimem process select <repo> <tag|commit> [<manifest>] [--ref <branch|tag>] [--from-archive <file>] [--sums <file>] [--expect <tag|commit>] [-p <project>]
+const processUsage = `usage: aimem process select <repo> <tag> [<manifest>] [--from-archive <file>] [--sums <file>] [--expect <tag|commit>] [-p <project>]
+       aimem process select <repo> <commit> [<manifest>] --commit [--ref <branch|tag>] [...]
+       aimem process default set <repo> <tag> [<manifest>]
+       aimem process default show
+       aimem process default clear
        aimem process export <repo> <commit> <manifest> [--ref <branch|tag>] [--out <dir>]
        aimem process clear --expect <tag|commit> [-p <project>]
        aimem process list
        aimem process refresh [-p <project>] [--from-archive <file>] [--sums <file>]
        aimem process show [--full] [--template <kind>] [-p <project>]
 
-select, clear, list and refresh run on the hub host (admin). select takes
-a tag (or a branch) or a full commit: a tag is resolved to the commit it
-holds now (git ls-remote on this host, or without git the forge's ref
+select, clear, default, list and refresh run on the hub host (admin).
+select takes a tag (or a branch): it is resolved to the commit it holds
+now (git ls-remote on this host, or without git the forge's ref
 advertisement over https), and the selection stores both and stays
-pinned to that commit. The manifest defaults to
+pinned to that commit. A full 40-hex commit is taken only with --commit,
+for a repository with no tag for it. The manifest defaults to
 processes/aimem/manifest.json. --expect names the current selection by
 its commit or its tag; re-selecting the commit and manifest already
 selected needs none. select reads the set at the commit from Git (without
@@ -72,7 +77,10 @@ then imports. show runs anywhere and prints what the session-start hook
 injects for this project; in a directory with no hub binding on a machine
 with no hub configured (the hub host), it reads this host's stored
 selection and set. --full prints the whole unit, even one over the
-manifest's injection budget, and adds the repository URL, for the admin.`
+manifest's injection budget, and adds the repository URL, for the admin.
+default set stores the hub's default process (resolved and imported as
+select does); aimem tasks on applies it to a project with no process.
+default show prints it, and default clear removes it.`
 
 func processCmd(args []string) error {
 	usage := processUsage
@@ -84,6 +92,8 @@ func processCmd(args []string) error {
 		return processListCmd(args[1:])
 	case "refresh":
 		return processRefreshCmd(args[1:])
+	case "default":
+		return processDefaultCmd(args[1:])
 	case "select", "clear", "export":
 		fs := flag.NewFlagSet("process "+args[0], flag.ExitOnError)
 		p := projectFlag(fs, "project id (default: current directory's project)")
@@ -92,6 +102,7 @@ func processCmd(args []string) error {
 		archive := fs.String("from-archive", "", "import the set from this tar.gz instead of Git")
 		sums := fs.String("sums", "", "the SHA256SUMS file that names the archive (default: SHA256SUMS beside it)")
 		out := fs.String("out", ".", "export: the directory to write the archive and SHA256SUMS into")
+		byCommit := fs.Bool("commit", false, "select: take a full 40-hex commit, for a repository with no tag for it")
 		var pos []string
 		rest := args[1:]
 		for len(rest) > 0 { // flags after the positionals too
@@ -128,6 +139,12 @@ func processCmd(args []string) error {
 			sel := process.Ref{Repo: pos[0], Commit: pos[1], Manifest: process.DefaultManifest, Ref: *ref}
 			if len(pos) == 3 {
 				sel.Manifest = pos[2]
+			}
+			switch {
+			case process.IsCommit(pos[1]) && !*byCommit:
+				return fmt.Errorf("%s is a commit; select by a tag of the repository (aimem process select <repo> <tag>), or pass --commit when the repository has no tag for it", pos[1])
+			case *byCommit && !process.IsCommit(pos[1]):
+				return fmt.Errorf("--commit takes a full 40-character lowercase hex commit, not %s", pos[1])
 			}
 			if !process.IsCommit(pos[1]) {
 				if *ref != "" {
