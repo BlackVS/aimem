@@ -83,6 +83,22 @@ func TestScenarioCardDrift(t *testing.T) {
 	}
 }
 
+// TestSkillsInstallNeedsTheToolNamed runs `skills install` without --tool
+// on a workstation that card 00 set up. The machines' PATH holds no agent
+// client, so the command is refused on every machine, whatever clients the
+// machine running the suite has installed: a card names the tool.
+func TestSkillsInstallNeedsTheToolNamed(t *testing.T) {
+	w := newWorld(t)
+	if err := w.run(filepath.Join(cardDir, "00-fixture.md")); err != nil {
+		t.Fatal(err)
+	}
+	out, err := w.exec(w.ws, "skills", "install", "-p", w.vars["project"])
+	const want = "no agent client found on PATH; name the clients to install for with --tool"
+	if err == nil || !strings.Contains(out, want) {
+		t.Fatalf("skills install without --tool: got %v:\n%s\nwant a refusal containing %q", err, out, want)
+	}
+}
+
 // TestParseCardRefuses covers what a card may not hold: each case is a
 // step a person could run in a shell but the runner could not, or a card
 // whose shape the convention does not allow.

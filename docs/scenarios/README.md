@@ -19,6 +19,15 @@ and state root), each with its own home directory and none of the
 caller's `AIMEM_` settings. It then runs the card's steps in order. The CI
 job `scenario` runs it on Linux and Windows.
 
+The machines do not inherit the caller's `PATH`. On Linux and macOS it is
+the directory of the binary under test, which also holds a link to the
+`git` the suite found. On Windows it is that directory, the `cmd`
+directory of the git installation, `System32` and the Windows directory.
+No agent client is on it, so a command that looks a client up on `PATH`
+finds none on any machine. A card names the tool it installs for, as in
+`aimem skills install --tool claude`, and a card cannot pass because of a
+client installed on the machine running the suite.
+
 ## Cards
 
 | Card | Path it covers | Tier |

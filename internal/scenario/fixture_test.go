@@ -51,9 +51,59 @@ func TestMain(m *testing.M) {
 		os.RemoveAll(dir)
 		os.Exit(1)
 	}
+	if machinePath, err = buildPath(dir); err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.RemoveAll(dir)
+		os.Exit(1)
+	}
 	code := m.Run()
 	os.RemoveAll(dir)
 	os.Exit(code)
+}
+
+// machinePath is the PATH every machine's commands get, built by TestMain.
+var machinePath string
+
+// buildPath returns a PATH that holds the aimem binary's directory and the
+// git the suite resolved, and nothing else from the host, so a command that
+// looks up a tool on PATH (an agent client for `skills install`) finds the
+// same tools on every machine. On Unix git is linked into binDir, since
+// its own directory (/usr/bin) may hold anything; git finds its helpers by
+// its compiled exec path. On Windows a linked or copied git.exe no longer
+// finds its installation, so PATH names git's directory and the system
+// directories. That directory is the installation's cmd launcher when
+// there is one (Git\cmd holds only git's launchers): the mingw64\bin
+// git.exe that a Git Bash PATH resolves first needs the tools the launcher
+// adds to its own PATH, and crashes without them.
+func buildPath(binDir string) (string, error) {
+	git, err := exec.LookPath("git")
+	if err != nil {
+		return "", fmt.Errorf("the scenario suite needs git: %v", err)
+	}
+	if git, err = filepath.Abs(git); err != nil {
+		return "", err
+	}
+	if runtime.GOOS != "windows" {
+		if err := os.Symlink(git, filepath.Join(binDir, "git")); err != nil {
+			return "", err
+		}
+		return binDir, nil
+	}
+	sys := os.Getenv("SystemRoot")
+	if sys == "" {
+		return "", fmt.Errorf("SystemRoot is not set")
+	}
+	gitDir := filepath.Dir(git)
+	for d := gitDir; ; d = filepath.Dir(d) {
+		if _, err := os.Stat(filepath.Join(d, "cmd", "git.exe")); err == nil {
+			gitDir = filepath.Join(d, "cmd")
+			break
+		}
+		if filepath.Dir(d) == d {
+			break
+		}
+	}
+	return strings.Join([]string{binDir, gitDir, filepath.Join(sys, "System32"), sys}, string(os.PathListSeparator)), nil
 }
 
 const (
@@ -155,7 +205,8 @@ func newWorld(t *testing.T) *world {
 
 // newMachine prepares one side's state root and home and its environment: the
 // inherited one without any AIMEM_ setting, XDG_RUNTIME_DIR or home, so no
-// command reaches the developer's real service or files.
+// command reaches the developer's real service or files, and with
+// machinePath in place of the host's PATH.
 func (w *world) newMachine(name string, extra []string) *machine {
 	m := &machine{name: name, state: filepath.Join(w.root, name)}
 	m.dir = m.state
@@ -167,12 +218,12 @@ func (w *world) newMachine(name string, extra []string) *machine {
 		k, _, _ := strings.Cut(kv, "=")
 		switch {
 		case strings.HasPrefix(strings.ToUpper(k), "AIMEM_"), strings.HasPrefix(strings.ToUpper(k), "GIT_CONFIG"):
-		case strings.EqualFold(k, "XDG_RUNTIME_DIR"), strings.EqualFold(k, "HOME"), strings.EqualFold(k, "USERPROFILE"):
+		case strings.EqualFold(k, "XDG_RUNTIME_DIR"), strings.EqualFold(k, "HOME"), strings.EqualFold(k, "USERPROFILE"), strings.EqualFold(k, "PATH"):
 		default:
 			m.env = append(m.env, kv)
 		}
 	}
-	m.env = append(m.env, "AIMEM_STATE_DIR="+m.state, "HOME="+home, "USERPROFILE="+home)
+	m.env = append(m.env, "PATH="+machinePath, "AIMEM_STATE_DIR="+m.state, "HOME="+home, "USERPROFILE="+home)
 	m.env = append(m.env, extra...)
 	return m
 }
