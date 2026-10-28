@@ -82,6 +82,16 @@ currently 25); a binary refuses a database newer than it understands.
     behaves as before. A project-local credential was already refused on
     the same field before any read.
 
+### Fixed
+
+- **Tasks page: a long epic title no longer squeezes the task title in the
+  list view.** The row's meta never wraps, and it printed the epic's full
+  title, so an epic title of about 120 characters left the task title a
+  column one or two words wide (or no width at all). The list row's epic
+  label is now capped at about 28 characters with an ellipsis, and the full
+  title shows on hover. The board cards and rows without an epic are
+  unchanged.
+
 ## [0.10.15] — 2026-10-28
 
 `install-hub.sh` now installs a hub without systemd (`AIMEM_NO_SERVICE=1`),

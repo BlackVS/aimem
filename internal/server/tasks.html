@@ -93,6 +93,7 @@
   .trow:hover{background:var(--well)}
   .trow .title{flex:1;font:15px/1.4 var(--text);min-width:0;overflow:hidden;text-overflow:ellipsis}
   .trow .meta{color:var(--dim);font-size:12px;white-space:nowrap}
+  .trow .meta .epic{display:inline-block;max-width:28ch;overflow:hidden;text-overflow:ellipsis;vertical-align:bottom}
   .trow.archived .title{opacity:.6}
   .trow:has(.snip){flex-wrap:wrap}
   .trow .meta.snip{flex-basis:100%;white-space:normal;overflow-wrap:anywhere}
@@ -525,7 +526,7 @@ async function listTasks(reset){
     for(const t of page.tasks){
       $("list").insertAdjacentHTML("beforeend", `<a class="trow${t.archived?' archived':''}" href="${taskURL(t.id)}" onclick="return go('${taskURL(t.id)}')">
         <span class="title">${esc(t.title)}</span>${stChip(t.state)}
-        <span class="meta">r${t.revision} · ${ago(t.updated_at)}${t.assignee?' · '+esc(t.assignee.kind)+'/'+esc(short(t.assignee.id)):''}${t.epic?' · '+esc(epicLabel(t.epic)):''}</span>${t.snippet?`<span class="meta snip">${t.matched==="comment"?"in a comment: ":""}${esc(t.snippet)}</span>`:''}</a>`);
+        <span class="meta">r${t.revision} · ${ago(t.updated_at)}${t.assignee?' · '+esc(t.assignee.kind)+'/'+esc(short(t.assignee.id)):''}${t.epic?` · <span class="epic" title="${esc(epicLabel(t.epic))}">${esc(epicLabel(t.epic))}</span>`:''}</span>${t.snippet?`<span class="meta snip">${t.matched==="comment"?"in a comment: ":""}${esc(t.snippet)}</span>`:''}</a>`);
     }
     CURSOR = page.next_cursor||"";
     if(reset) markLoaded();
