@@ -45,6 +45,16 @@
 #   AIMEM_PREBUILT_DIR=            a directory holding aimem-linux-<arch> and
 #                                  SHA256SUMS under the release names: the
 #                                  binary is verified, nothing is downloaded
+#   AIMEM_NO_SERVICE=1             install-only: no systemd unit, linger or
+#                                  start; a supervisor of your choice runs it
+#
+# Install-only mode (AIMEM_NO_SERVICE=1), for a host or container without
+# systemd: the same binary, env file, certificate and curation script,
+# without linger, the systemd units, a start or the health check, and no
+# systemctl or loginctl call. The last line printed is the command a
+# supervisor runs to start the hub. An upgrade refuses while the hub
+# answers on its configured address, since nothing here can stop or start
+# it: stop it, run the installer again, then start it.
 set -euo pipefail
 
 # The release this script installs. Bumped together with the CHANGELOG
@@ -52,6 +62,8 @@ set -euo pipefail
 RELEASE=v0.10.14
 
 [ "$(id -u)" = 0 ] || { echo "ERROR: run as root." >&2; exit 1; }
+NO_SERVICE=""
+[ "${AIMEM_NO_SERVICE:-}" != 1 ] || NO_SERVICE=1
 for t in curl; do
   command -v "$t" >/dev/null 2>&1 || { echo "ERROR: '$t' is required — apt-get install -y $t" >&2; exit 1; }
 done
@@ -80,7 +92,7 @@ if ! id "$HUB_USER" >/dev/null 2>&1; then
   useradd -m -s /bin/bash "$HUB_USER"
   echo "created user $HUB_USER"
 fi
-loginctl enable-linger "$HUB_USER"
+[ -n "$NO_SERVICE" ] || loginctl enable-linger "$HUB_USER"
 HOME_DIR=$(getent passwd "$HUB_USER" | cut -d: -f6)
 as_user() { runuser -u "$HUB_USER" -- "$@"; }
 sysuser() { runuser -u "$HUB_USER" -- env "XDG_RUNTIME_DIR=/run/user/$(id -u "$HUB_USER")" systemctl --user "$@"; }
@@ -217,8 +229,45 @@ svc_start() {
   sysuser start aimem-curate.timer || true
 }
 aimem_as() { runuser -u "$HUB_USER" -- env "HOME=$HOME_DIR" "XDG_RUNTIME_DIR=/run/user/$(id -u "$HUB_USER")" "$@"; }
+# Install-only mode: no service to stop or start, and no user manager, so
+# no XDG_RUNTIME_DIR. The serve a supervisor starts (SERVE_CMD) has none
+# either, and the socket path follows it: both sides must agree.
+SERVE_CMD="runuser -u $HUB_USER -- sh -c 'umask 077 && exec env -u XDG_RUNTIME_DIR HOME=$HOME_DIR PATH=$HOME_DIR/.local/bin:/usr/local/bin:/usr/bin:/bin $AIMEM_BIN serve'"
+if [ -n "${NO_SERVICE:-}" ]; then
+  TXN_MANAGED=0
+  svc_stop() { :; }
+  svc_start() { :; }
+  aimem_as() { runuser -u "$HUB_USER" -- env -u XDG_RUNTIME_DIR "HOME=$HOME_DIR" "$@"; }
+fi
 STATE_ROOT_DEFAULT="$HOME_DIR/.local/state/aimem"
 # END hub-service-hooks
+
+# BEGIN no-service-preflight
+# no_service_preflight env-file: an install-only upgrade cannot stop the
+# hub, and nothing would start the new release after the swap, so it
+# refuses while anything answers HTTP on the address the kept env file
+# names. Any status counts: a wrong token still means a hub is running.
+# It runs before anything is staged, so a refusal changes nothing.
+no_service_preflight() {
+  local listen cert scheme=http host port code
+  [ -f "$1" ] || return 0
+  listen=$(sed -n 's/^AIMEM_HTTP_LISTEN=//p' "$1" | tr -d '"')
+  cert=$(sed -n 's/^AIMEM_TLS_CERT=//p' "$1" | tr -d '"')
+  [ -z "$cert" ] || scheme=https
+  port=${listen##*:}
+  host=${listen%:*}
+  case "$host" in ""|0.0.0.0|"[::]") host=127.0.0.1 ;; esac
+  [ -n "$port" ] || return 0
+  code=$(curl -sk -m 5 -o /dev/null -w '%{http_code}' "$scheme://$host:$port/v1/health" 2>/dev/null) || true
+  if [ -n "$code" ] && [ "$code" != 000 ]; then
+    echo "ERROR: aimem answers at $scheme://$host:$port (AIMEM_HTTP_LISTEN=$listen), and with AIMEM_NO_SERVICE=1 this installer does not stop it. Stop it, run this again, then start it. Nothing was changed." >&2
+    return 1
+  fi
+}
+# END no-service-preflight
+if [ -n "$NO_SERVICE" ] && [ -e "$AIMEM_BIN" ]; then
+  no_service_preflight "$HOME_DIR/.config/aimem/env" || exit 1
+fi
 
 # BEGIN process-refresh
 # After an upgrade: store the process sets of the selections made before
@@ -354,6 +403,8 @@ exit 0
 EOS
 chmod 755 "$HOME_DIR/.local/sbin/curate-all.sh"
 
+# Install-only mode writes no unit: nothing would read it.
+if [ -z "$NO_SERVICE" ]; then
 UNITS="$HOME_DIR/.config/systemd/user"
 mkdir -p "$UNITS/aimem.service.d" "$UNITS/aimem-curate.service.d"
 cat > "$UNITS/aimem.service" <<'EOS'
@@ -402,29 +453,34 @@ MemoryHigh=256M
 MemoryMax=512M
 EOS
 done
+fi
 chown -R "$HUB_USER:$HUB_USER" "$HOME_DIR/.local" "$HOME_DIR/.config"
 
-sysuser daemon-reload
-sysuser enable aimem.service aimem-curate.timer >/dev/null 2>&1 || true
+[ -n "$NO_SERVICE" ] || sysuser daemon-reload
+[ -n "$NO_SERVICE" ] || sysuser enable aimem.service aimem-curate.timer >/dev/null 2>&1 || true
 UPGRADED=
 if [ -e "$AIMEM_BIN" ]; then
   UPGRADED=1
   upgrade_txn "$AIMEM_BIN.new" || exit 1
 else
   mv "$AIMEM_BIN.new" "$AIMEM_BIN"
-  sysuser restart aimem.service   # restart, not start: a stale binary may be running
-  sysuser start aimem-curate.timer
+  if [ -z "$NO_SERVICE" ]; then
+    sysuser restart aimem.service   # restart, not start: a stale binary may be running
+    sysuser start aimem-curate.timer
+  fi
 fi
 
 # --- verify -----------------------------------------------------------------
-sleep 1
+[ -n "$NO_SERVICE" ] || sleep 1
 PORT=${LISTEN##*:}
 # On an env-less re-run (upgrade) the TLS setting lives only in the kept
 # env file; probing a TLS listener with plain http yields a bogus 400.
 [ -z "${AIMEM_TLS_CERT:-}" ] && AIMEM_TLS_CERT=$(sed -n 's/^AIMEM_TLS_CERT=//p' "$ENVF" | tr -d '"')
 SCHEME=http; [ -n "${AIMEM_TLS_CERT:-}" ] && SCHEME=https
 HOST=${AIMEM_DOMAIN:-<this-host>}
-if curl -fsSk -H "Authorization: Bearer $TOKEN" "$SCHEME://127.0.0.1:$PORT/v1/health" >/dev/null; then
+if [ -n "$NO_SERVICE" ]; then
+  : # nothing was started; the supervisor starts it with SERVE_CMD below
+elif curl -fsSk -H "Authorization: Bearer $TOKEN" "$SCHEME://127.0.0.1:$PORT/v1/health" >/dev/null; then
   echo "hub is up: $SCHEME://$HOST:$PORT ($(as_user "$HOME_DIR/.local/bin/aimem" version))"
   if [ -n "$UPGRADED" ]; then
     refresh_processes "$AIMEM_BIN"
@@ -470,3 +526,15 @@ if [ "$SCHEME" = http ]; then
   echo "  Set AIMEM_DOMAIN (a self-signed certificate that clients pin) or AIMEM_TLS_CERT and AIMEM_TLS_KEY, and re-run." >&2
 fi
 # END client-hint
+
+# BEGIN no-service-finish
+# Install-only mode: what a supervisor runs. The serve command is the last
+# line, so a caller can take it with tail -n 1.
+if [ -n "${NO_SERVICE:-}" ]; then
+  echo
+  [ -z "$UPGRADED" ] || echo "After the hub is up, as $HUB_USER run: aimem process refresh   (stores the process sets of earlier selections)"
+  echo "Curation: have the supervisor run $HOME_DIR/.local/sbin/curate-all.sh hourly as $HUB_USER, with the variables of $ENVF in its environment."
+  echo "aimem is installed and not started (AIMEM_NO_SERVICE=1). Have a supervisor run, as root:"
+  echo "$SERVE_CMD"
+fi
+# END no-service-finish

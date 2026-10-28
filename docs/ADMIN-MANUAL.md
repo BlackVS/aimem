@@ -218,6 +218,38 @@ The script itself still has to reach the host: run a copy of
 `AIMEM_PREBUILT` stays for a binary you vouch for yourself, such as one
 you just built on this host; it is installed without a check.
 
+### Installing without systemd
+
+A container, or a host whose processes another supervisor runs, has no
+systemd user manager. `AIMEM_NO_SERVICE=1` installs the hub there:
+
+```sh
+AIMEM_NO_SERVICE=1 AIMEM_PREBUILT_DIR=/srv/aimem-dist bash install-hub.sh
+```
+
+The installer creates the service user, stages and verifies the binary,
+and writes the env file, the self-signed certificate (with `AIMEM_DOMAIN`)
+and `curate-all.sh`, as in the service mode. It does not enable linger,
+write the systemd units, start anything or check health, and it calls
+neither `systemctl` nor `loginctl`. The last line it prints is the
+command that starts the hub, for your supervisor to run as root:
+
+```sh
+runuser -u sessiond -- sh -c 'umask 077 && exec env -u XDG_RUNTIME_DIR HOME=/home/sessiond PATH=/home/sessiond/.local/bin:/usr/local/bin:/usr/bin:/bin /home/sessiond/.local/bin/aimem serve'
+```
+
+`aimem serve` reads the env file itself. Curation is yours to schedule as
+well: run `~/.local/sbin/curate-all.sh` hourly as the service user, with the
+env file's variables in its environment, as the timer would.
+
+An upgrade cannot stop the hub, and nothing would start the new release,
+so while anything answers on the env file's `AIMEM_HTTP_LISTEN` address
+the installer refuses and changes nothing. Stop the hub, run the
+installer again, then start the hub with the printed command. The state
+backup is taken as in the service mode; a hub that does not come up is
+yours to roll back with the backup the installer names. After an upgrade,
+run `aimem process refresh` as the service user once the hub is up.
+
 ### What a hub serves
 
 | Path | Auth | Contents |

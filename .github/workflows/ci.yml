@@ -120,6 +120,21 @@ jobs:
       - run: go vet -tags scenario ./internal/scenario/...
       - run: go test -tags scenario -count=1 -v ./internal/scenario/...
 
+  # install-hub.sh's install-only mode (AIMEM_NO_SERVICE=1) in a container
+  # without systemd, from a local build: install, serve with the printed
+  # command, refuse an upgrade while it runs, upgrade once it is stopped.
+  install-hub-container:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version: '1.26'
+          check-latest: true
+          cache: true
+      - run: bash scripts/check-install-hub-container.sh
+
   build:
     runs-on: ubuntu-latest
     steps:

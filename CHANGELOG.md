@@ -15,6 +15,17 @@ currently 25); a binary refuses a database newer than it understands.
 
 ### Added
 
+- **install-hub.sh installs a hub without systemd (`AIMEM_NO_SERVICE=1`).**
+  For a container or a host with its own supervisor, the installer writes
+  the binary, the env file, the certificate and the curation script as
+  usual, but enables no linger, writes no systemd unit, starts nothing and
+  calls neither `systemctl` nor `loginctl`. Its last line is the command
+  that starts the hub. An upgrade in this mode refuses while a hub answers
+  on the configured address, since it cannot stop or start one. A CI job
+  runs the installer this way in a Debian container: install, start with
+  the printed command, refusal, upgrade. See ADMIN-MANUAL, "Installing
+  without systemd".
+
 - **The new-project quickstart runs end to end as two scenario cards.**
   Card `01-new-project` follows QUICKSTART-NEW-PROJECT, sections 2 and 3,
   with a user task token. On the hub it switches tasks on, imports the
