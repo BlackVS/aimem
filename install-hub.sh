@@ -533,7 +533,7 @@ fi
 if [ -n "${NO_SERVICE:-}" ]; then
   echo
   [ -z "$UPGRADED" ] || echo "After the hub is up, as $HUB_USER run: aimem process refresh   (stores the process sets of earlier selections)"
-  echo "Curation: have the supervisor run $HOME_DIR/.local/sbin/curate-all.sh hourly as $HUB_USER, with the variables of $ENVF in its environment."
+  echo "Curation: have the supervisor run $HOME_DIR/.local/sbin/curate-all.sh hourly as $HUB_USER, with the variables of $ENVF in its environment and XDG_RUNTIME_DIR unset, as in the serve command."
   echo "aimem is installed and not started (AIMEM_NO_SERVICE=1). Have a supervisor run, as root:"
   echo "$SERVE_CMD"
 fi

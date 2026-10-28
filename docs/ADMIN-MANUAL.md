@@ -240,7 +240,9 @@ runuser -u sessiond -- sh -c 'umask 077 && exec env -u XDG_RUNTIME_DIR HOME=/hom
 
 `aimem serve` reads the env file itself. Curation is yours to schedule as
 well: run `~/.local/sbin/curate-all.sh` hourly as the service user, with the
-env file's variables in its environment, as the timer would.
+env file's variables in its environment, as the timer would, and with
+`XDG_RUNTIME_DIR` unset: the local socket's path follows that variable, and
+the serve command clears it.
 
 An upgrade cannot stop the hub, and nothing would start the new release,
 so while anything answers on the env file's `AIMEM_HTTP_LISTEN` address

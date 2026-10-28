@@ -119,7 +119,7 @@ func TestHubNoServicePrintsTheServeCommandLast(t *testing.T) {
 		if lines[len(lines)-1] != serveCmd {
 			t.Errorf("upgraded=%q: the last line is not the serve command:\n%s", upgraded, out)
 		}
-		if !strings.Contains(out, "/home/sessiond/.local/sbin/curate-all.sh hourly as sessiond") {
+		if !strings.Contains(out, "/home/sessiond/.local/sbin/curate-all.sh hourly as sessiond") || !strings.Contains(out, "XDG_RUNTIME_DIR unset") {
 			t.Errorf("upgraded=%q: no curation hint:\n%s", upgraded, out)
 		}
 		if got := strings.Contains(out, "aimem process refresh"); got != (upgraded == "1") {
