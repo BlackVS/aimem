@@ -15,6 +15,12 @@ To stand up a hub first, see [the general quickstart](QUICKSTART.md),
 stage 2. The [Kanban quickstart](KANBAN-QUICKSTART.md) explains the task
 access model behind step 2 in more depth.
 
+Sections 2 and 3 are also written as numbered steps with the expected
+output of each, in the scenario card
+[01-new-project](scenarios/01-new-project.md). CI runs that card against
+every change, so its commands and output lines match this release; use it
+to compare what you see.
+
 ## 1. Decide three names
 
 Write them down before you start. Every later command uses them, and

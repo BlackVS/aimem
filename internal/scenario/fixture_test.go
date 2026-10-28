@@ -14,6 +14,7 @@ import (
 	"encoding/hex"
 	"encoding/pem"
 	"fmt"
+	"io"
 	"math/big"
 	"net"
 	"net/http"
@@ -81,6 +82,7 @@ type world struct {
 type machine struct {
 	name  string
 	state string
+	dir   string // where its commands run
 	env   []string
 	serve *exec.Cmd
 	log   string
@@ -120,15 +122,28 @@ func newWorld(t *testing.T) *world {
 	}
 	w.hub = w.newMachine("hub", gitEnv)
 	w.ws = w.newMachine("workstation", gitEnv)
+	// The workstation's commands run in the project's checkout, as a
+	// person runs them from the project directory.
+	w.ws.dir = filepath.Join(root, "project")
+	if err := os.MkdirAll(w.ws.dir, 0o700); err != nil {
+		t.Fatal(err)
+	}
 	w.vars = map[string]string{
-		"hub-url":        fmt.Sprintf("https://127.0.0.1:%d", port),
-		"ca-file":        caFile,
-		"token-file":     filepath.Join(fx, "writer.token"),
-		"project":        "scenario-project",
-		"hub-name":       "team",
-		"tag":            processTag,
-		"skills-archive": archive,
-		"skills-version": skillsVer,
+		"hub-url":            fmt.Sprintf("https://127.0.0.1:%d", port),
+		"ca-file":            caFile,
+		"token-file":         filepath.Join(fx, "writer.token"),
+		"task-token-file":    filepath.Join(fx, "task.token"),
+		"project-token-file": filepath.Join(fx, "project.token"),
+		"project":            "scenario-project",
+		"project-2":          "scenario-project-2",
+		"hub-name":           "team",
+		"machine":            "scenario-machine",
+		"user":               "scenario-agent",
+		"repo-url":           "https://github.com/example/scenario-project.git",
+		"expires":            time.Now().UTC().Add(30 * 24 * time.Hour).Format(time.RFC3339),
+		"tag":                processTag,
+		"skills-archive":     archive,
+		"skills-version":     skillsVer,
 	}
 	w.start(w.hub, "AIMEM_HTTP_LISTEN=127.0.0.1:"+fmt.Sprint(port), "AIMEM_HTTP_TOKEN="+adminToken,
 		"AIMEM_TLS_CERT="+certFile, "AIMEM_TLS_KEY="+keyFile)
@@ -143,6 +158,7 @@ func newWorld(t *testing.T) *world {
 // command reaches the developer's real service or files.
 func (w *world) newMachine(name string, extra []string) *machine {
 	m := &machine{name: name, state: filepath.Join(w.root, name)}
+	m.dir = m.state
 	home := filepath.Join(m.state, "home")
 	if err := os.MkdirAll(home, 0o700); err != nil {
 		w.t.Fatal(err)
@@ -226,13 +242,10 @@ func (w *world) stop(m *machine, exited chan error) {
 // verified against the fixture CA.
 func (w *world) waitHTTPS(caFile, url, token string) {
 	t := w.t
-	caPEM, err := os.ReadFile(caFile)
+	c, err := hubClient(caFile, 5*time.Second)
 	if err != nil {
 		t.Fatal(err)
 	}
-	pool := x509.NewCertPool()
-	pool.AppendCertsFromPEM(caPEM)
-	c := &http.Client{Timeout: 5 * time.Second, Transport: &http.Transport{TLSClientConfig: &tls.Config{RootCAs: pool}}}
 	deadline := time.Now().Add(readyWait)
 	for {
 		req, _ := http.NewRequest("GET", url+"/v1/health", nil)
@@ -256,7 +269,7 @@ func (w *world) waitHTTPS(caFile, url, token string) {
 func (w *world) exec(m *machine, args ...string) (string, error) {
 	cmd := exec.Command(bin, args...)
 	cmd.Env = m.env
-	cmd.Dir = m.state
+	cmd.Dir = m.dir
 	out, err := cmd.CombinedOutput()
 	return string(out), err
 }
@@ -282,7 +295,13 @@ func (w *world) run(path string) error {
 		if st.Side == "workstation" {
 			m = w.ws
 		}
-		out, err := w.exec(m, st.Args[1:]...)
+		var out string
+		var err error
+		if st.HTTP != nil {
+			out, err = w.send(st.HTTP)
+		} else {
+			out, err = w.exec(m, st.Args[1:]...)
+		}
 		if err != nil {
 			return fmt.Errorf("%s:%d: step %d (%s): %v:\n%s", c.Path, st.Line, st.N, st.Title, err, out)
 		}
@@ -293,6 +312,60 @@ func (w *world) run(path string) error {
 		}
 	}
 	return nil
+}
+
+// send sends an http step's request to the hub over TLS verified against
+// the fixture CA, with the token from its Token-File as the bearer. The
+// output is the status line, then the response body; a status other than
+// 2xx is an error, as a non-zero exit is for a command.
+func (w *world) send(r *Request) (string, error) {
+	tok, err := os.ReadFile(r.TokenFile)
+	if err != nil {
+		return "", err
+	}
+	c, err := hubClient(w.vars["ca-file"], 30*time.Second)
+	if err != nil {
+		return "", err
+	}
+	req, err := http.NewRequest(r.Method, w.vars["hub-url"]+r.Path, strings.NewReader(r.Body))
+	if err != nil {
+		return "", err
+	}
+	req.Header.Set("Authorization", "Bearer "+strings.TrimSpace(string(tok)))
+	if r.Body != "" {
+		req.Header.Set("Content-Type", "application/json")
+	}
+	for _, h := range r.Header {
+		req.Header.Set(h[0], h[1])
+	}
+	resp, err := c.Do(req)
+	if err != nil {
+		return "", err
+	}
+	defer resp.Body.Close()
+	body, err := io.ReadAll(resp.Body)
+	out := resp.Status + "\n" + string(body)
+	if err != nil {
+		return out, err
+	}
+	if resp.StatusCode/100 != 2 {
+		return out, fmt.Errorf("the hub answered %s", resp.Status)
+	}
+	return out, nil
+}
+
+// hubClient is an HTTPS client that trusts only the CA in caFile and keeps
+// no idle connection to the hub after a request.
+func hubClient(caFile string, timeout time.Duration) (*http.Client, error) {
+	caPEM, err := os.ReadFile(caFile)
+	if err != nil {
+		return nil, err
+	}
+	pool := x509.NewCertPool()
+	if !pool.AppendCertsFromPEM(caPEM) {
+		return nil, fmt.Errorf("%s holds no PEM certificate", caFile)
+	}
+	return &http.Client{Timeout: timeout, Transport: &http.Transport{TLSClientConfig: &tls.Config{RootCAs: pool}, DisableKeepAlives: true}}, nil
 }
 
 // writeCerts writes a CA and a server certificate for 127.0.0.1 and

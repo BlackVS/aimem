@@ -15,6 +15,24 @@ currently 25); a binary refuses a database newer than it understands.
 
 ### Added
 
+- **The new-project quickstart runs end to end as two scenario cards.**
+  Card `01-new-project` follows QUICKSTART-NEW-PROJECT, sections 2 and 3,
+  with a user task token. On the hub it switches tasks on, imports the
+  skills, selects the process by tag, binds the repository, adds the
+  user, grants the project and issues the token. On the workstation it
+  wires the project, adds the hub, stores the task credential and runs
+  the checks of step 3.6. It then creates and lists a task through the
+  hub's API with that token, and shows that a second project needs only
+  a grant. Card `02-new-project-project-token` takes the project-local
+  path of TASK-CREDENTIALS.md: `token-issue --project`, `task-token set
+  --token-file`, a task created with that token, and the token refused
+  for another project the user is granted. Both are release-gate cards:
+  DEVELOPMENT.md's new "Release gate" section makes the green `scenario`
+  job a condition for marking a release's prepare pull request ready.
+  The card runner gains an `http` step, a request to the hub's API with
+  the bearer read from a token file, and workstation commands now run in
+  the project's directory. docs/scenarios/README.md documents both, with
+  the curl form of an `http` step for a person following a card by hand.
 - **`aimem task-token set --token-file FILE` reads the project token
   from a file.** The project-local task credential could only be piped
   in on standard input. It can now come from a file only its owner can

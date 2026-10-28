@@ -19,9 +19,21 @@ Node is absent, skip it locally and CI's lint job is its runner.
 
 The documented usage scenarios run separately, under a build tag, against
 the real binary started as a hub and as a workstation:
-`go test -tags scenario -count=1 ./internal/scenario/...`. A usage path
-that is added or changed gets a scenario card; docs/scenarios/README.md
-is the card convention.
+`go test -tags scenario -count=1 ./internal/scenario/...`. The suite is
+where a usage path is tested as a whole: a documented path that is added
+or changed gets a scenario card, or a change to the card that covers it,
+in the same pull request. docs/scenarios/README.md is the card
+convention and lists the cards.
+
+## Release gate
+
+A release's prepare pull request (the one that rolls the CHANGELOG's
+`[Unreleased]` section into the version) is marked ready only when CI is
+green on its head, including the `scenario` job on Linux and Windows.
+That job runs the release-gate cards, among them the new-project path of
+the quickstart, so every released quickstart has run against the release
+candidate. When the repository marks the job as a required check, the
+merge button enforces this as well.
 
 ## Toolchain
 
