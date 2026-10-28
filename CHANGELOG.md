@@ -157,10 +157,12 @@ currently 25); a binary refuses a database newer than it understands.
 
 ### Fixed
 
-- **A token passed to `--token-file` is no longer repeated in the error.**
-  `hub add`, `hub task-token` and `task-token set` take the path of a
-  file that holds the token. When the token itself was given instead,
-  the "cannot be read" error quoted it, and so did any log that captured
+- **A token passed to `--token-file` or `--admin-token-file` is no longer
+  repeated in the error.** `hub add`, `hub task-token` and
+  `task-token set` take `--token-file`, and `identity`,
+  `identity enroll` and `reservation recover` take `--admin-token-file`.
+  Both flags take the path of a file that holds the token. When the token itself was given instead,
+  the error that the file cannot be read quoted it, and so did any log that captured
   the error. Now, a value that names no file and has a token's shape is
   refused with a fixed message that does not repeat it. A token's shape
   is an `aimem_user_` or `aimem_peer_` credential, or a word of 32 or

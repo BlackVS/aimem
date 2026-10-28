@@ -69,8 +69,8 @@ func readHubToken(path string) (string, error) {
 	if path == "-" {
 		src, r = "standard input", hubStdin
 	} else {
-		if tokenShaped(path) {
-			return "", errTokenAsPath
+		if err := checkTokenPath("--token-file", path); err != nil {
+			return "", err
 		}
 		if err := privatefile.Check(path); err != nil {
 			return "", fmt.Errorf("--token-file: %w", err)
@@ -101,12 +101,21 @@ func readHubToken(path string) (string, error) {
 	return tok, nil
 }
 
-// errTokenAsPath refuses a --token-file value that is the token itself.
-// It never quotes the value: every other error names the path, and here
-// the path is the secret.
-var errTokenAsPath = errors.New("--token-file takes the path of a file that holds the token, and the value given names no file and has the shape of a token, so it is not repeated here: write the token to a file only you can read, and pass that file's path")
+// errTokenAsPath refuses a token-file flag's value that is the token
+// itself. It never quotes the value: every other error names the path,
+// and here the path is the secret.
+var errTokenAsPath = errors.New("the value given names no file and has the shape of a token, so it is not repeated here: write the token to a file only you can read, and pass that file's path")
 
-// tokenShaped reports a --token-file value that names no file and looks
+// checkTokenPath refuses a token-shaped value of flag (--token-file,
+// --admin-token-file) before the file is checked or read.
+func checkTokenPath(flag, path string) error {
+	if tokenShaped(path) {
+		return fmt.Errorf("%s takes the path of a file that holds the token, and %w", flag, errTokenAsPath)
+	}
+	return nil
+}
+
+// tokenShaped reports a token-file value that names no file and looks
 // like a hub token: a user or peer credential (aimem_user_, aimem_peer_),
 // or a long word of token characters such as a writer token (64 hex) or
 // the installer's env token (48 hex). A value with a path separator or a
