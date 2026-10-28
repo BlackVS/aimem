@@ -20,8 +20,9 @@ Tier: release gate.
   steps from that directory.
 - `<project-token-file>` does not exist yet: step 9 writes it. The
   quickstart copies the token from the hub to the workstation; in the
-  suite both sides read the same file. Delete it once step 12 has stored
-  the token.
+  suite both sides read the same file. Step 12 stores the token for the
+  checkout, and step 15 still reads the file for its request; delete it
+  after step 15.
 
 ## Steps
 
