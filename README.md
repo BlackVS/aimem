@@ -11,7 +11,7 @@ Works with **Claude Code** and **OpenCode**. One static Go binary, no
 runtime dependencies, no external database, no cloud service.
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/BlackVS/aimem/v0.10.14/boot.sh | bash
+curl -fsSL https://raw.githubusercontent.com/BlackVS/aimem/v0.10.15/boot.sh | bash
 ```
 
 ---
@@ -194,7 +194,7 @@ already run, with tasks, the handoff and design documents, is
 
 ```sh
 # Linux / macOS
-curl -fsSL https://raw.githubusercontent.com/BlackVS/aimem/v0.10.14/boot.sh | bash
+curl -fsSL https://raw.githubusercontent.com/BlackVS/aimem/v0.10.15/boot.sh | bash
 ```
 
 Windows, in a PowerShell window (from cmd or Win+R, type `powershell`
@@ -205,8 +205,8 @@ first and paste the block there):
   $ErrorActionPreference = 'Stop'
   $d = New-Item -ItemType Directory -Force (Join-Path $env:TEMP 'aimem-boot')
   $f = Join-Path $d 'boot.ps1'; $s = Join-Path $d 'SHA256SUMS'
-  Invoke-WebRequest https://github.com/BlackVS/aimem/releases/download/v0.10.14/boot.ps1 -OutFile $f -UseBasicParsing
-  Invoke-WebRequest https://github.com/BlackVS/aimem/releases/download/v0.10.14/SHA256SUMS -OutFile $s -UseBasicParsing
+  Invoke-WebRequest https://github.com/BlackVS/aimem/releases/download/v0.10.15/boot.ps1 -OutFile $f -UseBasicParsing
+  Invoke-WebRequest https://github.com/BlackVS/aimem/releases/download/v0.10.15/SHA256SUMS -OutFile $s -UseBasicParsing
   $want = ((Select-String -LiteralPath $s -Pattern '\sboot\.ps1$').Line -split '\s+')[0]
   if ((Get-FileHash -LiteralPath $f).Hash -ne $want) { throw 'boot.ps1 does not match SHA256SUMS' }
   Unblock-File -LiteralPath $f
@@ -264,7 +264,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\install.ps1 -Target C:\pat
 **Hub** (optional) — on a fresh Debian or Ubuntu host, as root:
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/BlackVS/aimem/v0.10.14/install-hub.sh | bash
+curl -fsSL https://raw.githubusercontent.com/BlackVS/aimem/v0.10.15/install-hub.sh | bash
 ```
 
 Full detail: **[INSTALL-CLIENT.md](docs/INSTALL-CLIENT.md)** ·

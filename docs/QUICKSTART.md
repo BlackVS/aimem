@@ -24,7 +24,7 @@ plenty).
 Run this **inside a project directory**:
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/BlackVS/aimem/v0.10.14/boot.sh | bash
+curl -fsSL https://raw.githubusercontent.com/BlackVS/aimem/v0.10.15/boot.sh | bash
 ```
 
 On Windows, in a PowerShell window (from cmd, type `powershell` first),
@@ -37,8 +37,8 @@ download the release's boot script, check it against the release's
   $ErrorActionPreference = 'Stop'
   $d = New-Item -ItemType Directory -Force (Join-Path $env:TEMP 'aimem-boot')
   $f = Join-Path $d 'boot.ps1'; $s = Join-Path $d 'SHA256SUMS'
-  Invoke-WebRequest https://github.com/BlackVS/aimem/releases/download/v0.10.14/boot.ps1 -OutFile $f -UseBasicParsing
-  Invoke-WebRequest https://github.com/BlackVS/aimem/releases/download/v0.10.14/SHA256SUMS -OutFile $s -UseBasicParsing
+  Invoke-WebRequest https://github.com/BlackVS/aimem/releases/download/v0.10.15/boot.ps1 -OutFile $f -UseBasicParsing
+  Invoke-WebRequest https://github.com/BlackVS/aimem/releases/download/v0.10.15/SHA256SUMS -OutFile $s -UseBasicParsing
   $want = ((Select-String -LiteralPath $s -Pattern '\sboot\.ps1$').Line -split '\s+')[0]
   if ((Get-FileHash -LiteralPath $f).Hash -ne $want) { throw 'boot.ps1 does not match SHA256SUMS' }
   Unblock-File -LiteralPath $f
@@ -97,7 +97,7 @@ On the hub host, **as root**:
 ```sh
 AIMEM_HUB_NAME=home \
 AIMEM_DOMAIN=hub.example.com \
-bash <(curl -fsSL https://raw.githubusercontent.com/BlackVS/aimem/v0.10.14/install-hub.sh)
+bash <(curl -fsSL https://raw.githubusercontent.com/BlackVS/aimem/v0.10.15/install-hub.sh)
 ```
 
 Substitute your own hostname. `AIMEM_DOMAIN` generates a self-signed

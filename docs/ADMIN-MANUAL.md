@@ -10,7 +10,7 @@ One-liner in any project directory (installs the binary if missing, then
 wires the project):
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/BlackVS/aimem/v0.10.14/boot.sh | bash
+curl -fsSL https://raw.githubusercontent.com/BlackVS/aimem/v0.10.15/boot.sh | bash
 ```
 
 Windows (supported, tested less than Linux), in a PowerShell window.
@@ -22,8 +22,8 @@ From cmd, or from the Run dialog (Win+R) for an upgrade, type
   $ErrorActionPreference = 'Stop'
   $d = New-Item -ItemType Directory -Force (Join-Path $env:TEMP 'aimem-boot')
   $f = Join-Path $d 'boot.ps1'; $s = Join-Path $d 'SHA256SUMS'
-  Invoke-WebRequest https://github.com/BlackVS/aimem/releases/download/v0.10.14/boot.ps1 -OutFile $f -UseBasicParsing
-  Invoke-WebRequest https://github.com/BlackVS/aimem/releases/download/v0.10.14/SHA256SUMS -OutFile $s -UseBasicParsing
+  Invoke-WebRequest https://github.com/BlackVS/aimem/releases/download/v0.10.15/boot.ps1 -OutFile $f -UseBasicParsing
+  Invoke-WebRequest https://github.com/BlackVS/aimem/releases/download/v0.10.15/SHA256SUMS -OutFile $s -UseBasicParsing
   $want = ((Select-String -LiteralPath $s -Pattern '\sboot\.ps1$').Line -split '\s+')[0]
   if ((Get-FileHash -LiteralPath $f).Hash -ne $want) { throw 'boot.ps1 does not match SHA256SUMS' }
   Unblock-File -LiteralPath $f
@@ -85,7 +85,7 @@ never wires the home directory.
 `AIMEM_USER_ONLY=1` upgrades the user level and wires nothing:
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/BlackVS/aimem/v0.10.14/boot.sh | AIMEM_USER_ONLY=1 bash
+curl -fsSL https://raw.githubusercontent.com/BlackVS/aimem/v0.10.15/boot.sh | AIMEM_USER_ONLY=1 bash
 ```
 
 The `VAR=value bash` form sets the knob for that `bash` only; your shell
@@ -100,8 +100,8 @@ window keeps no `AIMEM_*` variable:
   $ErrorActionPreference = 'Stop'
   $d = New-Item -ItemType Directory -Force (Join-Path $env:TEMP 'aimem-boot')
   $f = Join-Path $d 'boot.ps1'; $s = Join-Path $d 'SHA256SUMS'
-  Invoke-WebRequest https://github.com/BlackVS/aimem/releases/download/v0.10.14/boot.ps1 -OutFile $f -UseBasicParsing
-  Invoke-WebRequest https://github.com/BlackVS/aimem/releases/download/v0.10.14/SHA256SUMS -OutFile $s -UseBasicParsing
+  Invoke-WebRequest https://github.com/BlackVS/aimem/releases/download/v0.10.15/boot.ps1 -OutFile $f -UseBasicParsing
+  Invoke-WebRequest https://github.com/BlackVS/aimem/releases/download/v0.10.15/SHA256SUMS -OutFile $s -UseBasicParsing
   $want = ((Select-String -LiteralPath $s -Pattern '\sboot\.ps1$').Line -split '\s+')[0]
   if ((Get-FileHash -LiteralPath $f).Hash -ne $want) { throw 'boot.ps1 does not match SHA256SUMS' }
   Unblock-File -LiteralPath $f
@@ -167,7 +167,7 @@ Fresh host (Debian/Ubuntu LXC or VM), as root — one command does user,
 binary, env, units, timers:
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/BlackVS/aimem/v0.10.14/install-hub.sh | bash
+curl -fsSL https://raw.githubusercontent.com/BlackVS/aimem/v0.10.15/install-hub.sh | bash
 ```
 
 Knobs (env): `AIMEM_HUB_USER` (default sessiond), `AIMEM_HTTP_LISTEN`
