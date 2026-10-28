@@ -69,6 +69,9 @@ func readHubToken(path string) (string, error) {
 	if path == "-" {
 		src, r = "standard input", hubStdin
 	} else {
+		if tokenShaped(path) {
+			return "", errTokenAsPath
+		}
 		if err := privatefile.Check(path); err != nil {
 			return "", fmt.Errorf("--token-file: %w", err)
 		}
@@ -96,6 +99,37 @@ func readHubToken(path string) (string, error) {
 		}
 	}
 	return tok, nil
+}
+
+// errTokenAsPath refuses a --token-file value that is the token itself.
+// It never quotes the value: every other error names the path, and here
+// the path is the secret.
+var errTokenAsPath = errors.New("--token-file takes the path of a file that holds the token, and the value given names no file and has the shape of a token, so it is not repeated here: write the token to a file only you can read, and pass that file's path")
+
+// tokenShaped reports a --token-file value that names no file and looks
+// like a hub token: a user or peer credential (aimem_user_, aimem_peer_),
+// or a long word of token characters such as a writer token (64 hex) or
+// the installer's env token (48 hex). A value with a path separator or a
+// dot is a path, as is anything that exists.
+func tokenShaped(v string) bool {
+	if strings.ContainsAny(v, `/\.`) {
+		return false
+	}
+	if _, err := os.Lstat(v); err == nil {
+		return false
+	}
+	if strings.HasPrefix(v, "aimem_user_") || strings.HasPrefix(v, "aimem_peer_") {
+		return true
+	}
+	if len(v) < 32 {
+		return false
+	}
+	for _, c := range v {
+		if !(c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' || c >= '0' && c <= '9' || c == '_' || c == '-') {
+			return false
+		}
+	}
+	return true
 }
 
 // hubTokenArg is the token of a hub command: the positional one or
