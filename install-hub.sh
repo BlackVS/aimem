@@ -248,11 +248,23 @@ STATE_ROOT_DEFAULT="$HOME_DIR/.local/state/aimem"
 # refuses while anything answers HTTP on the address the kept env file
 # names. Any status counts: a wrong token still means a hub is running.
 # It runs before anything is staged, so a refusal changes nothing.
+env_value() { # file key: the value aimem serve reads (loadEnvFile in
+  # cmd/aimem): each line trimmed, quotes trimmed from the value, and the
+  # first non-empty value wins.
+  awk -v k="$2" -v q="[\"']" '{
+    sub(/^[ \t\r]+/, ""); sub(/[ \t\r]+$/, "")
+    i = index($0, "=")
+    if (i > 1 && substr($0, 1, i - 1) == k) {
+      v = substr($0, i + 1); gsub("^" q "+|" q "+$", "", v)
+      if (v != "") { print v; exit }
+    }
+  }' "$1"
+}
 no_service_preflight() {
   local listen cert scheme=http host port code
   [ -f "$1" ] || return 0
-  listen=$(sed -n 's/^AIMEM_HTTP_LISTEN=//p' "$1" | tr -d '"')
-  cert=$(sed -n 's/^AIMEM_TLS_CERT=//p' "$1" | tr -d '"')
+  listen=$(env_value "$1" AIMEM_HTTP_LISTEN)
+  cert=$(env_value "$1" AIMEM_TLS_CERT)
   [ -z "$cert" ] || scheme=https
   port=${listen##*:}
   host=${listen%:*}

@@ -74,11 +74,15 @@ serve /tmp/install.log
 echo "hub answers at v0.0.1"
 
 echo "--- upgrade while the hub runs"
+# An indented listen line, which aimem reads as written, must still be found.
+sed -i 's/^AIMEM_HTTP_LISTEN=/  AIMEM_HTTP_LISTEN=/' $ENVF
 sum=$(sha256sum $H/.local/bin/aimem $ENVF)
+curate=$(stat -c %y $H/.local/sbin/curate-all.sh)
 if install_hub v0.0.2 /tmp/refused.log; then cat /tmp/refused.log; fail "the upgrade ran while the hub answers"; fi
 cat /tmp/refused.log
 grep -q 'ERROR: aimem answers at http://127.0.0.1:8440 (AIMEM_HTTP_LISTEN=:8440), and with AIMEM_NO_SERVICE=1 this installer does not stop it.' /tmp/refused.log || fail "the refusal does not name the running hub"
 [ "$(sha256sum $H/.local/bin/aimem $ENVF)" = "$sum" ] || fail "the refused upgrade changed the binary or the env file"
+[ "$(stat -c %y $H/.local/sbin/curate-all.sh)" = "$curate" ] || fail "the refused upgrade rewrote curate-all.sh"
 [ ! -e $H/.local/bin/aimem.new ] || fail "the refused upgrade left a staged binary"
 [ "$(health)" = 200 ] || fail "the hub stopped answering"
 

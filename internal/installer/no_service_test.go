@@ -90,6 +90,31 @@ func TestHubNoServicePreflightRefusesWhileAHubAnswers(t *testing.T) {
 	}
 }
 
+// The preflight reads the listen address as aimem serve's loadEnvFile
+// does: lines trimmed, quotes trimmed from the value, the first non-empty
+// value wins. An anchored match missed an indented line, and the upgrade
+// went on to stage a binary while the hub ran.
+func TestHubNoServicePreflightReadsTheEnvFileAsTheHubDoes(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {}))
+	defer srv.Close()
+	port := strconv.Itoa(srv.Listener.Addr().(*net.TCPAddr).Port)
+	listen := ":" + port
+	for name, env := range map[string]string{
+		"indented":          "  AIMEM_HTTP_LISTEN=" + listen + "\n",
+		"tab and trailing":  "\tAIMEM_HTTP_LISTEN=" + listen + " \t\n",
+		"double quotes":     "AIMEM_HTTP_LISTEN=\"" + listen + "\"\n",
+		"single quotes":     "AIMEM_HTTP_LISTEN='" + listen + "'\n",
+		"CRLF":              "AIMEM_HTTP_TOKEN=x\r\nAIMEM_HTTP_LISTEN=" + listen + "\r\n",
+		"first wins":        "AIMEM_HTTP_LISTEN=" + listen + "\nAIMEM_HTTP_LISTEN=:1\n",
+		"empty value skips": "AIMEM_HTTP_LISTEN=\nAIMEM_HTTP_LISTEN=" + listen + "\n",
+	} {
+		out, err := runPreflight(t, env)
+		if err == nil || !strings.Contains(out, "aimem answers at http://127.0.0.1:"+port+" (AIMEM_HTTP_LISTEN="+listen+")") {
+			t.Errorf("%s: err %v, want the refusal:\n%s", name, err, out)
+		}
+	}
+}
+
 func TestHubNoServicePreflightPassesWithNothingListening(t *testing.T) {
 	l, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
