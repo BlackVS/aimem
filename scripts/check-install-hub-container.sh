@@ -4,7 +4,8 @@
 # is downloaded, a fresh install calls no systemctl or loginctl and its last
 # line starts a hub that answers health. While that hub runs, an upgrade
 # refuses and changes nothing. Once the hub is stopped, the upgrade goes
-# through, and the printed command starts the new release.
+# through, and the printed command starts the new release. Both runs pass
+# AIMEM_INTROSPECTION_TOKEN_FILE: the env file holds its line once.
 #
 # It needs docker and go, and touches nothing outside the container and a
 # temporary directory.
@@ -38,9 +39,11 @@ done
 
 H=/home/sessiond
 ENVF=$H/.config/aimem/env
+INTRO=$H/.config/aimem/introspection.token
 install_hub() { # release log
-  AIMEM_NO_SERVICE=1 AIMEM_PREBUILT_DIR=/rel/$1 bash /rel/install-hub.sh > "$2" 2>&1
+  AIMEM_NO_SERVICE=1 AIMEM_PREBUILT_DIR=/rel/$1 AIMEM_INTROSPECTION_TOKEN_FILE=$INTRO bash /rel/install-hub.sh > "$2" 2>&1
 }
+intro_lines() { grep -c "^AIMEM_INTROSPECTION_TOKEN_FILE=$INTRO\$" "$ENVF" || true; }
 health() { # prints the HTTP status of /v1/health with the env token, 000 when nothing answers
   curl -s -m 2 -o /dev/null -w '%{http_code}' -H "Authorization: Bearer $(sed -n 's/^AIMEM_HTTP_TOKEN=//p' "$ENVF")" http://127.0.0.1:8440/v1/health || true
 }
@@ -70,6 +73,7 @@ for f in $H/.local/bin/aimem $ENVF $H/.local/sbin/curate-all.sh; do [ -e "$f" ] 
 [ ! -e $H/.config/systemd ] || fail "unit files were written"
 [ "$(version)" = v0.0.1 ] || fail "installed $(version), want v0.0.1"
 grep -q 'not started (AIMEM_NO_SERVICE=1)' /tmp/install.log || fail "no install-only notice"
+[ "$(intro_lines)" = 1 ] || fail "the fresh install did not write AIMEM_INTROSPECTION_TOKEN_FILE once: $(grep -v '^AIMEM_HTTP_TOKEN=' $ENVF)"
 serve /tmp/install.log
 echo "hub answers at v0.0.1"
 
@@ -93,6 +97,8 @@ cat /tmp/upgrade.log
 [ ! -e /tmp/systemd-calls ] || fail "systemd was called: $(cat /tmp/systemd-calls)"
 grep -q 'upgraded aimem v0.0.1 -> v0.0.2' /tmp/upgrade.log || fail "no upgrade line"
 ls -d $H/.local/state/aimem.backup-* >/dev/null || fail "no state backup"
+[ "$(intro_lines)" = 1 ] || fail "the upgrade did not keep exactly one AIMEM_INTROSPECTION_TOKEN_FILE line"
+grep -q 'kept AIMEM_INTROSPECTION_TOKEN_FILE' /tmp/upgrade.log || fail "the upgrade does not say it kept the setting"
 [ "$(version)" = v0.0.2 ] || fail "installed $(version), want v0.0.2"
 serve /tmp/upgrade.log
 echo "hub answers at v0.0.2"
