@@ -88,10 +88,13 @@ The runner does not use a shell. It splits the command into words at
 spaces and runs the binary with those words as its arguments. A card
 therefore cannot contain anything a shell would interpret: no pipes
 (`|`), redirections (`>`, `<`), command separators (`;`, `&`), variables
-(`$NAME`), quoting (`"`, `'`), globs (`*`, `?`), substitutions, a
-home directory (`~` at the start of a word) or a comment (`#` at the
-start of a word). The parser refuses such a step, so a card never shows a person a command that
-the runner did not run. When a path needs a value that a shell would
+(`$NAME`), quoting (`"`, `'`), escapes (a backslash anywhere but the
+end of a line, where it continues the command), globs (`*`, `?`),
+substitutions, a home directory (`~` at the start of a word) or a comment
+(`#` at the start of a word). The parser refuses such a step, so a card
+never shows a person a command that the runner did not run. The check
+reads the card's own words, not the placeholders' values, so a Windows
+path substituted for a placeholder may hold backslashes. When a path needs a value that a shell would
 supply, it becomes a placeholder.
 
 ### Placeholders

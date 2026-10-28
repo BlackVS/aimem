@@ -43,7 +43,7 @@ var (
 	placeholder = regexp.MustCompile(`<[a-z][a-z0-9-]*>`)
 	// shellSyntax is what a person's shell would interpret and the runner,
 	// which takes an argv, would not.
-	shellSyntax = regexp.MustCompile("[|&;<>$`\"'*?(){}]")
+	shellSyntax = regexp.MustCompile("[|&;<>$`\"'*?(){}\\\\]")
 )
 
 // ParseCard reads a card and substitutes vars (placeholder name without
@@ -59,6 +59,7 @@ func ParseCard(path string, vars map[string]string) (*Card, error) {
 	block := "" // the fenced block being read: "sh", "text" or "other"
 	var cmd []string
 	cmdLine := 0
+	fenceLine := 0 // the line of the open block's fence
 	errf := func(n int, format string, a ...any) error {
 		return fmt.Errorf("%s:%d: %s", path, n, fmt.Sprintf(format, a...))
 	}
@@ -119,7 +120,7 @@ func ParseCard(path string, vars map[string]string) (*Card, error) {
 		}
 		if st == nil {
 			if strings.HasPrefix(trimmed, "```") {
-				block = "other"
+				block, fenceLine = "other", n
 			}
 			continue
 		}
@@ -128,12 +129,12 @@ func ParseCard(path string, vars map[string]string) (*Card, error) {
 			if st.Reason == "" || st.Args != nil {
 				return nil, errf(n, "step %d: the reason line, then one sh block, then one text block", st.N)
 			}
-			block, cmd, cmdLine = "sh", nil, 0
+			block, cmd, cmdLine, fenceLine = "sh", nil, 0, n
 		case trimmed == "```text":
 			if st.Args == nil || st.Expect != nil {
 				return nil, errf(n, "step %d: the text block follows the sh block, once", st.N)
 			}
-			block = "text"
+			block, fenceLine = "text", n
 		case strings.HasPrefix(trimmed, "```"):
 			return nil, errf(n, "step %d: a step holds only an sh block and a text block", st.N)
 		case trimmed != "" && st.Reason == "":
@@ -143,7 +144,7 @@ func ParseCard(path string, vars map[string]string) (*Card, error) {
 		}
 	}
 	if block != "" {
-		return nil, fmt.Errorf("%s: unterminated fenced block", path)
+		return nil, errf(fenceLine, "the fenced block opened here is not closed")
 	}
 	if err := complete(st, path); err != nil {
 		return nil, err
