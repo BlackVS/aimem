@@ -211,6 +211,16 @@ server error) serves the cached set as last observed, which never
 authorizes a task write. A session start with a cache hit therefore costs
 one small request.
 
+A selection without a digest is never checked on the set route, which an
+older hub does not know. Its grant check is the identity answer that every
+load reads first. For a user token, that answer's `task_write` applies the
+set route's own grant rule. When it is `false`, the selection is denied,
+neither the cache nor Git is read, and the selection is not recorded as
+last observed. When the field is absent (another kind of credential, or a
+hub before project grants), the load behaves as before. A project-local
+credential is checked on the same field before anything is read. Both
+paths therefore deny a revoked grant, and neither adds a request.
+
 ### 3. Readiness has four independent parts
 
 `status` keeps its meaning (`joined` or `blocked`: the membership outcome)
@@ -327,7 +337,7 @@ the project credential exactly as the session-start hook does.
 | New | New or v0.7.x | Role context comes from the client binary and needs no hub change; project process through the existing routes. Works against any hub with protocol v0.7.0. |
 | v0.7.2 or older | Any | Unchanged: no `team_context`, no readiness object, the playbook path in the report. The hub cannot detect this; the pilot must upgrade every member. |
 | New command assets | Old `aimem mcp` still running | Step 0 of the regenerated entry points stops when `team_setup`/`team_continue`, `team_context` or `process_context` is missing and tells the user to upgrade and restart. No shell fallback. |
-| New | Hub that stores no set for the selection (older hub, or a selection recorded before sets) | The selection carries no digest, so the client does not ask the set route (an older hub refuses a route it does not know with 403, which must not read as a denial) and fetches Git at the selected commit as before. For a selection with a digest, a 401 or 403 on the set route is denied and Git is not tried; a 404 (a kept version since pruned) leaves Git. |
+| New | Hub that stores no set for the selection (older hub, or a selection recorded before sets) | The selection carries no digest, so the client does not ask the set route (an older hub refuses a route it does not know with 403, which must not read as a denial) and fetches Git at the selected commit as before, unless the identity answer's `task_write` is `false`, which is denied (section 2). For a selection with a digest, a 401 or 403 on the set route is denied and Git is not tried; a 404 (a kept version since pruned) leaves Git. |
 | v0.10.x or older | New | Reads the reference, ignores `digest` and `name`, fetches the commit from Git with its own access, as before. |
 | Older `aimem process select` | New hub | Refused: a selection must carry its set or name a kept one; the hub host runs the hub's own command. |
 | New | Hub without the skills routes (older hub) | The bootstrap's skills line needs no hub: it compares the manifest's pins with the installers' record on this machine. `aimem skills install` and `aimem skills list` ask the index route; an older hub refuses it with 403 like any route it does not know, which these commands report as a refusal naming both causes (the grant, or a hub older than hub-served skills), and install nothing. |

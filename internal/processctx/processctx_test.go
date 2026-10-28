@@ -40,6 +40,11 @@ type fakeHub struct {
 	tasksEnabled   bool // identity's tasks_enabled
 	ref            *process.Ref
 	calls          atomic.Int64
+	// noGrant answers identity's task_write false, as a hub does for a
+	// user token without a current grant on the project; omitTaskWrite
+	// leaves the field out, as for other credentials and older hubs.
+	noGrant       bool
+	omitTaskWrite bool
 	// The stored set: served at /process/set for ref (or, with ?commit=,
 	// for the entry of kept with that commit) when set; 404 otherwise, as
 	// an older hub answers. setStatus forces another status; setDigest,
@@ -80,7 +85,11 @@ func (h *fakeHub) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			json.NewEncoder(w).Encode(map[string]string{"error": "token revoked"})
 			return
 		}
-		json.NewEncoder(w).Encode(map[string]any{"scope": "project", "task_write": true, "tasks_enabled": h.tasksEnabled})
+		answer := map[string]any{"scope": "project", "task_write": !h.noGrant, "tasks_enabled": h.tasksEnabled}
+		if h.omitTaskWrite {
+			delete(answer, "task_write")
+		}
+		json.NewEncoder(w).Encode(answer)
 	case strings.HasSuffix(r.URL.Path, "/process/set"):
 		h.setCalls.Add(1)
 		if h.setDrop {

@@ -110,7 +110,21 @@ type Result struct {
 	// The hub and credential connect selected, for the content step.
 	hub       *adapter.HubConfig
 	hubClient *http.Client
+	// ungranted: the hub's identity answer said this credential has no
+	// current grant on the project (task_write false).
+	ungranted bool
 }
+
+// identityAnswer is the part of GET /v1/access/identity a load reads.
+// TaskWrite is the hub's grant check for a user token, the same one the
+// set route applies; it is absent for other credentials and on hubs
+// before project grants.
+type identityAnswer struct {
+	TasksEnabled *bool `json:"tasks_enabled"`
+	TaskWrite    *bool `json:"task_write"`
+}
+
+func (a *identityAnswer) ungranted() bool { return a.TaskWrite != nil && !*a.TaskWrite }
 
 // Complete reports whether the result carries the whole unit.
 func (r *Result) Complete() bool { return r.State == Ready || r.State == LastObserved }
@@ -180,9 +194,7 @@ func Load(dir, root, projectID string) *Result {
 	id := r.Project
 	lastPath := filepath.Join(root, "process", "last-"+id+".json")
 	// 1. Enablement and the selection, from the hub, bounded.
-	var identity struct {
-		TasksEnabled *bool `json:"tasks_enabled"`
-	}
+	var identity identityAnswer
 	ierr := hubGetJSONClient(hub, hubClient, "/v1/access/identity?project="+url.QueryEscape(id), &identity)
 	var sel struct {
 		Current *process.Ref `json:"current"`
@@ -226,7 +238,12 @@ func Load(dir, root, projectID string) *Result {
 		return r.set(NotSelected, "tasks are on for project "+id+" but no process reference is selected", "an admin selects one on the hub host: aimem process select <repo> <tag>",
 			"Tasks (Kanban) are ON for project "+id+", but no process reference is selected: process context unavailable until an admin selects one.")
 	default:
-		r.Ref = sel.Current
+		r.Ref, r.ungranted = sel.Current, identity.ungranted()
+		if r.ungranted && r.Ref.Digest == "" {
+			// content denies it; a selection the hub refused this
+			// credential is not recorded as observed.
+			break
+		}
 		if b, err := json.Marshal(map[string]any{"ref": r.Ref, "observed_at": time.Now().UTC().Format(time.RFC3339)}); err == nil {
 			os.MkdirAll(filepath.Dir(lastPath), 0o700)
 			os.WriteFile(lastPath, b, 0o600)
@@ -254,9 +271,7 @@ func LoadRef(dir, root, projectID string, pinned process.Ref) *Result {
 		return r.set(Unavailable, "the recorded process version is malformed: "+err.Error(), "", "")
 	}
 	r.Ref = &pinned
-	var identity struct {
-		TasksEnabled *bool `json:"tasks_enabled"`
-	}
+	var identity identityAnswer
 	ierr := hubGetJSONClient(hub, hubClient, "/v1/access/identity?project="+url.QueryEscape(id), &identity)
 	var refused *hubRefusal
 	switch {
@@ -271,6 +286,7 @@ func LoadRef(dir, root, projectID string, pinned process.Ref) *Result {
 	case identity.TasksEnabled == nil || !*identity.TasksEnabled:
 		return r.set(Disabled, "tasks are not enabled for project "+id+" (or the hub predates the signal)", "an admin enables tasks for the project on the hub", "")
 	default:
+		r.ungranted = identity.ungranted()
 		var sel struct {
 			Current *process.Ref `json:"current"`
 		}
@@ -424,8 +440,14 @@ func (r *Result) finish(dir, root string) *Result {
 // digest (an older hub's, or one recorded before sets; a pinned version
 // from an accept before this record carried the digest) is fetched from
 // Git as before, and the set route is not asked: an older hub refuses the
-// route it does not know with 403, which must not read as a denial.
+// route it does not know with 403, which must not read as a denial. Its
+// grant is the identity answer's instead (task_write, the set route's own
+// check, on every hub with grants): when that says no current grant, the
+// selection is denied and neither the cache nor Git is read.
 func (r *Result) content(root string) process.Result {
+	if r.hub != nil && r.Ref.Digest == "" && r.ungranted {
+		return process.Result{Status: process.StatusDenied, Err: fmt.Errorf("the hub reports no current grant on project %s for this checkout's credential", r.Project)}
+	}
 	var cached *process.Set
 	if r.Ref.Digest != "" {
 		if set, err := process.CachedSet(root, *r.Ref); err == nil {
