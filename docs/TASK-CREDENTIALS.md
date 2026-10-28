@@ -90,6 +90,11 @@ aimem task-token show-source
 restricts it; on Windows a file in your profile folder is private
 already. Delete the file once `set` has stored the token.
 
+The scenario card
+[02-new-project-project-token](scenarios/02-new-project-project-token.md)
+runs this path from the hub's `token-issue --project` to a task created
+with the token, with the expected output of each step.
+
 `set` checks the token with the hub and requires project scope and current
 write access to the configured project. It preserves other `.aimem.json`
 fields and adds only the nonsecret local requirement. `show-source` reports
