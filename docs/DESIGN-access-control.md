@@ -267,9 +267,14 @@ aimem access token-revoke <token-id>
 aimem access user-set <user-id> Alice disabled
 ```
 
-Use `-` instead of the project to issue a read-only token. `list` returns IDs,
-membership/grants, token metadata, a project-instance/name map, and the last 100
-audit entries; no secrets or digests. The project map includes only readable,
+Use `-` instead of the project to issue a read-only token. `list --json` (the
+hub's `GET /v1/access`) returns IDs, membership/grants, token metadata, a
+project-instance/name map, and the last 100 audit entries; no secrets or
+digests. Without `--json`, `list` prints the same state as tables: per project,
+the granted users and groups and the live tokens that can write to it, then the
+users with their groups and tokens; disabled users and revoked or expired
+tokens appear with `--all`. `access audit` reads the audit through
+`GET /v1/access/audit`, filtered by time, actor and action. The project map includes only readable,
 existing access identities; unrelated damaged or uninitialized project directories
 do not prevent listing users or tokens, and listing does not create identities.
 The token issue response displays the secret

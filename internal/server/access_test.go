@@ -326,3 +326,60 @@ func TestAccessListingSurvivesUninitializedAndDamagedProjects(t *testing.T) {
 		}
 	}
 }
+
+// The audit route is admin-only, filters on the hub and is bounded.
+func TestAccessAuditRoute(t *testing.T) {
+	s, reg := testServer(t)
+	admin, ad, err := NewTokenSecret()
+	if err != nil {
+		t.Fatal(err)
+	}
+	writer, wd, err := NewTokenSecret()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := SaveTokens(reg.Root(), []TokenEntry{{Name: "host-admin", Role: "admin", SHA256: ad}, {Name: "old-writer", Role: "writer", SHA256: wd}}); err != nil {
+		t.Fatal(err)
+	}
+	h := s.authWrapper("host-env-admin", s.Handler())
+	for _, name := range []string{"Alice", "Bob", "Carol"} {
+		if w := authedReq(t, h, "POST", "/v1/access/users", admin, `{"name":"`+name+`"}`); w.Code != 200 {
+			t.Fatalf("user-add: %d %s", w.Code, w.Body)
+		}
+	}
+	read := func(token, query string) (int, []access.Event) {
+		t.Helper()
+		w := authedReq(t, h, "GET", "/v1/access/audit"+query, token, "")
+		var got struct {
+			Events []access.Event `json:"events"`
+		}
+		json.Unmarshal(w.Body.Bytes(), &got)
+		return w.Code, got.Events
+	}
+	for _, token := range []string{writer, ""} {
+		if code, _ := read(token, ""); code != 401 && code != 403 {
+			t.Fatalf("non-admin read the audit: %d", code)
+		}
+	}
+	code, all := read(admin, "")
+	if code != 200 || len(all) != 3 || all[0].Action != "user.create" || all[0].ID < all[2].ID {
+		t.Fatalf("all, newest first: %d %+v", code, all)
+	}
+	if _, got := read(admin, "?action=user.create&actor=host-admin&limit=2"); len(got) != 2 || got[0].ID != all[0].ID {
+		t.Fatalf("filtered and limited: %+v", got)
+	}
+	if _, got := read(admin, "?actor=someone-else"); len(got) != 0 {
+		t.Fatalf("other actor: %+v", got)
+	}
+	if _, got := read(admin, "?since="+time.Now().Add(time.Hour).UTC().Format(time.RFC3339)); len(got) != 0 {
+		t.Fatalf("since the future: %+v", got)
+	}
+	if _, got := read(admin, "?since="+time.Now().Add(-time.Hour).UTC().Format(time.RFC3339)); len(got) != 3 {
+		t.Fatalf("since an hour ago: %+v", got)
+	}
+	for _, bad := range []string{"?since=yesterday", "?limit=0", "?limit=1001", "?limit=x"} {
+		if code, _ := read(admin, bad); code != 400 {
+			t.Fatalf("%s: %d", bad, code)
+		}
+	}
+}

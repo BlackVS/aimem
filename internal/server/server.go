@@ -145,6 +145,7 @@ func (rt Route) Ordinary() bool { return ordinaryRoutes[rt.Method+" "+rt.Pattern
 func (s *Server) Routes() []Route {
 	return []Route{
 		{"GET", "/v1/access", s.getAccess, true},
+		{"GET", "/v1/access/audit", s.getAccessAudit, true},
 		{"DELETE", "/v1/access/grants/{instance}/{kind}/{id}", s.removeAccessGrant, true},
 		{"GET", "/v1/access/identity", s.accessIdentity, false},
 		{"POST", "/v1/access/users", s.createAccessUser, true},

@@ -15,7 +15,8 @@ import (
 	"time"
 )
 
-const accessUsage = `usage: aimem access list
+const accessUsage = `usage: aimem access list [--project PROJECT] [--user NAME] [--all] [--json]
+       aimem access audit [--since TIME|DATE|Nd] [--actor ACTOR] [--action ACTION] [--limit N] [--json]
        aimem access user-add --user-name NAME
        aimem access user-set --user-id ID --user-name NAME --state enabled|disabled
        aimem access group-add --group-name NAME
@@ -23,17 +24,24 @@ const accessUsage = `usage: aimem access list
        aimem access grant add|rm --project PROJECT (--user-name NAME | --user-id ID | --group-name NAME | --group-id ID)
        aimem access grant-rm-instance --instance ID (--user-name NAME | --user-id ID | --group-name NAME | --group-id ID)
        aimem access token-issue (--user-name NAME | --user-id ID) --label LABEL (--project PROJECT | --read-only)
-                                --expires RFC3339 --output FILE|-
-       aimem access token-issue-user (--user-name NAME | --user-id ID) --label LABEL --expires RFC3339 --output FILE|-
+                                --expires TIME --output FILE|-
+       aimem access token-issue-user (--user-name NAME | --user-id ID) --label LABEL --expires TIME --output FILE|-
        aimem access token-revoke --token-id ID
 
-Run on the aimem host with its local service running. A user or group is
+Run on the aimem host with its local service running. list prints, per
+project, who is granted and which live tokens can write to it, then the
+users; disabled users and revoked or expired tokens appear with --all, and
+--json prints the hub's whole document. audit prints the administration
+audit, newest first (100 events by default, at most 1000); --since takes a
+time, a date or a number of days ago (7d). A user or group is
 named by exactly one of its name or its ID; an unknown name is refused with
 the names that exist. user-add and group-add take the name only, since the
 hub generates the ID; user-set takes the ID and the new name.
 
 token-issue-user issues a token that follows the user's current project
 grants; token-issue issues one scoped to a project, or a read-only one.
+--expires takes an RFC 3339 time, a date (midnight UTC that day) or a
+number of days from now (+90d); the issued token shows the resolved time.
 The secret is written once to --output: a new file only you can read, or -
 for standard output into a pipe (refused on a terminal). Every other line
 then goes to standard error. Admin tokens are still managed only by the
@@ -44,7 +52,8 @@ The positional forms of earlier releases (for example
 release and print the new form.
 
 Examples, one per command:
-  aimem access list
+  aimem access list --project example
+  aimem access audit --since 7d --action token.issue
   aimem access user-add --user-name pilot-worker
   aimem access user-set --user-id 01a0e1f2-0000-7000-8000-000000000001 --user-name pilot-worker-2 --state enabled
   aimem access group-add --group-name reviewers
@@ -52,7 +61,7 @@ Examples, one per command:
   aimem access grant add --project example --group-name reviewers
   aimem access grant-rm-instance --instance 01a0e1f2-0000-7000-8000-000000000002 --user-name pilot-worker
   aimem access token-issue --user-name pilot-worker --label example-laptop --project example --expires 2026-12-28T00:00:00Z --output example.token
-  aimem access token-issue-user --user-name pilot-worker --label pilot-worker --expires 2026-12-28T00:00:00Z --output worker.token
+  aimem access token-issue-user --user-name pilot-worker --label pilot-worker --expires +90d --output worker.token
   aimem access token-revoke --token-id 01a0e1f2-0000-7000-8000-000000000003`
 
 // accessDirectory resolves user and group names to IDs; accessCmd reads it
@@ -71,6 +80,12 @@ type accessCall struct {
 }
 
 func accessCmd(args []string) error {
+	if len(args) > 0 && args[0] == "list" {
+		return accessListCmd(args[1:], os.Stdout)
+	}
+	if len(args) > 0 && args[0] == "audit" {
+		return accessAuditCmd(args[1:], os.Stdout)
+	}
 	call, err := accessRequest(args, &hubDirectory{})
 	if err != nil {
 		return err
@@ -331,13 +346,7 @@ func namedAccessRequest(cmd, verb string, args []string, dir accessDirectory) (a
 	if stray != nil {
 		return accessCall{}, stray
 	}
-	expiry := func() (time.Time, error) {
-		t, err := time.Parse(time.RFC3339, *expires)
-		if err != nil {
-			return t, fmt.Errorf("--expires must be an RFC 3339 time such as 2026-12-28T00:00:00Z")
-		}
-		return t, nil
-	}
+	expiry := func() (time.Time, error) { return parseExpiry(*expires, time.Now()) }
 	switch cmd {
 	case "user-add":
 		if *f.userName == "" {

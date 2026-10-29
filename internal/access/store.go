@@ -681,6 +681,50 @@ AND ((t.scope='user' AND t.project='') OR (t.scope='project' AND t.project=?))`,
 
 // Snapshot is an administrator-only view. Audit is bounded; credentials remain
 // usable regardless of whether their metadata has been listed.
+// AuditLimit bounds one audit read.
+const AuditLimit = 1000
+
+// AuditEvents returns the administration audit, newest first: events at
+// or after since (the zero time: no bound), by actor and of action when
+// those are given, at most limit (1..AuditLimit).
+func (s *Store) AuditEvents(since time.Time, actor, action string, limit int) ([]Event, error) {
+	if limit < 1 || limit > AuditLimit {
+		return nil, fmt.Errorf("limit must be 1-%d", AuditLimit)
+	}
+	q := "SELECT id,at,actor,action,subject FROM audit WHERE 1=1"
+	var args []any
+	if !since.IsZero() {
+		// at is RFC 3339 in UTC with a fixed-width date and time, so the
+		// second's prefix orders it; a fraction only follows the second.
+		q += " AND at >= ?"
+		args = append(args, since.UTC().Format("2006-01-02T15:04:05"))
+	}
+	if actor != "" {
+		q += " AND actor = ?"
+		args = append(args, actor)
+	}
+	if action != "" {
+		q += " AND action = ?"
+		args = append(args, action)
+	}
+	q += " ORDER BY id DESC LIMIT ?"
+	args = append(args, limit)
+	rows, err := s.db.Query(q, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []Event{}
+	for rows.Next() {
+		var v Event
+		if err := rows.Scan(&v.ID, &v.At, &v.Actor, &v.Action, &v.Subject); err != nil {
+			return nil, err
+		}
+		out = append(out, v)
+	}
+	return out, rows.Err()
+}
+
 func (s *Store) Snapshot() (Snapshot, error) {
 	out := Snapshot{Users: []User{}, Groups: []Group{}, Members: []Member{}, Grants: []Grant{}, Tokens: []Token{}, Audit: []Event{}}
 	queries := []struct {

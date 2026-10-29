@@ -118,12 +118,13 @@ func TestTasksOnAppliesTheHubDefault(t *testing.T) {
 		return stdoutOf(t, func() error { return tasksCmd(args) })
 	}
 
-	// No default: the output is today's, the gap and the next step.
+	// No default: the output is today's, the gap and the next step, then
+	// the readiness checklist.
 	out, err := tasks("on", "-p", "plain")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if want := "tasks on for project \"plain\"\n" + notReady + process.NextStep("plain", nil); out != want {
+	if want := "tasks on for project \"plain\"\n" + notReady + process.NextStep("plain", nil) + "\nreadiness: 3 of 4 open\n"; !strings.HasPrefix(out, want) {
 		t.Fatalf("no default:\n%s\nwant:\n%s", out, want)
 	}
 

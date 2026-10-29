@@ -162,11 +162,11 @@ func TestAccessTokenOutput(t *testing.T) {
 		t.Fatalf("named form printed a notice: %s", notices)
 	}
 	// An existing file is refused before anything is issued.
-	before, _ := run("list")
+	before, _ := run("list", "--json")
 	if _, err := run("token-issue-user", "--user-name", "pilot-worker", "--label", "again", "--expires", expiry, "--output", file); err == nil || !strings.Contains(err.Error(), "never overwritten") {
 		t.Fatalf("existing file: %v", err)
 	}
-	if after, _ := run("list"); strings.Count(after, `"label"`) != strings.Count(before, `"label"`) {
+	if after, _ := run("list", "--json"); strings.Count(after, `"label"`) != strings.Count(before, `"label"`) {
 		t.Fatal("a token was issued for a refused --output")
 	}
 	// Unknown names are refused with the names that exist.
@@ -175,7 +175,7 @@ func TestAccessTokenOutput(t *testing.T) {
 	}
 	// The old form prints the secret as before, and the new form to use.
 	notices.Reset()
-	list, _ := run("list")
+	list, _ := run("list", "--json")
 	id := between(list, `"id": "`, `"`)
 	out, err = run("token-issue-user", id, "legacy", expiry)
 	if err != nil || !strings.Contains(out, "aimem_user_") || !strings.Contains(notices.String(), "use: aimem access token-issue-user --user-id "+id+" --label legacy --expires "+expiry+" --output FILE") {

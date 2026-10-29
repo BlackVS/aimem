@@ -371,6 +371,7 @@ func projectShowCmd(args []string) error {
 	}
 	tasksOn := tasks.Value == "on"
 	w := os.Stdout
+	defer printReadiness(w, *p)
 	fmt.Fprintf(w, "project %s\n", *p)
 	fmt.Fprintf(w, "repository: %s\n", repo.Repository.line())
 	if r := repo.Repository; r != nil && r.SetBy != "" {

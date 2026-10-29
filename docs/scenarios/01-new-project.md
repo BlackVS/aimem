@@ -151,7 +151,7 @@ aimem access list
 ```
 
 ```text
-"users": []
+(no project has grants or tokens)
 ```
 
 ### 10. The user is added (hub)
