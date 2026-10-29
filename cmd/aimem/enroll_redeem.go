@@ -281,6 +281,7 @@ func enrollRedeem(root, hubName, label string, stdin io.Reader, stderr io.Writer
 		hubs[hubName] = entry
 	}
 	entry.URL, entry.TaskToken, entry.Insecure, entry.Pin, entry.CAFile = rec.Hub.URL, p.Token, false, "", ""
+	entry.TaskTokenMeta = &adapter.TokenMeta{Label: label}
 	switch {
 	case rec.Hub.Trust.SPKI != "":
 		entry.Pin = rec.Hub.Trust.SPKI

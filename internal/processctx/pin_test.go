@@ -68,5 +68,5 @@ func TestReadPin(t *testing.T) {
 
 	// The checkout's required credential is refused: nothing is read.
 	h.change(func(h *fakeHub) { h.ref, h.identityStatus = &sel, http.StatusUnauthorized })
-	fails("credential refused", "rejected")
+	fails("credential refused", "the hub refused the task credential")
 }

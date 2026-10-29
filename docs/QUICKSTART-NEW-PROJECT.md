@@ -333,7 +333,10 @@ aimem hub credential team
 ```
 
 `aimem hub credential` must report `individual credential set, active,
-scope user`, with the user and token IDs. It never prints the secret.
+scope user`, with the user's name and ID and the token's label, ID and
+expiry. It never prints the secret. If the hub later refuses the token, for
+example once it expires, the same command names the token by its label
+and gives the step that replaces it.
 
 ### 3.5 Bind the project in `.aimem.json`
 

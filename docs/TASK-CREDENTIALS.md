@@ -37,6 +37,13 @@ On the agent machine, configure that token for the existing hub:
 aimem hub task-token HUB_NAME "$USER_TOKEN"
 ```
 
+`hub task-token` asks the hub for the token's label, scope and expiry and
+records them beside it in `hub.json`. A token the hub refuses cannot be
+asked about itself, so every refusal names it from that record. The token is
+stored whatever the hub answers; when the hub cannot say (unreachable, or a hub
+that does not report token labels yet), the command notes it and a later refusal says the
+label is unknown.
+
 This setting applies to projects using that hub unless they require a local
 override. Adding another project grant updates the token's authority on the
 hub without changing this setting. Never use an admin/checkpoint credential.
@@ -50,8 +57,10 @@ aimem hub credential HUB_NAME          # or --json for a client to read
 It prints whether an individual credential is `set` or `none`. When it is
 set, it asks the hub (`GET /v1/access/identity`, over the same verified TLS
 the identity proof uses) and prints the hub's answer:
-- `active`, with the scope and the user and token IDs;
-- `refused`: revoked, expired or unknown to the hub;
+- `active`, with the scope, the user's name and ID, and the token's label,
+  ID and expiry;
+- `refused`: revoked, expired or unknown to the hub, with the token's label
+  and expiry as recorded when it was stored, and the step that replaces it;
 - `unreachable`.
 
 The identity proof of a team session needs `set`, `active` and scope `user`.
@@ -97,10 +106,12 @@ with the token, with the expected output of each step.
 
 `set` checks the token with the hub and requires project scope and current
 write access to the configured project. It preserves other `.aimem.json`
-fields and adds only the nonsecret local requirement. `show-source` reports
-the source, project, hub name and checkout directory, never the secret.
-It inspects local configuration; it does not promise the token is still
-valid on the hub.
+fields and adds only the nonsecret local requirement. It records the
+token's label, scope and expiry beside the secret. `show-source` reports
+the source, project, hub name and checkout directory, never the secret. It
+also asks the hub about the token and reports `state`: `active` with the
+token's label and expiry as the hub reports them, `refused` with the
+recorded ones and the step that replaces the token, or `unreachable`.
 
 The secret is stored outside the checkout in the user's aimem state
 directory, bound to the canonical checkout path, project ID, hub name and
@@ -109,7 +120,13 @@ current-user DPAPI. Writes replace files through temporary files. A state
 directory inside the checkout is refused for local credentials.
 
 A missing, unreadable, malformed, revoked, expired or mismatched override
-is an error, even if the global credential would work. Local overrides
+is an error, even if the global credential would work. When the hub refuses
+a credential, project-local or per-hub, the error names it: the label, scope
+and expiry, where it is bound (this checkout's override, or the hub's task
+credential), and the replacement step, `aimem task-token set` with a new
+project token or `aimem hub task-token HUB --token-file FILE` with a new
+user token. A credential stored by an older release still works; its
+refusal says the label is unknown. Local overrides
 require a hub that reports explicit token scope (the user-token model).
 Removed grants also refuse local use. Local-override requests do not follow redirects.
 Task calls re-read credentials; restart the agent session to refresh the

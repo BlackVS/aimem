@@ -51,8 +51,9 @@ func TestHubTaskTokenCommand(t *testing.T) {
 }
 
 // A task credential stored on an entry the strict client refuses is kept,
-// with a warning that it will not be sent there; a verified entry gets
-// none. Nothing is sent to the hub either way.
+// with a warning that it will not be sent there, and nothing is sent. A
+// verified entry gets no warning: the hub is asked for the token's label
+// and expiry, which are recorded beside it.
 func TestHubTaskTokenWarnsOnAnUntrustedEntry(t *testing.T) {
 	var warned bytes.Buffer
 	saved := hubWarnOut
@@ -60,7 +61,14 @@ func TestHubTaskTokenWarnsOnAnUntrustedEntry(t *testing.T) {
 	t.Cleanup(func() { hubWarnOut = saved })
 	state := t.TempDir()
 	t.Setenv("AIMEM_STATE_DIR", state)
-	srv := hubtest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) { t.Error("hub task-token reached the hub") }))
+	asked := 0
+	srv := hubtest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		asked++
+		if r.URL.Path != "/v1/access/identity" || r.Header.Get("Authorization") != "Bearer aimem_user_abc" {
+			t.Errorf("hub task-token sent %s %s", r.Method, r.URL)
+		}
+		w.Write([]byte(`{"role":"user","scope":"user","label":"laptop","expires_at":"2027-01-02T03:04:05Z"}`))
+	}))
 	defer srv.Close()
 	missing := filepath.Join(t.TempDir(), "absent.pem")
 	for name, tc := range map[string]struct {
@@ -87,11 +95,21 @@ func TestHubTaskTokenWarnsOnAnUntrustedEntry(t *testing.T) {
 			if got != "" {
 				t.Fatalf("%s: warned: %q", name, got)
 			}
+			hubs, _ := adapter.LoadHubs(state)
+			if m := hubs["home"].TaskTokenMeta; m == nil || *m != (adapter.TokenMeta{Label: "laptop", Scope: "user", ExpiresAt: "2027-01-02T03:04:05Z"}) {
+				t.Fatalf("%s: recorded %+v", name, m)
+			}
 			continue
+		}
+		if hubs, _ := adapter.LoadHubs(state); hubs["home"].TaskTokenMeta != nil {
+			t.Fatalf("%s: recorded without asking: %+v", name, hubs["home"].TaskTokenMeta)
 		}
 		if !strings.HasPrefix(got, "WARNING: hub home: the task credential is stored, but aimem will not send it to this entry: ") ||
 			!strings.Contains(got, tc.want) || strings.Contains(got, "aimem_user_abc") {
 			t.Fatalf("%s: %q", name, got)
 		}
+	}
+	if asked != 1 {
+		t.Fatalf("the hub was asked %d times, want once (the pinned entry)", asked)
 	}
 }

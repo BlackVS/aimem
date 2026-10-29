@@ -311,6 +311,13 @@ func TestHubRefusalIsNeverMaskedByTheLastObservedSelection(t *testing.T) {
 			if strings.Contains(text, "secret policy") || strings.Contains(text, "last observed") {
 				t.Errorf("local=%v status %d: the hook served the cached selection: %q", local, status, text)
 			}
+			// The session-start notice names the refused local credential
+			// and the step that replaces it.
+			if local && (!strings.Contains(text, "the hub refused the task credential (label unknown") ||
+				!strings.Contains(text, "bound project-locally to this checkout") ||
+				!strings.Contains(text, "replace it: an admin issues a new project token (aimem access token-issue --project alpha), then run aimem task-token set --token-file FILE in this checkout")) {
+				t.Errorf("status %d: the session-start notice lacks the credential or its replacement: %q", status, text)
+			}
 		}
 	}
 }

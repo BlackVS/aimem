@@ -373,5 +373,15 @@ func (s *Server) accessIdentity(w http.ResponseWriter, r *http.Request) {
 			allowed = err == nil
 		}
 	}
-	s.ok(w, map[string]any{"user_id": id.UserID, "token_id": id.TokenID, "name": id.Name, "role": "user", "scope": id.Scope, "task_read": "all-projects", "project": project, "task_write": allowed, "tasks_enabled": tasksOn})
+	out := map[string]any{"user_id": id.UserID, "token_id": id.TokenID, "name": id.Name, "role": "user", "scope": id.Scope, "task_read": "all-projects", "project": project, "task_write": allowed, "tasks_enabled": tasksOn}
+	// The client records the label and expiry beside the binding, to name
+	// the token when the hub refuses it. They are optional in the answer.
+	if db, err := s.openAccess(false); err == nil {
+		if label, expires, err := db.TokenMeta(id.TokenID); err == nil {
+			out["label"], out["expires_at"] = label, expires.Format(time.RFC3339)
+		} else {
+			s.log.Warn("read token label for identity", "err", err)
+		}
+	}
+	s.ok(w, out)
 }

@@ -15,6 +15,21 @@ currently 25); a binary refuses a database newer than it understands.
 
 ### Added
 
+- **A refused task credential names itself.** When the hub refuses a task
+  credential (HTTP 401), the error now says which token it is (label,
+  scope and expiry), where it is bound (this checkout's project-local
+  override, or the hub's task credential) and the step that replaces it,
+  in the MCP task tools, the session-start process context and
+  `aimem hub credential`. A token the hub refuses cannot be asked about
+  itself, so `aimem task-token set` and `aimem hub task-token` record its
+  label, scope and expiry beside the binding when they store it. The
+  identity answer (`GET /v1/access/identity`) reports `label` and
+  `expires_at` for the caller's own ordinary token. `aimem hub credential`
+  also prints the user's name and the token's label and expiry, and
+  `aimem task-token show-source` adds the token's label and expiry and a
+  live `state`. A credential stored by an older release keeps working; its
+  refusal says the label is unknown.
+
 - **`aimem project onboard` does the hub side of a new project in one
   command.** `aimem project onboard PROJECT --user NAME [--process REPO
   TAG] [--output FILE|-]` turns tasks on, selects the process (the one
