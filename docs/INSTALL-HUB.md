@@ -13,7 +13,7 @@ deployment.
 ## 1. One command, as root
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/BlackVS/aimem/v0.10.17/install-hub.sh | bash
+curl -fsSL https://raw.githubusercontent.com/BlackVS/aimem/v0.10.18/install-hub.sh | bash
 ```
 
 It creates the service user, installs the release named in the URL
