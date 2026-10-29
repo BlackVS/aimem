@@ -37,7 +37,7 @@ The examples below use these three values, the hub
 `sessiond`, and `my-mac` as the label of the workstation's credentials.
 Substitute your own.
 
-## 2. On the hub: two credentials, the project's board and its process
+## 2. On the hub: two credentials, then the project in one command
 
 Log in to the hub host and switch to the service account, so the CLI
 talks to the running hub service:
@@ -65,28 +65,16 @@ aimem token add my-mac
 The secret is printed once. Copy it into the workstation's private file
 in step 3.3 now, or keep this terminal open until you get there.
 
-**The task board.** This creates the project on the hub if it is new and
-switches its tasks on. When the hub has a default process (below), it
-also selects that process for the project and says so:
-
-```sh
-aimem tasks on -p my-project
-aimem projects
-```
-
-Check that the ID in the list is exactly the one you decided: a typo
-creates a second project.
-
-**The process.** Tasks on without a process is an unfinished setup.
-Every session then starts with the notice that no process reference is
-selected, and an agent can read that as "the board is not ready" and
-leave it alone. The process is the handbook, the checklists that gate
-READY and DONE, and the task templates the agents follow. The process
-lives in a Git repository, which is separate from the hub: the hub stores
-the selection and a copy of the files and serves them to members. aimem's
-own repository carries a ready set at `processes/aimem/manifest.json`. It
-is aimem's own process and requires the `oh-code-review` skill from step
-3.2. Read its
+**The process.** A project's board is not ready for work until it has a
+process. Every session then starts with the notice that no process
+reference is selected, and an agent can read that as "the board is not
+ready" and leave it alone. The process is the handbook, the checklists
+that gate READY and DONE, and the task templates the agents follow. The
+process lives in a Git repository, which is separate from the hub: the
+hub stores the selection and a copy of the files and serves them to
+members. aimem's own repository carries a ready set at
+`processes/aimem/manifest.json`. It is aimem's own process and requires
+the `oh-code-review` skill from step 3.2. Read its
 [handbook](https://github.com/BlackVS/aimem/blob/master/processes/aimem/handbook.md)
 before you select it; a project with other rules copies the
 set into a repository of its own and selects that instead.
@@ -113,35 +101,74 @@ them.
 Set the hub's default process once, by a release tag of the repository.
 The hub host resolves the tag to the commit it holds now, reads the
 files at that commit and checks them; the manifest path defaults to
-`processes/aimem/manifest.json`. Then turn tasks on again: for a project
-with no process, `tasks on` selects the default, pinned to that commit,
-so the agents read exactly what you reviewed:
+`processes/aimem/manifest.json`:
 
 ```sh
 aimem process default set https://github.com/BlackVS/aimem.git TAG
 aimem process default show
-aimem tasks on -p my-project
 ```
 
-Replace `TAG` with a release tag of aimem, such as `v0.10.14`. `tasks on`
-prints `applied the hub's default process:` with the set, the tag and
-the commit. The files are stored on the hub with the selection; each
-workstation reads them from the hub, and step 3.6 checks that it does.
-Every later project gets the same process from its `tasks on`, and a
-project that already has a process keeps it. `--no-process` turns tasks
-on without selecting one.
+Replace `TAG` with a release tag of aimem, such as `v0.10.14`. Every
+new project gets this process, pinned to that commit, from the onboard
+command below, so the agents read exactly what you reviewed. A project
+that already has a process keeps it.
 
-A project that needs another process is the exception: select it
-explicitly instead, by a tag of its repository:
+**The user and the user task token.** The task board knows the agent
+by a user. Skip `user-add` when `my-agent` already exists:
+`aimem access list --user my-agent` shows it, with its tokens.
 
 ```sh
-aimem process select https://github.com/BlackVS/aimem.git TAG -p my-project
+aimem access user-add --user-name my-agent
+aimem access token-issue-user --user-name my-agent --label my-mac --expires +90d --output my-agent.token
+cat my-agent.token
+rm my-agent.token
 ```
 
-To move a project to a newer release later, select its tag with
-`--expect` and the tag selected now; changing the default never
-re-selects an existing project. See
+The user task token is the credential the agent's task tools present.
+It writes to every project the user is granted, now and later, so give
+it an expiry that suits that (`--expires` takes a date such as
+`2027-01-01` or a duration such as `+90d`). Like any ordinary token, it
+can read the tasks of every project on the hub, not only the granted
+ones: grants and project scope limit writes. Do not put anything in a
+task that the hub's other users must not see. The command writes the
+secret to a new file only the service account can read and prints the
+token ID. Keep the ID; it is what you revoke. Copy the secret out of
+`cat` into the workstation's private file in step 3.4, then remove the
+hub's copy.
+
+**The project, in one command.** This creates the project on the hub if
+it is new, switches its tasks on, selects the hub's default process,
+and grants `my-agent` the project:
+
+```sh
+aimem project onboard my-project --user my-agent
+aimem projects
+```
+
+It prints one line per step and ends with the project's readiness
+checklist, which reads `readiness: ready for work` when the board can
+take an agent's writes. Since `my-agent` already holds a user task
+token, onboard issues none. For a user without one, it issues a token
+for this project only, and you name where its secret goes with
+`--output FILE`, as above. Running it again changes nothing and reports
+what exists. Check that the ID in `aimem projects` is exactly the one
+you decided: a typo creates a second project.
+
+A project that needs another process than the default names it, by a
+tag of its repository:
+
+```sh
+aimem project onboard my-project --user my-agent --process https://github.com/BlackVS/aimem.git TAG
+```
+
+With neither `--process` nor a hub default, onboard leaves the process
+step open and the checklist names the `aimem process select` command.
+Onboard never replaces a project's process: to move a project to a
+newer release later, select its tag with `--expect` and the tag selected
+now; changing the default never re-selects an existing project. See
 [the administrator manual](ADMIN-MANUAL.md#selecting-a-projects-process-documents).
+The workstation checks the token it was given with
+`aimem hub credential team` in step 3.4.
 
 **The repository.** Bind the project to the one repository its work
 happens in. The host of the URL names the forge credential a member
@@ -153,35 +180,8 @@ aimem project show --project my-project
 ```
 
 `--kind` is `github`, `gitea` or `gitlab`. `aimem project show` prints
-the repository, the process and, when the hub lacks a required skill,
-the warning above.
-
-**The user and the grant.** List the users first and skip `user-add` if
-`my-agent` already exists:
-
-```sh
-aimem access list
-aimem access user-add --user-name my-agent
-aimem access grant add --project my-project --user-name my-agent
-```
-
-**The user task token.** It is the credential the agent's task tools
-present. It writes to every project the user is granted, now and later,
-so give it an expiry that suits that. Like any ordinary token, it can
-read the tasks of every project on the hub, not only the granted ones:
-grants and project scope limit writes. Do not put anything in a task
-that the hub's other users must not see.
-
-```sh
-aimem access token-issue-user --user-name my-agent --label my-mac --expires 2027-01-01T00:00:00Z --output my-agent.token
-cat my-agent.token
-rm my-agent.token
-```
-
-The command writes the secret to a new file only the service account can
-read and prints the token ID. Keep the ID; it is what you revoke. Copy
-the secret out of `cat` into the workstation's private file in step 3.4,
-then remove the hub's copy.
+the repository, the process, when the hub lacks a required skill the
+warning above, and the readiness checklist.
 
 ## 3. On the workstation
 

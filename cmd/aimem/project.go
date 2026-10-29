@@ -36,6 +36,8 @@ const projectUsage = `usage: aimem project repo set --project <p> --kind github|
        aimem project repo clear --project <p>
        aimem project show --project <p>
        aimem project list | id [dir] | drop --project <p> --yes
+       aimem project onboard <p> --user <name> [--process <repo> <tag>] [--manifest <path>]
+                             [--expires TIME|DATE|+Nd] [--label <label>] [--output FILE|-] [--new-token]
 
 repo set|clear, show and list run on the hub host (admin). list prints
 each project's tasks and process state and marks a project with tasks on
@@ -46,11 +48,23 @@ The repository is the one repository the project's work happens in:
 --kind is the forge's API dialect, the host of --url names the credential
 a member needs, and --access is what members need (write, the default, or
 read). The hub stores no default branch: the forge owns it.
+onboard runs on the hub host (admin) and does the hub side of a new
+project in one command: it turns tasks on, selects the process (the one
+--process names, else the hub's default, else it leaves the step open),
+grants the user the project, and, when the user has no live token that
+can write to it, issues a project-scoped token (label: the project id
+unless --label; expiry +90d unless --expires) whose secret goes to
+--output, written as access token-issue writes it. It checks the user,
+the process and --output before the first change, so a refusal changes
+nothing; it never re-selects a project's process; a second run reports
+what exists and issues nothing unless --new-token. It ends with the
+project's readiness checklist.
 
 Examples, one per command:
   aimem project repo set --project example --kind github --url https://github.com/example/example.git
   aimem project repo clear --project example
   aimem project show --project example
+  aimem project onboard example --user pilot-worker --output example.token
   aimem project list
   aimem project id /path/to/checkout
   aimem project drop --project example --yes`
@@ -68,6 +82,8 @@ func projectNamespaceCmd(args []string) error {
 		return dropProjectCmd(args[1:])
 	case "show":
 		return projectShowCmd(args[1:])
+	case "onboard":
+		return projectOnboardCmd(args[1:])
 	case "repo":
 		if len(args) > 1 && (args[1] == "set" || args[1] == "clear") {
 			return projectRepoCmd(args[1], args[2:])

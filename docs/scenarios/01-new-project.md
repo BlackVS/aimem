@@ -3,13 +3,14 @@
 This card is the path of [the new-project quickstart](../QUICKSTART-NEW-PROJECT.md),
 sections 2 and 3, on a hub that already runs and a workstation that has
 never talked to it. On the hub, an administrator switches tasks on for the
-project, imports the skills, selects the process by tag, binds the
-repository, adds the user and its grant and issues the user's task token.
+project, imports the skills, adds the user and issues the user's task
+token, onboards the project in one command (tasks on, the process by tag,
+the grant) and binds the repository.
 On the workstation, a person wires the project, adds the hub with the
 writer token, stores the task token and checks what an agent will see. A
 task is then created and listed through the hub's API with that token.
-Last, a second project needs only a grant on the hub: the same token
-writes to it with nothing changed on the workstation. This is the path a
+Last, a second project is onboarded the same way: the same token writes
+to it with nothing changed on the workstation. This is the path a
 new user follows first, so a release must not break any step of it.
 
 Tier: release gate.
@@ -33,7 +34,7 @@ Tier: release gate.
   `<skills-version>`, with its `SHA256SUMS` beside it.
 - The process repository `https://github.com/BlackVS/aimem.git` with the
   tag `<tag>`.
-- `<task-token-file>` does not exist yet: step 12 writes it. The
+- `<task-token-file>` does not exist yet: step 6 writes it. The
   quickstart copies the token from the hub to the workstation; in the
   suite both sides read the same file.
 
@@ -63,33 +64,7 @@ aimem token add <machine>
 restart is not required; the hub reads the registry per request
 ```
 
-### 3. Tasks are switched on for the project (hub)
-
-This creates the project on the hub; without a process the board is not ready yet.
-
-```sh
-aimem tasks on -p <project>
-```
-
-```text
-tasks on for project "<project>"
-not ready for work: tasks on, process not selected
-next step: select the project's process on this hub host:
-```
-
-### 4. The project is listed under the decided ID (hub)
-
-A typo in the ID would show here as a second project.
-
-```sh
-aimem projects
-```
-
-```text
-"<project>"
-```
-
-### 5. The skills release is imported (hub)
+### 3. The skills release is imported (hub)
 
 The process requires a skill, and members install skills only from the hub.
 
@@ -102,20 +77,74 @@ importing release set <skills-version>
 "imported":true,"source":"release"
 ```
 
-### 6. The process is selected by tag (hub)
+### 4. The users are listed before one is added (hub)
 
-The hub pins the tag to the commit it holds now, so agents read what was reviewed.
+An existing user is reused rather than added twice.
 
 ```sh
-aimem process select https://github.com/BlackVS/aimem.git <tag> -p <project>
+aimem access list
 ```
 
 ```text
-<tag> holds commit
-"manifest":"processes/aimem/manifest.json"
+(no project has grants or tokens)
 ```
 
-### 7. The project is bound to its repository (hub)
+### 5. The user is added (hub)
+
+The task board knows the agent by this user.
+
+```sh
+aimem access user-add --user-name <user>
+```
+
+```text
+"name": "<user>"
+```
+
+### 6. The user task token is issued into a private file (hub)
+
+The token follows the user's grants, now and later, and only its ID is printed.
+
+```sh
+aimem access token-issue-user --user-name <user> --label <machine> \
+  --expires <expires> --output <task-token-file>
+```
+
+```text
+"scope": "user"
+"expires_at": "<expires>"
+```
+
+### 7. The project is onboarded in one command (hub)
+
+This switches tasks on, selects the process by tag and grants the user; the user's token already writes, so none is issued.
+
+```sh
+aimem project onboard <project> --user <user> --process https://github.com/BlackVS/aimem.git <tag>
+```
+
+```text
+  tasks: turned on
+<tag> holds commit
+  process: selected
+  grant: granted user <user>
+  token: none issued; user <user> already has one that can write: <machine> (user, expires
+readiness: ready for work
+```
+
+### 8. The project is listed under the decided ID (hub)
+
+A typo in the ID would show here as a second project.
+
+```sh
+aimem projects
+```
+
+```text
+"<project>"
+```
+
+### 9. The project is bound to its repository (hub)
 
 The repository's host names the forge credential a member needs.
 
@@ -127,7 +156,7 @@ aimem project repo set --project <project> --kind github --url <repo-url>
 now:      github <repo-url>
 ```
 
-### 8. The project shows its repository and process (hub)
+### 10. The project shows its repository and process (hub)
 
 This is the check the quickstart asks for after binding the repository.
 
@@ -142,57 +171,7 @@ process:    https://github.com/BlackVS/aimem.git
 (ref <tag>)
 ```
 
-### 9. The users are listed before one is added (hub)
-
-An existing user is reused rather than added twice.
-
-```sh
-aimem access list
-```
-
-```text
-(no project has grants or tokens)
-```
-
-### 10. The user is added (hub)
-
-The task board knows the agent by this user.
-
-```sh
-aimem access user-add --user-name <user>
-```
-
-```text
-"name": "<user>"
-```
-
-### 11. The user is granted the project (hub)
-
-The grant is what lets the user's token write to the project's tasks.
-
-```sh
-aimem access grant add --project <project> --user-name <user>
-```
-
-```text
-"ok": true
-```
-
-### 12. The user task token is issued into a private file (hub)
-
-The token follows the user's grants, now and later, and only its ID is printed.
-
-```sh
-aimem access token-issue-user --user-name <user> --label <machine> \
-  --expires <expires> --output <task-token-file>
-```
-
-```text
-"scope": "user"
-"expires_at": "<expires>"
-```
-
-### 13. The project is wired (workstation)
+### 11. The project is wired (workstation)
 
 This writes the handoff, the agent hooks and `.aimem.json` with the project ID and the hub's name.
 
@@ -205,7 +184,7 @@ aimem wire --project <project> --hub <hub-name>
 project wired.
 ```
 
-### 14. The workstation adds the hub with the writer token (workstation)
+### 12. The workstation adds the hub with the writer token (workstation)
 
 The hub's certificate is verified against the CA, and the token is read from a private file.
 
@@ -217,7 +196,7 @@ aimem hub add <hub-name> <hub-url> --token-file <token-file> --ca-file <ca-file>
 hub "<hub-name>" configured
 ```
 
-### 15. The task tools get their credential (workstation)
+### 13. The task tools get their credential (workstation)
 
 The user task token is stored for the hub; it never goes on a command line.
 
@@ -229,7 +208,7 @@ aimem hub task-token <hub-name> --token-file <task-token-file>
 task credential stored for hub "<hub-name>"
 ```
 
-### 16. The credential is active with user scope (workstation)
+### 14. The credential is active with user scope (workstation)
 
 The workstation asks the hub about the token without showing it.
 
@@ -241,7 +220,7 @@ aimem hub credential <hub-name>
 individual credential set, active, scope user
 ```
 
-### 17. The process's skills are installed from the hub (workstation)
+### 15. The process's skills are installed from the hub (workstation)
 
 The process names the review skill and the hub serves it; `--tool` names the client, which is found on `PATH` otherwise.
 
@@ -253,7 +232,7 @@ aimem skills install --tool claude
 installed oh-code-review <skills-version> (release) for claude
 ```
 
-### 18. The local service answers (workstation)
+### 16. The local service answers (workstation)
 
 Step 3.6 of the quickstart starts here.
 
@@ -265,7 +244,7 @@ aimem health
 "status":"ok"
 ```
 
-### 19. The project has the pinned ID (workstation)
+### 17. The project has the pinned ID (workstation)
 
 Every clone journals into the project the ID names.
 
@@ -277,7 +256,7 @@ aimem project-id .
 <project>
 ```
 
-### 20. A session start carries the handoff (workstation)
+### 18. A session start carries the handoff (workstation)
 
 This is the hook output an agent receives when it starts.
 
@@ -290,7 +269,7 @@ aimem session-start
 Canonical session handoff (docs
 ```
 
-### 21. The bound documents are published (workstation)
+### 19. The bound documents are published (workstation)
 
 The handoff is shared through the hub without being listed.
 
@@ -302,7 +281,7 @@ aimem docs push
 SESSION-STATE -> rev 1
 ```
 
-### 22. The hub lists the shared handoff (workstation)
+### 20. The hub lists the shared handoff (workstation)
 
 This reads the documents back from the hub.
 
@@ -315,7 +294,7 @@ SESSION-STATE
 docs/SESSION-STATE.md
 ```
 
-### 23. The process is what a session is told (workstation)
+### 21. The process is what a session is told (workstation)
 
 It names the set, the tag and the commit, the manifest and the installed skill.
 
@@ -331,7 +310,7 @@ Required skills: oh-code-review (installed <skills-version> from the hub (releas
 --- Checklist gating READY ---
 ```
 
-### 24. A task is created with the user task token (workstation)
+### 22. A task is created with the user task token (workstation)
 
 An agent's task tools make this same request; its success proves the credential, the grant and the board.
 
@@ -348,7 +327,7 @@ Idempotency-Key: scenario-01-first-task
 "title":"First task from the workstation"
 ```
 
-### 25. The project's tasks list the new task (workstation)
+### 23. The project's tasks list the new task (workstation)
 
 The quickstart's last check: the task an agent created appears in the list.
 
@@ -362,45 +341,25 @@ Token-File: <task-token-file>
 "title":"First task from the workstation"
 ```
 
-### 26. A second project's tasks are switched on (hub)
+### 24. The second project is onboarded in one command (hub)
 
-The second project starts like the first.
+The second project starts like the first, and the user's token already follows the new grant.
 
 ```sh
-aimem tasks on -p <project-2>
+aimem project onboard <project-2> --user <user> --process https://github.com/BlackVS/aimem.git <tag>
 ```
 
 ```text
-tasks on for project "<project-2>"
+  tasks: turned on
+  process: selected
+  grant: granted user <user>
+  token: none issued; user <user> already has one that can write
+readiness: ready for work
 ```
 
-### 27. The second project's process is selected (hub)
+### 25. The same token writes to the second project (workstation)
 
-A project without a process is not ready for work.
-
-```sh
-aimem process select https://github.com/BlackVS/aimem.git <tag> -p <project-2>
-```
-
-```text
-<tag> holds commit
-```
-
-### 28. The user is granted the second project (hub)
-
-This is the only step the user's access needs: the token follows the user's grants.
-
-```sh
-aimem access grant add --project <project-2> --user-name <user>
-```
-
-```text
-"ok": true
-```
-
-### 29. The same token writes to the second project (workstation)
-
-Nothing changed on the workstation since step 15.
+Nothing changed on the workstation since step 13.
 
 ```http
 POST /v1/projects/<project-2>/tasks
