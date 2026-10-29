@@ -263,7 +263,7 @@ func TestProcessDefaultSetFromArchiveOffline(t *testing.T) {
 	if err := os.WriteFile(bad, []byte(strings.Repeat("0", 64)+"  "+filepath.Base(archive)+"\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := run("set", repo, "v1", "--from-archive", archive, "--sums", bad); err == nil || !strings.Contains(err.Error(), "archive") {
+	if _, err := run("set", repo, "v1", "--from-archive", archive, "--sums", bad); err == nil || !strings.Contains(err.Error(), "does not match its line in "+bad) {
 		t.Fatalf("a mismatched sums file: %v", err)
 	}
 	// An archive that records no commit says how to get one that does.
