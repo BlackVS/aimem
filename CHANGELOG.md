@@ -13,6 +13,39 @@ currently 25); a binary refuses a database newer than it understands.
 
 ## [Unreleased]
 
+## [0.10.18] — 2026-10-29
+
+`aimem project onboard` does the hub side of a new project in one
+command. A refused task credential names itself: its label, scope and
+expiry, where it is bound, and the step that replaces it.
+`aimem process pin` works for a team member, under the team's grant. The
+on-disk schema stays at 25 and the access schema at 9. Includes PR #323,
+#325 and #326.
+
+### Upgrade notes
+
+- **A team member's pin read needs the upgraded hub.** In a team
+  conversation, `aimem process pin` reads `GET /v1/projects/{p}/process`
+  in team mode, which only an upgraded hub serves; an older hub refuses
+  it (`team_operation_unsupported`). Upgrade the hub before aicrew's
+  coordinator relies on the pin. Outside a team conversation the command
+  reads as before.
+- **Token labels are recorded against an upgraded hub.** The identity
+  answer reports the caller's token label and expiry from this release
+  on. `aimem task-token set` and `aimem hub task-token` record them when
+  they store a token; against an older hub, `hub task-token` notes that
+  the label was not recorded. A credential stored before keeps working,
+  and its refusal says the label is unknown. To name it later, store it
+  again after the hub upgrade (`aimem hub task-token HUB --token-file
+  FILE`, or `aimem task-token set` in the checkout).
+- **`aimem task-token show-source` now asks the hub.** It makes one
+  identity request (bounded at 5 s) to report the token's `state`; it was
+  offline before.
+- **Clients and hubs can otherwise be upgraded in either order.**
+  `aimem project onboard` composes admin routes an older hub serves.
+- **The on-disk schema stays at 25 and the access schema at 9.** A hub
+  or a client goes back to 0.10.17 by putting its binary back.
+
 ### Added
 
 - **A refused task credential names itself.** When the hub refuses a task
@@ -29,7 +62,6 @@ currently 25); a binary refuses a database newer than it understands.
   `aimem task-token show-source` adds the token's label and expiry and a
   live `state`. A credential stored by an older release keeps working; its
   refusal says the label is unknown.
-
 - **`aimem project onboard` does the hub side of a new project in one
   command.** `aimem project onboard PROJECT --user NAME [--process REPO
   TAG] [--output FILE|-]` turns tasks on, selects the process (the one
