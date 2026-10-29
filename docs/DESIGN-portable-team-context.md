@@ -389,6 +389,11 @@ The report gains fields and never removes one; a consumer of `status`,
    replaces a Git permission. Implemented: `GET /v1/projects/{p}/process/set`
    applies the project repository's read rule (a live grant for an ordinary
    token or a team session; unknown projects read as ungranted).
+   Corrected (audit A-4): the reference read now applies the same rule.
+   An ungated reference served the repository URL, the selection history
+   and who selected to a token with no grant, so the reference needs the
+   project grant too; its history, the kept sets and `selected_by` are
+   admin reads, and a selection's URL may not carry a credential.
 5. **"Delivered" versus "read".** The review asked for delivered versus
    acknowledged context. Only delivery in the same result is observable;
    acknowledgement is an agent declaration and is reported as one.

@@ -123,7 +123,7 @@ var ordinaryRoutes = func() map[string]bool {
 	maps.Copy(m, knowledgeRoute)
 	m["POST /mcp"] = true
 	m["GET /v1/projects"] = true
-	m["GET /v1/projects/{p}/process"] = true // the selected process reference: what an agent needs to find its rules; grants no repository access
+	m["GET /v1/projects/{p}/process"] = true // the selected process reference; the handler requires a grant on the project, history and the selector are admin reads
 	m[repositoryReadRoute] = true            // the project's repository; the handler requires a grant on the project
 	m[processSetReadRoute] = true            // the stored process set; the handler requires a grant on the project
 	m[skillsIndexReadRoute] = true           // the imported skills sets and the effective skills; the handler requires a grant on the project

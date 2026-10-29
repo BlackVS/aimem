@@ -10,9 +10,10 @@ import (
 
 // Selecting a process reference is an admin action with a compare-and-swap
 // on the previous commit; reading the selection is on the ordinary
-// surface; the history survives a change; every credential is refused a
-// malformed selection. A selection carries its set (process_set_test.go
-// has the set's own contract).
+// surface under the set's grant rule, with the history and the selector
+// admin reads; the history survives a change; every credential is refused
+// a malformed selection, and a URL carrying a credential. A selection
+// carries its set (process_set_test.go has the set's own contract).
 func TestProcessReferenceSelection(t *testing.T) {
 	f := newTaskFixture(t)
 	c1, c2 := strings.Repeat("1", 40), strings.Repeat("2", 40)
@@ -38,6 +39,8 @@ func TestProcessReferenceSelection(t *testing.T) {
 		`{"repo":"https://example.com/p.git","commit":"abc","manifest":"m.json","expected_commit":""}`,
 		`{"repo":"https://example.com/p.git","commit":"` + c1 + `","manifest":"../m.json","expected_commit":""}`,
 		`{"repo":"https://example.com/p.git","commit":"` + c1 + `","manifest":"m.json","expected_commit":"","surprise":1}`,
+		`{"repo":"https://user:token@example.com/p.git","commit":"` + c1 + `","manifest":"m.json","expected_commit":""}`,
+		`{"repo":"ssh://git:secret@example.com/p.git","commit":"` + c1 + `","manifest":"m.json","expected_commit":""}`,
 	} {
 		if code, body := sel(f.admin, bad); code != 400 {
 			t.Fatalf("bad selection accepted: %d %s (%s)", code, body, bad)
@@ -54,8 +57,22 @@ func TestProcessReferenceSelection(t *testing.T) {
 			Repo, Commit, Manifest, Ref string
 		} `json:"current"`
 	}
-	if w.Code != 200 || json.Unmarshal(w.Body.Bytes(), &got) != nil || got.Current.Commit != c1 || got.Current.Ref != "main" {
-		t.Fatalf("read by ordinary token: %d %s", w.Code, w.Body)
+	if w.Code != 200 || json.Unmarshal(w.Body.Bytes(), &got) != nil || got.Current.Commit != c1 || got.Current.Ref != "main" ||
+		got.Current.Repo != "https://example.com/p.git" || got.Current.Manifest != "m.json" || strings.Contains(w.Body.String(), "selected_by") {
+		t.Fatalf("read by a granted ordinary token: %d %s", w.Code, w.Body)
+	}
+	// A token without a grant on the project is refused it, as the set
+	// route refuses it; the history is an admin read even with a grant.
+	if w := taskReq(t, f.h, "GET", "/v1/projects/alpha/process", f.bob, "", ""); w.Code != 403 || strings.Contains(w.Body.String(), c1) {
+		t.Fatalf("no grant: %d %s", w.Code, w.Body)
+	}
+	for _, token := range []string{f.alice, f.bob} {
+		if w := taskReq(t, f.h, "GET", "/v1/projects/alpha/process?history=1", token, "", ""); w.Code != 403 || strings.Contains(w.Body.String(), c1) {
+			t.Fatalf("history for an ordinary token: %d %s", w.Code, w.Body)
+		}
+	}
+	if w := taskReq(t, f.h, "GET", "/v1/projects/alpha/process", f.admin, "", ""); w.Code != 200 || !strings.Contains(w.Body.String(), `"selected_by":"host-admin"`) {
+		t.Fatalf("read by admin: %d %s", w.Code, w.Body)
 	}
 	// Stale expectation: refused with the current selection.
 	code, body = sel(f.admin, `{"repo":"https://example.com/p.git","commit":"`+c2+`","manifest":"m.json","expected_commit":"`+strings.Repeat("9", 40)+`"}`)
@@ -81,15 +98,21 @@ func TestProcessReferenceSelection(t *testing.T) {
 	if w.Code != 200 {
 		t.Fatalf("clear by the operator: %d %s", w.Code, w.Body)
 	}
-	if w := taskReq(t, f.h, "GET", "/v1/projects/alpha/process", f.bob, "", ""); w.Code != 404 {
+	if w := taskReq(t, f.h, "GET", "/v1/projects/alpha/process", f.alice, "", ""); w.Code != 404 {
 		t.Fatalf("after clear: %d", w.Code)
 	}
-	w = taskReq(t, f.h, "GET", "/v1/projects/alpha/process?history=1", f.bob, "", "")
+	if w := taskReq(t, f.h, "GET", "/v1/projects/alpha/process", f.bob, "", ""); w.Code != 403 {
+		t.Fatalf("after clear, no grant: %d", w.Code)
+	}
+	w = taskReq(t, f.h, "GET", "/v1/projects/alpha/process?history=1", f.admin, "", "")
 	if w.Code != 200 || !strings.Contains(w.Body.String(), c2) || !strings.Contains(w.Body.String(), `"current":null`) {
 		t.Fatalf("history after clear: %d %s", w.Code, w.Body)
 	}
-	if w := taskReq(t, f.h, "GET", "/v1/projects/nope/process", f.alice, "", ""); w.Code != 404 {
-		t.Fatalf("unknown project: %d", w.Code)
+	if w := taskReq(t, f.h, "GET", "/v1/projects/nope/process", f.alice, "", ""); w.Code != 403 {
+		t.Fatalf("unknown project reads as ungranted: %d", w.Code)
+	}
+	if w := taskReq(t, f.h, "GET", "/v1/projects/nope/process", f.admin, "", ""); w.Code != 404 {
+		t.Fatalf("unknown project, admin: %d", w.Code)
 	}
 	if w := taskReq(t, f.h, "GET", "/v1/projects/user/process", f.alice, "", ""); w.Code != 400 {
 		t.Fatalf("reserved project: %d", w.Code)

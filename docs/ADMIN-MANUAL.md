@@ -851,6 +851,19 @@ host cannot reach over https, still needs the archive import. A
 tarball's set differ from the one Git gives; the hub serves the set it
 stored.
 
+The repository URL is stored with the selection and served to every
+token with a grant on the project, so it never carries a credential: an
+https URL with a user name or a token (`https://user:token@host/...`) and
+an ssh URL with a password are refused. For a private repository, give
+Git on the hub host its access through a credential helper (`git config
+--global credential.helper ...`) or an ssh key and agent, and the forge
+reads through `AIMEM_PROCESS_FORGE_TOKEN(S)` above. The selection's log
+line records `userinfo=none`. A token with a grant on the project reads
+the current selection (repository, ref, commit, manifest, digest, name,
+when); a token without one is refused, as for the set. The history, the
+kept sets and who selected are admin reads (`process show --full` and
+`process list` on the hub host).
+
 The manifest is JSON (`version` 1 or 2): `handbook` (Markdown path),
 `checklists` (task state to a JSON file of `{state, items:[{id,text}]}`),
 `templates` (kind to a JSON file), `skills` (the skills the process
