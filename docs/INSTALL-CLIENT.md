@@ -7,12 +7,14 @@ except section 4 applies whether or not you ever set one up.
 ## 1. One-liner
 
 Run it **inside a project directory**. The first run installs the
-user-level pieces and wires the project you are standing in. Later runs
-upgrade aimem from any directory and wire only a directory that already
-holds `.aimem.json`; to wire another project, run `aimem wire` inside it
-(see "Wiring another project" below). The home directory is never wired: Claude Code reads a
+user-level pieces and wires the project you are standing in. To wire
+another project, run `aimem wire` inside it (see "Wiring another
+project" below). The home directory is never wired: Claude Code reads a
 `CLAUDE.md` in every directory above a session, so wiring the home would
 reach every project under it.
+
+Every later release installs with `aimem upgrade`, from any directory
+(see "Upgrading" below). The one-liner stays the first install.
 
 **Linux / macOS**
 
@@ -119,6 +121,37 @@ refuses the home directory, the aimem state root and a directory inside
 a checkout whose `.aimem.json` already governs it. Registering the hub
 (`aimem hub add`) and the task credential (`aimem task-token`) stay
 separate steps (section 4).
+
+### Upgrading
+
+```sh
+aimem upgrade                      # the newest release
+aimem upgrade --release vX.Y.Z     # a named one, the only way to go back
+```
+
+Without `--release` the command takes the newest published release,
+prereleases excluded. It does the following, in order:
+
+1. It refuses an older release unless `--release` names it, and says so
+   and changes nothing when the release is the one already installed.
+2. It fetches the release's `SHA256SUMS` and the binary for this
+   platform, and refuses a missing sums file, a binary the sums do not
+   list, or a hash that does not match. A refusal leaves the installed
+   client as it was.
+3. It runs that release's own installer in its user-level mode, as the
+   one-liner does: `install.sh user`, or on Windows `install.ps1
+   -UserOnly` in a child PowerShell under the `RemoteSigned` policy for
+   that process only. The installer backs up the state root, swaps the
+   binary, refreshes the hooks, plugins, skills and the background
+   service, and restores the previous binary and state if the new release
+   does not answer health (ADMIN-MANUAL, "Upgrades").
+4. It prints the version the installed binary reports.
+
+It runs as your user, with no elevation, and wires no project. It
+upgrades only the client the installers put in place (`~/.local/bin/aimem`,
+or `%LOCALAPPDATA%\aimem\bin\aimem.exe` on Windows). A hub upgrades with
+`install-hub.sh`. A client older than the first release with the command
+upgrades once with the newer release's one-liner.
 
 ## 2. Options
 
