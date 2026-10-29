@@ -19,7 +19,7 @@ Every later release installs with `aimem upgrade`, from any directory
 **Linux / macOS**
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/BlackVS/aimem/v0.10.18/boot.sh | bash
+curl -fsSL https://raw.githubusercontent.com/BlackVS/aimem/v0.10.19/boot.sh | bash
 ```
 
 **Windows**, in a PowerShell window. From cmd, or from the Run dialog
@@ -31,8 +31,8 @@ curl -fsSL https://raw.githubusercontent.com/BlackVS/aimem/v0.10.18/boot.sh | ba
   $ErrorActionPreference = 'Stop'
   $d = New-Item -ItemType Directory -Force (Join-Path $env:TEMP 'aimem-boot')
   $f = Join-Path $d 'boot.ps1'; $s = Join-Path $d 'SHA256SUMS'
-  Invoke-WebRequest https://github.com/BlackVS/aimem/releases/download/v0.10.18/boot.ps1 -OutFile $f -UseBasicParsing
-  Invoke-WebRequest https://github.com/BlackVS/aimem/releases/download/v0.10.18/SHA256SUMS -OutFile $s -UseBasicParsing
+  Invoke-WebRequest https://github.com/BlackVS/aimem/releases/download/v0.10.19/boot.ps1 -OutFile $f -UseBasicParsing
+  Invoke-WebRequest https://github.com/BlackVS/aimem/releases/download/v0.10.19/SHA256SUMS -OutFile $s -UseBasicParsing
   $want = ((Select-String -LiteralPath $s -Pattern '\sboot\.ps1$').Line -split '\s+')[0]
   if ((Get-FileHash -LiteralPath $f).Hash -ne $want) { throw 'boot.ps1 does not match SHA256SUMS' }
   Unblock-File -LiteralPath $f

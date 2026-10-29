@@ -13,6 +13,45 @@ currently 25); a binary refuses a database newer than it understands.
 
 ## [Unreleased]
 
+## [0.10.19] — 2026-10-29
+
+`aimem upgrade` brings an installed client to a release in one command;
+the boot one-liner stays the first install. Curation's model CLI and the
+process import's git no longer inherit the hub's secrets (audit A-22).
+The readiness checklist counts a team's peer credential as a project's
+writer. The on-disk schema stays at 25 and the access schema at 9.
+Includes PR #328, #329 and #330.
+
+### Upgrade notes
+
+- **Curation's `claude` CLI runs with a minimal environment.** On a hub
+  whose curation uses a `kind=claude` provider, the CLI now sees only the
+  search path, home, temp dirs, locale, proxies, CA bundles, its own
+  credential and configuration variables (`CLAUDE_CODE_OAUTH_TOKEN`,
+  `ANTHROPIC_API_KEY`, `ANTHROPIC_AUTH_TOKEN`, `ANTHROPIC_BASE_URL`,
+  `CLAUDE_CONFIG_DIR`, `CLAUDE_CODE_GIT_BASH_PATH`), and no `AIMEM_*`
+  variable. It runs with `--tools ""` and `--strict-mcp-config`. A CLI
+  that authenticated through any other variable stops authenticating; a
+  login stored under the service user's home keeps working. After the
+  upgrade, run one curation pass (`systemctl --user start
+  aimem-curate.service`) and check its log for extracted facts.
+- **The process import's git runs with a minimal environment too.** It
+  keeps `SSH_AUTH_SOCK` and every `GIT_*` variable, and reads the service
+  user's own git configuration, so a private process source reached by
+  SSH agent, a configured credential helper or `GIT_ASKPASS` is reached as
+  before. A helper that reads its secret from another environment
+  variable no longer sees it.
+- **Clients upgrade once more with the one-liner, then with `aimem
+  upgrade`.** A client on 0.10.18 or older has no `aimem upgrade`; its
+  move to 0.10.19 is the 0.10.19 one-liner. Every later release is
+  `aimem upgrade`. On a hub's service user the command refuses and names
+  `install-hub.sh`, which stays the hub's upgrade path.
+- **Clients and hubs can be upgraded in either order.** No route or
+  answer changed; the readiness checklist change is computed by the
+  client from routes an older hub already serves.
+- **The on-disk schema stays at 25 and the access schema at 9.** A hub
+  or a client goes back to 0.10.18 by putting its binary back.
+
 ### Added
 
 - **`aimem upgrade` brings an installed client to a release in one
