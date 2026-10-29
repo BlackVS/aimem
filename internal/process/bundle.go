@@ -272,7 +272,12 @@ func CachedSet(root string, ref Ref) (*Set, error) {
 
 // WriteArchive writes the bundle's files as a tar.gz, in path order, with
 // fixed metadata, so the same bundle gives the same bytes.
-func WriteArchive(w io.Writer, b *Bundle) error {
+func WriteArchive(w io.Writer, b *Bundle) error { return WriteArchiveAt(w, b, "") }
+
+// WriteArchiveAt is WriteArchive recording commit first, as git archive
+// does, in a pax global header whose comment ArchiveCommit reads; an
+// empty commit records none.
+func WriteArchiveAt(w io.Writer, b *Bundle, commit string) error {
 	paths := make([]string, 0, len(b.Files))
 	for p := range b.Files {
 		paths = append(paths, p)
@@ -280,6 +285,11 @@ func WriteArchive(w io.Writer, b *Bundle) error {
 	sort.Strings(paths)
 	gz := gzip.NewWriter(w)
 	tw := tar.NewWriter(gz)
+	if commit != "" {
+		if err := tw.WriteHeader(&tar.Header{Typeflag: tar.TypeXGlobalHeader, Name: "pax_global_header", PAXRecords: map[string]string{"comment": commit}, Format: tar.FormatPAX}); err != nil {
+			return err
+		}
+	}
 	for _, p := range paths {
 		if err := tw.WriteHeader(&tar.Header{Typeflag: tar.TypeReg, Name: p, Mode: 0o644, Size: int64(len(b.Files[p])), Format: tar.FormatPAX}); err != nil {
 			return err

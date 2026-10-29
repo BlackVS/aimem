@@ -13,6 +13,26 @@ currently 25); a binary refuses a database newer than it understands.
 
 ## [Unreleased]
 
+### Upgrade notes
+
+- **A default set before this release is applied from the repository
+  as before.** Its files are not kept on the hub; `aimem process default
+  show` says so, and setting the default again keeps them.
+
+### Added
+
+- **The hub keeps its default process's set, and `default set` takes an
+  archive.** `aimem process default set` sends the set's files with the
+  default, and the hub keeps them in `process-default-set.json` in its
+  state root, so `aimem tasks on` applies the default without Git or the
+  forge, still checked against the default's digest. `default set <repo>
+  <tag> --from-archive FILE [--sums FILE]` reads nothing over the
+  network: the set comes from the archive its `SHA256SUMS` vouches for,
+  and the commit from the archive itself. `aimem process export` now
+  records the commit in the archive, as `git archive` and a forge's
+  source tarball do. `default show` says whether the files are kept, and
+  `default clear` removes them.
+
 ## [0.10.16] — 2026-10-28
 
 A hub can hold a default process that `aimem tasks on` applies to a

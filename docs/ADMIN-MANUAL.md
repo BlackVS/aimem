@@ -734,15 +734,37 @@ aimem process default clear
 `select` does, so a tag the repository lacks, or a set that does not
 validate, is refused before anything is stored. The hub stores the
 repository, the tag, the commit the tag held, the manifest and the set's
-digest in `process-default.json` in its state root: instance
-configuration, which the installer's state backup carries. `default
-show` prints them, with when and by whom the default was set.
+digest in `process-default.json` in its state root, and the set's files
+in `process-default-set.json` beside it: instance configuration, which
+the installer's state backup carries. `default show` prints them, with
+when and by whom the default was set and whether the files are kept.
+
+**On a hub host without network access**, set the default from an
+archive. On a machine with access to the repository, `aimem process
+export <repo> <commit> <manifest>` writes the archive and its
+`SHA256SUMS` line (a forge's source tarball of the tag's commit works
+too); carry both over and run:
+
+```sh
+aimem process default set https://github.com/BlackVS/aimem.git v0.10.14 \
+    --from-archive aimem-0123456789ab.tar.gz --sums SHA256SUMS
+```
+
+This reads nothing over the network. The archive must match its
+`SHA256SUMS` line, as `select --from-archive` requires; the commit is the
+one the archive records (`process export` and `git archive` write it),
+and the tag is taken as given, since nothing can check it offline. An
+archive that records no commit, such as one exported by 0.10.16 or
+earlier, is refused with the next step.
 
 `tasks on` for a project with no process then selects the default's
-commit, with its tag recorded as the selection's ref, reads the set at
-that commit again, checks that it is the set the default was stored
+commit, with its tag recorded as the selection's ref, takes the set the
+hub keeps for it, checks that it is the set the default was stored
 with, and prints `applied the hub's default process: <set> (tag <tag>,
-commit <commit>)`. The selection is an ordinary one: `process show`,
+commit <commit>)`. It needs neither Git nor the forge. A default set by
+0.10.16, which kept no files, is applied by reading the set at its
+commit from the repository again, as before; setting it again keeps the
+files. The selection is an ordinary one: `process show`,
 `--expect` and the history treat it like any other. A tag moved after
 `default set` does not change what is applied; set the default again to
 follow it. A project that already has a process keeps it, `--no-process`

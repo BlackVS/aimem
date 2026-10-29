@@ -167,6 +167,22 @@ func TestArchiveRoundTripAndSums(t *testing.T) {
 	if _, err := ReadArchive(bytes.NewReader(buf.Bytes()), "other/manifest.json"); err == nil {
 		t.Fatal("an archive without the manifest was read")
 	}
+	// An archive records its commit only when written with one, as git
+	// archive does, and reads the same set either way.
+	if c, err := ArchiveCommit(buf.Bytes()); err != nil || c != "" {
+		t.Fatalf("an archive written without a commit records %q %v", c, err)
+	}
+	commit := strings.Repeat("c", 40)
+	var at bytes.Buffer
+	if err := WriteArchiveAt(&at, b, commit); err != nil {
+		t.Fatal(err)
+	}
+	if c, err := ArchiveCommit(at.Bytes()); err != nil || c != commit {
+		t.Fatalf("recorded commit %q %v", c, err)
+	}
+	if got, err := ReadArchive(bytes.NewReader(at.Bytes()), b.Manifest); err != nil || got.Digest() != b.Digest() {
+		t.Fatalf("an archive with its commit: %v", err)
+	}
 
 	// A forge tarball: everything under repo-<sha>/, with files the
 	// manifest does not name beside the set.

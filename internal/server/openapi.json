@@ -6923,17 +6923,17 @@
     "/v1/process-default": {
       "get": {
         "summary": "The hub's default process (admin)",
-        "description": "The hub's default process: the selection `aimem tasks on` applies to a project that has none. Instance configuration in the state root (process-default.json), set on the hub host with `aimem process default set`, which resolves the tag and imports the set as `aimem process select` does. It names the repository, the tag (ref), the commit the tag held when it was set, the manifest and the set's digest. Applying it is an ordinary selection through PUT /v1/projects/{p}/process; a session never reads the default.",
+        "description": "The hub's default process: the selection `aimem tasks on` applies to a project that has none. Instance configuration in the state root (process-default.json), set on the hub host with `aimem process default set`, which resolves the tag and imports the set as `aimem process select` does. It names the repository, the tag (ref), the commit the tag held when it was set, the manifest and the set's digest; set_kept says whether the hub also keeps the set's files (process-default-set.json), which GET /v1/process-default/set serves. Applying it is an ordinary selection through PUT /v1/projects/{p}/process; a session never reads the default.",
         "x-role": "admin",
         "responses": {
           "200": {
-            "description": "{default: {repo, ref, commit, manifest, digest, name, selected_at, selected_by} or null}"
+            "description": "{default: {repo, ref, commit, manifest, digest, name, selected_at, selected_by} or null, set_kept}"
           }
         }
       },
       "put": {
         "summary": "Set the hub's default process (admin)",
-        "description": "Body {repo, ref, commit, manifest, digest}; ref (the tag) and digest are required. The hub stamps name, selected_at and selected_by and replaces any earlier default. Existing projects keep their selections.",
+        "description": "Body {repo, ref, commit, manifest, digest, files}; ref (the tag) and digest are required. files is the set (the manifest and the files it names, as a selection's files), checked as a selection's set is and required to have the stated digest; the hub keeps it so the default is applied without Git. A body without files stores the default alone and drops any kept set. The body is bounded like a selection body. The hub stamps name, selected_at and selected_by and replaces any earlier default. Existing projects keep their selections.",
         "x-role": "admin",
         "responses": {
           "200": {
@@ -6954,6 +6954,21 @@
           },
           "404": {
             "description": "no default process is set"
+          }
+        }
+      }
+    },
+    "/v1/process-default/set": {
+      "get": {
+        "summary": "The files of the hub's default process set (admin)",
+        "description": "The set the hub keeps for its default process, which `aimem tasks on` sends as the selection's files so the default is applied without reading Git. The caller checks the files against the default's digest.",
+        "x-role": "admin",
+        "responses": {
+          "200": {
+            "description": "{digest, set: {version, manifest, files}}"
+          },
+          "404": {
+            "description": "no default is set, or the hub keeps no set for it (a default stored by an older command)"
           }
         }
       }
