@@ -22,6 +22,7 @@ import (
 	"time"
 
 	"aimem/internal/adapter"
+	"aimem/internal/taskcred"
 	"aimem/internal/teamsession"
 )
 
@@ -43,6 +44,12 @@ type hubCredentialStatus struct {
 	Scope   string `json:"scope,omitempty"` // user, project or read-only, as the hub reports it
 	UserID  string `json:"user_id,omitempty"`
 	TokenID string `json:"token_id,omitempty"`
+	// UserName is the hub's name for the user, from a live answer only.
+	UserName string `json:"user_name,omitempty"`
+	// Label and ExpiresAt name the token: from the hub's answer when it
+	// accepts the credential, else as recorded when it was stored.
+	Label     string `json:"label,omitempty"`
+	ExpiresAt string `json:"expires_at,omitempty"`
 	// Detail explains an unreachable or untrusted hub; it never carries a
 	// secret.
 	Detail string `json:"detail,omitempty"`
@@ -98,6 +105,9 @@ func probeHubCredential(name string, h *adapter.HubConfig) hubCredentialStatus {
 		return st
 	}
 	st.Credential = "set"
+	if m := h.TaskTokenMeta; m != nil {
+		st.Label, st.ExpiresAt = m.Label, m.ExpiresAt
+	}
 	client, err := teamsession.HubClient(h)
 	if err != nil {
 		st.State, st.Detail = "unreachable", err.Error()
@@ -129,17 +139,57 @@ func probeHubCredential(name string, h *adapter.HubConfig) hubCredentialStatus {
 		st.State, st.Detail = "unreachable", fmt.Sprintf("the hub answered HTTP %d", resp.StatusCode)
 		return st
 	}
-	var id struct {
-		Scope   string `json:"scope"`
-		UserID  string `json:"user_id"`
-		TokenID string `json:"token_id"`
-	}
+	var id taskcred.Identity
 	if json.Unmarshal(raw, &id) != nil {
 		st.State, st.Detail = "unreachable", "the hub's answer is not an identity report"
 		return st
 	}
-	st.State, st.Scope, st.UserID, st.TokenID = "active", id.Scope, id.UserID, id.TokenID
+	st.State, st.Scope, st.UserID, st.TokenID, st.UserName = "active", id.Scope, id.UserID, id.TokenID, id.Name
+	if id.Label != "" {
+		st.Label, st.ExpiresAt = id.Label, id.ExpiresAt
+	}
 	return st
+}
+
+// hubTaskTokenMeta asks the hub what h's task credential is, to record
+// beside it. It returns why when the hub could not say.
+func hubTaskTokenMeta(name string, h *adapter.HubConfig) (meta *adapter.TokenMeta, why string) {
+	if _, err := h.StrictClient(time.Second); err != nil {
+		return nil, "" // nothing is sent there; hubTaskTokenWarn says why
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	sel := &taskcred.Selection{Source: "user-hub", HubName: name, Hub: h, Token: h.TaskToken}
+	id, err := sel.Identity(ctx)
+	var rejected *taskcred.Rejected
+	switch {
+	case errors.As(err, &rejected):
+		return nil, fmt.Sprintf("the hub refused the token, HTTP %d", rejected.Status)
+	case err != nil:
+		return nil, redactCred(err.Error(), h.TaskToken)
+	case id.Label == "":
+		return nil, "the hub does not report token labels; it runs an older aimem"
+	}
+	return id.Meta(), ""
+}
+
+// tokenName names the token by its label and expiry, after its ID when
+// the ID is known.
+func (st hubCredentialStatus) tokenName() string {
+	name := "token"
+	if st.Label != "" {
+		name += fmt.Sprintf(" %q", st.Label)
+	}
+	if st.TokenID != "" {
+		name += " " + st.TokenID
+	}
+	switch {
+	case st.Label == "" && st.State == "refused":
+		name += " (label unknown: not recorded when it was stored)"
+	case st.ExpiresAt != "":
+		name += ", expires " + st.ExpiresAt
+	}
+	return name
 }
 
 // redactCred removes the credential from an error text, in case a transport
@@ -158,11 +208,11 @@ func (st hubCredentialStatus) text() string {
 	case st.Credential == "other":
 		return fmt.Sprintf("hub %s: the stored credential is not an individual credential (%s)", st.Hub, st.Detail)
 	case st.State == "active":
-		return fmt.Sprintf("hub %s: individual credential set, active, scope %s (user %s, token %s)", st.Hub, st.Scope, st.UserID, st.TokenID)
+		return fmt.Sprintf("hub %s: individual credential set, active, scope %s (user %s %s, %s)", st.Hub, st.Scope, st.UserName, st.UserID, st.tokenName())
 	case st.State == "untrusted":
 		return fmt.Sprintf("hub %s: individual credential set, not sent: aimem will not send it to this entry (%s)", st.Hub, st.Detail)
 	case st.State == "refused":
-		return fmt.Sprintf("hub %s: individual credential set, refused by the hub (revoked, expired or unknown); install a new one with: aimem hub task-token %s <token>", st.Hub, st.Hub)
+		return fmt.Sprintf("hub %s: individual credential set, refused by the hub (revoked, expired or unknown): %s; an admin issues a new user token (aimem access token-issue-user), then: aimem hub task-token %s --token-file FILE", st.Hub, st.tokenName(), st.Hub)
 	}
 	return fmt.Sprintf("hub %s: individual credential set, state unknown: the hub is unreachable (%s)", st.Hub, st.Detail)
 }

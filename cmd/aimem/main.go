@@ -2431,11 +2431,18 @@ func hubCmd(args []string) error {
 		if !strings.HasPrefix(tok, "aimem_user_") {
 			return fmt.Errorf("task credential must be an ordinary token issued by the hub admin (aimem access token-issue), not the hub's checkpoint token")
 		}
-		h.TaskToken = tok
+		h.TaskToken, h.TaskTokenMeta = tok, nil
+		// Best effort: the label and expiry name the token if the hub
+		// refuses it later. The token is stored whatever the answer.
+		meta, why := hubTaskTokenMeta(pos[0], h)
+		h.TaskTokenMeta = meta
 		if err := adapter.SaveHubs(root, hubs, def); err != nil {
 			return err
 		}
 		fmt.Printf("task credential stored for hub %q; MCP task tools use it\n", pos[0])
+		if why != "" {
+			fmt.Fprintf(hubWarnOut, "note: hub %s: the token's label and expiry were not recorded (%s); a refusal will say the label is unknown\n", pos[0], why)
+		}
 		hubTaskTokenWarn(hubWarnOut, pos[0], h)
 		return nil
 	case "add":

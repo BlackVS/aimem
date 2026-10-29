@@ -67,7 +67,9 @@ current-user DPAPI encryption. Replacements use a temporary file and atomic
 rename. No secret is written into the checkout.
 
 `aimem task-token show-source` reports the selected source and binding without
-printing a secret. `aimem task-token clear` removes the local requirement
+printing a secret, with the token's label and expiry (live from the identity
+answer, which reports them for the caller's own token, or as recorded when
+the hub refuses it). `aimem task-token clear` removes the local requirement
 and credential, explicitly restoring the existing per-hub task credential.
 Without the marker, existing per-hub credentials retain their behavior.
 With the marker, missing, unreadable, malformed, mismatched or rejected

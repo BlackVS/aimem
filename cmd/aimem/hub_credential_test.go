@@ -80,23 +80,41 @@ func TestHubCredentialCommand(t *testing.T) {
 		t.Fatal("the hub was asked about an absent credential")
 	}
 
-	// The individual credential, active: its scope and IDs as the hub
-	// reports them. The default hub is used without a name.
-	save(&adapter.HubConfig{URL: g.ts.URL, Token: checkpoint, TaskToken: secret, CAFile: g.caFile})
+	// The individual credential, stored with hub task-token, which records
+	// the token's label, scope and expiry from the hub's answer.
+	if err := hubCmd([]string{"task-token", "hub", secret}); err != nil {
+		t.Fatal(err)
+	}
+	expires := tok.ExpiresAt.UTC().Format(time.RFC3339)
+	hubs, _ := adapter.LoadHubs(state)
+	if m := hubs["hub"].TaskTokenMeta; m == nil || *m != (adapter.TokenMeta{Label: "agent", Scope: "user", ExpiresAt: expires}) {
+		t.Fatalf("recorded: %+v", m)
+	}
+
+	// Active: its scope, user and token as the hub reports them. The
+	// default hub is used without a name.
 	for _, args := range [][]string{{"hub"}, nil} {
 		st, txt := report(args...)
 		if st.Credential != "set" || st.State != "active" || st.Scope != "user" || st.UserID != u.ID || st.TokenID != tok.ID ||
-			!strings.Contains(txt, "active, scope user") {
+			st.UserName != "Alice" || st.Label != "agent" || st.ExpiresAt != expires ||
+			!strings.Contains(txt, `individual credential set, active, scope user (user Alice `+u.ID+`, token "agent" `+tok.ID+", expires "+expires+")") {
 			t.Fatalf("active %v: %+v %q", args, st, txt)
 		}
 	}
 
-	// Revoked: the hub refuses it.
+	// Revoked: the hub refuses it, and the report names it from the record.
 	if err := db.Revoke("admin", tok.ID); err != nil {
 		t.Fatal(err)
 	}
-	if st, txt := report("hub"); st.Credential != "set" || st.State != "refused" || st.Scope != "" || !strings.Contains(txt, "refused") {
+	if st, txt := report("hub"); st.Credential != "set" || st.State != "refused" || st.Scope != "" || st.Label != "agent" || st.ExpiresAt != expires ||
+		!strings.Contains(txt, `individual credential set, refused by the hub (revoked, expired or unknown): token "agent", expires `+expires+";") || !strings.Contains(txt, "aimem hub task-token hub --token-file FILE") {
 		t.Fatalf("revoked: %+v %q", st, txt)
+	}
+
+	// A credential stored before labels were recorded: the label is unknown.
+	save(&adapter.HubConfig{URL: g.ts.URL, Token: checkpoint, TaskToken: secret, CAFile: g.caFile})
+	if st, txt := report("hub"); st.State != "refused" || st.Label != "" || !strings.Contains(txt, "label unknown") {
+		t.Fatalf("older record: %+v %q", st, txt)
 	}
 
 	// A stored task credential that is not an individual one.

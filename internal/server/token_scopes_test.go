@@ -160,3 +160,36 @@ func TestIssueScopeValidationAndLegacyHTTP(t *testing.T) {
 		t.Fatalf("strict decode %d %s", w.Code, w.Body)
 	}
 }
+
+// The identity answer names the caller's own token (label and expiry), so
+// a client can record them; another token of the same user never shows, and
+// a legacy admin or writer credential gets neither field.
+func TestIdentityNamesTheCallersOwnToken(t *testing.T) {
+	f := newTaskFixture(t)
+	issue := func(label string, expires time.Time) string {
+		raw, _ := json.Marshal(map[string]any{"user_id": f.aliceUser, "label": label, "scope": "user", "expires_at": expires})
+		w := authedReq(t, f.h, "POST", "/v1/access/tokens", f.admin, string(raw))
+		var issued struct {
+			Secret string `json:"secret"`
+		}
+		if w.Code != 200 || json.Unmarshal(w.Body.Bytes(), &issued) != nil {
+			t.Fatalf("issue %d: %s", w.Code, w.Body)
+		}
+		return issued.Secret
+	}
+	expires := time.Now().Add(48 * time.Hour).UTC().Truncate(time.Second)
+	laptop := issue("token-laptop", expires)
+	issue("token-other", expires.Add(time.Hour))
+	w := authedReq(t, f.h, "GET", "/v1/access/identity?project=alpha", laptop, "")
+	var id map[string]any
+	if w.Code != 200 || json.Unmarshal(w.Body.Bytes(), &id) != nil {
+		t.Fatalf("identity %d %s", w.Code, w.Body)
+	}
+	if id["label"] != "token-laptop" || id["expires_at"] != expires.Format(time.RFC3339) {
+		t.Fatalf("identity names another token: %s", w.Body)
+	}
+	w = authedReq(t, f.h, "GET", "/v1/access/identity", f.admin, "")
+	if w.Code != 200 || strings.Contains(w.Body.String(), `"label"`) || strings.Contains(w.Body.String(), `"expires_at"`) {
+		t.Fatalf("admin identity %d %s", w.Code, w.Body)
+	}
+}

@@ -415,7 +415,7 @@
         ],
         "responses": {
           "200": {
-            "description": "Identity including ordinary token scope (user, project or read-only), task_read (all-projects: an ordinary token reads the tasks, comments, history and epics of every project on the hub; scope and grants limit writes only), task_write scope/grant eligibility, and separate tasks_enabled setting"
+            "description": "Identity including ordinary token scope (user, project or read-only), task_read (all-projects: an ordinary token reads the tasks, comments, history and epics of every project on the hub; scope and grants limit writes only), task_write scope/grant eligibility, and separate tasks_enabled setting; an ordinary token also receives its own label and expires_at (RFC 3339), which a client records to name the token if the hub later refuses it"
           },
           "401": {
             "description": "Invalid, expired, revoked or disabled credential"

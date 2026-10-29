@@ -13,6 +13,32 @@ import (
 	"aimem/internal/taskcred"
 )
 
+// sourceReport is `task-token show-source`: the selection, the hub's state
+// for its credential, and the token's label and expiry, live from the
+// hub's answer when it accepts the credential, else as recorded.
+type sourceReport struct {
+	*taskcred.Selection
+	State  string `json:"state"` // active, refused or unreachable
+	Detail string `json:"detail,omitempty"`
+}
+
+func showSource(s *taskcred.Selection) sourceReport {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	id, err := s.Identity(ctx)
+	var rejected *taskcred.Rejected
+	switch {
+	case errors.As(err, &rejected):
+		return sourceReport{Selection: s, State: "refused", Detail: rejected.Error()}
+	case err != nil:
+		return sourceReport{Selection: s, State: "unreachable", Detail: redactCred(err.Error(), s.Token)}
+	}
+	if id.Label != "" {
+		s.Meta = id.Meta()
+	}
+	return sourceReport{Selection: s, State: "active"}
+}
+
 func taskTokenCmd(args []string) error {
 	return runTaskToken(args, ".", stateRoot(), os.Stdin, os.Stdout)
 }
@@ -69,7 +95,7 @@ func runTaskToken(args []string, dir, root string, in io.Reader, out io.Writer) 
 		if err != nil {
 			return err
 		}
-		return json.NewEncoder(out).Encode(selected)
+		return json.NewEncoder(out).Encode(showSource(selected))
 	case "clear":
 		if err := taskcred.Clear(dir, root); err != nil {
 			return err

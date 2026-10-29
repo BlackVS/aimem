@@ -836,7 +836,13 @@ func taskCallerIn(dir, root string) (TaskCallFunc, error) {
 		if err := selected.Validate(checkCtx); err != nil {
 			return 0, nil, err
 		}
-		return call(ctx, method, path, headers, body)
+		status, raw, err := call(ctx, method, path, headers, body)
+		if err == nil && status == http.StatusUnauthorized {
+			// The hub does not accept the credential at all: name it and
+			// the step that replaces it, not just the status.
+			return status, raw, selected.Rejected(status)
+		}
+		return status, raw, err
 	}, nil
 }
 

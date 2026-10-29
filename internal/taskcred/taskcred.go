@@ -28,15 +28,19 @@ type Selection struct {
 	HubName string             `json:"hub"`
 	Hub     *adapter.HubConfig `json:"-"`
 	Token   string             `json:"-"`
+	// Meta is the label, scope and expiry recorded when the credential was
+	// stored; nil for a binding recorded before they were.
+	Meta *adapter.TokenMeta `json:"token_meta,omitempty"`
 }
 
 type credential struct {
-	Version int    `json:"version"`
-	Repo    string `json:"repo"`
-	Project string `json:"project"`
-	Hub     string `json:"hub"`
-	URL     string `json:"url"`
-	Token   string `json:"token"`
+	Version int                `json:"version"`
+	Repo    string             `json:"repo"`
+	Project string             `json:"project"`
+	Hub     string             `json:"hub"`
+	URL     string             `json:"url"`
+	Token   string             `json:"token"`
+	Meta    *adapter.TokenMeta `json:"meta,omitempty"`
 }
 
 // Class says why a credential could not be used, so a caller names the
@@ -78,12 +82,54 @@ func Classify(err error) Class {
 	return ""
 }
 
-// Rejected is Validate's answer when the hub refused the local credential:
-// a denial, which callers must not treat as an outage.
-type Rejected struct{ Status int }
+// Rejected is the answer when the hub refused the selected credential: a
+// denial, which callers must not treat as an outage. Credential names the
+// token and its binding, Fix the step that replaces it; neither holds a
+// secret.
+type Rejected struct {
+	Status     int
+	Credential string
+	Fix        string
+}
 
 func (r *Rejected) Error() string {
-	return fmt.Sprintf("local task credential rejected (HTTP %d); no fallback", r.Status)
+	return fmt.Sprintf("the hub refused %s (HTTP %d); no other credential is used; replace it: %s", r.Credential, r.Status, r.Fix)
+}
+
+// Rejected names this credential in a refusal with the hub's status.
+func (s *Selection) Rejected(status int) *Rejected {
+	return &Rejected{Status: status, Credential: s.Describe(), Fix: s.Fix()}
+}
+
+// Describe names the credential without its secret: its label, scope and
+// expiry as recorded when it was stored, and where it is bound.
+func (s *Selection) Describe() string {
+	what := "task credential (label unknown: not recorded when it was stored)"
+	if m := s.Meta; m != nil && m.Label != "" {
+		what = fmt.Sprintf("task credential %q", m.Label)
+		var parts []string
+		if m.Scope != "" {
+			parts = append(parts, "scope "+m.Scope)
+		}
+		if m.ExpiresAt != "" {
+			parts = append(parts, "expires "+m.ExpiresAt)
+		}
+		if len(parts) > 0 {
+			what += " (" + strings.Join(parts, ", ") + ")"
+		}
+	}
+	if s.Source == "project-local" {
+		return fmt.Sprintf("the %s bound project-locally to this checkout (%s, project %s, hub %s)", what, s.Repo, s.Project, s.HubName)
+	}
+	return fmt.Sprintf("the %s stored for hub %s", what, s.HubName)
+}
+
+// Fix is the step that replaces this credential.
+func (s *Selection) Fix() string {
+	if s.Source == "project-local" {
+		return "an admin issues a new project token (aimem access token-issue --project " + s.Project + "), then run aimem task-token set --token-file FILE in this checkout"
+	}
+	return "an admin issues a new user token (aimem access token-issue-user), then run aimem hub task-token " + s.HubName + " --token-file FILE"
 }
 
 func failure(class Class, msg string, cause error) error {
@@ -217,7 +263,7 @@ func Resolve(dir, root string) (*Selection, error) {
 		return nil, err
 	}
 	if !local {
-		s.Source, s.Token = "user-hub", s.Hub.TaskToken
+		s.Source, s.Token, s.Meta = "user-hub", s.Hub.TaskToken, s.Hub.TaskTokenMeta
 		if s.Token == "" {
 			return nil, failure(ClassMissing, fmt.Sprintf("hub %q has no task credential: aimem hub task-token %s <ordinary-token>", s.HubName, s.HubName), nil)
 		}
@@ -260,7 +306,7 @@ func Resolve(dir, root string) (*Selection, error) {
 	if c.Repo != s.Repo || c.Project != s.Project || c.Hub != s.HubName || c.URL != s.Hub.URL {
 		return nil, failure(ClassRebound, "local task credential binding changed; run aimem task-token set", nil)
 	}
-	s.Token = c.Token
+	s.Token, s.Meta = c.Token, c.Meta
 	return s, nil
 }
 
@@ -290,31 +336,65 @@ func (s *Selection) Validate(ctx context.Context) error {
 	if s.Source != "project-local" {
 		return nil
 	}
+	id, err := s.Identity(ctx)
+	if err != nil {
+		return err
+	}
+	return id.projectWrite()
+}
+
+// Identity is the hub's identity answer for a task credential.
+type Identity struct {
+	Name      string `json:"name"`
+	UserID    string `json:"user_id"`
+	TokenID   string `json:"token_id"`
+	Scope     string `json:"scope"`
+	TaskWrite bool   `json:"task_write"`
+	Label     string `json:"label"`
+	ExpiresAt string `json:"expires_at"`
+}
+
+// Meta is what a binding records from the identity answer.
+func (id Identity) Meta() *adapter.TokenMeta {
+	return &adapter.TokenMeta{Label: id.Label, Scope: id.Scope, ExpiresAt: id.ExpiresAt}
+}
+
+func (id Identity) projectWrite() error {
+	if id.Scope != "project" || !id.TaskWrite {
+		return errors.New("local task credential must be project-scoped with current write access to this project; no fallback")
+	}
+	return nil
+}
+
+// Identity asks the hub who the selected credential is, for this project:
+// a *Rejected when the hub refuses it, another error when it cannot ask.
+func (s *Selection) Identity(ctx context.Context) (Identity, error) {
 	req, err := http.NewRequestWithContext(ctx, "GET", strings.TrimRight(s.Hub.URL, "/")+"/v1/access/identity?project="+url.QueryEscape(s.Project), nil)
 	if err != nil {
-		return errors.New("invalid hub URL for local task credential")
+		return Identity{}, errors.New("invalid hub URL for the task credential")
 	}
 	client, err := s.Client()
 	if err != nil {
-		return err
+		return Identity{}, err
 	}
 	req.Header.Set("Authorization", "Bearer "+s.Token)
 	resp, err := client.Do(req)
 	if err != nil {
-		return fmt.Errorf("cannot validate local task credential: %w", err)
+		return Identity{}, fmt.Errorf("cannot validate the task credential: %w", err)
 	}
 	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		return &Rejected{Status: resp.StatusCode}
+	switch resp.StatusCode {
+	case http.StatusOK:
+	case http.StatusUnauthorized, http.StatusForbidden:
+		return Identity{}, s.Rejected(resp.StatusCode)
+	default:
+		return Identity{}, fmt.Errorf("the hub answered HTTP %d to the task credential check", resp.StatusCode)
 	}
-	var id struct {
-		Scope     string `json:"scope"`
-		TaskWrite bool   `json:"task_write"`
+	var id Identity
+	if json.NewDecoder(io.LimitReader(resp.Body, 16384)).Decode(&id) != nil {
+		return Identity{}, errors.New("the hub's identity answer is not readable")
 	}
-	if json.NewDecoder(io.LimitReader(resp.Body, 16384)).Decode(&id) != nil || id.Scope != "project" || !id.TaskWrite {
-		return errors.New("local task credential must be project-scoped with current write access to this project; no fallback")
-	}
-	return nil
+	return id, nil
 }
 
 func credentialPath(root, repo string, create bool) (string, error) {
@@ -375,14 +455,22 @@ func Set(ctx context.Context, dir, root, token string) error {
 		return err
 	}
 	s.Source, s.Token = "project-local", token
-	if err := s.Validate(ctx); err != nil {
+	id, err := s.Identity(ctx)
+	var rejected *Rejected
+	if errors.As(err, &rejected) {
+		return fmt.Errorf("the hub refused this token (HTTP %d); nothing was stored", rejected.Status)
+	}
+	if err != nil {
+		return err
+	}
+	if err := id.projectWrite(); err != nil {
 		return err
 	}
 	path, err := credentialPath(root, s.Repo, true)
 	if err != nil {
 		return err
 	}
-	raw, err := json.Marshal(credential{Version: 1, Repo: s.Repo, Project: s.Project, Hub: s.HubName, URL: s.Hub.URL, Token: token})
+	raw, err := json.Marshal(credential{Version: 1, Repo: s.Repo, Project: s.Project, Hub: s.HubName, URL: s.Hub.URL, Token: token, Meta: id.Meta()})
 	if err != nil {
 		return err
 	}

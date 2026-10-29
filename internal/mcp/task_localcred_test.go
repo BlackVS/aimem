@@ -80,8 +80,18 @@ func TestConcurrentProjectCredentialsAndRevocation(t *testing.T) {
 		t.Fatal("identity missing")
 	}
 	admin("DELETE", "/v1/access/tokens/"+id.TokenID, nil)
-	if err := create(a, "revoked", "alpha"); err == nil || !strings.Contains(err.Error(), "rejected") {
-		t.Fatalf("revoked local credential: %v", err)
+	err := create(a, "revoked", "alpha")
+	if err == nil {
+		t.Fatal("revoked local credential accepted")
+	}
+	// The refusal names the token from what task-token set recorded.
+	for _, want := range []string{`the hub refused the task credential "agent"`, "scope project", "expires 20", "bound project-locally to this checkout", "aimem task-token set"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Fatalf("revoked local credential: %q lacks %q", err, want)
+		}
+	}
+	if strings.Contains(err.Error(), "aimem_user_") {
+		t.Fatalf("refusal carries a secret: %v", err)
 	}
 	if err := create(b, "beta-still-ok", "beta"); err != nil {
 		t.Fatal(err)

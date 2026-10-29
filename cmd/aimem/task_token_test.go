@@ -176,3 +176,54 @@ func TestProcessBootstrapHonorsLocalRequirement(t *testing.T) {
 		t.Fatal("missing override contacted hub")
 	}
 }
+
+// show-source prints the token's label and expiry: live while the hub
+// accepts the credential, as recorded once it refuses it.
+func TestTaskTokenShowSourceNamesTheToken(t *testing.T) {
+	root, repo := t.TempDir(), t.TempDir()
+	var expired atomic.Bool
+	var label atomic.Pointer[string]
+	first := "laptop-alpha"
+	label.Store(&first)
+	ts := hubtest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if expired.Load() {
+			http.Error(w, "bearer authentication required", http.StatusUnauthorized)
+			return
+		}
+		w.Write([]byte(`{"scope":"project","task_write":true,"label":"` + *label.Load() + `","expires_at":"2026-11-30T00:00:00Z"}`))
+	}))
+	defer ts.Close()
+	if err := adapter.SaveHubs(root, map[string]*adapter.HubConfig{"hub": {URL: ts.URL, Pin: hubtest.Pin(ts)}}, "hub"); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(repo, ".aimem.json"), []byte(`{"project":"alpha"}`), 0600); err != nil {
+		t.Fatal(err)
+	}
+	secret := "aimem_user_" + strings.Repeat("c", 64)
+	var out bytes.Buffer
+	if err := runTaskToken([]string{"set"}, repo, root, strings.NewReader(secret+"\n"), &out); err != nil {
+		t.Fatal(err)
+	}
+	show := func() string {
+		t.Helper()
+		out.Reset()
+		if err := runTaskToken([]string{"show-source"}, repo, root, strings.NewReader(""), &out); err != nil {
+			t.Fatal(err)
+		}
+		if strings.Contains(out.String(), secret) {
+			t.Fatalf("show-source prints the secret: %s", out.String())
+		}
+		return out.String()
+	}
+	// Live: the hub's answer wins over the record.
+	renamed := "laptop-alpha-renamed"
+	label.Store(&renamed)
+	if got := show(); !strings.Contains(got, `"token_meta":{"label":"laptop-alpha-renamed","scope":"project","expires_at":"2026-11-30T00:00:00Z"}`) || !strings.Contains(got, `"state":"active"`) {
+		t.Fatalf("active: %s", got)
+	}
+	// Refused: the record, and the refusal naming the token.
+	expired.Store(true)
+	if got := show(); !strings.Contains(got, `"label":"laptop-alpha"`) || !strings.Contains(got, `"state":"refused"`) || !strings.Contains(got, "aimem task-token set --token-file FILE") {
+		t.Fatalf("refused: %s", got)
+	}
+}

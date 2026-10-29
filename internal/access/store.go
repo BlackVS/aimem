@@ -628,6 +628,18 @@ WHERE t.digest=? AND t.revoked=0 AND t.expires_at>? AND u.disabled=0`, hex.Encod
 	return id, err
 }
 
+// TokenMeta returns a token's label and expiry. The identity answer reads
+// them for the caller's own token, so a client can name the credential later,
+// after the hub has stopped accepting it.
+func (s *Store) TokenMeta(id string) (label string, expires time.Time, err error) {
+	var unix int64
+	err = s.db.QueryRow("SELECT label,expires_at FROM tokens WHERE id=?", id).Scan(&label, &unix)
+	if err != nil {
+		return "", time.Time{}, err
+	}
+	return label, time.Unix(unix, 0).UTC(), nil
+}
+
 // Authorize rechecks token and membership; it never trusts a client-supplied
 // user or a previously cached identity. Empty project denotes a read-only check.
 func (s *Store) Authorize(secret, project string) (Identity, error) {

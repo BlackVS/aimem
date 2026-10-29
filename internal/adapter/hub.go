@@ -60,6 +60,9 @@ type HubConfig struct {
 	// the checkpoint token is a shared writer credential and must never
 	// carry task authority.
 	TaskToken string `json:"task_token,omitempty"`
+	// TaskTokenMeta is what the hub said about TaskToken when it was
+	// stored; nil when it was not asked (or before this was recorded).
+	TaskTokenMeta *TokenMeta `json:"task_token_meta,omitempty"`
 	// Insecure skips TLS certificate verification for this hub — for the
 	// self-signed phase of a fresh hub (still TLS on the wire + bearer
 	// token). Drop it once a real certificate is installed.
@@ -72,6 +75,17 @@ type HubConfig struct {
 	// (sha256-BASE64): the hub is trusted by that key alone. At most one of
 	// CAFile and Pin; `aimem hub add … --pin` records it.
 	Pin string `json:"pin,omitempty"`
+}
+
+// TokenMeta is what a hub's identity answer says about a task credential:
+// its label, scope and expiry (RFC 3339). It is recorded beside the
+// credential when it is stored, because a token the hub refuses cannot be
+// asked about itself; a refusal names the token from this record. Nothing
+// in it is secret.
+type TokenMeta struct {
+	Label     string `json:"label,omitempty"`
+	Scope     string `json:"scope,omitempty"`
+	ExpiresAt string `json:"expires_at,omitempty"`
 }
 
 // HTTPClient returns the client to talk to this hub with: its ca_file or
@@ -241,7 +255,7 @@ func (c *HubConfig) Over(prev *HubConfig) *HubConfig {
 		out.Sync = prev.Sync
 	}
 	if out.TaskToken == "" {
-		out.TaskToken = prev.TaskToken
+		out.TaskToken, out.TaskTokenMeta = prev.TaskToken, prev.TaskTokenMeta
 	}
 	if out.CAFile == "" && out.Pin == "" {
 		out.CAFile, out.Pin = prev.CAFile, prev.Pin

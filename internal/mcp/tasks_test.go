@@ -934,3 +934,38 @@ func TestTaskToolsPassTheReadabilityRefusalThrough(t *testing.T) {
 		}
 	}
 }
+
+// A task call the hub refuses (HTTP 401) with the per-hub credential is an
+// error that names the token from its record, the hub it is stored for and
+// the step that replaces it; the secret appears nowhere.
+func TestTaskCallerNamesARefusedHubCredential(t *testing.T) {
+	ts := hubtest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, "bearer authentication required", http.StatusUnauthorized)
+	}))
+	defer ts.Close()
+	root, dir := t.TempDir(), t.TempDir()
+	secret := "aimem_user_" + strings.Repeat("b", 64)
+	if err := adapter.SaveHubs(root, map[string]*adapter.HubConfig{"home": {URL: ts.URL, Pin: hubtest.Pin(ts), Token: "checkpoint-secret", TaskToken: secret,
+		TaskTokenMeta: &adapter.TokenMeta{Label: "laptop", Scope: "user", ExpiresAt: "2026-10-01T00:00:00Z"}}}, "home"); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, ".aimem.json"), []byte(`{"project":"alpha"}`), 0600); err != nil {
+		t.Fatal(err)
+	}
+	call, err := taskCallerIn(dir, root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	status, _, err := call(context.Background(), "GET", "/v1/projects/alpha/tasks", nil, nil)
+	if status != http.StatusUnauthorized || err == nil {
+		t.Fatalf("refusal: %d %v", status, err)
+	}
+	for _, want := range []string{`task credential "laptop" (scope user, expires 2026-10-01T00:00:00Z) stored for hub home`, "aimem access token-issue-user", "aimem hub task-token home --token-file FILE"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Fatalf("%q lacks %q", err, want)
+		}
+	}
+	if strings.Contains(err.Error(), secret) {
+		t.Fatalf("the refusal carries the secret: %v", err)
+	}
+}
