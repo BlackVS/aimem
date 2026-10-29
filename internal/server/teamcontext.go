@@ -68,8 +68,10 @@ var teamRoutes = append(append([]string{
 	"GET /v1/projects/{p}/epics",
 	"GET /v1/projects/{p}/epics/{e}",
 	// The project's repository under the profile's grant (DESIGN-AIFORGE-PILOT-1 §1),
-	// and the stored process set under the same rule (DESIGN-portable-team-context 1d).
+	// and the process reference and stored set under the same rule
+	// (DESIGN-portable-team-context 1d; the reference for `aimem process pin`).
 	"GET /v1/projects/{p}/repository",
+	"GET /v1/projects/{p}/process",
 	"GET /v1/projects/{p}/process/set",
 	// The hub-served skills sets under the same rule (increment 1e).
 	"GET /v1/projects/{p}/skills",

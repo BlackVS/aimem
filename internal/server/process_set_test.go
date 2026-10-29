@@ -291,6 +291,38 @@ func TestProcessSetIsStoredWithTheSelectionAndServedUnderAGrant(t *testing.T) {
 	}
 }
 
+// A team session reads the process reference of a project its profile is
+// granted, without who selected it, and is refused every other project
+// and the history.
+func TestProcessReferenceForATeamSession(t *testing.T) {
+	g := newTeamRig(t)
+	commit := strings.Repeat("7", 40)
+	body := withSet(t, `{"repo":"https://forge.example.org/team/process.git","commit":"`+commit+`","manifest":"proc/m.json","expected_commit":""}`, "team rules")
+	for _, p := range []string{"alpha", "beta"} {
+		if r := g.call(t, g.tls, "PUT", "/v1/projects/"+p+"/process", g.env, nil, body, true); r.status != 200 {
+			t.Fatalf("select %s: %d %s", p, r.status, r.body)
+		}
+	}
+	r := g.team(t, "GET", "/v1/projects/alpha/process")
+	var got struct {
+		Current map[string]any `json:"current"`
+	}
+	if r.status != 200 || json.Unmarshal(r.body, &got) != nil || got.Current["commit"] != commit || got.Current["digest"] == nil {
+		t.Fatalf("team mode, granted: %d %s", r.status, r.body)
+	}
+	if _, ok := got.Current["selected_by"]; ok {
+		t.Fatalf("team mode names who selected: %s", r.body)
+	}
+	for _, path := range []string{"/v1/projects/beta/process", "/v1/projects/user/process", "/v1/projects/nope/process"} {
+		if r := g.team(t, "GET", path); r.status != 403 || r.code() != "grant_denied" {
+			t.Fatalf("team mode %s: %d %s", path, r.status, r.body)
+		}
+	}
+	if r := g.team(t, "GET", "/v1/projects/alpha/process?history=1"); r.status != 400 || r.code() != "invalid_request" {
+		t.Fatalf("team mode history: %d %s", r.status, r.body)
+	}
+}
+
 // A team session reads the set of a project its profile is granted, and
 // nothing else; the answer never names the repository URL.
 func TestProcessSetForATeamSession(t *testing.T) {

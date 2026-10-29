@@ -607,14 +607,7 @@ func hubGetJSONClient(hub *adapter.HubConfig, client *http.Client, path string, 
 	defer resp.Body.Close()
 	raw, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
 	if resp.StatusCode != http.StatusOK {
-		var e struct {
-			Error string `json:"error"`
-		}
-		json.Unmarshal(raw, &e)
-		if e.Error != "" {
-			return &hubRefusal{status: resp.StatusCode, msg: e.Error}
-		}
-		return &hubRefusal{status: resp.StatusCode, msg: fmt.Sprintf("hub returned HTTP %d", resp.StatusCode)}
+		return &hubRefusal{status: resp.StatusCode, msg: hubErrorText(raw, resp.StatusCode)}
 	}
 	return json.Unmarshal(raw, into)
 }

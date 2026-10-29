@@ -45,6 +45,18 @@ currently 25); a binary refuses a database newer than it understands.
   profile.** The grant line names such a project's enabled team
   profiles (`team NAME`) beside its users and groups.
 
+### Fixed
+
+- **`aimem process pin` works for a team member.** Run in a team
+  conversation (`AIMEM_TEAM_SESSION`), it now reads the process
+  reference and the stored set under the team's grant, as the member's
+  MCP tools do, instead of being refused because the member's user
+  holds no project grant of its own. The hub serves
+  `GET /v1/projects/{p}/process` in team mode under the team profile's
+  grant, without `selected_by`, as it already served the set. The JSON
+  and the refusal shape are unchanged, and nothing falls back to the
+  checkout's credential.
+
 ## [0.10.17] — 2026-10-29
 
 The process reference on the hub is now read under the project grant,
