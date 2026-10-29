@@ -166,6 +166,8 @@ func main() {
 		err = budgetCmd(args)
 	case "tui":
 		err = tui.Run(stateRoot())
+	case "upgrade":
+		err = upgradeCmd(args, os.Stdout)
 	case "version", "--version", "-v":
 		fmt.Println("aimem", version)
 	default:
@@ -324,6 +326,9 @@ const mainUsage = `usage: aimem <command> [flags]
   token      add <name> [--role writer|admin] | list | rm <name>
                              named hub tokens (run on the hub host);
                              secret printed once, only hashes stored
+  upgrade    [--release vX.Y.Z]  bring this installed client to the newest
+                             (or the named) release: checked against the
+                             release's SHA256SUMS, installed by its installer
   logs       [-n 40] [-q filter]  local diagnostics: client-side warnings
                              (spooled checkpoints, orphaned hub bindings,
                              doc conflicts) + the service log ring

@@ -49,6 +49,11 @@ download the release's boot script, check it against the release's
 **Restart your Claude Code or OpenCode session** — hooks and plugins load
 at startup, so a session already running will not journal.
 
+The one-liner is for this first install. Every later release installs
+with `aimem upgrade`, from any directory: it checks the release against
+its SHA256SUMS and rolls back if the new release does not come up
+([INSTALL-CLIENT.md, Upgrading](INSTALL-CLIENT.md#upgrading)).
+
 Now work normally for a few turns, then list the project's sessions and
 read one of them by its `session_id`:
 

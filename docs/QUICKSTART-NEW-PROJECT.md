@@ -254,6 +254,10 @@ and wires the project: `docs/SESSION-STATE.md` (the handoff),
 Do not start an agent in the project yet: until step 3.5 pins the project
 ID, a session would journal under an ID derived from the directory.
 
+The one-liner is for the first install on a workstation. Every later
+release installs with `aimem upgrade`, from any directory
+([INSTALL-CLIENT.md, Upgrading](INSTALL-CLIENT.md#upgrading)).
+
 ### 3.2 Install the agent skills (optional)
 
 Skip this step for plain journaling. A project that uses the process

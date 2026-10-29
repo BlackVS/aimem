@@ -75,8 +75,14 @@ duplicate registration produces duplicate journal events.
 
 ### Upgrades
 
-Upgrade with the same one-liner, naming the newer release; do not swap
-binaries by hand. Each one-liner fetches its boot script from a release
+Upgrade a workstation with `aimem upgrade`, from any directory: it
+checks the newest release (or the one `--release vX.Y.Z` names) against
+its `SHA256SUMS`, then runs that release's installer in its user-level
+mode, which does the steps below
+([INSTALL-CLIENT.md, Upgrading](INSTALL-CLIENT.md#upgrading)). A client
+older than the first release with the command, and an upgrade that needs
+a knob, use the one-liner of the newer release. Do not swap binaries by
+hand. Each one-liner fetches its boot script from a release
 tag, and the script installs that release's binary, refusing one whose
 hash is not in the release's `SHA256SUMS`. Run it from any directory:
 when aimem is already installed the one-liner wires only a directory

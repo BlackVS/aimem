@@ -227,12 +227,22 @@ Then restart any running Claude Code or OpenCode session. The first run
 installs the binary, hooks, plugin and background service, and wires the
 project you are standing in. The one-liner names a release, and the
 prebuilt static binary comes from that release, checked against its
-SHA256SUMS, so no Go toolchain is needed. To upgrade, run the one-liner of
-the newer release from any directory: it backs up the state root first and
-rolls back if the new release does not come up, and it wires only a
-directory that already holds `.aimem.json`
-([ADMIN-MANUAL](docs/ADMIN-MANUAL.md#upgrades)). The home directory is
-never wired.
+SHA256SUMS, so no Go toolchain is needed. The one-liner is for the first
+install. Every later release installs with one command, from any
+directory:
+
+```sh
+aimem upgrade                      # the newest release
+aimem upgrade --release vX.Y.Z     # a named one, the only way to go back
+```
+
+`aimem upgrade` checks the release's binary against its SHA256SUMS
+before it changes anything, then runs that release's installer. The
+installer backs up the state root first and rolls back if the new
+release does not come up ([ADMIN-MANUAL](docs/ADMIN-MANUAL.md#upgrades)).
+A client older than the first release with the command upgrades once with
+the newer release's one-liner, run from any directory; it wires only a
+directory that already holds `.aimem.json`, and never the home directory.
 
 To add another project once aimem is installed, run `aimem wire` inside
 it. It writes the same files the one-liner does, and its flags set the

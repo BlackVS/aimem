@@ -13,6 +13,27 @@ currently 25); a binary refuses a database newer than it understands.
 
 ## [Unreleased]
 
+### Added
+
+- **`aimem upgrade` brings an installed client to a release in one
+  command.** Without flags it takes the newest published release,
+  prereleases excluded. `--release vX.Y.Z` names one, and is the only
+  way to install an older release. The same release says so and changes
+  nothing.
+  - The binary is checked against the release's `SHA256SUMS` first. A
+    missing sums file, an unlisted binary or a mismatch is refused, and
+    the installed client stays as it was.
+  - Then the release's own installer runs in its user-level mode:
+    `install.sh user`, or `install.ps1 -UserOnly` under the
+    `RemoteSigned` policy for that child process only. It keeps the state
+    backup, the swap, the hooks, plugin and service refresh, and the
+    rollback when the new release does not come up. The command ends by
+    printing the version the installed binary reports.
+  - It upgrades only the client the installers put in place, as your
+    user and with no elevation. A hub keeps `install-hub.sh`. The boot
+    one-liner stays the first install. A client older than this release
+    upgrades once with the newer release's one-liner.
+
 ### Changed
 
 - **A project granted only to a team has its writer.** The readiness
