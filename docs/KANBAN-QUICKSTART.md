@@ -84,6 +84,8 @@ next step: select the project's process on this hub host; processes this hub alr
 Both `tasks on` and `aimem project show -p my-project` end with the
 project's readiness checklist: tasks on, the process selected, a user or
 group granted, and a live token that can write (its label and expiry).
+A project granted only to a team has its writer without a token: the team
+writes with its peer credential, and the item names the team.
 Each open item carries the command that closes it, with the project filled
 in; sections 3 and 6 explain them. The checklist says `ready for work`
 when all four are there:

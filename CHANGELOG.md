@@ -13,6 +13,16 @@ currently 25); a binary refuses a database newer than it understands.
 
 ## [Unreleased]
 
+### Changed
+
+- **A project granted only to a team has its writer.** The readiness
+  checklist (`aimem tasks on`, `aimem project show`, `aimem project
+  onboard`) no longer reads a project granted only to an enabled team
+  profile as missing a token. The team writes with its peer credential,
+  not a hub token, so the item reads done and names the team or teams.
+  When a user is granted, alone or beside a team, the item still needs
+  that user's live token, as before.
+
 ## [0.10.18] — 2026-10-29
 
 `aimem project onboard` does the hub side of a new project in one
