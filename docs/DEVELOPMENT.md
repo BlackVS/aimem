@@ -25,11 +25,38 @@ or changed gets a scenario card, or a change to the card that covers it,
 in the same pull request. docs/scenarios/README.md is the card
 convention and lists the cards.
 
+## Which checks run where
+
+A pull request runs the fast set, so a PR's CI takes about two minutes:
+
+- `lint` (gofmt, the `scripts/check-*.sh` checks, the tasks console
+  harness, staticcheck, govulncheck) and `build`;
+- `test (ubuntu-latest)`: `go vet` and `go test ./...` on Linux;
+- `scenario (ubuntu-latest)` and `install-hub-container`.
+
+The slow checks run on every push to master, nightly, on a manual run
+of the CI workflow (`workflow_dispatch`, for any branch), and on a
+release prepare PR, whose branch is named `release/v<version>`:
+
+- `test (windows-latest)` and `test (macos-latest)`, including the
+  macOS launchd install check;
+- `scenario (windows-latest)`;
+- the identity test's 50 runs under the race detector on Linux.
+
+On an ordinary pull request those legs keep their names and pass after
+one step that says where they run, because the master ruleset requires
+every check by name. A Windows or macOS failure therefore surfaces on
+master. A change whose risk is on one of those platforms is tested
+there before the push, or given a manual run of the workflow on its
+branch.
+
 ## Release gate
 
 A release's prepare pull request (the one that rolls the CHANGELOG's
-`[Unreleased]` section into the version) is marked ready only when CI is
-green on its head, including the `scenario` job on Linux and Windows.
+`[Unreleased]` section into the version), on a branch named
+`release/v<version>` so CI runs the full set, is marked ready only when
+CI is green on its head, including the `scenario` job on Linux and
+Windows.
 That job runs the release-gate cards, among them the new-project path of
 the quickstart, so every released quickstart has run against the release
 candidate. When the repository marks the job as a required check, the
