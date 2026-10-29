@@ -662,6 +662,41 @@ func TestClaudeExtractorStdinRoundTrip(t *testing.T) {
 	}
 }
 
+// The CLI runs over member-authored text, so it sees none of the hub's
+// settings or secrets and gets no tools (audit A-22): AIMEM_* and other
+// providers' keys stay behind, its own credential and PATH pass, and
+// argv disables the built-in tools and MCP servers.
+func TestClaudeExtractorScrubsTheChild(t *testing.T) {
+	exe, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("AIMEM_LLM_INTERVAL", "0")
+	t.Setenv("GO_AIMEM_HELPER", "env")
+	t.Setenv("AIMEM_HTTP_TOKEN", "hub-admin-secret")
+	t.Setenv("AIMEM_OPENAI_API_KEY", "sk-provider-secret")
+	t.Setenv("OPENAI_API_KEY", "sk-other-secret")
+	t.Setenv("CLAUDE_CODE_OAUTH_TOKEN", "cli-own-credential")
+	c := &ClaudeExtractor{WorkDir: t.TempDir(), Bin: exe}
+	res, _, err := c.Complete("prompt")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, gone := range []string{"AIMEM_HTTP_TOKEN", "hub-admin-secret", "sk-provider-secret", "sk-other-secret"} {
+		if strings.Contains(res, gone) {
+			t.Errorf("the child sees %q:\n%s", gone, res)
+		}
+	}
+	for _, kept := range []string{"\nCLAUDE_CODE_OAUTH_TOKEN=cli-own-credential\n", "ARGV=-p|--model|haiku|--output-format|json|--tools||--strict-mcp-config"} {
+		if !strings.Contains(res, kept) {
+			t.Errorf("the child lacks %q:\n%s", kept, res)
+		}
+	}
+	if !strings.Contains(strings.ToUpper(res), "\nPATH=") {
+		t.Errorf("the child has no PATH:\n%s", res)
+	}
+}
+
 // TestClaudeExtractorTimeoutWithGrandchild: the case the plain kill
 // does NOT cover (max-review finding on PR #17): ctx expiry kills only
 // the direct child, and a spawned grandchild inheriting stdout keeps
@@ -753,6 +788,12 @@ func TestMain(m *testing.M) {
 				os.Exit(3) // loud, immediate: no grandchild stamp, and the test says so
 			}
 			time.Sleep(30 * time.Second)
+		case "env":
+			// The child's view: its environment and argv, for the scrub test.
+			json.NewEncoder(os.Stdout).Encode(map[string]any{
+				"result":   strings.Join(os.Environ(), "\n") + "\nARGV=" + strings.Join(os.Args[1:], "|"),
+				"is_error": false,
+			})
 		case "hold":
 			stampHelperStart()
 			time.Sleep(60 * time.Second)
@@ -762,6 +803,9 @@ func TestMain(m *testing.M) {
 		}
 		os.Exit(0)
 	}
+	// The helper modes reach the child through the scrubbed environment
+	// only because the tests name them.
+	claudeEnv = append(claudeEnv, "GO_AIMEM_HELPER", "GO_AIMEM_HELPER_STAMP")
 	// llmrate reads its retry count once per process: pin it before any
 	// test runs, so a block answers at once instead of after 15 s+ backoffs.
 	os.Setenv("AIMEM_LLM_RETRIES", "0")

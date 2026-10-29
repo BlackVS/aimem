@@ -389,6 +389,15 @@ every client first.
   hub comes up (the service user has linger enabled, so its timers start
   at boot). If the model endpoint is on an internal network, the hub
   needs a route to it.
+- The `claude` backend runs `claude -p` with `--tools ""` and
+  `--strict-mcp-config`: no built-in tools and no MCP servers, because it
+  reads journal text that any writer authored. The CLI must accept both
+  flags; Claude Code 2.1 and later does. It also runs with a minimal
+  environment. Its credential must be one of `CLAUDE_CODE_OAUTH_TOKEN`,
+  `ANTHROPIC_API_KEY` or `ANTHROPIC_AUTH_TOKEN` in the env file, or the
+  CLI's own login under the service user's home. `ANTHROPIC_BASE_URL`,
+  `CLAUDE_CONFIG_DIR` and `CLAUDE_CODE_GIT_BASH_PATH` pass too. No `AIMEM_*` variable reaches the
+  CLI, so the admin token and the provider keys stay with the hub.
 - Check runs: `journalctl --user -u aimem-curate.service`; per-project
   reports include token usage. Since v0.1.85 the headless `claude`
   backend counts its cached prompt tokens too (they are most of the

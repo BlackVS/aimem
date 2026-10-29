@@ -23,6 +23,29 @@ currently 25); a binary refuses a database newer than it understands.
   When a user is granted, alone or beside a team, the item still needs
   that user's live token, as before.
 
+### Security
+
+- **Curation's model CLI and the process import's git run without the
+  hub's secrets (audit A-22).** A hub folds its env file into its own
+  environment, and both children inherited all of it: the admin token
+  `AIMEM_HTTP_TOKEN` and the provider keys. The `claude` CLI also ran
+  with its default tools, over journal text that any writer or syncing
+  peer authored, so a prompt-injected curation run could have read the
+  env file and returned the token as a fact.
+  - Both children now get a minimal environment: the search path, home,
+    temp dirs, locale, proxies, CA bundles and the Windows system
+    variables. No `AIMEM_*` variable passes.
+  - The CLI also keeps its own credential and configuration
+    (`CLAUDE_CODE_OAUTH_TOKEN`, `ANTHROPIC_API_KEY`,
+    `ANTHROPIC_AUTH_TOKEN`, `ANTHROPIC_BASE_URL`, `CLAUDE_CONFIG_DIR`,
+    `CLAUDE_CODE_GIT_BASH_PATH`).
+    It runs with `--tools ""` and `--strict-mcp-config`, so it has no
+    built-in tools and no MCP servers, and extraction is a pure
+    completion.
+  - git also keeps `SSH_AUTH_SOCK` and git's own `GIT_*` settings, so a
+    private process source is still reached the way the machine already
+    reaches it.
+
 ## [0.10.18] — 2026-10-29
 
 `aimem project onboard` does the hub side of a new project in one

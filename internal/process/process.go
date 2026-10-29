@@ -27,6 +27,8 @@ import (
 	"sort"
 	"strings"
 	"time"
+
+	"aimem/internal/childenv"
 )
 
 // Ref is the hub-stored selection: where the process set lives and which
@@ -559,12 +561,22 @@ func git(ctx context.Context, dir string, args ...string) ([]byte, error) {
 	// the same reason — but only on a machine that configured no ssh
 	// command of its own: GIT_SSH_COMMAND overrides core.sshCommand and
 	// GIT_SSH, and those are exactly the access this design reuses.
-	cmd.Env = append(os.Environ(), "GIT_TERMINAL_PROMPT=0", "GCM_INTERACTIVE=never")
+	cmd.Env = append(gitEnv(), "GIT_TERMINAL_PROMPT=0", "GCM_INTERACTIVE=never")
 	if dir != "" && !sshCommandConfigured(ctx, dir) {
 		cmd.Env = append(cmd.Env, "GIT_SSH_COMMAND=ssh -o BatchMode=yes")
 	}
 	return runBounded(cmd)
 }
+
+// gitEnvNames is what git needs beyond childenv's base to reach a
+// private source the way this machine already does: the ssh agent and
+// git's own settings (the ssh command, CA bundles, config paths).
+var gitEnvNames = []string{"SSH_AUTH_SOCK", "GIT_*"}
+
+// gitEnv is the scrubbed environment every git child runs with: on a hub
+// the process environment holds the env file's admin token and provider
+// keys, which git and its helpers have no use for (audit A-22).
+func gitEnv() []string { return childenv.Minimal(gitEnvNames...) }
 
 // sshCommandConfigured reports whether this machine (or the cache
 // repository) already names the ssh command git should use — through the
@@ -577,6 +589,7 @@ func sshCommandConfigured(ctx context.Context, dir string) bool {
 	defer cancel()
 	cmd := exec.CommandContext(ctx, "git", "config", "--get", "core.sshCommand")
 	cmd.Dir = dir
+	cmd.Env = gitEnv()
 	out, err := runBounded(cmd)
 	return err == nil && strings.TrimSpace(string(out)) != ""
 }

@@ -25,6 +25,7 @@ import (
 	"strings"
 	"time"
 
+	"aimem/internal/childenv"
 	"aimem/internal/embed"
 	"aimem/internal/ident"
 	"aimem/internal/llmrate"
@@ -634,6 +635,13 @@ func (c *ClaudeExtractor) Extract(events []store.StoredEvent, maxFacts int, grou
 	return props, u, err
 }
 
+// claudeEnv names what the CLI needs beyond childenv's base: its own
+// credential and configuration. Nothing of the hub's passes.
+var claudeEnv = []string{
+	"CLAUDE_CODE_OAUTH_TOKEN", "ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN",
+	"ANTHROPIC_BASE_URL", "CLAUDE_CONFIG_DIR", "CLAUDE_CODE_GIT_BASH_PATH",
+}
+
 // Complete runs one headless claude turn — shared by extraction,
 // design-doc synthesis, the chapter-refile proposer, and the admin
 // provider test. Paced through llmrate like the OpenAI backend (a
@@ -670,8 +678,14 @@ func (c *ClaudeExtractor) Complete(prompt string) (string, Usage, error) {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
+	// No tools and no MCP servers: extraction is a pure completion over
+	// text any writer authored, and a prompt-injected run must have
+	// nothing to read files or run commands with. The environment is
+	// scrubbed for the same reason (audit A-22).
 	cmd := exec.CommandContext(ctx, bin, "-p",
-		"--model", model, "--output-format", "json")
+		"--model", model, "--output-format", "json",
+		"--tools", "", "--strict-mcp-config")
+	cmd.Env = childenv.Minimal(claudeEnv...)
 	cmd.Stdin = strings.NewReader(prompt)
 	// On ctx expiry Go kills only the DIRECT child; the claude CLI is a
 	// Node program that spawns subprocesses (on Windows the .cmd shim
