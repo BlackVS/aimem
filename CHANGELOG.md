@@ -13,11 +13,44 @@ currently 25); a binary refuses a database newer than it understands.
 
 ## [Unreleased]
 
+## [0.10.17] — 2026-10-29
+
+The process reference on the hub is now read under the project grant,
+and a selection may not carry a credential in its URL (audit A-4).
+`aimem process pin` prints a project's process pin as aicrew's offer
+names it. A new project's readiness checklist ends `tasks on` and
+`project show` with what is left and the command for each item;
+`aimem access list` prints tables, and `aimem access audit` reads the
+administration audit. The hub keeps its default process's files, so
+`tasks on` applies the default without Git, and `default set` takes an
+archive. Pull requests run the fast CI set. The on-disk schema stays at
+25 and the access schema at 9. Includes PR #318 to #322.
+
 ### Upgrade notes
 
+- **Before upgrading a hub, check that no selection names a URL with a
+  credential.** The upgraded hub refuses a selection or default whose
+  https URL carries a user name or password, or whose ssh URL carries a
+  password, and clients refuse such a stored reference. Re-select it
+  with a clean URL and give Git on the hub host its access through a
+  credential helper or an ssh agent (docs/ADMIN-MANUAL.md).
+- **A token without a grant on a project no longer reads its process
+  reference.** After the hub upgrade, `GET /v1/projects/{p}/process`
+  answers 403 to a user token with no current grant on the project, and
+  `?history=1` is an admin read. A member's checkout reads its process as
+  before through its grant; one without a grant gets the denial and a
+  message that says what to check.
 - **A default set before this release is applied from the repository
   as before.** Its files are not kept on the hub; `aimem process default
   show` says so, and setting the default again keeps them.
+- **Clients and hubs can otherwise be upgraded in either order.**
+  `aimem process pin` and the `access list` tables read routes an older
+  hub already serves. `aimem access audit` needs an upgraded hub (the
+  route is new), as does keeping the default's files; an upgraded
+  client's `tasks on` against an older hub reads the default's set from
+  the repository as before.
+- **The on-disk schema stays at 25 and the access schema at 9.** A hub
+  or a client goes back to 0.10.16 by putting its binary back.
 
 ### Added
 
