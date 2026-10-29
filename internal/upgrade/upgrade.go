@@ -110,7 +110,16 @@ func Run(ctx context.Context, src Source, o Options) error {
 		return refuse("this binary (%s) is not the client the installers put at %s; aimem upgrade upgrades that installed client (a hub upgrades with install-hub.sh)", o.Self, InstalledPath(goos))
 	}
 
+	if goos != "windows" {
+		if m := hubMarker(); m != "" {
+			return refuse("this is a hub's installation (%s): aimem upgrade would replace its service with a client's; upgrade a hub with install-hub.sh", m)
+		}
+	}
+
 	tag := o.Release
+	if tag != "" && !strings.HasPrefix(tag, "v") {
+		tag = "v" + tag // release tags are vX.Y.Z
+	}
 	if tag == "" {
 		latest, err := src.latest(ctx)
 		if err != nil {
@@ -194,6 +203,34 @@ func Run(ctx context.Context, src Source, o Options) error {
 	}
 	fmt.Fprintf(out, "aimem %s is installed at %s\n", came, inst)
 	return nil
+}
+
+// hubMarker names what only install-hub.sh leaves in the service user's
+// home: the curation script (written even without units), the curation
+// unit, or a listen address in the env file. A hub's binary sits at the
+// client's installed path, so the path alone does not tell them apart.
+func hubMarker() string {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return ""
+	}
+	for _, p := range []string{
+		filepath.Join(home, ".local", "sbin", "curate-all.sh"),
+		filepath.Join(home, ".config", "systemd", "user", "aimem-curate.service"),
+	} {
+		if _, err := os.Stat(p); err == nil {
+			return p
+		}
+	}
+	env := filepath.Join(home, ".config", "aimem", "env")
+	if b, err := os.ReadFile(env); err == nil {
+		for _, l := range strings.Split(string(b), "\n") {
+			if strings.HasPrefix(strings.TrimSpace(l), "AIMEM_HTTP_LISTEN=") {
+				return env + " sets AIMEM_HTTP_LISTEN"
+			}
+		}
+	}
+	return ""
 }
 
 func sameFile(a, b string) bool {

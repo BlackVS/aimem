@@ -319,6 +319,55 @@ func TestUpgradeRefusesWhatIsNotAnInstalledRelease(t *testing.T) {
 	}
 }
 
+// A hub's installation is refused before anything is fetched, by any of
+// the markers only install-hub.sh leaves: its binary sits at the client's
+// path, and install.sh user would replace its service with a client's.
+func TestUpgradeRefusesAHub(t *testing.T) {
+	for _, c := range []struct{ name, file, body string }{
+		{"curation script", ".local/sbin/curate-all.sh", "#!/bin/sh\n"},
+		{"curation unit", ".config/systemd/user/aimem-curate.service", "[Unit]\n"},
+		{"listen address", ".config/aimem/env", "AIMEM_HTTP_TOKEN=x\nAIMEM_HTTP_LISTEN=:8440\n"},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			r, src, s := setup(t)
+			r.publish(t, "v0.10.18")
+			p := filepath.Join(os.Getenv("HOME"), filepath.FromSlash(c.file))
+			os.MkdirAll(filepath.Dir(p), 0o755)
+			if err := os.WriteFile(p, []byte(c.body), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			_, err := run(src, Options{Current: "v0.10.17", GOOS: "linux", GOARCH: "amd64"})
+			if !errors.Is(err, ErrRefused) || !strings.Contains(err.Error(), "upgrade a hub with install-hub.sh") {
+				t.Fatalf("%v", err)
+			}
+			if n := r.downloads.Load(); n != 0 {
+				t.Errorf("%d release files fetched", n)
+			}
+			s.untouched(t)
+		})
+	}
+	// A client's env file without a listen address is not a hub's.
+	r, src, _ := setup(t)
+	r.publish(t, "v0.10.18")
+	p := filepath.Join(os.Getenv("HOME"), ".config", "aimem", "env")
+	os.MkdirAll(filepath.Dir(p), 0o755)
+	os.WriteFile(p, []byte("AIMEM_HUB_URL=https://hub.invalid\n# AIMEM_HTTP_LISTEN=:8440\n"), 0o644)
+	t.Setenv("STUB_VERSION", "v0.10.18")
+	if out, err := run(src, Options{Current: "v0.10.17"}); err != nil {
+		t.Fatalf("a client's env file: %v\n%s", err, out)
+	}
+}
+
+// A release named without its v is the same release.
+func TestUpgradeAcceptsAReleaseWithoutItsV(t *testing.T) {
+	r, src, _ := setup(t)
+	r.publish(t, "v0.10.19")
+	t.Setenv("STUB_VERSION", "v0.10.19")
+	if out, err := run(src, Options{Current: "v0.10.17", Release: "0.10.19"}); err != nil {
+		t.Fatalf("%v\n%s", err, out)
+	}
+}
+
 // An archive entry that would leave the extraction directory is refused.
 func TestExtractRefusesAnEscape(t *testing.T) {
 	for _, name := range []string{"aimem-x/../../evil", "aimem-x/../evil", "/abs/evil", `aimem-x/..\..\evil`, "aimem-x/C:evil"} {
