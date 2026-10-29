@@ -93,11 +93,27 @@ func TestReadinessChecklist(t *testing.T) {
 	if !strings.Contains(out, "readiness: ready for work\n") || !strings.Contains(out, "  [x] a live token that can write: worker-laptop (pilot-worker, user, expires ") || strings.Contains(out, "[ ]") {
 		t.Fatalf("ready:\n%s", out)
 	}
+	// A project token whose user loses the grant no longer counts, even
+	// with another user still granted: the hub refuses its writes.
+	access("user-add", "--user-name", "second")
+	access("grant", "add", "--project", "example", "--user-name", "second")
+	access("token-issue", "--user-name", "pilot-worker", "--label", "example-only", "--project", "example", "--expires", "+30d", "--output", filepath.Join(t.TempDir(), "p.token"))
+	access("grant", "rm", "--project", "example", "--user-name", "pilot-worker")
+	if out = show(); !strings.Contains(out, "readiness: 1 of 4 open\n") || !strings.Contains(out, "  [ ] a live token that can write\n") || strings.Contains(out, "example-only (") {
+		t.Fatalf("grant removed, project token left:\n%s", out)
+	}
+	if table := access("list", "--project", "example"); strings.Contains(table, "example-only") {
+		t.Fatalf("the table lists a token whose user has no grant:\n%s", table)
+	}
+	if table := access("list", "--project", "example", "--all"); !strings.Contains(table, "example-only [no grant]") {
+		t.Fatalf("--all does not mark the ungranted token:\n%s", table)
+	}
+	access("grant", "add", "--project", "example", "--user-name", "pilot-worker")
 	// A disabled user's token no longer counts.
 	var snap accessSnap
 	json.Unmarshal([]byte(access("list", "--json")), &snap)
 	access("user-set", "--user-id", snap.Users[0].ID, "--user-name", "pilot-worker", "--state", "disabled")
-	if out = show(); !strings.Contains(out, "readiness: 2 of 4 open\n") || !strings.Contains(out, "  [ ] a live token that can write\n") {
+	if out = show(); !strings.Contains(out, "readiness: 1 of 4 open\n") || !strings.Contains(out, "  [ ] a live token that can write\n") {
 		t.Fatalf("user disabled:\n%s", out)
 	}
 }

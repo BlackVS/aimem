@@ -186,9 +186,11 @@ func (v *accessView) grantNames(inst string, all bool) []string {
 	return out
 }
 
-// writeTokens are the indexes of the tokens that write to the instance:
-// project-scoped to it, or user-scoped of a user granted it. Only live
-// ones unless all.
+// writeTokens are the indexes of the tokens that write to the instance,
+// by the hub's own rule (access.Store.CanWriteToken): live, scoped to it
+// (project-scoped to it, or user-scoped), and its user granted it directly
+// or through a group. With all, also the dead ones and the project-scoped
+// ones whose user has no grant; noGrant marks those.
 func (v *accessView) writeTokens(inst string, all bool) []int {
 	granted := v.grantedUsers(inst, all)
 	var out []int
@@ -196,12 +198,22 @@ func (v *accessView) writeTokens(inst string, all bool) []int {
 		if !all && !v.liveToken(i) {
 			continue
 		}
-		if (t.Scope == "project" && t.Project == inst) || (t.Scope == "user" && granted[t.UserID]) {
+		scoped := (t.Scope == "project" && t.Project == inst) || t.Scope == "user"
+		if scoped && (granted[t.UserID] || (all && t.Scope == "project")) {
 			out = append(out, i)
 		}
 	}
 	sort.Slice(out, func(a, b int) bool { return v.snap.Tokens[out[a]].Label < v.snap.Tokens[out[b]].Label })
 	return out
+}
+
+// noGrant marks a token of the instance whose user has no current grant
+// on it: the hub refuses its writes.
+func (v *accessView) noGrant(inst string, i int) string {
+	if v.grantedUsers(inst, true)[v.snap.Tokens[i].UserID] {
+		return ""
+	}
+	return " [no grant]"
 }
 
 func expiryText(t time.Time) string { return t.UTC().Format("2006-01-02 15:04Z") }
@@ -306,7 +318,7 @@ func renderAccess(out io.Writer, v *accessView, project, user string, all bool) 
 			if !first {
 				name, g = "", ""
 			}
-			fmt.Fprintf(tw, "%s\t%s\t%s%s\t%s\t%s\t%s\n", name, g, t.Label, v.tokenState(i), v.userName[t.UserID], v.scopeText(i), expiryText(t.ExpiresAt))
+			fmt.Fprintf(tw, "%s\t%s\t%s%s%s\t%s\t%s\t%s\n", name, g, t.Label, v.tokenState(i), v.noGrant(inst, i), v.userName[t.UserID], v.scopeText(i), expiryText(t.ExpiresAt))
 			first = false
 		}
 		if first {
