@@ -21,6 +21,20 @@ currently 25); a binary refuses a database newer than it understands.
 
 ### Added
 
+- **`aimem project onboard` does the hub side of a new project in one
+  command.** `aimem project onboard PROJECT --user NAME [--process REPO
+  TAG] [--output FILE|-]` turns tasks on, selects the process (the one
+  named, else the hub's default, else it leaves the step open), grants
+  the user the project and, when the user holds no live token that can
+  write to it, issues a project-scoped token whose secret goes to
+  `--output` as `aimem access token-issue` writes it. It checks every
+  input before the first change, never replaces a project's process,
+  issues nothing on a second run unless `--new-token`, and ends with
+  the readiness checklist. The new-project quickstart's step 2 and the
+  scenario card 01 now use it.
+- **The readiness checklist counts a project granted to a team
+  profile.** The grant line names such a project's enabled team
+  profiles (`team NAME`) beside its users and groups.
 - **`aimem process pin` prints the project's current process pin.**
   aicrew's coordinator fills an offer's process pin and instruction
   digest from it. `aimem process pin [-p PROJECT] [--json]` runs with the

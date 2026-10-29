@@ -441,6 +441,7 @@ type readinessInput struct {
 	process  string // the selection's name and tag, "" when none
 	instance string // the project's access instance, "" when it has none
 	view     *accessView
+	teams    []string // the enabled team profiles granted the project
 }
 
 // readinessChecklist lists what an agent needs before it can write to the
@@ -486,6 +487,9 @@ func readinessChecklist(in readinessInput) string {
 				user = n
 			}
 		}
+	}
+	for _, t := range in.teams {
+		granted = append(granted, "team "+t)
 	}
 	if len(granted) > 0 {
 		item(true, "granted: "+strings.Join(granted, ", "))
@@ -555,5 +559,36 @@ func projectReadiness(project string) (string, error) {
 	}
 	in.view = newAccessView(snap, time.Now())
 	in.instance = in.view.instance[project]
+	in.teams = grantedTeams(project)
 	return readinessChecklist(in), nil
+}
+
+// grantedTeams names the enabled team profiles granted the project, by
+// the name aicrewd registered or, before it registers, service/team. A
+// hub that cannot answer leaves the line as the user and group grants.
+func grantedTeams(project string) []string {
+	var got struct {
+		Grants []struct {
+			Kind      string `json:"kind"`
+			Name      string `json:"name"`
+			ServiceID string `json:"service_id"`
+			TeamID    string `json:"team_id"`
+			Disabled  bool   `json:"disabled"`
+		} `json:"grants"`
+	}
+	if localJSON(http.MethodGet, "/v1/projects/"+url.PathEscape(project)+"/grants", nil, &got) != nil {
+		return nil
+	}
+	var out []string
+	for _, g := range got.Grants {
+		if g.Kind != "team_profile" || g.Disabled {
+			continue
+		}
+		name := g.Name
+		if name == "" {
+			name = g.ServiceID + "/" + g.TeamID
+		}
+		out = append(out, name)
+	}
+	return out
 }

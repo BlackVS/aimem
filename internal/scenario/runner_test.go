@@ -51,7 +51,7 @@ func TestScenarioCardDrift(t *testing.T) {
 		{"00-fixture.md", "not ready for work: tasks on, process not selected", "not ready for work: tasks off",
 			"step 3 (Tasks are switched on for the project)"},
 		{"01-new-project.md", `"title":"First task from the workstation"`, `"title":"Another task"`,
-			"step 25 (The project's tasks list the new task)"},
+			"step 23 (The project's tasks list the new task)"},
 	} {
 		t.Run(strings.TrimSuffix(d.card, ".md"), func(t *testing.T) {
 			b, err := os.ReadFile(filepath.Join(cardDir, d.card))

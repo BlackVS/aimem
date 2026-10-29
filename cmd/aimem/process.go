@@ -145,52 +145,12 @@ func processCmd(args []string) error {
 			if len(pos) != 2 && len(pos) != 3 {
 				return fmt.Errorf("%s", usage)
 			}
-			sel := process.Ref{Repo: pos[0], Commit: pos[1], Manifest: process.DefaultManifest, Ref: *ref}
+			manifest := ""
 			if len(pos) == 3 {
-				sel.Manifest = pos[2]
+				manifest = pos[2]
 			}
-			switch {
-			case process.IsCommit(pos[1]) && !*byCommit:
-				return fmt.Errorf("%s is a commit; select by a tag of the repository (aimem process select <repo> <tag>), or pass --commit when the repository has no tag for it", pos[1])
-			case *byCommit && !process.IsCommit(pos[1]):
-				return fmt.Errorf("--commit takes a full 40-character lowercase hex commit, not %s", pos[1])
-			}
-			if !process.IsCommit(pos[1]) {
-				if *ref != "" {
-					return errors.New("--ref goes with a commit; a tag or branch is resolved to its commit and stored as the ref")
-				}
-				commit, err := resolveRef(sel.Repo, pos[1])
-				if err != nil {
-					if looksLikeCommit(pos[1]) {
-						return fmt.Errorf("resolving %s: %w (a commit must be the full 40-character lowercase hex id)", pos[1], err)
-					}
-					return fmt.Errorf("resolving %s: %w", pos[1], err)
-				}
-				sel.Ref, sel.Commit = pos[1], commit
-				fmt.Fprintf(os.Stderr, "%s holds commit %s: selecting it\n", pos[1], commit)
-			}
-			if err := sel.Validate(); err != nil {
+			if body, err = selectRequest(proj, pos[0], pos[1], manifest, *ref, *expect, *archive, *sums, *byCommit); err != nil {
 				return err
-			}
-			expected, err := expectedCommit(proj, *expect, &sel)
-			if err != nil {
-				return err
-			}
-			body["expected_commit"] = expected
-			body["repo"], body["commit"], body["manifest"] = sel.Repo, sel.Commit, sel.Manifest
-			if sel.Ref != "" {
-				body["ref"] = sel.Ref
-			}
-			if kept := keptSetFor(proj, sel); kept != "" {
-				fmt.Fprintf(os.Stderr, "set %s is already kept on this hub: re-selecting it without an import\n", kept[:12])
-				body["digest"] = kept
-			} else {
-				bundle, source, err := importBundle(sel, *archive, *sums)
-				if err != nil {
-					return err
-				}
-				body["files"] = bundle.Files
-				fmt.Fprintf(os.Stderr, "importing set %s (%d files, %d bytes, from %s)\n", bundle.Digest()[:12], len(bundle.Files), bundle.Bytes(), source)
 			}
 		}
 		raw, _ := json.Marshal(body)
@@ -257,6 +217,61 @@ func processCmd(args []string) error {
 		return nil
 	}
 	return fmt.Errorf("%s", usage)
+}
+
+// selectRequest is the body of PUT /v1/projects/{p}/process for selecting
+// repo at tag (or, with byCommit, at a full commit) and manifest (the
+// default when empty): the tag resolved to its commit, the expected
+// commit for the compare-and-swap, and the set, imported unless the hub
+// already keeps it.
+func selectRequest(proj, repo, tag, manifest, ref, expect, archive, sums string, byCommit bool) (map[string]any, error) {
+	sel := process.Ref{Repo: repo, Commit: tag, Manifest: process.DefaultManifest, Ref: ref}
+	if manifest != "" {
+		sel.Manifest = manifest
+	}
+	switch {
+	case process.IsCommit(tag) && !byCommit:
+		return nil, fmt.Errorf("%s is a commit; select by a tag of the repository (aimem process select <repo> <tag>), or pass --commit when the repository has no tag for it", tag)
+	case byCommit && !process.IsCommit(tag):
+		return nil, fmt.Errorf("--commit takes a full 40-character lowercase hex commit, not %s", tag)
+	}
+	if !process.IsCommit(tag) {
+		if ref != "" {
+			return nil, errors.New("--ref goes with a commit; a tag or branch is resolved to its commit and stored as the ref")
+		}
+		commit, err := resolveRef(sel.Repo, tag)
+		if err != nil {
+			if looksLikeCommit(tag) {
+				return nil, fmt.Errorf("resolving %s: %w (a commit must be the full 40-character lowercase hex id)", tag, err)
+			}
+			return nil, fmt.Errorf("resolving %s: %w", tag, err)
+		}
+		sel.Ref, sel.Commit = tag, commit
+		fmt.Fprintf(os.Stderr, "%s holds commit %s: selecting it\n", tag, commit)
+	}
+	if err := sel.Validate(); err != nil {
+		return nil, err
+	}
+	expected, err := expectedCommit(proj, expect, &sel)
+	if err != nil {
+		return nil, err
+	}
+	body := map[string]any{"expected_commit": expected, "repo": sel.Repo, "commit": sel.Commit, "manifest": sel.Manifest}
+	if sel.Ref != "" {
+		body["ref"] = sel.Ref
+	}
+	if kept := keptSetFor(proj, sel); kept != "" {
+		fmt.Fprintf(os.Stderr, "set %s is already kept on this hub: re-selecting it without an import\n", kept[:12])
+		body["digest"] = kept
+		return body, nil
+	}
+	bundle, source, err := importBundle(sel, archive, sums)
+	if err != nil {
+		return nil, err
+	}
+	body["files"] = bundle.Files
+	fmt.Fprintf(os.Stderr, "importing set %s (%d files, %d bytes, from %s)\n", bundle.Digest()[:12], len(bundle.Files), bundle.Bytes(), source)
+	return body, nil
 }
 
 // printPin prints a process pin as one JSON object, or as labelled lines.

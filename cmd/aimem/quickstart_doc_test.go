@@ -194,10 +194,10 @@ func TestQuickstartNewProjectCommandsMatchUsage(t *testing.T) {
 	}
 	// The steps the guide exists to give, each present at least once.
 	for _, want := range []string{
-		"aimem token add ", "aimem tasks on ", "aimem access user-add ", "aimem access grant add ",
+		"aimem token add ", "aimem project onboard ", "aimem access user-add ",
 		"aimem access token-issue-user ", "aimem hub add team ", "aimem hub task-token team ",
 		"aimem health", "aimem session-start", "aimem docs list",
-		"aimem process select ", "aimem process default set ", "aimem process show", "aimem process show --template task",
+		"aimem process default set ", "aimem process show", "aimem process show --template task",
 		"aimem skills import --from-archive ", "aimem project repo set ", "aimem skills install",
 	} {
 		found := false
@@ -210,7 +210,7 @@ func TestQuickstartNewProjectCommandsMatchUsage(t *testing.T) {
 	}
 }
 
-// Step 2 imports the skills before it selects the process, binds the
+// Step 2 imports the skills before onboard selects the process, binds the
 // repository, and quotes the warning the CLI prints when the hub lacks a
 // required skill.
 func TestQuickstartNewProjectImportsSkillsBeforeTheProcess(t *testing.T) {
@@ -221,9 +221,9 @@ func TestQuickstartNewProjectImportsSkillsBeforeTheProcess(t *testing.T) {
 	text := string(raw)
 	step2, _, _ := strings.Cut(text[strings.Index(text, "## 2. "):], "## 3. ")
 	imp := strings.Index(step2, "aimem skills import --from-archive aiskills-")
-	sel := strings.Index(step2, "aimem process select ")
+	sel := strings.Index(step2, "aimem project onboard ")
 	if imp < 0 || sel < 0 || imp > sel {
-		t.Errorf("step 2 does not import the skills release before the process selection (import at %d, select at %d)", imp, sel)
+		t.Errorf("step 2 does not import the skills release before onboard selects the process (import at %d, onboard at %d)", imp, sel)
 	}
 	if !strings.Contains(step2, "aimem project repo set --project my-project ") {
 		t.Error("step 2 does not bind the project's repository")

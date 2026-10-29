@@ -704,6 +704,43 @@ after that except an admin. An agent whose session started with tasks on
 gets one notice when the hub turns them off, and needs a session restart
 to see the tools again after they are switched back on.
 
+#### The hub side of a new project in one command
+
+`aimem project onboard` composes the separate commands on the hub host,
+over the local socket, and adds no route:
+
+```sh
+aimem project onboard <project> --user <name> [--process <repo> <tag>] [--manifest <path>] \
+  [--expires TIME|DATE|+Nd] [--label <label>] [--output FILE|-] [--new-token]
+```
+
+In order, it turns tasks on (which creates a project the hub does not
+know yet), selects the process, grants the user the project and makes
+sure the user holds a live token that can write to it. The process is
+the one `--process` names, resolved by tag as `aimem process select`
+resolves it; without `--process`, the hub's default process; with
+neither, the step stays open and the checklist names the command. A
+project that already has a process keeps it: a `--process` naming
+another one is refused with the `aimem process select ... --expect`
+command that changes it. A user already granted, directly or through a
+group, is not granted again.
+
+The token step issues nothing when the user already holds a live token
+that writes to the project, user-scoped or scoped to this project.
+Otherwise it issues a project-scoped token, labelled with the project ID
+unless `--label` names another, expiring in 90 days unless `--expires`
+says otherwise. Its secret goes to `--output` exactly as `aimem access
+token-issue` writes it: a new owner-only file, or `-` for a pipe, in
+which case the report goes to standard error. `--new-token` issues one
+even when the user already has a writer.
+
+Every input is checked before the first change: the user (an unknown
+name is refused with the users that exist, and a disabled user is
+refused), the expiry, the process tag, and `--output` when a token will
+be issued. A refusal changes nothing. A second run reports each step as
+it finds it and issues nothing. The command ends with the project's
+readiness checklist.
+
 ### Selecting a project's process documents
 
 When a project's tasks are on, its agents receive the process documents
