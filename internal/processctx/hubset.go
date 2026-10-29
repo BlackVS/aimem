@@ -49,6 +49,26 @@ const (
 // digest, and the hub answers 304 after its grant check, without the
 // files.
 func hubSet(hub *adapter.HubConfig, client *http.Client, root, project string, ref *process.Ref, byVersion, cached bool) (hubSetOutcome, error) {
+	outcome, set, name, err := fetchHubSet(hub, client, project, ref, byVersion, cached)
+	if outcome != hubSetStored {
+		return outcome, err
+	}
+	if _, err := process.StoreSet(root, set, ref.Digest); err != nil {
+		return hubSetFailed, fmt.Errorf("the hub's set does not validate: %w", err)
+	}
+	if ref.Name == "" {
+		ref.Name = name
+	}
+	return hubSetStored, nil
+}
+
+// fetchHubSet reads the set for ref from the hub and verifies it against
+// the selection, storing nothing: hubSetStored with the set and the name
+// the hub gives it, or the outcome that says why not.
+func fetchHubSet(hub *adapter.HubConfig, client *http.Client, project string, ref *process.Ref, byVersion, cached bool) (hubSetOutcome, *process.Bundle, string, error) {
+	fail := func(o hubSetOutcome, err error) (hubSetOutcome, *process.Bundle, string, error) {
+		return o, nil, "", err
+	}
 	ctx, cancel := context.WithTimeout(context.Background(), setReadTimeout)
 	defer cancel()
 	u := strings.TrimRight(hub.URL, "/") + "/v1/projects/" + url.PathEscape(project) + "/process/set"
@@ -57,7 +77,7 @@ func hubSet(hub *adapter.HubConfig, client *http.Client, root, project string, r
 	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u, nil)
 	if err != nil {
-		return hubSetFailed, err
+		return fail(hubSetFailed, err)
 	}
 	req.Header.Set("Authorization", "Bearer "+hub.Token)
 	if cached {
@@ -65,32 +85,32 @@ func hubSet(hub *adapter.HubConfig, client *http.Client, root, project string, r
 	}
 	resp, err := client.Do(req)
 	if err != nil {
-		return hubSetFailed, fmt.Errorf("hub unreachable: %w", err)
+		return fail(hubSetFailed, fmt.Errorf("hub unreachable: %w", err))
 	}
 	defer resp.Body.Close()
 	raw, err := io.ReadAll(io.LimitReader(resp.Body, setBodyMax+1))
 	if resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden {
 		// A refusal stands whatever its body: one cut short or too large
 		// loses only the reason, never the denial.
-		return hubSetDenied, errors.New(hubErrorText(raw, resp.StatusCode))
+		return fail(hubSetDenied, errors.New(hubErrorText(raw, resp.StatusCode)))
 	}
 	if err != nil {
-		return hubSetFailed, fmt.Errorf("reading the set from the hub: %w", err)
+		return fail(hubSetFailed, fmt.Errorf("reading the set from the hub: %w", err))
 	}
 	if len(raw) > setBodyMax {
-		return hubSetFailed, fmt.Errorf("the hub's answer is larger than %d bytes", setBodyMax)
+		return fail(hubSetFailed, fmt.Errorf("the hub's answer is larger than %d bytes", setBodyMax))
 	}
 	switch resp.StatusCode {
 	case http.StatusOK:
 	case http.StatusNotModified:
 		if !cached {
-			return hubSetFailed, errors.New("the hub answered 304 to a read that was not conditional")
+			return fail(hubSetFailed, errors.New("the hub answered 304 to a read that was not conditional"))
 		}
-		return hubSetNotModified, nil
+		return fail(hubSetNotModified, nil)
 	case http.StatusNotFound, http.StatusMethodNotAllowed:
-		return hubSetUnsupported, errors.New(hubErrorText(raw, resp.StatusCode))
+		return fail(hubSetUnsupported, errors.New(hubErrorText(raw, resp.StatusCode)))
 	default:
-		return hubSetFailed, errors.New(hubErrorText(raw, resp.StatusCode))
+		return fail(hubSetFailed, errors.New(hubErrorText(raw, resp.StatusCode)))
 	}
 	var body struct {
 		Selection struct {
@@ -103,25 +123,19 @@ func hubSet(hub *adapter.HubConfig, client *http.Client, root, project string, r
 	}
 	if err := json.Unmarshal(raw, &body); err != nil {
 		// A cut or malformed body is never cached and never a set.
-		return hubSetFailed, fmt.Errorf("the hub's answer is not a complete set: %w", err)
+		return fail(hubSetFailed, fmt.Errorf("the hub's answer is not a complete set: %w", err))
 	}
 	if body.Selection.Commit != ref.Commit || body.Selection.Manifest != ref.Manifest {
-		return hubSetFailed, fmt.Errorf("the hub answered for %s (manifest %s), not the selection %s (manifest %s)", short(body.Selection.Commit), body.Selection.Manifest, short(ref.Commit), ref.Manifest)
+		return fail(hubSetFailed, fmt.Errorf("the hub answered for %s (manifest %s), not the selection %s (manifest %s)", short(body.Selection.Commit), body.Selection.Manifest, short(ref.Commit), ref.Manifest))
 	}
 	want := ref.Digest
 	if body.Selection.Digest != want {
-		return hubSetFailed, fmt.Errorf("the hub's set is %s, not the selection's %s", short(body.Selection.Digest), short(want))
+		return fail(hubSetFailed, fmt.Errorf("the hub's set is %s, not the selection's %s", short(body.Selection.Digest), short(want)))
 	}
 	if got := body.Set.Digest(); got != want {
-		return hubSetFailed, fmt.Errorf("digest mismatch: the files digest to %s, the selection says %s; nothing cached", short(got), short(want))
+		return fail(hubSetFailed, fmt.Errorf("digest mismatch: the files digest to %s, the selection says %s; nothing cached", short(got), short(want)))
 	}
-	if _, err := process.StoreSet(root, &body.Set, want); err != nil {
-		return hubSetFailed, fmt.Errorf("the hub's set does not validate: %w", err)
-	}
-	if ref.Name == "" {
-		ref.Name = body.Selection.Name
-	}
-	return hubSetStored, nil
+	return hubSetStored, &body.Set, body.Selection.Name, nil
 }
 
 func hubErrorText(raw []byte, status int) string {

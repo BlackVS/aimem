@@ -21,6 +21,17 @@ currently 25); a binary refuses a database newer than it understands.
 
 ### Added
 
+- **`aimem process pin` prints the project's current process pin.**
+  aicrew's coordinator fills an offer's process pin and instruction
+  digest from it. `aimem process pin [-p PROJECT] [--json]` runs with the
+  checkout's own credential, which needs the project grant, and prints
+  the repository, the full commit, the manifest, the set's digest, and
+  `instruction_digest`: `sha256:` and the SHA-256 of the manifest file's
+  bytes at that commit. It reads the hub's stored set, checks it against
+  the selection's digest, needs no Git, and caches nothing. A project
+  with no selection, a selection from before stored sets, a set that
+  does not match, or a refused credential is an error.
+
 - **A project's readiness checklist, `access list` as a table, and
   `access audit`.** The first steps on a new project no longer stop at
   `tasks on` without saying what is left.

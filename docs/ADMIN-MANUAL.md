@@ -921,6 +921,22 @@ this host's service, as `list` and `select` do, and prints the same unit;
 a selection without a stored set, is an error that says so, never an
 empty line.
 
+`aimem process pin -p <project> --json` prints the project's current pin
+as an offer names it, for a coordinator that fills offers from the hub:
+
+```json
+{"project":"example","repository":"https://example.com/team/process.git","commit":"<40-hex commit>","manifest":"process/manifest.json","set_digest":"<64-hex>","instruction_digest":"sha256:<64-hex>"}
+```
+
+`instruction_digest` is `sha256:` and the SHA-256 of the manifest file's
+exact bytes at that commit; `set_digest` is the digest of the whole
+stored set. The command runs with the checkout's credential, which needs
+the project grant (the reference and the set are served under it), reads
+the hub's stored set, checks it against the selection's digest, and needs
+no Git and no route to the process repository. It caches nothing. A
+project with no selection, a selection without a stored set, a set that
+does not match, or a refused credential is an error with a non-zero exit.
+
 ### Importing the skills sets
 
 The skills a process requires reach a member from the hub too, never from

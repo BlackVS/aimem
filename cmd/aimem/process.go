@@ -49,6 +49,7 @@ const processUsage = `usage: aimem process select <repo> <tag> [<manifest>] [--f
        aimem process list
        aimem process refresh [-p <project>] [--from-archive <file>] [--sums <file>]
        aimem process show [--full] [--template <kind>] [-p <project>]
+       aimem process pin [--json] [-p <project>]
 
 select, clear, default, list and refresh run on the hub host (admin).
 select takes a tag (or a branch): it is resolved to the commit it holds
@@ -80,7 +81,15 @@ selection and set. --full prints the whole unit, even one over the
 manifest's injection budget, and adds the repository URL, for the admin.
 default set stores the hub's default process (resolved and imported as
 select does); aimem tasks on applies it to a project with no process.
-default show prints it, and default clear removes it.`
+default show prints it, and default clear removes it.
+pin runs where show does, with this checkout's credential, and prints the
+project's current pin as an offer names it: the repository, the full
+commit, the manifest, the set's digest, and the instruction digest
+(sha256: and the SHA-256 of the manifest file's bytes at that commit). It
+reads the hub's stored set, checks it against the selection's digest, and
+needs no Git; --json prints one JSON object. A project with no selection,
+a selection without a stored set, a set that does not match, or a
+credential without the project grant is an error.`
 
 func processCmd(args []string) error {
 	usage := processUsage
@@ -204,6 +213,19 @@ func processCmd(args []string) error {
 			fmt.Fprint(os.Stderr, "warning: "+gap)
 		}
 		return nil
+	case "pin":
+		fs := flag.NewFlagSet("process pin", flag.ExitOnError)
+		p := projectFlag(fs, "project id (default: current directory's project)")
+		asJSON := fs.Bool("json", false, "print one JSON object")
+		fs.Parse(args[1:])
+		if fs.NArg() != 0 {
+			return fmt.Errorf("%s", usage)
+		}
+		pin, err := processctx.ReadPin(".", stateRoot(), *p)
+		if err != nil {
+			return err
+		}
+		return printPin(os.Stdout, pin, *asJSON)
 	case "show":
 		fs := flag.NewFlagSet("process show", flag.ExitOnError)
 		p := projectFlag(fs, "project id (default: current directory's project)")
@@ -235,6 +257,16 @@ func processCmd(args []string) error {
 		return nil
 	}
 	return fmt.Errorf("%s", usage)
+}
+
+// printPin prints a process pin as one JSON object, or as labelled lines.
+func printPin(w io.Writer, pin *processctx.Pin, asJSON bool) error {
+	if asJSON {
+		return json.NewEncoder(w).Encode(pin)
+	}
+	_, err := fmt.Fprintf(w, "project             %s\nrepository          %s\ncommit              %s\nmanifest            %s\nset_digest          %s\ninstruction_digest  %s\n",
+		pin.Project, pin.Repository, pin.Commit, pin.Manifest, pin.SetDigest, pin.InstructionDigest)
+	return err
 }
 
 // looksLikeCommit reports whether s could be meant as a commit id that is
