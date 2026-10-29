@@ -247,3 +247,45 @@ func TestAccessViewExpiredToken(t *testing.T) {
 		t.Fatalf("checklist:\n%s", list)
 	}
 }
+
+// A project granted only to a team has its writer: the team writes with
+// its peer credential. A granted user, alone or beside a team, still
+// needs a live token of their own; with neither, the item stays open.
+func TestReadinessTeamWriter(t *testing.T) {
+	now := time.Date(2026, 10, 29, 0, 0, 0, 0, time.UTC)
+	view := func(grants string) *accessView {
+		var snap accessSnap
+		if err := json.Unmarshal([]byte(`{
+			"users": [{"id": "u1", "name": "alice", "disabled": false}, {"id": "u2", "name": "bob", "disabled": true}],
+			"groups": [], "members": [],
+			"grants": [`+grants+`],
+			"tokens": [], "projects": {"i1": "alpha"}}`), &snap); err != nil {
+			t.Fatal(err)
+		}
+		return newAccessView(snap, now)
+	}
+	check := func(name string, in readinessInput, want ...string) {
+		t.Helper()
+		in.project, in.tasksOn, in.process = "alpha", true, "p (v1)"
+		list := readinessChecklist(in)
+		for _, w := range want {
+			if !strings.Contains(list, w) {
+				t.Errorf("%s: missing %q in\n%s", name, w, list)
+			}
+		}
+	}
+	teams := []string{"pilot", "aicrew-example/0191"}
+	check("teams only", readinessInput{view: view(""), teams: teams},
+		"readiness: ready for work\n",
+		"  [x] a writer: the team writes with its peer credential (team pilot, team aicrew-example/0191)\n")
+	check("a disabled user and a team", readinessInput{instance: "i1", view: view(`{"project_instance": "i1", "kind": "user", "subject": "u2"}`), teams: teams[:1]},
+		"readiness: ready for work\n",
+		"  [x] a writer: the team writes with its peer credential (team pilot)\n")
+	check("a user and a team", readinessInput{instance: "i1", view: view(`{"project_instance": "i1", "kind": "user", "subject": "u1"}`), teams: teams},
+		"readiness: 1 of 4 open\n",
+		"  [x] granted: alice, team pilot, team aicrew-example/0191\n",
+		"  [ ] a live token that can write\n      aimem access token-issue-user --user-name alice --label alice")
+	check("neither", readinessInput{view: view("")},
+		"readiness: 2 of 4 open\n",
+		"  [ ] a live token that can write\n      aimem access token-issue-user --user-name <user> --label <user>")
+}

@@ -476,6 +476,7 @@ func readinessChecklist(in readinessInput) string {
 	var granted []string
 	var tokens []string
 	user := "<user>"
+	users := 0
 	if in.instance != "" {
 		granted = in.view.grantNames(in.instance, false)
 		for _, i := range in.view.writeTokens(in.instance, false) {
@@ -483,25 +484,33 @@ func readinessChecklist(in readinessInput) string {
 			tokens = append(tokens, fmt.Sprintf("%s (%s, %s, expires %s)", t.Label, in.view.userName[t.UserID], in.view.scopeText(i), expiryText(t.ExpiresAt)))
 		}
 		for u := range in.view.grantedUsers(in.instance, false) {
-			if n := in.view.userName[u]; user == "<user>" || n < user {
+			if n := in.view.userName[u]; users == 0 || n < user {
 				user = n
 			}
+			users++
 		}
 	}
+	var teams []string
 	for _, t := range in.teams {
-		granted = append(granted, "team "+t)
+		teams = append(teams, "team "+t)
 	}
+	granted = append(granted, teams...)
 	if len(granted) > 0 {
 		item(true, "granted: "+strings.Join(granted, ", "))
 	} else {
 		item(false, "a user or group granted", "aimem access grant add --project "+p+" --user-name <user>")
 	}
-	if user != "<user>" {
+	if users > 0 {
 		user = shellArg(user, false)
 	}
-	if len(tokens) > 0 {
+	// A team writes with its peer's credential, not a hub token of ours;
+	// a granted user still needs a token of their own.
+	switch {
+	case len(tokens) > 0:
 		item(true, "a live token that can write: "+strings.Join(tokens, "; "))
-	} else {
+	case users == 0 && len(teams) > 0:
+		item(true, "a writer: the team writes with its peer credential ("+strings.Join(teams, ", ")+")")
+	default:
 		item(false, "a live token that can write",
 			"aimem access token-issue-user --user-name "+user+" --label "+user+" --expires +90d --output FILE",
 			"or, for this project only: aimem access token-issue --user-name "+user+" --label LABEL --project "+p+" --expires +90d --output FILE")
