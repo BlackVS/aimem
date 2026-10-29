@@ -21,6 +21,30 @@ currently 25); a binary refuses a database newer than it understands.
 
 ### Added
 
+- **A project's readiness checklist, `access list` as a table, and
+  `access audit`.** The first steps on a new project no longer stop at
+  `tasks on` without saying what is left.
+  - `aimem tasks on -p ID` and `aimem project show -p ID` end with the
+    project's readiness checklist: tasks on, the process selected, a user
+    or group granted (named), and a live token that can write (label and
+    expiry). Each open item carries the command that closes it, with the
+    project filled in, and the granted user's name where there is one.
+    The output before the checklist is unchanged.
+  - `aimem access list` prints tables instead of the hub's JSON: per
+    project, who is granted and which live tokens can write to it, then
+    the users with their groups and tokens. `--project` and `--user`
+    narrow it. Disabled users and revoked or expired tokens appear only
+    with `--all`. `--json` prints the document exactly as before, for
+    scripts.
+  - `aimem access audit [--since TIME|DATE|Nd] [--actor A] [--action X]
+    [--limit N] [--json]` reads the administration audit, newest first.
+    It is served by a new admin route, `GET /v1/access/audit`, bounded to
+    1000 events; the access snapshot still carries the newest 100.
+  - `--expires` on `access token-issue` and `token-issue-user` also takes
+    a date (`2027-10-01`, midnight UTC) and a number of days from now
+    (`+90d`). The issued token shows the resolved time. RFC 3339 keeps
+    working.
+
 - **The hub keeps its default process's set, and `default set` takes an
   archive.** `aimem process default set` sends the set's files with the
   default, and the hub keeps them in `process-default-set.json` in its

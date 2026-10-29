@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 
@@ -133,6 +134,42 @@ func (s *Server) getAccess(w http.ResponseWriter, r *http.Request) {
 		Projects map[string]string `json:"projects"`
 	}{result, instances})
 }
+
+// getAccessAudit answers the administration audit, newest first, filtered
+// by ?since= (RFC 3339), ?actor= and ?action=, at most ?limit= events
+// (100 by default, access.AuditLimit at most).
+func (s *Server) getAccessAudit(w http.ResponseWriter, r *http.Request) {
+	q := r.URL.Query()
+	var since time.Time
+	if v := q.Get("since"); v != "" {
+		t, err := time.Parse(time.RFC3339, v)
+		if err != nil {
+			s.fail(w, http.StatusBadRequest, errors.New("since must be an RFC 3339 time"))
+			return
+		}
+		since = t
+	}
+	limit := 100
+	if v := q.Get("limit"); v != "" {
+		n, err := strconv.Atoi(v)
+		if err != nil || n < 1 || n > access.AuditLimit {
+			s.fail(w, http.StatusBadRequest, fmt.Errorf("limit must be 1-%d", access.AuditLimit))
+			return
+		}
+		limit = n
+	}
+	db, ok := s.accessStore(w)
+	if !ok {
+		return
+	}
+	events, err := db.AuditEvents(since, q.Get("actor"), q.Get("action"), limit)
+	if err != nil {
+		s.fail(w, 500, fmt.Errorf("cannot read the access audit"))
+		return
+	}
+	s.ok(w, map[string]any{"events": events})
+}
+
 func (s *Server) createAccessUser(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		Name string `json:"name"`

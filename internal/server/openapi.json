@@ -349,6 +349,55 @@
         }
       }
     },
+    "/v1/access/audit": {
+      "get": {
+        "summary": "The administration audit, newest first, filtered by time, actor and action",
+        "description": "Admin only. since is an RFC 3339 time (events at or after it); actor and action match exactly; limit is 1-1000, 100 by default. 400 for a malformed since or limit.",
+        "x-role": "admin",
+        "parameters": [
+          {
+            "name": "since",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "actor",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "action",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "events: id, at, actor, action, subject"
+          },
+          "400": {
+            "description": "malformed since or limit"
+          }
+        }
+      }
+    },
     "/v1/access/identity": {
       "get": {
         "x-team-mode": "Team mode: with the optional header X-Aimem-Team-Context (an aimem-scoped acs1_ handle from aicrew) and a user-scoped individual bearer, over TLS terminated by the hub only (otherwise tls_required, 403, whatever forwarded headers claim), the hub verifies the session online through aicrew introspection on every request, matches it to the authenticated user and token, and serves the read only under the linked team access profile's live grant, never the caller's personal grants. Refusals use the envelope with active_mode team: context_unavailable (503, retryable), context_stale, identity_mismatch, grant_denied, role_forbidden (403). In team mode this is the context report: mode, the verified team session (service, team, agent, role, session, generation, handle expiry), the projects the profile currently grants, task_write (\"triage\" for the coordinator role, false for every other role), knowledge read (the pilot's recall and shared-document reads on those projects) and doc_write \"report-*\" (the documents team mode writes); with ?project=<id> it adds project_read for that project.",

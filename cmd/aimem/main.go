@@ -762,6 +762,7 @@ func tasksCmd(args []string) error {
 	if args[0] != "on" {
 		return nil
 	}
+	defer printReadiness(os.Stdout, proj)
 	gap := tasksOnGap(proj, data)
 	if !strings.HasPrefix(gap, notReady) || *noProcess {
 		fmt.Print(gap)

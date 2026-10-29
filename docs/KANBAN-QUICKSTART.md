@@ -81,6 +81,24 @@ next step: select the project's process on this hub host; processes this hub alr
   or another process: aimem process select <repo> <tag> [<manifest>] -p my-project
 ```
 
+Both `tasks on` and `aimem project show -p my-project` end with the
+project's readiness checklist: tasks on, the process selected, a user or
+group granted, and a live token that can write (its label and expiry).
+Each open item carries the command that closes it, with the project filled
+in; sections 3 and 6 explain them. The checklist says `ready for work`
+when all four are there:
+
+```text
+readiness: 2 of 4 open
+  [x] tasks on
+  [ ] process selected
+      aimem process select <repo> <tag> [<manifest>] -p my-project (the next step above names one)
+  [x] granted: my-agent
+  [ ] a live token that can write
+      aimem access token-issue-user --user-name my-agent --label my-agent --expires +90d --output FILE
+      or, for this project only: aimem access token-issue --user-name my-agent --label LABEL --project my-project --expires +90d --output FILE
+```
+
 The values are the process repository's git URL, a release tag of that
 repository (a full 40-hex commit also works), and optionally the
 manifest's path in that repository, by default
@@ -115,6 +133,13 @@ aimem access list
 aimem access user-add --user-name my-agent
 ```
 
+`access list` prints, per project, who is granted and which live tokens
+can write to it, then the users with their groups and tokens.
+`--project` and `--user` narrow it, `--all` adds disabled users and revoked
+or expired tokens, and `--json` prints the hub's whole document for
+scripts. The administration audit is `aimem access audit` (`--since 7d`,
+`--actor`, `--action token.issue`).
+
 If the intended user already exists, reuse it instead of creating
 another. A user is named by `--user-name` or by `--user-id`:
 
@@ -124,7 +149,9 @@ aimem access token-issue-user --user-name my-agent --label token-my-agent-laptop
 ```
 
 Replace `EXPIRY_RFC3339` with a future UTC timestamp such as
-`2027-01-01T00:00:00Z`, choosing a lifetime appropriate to your access policy.
+`2027-01-01T00:00:00Z`, a date such as `2027-01-01` (midnight UTC) or a
+number of days from now such as `+90d`, choosing a lifetime appropriate to
+your access policy.
 This user-scoped token can write to every currently granted project, including
 projects granted later; a long lifetime keeps that evolving authority usable
 longer. The `token-` label identifies the credential, not a second user.
