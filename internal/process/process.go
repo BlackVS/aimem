@@ -74,13 +74,32 @@ func (r Ref) Validate() error {
 }
 
 // checkRepo checks that repo is a Git URL a client can hand to git: https,
-// ssh, or the scp-like form, without whitespace or a leading dash.
+// ssh, or the scp-like form, without whitespace or a leading dash, and
+// without a credential: every token holder with a grant reads the URL, so
+// an https URL carries no user name or password and an ssh URL no
+// password (the rule projectrepo applies to the project's repository).
 func checkRepo(repo string) error {
 	if len(repo) == 0 || len(repo) > 512 || strings.ContainsAny(repo, " \t\r\n\"'") || strings.HasPrefix(repo, "-") {
 		return errors.New("repo must be a Git URL (at most 512 bytes, no whitespace)")
 	}
+	authority := func(rest string) string {
+		if i := strings.IndexAny(rest, "/?#"); i >= 0 {
+			return rest[:i]
+		}
+		return rest
+	}
 	switch {
-	case strings.HasPrefix(repo, "https://"), strings.HasPrefix(repo, "ssh://"), strings.HasPrefix(repo, "git@"):
+	case strings.HasPrefix(repo, "https://"):
+		if strings.Contains(authority(strings.TrimPrefix(repo, "https://")), "@") {
+			return errors.New("an https repo must not carry a user name or password; git on the hub host and the clients uses a credential helper")
+		}
+		return nil
+	case strings.HasPrefix(repo, "ssh://"):
+		if user, _, found := strings.Cut(authority(strings.TrimPrefix(repo, "ssh://")), "@"); found && strings.Contains(user, ":") {
+			return errors.New("an ssh repo must not carry a password; use an ssh key or agent")
+		}
+		return nil
+	case strings.HasPrefix(repo, "git@"):
 		return nil
 	default:
 		return errors.New("repo must start with https://, ssh:// or git@")

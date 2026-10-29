@@ -17,9 +17,27 @@ func TestRefValidate(t *testing.T) {
 	if err := good.Validate(); err != nil {
 		t.Fatal(err)
 	}
+	for _, repo := range []string{
+		"https://example.com:8443/org/process.git",
+		"https://example.com/org/a@b.git",
+		"ssh://git@example.com/org/process.git",
+		"ssh://git@example.com:2222/org/process.git",
+		"git@example.com:org/process.git",
+	} {
+		r := good
+		r.Repo = repo
+		if err := r.Validate(); err != nil {
+			t.Errorf("%s refused: %v", repo, err)
+		}
+	}
 	bad := []Ref{
 		{Repo: "ftp://x", Commit: good.Commit, Manifest: good.Manifest},
 		{Repo: "-https://x", Commit: good.Commit, Manifest: good.Manifest},
+		// A credential in the URL would be served to every grant holder.
+		{Repo: "https://user:token@example.com/org/process.git", Commit: good.Commit, Manifest: good.Manifest},
+		{Repo: "https://token@example.com/org/process.git", Commit: good.Commit, Manifest: good.Manifest},
+		{Repo: "https://user:@example.com", Commit: good.Commit, Manifest: good.Manifest},
+		{Repo: "ssh://git:secret@example.com/org/process.git", Commit: good.Commit, Manifest: good.Manifest},
 		{Repo: good.Repo, Commit: "abc", Manifest: good.Manifest},
 		{Repo: good.Repo, Commit: strings.ToUpper(good.Commit), Manifest: good.Manifest},
 		{Repo: good.Repo, Commit: good.Commit, Manifest: "../x.json"},

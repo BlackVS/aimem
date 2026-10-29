@@ -47,6 +47,26 @@ currently 25); a binary refuses a database newer than it understands.
   sensitive or release PR; the worker takes the next task right after
   the merge.
 
+### Security
+
+- **The process reference needs a grant on the project, and its URL may
+  not carry a credential (audit A-4).** `GET /v1/projects/{p}/process`
+  checked only that the project exists, so any user token read the
+  repository URL, who selected it and, with `?history=1`, every earlier
+  selection and the kept sets. A selection also accepted
+  `https://user:token@host/...`, which would have published the token to
+  every token holder.
+  - The route now applies the set route's rule: a user token with a
+    current grant reads the current selection without `selected_by`; a
+    token without one gets 403, and an unknown project reads the same.
+  - `?history=1` is an admin read. Admin credentials and the hub host's
+    socket (the `aimem process` commands) are unchanged.
+  - A selection or default whose https URL carries a user name or
+    password, or whose ssh URL carries a password, is refused with 400.
+    Clients refuse such a stored reference too. Give Git on the hub host
+    its access through a credential helper or an ssh agent
+    (docs/ADMIN-MANUAL.md).
+
 ## [0.10.16] — 2026-10-28
 
 A hub can hold a default process that `aimem tasks on` applies to a

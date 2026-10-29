@@ -88,12 +88,16 @@ func decodeKept(v string) []string {
 	return kept
 }
 
-// getProcessRef answers the current selection; ?history=1 adds the
-// retained earlier selections (newest first), so historical evidence that
-// names a commit can still be resolved after a change, and the sets the
-// hub still keeps, so an admin sees which earlier selection needs no
-// re-import.
+// getProcessRef answers the current selection under the set's grant rule;
+// ?history=1 (admin) adds the retained earlier selections (newest first),
+// so historical evidence that names a commit can still be resolved after a
+// change, and the sets the hub still keeps, so an admin sees which earlier
+// selection needs no re-import. Who selected is an admin read too.
 func (s *Server) getProcessRef(w http.ResponseWriter, r *http.Request) {
+	history := r.URL.Query().Get("history") != ""
+	if s.projectReadDenied(w, r, "process reference", history) {
+		return
+	}
 	db := s.processProject(w, r)
 	if db == nil {
 		return
@@ -103,8 +107,12 @@ func (s *Server) getProcessRef(w http.ResponseWriter, r *http.Request) {
 		s.fail(w, http.StatusInternalServerError, err)
 		return
 	}
+	id, ok := IdentityFrom(r.Context())
+	if _, team := teamContextFrom(r.Context()); ref != nil && (team || ok && id.Role == "user") {
+		ref.SelectedBy = ""
+	}
 	out := map[string]any{"project": r.PathValue("p"), "current": ref}
-	if r.URL.Query().Get("history") != "" {
+	if history {
 		hist, err := db.GetMeta(processHistoryKey)
 		if err != nil {
 			s.fail(w, http.StatusInternalServerError, err)
@@ -138,7 +146,7 @@ func (s *Server) getProcessRef(w http.ResponseWriter, r *http.Request) {
 		}
 		out["sets"] = sets
 	}
-	if ref == nil && r.URL.Query().Get("history") == "" {
+	if ref == nil && !history {
 		s.fail(w, http.StatusNotFound, errors.New("no process reference selected for this project; an admin selects one (aimem process select … on the hub host)"))
 		return
 	}
@@ -331,7 +339,7 @@ func (s *Server) putProcessRef(w http.ResponseWriter, r *http.Request) {
 	if result == nil {
 		s.log.Info("process reference cleared", "project", r.PathValue("p"), "by", taskActor(r).Name)
 	} else {
-		s.log.Info("process reference selected", "project", r.PathValue("p"), "commit", result.Commit, "digest", result.Digest, "imported", bundle != nil, "by", result.SelectedBy)
+		s.log.Info("process reference selected", "project", r.PathValue("p"), "commit", result.Commit, "digest", result.Digest, "imported", bundle != nil, "userinfo", "none", "by", result.SelectedBy)
 	}
 	s.ok(w, map[string]any{"project": r.PathValue("p"), "current": result, "imported": bundle != nil})
 }

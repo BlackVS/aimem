@@ -217,12 +217,12 @@ Idempotency-Key: scenario-02-first-task
 
 ### 16. The token is refused another project's process (workstation)
 
-The user is granted the second project, but this token is scoped to the first.
+The user is granted the second project, but this token is scoped to the first, so the hub refuses it the process reference.
 
 ```sh
 aimem process show -p <project-2>
 ```
 
 ```text
-access to the process set was DENIED on this machine
+does not permit reading this project's process reference
 ```
