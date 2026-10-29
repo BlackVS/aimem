@@ -20,6 +20,7 @@ import (
 
 	"aimem/internal/adapter"
 	"aimem/internal/process"
+	"aimem/internal/teamsession"
 )
 
 // setReadTimeout bounds the one read of a set from the hub; a cache miss
@@ -139,6 +140,9 @@ func fetchHubSet(hub *adapter.HubConfig, client *http.Client, project string, re
 }
 
 func hubErrorText(raw []byte, status int) string {
+	if r := teamsession.ParseRefusal(status, raw); r != nil {
+		return r.Error()
+	}
 	var e struct {
 		Error string `json:"error"`
 	}

@@ -19,12 +19,16 @@ import (
 	"aimem/internal/hubtest"
 	"aimem/internal/process"
 	"aimem/internal/taskcred"
+	"aimem/internal/teamsession"
 )
 
 // The fake hubs answer on loopback; on a loaded machine they can answer
 // later than the session-start bound, which is not what these tests check.
 func TestMain(m *testing.M) {
 	hubLookupTimeout = time.Minute
+	// A team conversation in the caller's environment would put ReadPin in
+	// team mode; the tests that want it set it themselves.
+	os.Unsetenv(teamsession.EnvVar)
 	os.Exit(m.Run())
 }
 

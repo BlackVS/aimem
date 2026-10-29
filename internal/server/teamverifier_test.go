@@ -153,6 +153,9 @@ func TestTeamRoutesAreTheApprovedMatrix(t *testing.T) {
 		// The project's repository under the profile's grant (DESIGN-AIFORGE-PILOT-1 §1),
 		// and the stored process set under the same rule (DESIGN-portable-team-context 1d).
 		"GET /v1/projects/{p}/repository",
+		// The selected process reference under the same rule (01a1884e):
+		// the member's `aimem process pin` reads it with the set.
+		"GET /v1/projects/{p}/process",
 		"GET /v1/projects/{p}/process/set",
 		"GET /v1/projects/{p}/skills",
 		"GET /v1/projects/{p}/skills/set",

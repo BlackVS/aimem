@@ -974,6 +974,16 @@ no Git and no route to the process repository. It caches nothing. A
 project with no selection, a selection without a stored set, a set that
 does not match, or a refused credential is an error with a non-zero exit.
 
+In a team conversation (`AIMEM_TEAM_SESSION` set, as aicrew launches a
+member), the command reads under the team's grant instead, the way the
+member's MCP tools do. It uses the session's hub and the installation's
+individual credential over verified TLS, and sends the session's handle
+with every request. It also checks that the hub's context report matches
+the session. The member's user needs no project grant of its own. A
+project the team's profile is not granted is refused (`grant_denied`) with
+the same message shape. Nothing falls back to the checkout's credential.
+The JSON is the same.
+
 ### Importing the skills sets
 
 The skills a process requires reach a member from the hub too, never from
