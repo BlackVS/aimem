@@ -351,7 +351,7 @@ func (r *Result) connect(dir, root string) (*adapter.HubConfig, *http.Client, bo
 			var rejected *taskcred.Rejected
 			if errors.As(err, &rejected) && (rejected.Status == http.StatusUnauthorized || rejected.Status == http.StatusForbidden) {
 				detail := fmt.Sprintf("the hub refused %s (HTTP %d); no other credential is used", rejected.Credential, rejected.Status)
-				return fail(Denied, detail, rejected.Fix, "process context unavailable: "+detail)
+				return fail(Denied, detail, rejected.Fix, "process context unavailable: "+detail+"; replace it: "+rejected.Fix)
 			}
 			// A local credential that cannot be validated is not used, and
 			// nothing cached stands in for it.
