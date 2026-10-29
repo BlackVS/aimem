@@ -201,7 +201,7 @@ the periodic sync as launchd user agents, which start at each login:
 
 ```sh
 cd ~/src/my-project
-curl -fsSL https://raw.githubusercontent.com/BlackVS/aimem/v0.10.18/boot.sh | bash
+curl -fsSL https://raw.githubusercontent.com/BlackVS/aimem/v0.10.19/boot.sh | bash
 export PATH="$HOME/.local/bin:$PATH"
 launchctl list | grep io.github.blackvs.aimem
 ```
@@ -223,7 +223,7 @@ Ubuntu) and runs the service as a systemd user unit:
 
 ```sh
 cd ~/src/my-project
-curl -fsSL https://raw.githubusercontent.com/BlackVS/aimem/v0.10.18/boot.sh | bash
+curl -fsSL https://raw.githubusercontent.com/BlackVS/aimem/v0.10.19/boot.sh | bash
 ```
 
 **Windows.** The installer registers a logon task for the
@@ -238,8 +238,8 @@ cd $HOME\src\my-project
   $ErrorActionPreference = 'Stop'
   $d = New-Item -ItemType Directory -Force (Join-Path $env:TEMP 'aimem-boot')
   $f = Join-Path $d 'boot.ps1'; $s = Join-Path $d 'SHA256SUMS'
-  Invoke-WebRequest https://github.com/BlackVS/aimem/releases/download/v0.10.18/boot.ps1 -OutFile $f -UseBasicParsing
-  Invoke-WebRequest https://github.com/BlackVS/aimem/releases/download/v0.10.18/SHA256SUMS -OutFile $s -UseBasicParsing
+  Invoke-WebRequest https://github.com/BlackVS/aimem/releases/download/v0.10.19/boot.ps1 -OutFile $f -UseBasicParsing
+  Invoke-WebRequest https://github.com/BlackVS/aimem/releases/download/v0.10.19/SHA256SUMS -OutFile $s -UseBasicParsing
   $want = ((Select-String -LiteralPath $s -Pattern '\sboot\.ps1$').Line -split '\s+')[0]
   if ((Get-FileHash -LiteralPath $f).Hash -ne $want) { throw 'boot.ps1 does not match SHA256SUMS' }
   Unblock-File -LiteralPath $f
