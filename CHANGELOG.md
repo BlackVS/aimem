@@ -33,6 +33,20 @@ currently 25); a binary refuses a database newer than it understands.
   source tarball do. `default show` says whether the files are kept, and
   `default clear` removes them.
 
+### Changed
+
+- **CI on a pull request runs the fast set; the slow checks run on
+  master.** A PR runs lint, build, the Linux tests and scenarios and the
+  installer container, in about two minutes. The Windows and macOS tests,
+  the Windows scenarios and the race runs, which made a PR's run about
+  six minutes, run on every push to master, nightly, on a manual run, and
+  on a release prepare PR (branch `release/v<version>`).
+  docs/DEVELOPMENT.md names the split. AGENTS.md gains the PR economy
+  rules: one task, one PR, one squash commit; gates by size and surface;
+  the architect session merges an ordinary PR and the operator a
+  sensitive or release PR; the worker takes the next task right after
+  the merge.
+
 ## [0.10.16] — 2026-10-28
 
 A hub can hold a default process that `aimem tasks on` applies to a

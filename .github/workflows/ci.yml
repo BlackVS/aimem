@@ -4,6 +4,18 @@ on:
   push:
     branches: [master]
   pull_request:
+  schedule:
+    - cron: '17 3 * * *'
+  workflow_dispatch:
+
+# A pull request runs the fast set: lint, build, the Linux tests and
+# scenarios, the installer container. The Windows and macOS legs and the
+# race runs, which set a pull request's wall time, run on every push to
+# master, nightly, on a manual run, and on a release prepare pull request
+# (branch release/v<version>), so the release gate still sees them
+# (docs/DEVELOPMENT.md, "Which checks run where"). The legs keep their
+# names on a pull request and pass without testing, because the master
+# ruleset requires every check by name.
 
 permissions:
   contents: read
@@ -72,9 +84,17 @@ jobs:
       matrix:
         os: [ubuntu-latest, windows-latest, macos-latest]
     runs-on: ${{ matrix.os }}
+    env:
+      FULL: ${{ github.event_name != 'pull_request' || startsWith(github.head_ref, 'release/') }}
+      RUN: ${{ matrix.os == 'ubuntu-latest' || github.event_name != 'pull_request' || startsWith(github.head_ref, 'release/') }}
     steps:
+      - name: on a pull request this leg runs on master
+        if: env.RUN != 'true'
+        run: echo "The ${{ matrix.os }} tests run on pushes to master, nightly and on release/ pull requests (docs/DEVELOPMENT.md)."
       - uses: actions/checkout@v7
+        if: env.RUN == 'true'
       - uses: actions/setup-go@v7
+        if: env.RUN == 'true'
         with:
           go-version: '1.26'
           check-latest: true   # the newest 1.26 patch, with its security fixes
@@ -82,22 +102,25 @@ jobs:
       # Build and test on the Go that setup-go installed, never a toolchain
       # that go.mod would download (docs/DEVELOPMENT.md, "Toolchain").
       - name: toolchain is the runner's Go 1.26
+        if: env.RUN == 'true'
         shell: bash
         run: |
           test "$(go env GOTOOLCHAIN)" = local
           go version | grep -q ' go1\.26'
       - run: go vet ./...
+        if: env.RUN == 'true'
       - run: go test ./...
+        if: env.RUN == 'true'
       # The client installer's launchd agents, against the runner's real
       # launchd: install, upgrade in place, uninstall.
       - name: macOS install registers launchd agents
-        if: matrix.os == 'macos-latest'
+        if: matrix.os == 'macos-latest' && env.RUN == 'true'
         run: bash scripts/check-launchd-install.sh
       # The end-to-end identity test races concurrent redemptions against
       # the rig's shared state. The race detector needs cgo, which the
       # Ubuntu runner has; 50 runs keep a lost update from passing by luck.
       - name: identity racing redemptions under the race detector
-        if: matrix.os == 'ubuntu-latest'
+        if: matrix.os == 'ubuntu-latest' && env.FULL == 'true'
         run: go test -race -count=50 -run '^TestIdentityRoutesEndToEndWithFakeVerifier$' ./internal/server/
 
   # The documented usage scenarios (docs/scenarios), run against the real
@@ -109,16 +132,25 @@ jobs:
         os: [ubuntu-latest, windows-latest]
     runs-on: ${{ matrix.os }}
     timeout-minutes: 10
+    env:
+      RUN: ${{ matrix.os == 'ubuntu-latest' || github.event_name != 'pull_request' || startsWith(github.head_ref, 'release/') }}
     steps:
+      - name: on a pull request this leg runs on master
+        if: env.RUN != 'true'
+        run: echo "The ${{ matrix.os }} scenarios run on pushes to master, nightly and on release/ pull requests (docs/DEVELOPMENT.md)."
       - uses: actions/checkout@v7
+        if: env.RUN == 'true'
       - uses: actions/setup-go@v7
+        if: env.RUN == 'true'
         with:
           go-version: '1.26'
           check-latest: true
           cache: true
       # The lint job's vet and staticcheck do not see tagged files.
       - run: go vet -tags scenario ./internal/scenario/...
+        if: env.RUN == 'true'
       - run: go test -tags scenario -count=1 -v ./internal/scenario/...
+        if: env.RUN == 'true'
 
   # install-hub.sh's install-only mode (AIMEM_NO_SERVICE=1) in a container
   # without systemd, from a local build: install, serve with the printed

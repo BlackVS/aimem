@@ -76,8 +76,8 @@ from another model family.
 POST the review as a comment on the PR, so the record lives with the
 code and survives the session. Only BLOCKER findings return the PR to
 implementation; track follow-ups separately. Blockers are fixed or
-explicitly accepted by the operator before merge; the merge click stays the
-operator's.
+explicitly accepted by the operator before merge. Who merges is set in
+"PR economy" below; the worker never merges.
 
 A review binds to the head it reviewed and to your change's patch. A
 new commit, or a base update that changes your own change (a conflict
@@ -123,6 +123,37 @@ automation (dependabot) arrive in parallel by nature — merge those
 one at a time, `@dependabot rebase` before each; and a genuinely
 independent pair (disjoint files, no shared CHANGELOG entry) may
 overlap when the operator says so.
+
+## PR economy
+
+Operator decision of 2026-10-29. A pull request has a fixed cost: a CI
+run, three readings and a second CI run after the merge before DONE.
+These rules keep that cost in proportion to the change.
+
+- **Granularity.** One board task is one PR, and lands as one commit on
+  master by squash merge. A task is no finer than S. Review findings are
+  grouped per surface into one task, not one task per finding. An L or
+  XL task is split into parts no finer than M.
+- **Gates by size and surface.** An XS or S task on an ordinary surface
+  gets the worker's medium pre-push review, its high review at the final
+  head and the external review; the architect does not review it. An M
+  task, or any task on a sensitive surface, adds the architect's high
+  review at the final head. The sensitive surfaces here are the HTTP API
+  and authentication, the access and task schemas and the migrations,
+  the installers (`boot.sh`, `boot.ps1`, `install-hub.sh`) and the sync
+  protocol.
+- **Who merges.** An ordinary PR is merged by the architect session
+  once every review its gates require is READY_FOR_HUMAN_MERGE at the
+  final head and CI is green. A PR on a sensitive surface, and a release
+  prepare PR, is merged by the operator.
+- **After the merge.** The worker takes its next task right after the
+  merge. It records the delivered task DONE, with verify-delivery's
+  evidence, when the CI run on the merge commit is green.
+
+CI on a pull request runs the fast set; the slow checks run on master
+(docs/DEVELOPMENT.md, "Which checks run where"). A change that only a
+Windows or macOS leg would test is tested on that platform before the
+push.
 
 ## Working in this repo
 
