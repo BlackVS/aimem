@@ -488,7 +488,7 @@ func writeExport(b *process.Bundle, sel process.Ref, out string) (archivePath, s
 	}
 	name := fmt.Sprintf("%s-%s.tar.gz", process.SetName(sel.Repo, sel.Manifest), sel.Commit[:12])
 	var buf bytes.Buffer
-	if err := process.WriteArchive(&buf, b); err != nil {
+	if err := process.WriteArchiveAt(&buf, b, sel.Commit); err != nil {
 		return "", "", err
 	}
 	archivePath = filepath.Join(out, name)

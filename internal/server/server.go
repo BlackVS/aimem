@@ -221,6 +221,7 @@ func (s *Server) Routes() []Route {
 		{"GET", "/v1/process-default", s.getProcessDefault, true},
 		{"PUT", "/v1/process-default", s.putProcessDefault, true},
 		{"DELETE", "/v1/process-default", s.deleteProcessDefault, true},
+		{"GET", "/v1/process-default/set", s.getProcessDefaultSet, true},
 		{"GET", "/v1/skills", s.getSkills, true},
 		{"GET", "/v1/skills/{source}", s.getSkillsSet, true},
 		{"PUT", "/v1/skills/{source}", s.putSkillsSet, true},

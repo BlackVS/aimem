@@ -5,8 +5,11 @@ package main
 // select` taking a bare commit only with --commit.
 
 import (
+	"encoding/json"
 	"errors"
 	"net/http"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -68,7 +71,7 @@ func TestProcessDefaultSetShowClear(t *testing.T) {
 	if err != nil {
 		t.Fatalf("set: %v\n%s", err, out)
 	}
-	for _, want := range []string{"  repository  " + repo + "\n", "  tag         v1\n", "  commit      " + tags["v1"] + "\n", "  manifest    " + process.DefaultManifest + "\n", "  set         "} {
+	for _, want := range []string{"  repository  " + repo + "\n", "  tag         v1\n", "  commit      " + tags["v1"] + "\n", "  manifest    " + process.DefaultManifest + "\n", "  set         ", "  files       kept on the hub (set "} {
 		if !strings.Contains(out, want) {
 			t.Fatalf("set prints no %q:\n%s", want, out)
 		}
@@ -167,18 +170,150 @@ func TestTasksOnAppliesTheHubDefault(t *testing.T) {
 		t.Fatal("tasks off took --no-process")
 	}
 
-	// A default whose set no longer reads as stored is not applied; tasks
-	// stay on and the gap is printed with the error.
-	fetchGit = func(process.Ref) (*process.Bundle, error) { return nil, errors.New("unreachable") }
-	oldForge := forgeClient
-	forgeClient = &http.Client{Transport: failingTransport{}}
-	t.Cleanup(func() { forgeClient = oldForge })
+	// The hub keeps the default's set, so it is applied with neither Git
+	// nor the forge reachable.
+	noNetwork(t)
 	out, err = tasks("on", "-p", "plain")
+	if err != nil || !strings.Contains(out, "applied the hub's default process: "+def.Name+" (tag v1, commit "+def.Commit+")\n") {
+		t.Fatalf("offline apply: %v\n%s", err, out)
+	}
+	if sel, _ := currentSelection("plain"); sel == nil || sel.Commit != def.Commit || sel.Digest != def.Digest {
+		t.Fatalf("offline apply recorded %+v", sel)
+	}
+}
+
+// noNetwork makes every read of a set or a tag fail, as on a hub host
+// with no network: no tag resolves, Git reads nothing and the forge is
+// unreachable.
+func noNetwork(t *testing.T) {
+	t.Helper()
+	oldResolve, oldGit, oldForge := resolveRef, fetchGit, forgeClient
+	t.Cleanup(func() { resolveRef, fetchGit, forgeClient = oldResolve, oldGit, oldForge })
+	resolveRef = func(string, string) (string, error) { return "", errors.New("no network in this test") }
+	fetchGit = func(process.Ref) (*process.Bundle, error) { return nil, errors.New("no network in this test") }
+	forgeClient = &http.Client{Transport: failingTransport{}}
+}
+
+// A default stored by an older command (the digest, no files) is applied
+// from the repository as before, and not applied when the repository
+// cannot be read: tasks stay on and the gap is printed with the error.
+func TestTasksOnAppliesADigestOnlyDefaultFromGit(t *testing.T) {
+	reg := projectService(t)
+	for _, p := range []string{"one", "two"} {
+		if _, err := reg.Open(p); err != nil {
+			t.Fatal(err)
+		}
+	}
+	repo, tags := defaultRig(t)
+	sel := process.Ref{Repo: repo, Ref: "v1", Commit: tags["v1"], Manifest: process.DefaultManifest}
+	b, err := fetchGit(sel)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sel.Digest = b.Digest()
+	raw, _ := json.Marshal(sel)
+	var stored map[string]any
+	if err := localJSON(http.MethodPut, "/v1/process-default", raw, &stored); err != nil {
+		t.Fatal(err)
+	}
+	if show, err := stdoutOf(t, func() error { return processCmd([]string{"default", "show"}) }); err != nil || !strings.Contains(show, "  files       not kept on the hub") {
+		t.Fatalf("show: %v\n%s", err, show)
+	}
+	reads := 0
+	git := fetchGit
+	fetchGit = func(s process.Ref) (*process.Bundle, error) { reads++; return git(s) }
+	tasks := func(args ...string) (string, error) {
+		return stdoutOf(t, func() error { return tasksCmd(args) })
+	}
+	if out, err := tasks("on", "-p", "one"); err != nil || !strings.Contains(out, "applied the hub's default process") || reads != 1 {
+		t.Fatalf("digest-only apply (%d Git reads): %v\n%s", reads, err, out)
+	}
+	if got, _ := currentSelection("one"); got == nil || got.Commit != sel.Commit || got.Digest != sel.Digest {
+		t.Fatalf("recorded %+v", got)
+	}
+
+	noNetwork(t)
+	out, err := tasks("on", "-p", "two")
 	if err == nil || !strings.Contains(err.Error(), "tasks are on, but the hub's default process was not applied") || !strings.Contains(out, notReady) {
 		t.Fatalf("failed apply: %v\n%s", err, out)
 	}
-	if sel, _ := currentSelection("plain"); sel != nil {
-		t.Fatalf("a failed apply selected %+v", sel)
+	if got, _ := currentSelection("two"); got != nil {
+		t.Fatalf("a failed apply selected %+v", got)
+	}
+}
+
+// default set --from-archive reads nothing over the network: the set is
+// the verified archive's and the commit the one it records. An archive
+// its sums do not vouch for, or one that records no commit, is refused;
+// clear removes the kept set.
+func TestProcessDefaultSetFromArchiveOffline(t *testing.T) {
+	reg := projectService(t)
+	if _, err := reg.Open("fresh"); err != nil {
+		t.Fatal(err)
+	}
+	const repo = "https://example.com/team/process.git"
+	commit := strings.Repeat("e1", 20)
+	archive, sums := exportFixture(t, repo, commit, process.DefaultManifest)
+	noNetwork(t)
+	run := func(args ...string) (string, error) {
+		return stdoutOf(t, func() error { return processCmd(append([]string{"default"}, args...)) })
+	}
+
+	bad := filepath.Join(t.TempDir(), "SHA256SUMS")
+	if err := os.WriteFile(bad, []byte(strings.Repeat("0", 64)+"  "+filepath.Base(archive)+"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := run("set", repo, "v1", "--from-archive", archive, "--sums", bad); err == nil || !strings.Contains(err.Error(), "does not match its line in "+bad) {
+		t.Fatalf("a mismatched sums file: %v", err)
+	}
+	// An archive that records no commit says how to get one that does.
+	b, err := process.ReadArchiveFile(archive, sums, process.DefaultManifest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	plain, plainSums, err := writeExport(b, process.Ref{Repo: repo, Commit: strings.Repeat("e2", 20), Manifest: process.DefaultManifest}, t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	var buf strings.Builder
+	process.WriteArchive(&buf, b)
+	if err := os.WriteFile(plain, []byte(buf.String()), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(plainSums, []byte(process.SumsLine([]byte(buf.String()), filepath.Base(plain))), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := run("set", repo, "v1", "--from-archive", plain); err == nil || !strings.Contains(err.Error(), "records no commit") {
+		t.Fatalf("an archive without its commit: %v", err)
+	}
+	if def, err := hubProcessDefault(); err != nil || def != nil {
+		t.Fatalf("a refused set stored %+v %v", def, err)
+	}
+
+	out, err := run("set", repo, "v1", "--from-archive", archive, "--sums", sums)
+	if err != nil {
+		t.Fatalf("offline set: %v\n%s", err, out)
+	}
+	if !strings.Contains(out, "  commit      "+commit+"\n") || !strings.Contains(out, "  files       kept on the hub (set ") {
+		t.Fatalf("offline set prints:\n%s", out)
+	}
+	def, err := hubProcessDefault()
+	if err != nil || def == nil || def.Ref != "v1" || def.Commit != commit || def.Digest != b.Digest() {
+		t.Fatalf("stored %+v %v", def, err)
+	}
+	if out, err := stdoutOf(t, func() error { return tasksCmd([]string{"on", "-p", "fresh"}) }); err != nil || !strings.Contains(out, "applied the hub's default process") {
+		t.Fatalf("offline apply: %v\n%s", err, out)
+	}
+
+	kept := filepath.Join(reg.Root(), "process-default-set.json")
+	if _, err := os.Stat(kept); err != nil {
+		t.Fatalf("the kept set: %v", err)
+	}
+	if _, err := run("clear"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(kept); !os.IsNotExist(err) {
+		t.Fatalf("clear left the kept set: %v", err)
 	}
 }
 
