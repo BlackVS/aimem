@@ -13,6 +13,50 @@ currently 25); a binary refuses a database newer than it understands.
 
 ## [Unreleased]
 
+## [0.10.20] — 2026-10-30
+
+`aimem wire` wires a linked worktree of a wired checkout, and refuses an
+empty `.aimem.json` there as it does in the main checkout. A project
+wired on Windows now gets the guarded Claude Code handoff hook, so a
+collaborator without aimem sees no hook error. A retried task write
+returns its stored receipt instead of meeting the readability check
+again. The on-disk schema stays at 25 and the access schema at 9.
+Includes PR #332, #333, #334, #335 and #336.
+
+### Upgrade notes
+
+- **A project already wired on Windows keeps its bare Claude Code
+  hook.** `aimem wire` writes the guarded form
+  `command -v aimem >/dev/null 2>&1 && aimem session-start || true` only
+  when it adds the hook. A project wired on Windows by an earlier release
+  has the bare `aimem session-start` in `.claude/settings.json`; it still
+  counts as present, works for everyone with aimem, and is not rewritten.
+  To spare its collaborators without aimem the hook error, replace that
+  command with the guarded form by hand, or delete the hook entry and
+  run `aimem wire` again, which adds the guarded one. Then commit the
+  file if the project keeps it in Git. Projects wired on Linux or macOS
+  already have the guarded form.
+- **The Codex hook does not change.** `.codex/hooks.json` keeps the bare
+  `aimem session-start`: Codex runs hook commands without a shell, so
+  the command cannot be guarded. A Codex collaborator without aimem sees
+  one non-fatal `hook: SessionStart Failed` line per session start, as
+  before. Because the spelling is the same, Codex does not ask to trust
+  the hook again.
+- **A worktree of a wired checkout can be wired now.** Run
+  `aimem wire` at the worktree's top. It writes the client files there
+  and no `.aimem.json`; the main checkout's file governs. An empty or
+  whitespace-only main `.aimem.json` makes it fail and exit non-zero:
+  write `{}` into that file, or remove it, in the main checkout.
+- **Clients and hubs can be upgraded in either order.** No route or
+  answer shape changed. Only a hub at 0.10.20 replays a retried task
+  write before the readability check; an older hub answers such a retry
+  as before.
+- **Clients upgrade with `aimem upgrade`**, from 0.10.19. A client on
+  0.10.18 or older moves once with the one-liner. A hub keeps
+  `install-hub.sh`.
+- **The on-disk schema stays at 25 and the access schema at 9.** A hub
+  or a client goes back to 0.10.19 by putting its binary back.
+
 ### Changed
 
 - **`aimem wire` wires a linked worktree of a wired checkout.** It used
@@ -61,6 +105,13 @@ currently 25); a binary refuses a database newer than it understands.
   between. Such a retry now returns the stored result unchecked. The same
   key with other content is a new write and is checked as before.
   Authorization is unchanged.
+
+- **A flaky process test.** The test that the process import's git runs
+  with a minimal environment ran a copy of the test binary as a stub git,
+  bounded by the 10 s fetch timeout. Under a full parallel run on Windows,
+  starting that fresh executable sometimes took longer, and the test
+  failed. It now inspects the environment of the command git() builds,
+  without running a child. Behaviour is unchanged.
 
 ## [0.10.19] — 2026-10-29
 
