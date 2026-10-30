@@ -173,8 +173,28 @@ func (s *Store) prune(ix *Index) {
 	if err != nil {
 		return
 	}
+	s.sweepTemp(entries)
 	for _, d := range entries {
 		if ValidDigest(d.Name()) && !keep[d.Name()] {
+			os.RemoveAll(filepath.Join(s.Dir(), "sets", d.Name()))
+		}
+	}
+}
+
+// tempMaxAge is how old a temporary directory under sets must be before
+// housekeeping removes it; a younger one may still be filling.
+const tempMaxAge = time.Hour
+
+// sweepTemp removes the temporary directories an interrupted put left
+// under sets (a crash between MkdirTemp and the rename). It goes by the
+// directory's modification time, so another process's put in progress
+// is left alone; a digest-named entry is never one of them.
+func (s *Store) sweepTemp(entries []os.DirEntry) {
+	for _, d := range entries {
+		if !strings.HasPrefix(d.Name(), ".tmp-") {
+			continue
+		}
+		if fi, err := d.Info(); err == nil && time.Since(fi.ModTime()) > tempMaxAge {
 			os.RemoveAll(filepath.Join(s.Dir(), "sets", d.Name()))
 		}
 	}
@@ -315,6 +335,7 @@ func (s *Store) Trim(n int) {
 	if err != nil {
 		return
 	}
+	s.sweepTemp(entries)
 	type aged struct {
 		name string
 		mod  time.Time
