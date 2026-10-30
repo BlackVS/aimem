@@ -552,6 +552,11 @@ func loadSetFrom(read func(p string) ([]byte, error), ref Ref) (*Set, error) {
 func git(ctx context.Context, dir string, args ...string) ([]byte, error) {
 	ctx, cancel := context.WithTimeout(ctx, FetchTimeout)
 	defer cancel()
+	return runBounded(gitCmd(ctx, dir, args...))
+}
+
+// gitCmd builds the git child with the environment it runs with.
+func gitCmd(ctx context.Context, dir string, args ...string) *exec.Cmd {
 	cmd := exec.CommandContext(ctx, "git", args...)
 	if dir != "" {
 		cmd.Dir = dir
@@ -565,7 +570,7 @@ func git(ctx context.Context, dir string, args ...string) ([]byte, error) {
 	if dir != "" && !sshCommandConfigured(ctx, dir) {
 		cmd.Env = append(cmd.Env, "GIT_SSH_COMMAND=ssh -o BatchMode=yes")
 	}
-	return runBounded(cmd)
+	return cmd
 }
 
 // gitEnvNames is what git needs beyond childenv's base to reach a
