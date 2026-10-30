@@ -319,11 +319,16 @@ func validToken(token string) bool {
 	return err == nil
 }
 
+// ClientTimeout bounds each request of Client. It is a var only so that
+// test mains whose loopback fakes answer it can raise it; nothing else
+// changes it.
+var ClientTimeout = 30 * time.Second
+
 // Client is the hub's strict client: every selection carries an
 // individual credential, project-local or the hub entry's own. A refusal
 // names the hub and wraps adapter.ErrUntrustedHub.
 func (s *Selection) Client() (*http.Client, error) {
-	c, err := s.Hub.StrictClient(30 * time.Second)
+	c, err := s.Hub.StrictClient(ClientTimeout)
 	if err != nil {
 		return nil, fmt.Errorf("hub %q: %w", s.HubName, err)
 	}

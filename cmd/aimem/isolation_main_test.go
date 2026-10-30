@@ -4,10 +4,12 @@ import (
 	"io"
 	"os"
 	"testing"
+	"time"
 
 	"aimem/internal/adapter"
 	"aimem/internal/isolation"
 	"aimem/internal/provider"
+	"aimem/internal/taskcred"
 	"aimem/internal/textcheck"
 )
 
@@ -25,5 +27,10 @@ func TestMain(m *testing.M) {
 	os.Setenv(textcheck.FilterKey, "")
 	os.Setenv(provider.AllowPrivateEnv, "1") // the fake model servers listen on loopback
 	hubAddWarn = func(io.Writer, string, *adapter.HubConfig) {}
+	// The fake hubs answer on loopback, later than these bounds on a
+	// loaded machine, which no test here is about.
+	adapter.PushTimeout = time.Minute
+	sourceTimeout = time.Minute
+	taskcred.ClientTimeout = time.Minute
 	os.Exit(m.Run())
 }

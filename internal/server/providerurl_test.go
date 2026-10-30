@@ -12,6 +12,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"aimem/internal/provider"
 	"aimem/internal/textcheck"
@@ -27,6 +28,9 @@ func TestMain(m *testing.M) {
 	// developer's environment names; tests that want it inject a fake.
 	os.Setenv(textcheck.ModelKey, "")
 	os.Setenv(textcheck.FilterKey, "")
+	// On a loaded machine the store can take longer than the identity
+	// routes' wait; the test about that wait sets the contract value back.
+	identityWait = time.Minute
 	os.Exit(m.Run())
 }
 

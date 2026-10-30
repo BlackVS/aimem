@@ -26,6 +26,8 @@ import (
 // later than the session-start bound, which is not what these tests check.
 func TestMain(m *testing.M) {
 	hubLookupTimeout = time.Minute
+	setReadTimeout = time.Minute
+	adapter.PushTimeout = time.Minute
 	// A team conversation in the caller's environment would put ReadPin in
 	// team mode; the tests that want it set it themselves.
 	os.Unsetenv(teamsession.EnvVar)

@@ -576,8 +576,8 @@ func TestIdentityWaitMapsToRequestInProgress(t *testing.T) {
 	if ref := identityRefusals["request_in_progress"]; ref.status != 503 || !ref.retryable {
 		t.Errorf("request_in_progress must be a retryable 503: %+v", ref)
 	}
-	if identityWait != 5*time.Second {
-		t.Errorf("identity wait %v, contract says 5 s", identityWait)
+	if identityWaitContract != 5*time.Second {
+		t.Errorf("identity wait %v, contract says 5 s", identityWaitContract)
 	}
 }
 

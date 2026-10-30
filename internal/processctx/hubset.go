@@ -24,8 +24,9 @@ import (
 )
 
 // setReadTimeout bounds the one read of a set from the hub; a cache miss
-// pays it once per digest, as a Git fetch was paid once per commit.
-const setReadTimeout = process.FetchTimeout
+// pays it once per digest, as a Git fetch was paid once per commit. A var
+// so that TestMain can raise it for the loopback fakes.
+var setReadTimeout = process.FetchTimeout
 
 // setBodyMax bounds the hub's answer: the set's bytes base64-encoded in
 // JSON, with room for the envelope.

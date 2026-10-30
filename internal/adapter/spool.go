@@ -94,12 +94,17 @@ type Client struct {
 	pushOff sync.Once
 }
 
+// localTimeout bounds each call to the local service: hooks must never
+// hang the coding client. A var so that TestMain can raise it for the
+// in-process services.
+var localTimeout = 5 * time.Second
+
 func NewClient(stateRoot string) *Client {
 	sock := server.SocketPath(stateRoot)
 	return &Client{
 		root: stateRoot,
 		http: &http.Client{
-			Timeout: 5 * time.Second, // hooks must never hang the coding client
+			Timeout: localTimeout,
 			Transport: &http.Transport{
 				DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
 					var d net.Dialer
