@@ -36,10 +36,12 @@ A pull request runs the fast set, so a PR's CI takes about two minutes:
   whose behaviour depends on the operating system: `internal/wiring`,
   `internal/process`, `internal/processctx`, `internal/childenv`,
   `internal/filelock`, `internal/privatefile`, `internal/taskcred`,
-  `internal/upgrade`, `internal/adapter` and `internal/installer`
-  (paths and 8.3 short names, git and its environment, file locks and
-  permissions, hooks, the binary swap, the installers under Windows
-  PowerShell);
+  `internal/upgrade` and `internal/adapter` (paths and 8.3 short names,
+  git and its environment, file locks and permissions, hooks, the
+  binary swap), and boot.ps1's tests from `internal/installer`
+  (`go test -run '^Test(BootPs1|DocumentedWindowsInstall)'`); the rest
+  of `internal/installer` takes over five minutes on the runner and
+  runs on master;
 - `scenario (ubuntu-latest)` and `install-hub-container`.
 
 The slow checks run on every push to master, nightly, on a manual run
