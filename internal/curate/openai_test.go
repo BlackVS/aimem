@@ -8,7 +8,41 @@ import (
 	"testing"
 
 	"aimem/internal/llmrate"
+	"aimem/internal/provider"
 )
+
+// Curation's completion call goes through the provider dial guard: a
+// model server on loopback is refused without the flag, before any
+// request is sent, and served with it.
+func TestCompleteRefusesPrivateUnlessAllowed(t *testing.T) {
+	var calls atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls.Add(1)
+		w.Write([]byte(`{"choices":[{"message":{"content":"fine"}}]}`))
+	}))
+	defer srv.Close()
+	x := &OpenAIExtractor{BaseURL: srv.URL, Model: "m"}
+
+	t.Setenv(provider.AllowPrivateEnv, "")
+	if _, _, err := x.Complete("p"); err == nil || !strings.Contains(err.Error(), provider.AllowPrivateEnv) {
+		t.Fatalf("loopback completion without the flag: %v", err)
+	}
+	if n := calls.Load(); n != 0 {
+		t.Fatalf("%d requests reached the server without the flag", n)
+	}
+
+	t.Setenv(provider.AllowPrivateEnv, "1")
+	if got, _, err := x.Complete("p"); err != nil || got != "fine" {
+		t.Fatalf("loopback completion with the flag: %q, %v", got, err)
+	}
+
+	// The host's own AIMEM_OPENAI_* pair is not guarded.
+	t.Setenv(provider.AllowPrivateEnv, "")
+	env := &OpenAIExtractor{BaseURL: srv.URL, Model: "m", FromEnv: true}
+	if got, _, err := env.Complete("p"); err != nil || got != "fine" {
+		t.Fatalf("env-pair completion without the flag: %q, %v", got, err)
+	}
+}
 
 // A 200 completion whose content mentions Cloudflare is an answer, not a
 // block page: it is returned at once, with no retry and no widened

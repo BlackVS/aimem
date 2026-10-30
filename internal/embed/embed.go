@@ -34,6 +34,9 @@ type Client struct {
 	// the nightly sweep all scan every vector, so this is the cheapest
 	// lever on a knowledge base heading past ~10^3 facts/project.
 	Dim int
+	// FromEnv: the endpoint is the host's AIMEM_OPENAI_* pair
+	// (provider.Endpoint.FromEnv), which dials without the provider guard.
+	FromEnv bool
 }
 
 // Key identifies the vector space these embeddings live in. Vectors of
@@ -85,7 +88,7 @@ func ForModel(root, model string) *Client {
 	dim, _ := strconv.Atoi(os.Getenv("AIMEM_EMBED_DIM"))
 	// ep.Model is the payload name (an alias binding's upstream); vectors
 	// are keyed by it too, consistently on the write and query paths.
-	return &Client{BaseURL: ep.BaseURL, APIKey: ep.Token, Model: ep.Model, Dim: dim}
+	return &Client{BaseURL: ep.BaseURL, APIKey: ep.Token, Model: ep.Model, Dim: dim, FromEnv: ep.FromEnv}
 }
 
 // Embed returns one vector per input text, in order, plus the request's
@@ -121,7 +124,7 @@ func (c *Client) Embed(texts []string) ([][]float32, int64, error) {
 		}
 		req.Header.Set("Content-Type", "application/json")
 		req.Header.Set("Authorization", "Bearer "+c.APIKey)
-		resp, err := (&http.Client{Timeout: 60 * time.Second}).Do(req)
+		resp, err := provider.HTTPClient(60*time.Second, c.FromEnv).Do(req)
 		if err != nil {
 			return nil, 0, err
 		}

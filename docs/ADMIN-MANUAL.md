@@ -293,9 +293,11 @@ Manual equivalent (what the script sets up):
    AIMEM_OPENAI_API_KEY=<api key>
    AIMEM_OPENAI_BASE_URL=https://llm.example.com/v1   # omit for api.openai.com
    # Provider registry (console, Usage tab): base URLs must be public
-   # https endpoints. Set this to allow http and loopback, private or
-   # link-local addresses (a local Ollama, a LAN gateway). The admin API
-   # cannot set it.
+   # https endpoints, and curation, embeddings and the text check reach
+   # registry providers only at public addresses. Set this to allow http
+   # and loopback, private or link-local addresses (a local Ollama, a LAN
+   # gateway). The admin API cannot set it. The AIMEM_OPENAI_* pair above
+   # needs no such setting.
    #AIMEM_PROVIDER_ALLOW_PRIVATE=1
    # LLM call pacing (optional): outbound curate/embed calls are spaced
    # AIMEM_LLM_INTERVAL seconds apart (default 2; 0 disables) and retry
@@ -646,8 +648,9 @@ console's model list button asks the provider).
   server or vLLM, keeps the text inside your network. This is the choice
   for a closed network or a confidential project. A loopback or private
   address needs `AIMEM_PROVIDER_ALLOW_PRIVATE=1` in the hub's env file,
-  and the provider needs a token, so give any non-empty value when the
-  server checks none.
+  both to save the provider and for the stage to reach it, and the
+  provider needs a token, so give any non-empty value when the server
+  checks none.
 - **A paid API.** Any vendor's API at a small, cheap model. The stage
   sends a few hundred tokens per flagged write and only for flagged
   writes, and the daily cap bounds the rest.
