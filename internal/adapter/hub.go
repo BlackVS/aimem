@@ -95,9 +95,9 @@ func (h *HubConfig) HTTPClient() *http.Client {
 		return h.cachedClient()
 	}
 	if h.Insecure {
-		return hubHTTPInsecure
+		return &http.Client{Timeout: PushTimeout, Transport: insecureTransport}
 	}
-	return hubHTTP
+	return &http.Client{Timeout: PushTimeout}
 }
 
 // hubsFile is the on-disk shape of hub.json. Two generations coexist:
@@ -316,14 +316,14 @@ func (c *Client) hubSpoolPathFor(name string) string {
 	return filepath.Join(c.root, "spool", "hub-"+name+".jsonl")
 }
 
-var hubHTTP = &http.Client{Timeout: 5 * time.Second}
+// PushTimeout bounds each request of the push clients (HTTPClient). It
+// is a var only so that test mains whose loopback fakes answer these
+// clients can raise it; nothing else changes it.
+var PushTimeout = 5 * time.Second
 
-// hubHTTPInsecure serves hubs in their self-signed phase (Insecure flag).
-var hubHTTPInsecure = &http.Client{
-	Timeout: 5 * time.Second,
-	Transport: &http.Transport{
-		TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
-	},
+// insecureTransport serves hubs in their self-signed phase (Insecure flag).
+var insecureTransport = &http.Transport{
+	TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
 }
 
 // pushHub sends one already-redacted payload to the configured hub, spooling

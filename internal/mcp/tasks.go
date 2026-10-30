@@ -782,6 +782,11 @@ const (
 	taskStateUnknown  = "unknown"
 )
 
+// taskCheckTimeout bounds the identity reads that precede a task call: the
+// task-state probe and a project-local credential's validation. A var so
+// that TestMain can raise it for the loopback fakes.
+var taskCheckTimeout = 5 * time.Second
+
 // probeTaskState asks the project's hub, with the task credential, whether
 // tasks are enabled for the project — once, at session start. Anything
 // short of a definite answer is unknown: no credential configured, the
@@ -795,7 +800,7 @@ func probeTaskState(dir, root, project string) string {
 	if err != nil {
 		return taskStateUnknown
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), taskCheckTimeout)
 	defer cancel()
 	status, body, err := call(ctx, "GET", "/v1/access/identity?project="+url.QueryEscape(project), nil, nil)
 	if err != nil || status != http.StatusOK {
@@ -831,7 +836,7 @@ func taskCallerIn(dir, root string) (TaskCallFunc, error) {
 	}
 	call := hubCaller(selected.Hub.URL, selected.Token, client)
 	return func(ctx context.Context, method, path string, headers map[string]string, body []byte) (int, []byte, error) {
-		checkCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+		checkCtx, cancel := context.WithTimeout(ctx, taskCheckTimeout)
 		defer cancel()
 		if err := selected.Validate(checkCtx); err != nil {
 			return 0, nil, err

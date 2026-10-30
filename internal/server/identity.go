@@ -25,8 +25,12 @@ const identityVersionHeader = "X-Aimem-Identity-Version"
 
 // identityWait bounds how long a proof or redemption waits for the store; an
 // identical in-flight request that is still running past it gets the
-// retryable request_in_progress and nothing is applied.
-const identityWait = 5 * time.Second
+// retryable request_in_progress and nothing is applied. identityWait is
+// a var only so that TestMain can raise it; the contract is
+// identityWaitContract.
+const identityWaitContract = 5 * time.Second
+
+var identityWait = identityWaitContract
 
 // identityRefusal is the context contract's refusal envelope. It never
 // carries a bearer, receipt or another actor's identity.

@@ -22,8 +22,12 @@ type sourceReport struct {
 	Detail string `json:"detail,omitempty"`
 }
 
+// sourceTimeout bounds show-source's identity read; a var so that TestMain
+// can raise it for the loopback fakes.
+var sourceTimeout = 5 * time.Second
+
 func showSource(s *taskcred.Selection) sourceReport {
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), sourceTimeout)
 	defer cancel()
 	id, err := s.Identity(ctx)
 	var rejected *taskcred.Rejected

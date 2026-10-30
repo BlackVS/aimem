@@ -523,6 +523,9 @@ func TestReadScopeRefusals(t *testing.T) {
 // retryable request_in_progress while the connection is still held, and
 // answers normally once it frees.
 func TestReadScopeBusyStoreRefusesWithinTheDeadline(t *testing.T) {
+	raised := identityWait
+	identityWait = identityWaitContract
+	t.Cleanup(func() { identityWait = raised })
 	g := newReadRig(t)
 	indep := g.member(t, "independent", "agent-indep", "sess-i")
 	task := g.readyTask(t, g.alpha)

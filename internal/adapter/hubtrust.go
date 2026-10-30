@@ -171,8 +171,8 @@ func (h *HubConfig) cachedClient() *http.Client {
 		return c.(*http.Client)
 	}
 	if _, err := h.TLSConfig(); err != nil {
-		return h.Client(5 * time.Second)
+		return h.Client(PushTimeout)
 	}
-	c, _ := hubClients.LoadOrStore(k, h.Client(5*time.Second))
+	c, _ := hubClients.LoadOrStore(k, h.Client(PushTimeout))
 	return c.(*http.Client)
 }
