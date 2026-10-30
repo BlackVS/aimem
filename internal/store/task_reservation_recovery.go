@@ -86,7 +86,7 @@ func (r *Registry) RecoverTaskReservation(ctx context.Context, op RecoveryOperat
 	if evidence.Kind == "stop_evidence" && evidence.HolderRef == "" {
 		return TaskReservationOutcome{}, invalid(errors.New("stop evidence names the hold it was verified against"))
 	}
-	ctx, cancel := context.WithTimeout(ctx, dependencyClaimTimeout)
+	ctx, cancel := context.WithTimeout(ctx, r.claimBudget())
 	defer cancel()
 	if err := r.lockClaimLifecycle(ctx); err != nil {
 		return TaskReservationOutcome{}, err

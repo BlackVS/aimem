@@ -3,6 +3,7 @@ package process
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -409,6 +410,31 @@ func TestRunBoundedReturnsDespiteHeldPipes(t *testing.T) {
 	// pipes for 30 s — so the slack is generous for a slow CI runner.
 	if took > 500*time.Millisecond+PipeDrainDelay+10*time.Second {
 		t.Fatalf("runBounded held for %v despite the held pipes", took)
+	}
+}
+
+// A git child its deadline killed is reported as stopped by the
+// deadline, not by the exit status the kill left (1 on Windows, with no
+// output), which read as git's own failure. The test binary plays the
+// child, which sleeps past the deadline.
+func TestKilledChildNamesTheDeadline(t *testing.T) {
+	if os.Getenv("PROCESS_TEST_HELPER") == "sleeper" {
+		time.Sleep(30 * time.Second)
+		os.Exit(0)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 300*time.Millisecond)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, os.Args[0], "-test.run=TestKilledChildNamesTheDeadline")
+	cmd.Env = append(os.Environ(), "PROCESS_TEST_HELPER=sleeper")
+	out, err := runUntil(ctx, cmd)
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("a child killed at the deadline must report the deadline, got %v", err)
+	}
+	if line := firstLine(out, err); !strings.Contains(line, "deadline exceeded") {
+		t.Fatalf("the reported line must name the deadline: %q", line)
+	}
+	if st, _ := classify(out, err); st != StatusUnavailable {
+		t.Fatalf("a deadline is unavailability, not %s", st)
 	}
 }
 

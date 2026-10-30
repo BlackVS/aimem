@@ -564,7 +564,7 @@ func (r *Registry) ApplyTaskReservation(ctx context.Context, op ReservationOpera
 	if op == ReservationClaim {
 		return TaskReservationOutcome{}, invalid(errors.New("a claim goes through ClaimTaskReservation"))
 	}
-	ctx, cancel := context.WithTimeout(ctx, dependencyClaimTimeout)
+	ctx, cancel := context.WithTimeout(ctx, r.claimBudget())
 	defer cancel()
 	if err := r.lockClaimLifecycle(ctx); err != nil {
 		return TaskReservationOutcome{}, err

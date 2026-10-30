@@ -41,6 +41,9 @@ func newReservationRig(t *testing.T) *reservationRig {
 	pinned := time.Now()
 	reservationClock = func() time.Time { return pinned }
 	t.Cleanup(func() { reservationClock = time.Now })
+	// The rig's claims run real SQLite work, which a loaded machine slows
+	// past the production budget; no rig test is about that budget.
+	g.s.reg.ClaimBudget = time.Minute
 	var err error
 	if g.alpha, err = g.s.reg.Open("alpha"); err != nil {
 		t.Fatal(err)

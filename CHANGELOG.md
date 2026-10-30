@@ -64,6 +64,12 @@ currently 25); a binary refuses a database newer than it understands.
   for good, on the hub (an import) and on a member (a fetch into the
   cache). The housekeeping after an import and the member's cache trim
   now remove such a directory once it is more than an hour old.
+- **A process fetch that ran out of time says so.** When a git child
+  of a process fetch outlived its time budget and was stopped, the
+  notice read like git's own failure, for example `git init: exit
+  status 1` on Windows, where a stopped child exits with status 1 and
+  prints nothing. The notice now names the deadline (`git init: context
+  deadline exceeded (exit status 1)`).
 
 ## [0.10.20] — 2026-10-30
 
