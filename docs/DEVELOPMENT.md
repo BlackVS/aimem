@@ -32,6 +32,13 @@ A pull request runs the fast set, so a PR's CI takes about two minutes:
 - `lint` (gofmt, the `scripts/check-*.sh` checks, the tasks console
   harness, staticcheck, govulncheck) and `build`;
 - `test (ubuntu-latest)`: `go vet` and `go test ./...` on Linux;
+- `test-windows-pr`: `go vet` and `go test` on Windows for the packages
+  whose behaviour depends on the operating system: `internal/wiring`,
+  `internal/process`, `internal/processctx`, `internal/childenv`,
+  `internal/filelock`, `internal/privatefile`, `internal/taskcred`,
+  `internal/upgrade` and `internal/adapter` (paths and 8.3 short names,
+  git and its environment, file locks and permissions, hooks, the
+  binary swap);
 - `scenario (ubuntu-latest)` and `install-hub-container`.
 
 The slow checks run on every push to master, nightly, on a manual run
@@ -45,10 +52,13 @@ release prepare PR, whose branch is named `release/v<version>`:
 
 On an ordinary pull request those legs keep their names and pass after
 one step that says where they run, because the master ruleset requires
-every check by name. A Windows or macOS failure therefore surfaces on
-master. A change whose risk is on one of those platforms is tested
-there before the push, or given a manual run of the workflow on its
-branch.
+every check by name. `test-windows-pr` runs only on an ordinary pull
+request; on master, nightly and a release/ pull request it is skipped,
+since the full Windows leg runs there. A Windows failure outside its
+packages (`cmd/aimem` and the rest of the suite, the Windows scenarios)
+and any macOS failure therefore still surface on master. A change whose
+risk is on one of those platforms is tested there before the push, or
+given a manual run of the workflow on its branch.
 
 ## Release gate
 
