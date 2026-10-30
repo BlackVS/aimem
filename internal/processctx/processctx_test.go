@@ -27,6 +27,10 @@ import (
 func TestMain(m *testing.M) {
 	hubLookupTimeout = time.Minute
 	setReadTimeout = time.Minute
+	// The fake Git servers' git children run slowly on a loaded machine
+	// too; no test here is about the Git budget.
+	process.GitTimeout = time.Minute
+	setFetchDeadline = 2 * time.Minute
 	adapter.PushTimeout = time.Minute
 	// A team conversation in the caller's environment would put ReadPin in
 	// team mode; the tests that want it set it themselves.

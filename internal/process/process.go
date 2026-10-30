@@ -360,6 +360,10 @@ func CacheDir(root string, ref Ref) string {
 // commit again.
 const FetchTimeout = 10 * time.Second
 
+// GitTimeout bounds each git child, FetchTimeout unless a test main
+// raised it for git slowed by load, which no test there is about.
+var GitTimeout = FetchTimeout
+
 // Fetch returns the process set for ref, from the cache when the commit
 // is already there complete, otherwise from Git. It never returns a
 // partial set: files are written to a temporary directory and promoted
@@ -550,7 +554,7 @@ func loadSetFrom(read func(p string) ([]byte, error), ref Ref) (*Set, error) {
 }
 
 func git(ctx context.Context, dir string, args ...string) ([]byte, error) {
-	ctx, cancel := context.WithTimeout(ctx, FetchTimeout)
+	ctx, cancel := context.WithTimeout(ctx, GitTimeout)
 	defer cancel()
 	return runBounded(gitCmd(ctx, dir, args...))
 }
@@ -590,7 +594,7 @@ func sshCommandConfigured(ctx context.Context, dir string) bool {
 	if os.Getenv("GIT_SSH_COMMAND") != "" || os.Getenv("GIT_SSH") != "" {
 		return true
 	}
-	ctx, cancel := context.WithTimeout(ctx, FetchTimeout)
+	ctx, cancel := context.WithTimeout(ctx, GitTimeout)
 	defer cancel()
 	cmd := exec.CommandContext(ctx, "git", "config", "--get", "core.sshCommand")
 	cmd.Dir = dir

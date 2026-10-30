@@ -20,6 +20,14 @@ var ErrDependencyUnresolved = errors.New("dependency evidence is unresolved")
 const dependencyClaimTimeout = 5 * time.Second
 const maxDependencyWalk = 512
 
+// claimBudget is the registry's ClaimBudget, or dependencyClaimTimeout.
+func (r *Registry) claimBudget() time.Duration {
+	if r.ClaimBudget > 0 {
+		return r.ClaimBudget
+	}
+	return dependencyClaimTimeout
+}
+
 func beginClaimTx(ctx context.Context, db *DB) (*sql.DB, *sql.Tx, error) {
 	return beginClaimTxDriver(ctx, db, "sqlite")
 }
@@ -270,7 +278,7 @@ func (r *Registry) ClaimTaskReservation(ctx context.Context, in TaskReservationI
 	if verify == nil {
 		return TaskReservationOutcome{}, ErrDependencyUnresolved
 	}
-	ctx, cancel := context.WithTimeout(ctx, dependencyClaimTimeout)
+	ctx, cancel := context.WithTimeout(ctx, r.claimBudget())
 	defer cancel()
 	if err := r.lockClaimLifecycle(ctx); err != nil {
 		return TaskReservationOutcome{}, err
@@ -431,7 +439,7 @@ func (r *Registry) ReconcileReservationDependencies(ctx context.Context, taskID 
 	if verify == nil {
 		return true, ErrDependencyUnresolved
 	}
-	ctx, cancel := context.WithTimeout(ctx, dependencyClaimTimeout)
+	ctx, cancel := context.WithTimeout(ctx, r.claimBudget())
 	defer cancel()
 	if err := r.lockClaimLifecycle(ctx); err != nil {
 		return true, err

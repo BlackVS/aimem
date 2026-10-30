@@ -156,4 +156,5 @@ func hubErrorText(raw []byte, status int) string {
 
 // setFetchDeadline is the overall bound of finish's content step: one hub
 // read, then at most one Git fetch for an older hub.
-const setFetchDeadline = process.FetchTimeout + time.Second
+// A var so that TestMain can raise it with process.GitTimeout.
+var setFetchDeadline = process.FetchTimeout + time.Second

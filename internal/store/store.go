@@ -39,6 +39,11 @@ type Registry struct {
 	// been stale; LocateTask scans again and never remembers such a result.
 	lifecycleGen atomic.Int64
 	scanHook     func() // tests: runs after a scan enumerated the projects
+	// ClaimBudget bounds one reservation claim or transition, from the
+	// lifecycle lock to the commit; zero is dependencyClaimTimeout. A
+	// test whose SQLite work runs slowly on a loaded machine sets its
+	// own; production never does.
+	ClaimBudget time.Duration
 }
 
 // DB is one project's journal database.
