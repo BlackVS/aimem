@@ -80,8 +80,11 @@ not a host global.
   base URL with a blank token is refused, because the stored token would
   then go to the new endpoint (audit A-7). Base URLs must be public https
   endpoints unless the hub's environment sets
-  `AIMEM_PROVIDER_ALLOW_PRIVATE=1`, and the model list and the test
-  button enforce the same address ranges when they connect.
+  `AIMEM_PROVIDER_ALLOW_PRIVATE=1`, and the model list, the test button,
+  curation, embeddings and the text check enforce the same address
+  ranges when they connect to a registry provider
+  (`provider.HTTPClient`). The `AIMEM_OPENAI_*` pair is the host
+  operator's own setting and dials unguarded.
 - **Model bindings card**: model name → provider dropdown. The current
   curate/embed model inputs stay; a bound model shows its provider.
 - **Test button per model** (user request): each binding row gets

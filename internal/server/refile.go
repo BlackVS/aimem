@@ -47,7 +47,7 @@ func (s *Server) curateSynth() (curate.Synthesizer, string, error) {
 		if ep.Kind == "claude" {
 			return claude(ep.Model), m, nil
 		}
-		return &curate.OpenAIExtractor{BaseURL: ep.BaseURL, APIKey: ep.Token, Model: ep.Model}, m, nil
+		return &curate.OpenAIExtractor{BaseURL: ep.BaseURL, APIKey: ep.Token, Model: ep.Model, FromEnv: ep.FromEnv}, m, nil
 	}
 	switch os.Getenv("AIMEM_CURATE_BACKEND") {
 	case "openai":
@@ -58,7 +58,7 @@ func (s *Server) curateSynth() (curate.Synthesizer, string, error) {
 		if why != "" {
 			return nil, "", fmt.Errorf("no curate endpoint: %s", why)
 		}
-		return &curate.OpenAIExtractor{BaseURL: ep.BaseURL, APIKey: ep.Token, Model: ep.Model}, m, nil
+		return &curate.OpenAIExtractor{BaseURL: ep.BaseURL, APIKey: ep.Token, Model: ep.Model, FromEnv: ep.FromEnv}, m, nil
 	default: // claude
 		if m == "" {
 			m = "haiku"

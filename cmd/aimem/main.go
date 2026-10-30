@@ -1129,7 +1129,7 @@ func docCmd(args []string) error {
 		if why != "" {
 			return fmt.Errorf("no openai endpoint: %s", why)
 		}
-		syn = &curate.OpenAIExtractor{BaseURL: ep.BaseURL, APIKey: ep.Token, Model: ep.Model,
+		syn = &curate.OpenAIExtractor{BaseURL: ep.BaseURL, APIKey: ep.Token, Model: ep.Model, FromEnv: ep.FromEnv,
 			Timeout: curate.DocSynthesisTimeout}
 	case "claude":
 		workDir := filepath.Join(stateRoot(), "curator-workdir")
@@ -2083,7 +2083,7 @@ func curateBackend(root, model, backend string) (curateBackendImpl, string, erro
 		if ep.Kind == "claude" {
 			return claudeEx(ep.Model), m, nil
 		}
-		return &curate.OpenAIExtractor{BaseURL: ep.BaseURL, APIKey: ep.Token, Model: ep.Model}, m, nil
+		return &curate.OpenAIExtractor{BaseURL: ep.BaseURL, APIKey: ep.Token, Model: ep.Model, FromEnv: ep.FromEnv}, m, nil
 	}
 	switch backend {
 	case "openai":
@@ -2094,7 +2094,7 @@ func curateBackend(root, model, backend string) (curateBackendImpl, string, erro
 		if why != "" {
 			return nil, "", fmt.Errorf("no openai endpoint: %s", why)
 		}
-		return &curate.OpenAIExtractor{BaseURL: ep.BaseURL, APIKey: ep.Token, Model: ep.Model}, m, nil
+		return &curate.OpenAIExtractor{BaseURL: ep.BaseURL, APIKey: ep.Token, Model: ep.Model, FromEnv: ep.FromEnv}, m, nil
 	case "claude":
 		if m == "" {
 			m = "haiku"

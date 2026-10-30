@@ -13,34 +13,22 @@ import (
 	"net"
 	"net/http"
 	"net/url"
-	"os"
 	"strings"
-	"syscall"
 	"time"
 
 	"aimem/internal/provider"
 )
 
-const allowPrivateEnv = "AIMEM_PROVIDER_ALLOW_PRIVATE"
+const allowPrivateEnv = provider.AllowPrivateEnv
 
-func providerAllowPrivate() bool { return os.Getenv(allowPrivateEnv) == "1" }
+func providerAllowPrivate() bool { return provider.AllowPrivate() }
 
 // lookupIP is the save-time resolver; tests replace it.
 var lookupIP = net.DefaultResolver.LookupIPAddr
 
-func blockedIP(ip net.IP) bool {
-	// All of 0.0.0.0/8, not only 0.0.0.0: Linux routes the block to
-	// the local host.
-	if ip4 := ip.To4(); ip4 != nil && ip4[0] == 0 {
-		return true
-	}
-	return ip.IsLoopback() || ip.IsPrivate() || ip.IsUnspecified() ||
-		ip.IsLinkLocalUnicast() || ip.IsMulticast()
-}
+func blockedIP(ip net.IP) bool { return provider.BlockedIP(ip) }
 
-func blockedErr(host string) error {
-	return fmt.Errorf("base_url host %s is a loopback, private or link-local address (set %s=1 in the hub's environment to allow it)", host, allowPrivateEnv)
-}
+func blockedErr(host string) error { return provider.BlockedErr(host) }
 
 // sameEndpoint compares base URLs the way the callers use them: blank
 // means the default, and a trailing slash is trimmed before a path is
@@ -98,22 +86,4 @@ func checkProviderURL(ctx context.Context, raw string) error {
 // a stored token: the model list and the test probe. Unless the hub
 // allows private endpoints, its dialer refuses blocked addresses after
 // resolution, so a name re-pointed since the save gains nothing.
-func providerClient() *http.Client {
-	tr := http.DefaultTransport.(*http.Transport).Clone()
-	if !providerAllowPrivate() {
-		d := &net.Dialer{Timeout: 15 * time.Second, Control: refuseBlockedDial}
-		tr.DialContext = d.DialContext
-	}
-	return &http.Client{Timeout: 15 * time.Second, Transport: tr}
-}
-
-func refuseBlockedDial(_, address string, _ syscall.RawConn) error {
-	host, _, err := net.SplitHostPort(address)
-	if err != nil {
-		return err
-	}
-	if ip := net.ParseIP(host); ip == nil || blockedIP(ip) {
-		return blockedErr(host)
-	}
-	return nil
-}
+func providerClient() *http.Client { return provider.HTTPClient(15*time.Second, false) }

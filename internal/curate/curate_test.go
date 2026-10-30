@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"aimem/internal/embed"
+	"aimem/internal/provider"
 	"aimem/internal/schema"
 	"aimem/internal/store"
 )
@@ -809,5 +810,8 @@ func TestMain(m *testing.M) {
 	// llmrate reads its retry count once per process: pin it before any
 	// test runs, so a block answers at once instead of after 15 s+ backoffs.
 	os.Setenv("AIMEM_LLM_RETRIES", "0")
+	// The fake model servers listen on loopback, a local model server as
+	// far as the dial guard can tell.
+	os.Setenv(provider.AllowPrivateEnv, "1")
 	os.Exit(m.Run())
 }

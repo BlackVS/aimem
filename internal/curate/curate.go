@@ -29,6 +29,7 @@ import (
 	"aimem/internal/embed"
 	"aimem/internal/ident"
 	"aimem/internal/llmrate"
+	"aimem/internal/provider"
 	"aimem/internal/store"
 )
 
@@ -795,6 +796,7 @@ type OpenAIExtractor struct {
 	APIKey  string
 	Model   string        // e.g. a small routed model on the proxy
 	Timeout time.Duration // per-completion bound; 0 = completionTimeout
+	FromEnv bool          // the endpoint is the host's AIMEM_OPENAI_* pair (provider.Endpoint.FromEnv)
 }
 
 func (o *OpenAIExtractor) Extract(events []store.StoredEvent, maxFacts int, groups []GroupHint) ([]Proposal, Usage, error) {
@@ -849,7 +851,7 @@ func (o *OpenAIExtractor) Complete(prompt string) (string, Usage, error) {
 		}
 		req.Header.Set("Content-Type", "application/json")
 		req.Header.Set("Authorization", "Bearer "+o.APIKey)
-		resp, err := (&http.Client{Timeout: timeout}).Do(req)
+		resp, err := provider.HTTPClient(timeout, o.FromEnv).Do(req)
 		if err != nil {
 			return "", u, err
 		}

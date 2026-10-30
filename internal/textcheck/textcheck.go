@@ -93,7 +93,7 @@ func ForRoot(root string) (*Judge, string) {
 		return nil, why + " (the text check needs an OpenAI-compatible endpoint; a subscription CLI cannot serve it)"
 	}
 	return &Judge{Model: model, ep: ep, cap: limit,
-		path: filepath.Join(root, "textcheck.json"), client: &http.Client{Timeout: Timeout}}, ""
+		path: filepath.Join(root, "textcheck.json"), client: provider.HTTPClient(Timeout, ep.FromEnv)}, ""
 }
 
 // FilterOn reads FilterKey. A value other than on or off is an error,
