@@ -5,7 +5,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"runtime"
 	"strings"
 	"testing"
 
@@ -55,13 +54,10 @@ func TestWireEmptyDirectoryThenNothingChanges(t *testing.T) {
 			t.Errorf("%s not wired", want)
 		}
 	}
-	// Claude Code runs hooks through sh outside Windows: the installer's
-	// guarded form, so a collaborator without aimem sees no hook error.
-	// Codex runs them without a shell and gets the bare command.
-	claude := `"command": "aimem session-start"`
-	if runtime.GOOS != "windows" {
-		claude = `"command": "command -v aimem >/dev/null 2>&1 && aimem session-start || true"`
-	}
+	// Claude Code runs hooks through sh on every platform: the guarded form,
+	// so a collaborator without aimem sees no hook error. Codex runs them
+	// without a shell and gets the bare command.
+	claude := `"command": "command -v aimem >/dev/null 2>&1 && aimem session-start || true"`
 	if !strings.Contains(first[".claude/settings.json"], claude) {
 		t.Errorf(".claude/settings.json lacks %s:\n%s", claude, first[".claude/settings.json"])
 	}
