@@ -80,6 +80,15 @@ currently 25); a binary refuses a database newer than it understands.
   status 1` on Windows, where a stopped child exits with status 1 and
   prints nothing. The notice now names the deadline (`git init: context
   deadline exceeded (exit status 1)`).
+- **`irm … | iex` of `boot.ps1` leaves the PowerShell window as it
+  found it.** Run that way, the script runs in the window's own scope,
+  so its `$ErrorActionPreference = 'Stop'` stayed set after the install,
+  and a later non-terminating error in that window stopped its command.
+  Its other variables stayed too, and so did the process-wide TLS
+  setting it narrows to TLS 1.2 for the downloads. The script now runs
+  its body in a script block of its own and puts the TLS setting back
+  when it ends, after a successful run and after a failed one. What it
+  installs is unchanged.
 
 ## [0.10.20] — 2026-10-30
 
