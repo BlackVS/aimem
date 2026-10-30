@@ -60,11 +60,11 @@ currently 25); a binary refuses a database newer than it understands.
   and `go test` on windows-latest for `internal/wiring`,
   `internal/process`, `internal/processctx`, `internal/childenv`,
   `internal/filelock`, `internal/privatefile`, `internal/taskcred`,
-  `internal/upgrade` and `internal/adapter`. On 2026-10-30 two
-  Windows-only failures (#333, #336) reached master, where the full
-  Windows leg runs, and held the release preparation until the fix
-  merged. The full three-OS suite still runs on master, nightly and
-  release/ pull requests, where the new job is skipped.
+  `internal/upgrade`, `internal/adapter` and `internal/installer`. On
+  2026-10-30 two Windows-only failures (#333, #336) reached master,
+  where the full Windows leg runs, and held the release preparation
+  until the fix merged. The full three-OS suite still runs on master,
+  nightly and release/ pull requests, where the new job is skipped.
 
 ### Fixed
 

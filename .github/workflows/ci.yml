@@ -127,7 +127,8 @@ jobs:
 
   # On a pull request, the Windows tests of the packages whose behaviour
   # depends on the operating system: paths (8.3 short names), git and its
-  # environment, file locks and permissions, hooks and the binary swap.
+  # environment, file locks and permissions, hooks, the binary swap and
+  # the installers under Windows PowerShell.
   # Two Windows-only failures reached master on 2026-10-30 (#333, #336)
   # because the full Windows leg runs only there. A release/ pull request
   # runs the full leg instead, and master and nightly skip this job.
@@ -140,6 +141,7 @@ jobs:
         ./internal/wiring/... ./internal/process/... ./internal/processctx/...
         ./internal/childenv/... ./internal/filelock/... ./internal/privatefile/...
         ./internal/taskcred/... ./internal/upgrade/... ./internal/adapter/...
+        ./internal/installer/...
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-go@v7
