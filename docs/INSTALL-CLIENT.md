@@ -122,6 +122,15 @@ a checkout whose `.aimem.json` already governs it. Registering the hub
 (`aimem hub add`) and the task credential (`aimem task-token`) stay
 separate steps (section 4).
 
+A linked worktree (`git worktree add`) of a wired checkout belongs to
+that checkout's project. When the wired files are tracked, the worktree
+already has them. When they are kept untracked, run `aimem wire` at the
+worktree's top. It writes the hooks, the MCP registrations, the OpenCode
+instructions, the commands and the `AGENTS.md` and `CLAUDE.md` stubs
+there, and names the main checkout's `.aimem.json`, which still governs
+the worktree. The worktree gets no `.aimem.json` of its own. `--project`,
+`--hub` and `--groups` are refused there: set them in the main checkout.
+
 ### Upgrading
 
 ```sh

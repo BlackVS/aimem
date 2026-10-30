@@ -13,6 +13,20 @@ currently 25); a binary refuses a database newer than it understands.
 
 ## [Unreleased]
 
+### Changed
+
+- **`aimem wire` wires a linked worktree of a wired checkout.** It used
+  to refuse one, and its advice to commit the wired files did not help a
+  project that keeps them untracked: a session started in the worktree
+  loaded no handoff and had no aimem tools. Run at the worktree's top, it
+  now writes the client files there: the hooks, the MCP registrations,
+  the OpenCode instructions, the commands and the `AGENTS.md` and
+  `CLAUDE.md` stubs. It names the main checkout's `.aimem.json`, which
+  still governs the worktree, and writes no `.aimem.json` of its own.
+  `aimem wire --check` reports the same. `--project`, `--hub` and
+  `--groups` are refused in a worktree, and so is a directory below a
+  worktree's top.
+
 ## [0.10.19] — 2026-10-29
 
 `aimem upgrade` brings an installed client to a release in one command;

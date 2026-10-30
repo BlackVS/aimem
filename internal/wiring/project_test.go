@@ -3,6 +3,7 @@ package wiring
 import (
 	"io/fs"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strings"
@@ -212,6 +213,9 @@ func TestWireRefusesBeforeWriting(t *testing.T) {
 	write(t, filepath.Join(checkout, ".aimem.json"), `{"groups":[]}`)
 	// A linked worktree of that checkout, the way git lays one out.
 	worktree := filepath.Join(base, "worktree")
+	if err := os.MkdirAll(filepath.Join(worktree, "sub"), 0o755); err != nil {
+		t.Fatal(err)
+	}
 	write(t, filepath.Join(checkout, ".git", "worktrees", "w", "commondir"), "../..\n")
 	write(t, filepath.Join(worktree, ".git"), "gitdir: "+filepath.Join(checkout, ".git", "worktrees", "w")+"\n")
 	o := ProjectOptions{Home: home, StateRoot: state}
@@ -223,7 +227,8 @@ func TestWireRefusesBeforeWriting(t *testing.T) {
 		{"state root", state, "inside aimem's state root", o},
 		{"inside the state root", filepath.Join(state, "inner"), "inside aimem's state root", o},
 		{"inside a wired checkout", nested, "move it out of that checkout and run `aimem wire` in it", o},
-		{"linked worktree of a wired checkout", worktree, "need no wiring of their own. Next: commit the wired files in", o},
+		{"inside a linked worktree", filepath.Join(worktree, "sub"), "it is inside the linked worktree", o},
+		{"keys in a linked worktree", worktree, "refusing to set the project, hub or groups", ProjectOptions{Home: home, Hub: "lab"}},
 		{"bad project", plain, "invalid project name", ProjectOptions{Home: home, Project: "group-x"}},
 		{"bad hub", plain, "invalid hub name", ProjectOptions{Home: home, Hub: "Lab Hub"}},
 		{"bad group", plain, "invalid group name", ProjectOptions{Home: home, Groups: []string{"ok", "No"}}},
@@ -238,6 +243,94 @@ func TestWireRefusesBeforeWriting(t *testing.T) {
 				t.Errorf("a refused run wrote %d files", after-before)
 			}
 		})
+	}
+}
+
+// A linked worktree of a wired checkout whose wired files are untracked
+// gets the client files and no .aimem.json: the main checkout's governs
+// it, is named in the output, and is left byte for byte as it was.
+func TestWireLinkedWorktree(t *testing.T) {
+	gitPath, err := exec.LookPath("git")
+	if err != nil {
+		t.Skip("git not found")
+	}
+	base, home := t.TempDir(), t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("GIT_CONFIG_NOSYSTEM", "1")
+	git := func(dir string, args ...string) {
+		t.Helper()
+		cmd := exec.Command(gitPath, append([]string{"-c", "user.name=t", "-c", "user.email=t@t.invalid", "-c", "init.defaultBranch=main"}, args...)...)
+		cmd.Dir = dir
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v\n%s", args, err, out)
+		}
+	}
+	main := filepath.Join(base, "main")
+	if err := os.MkdirAll(main, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	git(main, "init", "-q")
+	write(t, filepath.Join(main, "README"), "x\n")
+	git(main, "add", "README")
+	git(main, "commit", "-q", "-m", "init")
+	// The wired files stay untracked, so a new worktree has none of them.
+	wireOK(t, main, ProjectOptions{Home: home, Project: "p1", Hub: "lab"})
+	cfg := read(t, filepath.Join(main, ".aimem.json"))
+	wt := filepath.Join(base, "wt")
+	git(main, "worktree", "add", "-q", wt)
+
+	governed := func(t *testing.T, out []Finding) {
+		t.Helper()
+		for _, f := range out {
+			if f.File == ".aimem.json" {
+				if f.Level != "ok" || !strings.Contains(f.Detail, "governed by") || !strings.Contains(f.Detail, filepath.Base(main)) || !strings.Contains(f.Detail, "project: p1, hub: lab") {
+					t.Errorf(".aimem.json: %s %s (fix %q)", f.Level, f.Detail, f.Fix)
+				}
+				return
+			}
+		}
+		t.Error("no .aimem.json finding")
+	}
+	before := files(t, wt)
+	out, err := Wire(wt, ProjectOptions{Home: home, Check: true})
+	if err != nil {
+		t.Fatalf("check: %v", err)
+	}
+	governed(t, out)
+	missing := 0
+	for _, f := range out {
+		if strings.Contains(f.Fix, "aimem wire") {
+			missing++
+		}
+	}
+	if missing == 0 {
+		t.Error("the check reports nothing missing in a bare worktree")
+	}
+	if got := files(t, wt); len(got) != len(before) {
+		t.Errorf("the check wrote %d files", len(got)-len(before))
+	}
+
+	governed(t, wireOK(t, wt, ProjectOptions{Home: home}))
+	if _, err := os.Lstat(filepath.Join(wt, ".aimem.json")); !os.IsNotExist(err) {
+		t.Errorf("the worktree got a .aimem.json: %v", err)
+	}
+	for _, rel := range []string{filepath.Join(".claude", "settings.json"), ".mcp.json", "opencode.json", "AGENTS.md", "CLAUDE.md", filepath.Join(".claude", "commands", "aimem-analyze.md")} {
+		if _, err := os.Stat(filepath.Join(wt, rel)); err != nil {
+			t.Errorf("%s not written in the worktree: %v", rel, err)
+		}
+	}
+	out, err = Wire(wt, ProjectOptions{Home: home, Check: true})
+	if err != nil {
+		t.Fatalf("check after wiring: %v", err)
+	}
+	governed(t, out)
+	for _, f := range out {
+		if f.Fix != "" {
+			t.Errorf("still missing after wiring: %s: %s (%s)", f.File, f.Detail, f.Fix)
+		}
+	}
+	if got := read(t, filepath.Join(main, ".aimem.json")); got != cfg {
+		t.Errorf("the main checkout's .aimem.json changed:\n%s\nwas\n%s", got, cfg)
 	}
 }
 
