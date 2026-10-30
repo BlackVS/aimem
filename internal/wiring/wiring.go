@@ -18,7 +18,6 @@ import (
 	"path/filepath"
 	"reflect"
 	"regexp"
-	"runtime"
 	"sort"
 	"strings"
 	"time"
@@ -83,20 +82,19 @@ type Options struct {
 // handoff hook; either one satisfies the check.
 var sessionStartMarkers = []string{"aimem session-start", "SESSION-STATE.md"}
 
-// sessionStartCommand is the portable spelling (install.ps1 and Codex use
-// it; it runs under cmd.exe and without a shell).
+// sessionStartCommand is the bare spelling Codex gets: Codex splits a hook
+// command on spaces and runs it without a shell, so it cannot be guarded,
+// and a collaborator without aimem sees one non-fatal hook failure line.
 const sessionStartCommand = "aimem session-start"
 
-// guardedSessionStartCommand is the spelling install.sh writes for Claude
-// Code, which runs hook commands through sh: a collaborator without aimem
-// gets no hook error.
+// guardedSessionStartCommand is the spelling Claude Code gets. Claude Code
+// runs hook commands through sh on every platform (Git Bash on Windows), so
+// a collaborator without aimem gets no hook error.
 const guardedSessionStartCommand = "command -v aimem >/dev/null 2>&1 && aimem session-start || true"
 
-// handoffHookCommand is the command a new SessionStart hook runs for
-// client: the guarded form for Claude Code outside Windows, the portable
-// one otherwise.
+// handoffHookCommand is the command a new SessionStart hook runs for client.
 func handoffHookCommand(client string) string {
-	if client == "Claude Code" && runtime.GOOS != "windows" {
+	if client == "Claude Code" {
 		return guardedSessionStartCommand
 	}
 	return sessionStartCommand

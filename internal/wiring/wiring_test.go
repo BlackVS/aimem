@@ -272,14 +272,32 @@ func TestSkillReportPerClientRequiresSkillMD(t *testing.T) {
 	}
 }
 
+// Every spelling a project may already carry counts as the handoff hook for
+// both clients: a repairing run reports it present and adds no second hook.
 func TestBothHookSpellingsSatisfy(t *testing.T) {
-	for _, cmd := range []string{"aimem session-start", "command -v aimem >/dev/null 2>&1 && aimem session-start || true", "cat docs/SESSION-STATE.md"} {
-		dir := t.TempDir()
-		write(t, filepath.Join(dir, ".claude", "settings.json"), `{"hooks": {"SessionStart": [{"hooks": [{"type": "command", "command": `+jsonString(cmd)+`}]}]}}`)
-		r := Check(dir, Options{Repair: false})
-		if f := findingsByFile(r)[".claude/settings.json"]; len(f) != 1 || f[0].Level != "ok" {
-			t.Fatalf("%q: %+v", cmd, f)
+	for _, cmd := range []string{sessionStartCommand, guardedSessionStartCommand, "cat docs/SESSION-STATE.md"} {
+		for _, f := range []string{".claude/settings.json", ".codex/hooks.json"} {
+			dir := t.TempDir()
+			hooks := `{"hooks": {"SessionStart": [{"hooks": [{"type": "command", "command": ` + jsonString(cmd) + `}]}]}}`
+			write(t, filepath.Join(dir, f), hooks)
+			r := Check(dir, Options{Repair: true})
+			if got := findingsByFile(r)[f]; len(got) != 1 || got[0].Level != "ok" || got[0].Repaired {
+				t.Fatalf("%s %q: %+v", f, cmd, got)
+			}
+			if after := read(t, filepath.Join(dir, f)); after != hooks {
+				t.Fatalf("%s %q rewritten:\n%s", f, cmd, after)
+			}
 		}
+	}
+}
+
+// Claude Code runs hooks through sh everywhere, Codex without a shell.
+func TestHandoffHookCommandPerClient(t *testing.T) {
+	if got := handoffHookCommand("Claude Code"); got != guardedSessionStartCommand {
+		t.Errorf("Claude Code: %q", got)
+	}
+	if got := handoffHookCommand("Codex"); got != sessionStartCommand {
+		t.Errorf("Codex: %q", got)
 	}
 }
 

@@ -29,6 +29,19 @@ currently 25); a binary refuses a database newer than it understands.
 
 ### Fixed
 
+- **A project wired on Windows no longer gives a collaborator without
+  aimem a Claude Code hook error.** `aimem wire` wrote the bare
+  `aimem session-start` as the Claude Code SessionStart hook on Windows,
+  on the belief that Claude Code runs hooks under cmd.exe there. It runs
+  them through Git Bash, as it does sh elsewhere, so the bare command
+  failed at every session start on a machine without aimem. `aimem wire`
+  now writes the guarded form install.sh uses
+  (`command -v aimem >/dev/null 2>&1 && aimem session-start || true`) on
+  every platform. A hook already in either spelling still counts as
+  present and is not rewritten. The Codex hook stays the bare command:
+  Codex runs hooks without a shell, so it cannot be guarded, and without
+  aimem it shows one non-fatal `hook: SessionStart Failed` line.
+
 - **A retried task write returns its receipt instead of meeting the
   readability check again.** A retry is a write sent again with the same
   idempotency key and content. On a task create, a task update and a
