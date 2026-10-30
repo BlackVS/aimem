@@ -55,6 +55,16 @@ currently 25); a binary refuses a database newer than it understands.
   from 0.10.18 to 0.10.20 under the default `Restricted` policy drew no
   warning. The scenario test runs every documented line, the knob form
   included, and the optional block against a stub release.
+- **A pull request runs the Windows tests of the packages that depend
+  on the operating system.** A new `test-windows-pr` job runs `go vet`
+  and `go test` on windows-latest for `internal/wiring`,
+  `internal/process`, `internal/processctx`, `internal/childenv`,
+  `internal/filelock`, `internal/privatefile`, `internal/taskcred`,
+  `internal/upgrade` and `internal/adapter`. On 2026-10-30 two
+  Windows-only failures (#333, #336) reached master, where the full
+  Windows leg runs, and held the release preparation until the fix
+  merged. The full three-OS suite still runs on master, nightly and
+  release/ pull requests, where the new job is skipped.
 
 ### Fixed
 
