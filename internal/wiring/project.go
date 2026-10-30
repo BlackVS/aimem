@@ -42,9 +42,10 @@ type ProjectOptions struct {
 // registrations, the OpenCode instructions, the /join_team and
 // /aimem-analyze commands, AGENTS.md and CLAUDE.md, and .aimem.json. A file
 // with the user's content is kept, a managed file is refreshed, and in
-// .aimem.json only the keys o names are set. A refused directory, or an
-// option that would be refused later, returns an error before anything is
-// written.
+// .aimem.json only the keys o names are set. A linked worktree of a wired
+// checkout gets everything but .aimem.json: the main checkout's governs it.
+// A refused directory, or an option that would be refused later, returns
+// an error before anything is written.
 func Wire(dir string, o ProjectOptions) ([]Finding, error) {
 	dir, err := canonical(dir)
 	if err != nil {
@@ -53,7 +54,8 @@ func Wire(dir string, o ProjectOptions) ([]Finding, error) {
 	if fi, err := os.Stat(dir); err != nil || !fi.IsDir() {
 		return nil, fmt.Errorf("%s is not a directory", dir)
 	}
-	if err := refuseDir(dir, o); err != nil {
+	gov, linked, err := refuseDir(dir, o)
+	if err != nil {
 		return nil, err
 	}
 	if o.Project != "" {
@@ -79,7 +81,11 @@ func Wire(dir string, o ProjectOptions) ([]Finding, error) {
 	}
 	out = append(out, keptFile(dir, "AGENTS.md", string(templates.AgentsMD), write))
 	out = append(out, keptFile(dir, "CLAUDE.md", claudeStub, write))
-	out = append(out, projectConfig(dir, o, write))
+	if linked {
+		out = append(out, governingConfig(gov))
+	} else {
+		out = append(out, projectConfig(dir, o, write))
+	}
 	if o.Check {
 		for i, f := range out {
 			if f.Level == "warn" && f.Fix != "" && (strings.Contains(f.Fix, "--no-repair") || strings.Contains(f.Fix, "teams commands")) {
@@ -117,25 +123,61 @@ func within(dir, root string) bool {
 	return rel == "." || (rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator)))
 }
 
-func refuseDir(dir string, o ProjectOptions) error {
+// refuseDir refuses a directory that is not to be wired. A linked worktree
+// of a wired checkout is wired without its own .aimem.json: linked is true
+// and gov names the main checkout whose file governs it.
+func refuseDir(dir string, o ProjectOptions) (gov string, linked bool, err error) {
 	if o.Home != "" {
 		if home, err := canonical(o.Home); err == nil && sameDir(dir, home) {
-			return fmt.Errorf("refusing to wire the home directory %s as a project: Claude Code would read its CLAUDE.md in every session under it. Run this inside a project directory.", dir)
+			return "", false, fmt.Errorf("refusing to wire the home directory %s as a project: Claude Code would read its CLAUDE.md in every session under it. Run this inside a project directory.", dir)
 		}
 	}
 	if o.StateRoot != "" {
 		if root, err := canonical(o.StateRoot); err == nil && within(dir, root) {
-			return fmt.Errorf("refusing to wire %s as a project: it is inside aimem's state root %s. Run `aimem wire` inside a project directory.", dir, root)
+			return "", false, fmt.Errorf("refusing to wire %s as a project: it is inside aimem's state root %s. Run `aimem wire` inside a project directory.", dir, root)
 		}
 	}
 	gov, viaWorktree := ident.ConfigDir(dir)
 	if viaWorktree {
-		return fmt.Errorf("refusing to wire %s as a project: it is a linked worktree of the wired checkout %s, whose .aimem.json governs it, so sessions here already belong to that project and need no wiring of their own. Next: commit the wired files in %s so every worktree has them; to refresh them, run `aimem wire` there.", dir, gov, gov)
+		if top := gitTop(dir); !sameDir(top, dir) {
+			return "", false, fmt.Errorf("refusing to wire %s as a project: it is inside the linked worktree %s of the wired checkout %s. Next: run `aimem wire` in %s to give that worktree its hooks and registrations.", dir, top, gov, top)
+		}
+		if o.Project != "" || o.Hub != "" || o.Groups != nil {
+			return "", false, fmt.Errorf("refusing to set the project, hub or groups in %s: it is a linked worktree of the wired checkout %s, whose .aimem.json governs it. Next: run `aimem wire` with those options in %s; run it here without them to write this worktree's hooks and registrations.", dir, gov, gov)
+		}
+		return gov, true, nil
 	}
 	if !sameDir(gov, dir) {
-		return fmt.Errorf("refusing to wire %s as a project: it is inside the wired checkout %s, whose .aimem.json already governs it, so sessions here already belong to that project. Next: start sessions from %s; to refresh its wiring, run `aimem wire` there; to make this directory a project of its own, move it out of that checkout and run `aimem wire` in it.", dir, gov, gov)
+		return "", false, fmt.Errorf("refusing to wire %s as a project: it is inside the wired checkout %s, whose .aimem.json already governs it, so sessions here already belong to that project. Next: start sessions from %s; to refresh its wiring, run `aimem wire` there; to make this directory a project of its own, move it out of that checkout and run `aimem wire` in it.", dir, gov, gov)
 	}
-	return nil
+	return gov, false, nil
+}
+
+// gitTop is the nearest directory at or above dir that holds a .git entry,
+// or dir when there is none.
+func gitTop(dir string) string {
+	for d := dir; ; {
+		if _, err := os.Lstat(filepath.Join(d, ".git")); err == nil {
+			return d
+		}
+		parent := filepath.Dir(d)
+		if parent == d {
+			return dir
+		}
+		d = parent
+	}
+}
+
+// governingConfig reports the main checkout's .aimem.json, which governs a
+// linked worktree; the worktree gets none of its own.
+func governingConfig(gov string) Finding {
+	const rel = ".aimem.json"
+	path := filepath.Join(gov, rel)
+	obj, _, _, err := readObject(gov, path)
+	if err != nil {
+		return Finding{File: rel, Level: "fail", Detail: "the governing " + path + " is unreadable: " + err.Error(), Fix: "repair it in the main checkout"}
+	}
+	return Finding{File: rel, Level: "ok", Detail: "not written here: this linked worktree is governed by " + path + describeConfig(obj)}
 }
 
 // managedFile writes content at rel unless the file there is current, or
