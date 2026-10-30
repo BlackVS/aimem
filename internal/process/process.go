@@ -556,7 +556,19 @@ func loadSetFrom(read func(p string) ([]byte, error), ref Ref) (*Set, error) {
 func git(ctx context.Context, dir string, args ...string) ([]byte, error) {
 	ctx, cancel := context.WithTimeout(ctx, GitTimeout)
 	defer cancel()
-	return runBounded(gitCmd(ctx, dir, args...))
+	return runUntil(ctx, gitCmd(ctx, dir, args...))
+}
+
+// runUntil is runBounded for a command bound to ctx, and names the
+// context when it ended the command: a child killed at its deadline
+// exits with an ordinary status (1 on Windows), often with no output,
+// which would otherwise read as git's own failure.
+func runUntil(ctx context.Context, cmd *exec.Cmd) ([]byte, error) {
+	out, err := runBounded(cmd)
+	if err != nil && ctx.Err() != nil && !errors.Is(err, ctx.Err()) {
+		err = fmt.Errorf("%w (%v)", ctx.Err(), err)
+	}
+	return out, err
 }
 
 // gitCmd builds the git child with the environment it runs with.
