@@ -331,6 +331,8 @@ func TestWireLinkedWorktree(t *testing.T) {
 
 	// An empty governing file is refused as it is in the main checkout: a
 	// session cannot read it. The worktree names it and leaves it alone.
+	// The path is matched from the checkout's name, as in governed: git
+	// reports the long form of a temp dir Windows may give in 8.3 form.
 	for _, empty := range []string{"", " \n\t\n"} {
 		write(t, filepath.Join(main, ".aimem.json"), empty)
 		for _, check := range []bool{true, false} {
@@ -342,7 +344,7 @@ func TestWireLinkedWorktree(t *testing.T) {
 			for _, f := range out {
 				if f.File == ".aimem.json" {
 					found = true
-					if f.Level != "fail" || !strings.Contains(f.Detail, filepath.Join(main, ".aimem.json")) || !strings.Contains(f.Detail, "empty") || !strings.Contains(f.Fix, "main checkout") {
+					if f.Level != "fail" || !strings.Contains(f.Detail, filepath.Join(filepath.Base(main), ".aimem.json")) || !strings.Contains(f.Detail, "empty") || !strings.Contains(f.Fix, "main checkout") {
 						t.Errorf("empty %q, check %v: %s %s (fix %q)", empty, check, f.Level, f.Detail, f.Fix)
 					}
 				}
