@@ -165,7 +165,7 @@ jobs:
       # takes over five minutes on the runner. They run under the
       # runner's default shell, as in the full Windows leg.
       - name: boot.ps1 tests
-        run: go test -run '^Test(BootPs1|DocumentedWindowsInstall)' ./internal/installer/
+        run: go test -v -run '^Test(BootPs1|DocumentedWindowsInstall)' ./internal/installer/
 
   # The documented usage scenarios (docs/scenarios), run against the real
   # binary started as a hub and as a workstation.
