@@ -33,8 +33,9 @@ currently 25); a binary refuses a database newer than it understands.
   The same holds when the hub reaches a registry provider through an
   `HTTPS_PROXY` on a private address, because the guard sees the
   proxy's address, and on any other machine that runs `aimem curate` or
-  embeddings through a registry binding. A model served through the
-  `AIMEM_OPENAI_*` pair needs nothing.
+  embeddings through a registry binding. The `AIMEM_OPENAI_*` pair is
+  the other way to a local model server: it is not guarded, so a model
+  served through it needs nothing.
 
 ## [0.10.20] — 2026-10-30
 
