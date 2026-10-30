@@ -15,30 +15,18 @@ curl -fsSL https://raw.githubusercontent.com/BlackVS/aimem/v0.10.20/boot.sh | ba
 
 Windows (supported, tested less than Linux), in a PowerShell window.
 From cmd, or from the Run dialog (Win+R) for an upgrade, type
-`powershell` first and paste the block there:
+`powershell` first:
 
 ```powershell
-& {
-  $ErrorActionPreference = 'Stop'
-  $d = New-Item -ItemType Directory -Force (Join-Path $env:TEMP 'aimem-boot')
-  $f = Join-Path $d 'boot.ps1'; $s = Join-Path $d 'SHA256SUMS'
-  Invoke-WebRequest https://github.com/BlackVS/aimem/releases/download/v0.10.20/boot.ps1 -OutFile $f -UseBasicParsing
-  Invoke-WebRequest https://github.com/BlackVS/aimem/releases/download/v0.10.20/SHA256SUMS -OutFile $s -UseBasicParsing
-  $want = ((Select-String -LiteralPath $s -Pattern '\sboot\.ps1$').Line -split '\s+')[0]
-  if ((Get-FileHash -LiteralPath $f).Hash -ne $want) { throw 'boot.ps1 does not match SHA256SUMS' }
-  Unblock-File -LiteralPath $f
-  powershell -NoProfile -ExecutionPolicy RemoteSigned -File $f
-}
+irm https://github.com/BlackVS/aimem/releases/download/v0.10.20/boot.ps1 | iex
 ```
 
-The block checks `boot.ps1` against the release's `SHA256SUMS` before it
-runs it, and runs it under `RemoteSigned` for that one process; there is
-no `irm | iex` and no execution-policy bypass
-([INSTALL-CLIENT](INSTALL-CLIENT.md) has the details). The block's
-`powershell` starts Windows PowerShell 5.1 even from a PowerShell 7
-window, so the block works the same pasted into `pwsh`. Releases up to
-0.10.13 publish no `boot.ps1` asset; they were installed with
-`irm …/boot.ps1 | iex`, as their own README shows.
+`boot.ps1` checks the aimem binary against the release's `SHA256SUMS`
+before it installs it, and runs the installer under `RemoteSigned` for
+that one child process; nothing checks `boot.ps1` itself before it runs
+([INSTALL-CLIENT](INSTALL-CLIENT.md#1-one-liner) has the details and an
+optional stricter form). The line works the same in `powershell` and
+`pwsh`.
 
 Environment knobs for the boot script:
 
@@ -97,23 +85,12 @@ curl -fsSL https://raw.githubusercontent.com/BlackVS/aimem/v0.10.20/boot.sh | AI
 The `VAR=value bash` form sets the knob for that `bash` only; your shell
 keeps no `AIMEM_*` variable.
 
-On Windows, set the knob inside the block, just before the run, and take
-it out again in a `finally`, so it lives only for that run and your
-window keeps no `AIMEM_*` variable:
+On Windows, set the knob just before the run and take it out again in a
+`finally`, so it lives only for that run and your window keeps no
+`AIMEM_*` variable:
 
 ```powershell
-& {
-  $ErrorActionPreference = 'Stop'
-  $d = New-Item -ItemType Directory -Force (Join-Path $env:TEMP 'aimem-boot')
-  $f = Join-Path $d 'boot.ps1'; $s = Join-Path $d 'SHA256SUMS'
-  Invoke-WebRequest https://github.com/BlackVS/aimem/releases/download/v0.10.20/boot.ps1 -OutFile $f -UseBasicParsing
-  Invoke-WebRequest https://github.com/BlackVS/aimem/releases/download/v0.10.20/SHA256SUMS -OutFile $s -UseBasicParsing
-  $want = ((Select-String -LiteralPath $s -Pattern '\sboot\.ps1$').Line -split '\s+')[0]
-  if ((Get-FileHash -LiteralPath $f).Hash -ne $want) { throw 'boot.ps1 does not match SHA256SUMS' }
-  Unblock-File -LiteralPath $f
-  $env:AIMEM_USER_ONLY = 1
-  try { powershell -NoProfile -ExecutionPolicy RemoteSigned -File $f } finally { Remove-Item Env:AIMEM_USER_ONLY }
-}
+$env:AIMEM_USER_ONLY = 1; try { irm https://github.com/BlackVS/aimem/releases/download/v0.10.20/boot.ps1 | iex } finally { Remove-Item Env:AIMEM_USER_ONLY }
 ```
 
 `$env:` is the whole process's environment: a knob set in your window

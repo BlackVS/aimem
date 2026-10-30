@@ -23,8 +23,29 @@ curl -fsSL https://raw.githubusercontent.com/BlackVS/aimem/v0.10.20/boot.sh | ba
 ```
 
 **Windows**, in a PowerShell window. From cmd, or from the Run dialog
-(Win+R) for an upgrade, type `powershell` first and paste the block there
-(the Run dialog starts in your home directory, which is never wired):
+(Win+R) for an upgrade, type `powershell` first (the Run dialog starts
+in your home directory, which is never wired):
+
+```powershell
+irm https://github.com/BlackVS/aimem/releases/download/v0.10.20/boot.ps1 | iex
+```
+
+The line runs the release's `boot.ps1` in your window. `boot.ps1` checks
+the aimem binary against the release's `SHA256SUMS` before it installs
+it; nothing checks `boot.ps1` itself before it runs. The line works on a
+fresh machine, whose `Restricted` execution policy refuses every script
+file: a script piped into `iex` is not a file, and `boot.ps1` runs the
+installer as a file in a child PowerShell under `-ExecutionPolicy
+RemoteSigned`, for that process only, with no machine state changed. A
+Group Policy-enforced policy (`Get-ExecutionPolicy -List` showing
+MachinePolicy/UserPolicy) overrides the flag, and no installer can or
+should work around it.
+
+Optional, stricter: this block also checks `boot.ps1` against the
+release's `SHA256SUMS` before it runs it, and runs it as a file in a
+child PowerShell. `Unblock-File` comes after the hash check, because
+PowerShell 7 marks a downloaded file as coming from the internet and
+`RemoteSigned` would refuse it.
 
 ```powershell
 & {
@@ -40,30 +61,16 @@ curl -fsSL https://raw.githubusercontent.com/BlackVS/aimem/v0.10.20/boot.sh | ba
 }
 ```
 
-The block downloads `boot.ps1` and `SHA256SUMS` from the release and
-refuses a `boot.ps1` whose hash the release does not list; `boot.ps1`
-then checks the binary against the same `SHA256SUMS`. It runs `boot.ps1`
-as a file in a child PowerShell, which matters on a fresh machine:
-Windows clients default to the `Restricted` execution policy, which
-refuses every script file. `-ExecutionPolicy RemoteSigned` lifts that
-for the child only and changes no machine state; `Unblock-File` comes
-after the hash check, because PowerShell 7 marks a downloaded file as
-coming from the internet and `RemoteSigned` would refuse it. A Group
-Policy-enforced policy (`Get-ExecutionPolicy -List` showing
-MachinePolicy/UserPolicy) overrides the flag, and no installer can or
-should work around it. There is no one-line cmd form: the check and the
-run in one line would be too long to read before running it. Releases up
-to 0.10.13 publish no `boot.ps1` asset; they were installed with
-`irm …/boot.ps1 | iex`, as their own README shows.
-
 Then **restart any running Claude Code, OpenCode, or Codex session** —
 hooks and plugins are read at startup. Codex additionally asks once, in
 its own UI, to review-and-trust the new hooks before running them.
 
-If the Windows block stops with `boot.ps1 does not match SHA256SUMS`,
-the download was cut short or changed by the CDN or a network filter,
-and nothing ran. Retry, or install from a checkout (section 5), which
-never touches the network for the script itself.
+If the Windows line stops with `checksum mismatch for
+aimem-windows-amd64.exe`, or the optional block with `boot.ps1 does not
+match SHA256SUMS`, the download was cut short or changed by the CDN or a
+network filter, and nothing was installed. Retry, or install from a
+checkout (section 5), which never touches the network for the script
+itself.
 
 ### What the user-level install puts on the machine
 
