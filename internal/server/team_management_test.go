@@ -381,4 +381,16 @@ func TestManagedEditRunsTheReadabilityCheck(t *testing.T) {
 	if edited.Title != content.Title || edited.NonGoals != legacy.NonGoals {
 		t.Fatalf("readable edit: %+v", edited)
 	}
+
+	// B replaces the stored compressed text with prose; a retry of the
+	// readable edit then returns its own receipt, not a refusal measured
+	// against B's text.
+	prose := edited.TaskContent
+	prose.NonGoals = "The checkpoint keeps its 74 files."
+	b := store.TeamManagedEditCommand{TeamSessionHandle: f.sender, CoordinatorGeneration: 1, ExpectedRevision: edited.Revision, Content: prose, Reason: "Non-goals in prose"}
+	managedTaskResult(t, taskReq(t, f.h, "POST", f.base+"/tasks/"+task.ID+"/edit", f.alice, "prose", assignmentJSON(t, b)))
+	retried := managedTaskResult(t, taskReq(t, f.h, "POST", f.base+"/tasks/"+task.ID+"/edit", f.alice, "readable", assignmentJSON(t, edit)))
+	if retried.Revision != edited.Revision || retried.NonGoals != legacy.NonGoals || retried.Title != edited.Title {
+		t.Fatalf("retried edit returned %+v, want the receipt %+v", retried, edited)
+	}
 }

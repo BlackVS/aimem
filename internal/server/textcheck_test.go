@@ -117,6 +117,52 @@ func TestTaskWritesRefuseUnreadableText(t *testing.T) {
 	}
 }
 
+// A retry whose key and content match a stored receipt returns that
+// receipt without the readability check, even when the check would now
+// refuse it; the same key with other content still meets the check.
+func TestRetryReplaysBeforeTheTextCheck(t *testing.T) {
+	f := newTaskFixture(t)
+	h := f.h
+	db, _ := f.reg.Open("alpha")
+
+	// Update: A changes only the title and keeps stored compressed text,
+	// B then replaces that text with prose, and A is retried.
+	old := store.TaskContent{Title: "Legacy", Objective: "All11containersremoved", State: "READY"}
+	legacy, err := db.CreateTask(old, store.TaskActor{Kind: "admin", Name: "host-admin"}, "legacy")
+	if err != nil {
+		t.Fatal(err)
+	}
+	editA := `{"title":"Legacy, renamed","objective":"All11containersremoved","state":"READY","expected_revision":1}`
+	a := decodeTask(t, taskReq(t, h, "PUT", "/v1/tasks/"+legacy.ID, f.alice, "a", editA))
+	if w := taskReq(t, h, "PUT", "/v1/tasks/"+legacy.ID, f.alice, "b", `{"title":"Legacy, renamed","objective":"All eleven containers are removed.","state":"READY","expected_revision":2}`); w.Code != 200 {
+		t.Fatalf("edit B: %d %s", w.Code, w.Body)
+	}
+	w := taskReq(t, h, "PUT", "/v1/tasks/"+legacy.ID, f.alice, "a", editA)
+	if w.Code != 200 {
+		t.Fatalf("retry of A: %d %s", w.Code, w.Body)
+	}
+	if got := decodeTask(t, w); got.Revision != a.Revision || got.Objective != a.Objective || got.Title != a.Title {
+		t.Fatalf("retry of A returned %+v, want A's receipt %+v", got, a)
+	}
+	// The same key with other content is a new write, and is checked.
+	w = taskReq(t, h, "PUT", "/v1/tasks/"+legacy.ID, f.alice, "a", `{"title":"Legacy, again","objective":"All11containersremoved","state":"READY","expected_revision":1}`)
+	refusedText(t, w, "objective", "All11containersremoved", stageFilter)
+
+	// Create: the model relaxed the filter when the task was created; it no
+	// longer does, and the retry still returns the stored task.
+	j := &fakeJudge{readable: true}
+	f.s.judge = j
+	body := `{"title":"Ship the fix","objective":"Checkpoint74files written","state":"READY"}`
+	created := decodeTask(t, taskReq(t, h, "POST", "/v1/projects/alpha/tasks", f.alice, "cr", body))
+	j.readable = false
+	again := decodeTask(t, taskReq(t, h, "POST", "/v1/projects/alpha/tasks", f.alice, "cr", body))
+	if again.ID != created.ID || again.Revision != created.Revision {
+		t.Fatalf("retried create returned %+v, want %+v", again, created)
+	}
+	refusedText(t, taskReq(t, h, "POST", "/v1/projects/alpha/tasks", f.alice, "cr", `{"title":"Ship it","objective":"Checkpoint74files written","state":"READY"}`),
+		"objective", "Checkpoint74files", stageFilterModel)
+}
+
 func TestSecondStageCanOnlyRelaxTheFilter(t *testing.T) {
 	f := newTaskFixture(t)
 	h := f.h

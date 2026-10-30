@@ -453,6 +453,47 @@ func checkedTaskMutation[T any](d *DB, actor TaskActor, op, scope, key string, i
 	return out, nil
 }
 
+// retry names a mutation's retry receipt: its operation, scope and the
+// input whose digest the receipt holds. The mutation and its Replays probe
+// take it from the same constructor, so the probe matches exactly what the
+// mutation would replay.
+type retry struct {
+	op, scope string
+	input     any
+}
+
+// replays reports whether a stored receipt for (actor, r, key) holds this
+// exact input, so the mutation would return its saved result instead of
+// running. It only reads; any doubt (no receipt, a different input, an
+// error) is false, and the caller treats the write as new.
+func (d *DB) replays(actor TaskActor, key string, r retry) bool {
+	actorKey, err := actor.key()
+	if err != nil {
+		return false
+	}
+	digest, err := receiptDigest(r.input)
+	if err != nil {
+		return false
+	}
+	var saved string
+	err = d.sql.QueryRow(`SELECT digest FROM task_requests WHERE actor=? AND operation=? AND scope=? AND key=?`,
+		actorKey, r.op, r.scope, key).Scan(&saved)
+	return err == nil && saved == digest
+}
+
+func createRetry(content TaskContent) retry {
+	if content.State == "" {
+		content.State = "BACKLOG"
+	}
+	return retry{"create", "", content}
+}
+
+// CreateReplays reports whether CreateTask with these arguments would
+// return a stored receipt rather than create a task.
+func (d *DB) CreateReplays(content TaskContent, actor TaskActor, key string) bool {
+	return d.replays(actor, key, createRetry(content))
+}
+
 // CreateTask stores a new task at revision 1 with its first history row.
 // An empty state defaults to BACKLOG.
 func (d *DB) CreateTask(content TaskContent, actor TaskActor, key string) (Task, error) {
@@ -462,7 +503,8 @@ func (d *DB) CreateTask(content TaskContent, actor TaskActor, key string) (Task,
 	if err := content.validate(); err != nil {
 		return Task{}, invalid(err)
 	}
-	t, err := taskMutation(d, actor, "create", "", key, content, func(tx *sql.Tx) (Task, error) {
+	r := createRetry(content)
+	t, err := taskMutation(d, actor, r.op, r.scope, key, r.input, func(tx *sql.Tx) (Task, error) {
 		if err := checkEpicAssignable(tx, content.Epic, ""); err != nil {
 			return Task{}, err
 		}
@@ -476,6 +518,19 @@ func (d *DB) CreateTask(content TaskContent, actor TaskActor, key string) (Task,
 	return t, err
 }
 
+func updateRetry(id string, content TaskContent, expected int64) retry {
+	return retry{"update", id, struct {
+		Content  TaskContent `json:"content"`
+		Expected int64       `json:"expected"`
+	}{content, expected}}
+}
+
+// UpdateReplays reports whether UpdateTask with these arguments would
+// return a stored receipt rather than update the task.
+func (d *DB) UpdateReplays(id string, content TaskContent, expected int64, actor TaskActor, key string) bool {
+	return d.replays(actor, key, updateRetry(id, content, expected))
+}
+
 // UpdateTask replaces every editable field under expected-revision CAS.
 func (d *DB) UpdateTask(id string, content TaskContent, expected int64, actor TaskActor, key string) (Task, error) {
 	if !taskIDRE.MatchString(id) {
@@ -487,10 +542,7 @@ func (d *DB) UpdateTask(id string, content TaskContent, expected int64, actor Ta
 	if err := content.validate(); err != nil {
 		return Task{}, invalid(err)
 	}
-	input := struct {
-		Content  TaskContent `json:"content"`
-		Expected int64       `json:"expected"`
-	}{content, expected}
+	r := updateRetry(id, content, expected)
 	check := func(tx *sql.Tx) error {
 		var managed bool
 		if err := tx.QueryRow(`SELECT EXISTS(SELECT 1 FROM team_managed_tasks WHERE task_id=? AND managed=1)`, id).Scan(&managed); err != nil {
@@ -501,7 +553,7 @@ func (d *DB) UpdateTask(id string, content TaskContent, expected int64, actor Ta
 		}
 		return rejectActiveReservation(tx, id)
 	}
-	return checkedTaskMutation(d, actor, "update", id, key, input, check, func(tx *sql.Tx) (Task, error) {
+	return checkedTaskMutation(d, actor, r.op, r.scope, key, r.input, check, func(tx *sql.Tx) (Task, error) {
 		t, err := readTask(tx, id)
 		if err != nil {
 			return Task{}, err
