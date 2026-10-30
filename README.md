@@ -198,30 +198,17 @@ curl -fsSL https://raw.githubusercontent.com/BlackVS/aimem/v0.10.20/boot.sh | ba
 ```
 
 Windows, in a PowerShell window (from cmd or Win+R, type `powershell`
-first and paste the block there):
+first):
 
 ```powershell
-& {
-  $ErrorActionPreference = 'Stop'
-  $d = New-Item -ItemType Directory -Force (Join-Path $env:TEMP 'aimem-boot')
-  $f = Join-Path $d 'boot.ps1'; $s = Join-Path $d 'SHA256SUMS'
-  Invoke-WebRequest https://github.com/BlackVS/aimem/releases/download/v0.10.20/boot.ps1 -OutFile $f -UseBasicParsing
-  Invoke-WebRequest https://github.com/BlackVS/aimem/releases/download/v0.10.20/SHA256SUMS -OutFile $s -UseBasicParsing
-  $want = ((Select-String -LiteralPath $s -Pattern '\sboot\.ps1$').Line -split '\s+')[0]
-  if ((Get-FileHash -LiteralPath $f).Hash -ne $want) { throw 'boot.ps1 does not match SHA256SUMS' }
-  Unblock-File -LiteralPath $f
-  powershell -NoProfile -ExecutionPolicy RemoteSigned -File $f
-}
+irm https://github.com/BlackVS/aimem/releases/download/v0.10.20/boot.ps1 | iex
 ```
 
-The block downloads `boot.ps1` and `SHA256SUMS` from the release,
-refuses a `boot.ps1` whose hash the release does not list, and runs it
-in a child PowerShell under the `RemoteSigned` policy for that process
-only. There is no `irm | iex` and no execution-policy bypass. There is
-no one-line cmd form: the check and the run in one line would be too
-long to read before running it. Releases up to 0.10.13 publish no
-`boot.ps1` asset; they were installed with `irm …/boot.ps1 | iex`, as
-their own README shows.
+The line runs the release's `boot.ps1` in your window. `boot.ps1` checks
+the aimem binary against the release's `SHA256SUMS` before it installs
+it; nothing checks `boot.ps1` itself before it runs.
+[INSTALL-CLIENT](docs/INSTALL-CLIENT.md#1-one-liner) has an optional
+stricter form that does.
 
 Then restart any running Claude Code or OpenCode session. The first run
 installs the binary, hooks, plugin and background service, and wires the
@@ -253,9 +240,10 @@ wired without writing:
 aimem wire --project my-project --hub team
 ```
 
-The one-liner needs the script to arrive intact. If the Windows block
-stops with `boot.ps1 does not match SHA256SUMS`, the download was cut or
-changed on the way (often a transient CDN or network-filter hiccup):
+The one-liner needs the script to arrive intact. If the Windows line
+stops with `checksum mismatch for aimem-windows-amd64.exe`, the download
+was cut or changed on the way (often a transient CDN or network-filter
+hiccup):
 retry, or run the installer from a checkout instead. That path skips the
 download entirely. (With no aimem installed yet it builds the binary from
 the checkout's source, which needs Go.)

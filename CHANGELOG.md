@@ -37,6 +37,25 @@ currently 25); a binary refuses a database newer than it understands.
   the other way to a local model server: it is not guarded, so a model
   served through it needs nothing.
 
+### Changed
+
+- **The documented Windows install is one line again:**
+  `irm https://github.com/BlackVS/aimem/releases/download/vX.Y.Z/boot.ps1 | iex`
+  in a PowerShell window, pinned to the release like the curl line.
+  README, INSTALL-CLIENT, ADMIN-MANUAL and both quickstarts show it, and
+  the knob form is one line too (set the knob, `try { irm … | iex }
+  finally { remove it }`). `boot.ps1` checks the binary against the
+  release's `SHA256SUMS`; nothing checks `boot.ps1` itself before it
+  runs. The block that also checks it stays in INSTALL-CLIENT as an
+  optional stricter form. The block had replaced `irm | iex` after the
+  chain drew a Windows Defender behavioral warning on an upgrade on
+  2026-09-05; `boot.ps1` then started its installer with
+  `-ExecutionPolicy Bypass`. It has since started it with
+  `RemoteSigned`, for the child process only, and an `irm | iex` upgrade
+  from 0.10.18 to 0.10.20 under the default `Restricted` policy drew no
+  warning. The scenario test runs every documented line, the knob form
+  included, and the optional block against a stub release.
+
 ### Fixed
 
 - **The skills store removes what an interrupted write left behind.** A
@@ -85,8 +104,9 @@ Includes PR #332, #333, #334, #335 and #336.
   write before the readability check; an older hub answers such a retry
   as before.
 - **Clients upgrade with `aimem upgrade`**, from 0.10.19. A client on
-  0.10.18 or older moves once with the one-liner. A hub keeps
-  `install-hub.sh`.
+  0.10.18 or older moves once with the one-liner (on Windows,
+  `irm https://github.com/BlackVS/aimem/releases/download/v0.10.20/boot.ps1 | iex`).
+  A hub keeps `install-hub.sh`.
 - **The on-disk schema stays at 25 and the access schema at 9.** A hub
   or a client goes back to 0.10.19 by putting its binary back.
 

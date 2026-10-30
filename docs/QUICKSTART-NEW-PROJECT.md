@@ -229,22 +229,12 @@ curl -fsSL https://raw.githubusercontent.com/BlackVS/aimem/v0.10.20/boot.sh | ba
 **Windows.** The installer registers a logon task for the
 service and adds `aimem` to your user `PATH`. Open a new PowerShell
 window after it finishes. In a PowerShell window (from cmd, type
-`powershell` first), go to the project, then download the release's
-boot script, check it against the release's `SHA256SUMS` and run it:
+`powershell` first), go to the project and run the release's boot
+script:
 
 ```powershell
 cd $HOME\src\my-project
-& {
-  $ErrorActionPreference = 'Stop'
-  $d = New-Item -ItemType Directory -Force (Join-Path $env:TEMP 'aimem-boot')
-  $f = Join-Path $d 'boot.ps1'; $s = Join-Path $d 'SHA256SUMS'
-  Invoke-WebRequest https://github.com/BlackVS/aimem/releases/download/v0.10.20/boot.ps1 -OutFile $f -UseBasicParsing
-  Invoke-WebRequest https://github.com/BlackVS/aimem/releases/download/v0.10.20/SHA256SUMS -OutFile $s -UseBasicParsing
-  $want = ((Select-String -LiteralPath $s -Pattern '\sboot\.ps1$').Line -split '\s+')[0]
-  if ((Get-FileHash -LiteralPath $f).Hash -ne $want) { throw 'boot.ps1 does not match SHA256SUMS' }
-  Unblock-File -LiteralPath $f
-  powershell -NoProfile -ExecutionPolicy RemoteSigned -File $f
-}
+irm https://github.com/BlackVS/aimem/releases/download/v0.10.20/boot.ps1 | iex
 ```
 
 The install puts the hooks and the agent plugins in your user profile,
