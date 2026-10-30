@@ -11,36 +11,58 @@ import (
 	"testing"
 )
 
-// boot.ps1 run as `irm | iex` runs in the caller's own process, so the two
-// variables it sets for install.ps1 must be put back as they were, even
-// when the run fails: unset stays unset, and a value the user set stays
-// theirs. The downloads are stubbed: the archive and the binary arrive as
-// placeholder files and SHA256SUMS lists nothing, so the run gets past
-// setting AIMEM_PREBUILT and fails on the checksum, offline. Get-FileHash
-// is stubbed too: Windows PowerShell started by a test under a pwsh step
-// inherits pwsh's module path and could not load it on the CI runner.
+// boot.ps1 run as `irm | iex` runs in the caller's own process and scope,
+// so it must leave the session as it found it, after a failed run and
+// after a successful one. The two environment variables it sets for
+// install.ps1 are put back (unset stays unset, and a value the user set
+// stays theirs), and so is the process-wide TLS setting. Its own
+// variables, $ErrorActionPreference = 'Stop' among them, never reach the
+// caller's scope. The downloads are stubbed: the archive and the binary
+// arrive as placeholder files. A failed run's SHA256SUMS lists nothing,
+// so the run gets past setting AIMEM_PREBUILT and fails on the checksum,
+// offline. A successful run's lists the placeholder hash, its archive
+// holds an install.ps1, and the installer's shell is stubbed to succeed.
+// Get-FileHash is stubbed too: Windows PowerShell started by a test under
+// a pwsh step inherits pwsh's module path and could not load it on the CI
+// runner. It is stubbed through an alias: Get-FileHash is itself a module
+// function, and under Invoke-Expression the module's copy wins over a
+// function of the same name, while an alias outranks both.
 func TestBootPs1LeavesNoVariablesInTheCallersSession(t *testing.T) {
 	shells := powerShells(t)
 	boot, err := filepath.Abs(filepath.Join("..", "..", "boot.ps1"))
 	if err != nil {
 		t.Fatal(err)
 	}
+	// The stubs of a successful run: SHA256SUMS lists the placeholder
+	// hash, the archive holds an install.ps1, and the installer succeeds.
+	const succeeds = `function Invoke-WebRequest { param($Uri, $OutFile, [switch]$UseBasicParsing)
+  if ($OutFile -like '*SHA256SUMS') { Set-Content -LiteralPath $OutFile -Value 'placeholder  aimem-windows-amd64.exe' } else { Set-Content -LiteralPath $OutFile -Value "placeholder for $Uri" } }
+function tar { Set-Content -LiteralPath (Join-Path $args[[array]::IndexOf($args, '-C') + 1] 'install.ps1') -Value '' }
+function powershell { $global:LASTEXITCODE = 0 }
+`
+	const fails = `function Invoke-WebRequest { param($Uri, $OutFile, [switch]$UseBasicParsing) Set-Content -LiteralPath $OutFile -Value "placeholder for $Uri" }
+function tar { }
+`
 	for _, c := range []struct {
-		name, before, want string
+		name, before, stubs, failure, want string
 	}{
-		{"unset before", "", "target=[] prebuilt=[]"},
-		{"set by the user", "$env:AIMEM_TARGET_VERSION = 'v0.0.1'; $env:AIMEM_PREBUILT = 'C:\\mine\\aimem.exe'\n", `target=[v0.0.1] prebuilt=[C:\mine\aimem.exe]`},
+		{"unset before, failed run", "", fails, "failure=[checksum mismatch", "target=[] prebuilt=[]"},
+		{"set by the user, failed run", "$env:AIMEM_TARGET_VERSION = 'v0.0.1'; $env:AIMEM_PREBUILT = 'C:\\mine\\aimem.exe'\n", fails, "failure=[checksum mismatch", `target=[v0.0.1] prebuilt=[C:\mine\aimem.exe]`},
+		{"unset before, successful run", "", succeeds, "failure=[]", "target=[] prebuilt=[]"},
 	} {
 		for _, ps := range shells {
 			t.Run(c.name+" in "+filepath.Base(ps), func(t *testing.T) {
 				dir := t.TempDir()
-				script := c.before + `function Invoke-WebRequest { param($Uri, $OutFile, [switch]$UseBasicParsing) Set-Content -LiteralPath $OutFile -Value "placeholder for $Uri" }
-function tar { }
-function Get-FileHash { [pscustomobject]@{ Hash = 'PLACEHOLDER' } }
+				script := c.before + c.stubs + `function Get-PlaceholderHash { [pscustomobject]@{ Hash = 'PLACEHOLDER' } }
+Set-Alias Get-FileHash Get-PlaceholderHash
+$protocol = [Net.ServicePointManager]::SecurityProtocol
 $failure = ''
 try { Get-Content -Raw -LiteralPath $env:BOOT | Invoke-Expression } catch { $failure = "$_" }
 Write-Output "failure=[$failure]"
 Write-Output "target=[$env:AIMEM_TARGET_VERSION] prebuilt=[$env:AIMEM_PREBUILT]"
+Write-Output "preference=[$ErrorActionPreference]"
+Write-Output "leaked=[$(@('release', 'tag', 'saved', 'dest', 'repo', 'base') | Where-Object { Get-Variable $_ -ErrorAction SilentlyContinue })]"
+Write-Output "protocol kept=[$([Net.ServicePointManager]::SecurityProtocol -eq $protocol)]"
 `
 				file := filepath.Join(dir, "session.ps1")
 				if err := os.WriteFile(file, []byte(script), 0o600); err != nil {
@@ -50,11 +72,16 @@ Write-Output "target=[$env:AIMEM_TARGET_VERSION] prebuilt=[$env:AIMEM_PREBUILT]"
 				if err != nil {
 					t.Fatalf("%v:\n%s", err, out)
 				}
-				if !strings.Contains(out, "failure=[checksum mismatch") {
-					t.Fatalf("the stubbed run did not reach the checksum, so AIMEM_PREBUILT was never set:\n%s", out)
+				if !strings.Contains(out, c.failure) {
+					t.Fatalf("the stubbed run did not end as planned (want %q), so it did not set AIMEM_PREBUILT and run to the end:\n%s", c.failure, out)
 				}
 				if !strings.Contains(out, c.want) {
 					t.Fatalf("the session holds the run's variables; want %q:\n%s", c.want, out)
+				}
+				for _, w := range []string{"preference=[Continue]", "leaked=[]", "protocol kept=[True]"} {
+					if !strings.Contains(out, w) {
+						t.Fatalf("the run left its state in the caller's session; want %q:\n%s", w, out)
+					}
 				}
 			})
 		}

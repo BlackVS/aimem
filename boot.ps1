@@ -33,12 +33,17 @@
 # Set a knob just before the run and remove it in a `finally`, so it lives
 # only for that run (docs/ADMIN-MANUAL.md, Upgrades, has the form). Set in
 # the caller's window and left there, it would stay for every later run.
+
+# The body runs in a script block of its own: run as `irm | iex`, the
+# script runs in the caller's scope, and its variables, among them
+# $ErrorActionPreference = 'Stop', would stay set in that window. The body
+# is not indented, so the markers and the $release line keep their shape.
+& {
 $ErrorActionPreference = 'Stop'
 
 # The release this script installs. Bumped together with the CHANGELOG
 # when a release is cut (internal/installer checks they agree).
 $release = 'v0.10.20'
-[Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
 
 $repo = if ($env:AIMEM_REPO) { $env:AIMEM_REPO } else { 'BlackVS/aimem' }
 $base = "https://github.com/$repo"
@@ -54,7 +59,10 @@ foreach ($k in 'AIMEM_TARGET_VERSION', 'AIMEM_PREBUILT') {
 }
 $dest = Join-Path ([IO.Path]::GetTempPath()) ("aimem-" + [Guid]::NewGuid().ToString('N'))
 New-Item -ItemType Directory -Force $dest | Out-Null
+$protocol = [Net.ServicePointManager]::SecurityProtocol
 try {
+  # Process-wide, so the finally puts it back too.
+  [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
   # Tell install.ps1 which release this is, so an older install gets upgraded.
   $env:AIMEM_TARGET_VERSION = $tag
   Write-Host "Fetching aimem $tag ..."
@@ -114,4 +122,6 @@ try {
   foreach ($k in $saved.Keys) {
     [Environment]::SetEnvironmentVariable($k, $saved[$k], 'Process')
   }
+  [Net.ServicePointManager]::SecurityProtocol = $protocol
+}
 }
