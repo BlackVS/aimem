@@ -27,6 +27,19 @@ currently 25); a binary refuses a database newer than it understands.
   `--groups` are refused in a worktree, and so is a directory below a
   worktree's top.
 
+### Fixed
+
+- **A retried task write returns its receipt instead of meeting the
+  readability check again.** A retry is a write sent again with the same
+  idempotency key and content. On a task create, a task update and a
+  coordinator's edit of a managed task, the hub ran the readability check
+  before it looked the key up. So a retry of a write that had already
+  succeeded could be refused, because its text was compared with a task
+  that had moved on since, or checked by a filter that had changed in
+  between. Such a retry now returns the stored result unchecked. The same
+  key with other content is a new write and is checked as before.
+  Authorization is unchanged.
+
 ## [0.10.19] — 2026-10-29
 
 `aimem upgrade` brings an installed client to a release in one command;

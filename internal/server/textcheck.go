@@ -99,6 +99,21 @@ func (s *Server) checkTaskFields(ctx context.Context, c store.TaskContent, prev 
 	return nil
 }
 
+// checkTaskChange checks a write that replaces task id's content: only the
+// fields it changes. A retry of a stored write (replay) is not checked: it
+// returns its receipt, and the task may have moved on since. A task that
+// cannot be read is left to the store, which answers for it.
+func (s *Server) checkTaskChange(ctx context.Context, db *store.DB, id string, c store.TaskContent, replay bool) *textRefusal {
+	if replay {
+		return nil
+	}
+	cur, err := db.GetTask(id)
+	if err != nil {
+		return nil
+	}
+	return s.checkTaskFields(ctx, c, &cur.TaskContent)
+}
+
 // refuseText answers 422 in the hub's refusal envelope (code, message,
 // next_action), which the MCP tools render as "code: message Next: fix";
 // error carries the same whole sentence for readers of the plain shape.

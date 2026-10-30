@@ -70,6 +70,16 @@ func managedEvent(tx *sql.Tx, tm Team, s *TeamSession, operation string, change 
 	return putTeamEvent(tx, tm.ID, TeamEvent{ID: uuidv7.New(), ProtocolVersion: 1, Operation: operation, At: change.CreatedAt, TeamAuditContext: a, Team: tm, Session: s, PreviousRevision: change.PreviousRevision, Managed: &change})
 }
 
+func managedEditRetry(taskID string, c TeamManagedEditCommand) retry {
+	return retry{"team.task.edit", taskID, c}
+}
+
+// EditManagedReplays reports whether EditManagedTask with these arguments
+// would return a stored receipt rather than edit the task.
+func (d *DB) EditManagedReplays(taskID string, c TeamManagedEditCommand, actor TaskActor, key string) bool {
+	return d.replays(actor, key, managedEditRetry(taskID, c))
+}
+
 // EditManagedTask lets the current coordinator replace a managed task's content
 // between attempts. Changing scope during execution requires a stop and a new
 // offer; the task state and archive flag are owned by coordination operations.
@@ -92,7 +102,8 @@ func (d *DB) EditManagedTask(teamID, taskID string, c TeamManagedEditCommand, a 
 		return Task{}, invalid(errors.New("managed tasks are archived after unmanage, not by edit"))
 	}
 	check := func(tx *sql.Tx) error { _, _, err := boundTeamSession(tx, teamID, c.SessionID, a.Actor); return err }
-	return checkedTaskMutation(d, a.Actor, "team.task.edit", taskID, key, c, check, func(tx *sql.Tx) (Task, error) {
+	r := managedEditRetry(taskID, c)
+	return checkedTaskMutation(d, a.Actor, r.op, r.scope, key, r.input, check, func(tx *sql.Tx) (Task, error) {
 		tm, coordinator, err := currentCoordinator(tx, teamID, c.TeamSessionHandle, c.CoordinatorGeneration, a.Actor)
 		if err != nil {
 			return Task{}, err
