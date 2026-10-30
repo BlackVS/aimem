@@ -37,6 +37,15 @@ currently 25); a binary refuses a database newer than it understands.
   the other way to a local model server: it is not guarded, so a model
   served through it needs nothing.
 
+### Fixed
+
+- **The skills store removes what an interrupted write left behind.** A
+  set is written into a temporary `skills/sets/.tmp-*` directory and
+  renamed into place; a crash or kill in between left that directory
+  for good, on the hub (an import) and on a member (a fetch into the
+  cache). The housekeeping after an import and the member's cache trim
+  now remove such a directory once it is more than an hour old.
+
 ## [0.10.20] — 2026-10-30
 
 `aimem wire` wires a linked worktree of a wired checkout, and refuses an

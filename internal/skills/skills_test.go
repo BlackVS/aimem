@@ -314,6 +314,75 @@ func TestTrimSparesTheIndexKeptSets(t *testing.T) {
 	}
 }
 
+// An interrupted put leaves a .tmp-* directory under sets; an import's
+// prune and a member's Trim remove it once it is over an hour old, and
+// leave a younger one, which may still be filling, and the complete
+// entries beside them.
+func TestHousekeepingRemovesStaleTemporaryDirectories(t *testing.T) {
+	for _, path := range []string{"prune", "trim"} {
+		t.Run(path, func(t *testing.T) {
+			root := t.TempDir()
+			st := NewStore(root)
+			first, _, err := st.Import(&Set{Source: SourceRelease, Version: "1.0", Files: releaseFiles()}, "admin", time.Now())
+			if err != nil {
+				t.Fatal(err)
+			}
+			sets := filepath.Join(root, "skills", "sets")
+			stale := filepath.Join(sets, ".tmp-"+first.Digest[:12]+"-111")
+			fresh := filepath.Join(sets, ".tmp-"+first.Digest[:12]+"-222")
+			for _, d := range []string{stale, fresh} {
+				if err := os.MkdirAll(filepath.Join(d, "x"), 0o700); err != nil {
+					t.Fatal(err)
+				}
+				os.WriteFile(filepath.Join(d, "x", "SKILL.md"), []byte("partial"), 0o600)
+			}
+			old := time.Now().Add(-2 * time.Hour)
+			if err := os.Chtimes(stale, old, old); err != nil {
+				t.Fatal(err)
+			}
+			// A digest-named entry without its marker, as old: the marker
+			// rule's, not this one's (Trim skips it; prune's kept rule
+			// already removes it).
+			incomplete := filepath.Join(sets, strings.Repeat("c", 64))
+			os.MkdirAll(incomplete, 0o700)
+			os.Chtimes(incomplete, old, old)
+
+			complete := []string{first.Digest}
+			if path == "prune" {
+				files := releaseFiles()
+				files["oh-code-review/SKILL.md"] = []byte("second")
+				second, _, err := st.Import(&Set{Source: SourceRelease, Version: "1.1", Files: files}, "admin", time.Now())
+				if err != nil {
+					t.Fatal(err)
+				}
+				complete = append(complete, second.Digest)
+			} else {
+				files := map[string][]byte{"x/SKILL.md": []byte("cached")}
+				cached := (&Set{Files: files}).Digest()
+				if _, err := st.Put(files, cached); err != nil {
+					t.Fatal(err)
+				}
+				complete = append(complete, cached)
+				st.Trim(10)
+				if _, err := os.Stat(incomplete); err != nil {
+					t.Fatalf("trim removed a digest-named entry by the temporary rule: %v", err)
+				}
+			}
+			if _, err := os.Stat(stale); !os.IsNotExist(err) {
+				t.Fatalf("%s kept a stale temporary directory: %v", path, err)
+			}
+			if _, err := os.Stat(fresh); err != nil {
+				t.Fatalf("%s removed a fresh temporary directory: %v", path, err)
+			}
+			for _, d := range complete {
+				if !st.Has(d) {
+					t.Fatalf("%s removed the complete entry %s", path, d[:12])
+				}
+			}
+		})
+	}
+}
+
 func TestResolvePinsAgainstTheIndex(t *testing.T) {
 	ix := &IndexAnswer{
 		Sources: map[string]*Entry{
