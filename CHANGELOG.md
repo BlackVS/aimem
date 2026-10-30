@@ -29,6 +29,15 @@ currently 25); a binary refuses a database newer than it understands.
 
 ### Fixed
 
+- **`aimem wire` in a linked worktree refuses an empty governing
+  `.aimem.json`.** Run in a worktree, it reported the main checkout's
+  `.aimem.json` as healthy when that file was empty or held only
+  whitespace. A session cannot read such a file, so the project ran with
+  no pin, hub binding or groups. The worktree now gets the same fail
+  finding as the main checkout, naming the governing file and how to
+  repair it there, and `aimem wire` exits non-zero. The governing file
+  is never written from the worktree.
+
 - **A project wired on Windows no longer gives a collaborator without
   aimem a Claude Code hook error.** `aimem wire` wrote the bare
   `aimem session-start` as the Claude Code SessionStart hook on Windows,

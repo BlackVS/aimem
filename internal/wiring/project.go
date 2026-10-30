@@ -173,6 +173,10 @@ func gitTop(dir string) string {
 func governingConfig(gov string) Finding {
 	const rel = ".aimem.json"
 	path := filepath.Join(gov, rel)
+	if emptyConfig(gov, path) {
+		return Finding{File: rel, Level: "fail", Detail: "the governing " + path + " is empty: a session cannot read it, so the project has no pin, hub binding or groups",
+			Fix: "in the main checkout, write `{}` into it, or remove it, and run `aimem wire` there"}
+	}
 	obj, _, _, err := readObject(gov, path)
 	if err != nil {
 		return Finding{File: rel, Level: "fail", Detail: "the governing " + path + " is unreadable: " + err.Error(), Fix: "repair it in the main checkout"}
@@ -228,15 +232,21 @@ func keptFile(dir, rel, content string, write bool) Finding {
 	return Finding{File: rel, Level: "ok", Detail: "created", Repaired: true}
 }
 
+// emptyConfig reports whether the .aimem.json at path exists but holds
+// nothing. readObject takes an empty client config for an empty object, but
+// a session's reader (ident.loadConfig) refuses an empty .aimem.json, so the
+// project would run with no pin, hub binding or groups.
+func emptyConfig(root, path string) bool {
+	raw, err := confine.ReadFile(root, path)
+	return err == nil && len(bytes.TrimSpace(bytes.TrimPrefix(raw, []byte("\xef\xbb\xbf")))) == 0
+}
+
 // projectConfig creates .aimem.json, or sets in it only the keys o names;
 // every other key keeps its value. It is written as UTF-8 without a BOM.
 func projectConfig(dir string, o ProjectOptions, write bool) Finding {
 	const rel = ".aimem.json"
 	path := filepath.Join(dir, rel)
-	// readObject takes an empty client config for an empty object, but a
-	// session's reader (ident.loadConfig) refuses an empty .aimem.json, so
-	// the project would run with no pin, hub binding or groups.
-	if raw, err := confine.ReadFile(dir, path); err == nil && len(bytes.TrimSpace(bytes.TrimPrefix(raw, []byte("\xef\xbb\xbf")))) == 0 {
+	if emptyConfig(dir, path) {
 		return Finding{File: rel, Level: "fail", Detail: "empty: a session cannot read it, so the project has no pin, hub binding or groups",
 			Fix: "write `{}` into it, or remove it, and run `aimem wire` again; nothing was written"}
 	}

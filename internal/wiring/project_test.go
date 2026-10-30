@@ -328,6 +328,33 @@ func TestWireLinkedWorktree(t *testing.T) {
 	if got := read(t, filepath.Join(main, ".aimem.json")); got != cfg {
 		t.Errorf("the main checkout's .aimem.json changed:\n%s\nwas\n%s", got, cfg)
 	}
+
+	// An empty governing file is refused as it is in the main checkout: a
+	// session cannot read it. The worktree names it and leaves it alone.
+	for _, empty := range []string{"", " \n\t\n"} {
+		write(t, filepath.Join(main, ".aimem.json"), empty)
+		for _, check := range []bool{true, false} {
+			out, err := Wire(wt, ProjectOptions{Home: home, Check: check})
+			if err != nil {
+				t.Fatalf("empty %q, check %v: %v", empty, check, err)
+			}
+			found := false
+			for _, f := range out {
+				if f.File == ".aimem.json" {
+					found = true
+					if f.Level != "fail" || !strings.Contains(f.Detail, filepath.Join(main, ".aimem.json")) || !strings.Contains(f.Detail, "empty") || !strings.Contains(f.Fix, "main checkout") {
+						t.Errorf("empty %q, check %v: %s %s (fix %q)", empty, check, f.Level, f.Detail, f.Fix)
+					}
+				}
+			}
+			if !found {
+				t.Errorf("empty %q, check %v: no .aimem.json finding", empty, check)
+			}
+			if got := read(t, filepath.Join(main, ".aimem.json")); got != empty {
+				t.Errorf("empty %q, check %v: the governing file became %q", empty, check, got)
+			}
+		}
+	}
 }
 
 // A rewrite keeps a user's & and > as written, not as JSON escapes.
