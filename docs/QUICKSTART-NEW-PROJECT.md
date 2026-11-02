@@ -7,9 +7,14 @@ design documents are shared through the hub, and the agent works from
 the project's task board under a selected process.
 
 You need:
-- the workstation (macOS, Linux or Windows) and the project directory on it;
+- the workstation (macOS, Linux or Windows);
+- the project's repository on its forge, GitHub or Gitea, or the right to
+  create it there;
 - SSH access to the hub host as an administrator;
 - the hub's URL, for example `https://hub.example.com:8440`.
+
+Every forge-specific step below is shown for GitHub and for Gitea. The
+Gitea examples use `https://gitea.example.com`; substitute your own.
 
 To stand up a hub first, see [the general quickstart](QUICKSTART.md),
 stage 2. The [Kanban quickstart](KANBAN-QUICKSTART.md) explains the task
@@ -36,6 +41,28 @@ The examples below use these three values, the hub
 `https://hub.example.com:8440`, the installer's default service account
 `sessiond`, and `my-mac` as the label of the workstation's credentials.
 Substitute your own.
+
+**A workstation that already works with the hub.** For a second project
+on a machine where aimem already runs, check first what it holds:
+
+```sh
+aimem hub list
+aimem hub credential team    # the hub's name as aimem hub list shows it
+```
+
+When `aimem hub list` shows the hub with `task-credential:set`, and
+`aimem hub credential` reports `active, scope user (user NAME ...)`,
+the machine already has its writer token and a user task token. Then:
+- in step 2, skip the writer token and the user part, and give the
+  onboard command `--user NAME`, the user that credential belongs to.
+  That is often the machine's agent user rather than your own: the grant
+  must go to the user whose token this machine presents;
+- in step 3, skip steps 3.3 and 3.4, and use the hub name the machine
+  lists, which need not be `team`.
+
+A credential with `scope project` writes only to its own project. For
+the new one, issue a user task token as in step 2 and store it with
+step 3.4.
 
 ## 2. On the hub: two credentials, then the project in one command
 
@@ -74,7 +101,8 @@ process lives in a Git repository, which is separate from the hub: the
 hub stores the selection and a copy of the files and serves them to
 members. aimem's own repository carries a ready set at
 `processes/aimem/manifest.json`. It is aimem's own process and requires
-the `oh-code-review` skill from step 3.2. Read its
+the `oh-code-review`, `forge-gates` and `verify-delivery` skills from
+step 3.2. Read its
 [handbook](https://github.com/BlackVS/aimem/blob/master/processes/aimem/handbook.md)
 before you select it; a project with other rules copies the
 set into a repository of its own and selects that instead.
@@ -171,11 +199,20 @@ The workstation checks the token it was given with
 `aimem hub credential team` in step 3.4.
 
 **The repository.** Bind the project to the one repository its work
-happens in. The host of the URL names the forge credential a member
-needs:
+happens in, by its HTTPS URL. The host of the URL names the forge
+credential a member needs (step 3.7).
+
+GitHub:
 
 ```sh
 aimem project repo set --project my-project --kind github --url https://github.com/you/my-project.git
+aimem project show --project my-project
+```
+
+Gitea:
+
+```sh
+aimem project repo set --project my-project --kind gitea --url https://gitea.example.com/you/my-project.git
 aimem project show --project my-project
 ```
 
@@ -187,9 +224,45 @@ warning above, and the readiness checklist.
 
 ### 3.1 Install aimem and wire the project
 
-Run the one-liner **inside the project directory**. When aimem is
-already installed on this machine, wire the project with the installed
-binary instead, which downloads nothing, and skip to step 3.2:
+**First, the Git checkout.** The project directory is a clone of the
+project's repository before anything is wired in it, so that the wired
+files land in a working tree and the first commit carries them. Create
+the repository on the forge, then clone it over HTTPS.
+
+GitHub, with the `gh` CLI (or create it on github.com and clone it):
+
+```sh
+cd ~/src
+gh repo create you/my-project --private --clone
+cd my-project
+```
+
+Gitea: create the repository in the web interface (**New Repository**),
+then clone it:
+
+```sh
+cd ~/src
+git clone https://gitea.example.com/you/my-project.git
+cd my-project
+```
+
+Cloning an empty repository works; Git warns that it is empty. When the
+repository is empty on the forge and your directory already holds
+files but is not a clone, turn the directory into one instead. If the
+forge created a first commit (a README or a licence), clone it and move
+your files into the clone:
+
+```sh
+cd ~/src/my-project
+git init -b main
+git remote add origin https://github.com/you/my-project.git    # Gitea: https://gitea.example.com/you/my-project.git
+```
+
+The first push comes after step 3.5, when the wired files are in place.
+
+Then run the one-liner **inside the clone**. When aimem is already
+installed on this machine, wire the project with the installed binary
+instead, which downloads nothing, and skip to step 3.2:
 
 ```sh
 aimem wire --project my-project --hub team
@@ -278,6 +351,8 @@ neither Git nor internet access for its skills.
 
 ### 3.3 Register the hub with the writer token
 
+Skip this step on a machine that already lists the hub (section 1).
+
 Put the writer token from step 2 in a file only you can read, give the
 file to `aimem hub add`, and delete it.
 
@@ -309,6 +384,9 @@ home), or `--pin sha256-BASE64`. The certificate is public; only the
 tokens are secret.
 
 ### 3.4 Give the task tools their credential
+
+Skip this step on a machine whose credential for the hub is active with
+`scope user` (section 1): the onboard granted that user the project.
 
 Do the same with the user task token from step 2:
 
@@ -359,7 +437,59 @@ it with `Out-File` or `>` in Windows PowerShell 5.1: they write UTF-16,
 which aimem cannot read. It then warns that `.aimem.json` is unreadable
 and treats the file as absent.
 
-Commit `.aimem.json` and the other wired files if the project is tracked.
+**What to commit.** The wiring writes two kinds of file. The shared ones
+are the same on every machine and are committed:
+- `AGENTS.md` and `CLAUDE.md`;
+- `.mcp.json`, `opencode.json`, `.claude/settings.json` and
+  `.codex/hooks.json`;
+- the command and skill entry points the wiring renders:
+  `.claude/commands/aimem-analyze.md`, `.opencode/command/aimem-analyze.md`,
+  the team entry points `.claude/skills/join_team/` and `resume_team/`,
+  `.agents/skills/join-team/` and `resume-team/`, and
+  `.opencode/commands/join_team.md` and `resume_team.md`.
+
+The local ones belong to one machine or one member and stay out of Git:
+- `.aimem.json`, which names the hub as this machine registered it;
+- `docs/SESSION-STATE.md` and `docs/SESSION-STATE-ARCHIVE.md`, the
+  handoff, which the hub shares (step 3.6);
+- `.claude/settings.local.json`, Claude Code's personal settings;
+- the skills `aimem skills install` puts in place (step 3.2), with their
+  record `.ai-skills.json`: each member installs them from the hub.
+
+Add these lines to `.gitignore`. The skills directories also hold the
+committed team entry points, which the `!` lines keep:
+
+```gitignore
+.aimem.json
+docs/SESSION-STATE.md
+docs/SESSION-STATE-ARCHIVE.md
+.claude/settings.local.json
+.claude/skills/*
+!.claude/skills/join_team/
+!.claude/skills/resume_team/
+.agents/skills/*
+!.agents/skills/join-team/
+!.agents/skills/resume-team/
+.opencode/skills/
+.openhands/skills/
+```
+
+Commit `.aimem.json` instead, and drop its line, when every clone
+should pin the project ID without running `aimem wire --project`; every
+member then registers the hub under the same name. With it kept local,
+each new clone runs `aimem wire --project my-project --hub team` once.
+
+Then make the first commit and push it:
+
+```sh
+git add .gitignore AGENTS.md CLAUDE.md .mcp.json opencode.json .claude .codex .agents .opencode
+git status --short
+git commit -m "Wire the project for aimem"
+git push -u origin HEAD
+```
+
+`git status --short` must not list any of the local files above as
+staged.
 
 ### 3.6 Verify, in this order
 
@@ -405,6 +535,88 @@ project's tasks. The new task appearing in the list proves the whole
 chain: the MCP registration, the task credential, the user's grant and
 the board. The hub's task page,
 `https://hub.example.com:8440/tasks`, shows the same task.
+
+### 3.7 Give the agent its forge access
+
+The agent pushes branches, opens pull requests, requests the external
+review and reads the gates with the `forge-gates` and `verify-delivery`
+skills. It needs a forge credential of its own for that, and that
+credential is never kept in plain text: not in an env file, a shell
+profile or a project file. Each platform's own credential store holds it.
+
+The agent pushes over HTTPS, even where your own remote is SSH: your
+SSH key stays yours, and a key that asks for a PIN or a touch blocks a
+call nobody is there to answer. With an SSH `origin`, the agent pushes
+to the HTTPS URL by name, for example
+`git push https://github.com/you/my-project.git BRANCH`.
+
+**GitHub.** Log in with the `gh` CLI. It keeps the token in the system's
+credential store, and `gh auth setup-git` makes Git use it for HTTPS:
+
+```sh
+gh auth login
+gh auth setup-git
+gh auth status
+```
+
+`forge-gates` and `verify-delivery` read the token from `gh` at call
+time (`gh auth token`), so they need nothing more.
+
+**Gitea.** Use the account the agent works as, for example a bot user,
+and a Gitea access token for it with repository read and write. Store it
+in Git's credential helper for the platform:
+- macOS: `git config --global credential.helper osxkeychain`, the
+  Keychain;
+- Windows: Git Credential Manager, which Git for Windows installs and
+  sets as the helper;
+- Linux: the libsecret helper, `git-credential-libsecret`, which ships in
+  Git's `contrib` (build it once with `make` on Debian and Ubuntu) and is
+  set with `git config --global credential.helper`.
+
+Then push once over HTTPS as that user and give the token as the
+password; the helper stores it. Put the user name in the URL the agent
+pushes to, `https://my-bot@gitea.example.com/you/my-project.git`, so
+that Git picks that user's entry and not yours. The Gitea API calls (adding the review
+label, `forge-gates`, `verify-delivery`) need the token in a file named
+by `GITEA_TOKEN_FILE`. Read it from the store at call time into an
+owner-only temporary file and delete the file after the call. On macOS:
+
+```sh
+f=$(mktemp)    # owner-only
+security find-internet-password -s gitea.example.com -a my-bot -w > "$f"
+GITEA_TOKEN_FILE="$f" python3 .claude/skills/forge-gates/scripts/forge_gates.py gates \
+  --pr https://gitea.example.com/you/my-project/pulls/1 --api-base https://gitea.example.com/api/v1 \
+  --review-author local=my-bot --review-author external=REVIEWER
+rm -f "$f"
+```
+
+On Gitea, `--review-author` names the account each review comes from
+(`REVIEWER` is the external reviewer's account); the `forge-gates` and
+`verify-delivery` skills describe their options.
+
+On Windows (in Git Bash) and Linux, `git credential fill` reads the same
+store; this line takes the place of the `security` line, and with no
+stored entry it fails instead of asking:
+
+```sh
+printf 'protocol=https\nhost=gitea.example.com\nusername=my-bot\n\n' | GIT_TERMINAL_PROMPT=0 GCM_INTERACTIVE=never git credential fill | sed -n 's/^password=//p' > "$f"
+```
+
+Never print the token or pass it on a command line.
+
+**The external review labels.** Where an external reviewer watches the
+repository, the agent requests a review by adding the `review-this`
+label to the pull request (the process handbook names the labels and
+what they mean). The label must exist in the repository:
+- GitHub: `gh label list` shows the repository's labels,
+  `gh label create review-this` adds one, and
+  `gh pr edit 1 --add-label review-this` requests the review;
+- Gitea: **Issues > Labels** in the repository shows and adds them. The
+  API adds one to pull request 1 with
+  `POST /api/v1/repos/you/my-project/issues/1/labels` and the body <!-- doc-check: skip -->
+  `{"labels": [ID]}`, where `ID` is the label's `id` from
+  `GET /api/v1/repos/you/my-project/labels`, sent with the token as <!-- doc-check: skip -->
+  above.
 
 ## 4. The first day on the board
 
