@@ -273,7 +273,8 @@ Manual equivalent (what the script sets up):
    # URL, a model server on this machine or the local network included.
    # The hub trusts its admin with this machine's network position; a hub
    # whose admin is not the machine's operator is not a supported
-   # deployment.
+   # deployment. A plain http:// provider gets its key in clear text, so
+   # keep it on this machine or its private network.
    # LLM call pacing (optional): outbound curate/embed calls are spaced
    # AIMEM_LLM_INTERVAL seconds apart (default 2; 0 disables) and retry
    # transient upstream blocks AIMEM_LLM_RETRIES times (default 3) with
