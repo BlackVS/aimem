@@ -9,9 +9,11 @@ the grant) and binds the repository.
 On the workstation, a person wires the project, adds the hub with the
 writer token, stores the task token and checks what an agent will see. A
 task is then created and listed through the hub's API with that token.
-Last, a second project is onboarded the same way: the same token writes
-to it with nothing changed on the workstation. This is the path a
-new user follows first, so a release must not break any step of it.
+Last, a second project is onboarded the same way, after the workstation
+shows that it already holds the hub and a user task token and names that
+token's user: the same token writes to it with nothing changed on the
+workstation. This is the path a new user follows first, so a release
+must not break any step of it.
 
 Tier: release gate.
 
@@ -25,7 +27,9 @@ Tier: release gate.
   empty project directory. Run the workstation steps from that directory.
   The quickstart's one-liner installs and wires in one go; this card
   starts from the installed binary and wires the project with
-  `aimem wire`.
+  `aimem wire`. The quickstart wires a clone of the project's repository
+  (its step 3.1); wiring does not depend on Git, so the card wires a
+  plain directory.
 - A writer token for the workstation in `<token-file>`, readable only by
   your account. Step 2 shows the command that issues one; copy its secret
   into that file, as the quickstart's step 3.3 does with `umask`, `cat` or
@@ -222,7 +226,7 @@ individual credential set, active, scope user
 
 ### 15. The process's skills are installed from the hub (workstation)
 
-The process names the review skill and the hub serves it; `--tool` names the client, which is found on `PATH` otherwise.
+The process names three skills and the hub serves them; `--tool` names the client, which is found on `PATH` otherwise.
 
 ```sh
 aimem skills install --tool claude
@@ -230,6 +234,8 @@ aimem skills install --tool claude
 
 ```text
 installed oh-code-review <skills-version> (release) for claude
+installed forge-gates <skills-version> (release) for claude
+installed verify-delivery <skills-version> (release) for claude
 ```
 
 ### 16. The local service answers (workstation)
@@ -296,7 +302,7 @@ docs/SESSION-STATE.md
 
 ### 21. The process is what a session is told (workstation)
 
-It names the set, the tag and the commit, the manifest and the installed skill.
+It names the set, the tag and the commit, the manifest and the installed skills.
 
 ```sh
 aimem process show
@@ -306,7 +312,7 @@ aimem process show
 Tasks (Kanban) are ON for project <project>.
 Process set: aimem <tag> @
 (manifest processes/aimem/manifest.json)
-Required skills: oh-code-review (installed <skills-version> from the hub (release))
+Required skills: oh-code-review (installed <skills-version> from the hub (release)); forge-gates (installed <skills-version> from the hub (release)); verify-delivery (installed <skills-version> from the hub (release))
 --- Checklist gating READY ---
 ```
 
@@ -341,7 +347,32 @@ Token-File: <task-token-file>
 "title":"First task from the workstation"
 ```
 
-### 24. The second project is onboarded in one command (hub)
+### 24. The workstation already holds the hub and a task credential (workstation)
+
+The quickstart's check before a second project: with the hub listed and its task credential set, its steps 3.3 and 3.4 are skipped.
+
+```sh
+aimem hub list
+```
+
+```text
+<hub-name>
+task-credential:set
+```
+
+### 25. The credential names the user the second project is granted to (workstation)
+
+The onboard of the second project names this user, the one whose token the workstation presents.
+
+```sh
+aimem hub credential <hub-name>
+```
+
+```text
+active, scope user (user <user>
+```
+
+### 26. The second project is onboarded in one command (hub)
 
 The second project starts like the first, and the user's token already follows the new grant.
 
@@ -357,7 +388,7 @@ aimem project onboard <project-2> --user <user> --process https://github.com/Bla
 readiness: ready for work
 ```
 
-### 25. The same token writes to the second project (workstation)
+### 27. The same token writes to the second project (workstation)
 
 Nothing changed on the workstation since step 13.
 

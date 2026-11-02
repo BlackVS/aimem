@@ -102,7 +102,9 @@ or `.codex/hooks.json`: registering them twice journals every turn twice.
 | `.claude/commands/aimem-analyze.md`, `.opencode/command/aimem-analyze.md` | the `/aimem-analyze` command, which builds the shared knowledge base subsystem by subsystem (managed files) |
 | `.aimem.json` | project identity, knowledge groups, hub binding |
 
-Commit these if the project is tracked. An existing `AGENTS.md`,
+Which of these to commit and which to keep local, with the `.gitignore`
+lines: [the new-project quickstart, step 3.5](QUICKSTART-NEW-PROJECT.md#35-bind-the-project-in-aimemjson).
+An existing `AGENTS.md`,
 `CLAUDE.md` or handoff is kept as it is, and a managed file is refreshed.
 Re-running the installer in another directory only wires that directory. `aimem teams setup` checks
 this wiring in a checkout before joining a team and adds what is missing

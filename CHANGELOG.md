@@ -37,6 +37,35 @@ currently 25); a binary refuses a database newer than it understands.
 
 ### Changed
 
+- **The new-project quickstart starts from a clone and says what to
+  commit.** `docs/QUICKSTART-NEW-PROJECT.md` closes four gaps found by
+  running it for a new project on a workstation that already worked with
+  the hub:
+  - Step 3.1 creates the repository on the forge and clones it before
+    anything is wired. When the directory already holds files, it shows
+    `git init` and `git remote add` for an empty repository.
+  - Step 3.5 lists the wired files a project commits (`AGENTS.md`,
+    `CLAUDE.md`, the hook and MCP registrations, the command and team
+    entry points) and those it keeps local (`.aimem.json`, the handoff,
+    `.claude/settings.local.json`, the skills `aimem skills install`
+    puts in place and their `.ai-skills.json`). It gives the `.gitignore`
+    lines and says when committing `.aimem.json` is the right choice
+    instead. INSTALL-CLIENT points there.
+  - Section 1 has the branch for a machine that already works with the
+    hub. When `aimem hub list` shows `task-credential:set` and
+    `aimem hub credential` names a user, steps 3.3 and 3.4 are skipped,
+    and the onboard grants the project to that user.
+  - Every forge-specific step is shown for GitHub and for Gitea:
+    creating and cloning the repository, `aimem project repo set
+    --kind`, and the review labels. The new step 3.7 covers the agent's
+    forge credential, kept in the platform's credential store and never
+    in plain text: `gh auth login` for GitHub, and for Gitea Git's
+    credential helper with a temporary owner-only file for
+    `GITEA_TOKEN_FILE`. The agent pushes over HTTPS.
+  - Scenario card 01 checks the already-wired machine
+    (`aimem hub list`, `aimem hub credential`) before it onboards the
+    second project, and expects the three skills the process set now
+    requires.
 - **The reference process set requires forge-gates and verify-delivery
   beside oh-code-review.** Its handbook tells the agent to check a pull
   request's gates with `forge_gates.py` from the forge-gates skill, and
