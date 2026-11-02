@@ -8,7 +8,6 @@ import (
 
 	"aimem/internal/adapter"
 	"aimem/internal/isolation"
-	"aimem/internal/provider"
 	"aimem/internal/taskcred"
 	"aimem/internal/textcheck"
 )
@@ -25,7 +24,6 @@ func TestMain(m *testing.M) {
 	isolation.ClearInherited()
 	os.Setenv(textcheck.ModelKey, "") // no real model behind an in-process hub
 	os.Setenv(textcheck.FilterKey, "")
-	os.Setenv(provider.AllowPrivateEnv, "1") // the fake model servers listen on loopback
 	hubAddWarn = func(io.Writer, string, *adapter.HubConfig) {}
 	// The fake hubs answer on loopback, later than these bounds on a
 	// loaded machine, which no test here is about.

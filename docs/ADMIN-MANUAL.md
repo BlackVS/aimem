@@ -269,13 +269,11 @@ Manual equivalent (what the script sets up):
    # curation + embeddings (optional, enables LLM egress):
    AIMEM_OPENAI_API_KEY=<api key>
    AIMEM_OPENAI_BASE_URL=https://llm.example.com/v1   # omit for api.openai.com
-   # Provider registry (console, Usage tab): base URLs must be public
-   # https endpoints, and curation, embeddings and the text check reach
-   # registry providers only at public addresses. Set this to allow http
-   # and loopback, private or link-local addresses (a local Ollama, a LAN
-   # gateway). The admin API cannot set it. The AIMEM_OPENAI_* pair above
-   # needs no such setting.
-   #AIMEM_PROVIDER_ALLOW_PRIVATE=1
+   # Provider registry (console, Usage tab): a base URL is any http(s)
+   # URL, a model server on this machine or the local network included.
+   # The hub trusts its admin with this machine's network position; a hub
+   # whose admin is not the machine's operator is not a supported
+   # deployment.
    # LLM call pacing (optional): outbound curate/embed calls are spaced
    # AIMEM_LLM_INTERVAL seconds apart (default 2; 0 disables) and retry
    # transient upstream blocks AIMEM_LLM_RETRIES times (default 3) with
@@ -623,11 +621,8 @@ console's model list button asks the provider).
 - **A local model.** An OpenAI-compatible server on the hub's own machine
   or network, such as Ollama (`http://127.0.0.1:11434/v1`), llama.cpp's
   server or vLLM, keeps the text inside your network. This is the choice
-  for a closed network or a confidential project. A loopback or private
-  address needs `AIMEM_PROVIDER_ALLOW_PRIVATE=1` in the hub's env file,
-  both to save the provider and for the stage to reach it, and the
-  provider needs a token, so give any non-empty value when the server
-  checks none.
+  for a closed network or a confidential project. The provider needs a
+  token, so give any non-empty value when the server checks none.
 - **A paid API.** Any vendor's API at a small, cheap model. The stage
   sends a few hundred tokens per flagged write and only for flagged
   writes, and the daily cap bounds the rest.

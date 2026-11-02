@@ -69,7 +69,6 @@ func TestProviderTestFailureCarriesElapsed(t *testing.T) {
 		w.Write([]byte(`{"error":{"message":"upstream exploded"}}`))
 	}))
 	defer up.Close()
-	t.Setenv(allowPrivateEnv, "1") // the fake upstream is plain http on loopback
 	s, _ := testServer(t)
 	h := s.Handler()
 	req(t, h, "PUT", "/v1/config/providers",
@@ -294,7 +293,6 @@ func TestConsoleBindingRowLayoutRules(t *testing.T) {
 func TestProviderSaveNamesDataExposureForRemoteEndpoints(t *testing.T) {
 	s, _ := testServer(t)
 	h := s.Handler()
-	t.Setenv(allowPrivateEnv, "1")
 	note := func(body string) string {
 		t.Helper()
 		w := req(t, h, "PUT", "/v1/config/providers", body)

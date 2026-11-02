@@ -60,7 +60,16 @@ func localEndpoint(raw string) bool {
 		return true
 	}
 	ip := net.ParseIP(host)
-	return ip != nil && blockedIP(ip)
+	if ip == nil {
+		return false
+	}
+	// All of 0.0.0.0/8, not only 0.0.0.0: Linux routes the block to the
+	// local host.
+	if ip4 := ip.To4(); ip4 != nil && ip4[0] == 0 {
+		return true
+	}
+	return ip.IsLoopback() || ip.IsPrivate() || ip.IsUnspecified() ||
+		ip.IsLinkLocalUnicast() || ip.IsMulticast()
 }
 
 func (s *Server) providersView(w http.ResponseWriter, note string) {
@@ -136,12 +145,9 @@ func (s *Server) putProviders(w http.ResponseWriter, r *http.Request) {
 			s.fail(w, http.StatusBadRequest, fmt.Errorf("base_url must be http(s)"))
 			return
 		}
-		if p.BaseURL != "" {
-			if err := checkProviderURL(r.Context(), p.BaseURL); err != nil {
-				s.log.Warn("admin provider set refused", "name", p.Name, "base_url", p.BaseURL, "why", err)
-				s.fail(w, http.StatusBadRequest, err)
-				return
-			}
+		if u, err := url.Parse(p.BaseURL); p.BaseURL != "" && (err != nil || u.Hostname() == "") {
+			s.fail(w, http.StatusBadRequest, fmt.Errorf("base_url is not a URL with a host"))
+			return
 		}
 		prev, existed := reg.Providers[p.Name]
 		token, tokenState := p.Token, "new"
@@ -221,7 +227,6 @@ func (s *Server) testProvider(w http.ResponseWriter, r *http.Request) {
 		s.fail(w, http.StatusBadRequest, fmt.Errorf("%s", why))
 		return
 	}
-	afterProbeResolve()
 	start := time.Now()
 	var tokens int64
 	var err error
@@ -237,7 +242,7 @@ func (s *Server) testProvider(w http.ResponseWriter, r *http.Request) {
 		_, u, err = ex.Complete("Reply with the single word: ok")
 		tokens = u.InputTokens + u.OutputTokens
 	} else {
-		tokens, err = probeOpenAI(probeClient(ep), ep, req.Op)
+		tokens, err = probeOpenAI(ep, req.Op)
 	}
 	if err != nil {
 		// Same shape as the success line below: a failure nobody can
@@ -293,7 +298,7 @@ func (s *Server) providerModels(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	hreq.Header.Set("Authorization", "Bearer "+p.Token)
-	resp, err := providerClient().Do(hreq)
+	resp, err := (&http.Client{Timeout: 15 * time.Second}).Do(hreq)
 	if err != nil {
 		s.log.Warn("provider model list failed", "provider", name, "base_url", base, "err", err)
 		s.fail(w, http.StatusBadGateway, err)
@@ -321,25 +326,9 @@ func (s *Server) providerModels(w http.ResponseWriter, r *http.Request) {
 	s.ok(w, map[string]any{"models": ids})
 }
 
-// afterProbeResolve lets a test change the registry between resolution
-// and the probe, the window a concurrent admin request can hit.
-var afterProbeResolve = func() {}
-
-// probeClient guards every registry endpoint. The AIMEM_OPENAI_* pair
-// is the host operator's own setting, which the admin API cannot change.
-// The choice rests on ep alone, resolved in one registry read: a second
-// read could see a concurrent unbind and mistake a registry endpoint for
-// the environment's.
-func probeClient(ep provider.Endpoint) *http.Client {
-	if ep.FromEnv {
-		return &http.Client{Timeout: 15 * time.Second}
-	}
-	return providerClient()
-}
-
 // probeOpenAI is the HTTP half of the test button: one tiny embeddings or
 // chat request with a hard 15s bound so a dead endpoint fails fast.
-func probeOpenAI(client *http.Client, ep provider.Endpoint, op string) (int64, error) {
+func probeOpenAI(ep provider.Endpoint, op string) (int64, error) {
 	path, payload := "/chat/completions", map[string]any{
 		"model":                 ep.Model,
 		"messages":              []map[string]string{{"role": "user", "content": "Reply with the single word: ok"}},
@@ -355,7 +344,7 @@ func probeOpenAI(client *http.Client, ep provider.Endpoint, op string) (int64, e
 	}
 	hreq.Header.Set("Content-Type", "application/json")
 	hreq.Header.Set("Authorization", "Bearer "+ep.Token)
-	resp, err := client.Do(hreq)
+	resp, err := (&http.Client{Timeout: 15 * time.Second}).Do(hreq)
 	if err != nil {
 		return 0, err
 	}

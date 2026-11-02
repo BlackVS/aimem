@@ -15,27 +15,25 @@ currently 25); a binary refuses a database newer than it understands.
 
 ### Security
 
-- **Curation, embeddings and the text check's model stage dial a
-  registry provider only at a public address (audit A-7).** Since
-  v0.10.14 the provider save, the model list and the test button refuse
-  loopback, private and link-local addresses. The calls that do the work
-  still dialled whatever a provider's `base_url` resolved to, including
-  a name re-pointed after the save. They now go through the same
-  dial-time guard, which checks the resolved address. The host's own
-  `AIMEM_OPENAI_*` pair is not an admin setting and is not guarded, as
-  for the test button.
+- **The hub no longer refuses a provider at a loopback, private or
+  link-local address, and `AIMEM_PROVIDER_ALLOW_PRIVATE` is gone.** Since
+  v0.10.14 the provider save, the model list and the test button refused
+  a plain `http://` base URL and those addresses unless the hub's env
+  file set `AIMEM_PROVIDER_ALLOW_PRIVATE=1`. The guard and the setting
+  are removed: a model server on the hub's machine or local network,
+  such as Ollama, vLLM or a LAN LiteLLM, saves and works with no
+  setting, over `http://` or `https://`, and curation, embeddings and
+  the text check dial it as they always have. The hub's admin is the
+  operator of its machine (`install-hub.sh` creates the admin token
+  there, and members cannot edit the provider registry), so the guard
+  stood against an actor the hub does not have, while it broke the
+  normal closed-network install. The rest of audit A-7 stays: a save
+  that moves a provider's base URL needs its token again, and a base URL
+  must still be an `http(s)` URL with a host.
 
-  **Upgrade note.** A hub whose provider registry binds a model to a
-  model server on the hub's machine or local network, such as Ollama,
-  vLLM or a LAN LiteLLM, needs `AIMEM_PROVIDER_ALLOW_PRIVATE=1` in the
-  hub's env file and a restart; without it, curation, embeddings and the
-  text check's model stage fail with a message that names the setting.
-  The same holds when the hub reaches a registry provider through an
-  `HTTPS_PROXY` on a private address, because the guard sees the
-  proxy's address, and on any other machine that runs `aimem curate` or
-  embeddings through a registry binding. The `AIMEM_OPENAI_*` pair is
-  the other way to a local model server: it is not guarded, so a model
-  served through it needs nothing.
+  **Upgrade note.** An env file that sets
+  `AIMEM_PROVIDER_ALLOW_PRIVATE=1` keeps working: the line is ignored
+  and can be removed.
 
 ### Changed
 
