@@ -77,7 +77,7 @@ func wireCmd(args []string, w io.Writer) error {
 	case *check:
 		fmt.Fprintln(w, "project wired")
 	default:
-		fmt.Fprintln(w, "project wired. Commit the new files if the project is tracked.")
+		fmt.Fprintln(w, wiring.WiredLine())
 	}
 	return nil
 }

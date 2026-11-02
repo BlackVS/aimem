@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"aimem/internal/wiring"
 )
 
 func TestWireCmdFlagsAroundTheDirectoryAndCheck(t *testing.T) {
@@ -27,6 +29,9 @@ func TestWireCmdFlagsAroundTheDirectoryAndCheck(t *testing.T) {
 	out.Reset()
 	if err := wireCmd([]string{"-p", "demo", dir, "--groups", ""}, &out); err != nil {
 		t.Fatalf("wire: %v\n%s", err, out.String())
+	}
+	if lines := strings.Split(strings.TrimSpace(out.String()), "\n"); lines[len(lines)-1] != wiring.WiredLine() {
+		t.Errorf("wire's closing line = %q, want %q", lines[len(lines)-1], wiring.WiredLine())
 	}
 	raw, err := os.ReadFile(filepath.Join(dir, ".aimem.json"))
 	if err != nil || !strings.Contains(string(raw), `"project": "demo"`) || !strings.Contains(string(raw), `"groups": []`) {
