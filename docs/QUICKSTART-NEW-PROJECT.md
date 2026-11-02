@@ -439,22 +439,32 @@ and treats the file as absent.
 
 **What to commit.** The wiring writes two kinds of file. The shared ones
 are the same on every machine and are committed:
+<!-- wire-files: committed -->
 - `AGENTS.md` and `CLAUDE.md`;
 - `.mcp.json`, `opencode.json`, `.claude/settings.json` and
   `.codex/hooks.json`;
-- the command and skill entry points the wiring renders:
-  `.claude/commands/aimem-analyze.md`, `.opencode/command/aimem-analyze.md`,
-  the team entry points `.claude/skills/join_team/` and `resume_team/`,
-  `.agents/skills/join-team/` and `resume-team/`, and
-  `.opencode/commands/join_team.md` and `resume_team.md`.
+- the `/aimem-analyze` command, `.claude/commands/aimem-analyze.md` and
+  `.opencode/command/aimem-analyze.md`;
+- the `/join_team` and `/resume_team` team entry points,
+  `.claude/skills/join_team/SKILL.md`, `.claude/skills/resume_team/SKILL.md`,
+  `.agents/skills/join-team/SKILL.md`, `.agents/skills/resume-team/SKILL.md`,
+  `.opencode/commands/join_team.md` and `.opencode/commands/resume_team.md`.
+<!-- wire-files: end -->
 
 The local ones belong to one machine or one member and stay out of Git:
+<!-- wire-files: local -->
 - `.aimem.json`, which names the hub as this machine registered it;
 - `docs/SESSION-STATE.md` and `docs/SESSION-STATE-ARCHIVE.md`, the
   handoff, which the hub shares (step 3.6);
 - `.claude/settings.local.json`, Claude Code's personal settings;
 - the skills `aimem skills install` puts in place (step 3.2), with their
   record `.ai-skills.json`: each member installs them from the hub.
+<!-- wire-files: end -->
+
+`aimem wire` ends with the same rule. INSTALL-CLIENT's
+[wiring table](INSTALL-CLIENT.md#what-wiring-a-project-adds-to-it) marks
+each file committed or local, and a test holds this list, that table, the
+lines below and what `aimem wire` writes to one list in the code.
 
 Add these lines to `.gitignore`. The skills directories also hold the
 committed team entry points, which the `!` lines keep:

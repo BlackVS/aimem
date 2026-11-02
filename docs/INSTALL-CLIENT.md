@@ -90,20 +90,21 @@ or `.codex/hooks.json`: registering them twice journals every turn twice.
 
 ### What wiring a project adds to it
 
-| Path | What |
-|---|---|
-| `docs/SESSION-STATE.md` | the handoff file, re-injected at session start |
-| `AGENTS.md` | the handoff protocol (edit its project-context section) |
-| `CLAUDE.md` | a one-line stub importing `AGENTS.md` |
-| `.claude/settings.json` | a `SessionStart` hook running `aimem session-start`, guarded as `command -v aimem >/dev/null 2>&1 && aimem session-start \|\| true` so that a collaborator without aimem gets no hook error (Claude Code runs hooks through sh on every platform, Git Bash on Windows). It injects `docs/SESSION-STATE.md` at the start of a session and after each compaction: at most its first 8 KiB, followed by a one-line note when the file is longer. `docs/SESSION-STATE-ARCHIVE.md`, where history goes, is never injected. `aimem handoff compact` moves the history there: everything below the line `<!-- aimem: history below -->`, or without that line everything past the head that fits 50 lines and 8 KiB, keeping a closing section of up to 10 lines headed "Pick up here", "Pick up", "Exact next action", "Next action", "Next" or "Next steps" (any case). `--summarize` adds a short summary of what moved, written by the curation backend (`aimem curate`'s), and `--dry-run` only reports |
-| `.codex/hooks.json` | the same `SessionStart` hook for Codex (runs once the project is trusted in Codex). Codex runs hook commands without a shell, so this one cannot guard on aimem's presence: a collaborator without aimem sees one `hook: SessionStart Failed` line per session start, and the session goes on |
-| `.mcp.json`, `opencode.json` | MCP registration for recall. `opencode.json` also lists `docs/SESSION-STATE.md` in `instructions`. OpenCode 1.x loads that file whole into every session, with no size limit aimem can apply, so the handoff's 50-line rule and `aimem handoff compact`, which moves history to `docs/SESSION-STATE-ARCHIVE.md`, are what keep it small there. OpenCode 2.x ignores `instructions`; the aimem plugin injects the handoff instead, with the same 8 KiB limit and note as `aimem session-start`. |
-| `.claude/skills/join_team/SKILL.md`, `.opencode/commands/join_team.md`, `.agents/skills/join-team/SKILL.md` | the `/join_team` team-onboarding entry points, rendered by `aimem teams commands` (managed files; `~/.codex/prompts/join_team.md` too when a Codex home exists) |
-| `.claude/commands/aimem-analyze.md`, `.opencode/command/aimem-analyze.md` | the `/aimem-analyze` command, which builds the shared knowledge base subsystem by subsystem (managed files) |
-| `.aimem.json` | project identity, knowledge groups, hub binding |
+| Path | Git | What |
+|---|---|---|
+| `docs/SESSION-STATE.md` | local | the handoff file, re-injected at session start |
+| `AGENTS.md` | committed | the handoff protocol (edit its project-context section) |
+| `CLAUDE.md` | committed | a one-line stub importing `AGENTS.md` |
+| `.claude/settings.json` | committed | a `SessionStart` hook running `aimem session-start`, guarded as `command -v aimem >/dev/null 2>&1 && aimem session-start \|\| true` so that a collaborator without aimem gets no hook error (Claude Code runs hooks through sh on every platform, Git Bash on Windows). It injects `docs/SESSION-STATE.md` at the start of a session and after each compaction: at most its first 8 KiB, followed by a one-line note when the file is longer. `docs/SESSION-STATE-ARCHIVE.md`, where history goes, is never injected. `aimem handoff compact` moves the history there: everything below the line `<!-- aimem: history below -->`, or without that line everything past the head that fits 50 lines and 8 KiB, keeping a closing section of up to 10 lines headed "Pick up here", "Pick up", "Exact next action", "Next action", "Next" or "Next steps" (any case). `--summarize` adds a short summary of what moved, written by the curation backend (`aimem curate`'s), and `--dry-run` only reports |
+| `.codex/hooks.json` | committed | the same `SessionStart` hook for Codex (runs once the project is trusted in Codex). Codex runs hook commands without a shell, so this one cannot guard on aimem's presence: a collaborator without aimem sees one `hook: SessionStart Failed` line per session start, and the session goes on |
+| `.mcp.json`, `opencode.json` | committed | MCP registration for recall. `opencode.json` also lists `docs/SESSION-STATE.md` in `instructions`. OpenCode 1.x loads that file whole into every session, with no size limit aimem can apply, so the handoff's 50-line rule and `aimem handoff compact`, which moves history to `docs/SESSION-STATE-ARCHIVE.md`, are what keep it small there. OpenCode 2.x ignores `instructions`; the aimem plugin injects the handoff instead, with the same 8 KiB limit and note as `aimem session-start`. |
+| `.claude/skills/join_team/SKILL.md`, `.claude/skills/resume_team/SKILL.md`, `.opencode/commands/join_team.md`, `.opencode/commands/resume_team.md`, `.agents/skills/join-team/SKILL.md`, `.agents/skills/resume-team/SKILL.md` | committed | the `/join_team` and `/resume_team` team entry points, rendered by `aimem teams commands` (managed files; `~/.codex/prompts/join_team.md` and `resume_team.md` too when a Codex home exists) |
+| `.claude/commands/aimem-analyze.md`, `.opencode/command/aimem-analyze.md` | committed | the `/aimem-analyze` command, which builds the shared knowledge base subsystem by subsystem (managed files) |
+| `.aimem.json` | local | project identity, knowledge groups, hub binding |
 
-Which of these to commit and which to keep local, with the `.gitignore`
-lines: [the new-project quickstart, step 3.5](QUICKSTART-NEW-PROJECT.md#35-bind-the-project-in-aimemjson).
+A project commits the files marked committed and keeps those marked local out of Git;
+the `.gitignore` lines are in [the new-project quickstart, step 3.5](QUICKSTART-NEW-PROJECT.md#35-bind-the-project-in-aimemjson).
+`aimem wire` ends with the same rule.
 An existing `AGENTS.md`,
 `CLAUDE.md` or handoff is kept as it is, and a managed file is refreshed.
 Re-running the installer in another directory only wires that directory. `aimem teams setup` checks

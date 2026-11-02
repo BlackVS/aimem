@@ -37,6 +37,18 @@ currently 25); a binary refuses a database newer than it understands.
 
 ### Changed
 
+- **`aimem wire` ends by saying what stays out of Git, and one list
+  holds the files it writes.** Its closing line used to say "Commit the
+  new files if the project is tracked", which included `.aimem.json` and
+  `docs/SESSION-STATE.md`. It now reads: commit the files above except
+  `.aimem.json` and `docs/SESSION-STATE.md`, which stay local, and it
+  points to the `.gitignore` lines in the new-project quickstart, step 3.5.
+  INSTALL-CLIENT's wiring table gains a column that marks each file
+  committed or local, and it lists the `/resume_team` entry points, which
+  wire writes beside `/join_team`. One list in the code feeds the closing
+  line, and tests hold four things to it: what wire writes, the
+  `.gitignore` lines (asked of Git itself), INSTALL-CLIENT's table and
+  the quickstart's list.
 - **The new-project quickstart starts from a clone and says what to
   commit.** `docs/QUICKSTART-NEW-PROJECT.md` closes four gaps found by
   running it for a new project on a workstation that already worked with
