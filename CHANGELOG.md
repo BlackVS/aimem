@@ -13,6 +13,49 @@ currently 25); a binary refuses a database newer than it understands.
 
 ## [Unreleased]
 
+## [0.10.21] — 2026-11-02
+
+The hub accepts a provider at a loopback, private or link-local address
+with no setting again: `AIMEM_PROVIDER_ALLOW_PRIVATE` is gone, and a model
+server on the hub's machine or local network works as it did before
+0.10.14. The reference process set requires forge-gates and
+verify-delivery beside oh-code-review. The new-project quickstart starts
+from a clone, says which wired files a project commits and which stay
+local, and shows GitHub and Gitea side by side; `aimem wire` ends with
+the same rule. The documented Windows install is one line again, and
+`irm … | iex` of `boot.ps1` leaves the window as it found it. The on-disk
+schema stays at 25 and the access schema at 9. Includes PR #339 to #349.
+
+### Upgrade notes
+
+- **A hub whose env file sets `AIMEM_PROVIDER_ALLOW_PRIVATE=1` keeps
+  working.** The line is ignored and can be removed. A hub whose
+  providers are public `https://` URLs sees no change.
+- **A project gets the new process set only when its administrator
+  selects it.** Before selecting the v0.10.21 tag, import an ai-skills
+  release that carries forge-gates and verify-delivery, 1.34.0 or later,
+  on the hub. Until then the hub warns that it lacks required skills,
+  and a member's `aimem skills install` refuses them with the import
+  command. After the selection, each member runs `aimem skills install`
+  again for the two new skills.
+- **A project that committed `.aimem.json` or `docs/SESSION-STATE.md`
+  can keep them.** Committing `.aimem.json` is right when every member
+  registers the hub under the same name. To move both out of Git, add
+  the `.gitignore` lines of the new-project quickstart's step 3.5 and run
+  `git rm --cached .aimem.json docs/SESSION-STATE.md`, which keeps the
+  files on disk.
+- **Clients and hubs can be upgraded in either order.** No route or
+  answer shape changed; a hub at 0.10.21 accepts provider URLs that an
+  older hub refused.
+- **Clients upgrade with `aimem upgrade`**, from 0.10.19 or 0.10.20. A
+  client on 0.10.18 or older moves once with the one-liner. A hub keeps
+  `install-hub.sh`.
+- **The on-disk schema stays at 25 and the access schema at 9.** A hub
+  or a client goes back to 0.10.20 by putting its binary back. A hub
+  back on 0.10.20 again refuses to save, list the models of or test a
+  provider at a private address, unless its env file sets
+  `AIMEM_PROVIDER_ALLOW_PRIVATE=1`.
+
 ### Security
 
 - **The hub no longer refuses a provider at a loopback, private or
