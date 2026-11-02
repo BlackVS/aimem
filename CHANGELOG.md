@@ -37,6 +37,17 @@ currently 25); a binary refuses a database newer than it understands.
 
 ### Changed
 
+- **The reference process set requires forge-gates and verify-delivery
+  beside oh-code-review.** Its handbook tells the agent to check a pull
+  request's gates with `forge_gates.py` from the forge-gates skill, and
+  the DONE checklist's delivery evidence is what verify-delivery
+  produces, but the manifest listed only oh-code-review, so
+  `aimem skills install` put only that one in place. A project that
+  selects a release carrying this set now gets three required skills:
+  `aimem process show` lists them, and `aimem skills install` installs
+  two more skill directories per agent client, or refuses with the
+  import command when the hub's sets lack them. A project keeps the set
+  it selected until the administrator selects a newer tag.
 - **The documented Windows install is one line again:**
   `irm https://github.com/BlackVS/aimem/releases/download/vX.Y.Z/boot.ps1 | iex`
   in a PowerShell window, pinned to the release like the curl line.
