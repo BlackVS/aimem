@@ -9,6 +9,6 @@
     "task": "processes/aimem/task.json",
     "investigation": "processes/aimem/investigation.json"
   },
-  "skills": ["oh-code-review"],
+  "skills": ["oh-code-review", "forge-gates", "verify-delivery"],
   "budget_bytes": 12288
 }

@@ -252,8 +252,8 @@ release installs with `aimem upgrade`, from any directory
 
 Skip this step for plain journaling. A project that uses the process
 from step 2, the review gates or a team process needs the skills the
-process names (the review skill `oh-code-review` among them). They come
-from the hub. The skills import of step 2
+process names (for aimem's own set, `oh-code-review`, `forge-gates` and
+`verify-delivery`). They come from the hub. The skills import of step 2
 (`aimem skills import --from-archive aiskills-X.Y.Z.tar.gz` on the hub
 host, verified against the `SHA256SUMS` beside it; see the
 [admin manual](ADMIN-MANUAL.md#importing-the-skills-sets)) is the
@@ -388,7 +388,8 @@ aimem process show
   first 12 characters of the commit you selected, then names the
   manifest, `processes/aimem/manifest.json` (the repository URL is not
   part of what a session sees; `--full` prints it). Then come
-  `Required skills: oh-code-review (installed 1.34.0 from the hub (release))`
+  `Required skills: oh-code-review (installed 1.34.0 from the hub (release))`,
+  the same for `forge-gates` and `verify-delivery`, separated by `; `
   (with a version 2 manifest,
   `oh-code-review 1.34.0 (release; installed 1.34.0 from the hub (release))`;
   a copy another installer put there reads `installed, not from the hub`,

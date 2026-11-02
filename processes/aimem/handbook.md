@@ -1,7 +1,7 @@
 # aimem working process, version 1
 
-Ported from the ai-skills copy at 4be41c1; forge_gates.py, named below, is
-optional and comes with the ai-skills forge-gates skill, not with aimem.
+Ported from the ai-skills copy at 4be41c1; forge_gates.py, named below, comes
+with the ai-skills forge-gates skill, which this set requires, not with aimem.
 
 ## Authority and session start
 

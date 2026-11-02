@@ -494,14 +494,16 @@ func gitFixture(t *testing.T, dir string) string {
 }
 
 // skillsArchive writes a skills release archive (aiskills-V/VERSION and
-// aiskills-V/skills/<name>/...) holding the skill the process set needs,
+// aiskills-V/skills/<name>/...) holding the skills the process set needs,
 // with its SHA256SUMS beside it, and returns the archive's path.
 func skillsArchive(t *testing.T, dir string) string {
 	t.Helper()
 	top := "aiskills-" + skillsVer + "/"
 	files := map[string][]byte{
-		top + "VERSION":                        []byte(skillsVer + "\n"),
-		top + "skills/oh-code-review/SKILL.md": []byte("---\nname: oh-code-review\ndescription: scenario stand-in\n---\nReview.\n"),
+		top + "VERSION":                         []byte(skillsVer + "\n"),
+		top + "skills/oh-code-review/SKILL.md":  []byte("---\nname: oh-code-review\ndescription: scenario stand-in\n---\nReview.\n"),
+		top + "skills/forge-gates/SKILL.md":     []byte("---\nname: forge-gates\ndescription: scenario stand-in\n---\nGates.\n"),
+		top + "skills/verify-delivery/SKILL.md": []byte("---\nname: verify-delivery\ndescription: scenario stand-in\n---\nDelivery.\n"),
 	}
 	var buf bytes.Buffer
 	if err := process.WriteArchive(&buf, &process.Bundle{Files: files}); err != nil {

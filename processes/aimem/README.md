@@ -8,8 +8,10 @@ submit placeholder text or treat a template as a ready-to-run request.
 
 This set follows aimem's project policy. Other projects must review their own
 rules before selecting it; a shared process does not override project rules or
-owner instructions. Only oh-code-review is required. QA and writing skills may
-be used when appropriate but are not mandatory for every task.
+owner instructions. Three skills are required: oh-code-review for the reviews,
+forge-gates for the pull request's gates and verify-delivery for the delivery
+evidence a task records as DONE. QA and writing skills may be used when
+appropriate but are not mandatory for every task.
 
 Review changes to all referenced files together. After merge, select the full
 40-character merged commit, not a moving branch name. On the hub host:
