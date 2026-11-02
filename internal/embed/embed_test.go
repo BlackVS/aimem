@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"path/filepath"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -13,10 +14,9 @@ import (
 	"aimem/internal/provider"
 )
 
-// Embedding calls go through the provider dial guard: a model server on
-// loopback is refused without the flag, before any request is sent, and
-// served with it.
-func TestEmbedRefusesPrivateUnlessAllowed(t *testing.T) {
+// Embeddings dial a model server on loopback, a local model server, with
+// no setting, whether the client is built directly or through ForModel.
+func TestEmbedDialsALocalModelServer(t *testing.T) {
 	var calls atomic.Int32
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		calls.Add(1)
@@ -24,36 +24,27 @@ func TestEmbedRefusesPrivateUnlessAllowed(t *testing.T) {
 	}))
 	defer srv.Close()
 	c := &Client{BaseURL: srv.URL, Model: "m"}
-
-	t.Setenv(provider.AllowPrivateEnv, "")
-	if _, _, err := c.Embed([]string{"x"}); err == nil || !strings.Contains(err.Error(), provider.AllowPrivateEnv) {
-		t.Fatalf("loopback embedding without the flag: %v", err)
-	}
-	if n := calls.Load(); n != 0 {
-		t.Fatalf("%d requests reached the server without the flag", n)
-	}
-
-	t.Setenv(provider.AllowPrivateEnv, "1")
 	if vecs, _, err := c.Embed([]string{"x"}); err != nil || len(vecs) != 1 {
-		t.Fatalf("loopback embedding with the flag: %d vectors, %v", len(vecs), err)
+		t.Fatalf("loopback embedding: %d vectors, %v", len(vecs), err)
 	}
 
-	// The host's own AIMEM_OPENAI_* pair is not guarded.
-	t.Setenv(provider.AllowPrivateEnv, "")
-	env := &Client{BaseURL: srv.URL, Model: "m", FromEnv: true}
-	if vecs, _, err := env.Embed([]string{"x"}); err != nil || len(vecs) != 1 {
-		t.Fatalf("env-pair embedding without the flag: %d vectors, %v", len(vecs), err)
+	root := t.TempDir()
+	reg, _ := json.Marshal(provider.Registry{
+		Providers: map[string]provider.Provider{"local": {Kind: "openai", BaseURL: srv.URL, Token: "t"}},
+		Models:    map[string]provider.Binding{"m": {Provider: "local"}},
+	})
+	if err := os.WriteFile(filepath.Join(root, "providers.json"), reg, 0o600); err != nil {
+		t.Fatal(err)
 	}
-
-	// ForModel carries the endpoint's origin into the client.
-	t.Setenv("AIMEM_OPENAI_API_KEY", "k")
-	t.Setenv("AIMEM_OPENAI_BASE_URL", srv.URL)
-	resolved := ForModel(t.TempDir(), "m")
-	if resolved == nil || !resolved.FromEnv {
-		t.Fatalf("ForModel through the env pair: %+v", resolved)
+	resolved := ForModel(root, "m")
+	if resolved == nil {
+		t.Fatal("ForModel: no client for the registry binding")
 	}
 	if vecs, _, err := resolved.Embed([]string{"x"}); err != nil || len(vecs) != 1 {
-		t.Fatalf("env-pair embedding through ForModel: %d vectors, %v", len(vecs), err)
+		t.Fatalf("registry embedding through ForModel: %d vectors, %v", len(vecs), err)
+	}
+	if n := calls.Load(); n != 2 {
+		t.Fatalf("%d requests reached the server, want 2", n)
 	}
 }
 
@@ -208,8 +199,5 @@ func TestForModelReportsWhy(t *testing.T) {
 // 15 s+ backoffs.
 func TestMain(m *testing.M) {
 	os.Setenv("AIMEM_LLM_RETRIES", "0")
-	// The fake model servers listen on loopback, a local model server as
-	// far as the dial guard can tell.
-	os.Setenv(provider.AllowPrivateEnv, "1")
 	os.Exit(m.Run())
 }

@@ -107,7 +107,6 @@ type Endpoint struct {
 	BaseURL string
 	Token   string
 	Model   string
-	FromEnv bool // the AIMEM_OPENAI_* pair, not a registry binding
 }
 
 // bound classifies a model's registry binding: the endpoint it names,
@@ -161,7 +160,7 @@ func Lookup(root, model, wantKind string) (Endpoint, string) {
 		if base == "" {
 			base = DefaultBaseURL
 		}
-		ep = Endpoint{Kind: "openai", BaseURL: base, Token: key, Model: model, FromEnv: true}
+		ep = Endpoint{Kind: "openai", BaseURL: base, Token: key, Model: model}
 	}
 	if reason != "" {
 		return Endpoint{}, reason

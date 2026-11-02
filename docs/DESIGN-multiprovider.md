@@ -78,13 +78,13 @@ not a host global.
   GET endpoint returns masked values ONLY; a blank token on save means
   "keep existing", for the same base URL only. A save that changes the
   base URL with a blank token is refused, because the stored token would
-  then go to the new endpoint (audit A-7). Base URLs must be public https
-  endpoints unless the hub's environment sets
-  `AIMEM_PROVIDER_ALLOW_PRIVATE=1`, and the model list, the test button,
-  curation, embeddings and the text check enforce the same address
-  ranges when they connect to a registry provider
-  (`provider.HTTPClient`). The `AIMEM_OPENAI_*` pair is the host
-  operator's own setting and dials unguarded.
+  then go to the new endpoint (audit A-7). A base URL is any http(s) URL
+  with a host, a model server on the hub's machine or local network
+  included: the hub trusts its admin, the operator of its machine, with
+  that machine's network position. (A-7 also refused loopback, private
+  and link-local addresses unless the hub's environment allowed them;
+  that guard and its setting were removed by the operator's decision of
+  2026-10-30, since a local model server is the normal case.)
 - **Model bindings card**: model name → provider dropdown. The current
   curate/embed model inputs stay; a bound model shows its provider.
 - **Test button per model** (user request): each binding row gets

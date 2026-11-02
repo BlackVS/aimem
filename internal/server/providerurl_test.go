@@ -1,29 +1,21 @@
 package server
 
 import (
-	"context"
 	"encoding/json"
-	"errors"
 	"log/slog"
-	"net"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
-	"aimem/internal/provider"
 	"aimem/internal/textcheck"
 )
 
-// Save-time resolution never touches real DNS in tests: every name is
-// unknown unless a test says otherwise.
 func TestMain(m *testing.M) {
-	lookupIP = func(context.Context, string) ([]net.IPAddr, error) {
-		return nil, errors.New("no such host")
-	}
 	// The readability check's second stage would use a model the
 	// developer's environment names; tests that want it inject a fake.
 	os.Setenv(textcheck.ModelKey, "")
@@ -79,7 +71,6 @@ func storedProvider(t *testing.T, h http.Handler, name string) map[string]string
 // new base_url with a blank token is refused and changes nothing; with
 // a token it is saved, and the log names the old URL.
 func TestProviderURLChangeNeedsToken(t *testing.T) {
-	t.Setenv(allowPrivateEnv, "")
 	h, logs := loggedServer(t)
 	if w := setProvider(t, h, "p", "https://a.example/v1", "secret-token-1"); w.Code != 200 {
 		t.Fatalf("set: %d %s", w.Code, w.Body)
@@ -122,129 +113,56 @@ func TestProviderURLChangeNeedsToken(t *testing.T) {
 	}
 }
 
-func TestProviderURLPolicy(t *testing.T) {
-	t.Setenv(allowPrivateEnv, "")
-	h, logs := loggedServer(t)
-	refused := []string{
-		"http://llm.example/v1",
-		"https://127.0.0.1/v1",
+// The hub does not judge where a provider points: a model server on this
+// machine, the local network or the container host saves like a public
+// one, plain http included, with no setting. The scheme rule is the one
+// kept: base_url is http(s) with a host, anything else is refused.
+func TestProviderURLAcceptsAnyHTTPEndpoint(t *testing.T) {
+	h, _ := loggedServer(t)
+	for _, u := range []string{
+		"http://127.0.0.1:11434/v1",
+		"http://10.0.0.5:4000/v1",
+		"http://host.docker.internal:11434/v1",
+		"http://localhost:8080/v1",
 		"https://[::1]:8443/v1",
-		"https://169.254.169.254/latest",
-		"https://10.1.2.3/v1",
-		"https://192.168.1.10/v1",
-		"https://[fd00::1]/v1",
-		"https://[fe80::1]/v1",
-		"https://[::ffff:127.0.0.1]/v1",
-		"https://0.0.0.0/v1",
-		"https://0.0.0.1/v1",
-		"https://[::ffff:0.1.2.3]/v1",
-		"https://localhost/v1",
-		"https://api.localhost./v1",
-		"https:///v1",
-	}
-	for _, u := range refused {
-		if w := setProvider(t, h, "p", u, "k"); w.Code != http.StatusBadRequest {
-			t.Errorf("%s accepted without %s: %d %s", u, allowPrivateEnv, w.Code, w.Body)
+		"http://llm.example/v1",
+		"https://llm.example/v1",
+	} {
+		if w := setProvider(t, h, "p", u, "k"); w.Code != 200 {
+			t.Errorf("%s refused: %d %s", u, w.Code, w.Body)
+		} else if got := storedProvider(t, h, "p"); got["base_url"] != u {
+			t.Errorf("%s not stored: %+v", u, got)
 		}
 	}
-	if !strings.Contains(logs.String(), "base_url=https://169.254.169.254/latest") {
-		t.Fatalf("a refused save must be logged:\n%s", logs)
-	}
-
-	// A name is judged by every address it resolves to.
-	lookupIP = func(_ context.Context, host string) ([]net.IPAddr, error) {
-		if host == "inside.example" {
-			return []net.IPAddr{{IP: net.ParseIP("203.0.113.5")}, {IP: net.ParseIP("10.0.0.7")}}, nil
-		}
-		return []net.IPAddr{{IP: net.ParseIP("203.0.113.5")}}, nil
-	}
-	t.Cleanup(func() {
-		lookupIP = func(context.Context, string) ([]net.IPAddr, error) { return nil, errors.New("no such host") }
-	})
-	if w := setProvider(t, h, "p", "https://inside.example/v1", "k"); w.Code != http.StatusBadRequest ||
-		!strings.Contains(w.Body.String(), "10.0.0.7") {
-		t.Fatalf("a name resolving to a private address: %d %s", w.Code, w.Body)
-	}
-	if w := setProvider(t, h, "p", "https://public.example/v1", "k"); w.Code != 200 {
-		t.Fatalf("a public name: %d %s", w.Code, w.Body)
-	}
-
-	t.Setenv(allowPrivateEnv, "1")
-	for _, u := range []string{"http://127.0.0.1:11434/v1", "https://inside.example/v1", "http://10.1.2.3/v1"} {
-		if w := setProvider(t, h, "local", u, "k"); w.Code != 200 {
-			t.Errorf("%s refused with %s=1: %d %s", u, allowPrivateEnv, w.Code, w.Body)
+	for _, u := range []string{"ftp://llm.example/v1", "llm.example/v1", "https:///v1", "http://"} {
+		if w := setProvider(t, h, "q", u, "k"); w.Code != http.StatusBadRequest {
+			t.Errorf("%s accepted: %d %s", u, w.Code, w.Body)
 		}
 	}
 }
 
-// The admin buttons dial through the guard, so an endpoint that points
-// at a blocked address now (saved with the flag, or re-pointed by DNS
-// since) gets no token sent to it.
-func TestProviderButtonsDialGuard(t *testing.T) {
-	var hits int
-	var mu sync.Mutex
+// The admin buttons reach a model server on loopback with no setting:
+// the model list and the test probe of a model bound to it both answer.
+func TestProviderButtonsReachALocalServer(t *testing.T) {
+	var hits atomic.Int32
 	up := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		mu.Lock()
-		hits++
-		mu.Unlock()
+		hits.Add(1)
 		w.Write([]byte(`{"data":[{"id":"m"}],"usage":{"total_tokens":1}}`))
 	}))
 	defer up.Close()
-	t.Setenv(allowPrivateEnv, "1")
 	s, _ := testServer(t)
 	h := s.Handler()
 	if w := setProvider(t, h, "p", up.URL, "k"); w.Code != 200 {
-		t.Fatalf("set with the flag: %d %s", w.Code, w.Body)
+		t.Fatalf("set: %d %s", w.Code, w.Body)
 	}
 	req(t, h, "PUT", "/v1/config/providers", `{"bind":{"model":"p/m","provider":"p","upstream":"m"}}`)
-
-	t.Setenv(allowPrivateEnv, "")
-	if w := req(t, h, "GET", "/v1/config/providers/p/models", ""); w.Code != http.StatusBadGateway ||
-		!strings.Contains(w.Body.String(), "loopback") {
-		t.Fatalf("model list to loopback without the flag: %d %s", w.Code, w.Body)
-	}
-	if w := req(t, h, "POST", "/v1/config/providers/test", `{"model":"p/m","op":"chat"}`); w.Code != http.StatusBadGateway ||
-		!strings.Contains(w.Body.String(), "loopback") {
-		t.Fatalf("probe to loopback without the flag: %d %s", w.Code, w.Body)
-	}
-	mu.Lock()
-	if hits != 0 {
-		t.Fatalf("the guarded client reached the upstream %d times", hits)
-	}
-	mu.Unlock()
-
-	// An unbound model probes the environment's endpoint, which the
-	// operator set and the admin API cannot change: no guard.
-	t.Setenv("AIMEM_OPENAI_API_KEY", "envkey")
-	t.Setenv("AIMEM_OPENAI_BASE_URL", up.URL)
-	if w := req(t, h, "POST", "/v1/config/providers/test", `{"model":"unbound","op":"chat"}`); w.Code != 200 {
-		t.Fatalf("probe of the environment's endpoint: %d %s", w.Code, w.Body)
-	}
-
-	// The client follows the resolved endpoint, never a later read of the
-	// registry: a registry endpoint stays guarded when its binding goes
-	// away between resolution and the probe (a concurrent unbind).
-	afterProbeResolve = func() {
-		reg := provider.Load(s.reg.Root())
-		delete(reg.Models, "p/m")
-		if err := reg.Save(s.reg.Root()); err != nil {
-			t.Error(err)
-		}
-	}
-	t.Cleanup(func() { afterProbeResolve = func() {} })
-	if w := req(t, h, "POST", "/v1/config/providers/test", `{"model":"p/m","op":"chat"}`); w.Code != http.StatusBadGateway ||
-		!strings.Contains(w.Body.String(), "loopback") {
-		t.Fatalf("registry endpoint probed unguarded after a concurrent unbind: %d %s", w.Code, w.Body)
-	}
-	afterProbeResolve = func() {}
-	mu.Lock()
-	if hits != 1 {
-		t.Fatalf("only the environment probe may reach the upstream, got %d hits", hits)
-	}
-	mu.Unlock()
-
-	t.Setenv(allowPrivateEnv, "1")
 	if w := req(t, h, "GET", "/v1/config/providers/p/models", ""); w.Code != 200 || !strings.Contains(w.Body.String(), `"m"`) {
-		t.Fatalf("model list with the flag: %d %s", w.Code, w.Body)
+		t.Fatalf("model list of a loopback server: %d %s", w.Code, w.Body)
+	}
+	if w := req(t, h, "POST", "/v1/config/providers/test", `{"model":"p/m","op":"chat"}`); w.Code != 200 {
+		t.Fatalf("probe of a loopback server: %d %s", w.Code, w.Body)
+	}
+	if n := hits.Load(); n != 2 {
+		t.Fatalf("%d requests reached the server, want 2", n)
 	}
 }

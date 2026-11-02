@@ -60,10 +60,9 @@ func judgeFor(t *testing.T, url string) *Judge {
 	return j
 }
 
-// A model bound in the provider registry is reached through the provider
-// dial guard: on loopback it is refused without the flag, before any
-// request, and served with it.
-func TestRegistryModelGoesThroughTheDialGuard(t *testing.T) {
+// A model bound in the provider registry to a model server on loopback,
+// a local model server, is reached with no setting.
+func TestRegistryModelOnALocalServer(t *testing.T) {
 	srv, calls, _ := fakeModel(t, 200, "READABLE")
 	root := t.TempDir()
 	reg, _ := json.Marshal(provider.Registry{
@@ -79,17 +78,8 @@ func TestRegistryModelGoesThroughTheDialGuard(t *testing.T) {
 		t.Fatalf("stage off: %s", why)
 	}
 
-	t.Setenv(provider.AllowPrivateEnv, "")
-	if _, err := j.Readable(context.Background(), "CI409", "The run CI409 passed."); err == nil || !strings.Contains(err.Error(), provider.AllowPrivateEnv) {
-		t.Fatalf("loopback registry model without the flag: %v", err)
-	}
-	if n := calls.Load(); n != 0 {
-		t.Fatalf("%d requests reached the model without the flag", n)
-	}
-
-	t.Setenv(provider.AllowPrivateEnv, "1")
-	if ok, err := j.Readable(context.Background(), "CI409", "The run CI409 passed."); err != nil || !ok {
-		t.Fatalf("loopback registry model with the flag: %v, %v", ok, err)
+	if ok, err := j.Readable(context.Background(), "CI409", "The run CI409 passed."); err != nil || !ok || calls.Load() != 1 {
+		t.Fatalf("loopback registry model: %v, %v, %d calls", ok, err, calls.Load())
 	}
 }
 
