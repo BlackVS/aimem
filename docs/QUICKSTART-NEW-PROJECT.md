@@ -528,10 +528,10 @@ aimem process show
   first 12 characters of the commit you selected, then names the
   manifest, `processes/aimem/manifest.json` (the repository URL is not
   part of what a session sees; `--full` prints it). Then come
-  `Required skills: oh-code-review (installed 1.34.0 from the hub (release))`,
+  `Required skills: oh-code-review (installed 1.35.0 from the hub (release))`,
   the same for `forge-gates` and `verify-delivery`, separated by `; `
   (with a version 2 manifest,
-  `oh-code-review 1.34.0 (release; installed 1.34.0 from the hub (release))`;
+  `oh-code-review 1.35.0 (release; installed 1.35.0 from the hub (release))`;
   a copy another installer put there reads `installed, not from the hub`,
   and a missing or outdated skill reads `run aimem skills install`), the
   handbook and the READY and DONE checklists. A notice in their place (no process
@@ -569,6 +569,12 @@ gh auth setup-git
 gh auth status
 ```
 
+`gh auth status` names where the token is kept. If it says the token is
+stored in a file (`gh` falls back to a plain-text file when no system
+credential store works), stop: the platform store is required. Make one
+available (on Linux a running Secret Service, such as GNOME Keyring),
+run `gh auth logout`, and log in again.
+
 `forge-gates` and `verify-delivery` read the token from `gh` at call
 time (`gh auth token`), so they need nothing more.
 
@@ -586,33 +592,26 @@ in Git's credential helper for the platform:
 Then push once over HTTPS as that user and give the token as the
 password; the helper stores it. Put the user name in the URL the agent
 pushes to, `https://my-bot@gitea.example.com/you/my-project.git`, so
-that Git picks that user's entry and not yours. The Gitea API calls (adding the review
-label, `forge-gates`, `verify-delivery`) need the token in a file named
-by `GITEA_TOKEN_FILE`. Read it from the store at call time into an
-owner-only temporary file and delete the file after the call. On macOS:
+that Git picks that user's entry and not yours.
+
+That one stored entry is all the agent needs. From ai-skills 1.35.0,
+`forge-gates` and `verify-delivery` read the token from Git's credential
+helper themselves when no token file is set, with prompts switched off,
+so a missing entry is an error instead of a question. `--forge-user`
+names the user the token is stored under, as the push URL does:
 
 ```sh
-f=$(mktemp)    # owner-only
-security find-internet-password -s gitea.example.com -a my-bot -w > "$f"
-GITEA_TOKEN_FILE="$f" python3 .claude/skills/forge-gates/scripts/forge_gates.py gates \
+python3 .claude/skills/forge-gates/scripts/forge_gates.py gates \
   --pr https://gitea.example.com/you/my-project/pulls/1 --api-base https://gitea.example.com/api/v1 \
-  --review-author local=my-bot --review-author external=REVIEWER
-rm -f "$f"
+  --forge-user my-bot --review-author local=my-bot --review-author external=REVIEWER
 ```
 
 On Gitea, `--review-author` names the account each review comes from
 (`REVIEWER` is the external reviewer's account); the `forge-gates` and
-`verify-delivery` skills describe their options.
-
-On Windows (in Git Bash) and Linux, `git credential fill` reads the same
-store; this line takes the place of the `security` line, and with no
-stored entry it fails instead of asking:
-
-```sh
-printf 'protocol=https\nhost=gitea.example.com\nusername=my-bot\n\n' | GIT_TERMINAL_PROMPT=0 GCM_INTERACTIVE=never git credential fill | sed -n 's/^password=//p' > "$f"
-```
-
-Never print the token or pass it on a command line.
+`verify-delivery` skills describe their options. With an older ai-skills
+release on the hub, the skills ask for a token file instead: import
+1.35.0 or later first. Never print the token or pass it on a command
+line.
 
 **The external review labels.** Where an external reviewer watches the
 repository, the agent requests a review by adding the `review-this`
@@ -625,8 +624,9 @@ what they mean). The label must exist in the repository:
   API adds one to pull request 1 with
   `POST /api/v1/repos/you/my-project/issues/1/labels` and the body <!-- doc-check: skip -->
   `{"labels": [ID]}`, where `ID` is the label's `id` from
-  `GET /api/v1/repos/you/my-project/labels`, sent with the token as <!-- doc-check: skip -->
-  above.
+  `GET /api/v1/repos/you/my-project/labels`, sent with the agent's <!-- doc-check: skip -->
+  token from the credential helper (the `password=` line that
+  `git credential fill` prints for the host, read without printing it).
 
 ## 4. The first day on the board
 

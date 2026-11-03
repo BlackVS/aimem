@@ -13,6 +13,18 @@ currently 25); a binary refuses a database newer than it understands.
 
 ## [Unreleased]
 
+### Changed
+
+- **The new-project quickstart's forge step stores the agent's token
+  once.** Step 3.7 no longer copies a Gitea token from the platform's
+  credential store into a temporary file for every call: from ai-skills
+  1.35.0, `forge-gates` and `verify-delivery` read it from Git's
+  credential helper themselves, and the step shows the call with
+  `--forge-user`. The GitHub paragraph says to stop when `gh auth status`
+  reports the token stored in a file, and to make a credential store
+  available and log in again. The sample `aimem process show` output
+  shows ai-skills 1.35.0.
+
 ## [0.10.21] — 2026-11-02
 
 The hub accepts a provider at a loopback, private or link-local address
