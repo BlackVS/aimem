@@ -131,9 +131,12 @@ run, three readings and a second CI run after the merge before DONE.
 These rules keep that cost in proportion to the change.
 
 - **Granularity.** One board task is one PR, and lands as one commit on
-  master by squash merge. A task is no finer than S. Review findings are
-  grouped per surface into one task, not one task per finding. An L or
-  XL task is split into parts no finer than M.
+  master by squash merge. Work is not cut finer than S; an outcome that
+  is XS on its own stays one task. Review findings are
+  grouped per surface into one task, not one task per finding. Large
+  scope alone does not require a split: an L or XL task is split only
+  where a reviewer could not read a part whole, into parts no finer than
+  M (the process handbook's decomposition rule).
 - **Gates by size and surface.** An XS or S task on an ordinary surface
   gets the worker's medium pre-push review, its high review at the final
   head and the external review; the architect does not review it. An M

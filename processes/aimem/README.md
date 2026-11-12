@@ -2,7 +2,7 @@
 
 The manifest at `processes/aimem/manifest.json` is an aimem v0.6.0-compatible
 process set. Its handbook and READY/DONE checklists form one bootstrap bounded
-at 12 KiB. The two JSON templates are examples: replace their placeholders and
+at 13 KiB. The two JSON templates are examples: replace their placeholders and
 supply the project and a unique idempotency key when creating a task. Do not
 submit placeholder text or treat a template as a ready-to-run request.
 

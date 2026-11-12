@@ -135,13 +135,19 @@ is surfaced first, and unknown estimates need triage. Policy and selection
 reasons must be visible to agents and operators. This is planned behavior.
 
 Decomposition guidance belongs in agent creation/pickup docs, templates and
-applicable shipped skills/bootstrap context: prefer small, coherent tasks
-that an agent can finish and verify in a focused session. L tasks trigger a
-split assessment; XL or uncertain tasks need a concrete split proposal or
-a reason to stay whole before READY. Each increment has its own outcome,
-acceptance criteria, estimate and dependencies, with completion criteria
-for the original outcome. Use an investigation task when uncertainty is the
-main problem; avoid arbitrary file-sized fragments and duplicate children.
+applicable shipped skills/bootstrap context. The rule is the process
+handbook's: a task is one complete, verifiable outcome and one pull
+request, and work is not cut finer than S (an XS outcome stays one
+task); its internal components are checklist steps,
+not separate tasks. A split must justify the fixed cost of each pull
+request (CI, reviews, merge, post-merge CI), and large scope alone does
+not require one: L or XL work is split only where a reviewer could not
+read a part whole, no finer than M. L tasks record that assessment; XL or
+uncertain tasks need a concrete split proposal or a reason to stay whole
+before READY. Each child has its own outcome, acceptance criteria,
+estimate and dependencies, with completion criteria for the original
+outcome. Use an investigation task when uncertainty is the main problem;
+avoid arbitrary file-sized fragments and duplicate children.
 
 Existing follow-ups remain BACKLOG: reference size/migration behavior,
 strict request decoding, task-page tests and accessibility, registry lock

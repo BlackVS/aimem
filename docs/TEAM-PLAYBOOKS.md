@@ -63,9 +63,12 @@ notification, and delivery while a model is busy is only partly observed. So:
 3. **Assess before offering.** State the task's complexity (XS to XL) and the
    capabilities it needs (language, tests, browser, tools, repository
    familiarity). If complexity or suitability is unknown, ask the owner or the
-   task's author, or issue an investigation assignment first. L work needs a
-   split assessment and XL work a concrete split proposal, exactly as the
-   handbook says; do not offer an unsplit L or XL task.
+   task's author, or issue an investigation assignment first. Apply the
+   handbook's decomposition rule: a task is one complete outcome and work is
+   not cut finer than S; L work needs a split assessment and XL work a split proposal or a
+   reason to stay whole, and a split goes only where a reviewer could not read
+   a part whole, no finer than M. Do not offer an L or XL task without that
+   record.
 4. **Choose the least costly suitable available member.** Suitable means the
    declared capabilities and reported model fit the assessed complexity;
    available means an active session with no reserved attempt and a recent
@@ -214,7 +217,8 @@ returns the task to READY with the note. Decline is refused for accepted work.
 ## Where the process rules live
 
 The selected process handbook owns: pickup order and the standalone workflow,
-the priority and complexity assessment, the split rules for L and XL work,
+the priority and complexity assessment, the decomposition rule (one complete
+outcome per task, work not cut finer than S, and when L or XL work is split),
 claiming with revision checks, what each task state means, evidence and
 checklist recording, review levels and gates, serial PRs, human merge, releases
 and credentials. Team members follow it unchanged; joining a team only replaces

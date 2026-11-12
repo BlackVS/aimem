@@ -15,6 +15,20 @@ currently 25); a binary refuses a database newer than it understands.
 
 ### Changed
 
+- **The process handbook's decomposition rule weighs the fixed cost of a
+  pull request.** "Scope, pickup and decomposition" no longer opens with
+  a preference for small increments: a task is one complete, verifiable
+  outcome and one pull request, work is not cut finer than S (an XS
+  outcome stays one task), and its internal
+  components are checklist steps. A split needs a justification that
+  counts the CI run, reviews, merge and post-merge CI each pull request
+  costs; large scope alone does not require one, and L or XL work is
+  split only where a reviewer could not read a part whole, no finer than
+  M. The READY checklist items `ready.plan` and `ready.team` carry the
+  rule, and the team playbooks, the roadmap and AGENTS.md now agree with
+  it. The set's bootstrap budget (`budget_bytes` in its manifest) rises
+  from 12 KiB to 13 KiB to fit the rule. A project picks the rule up
+  when it moves its process pin.
 - **macOS is tested at the release, not on every pull request and
   master push.** CI's `test` matrix runs on Linux and Windows. The
   release workflow runs `go vet`, `go test`, a native build and the

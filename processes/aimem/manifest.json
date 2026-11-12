@@ -10,5 +10,5 @@
     "investigation": "processes/aimem/investigation.json"
   },
   "skills": ["oh-code-review", "forge-gates", "verify-delivery"],
-  "budget_bytes": 12288
+  "budget_bytes": 13312
 }
