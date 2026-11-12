@@ -35,24 +35,20 @@ unsupported API fields. These estimates do not change the current pickup order.
 Complexity describes scope and uncertainty, not a time promise. Reassess when
 scope changes and assess old tasks before promoting them to READY.
 
-A task is one complete, verifiable outcome; its size follows the outcome, not a
-preference for small or large. One task is one pull request. Work is not cut
-finer than S, and an outcome that is XS on its own stays one task. The internal
-components of the outcome (a schema, a command, its tests, its docs) are
-checklist steps inside the task, not separate tasks or pull requests. Review
-findings are grouped into one task per surface, not one task per finding.
-
-Every pull request has a fixed cost: a CI run, the reviews, the merge and the CI
-run after the merge. A split therefore needs a concrete justification that
-counts that cost; "it would be smaller" is not one. Large scope alone does not
-require a split: L or XL work is split only where a reviewer could not read a
-part whole, and no finer than M. An L task records that assessment before READY;
-an XL or uncertain task records a concrete split proposal or the reason it stays
-whole. Each child has an outcome, acceptance criteria, assessment and
-dependencies, and the parent says how its outcome completes. Investigate first
-when uncertainty prevents a credible split. Do not split arbitrarily by file,
-create duplicate children, or silently replace, close or reprioritize the
-original task.
+A task is one complete, verifiable outcome and one pull request; its size
+follows the outcome, not a preference for small or large. Work is not cut finer
+than S (an XS outcome stays one task); its components (schema, command, tests,
+docs) are checklist steps, and review findings are grouped per surface. Each
+pull request costs a CI run, reviews, a merge and post-merge CI, so a split
+needs a concrete justification that counts that cost; "it would be smaller" is
+not one. Large scope alone does not require a split: L or XL work is split only
+where a reviewer could not read a part whole, no finer than M. Before READY, L
+work records that assessment and XL or uncertain work a split proposal or the
+reason it stays whole. Each child has an outcome, acceptance criteria,
+assessment and dependencies; the parent says how its outcome completes.
+Investigate first when uncertainty prevents a credible split. Do not split
+arbitrarily by file, create duplicate children, or silently replace, close or
+reprioritize the original task.
 
 ## Claiming, evidence and completion
 
@@ -123,8 +119,7 @@ only the hub's coordination operations move them.
 
 The coordinator applies the pickup order above, then assesses complexity and
 required capabilities before offering; L work needs its split assessment and
-XL work its split proposal or reason to stay whole first, under the
-decomposition rule above. Offer to the least costly suitable available
+XL work its proposal or reason to stay whole first. Offer to the least costly suitable available
 member and record the suitability and cost rationale with the offer; a
 stronger model on trivial work or a weaker one on complex work needs an
 explicit reason. Review a submitted result against its candidate head with

@@ -26,7 +26,9 @@ currently 25); a binary refuses a database newer than it understands.
   split only where a reviewer could not read a part whole, no finer than
   M. The READY checklist items `ready.plan` and `ready.team` carry the
   rule, and the team playbooks, the roadmap and AGENTS.md now agree with
-  it. A project picks the rule up when it moves its process pin.
+  it. The set's bootstrap budget (`budget_bytes` in its manifest) rises
+  from 12 KiB to 13 KiB to fit the rule. A project picks the rule up
+  when it moves its process pin.
 - **macOS is tested at the release, not on every pull request and
   master push.** CI's `test` matrix runs on Linux and Windows. The
   release workflow runs `go vet`, `go test`, a native build and the

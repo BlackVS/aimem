@@ -180,7 +180,7 @@ bootstrap") are reused unchanged. What changes is reachability:
   Delivery is all or nothing: a unit over 32 KiB is not delivered and the
   state is `too_large`, with the fix addressed to the process owner (split
   the handbook), the same rule the session-start budget applies. aimem's
-  current unit is under 12 KiB.
+  current unit is under 13 KiB.
 - A read-only local MCP tool (proposed `process_context`) returns the same
   unit on demand, for an agent that lost it without re-running `team_continue`,
   or with `template` set to a kind the manifest names, that template (today's
