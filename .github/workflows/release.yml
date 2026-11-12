@@ -16,7 +16,39 @@ permissions:
   contents: write   # create the release and upload its assets
 
 jobs:
+  # The macOS tests run here, not on pull requests or master (GitHub's macOS
+  # runners can go unassigned for long stretches): a Mac-only failure stops
+  # the release instead of a merge (docs/DEVELOPMENT.md, "Which checks run
+  # where").
+  macos:
+    runs-on: macos-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.inputs.tag || github.ref }}
+          persist-credentials: false
+      - uses: actions/setup-go@v7
+        with:
+          go-version: '1.26'
+          check-latest: true   # the newest 1.26 patch, with its security fixes
+          cache: true
+      - name: Toolchain is the runner's Go 1.26
+        run: |
+          test "$(go env GOTOOLCHAIN)" = local
+          go version | grep -q ' go1\.26'
+      - run: go vet ./...
+      - run: go test ./...
+      - name: Native build
+        run: CGO_ENABLED=0 go build -o aimem ./cmd/aimem
+      # The client installer's launchd agents, against the runner's real
+      # launchd: install, upgrade in place, uninstall.
+      - name: macOS install registers launchd agents
+        run: bash scripts/check-launchd-install.sh
+
   release:
+    needs: macos
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7

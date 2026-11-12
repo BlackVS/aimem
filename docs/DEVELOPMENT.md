@@ -48,8 +48,7 @@ The slow checks run on every push to master, nightly, on a manual run
 of the CI workflow (`workflow_dispatch`, for any branch), and on a
 release prepare PR, whose branch is named `release/v<version>`:
 
-- `test (windows-latest)` and `test (macos-latest)`, including the
-  macOS launchd install check;
+- `test (windows-latest)`;
 - `scenario (windows-latest)`;
 - the identity test's 50 runs under the race detector on Linux.
 
@@ -59,9 +58,21 @@ every check by name. `test-windows-pr` runs only on an ordinary pull
 request; on master, nightly and a release/ pull request it is skipped,
 since the full Windows leg runs there. A Windows failure outside its
 packages (`cmd/aimem` and the rest of the suite, the Windows scenarios)
-and any macOS failure therefore still surface on master. A change whose
-risk is on one of those platforms is tested there before the push, or
-given a manual run of the workflow on its branch.
+therefore still surfaces on master.
+
+macOS runs only in the release workflow, at the tag: the `macos` job
+runs `go vet`, `go test ./...`, a native build and the launchd install
+check (`scripts/check-launchd-install.sh`) on `macos-latest`, and the
+job that builds and publishes the release waits for it. GitHub's macOS
+runners can go unassigned for long stretches, and a starved job held
+merges until someone re-ran it, so a Mac-only break now stops a
+release, never a merge. When the job fails on a real Mac problem, the
+fix goes through a pull request and the release takes the next
+version; when the runner never started, re-run the job.
+
+A change whose risk is on Windows or macOS is tested there before the
+push; a Windows change can also get a manual run of the workflow on its
+branch.
 
 ## Release gate
 
