@@ -9,15 +9,17 @@ on:
   workflow_dispatch:
 
 # A pull request runs the fast set: lint, build, the Linux tests and
-# scenarios, the installer container. The Windows and macOS legs and the
-# race runs, which set a pull request's wall time, run on every push to
-# master, nightly, on a manual run, and on a release prepare pull request
-# (branch release/v<version>), so the release gate still sees them
-# (docs/DEVELOPMENT.md, "Which checks run where"). The legs keep their
-# names on a pull request and pass without testing, because the master
-# ruleset requires every check by name. What a pull request does run on
-# Windows is test-windows-pr: the packages whose behaviour depends on the
-# operating system.
+# scenarios, the installer container. The Windows legs and the race runs,
+# which set a pull request's wall time, run on every push to master,
+# nightly, on a manual run, and on a release prepare pull request (branch
+# release/v<version>), so the release gate still sees them
+# (docs/DEVELOPMENT.md, "Which checks run where"). The Windows legs keep
+# their names on a pull request and pass without testing, because the
+# master ruleset requires every check by name. What a pull request does
+# run on Windows is test-windows-pr: the packages whose behaviour depends
+# on the operating system. macOS runs only in the release workflow, at the
+# tag: GitHub's macOS runners can go unassigned for long stretches, so a
+# Mac-only break stops a release, never a merge.
 
 permissions:
   contents: read
@@ -84,7 +86,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, windows-latest, macos-latest]
+        os: [ubuntu-latest, windows-latest]
     runs-on: ${{ matrix.os }}
     env:
       FULL: ${{ github.event_name != 'pull_request' || startsWith(github.head_ref, 'release/') }}
@@ -113,11 +115,6 @@ jobs:
         if: env.RUN == 'true'
       - run: go test ./...
         if: env.RUN == 'true'
-      # The client installer's launchd agents, against the runner's real
-      # launchd: install, upgrade in place, uninstall.
-      - name: macOS install registers launchd agents
-        if: matrix.os == 'macos-latest' && env.RUN == 'true'
-        run: bash scripts/check-launchd-install.sh
       # The end-to-end identity test races concurrent redemptions against
       # the rig's shared state. The race detector needs cgo, which the
       # Ubuntu runner has; 50 runs keep a lost update from passing by luck.

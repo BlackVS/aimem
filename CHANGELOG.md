@@ -15,6 +15,14 @@ currently 25); a binary refuses a database newer than it understands.
 
 ### Changed
 
+- **macOS is tested at the release, not on every pull request and
+  master push.** CI's `test` matrix runs on Linux and Windows. The
+  release workflow runs `go vet`, `go test`, a native build and the
+  launchd install check on `macos-latest` at the tag, and builds and
+  publishes the release only when they pass. GitHub's macOS runners went
+  unassigned for long stretches and held merges until someone re-ran
+  the job. The master ruleset no longer requires `test (macos-latest)`.
+
 - **The new-project quickstart's forge step stores the agent's token
   once.** Step 3.7 no longer copies a Gitea token from the platform's
   credential store into a temporary file for every call: from ai-skills
