@@ -13,6 +13,34 @@ currently 25); a binary refuses a database newer than it understands.
 
 ## [Unreleased]
 
+## [0.10.22] — 2026-11-12
+
+The reference process set's decomposition rule weighs the fixed cost of a
+pull request: a task is one complete, verifiable outcome, work is not cut
+finer than S, and L or XL work is split only where a reviewer could not
+read a part whole. macOS leaves the pull-request and master gates and is
+tested in the release workflow, which publishes only when that job
+passes; this is the first release built that way. The new-project
+quickstart's forge step stores the agent's token once. No Go code
+changed: the binary behaves as 0.10.21 does. The on-disk schema stays at
+25 and the access schema at 9. Includes PR #351, #353 and #354.
+
+### Upgrade notes
+
+- **A project gets the new decomposition rule only when its
+  administrator selects the v0.10.22 tag.** The set requires the same
+  three skills as 0.10.21, so a hub that already holds ai-skills 1.34.0
+  or later needs no new import for the selection. The set's bootstrap budget is now 13 KiB; the handbook and
+  checklists fit within it.
+- **The quickstart's forge step expects ai-skills 1.35.0 or later**,
+  where `forge-gates` and `verify-delivery` read the token from Git's
+  credential helper. A hub with an older import keeps working; only the
+  step's text assumes 1.35.0.
+- **Clients and hubs can be upgraded in either order, or not at all.**
+  No route, answer shape or schema changed. Clients upgrade with
+  `aimem upgrade` from 0.10.19 or later; a hub keeps `install-hub.sh`.
+  Going back to 0.10.21 is putting the binary back.
+
 ### Changed
 
 - **The process handbook's decomposition rule weighs the fixed cost of a
@@ -36,7 +64,6 @@ currently 25); a binary refuses a database newer than it understands.
   publishes the release only when they pass. GitHub's macOS runners went
   unassigned for long stretches and held merges until someone re-ran
   the job. The master ruleset no longer requires `test (macos-latest)`.
-
 - **The new-project quickstart's forge step stores the agent's token
   once.** Step 3.7 no longer copies a Gitea token from the platform's
   credential store into a temporary file for every call: from ai-skills
