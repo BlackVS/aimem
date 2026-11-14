@@ -131,8 +131,8 @@ func reservationPermits(c reservationCaller, op store.ReservationOperation, in s
 // through the access instance it had when the call began. The owner project
 // needs the caller's write authority: a personal write grant, or the team
 // profile's grant. A dependency project needs read authority: in personal
-// mode a live credential whose scope reaches it, in team mode the profile's
-// grant. It reads only the access store and the registry, never a project
+// mode the grant a task read needs (access.CanReadToken), in team mode the
+// profile's grant. It reads only the access store and the registry, never a project
 // database, so the ledger can run it inside its transaction.
 func (s *Server) reservationAuthority(c reservationCaller, project, instance string, owner bool) error {
 	current, err := s.reg.ExistingProjectAccessID(project)
@@ -152,10 +152,14 @@ func (s *Server) reservationAuthority(c reservationCaller, project, instance str
 	}
 	var allowed bool
 	if c.team == nil {
-		if !owner {
-			return nil
+		// The owner's project needs the write grant; a dependency's project
+		// needs the grant a task read needs, so a claim proves no more than
+		// the caller could read.
+		if owner {
+			allowed, err = db.CanWriteToken(c.id.UserID, c.id.TokenID, instance)
+		} else {
+			allowed, err = db.CanReadToken(c.id.UserID, c.id.TokenID, instance)
 		}
-		allowed, err = db.CanWriteToken(c.id.UserID, c.id.TokenID, instance)
 	} else {
 		profile, perr := db.TeamProfileByKey(c.team.ServiceID, c.team.TeamID)
 		if perr != nil || profile.Disabled || profile.ID != c.team.ProfileID {

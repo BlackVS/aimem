@@ -30,7 +30,7 @@ func epicView(project string, e store.Epic) epicResponse {
 }
 
 func (s *Server) listEpics(w http.ResponseWriter, r *http.Request) {
-	project, db := s.taskProject(w, r)
+	project, db := s.taskReadProject(w, r)
 	if db == nil {
 		return
 	}
@@ -81,7 +81,7 @@ func (s *Server) createEpic(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) getEpic(w http.ResponseWriter, r *http.Request) {
-	project, db := s.taskProject(w, r)
+	project, db := s.taskReadProject(w, r)
 	if db == nil {
 		return
 	}

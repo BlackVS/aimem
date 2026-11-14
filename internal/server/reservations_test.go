@@ -551,8 +551,60 @@ func TestReservationClaimDependencies(t *testing.T) {
 	scoped.TokenID, scoped.Scope, scoped.Project = tok.ID, access.ScopeProject, g.alphaInstance
 	_, err = g.s.reserve(g.personal(scoped), store.ReservationClaim, claimOf(owner), "scoped", "")
 	expectRefusal(t, "unreadable dependency project", err, "dependency_unresolved")
+	// A user-scoped token whose user holds no grant on beta cannot read it
+	// either: the dependency is unresolved until the grant exists.
+	_, err = g.s.reserve(alice, store.ReservationClaim, claimOf(owner), "ungranted", "")
+	expectRefusal(t, "ungranted dependency project", err, "dependency_unresolved")
+	betaInstance, err := g.s.reg.ProjectAccessID("beta")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := g.db.SetGrant("admin", betaInstance, "user", g.aliceID, true); err != nil {
+		t.Fatal(err)
+	}
 	if out, err := g.s.reserve(alice, store.ReservationClaim, claimOf(owner), "done", ""); err != nil || out.Reservation.ID == "" {
 		t.Fatalf("claim with a done dependency: %+v, %v", out, err)
+	}
+}
+
+// In team mode a dependency in another project is read through the team
+// profile's grant: a claim whose task depends on a task in a project the
+// team is not granted is unresolved, and resolves once the team is
+// granted that project.
+func TestReservationTeamClaimDependencyNeedsTheTeamGrant(t *testing.T) {
+	g := newReservationRig(t)
+	g.selectProcess(t, testPin)
+	beta, err := g.s.reg.Open("beta")
+	if err != nil {
+		t.Fatal(err)
+	}
+	admin := store.TaskActor{Kind: "admin", Name: "admin"}
+	dep, err := beta.CreateTask(store.TaskContent{Title: "dependency", State: "DONE"}, admin, "dep")
+	if err != nil {
+		t.Fatal(err)
+	}
+	owner, err := g.alpha.CreateTask(store.TaskContent{Title: "owner", State: "READY", Dependencies: []string{dep.ID}}, admin, "owner")
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Alice holds a personal grant on beta; team mode never counts it.
+	betaInstance, err := g.s.reg.ProjectAccessID("beta")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := g.db.SetGrant("admin", betaInstance, "user", g.aliceID, true); err != nil {
+		t.Fatal(err)
+	}
+	coord := g.member(t, "coordinator", "agent-coord", "sess-c")
+	g.answerFact(offerFact(coord, owner.ID, "offer-1", "offer-1"))
+	_, err = g.s.reserve(coord, store.ReservationClaim, externalClaim(owner, "offer-1"), "offer-1", testProof(t))
+	expectRefusal(t, "dependency in a project the team is not granted", err, "dependency_unresolved")
+	if err := g.db.SetTeamGrant("admin", betaInstance, g.profile.ID, true); err != nil {
+		t.Fatal(err)
+	}
+	g.answerFact(offerFact(coord, owner.ID, "offer-2", "offer-2"))
+	if out, err := g.s.reserve(coord, store.ReservationClaim, externalClaim(owner, "offer-2"), "offer-2", testProof(t)); err != nil || out.Reservation.ID == "" {
+		t.Fatalf("claim once the team is granted the dependency's project: %+v, %v", out, err)
 	}
 }
 

@@ -47,7 +47,7 @@ func decodeTask(t *testing.T, w *httptest.ResponseRecorder) taskResponse {
 
 // taskFixture is a hub with two ordinary projects, legacy writer/admin
 // tokens, and two ordinary users: alice holds a grant and a project token
-// on alpha; bob holds a cross-project read-only token.
+// on alpha; bob holds a read-only token and a grant on alpha, none on beta.
 type taskFixture struct {
 	s                                *Server
 	reg                              *store.Registry
@@ -95,6 +95,9 @@ func newTaskFixture(t *testing.T) *taskFixture {
 	}
 	aliceTok, aliceSecret, err := db.Issue("admin", alice.ID, "agent", instance, time.Now().Add(time.Hour))
 	if err != nil {
+		t.Fatal(err)
+	}
+	if err := db.SetGrant("admin", instance, "user", bob.ID, true); err != nil {
 		t.Fatal(err)
 	}
 	_, bobSecret, err := db.Issue("admin", bob.ID, "reader", "", time.Now().Add(time.Hour))
@@ -241,9 +244,14 @@ func TestProjectListTaskEnablementFilter(t *testing.T) {
 			t.Fatalf("filtered projects: %d %s; want %v", w.Code, w.Body, want)
 		}
 	}
-	for _, tok := range []string{f.alice, f.bob, f.admin, f.writer, f.env} {
+	for _, tok := range []string{f.admin, f.writer, f.env} {
 		list(tok, "true", []string{"beta"}) // empty enabled board stays visible
 		list(tok, "false", []string{"alpha", "gamma"})
+	}
+	// An ordinary token lists only the projects its user holds a grant on.
+	for _, tok := range []string{f.alice, f.bob} {
+		list(tok, "true", []string{})
+		list(tok, "false", []string{"alpha"})
 	}
 	if w := taskReq(t, f.h, "GET", "/v1/tasks/"+task.ID, f.bob, "", ""); w.Code != http.StatusOK {
 		t.Fatalf("disabled board task deep link: %d %s", w.Code, w.Body)
@@ -251,7 +259,8 @@ func TestProjectListTaskEnablementFilter(t *testing.T) {
 	if err := alpha.SetMeta(store.TasksMetaKey, "on"); err != nil {
 		t.Fatal(err)
 	}
-	list(f.bob, "true", []string{"alpha", "beta"})
+	list(f.admin, "true", []string{"alpha", "beta"})
+	list(f.bob, "true", []string{"alpha"})
 	for _, p := range []string{"alpha", "beta"} {
 		db, err := f.reg.OpenExisting(p)
 		if err != nil {
@@ -261,6 +270,7 @@ func TestProjectListTaskEnablementFilter(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
+	list(f.admin, "true", []string{})
 	list(f.bob, "true", []string{})
 	for _, query := range []string{"", "bogus"} {
 		if w := taskReq(t, f.h, "GET", "/v1/projects?tasks_enabled="+query, f.bob, "", ""); w.Code != http.StatusBadRequest {
@@ -291,8 +301,8 @@ func TestProjectListForOrdinaryTokens(t *testing.T) {
 	}
 	for _, tok := range []string{f.alice, f.bob} { // scoped and read-only ordinary tokens alike
 		got := list(tok)
-		if !slices.Contains(got, "alpha") {
-			t.Fatalf("ordinary token must see the ordinary projects: %v", got)
+		if !slices.Equal(got, []string{"alpha"}) {
+			t.Fatalf("ordinary token must see exactly the granted projects: %v", got)
 		}
 		for _, p := range got {
 			if store.IsReservedProject(p) {
@@ -632,8 +642,8 @@ func TestTaskRoutesCASCommentsAndPermissionChanges(t *testing.T) {
 	if w := taskReq(t, h, "POST", "/v1/projects/alpha/tasks", f.alice, "k1", taskBody); w.Code != 403 {
 		t.Fatalf("replay after grant removal: %d %s", w.Code, w.Body)
 	}
-	if w := taskReq(t, h, "GET", "/v1/tasks/"+other.ID, f.alice, "", ""); w.Code != 200 {
-		t.Fatalf("reads survive grant removal: %d", w.Code)
+	if w := taskReq(t, h, "GET", "/v1/tasks/"+other.ID, f.alice, "", ""); w.Code != 404 || !strings.Contains(w.Body.String(), "holds no grant") {
+		t.Fatalf("a read after grant removal: %d %s", w.Code, w.Body)
 	}
 	if err := db.SetGrant("admin", f.alphaInstance, "user", f.aliceUser, true); err != nil {
 		t.Fatal(err)

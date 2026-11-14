@@ -37,11 +37,10 @@ type TaskCallFunc func(ctx context.Context, method, path string, headers map[str
 type PrincipalFunc func(r *http.Request) (tasks TaskCallFunc, tasksOnly bool)
 
 // taskReadScope is appended to every task and epic read tool: the
-// project argument selects a project, it does not limit what the token
-// may read. Outside team mode an ordinary token reads the tasks of every
-// project on the hub (docs/DESIGN-access-control.md, "Permissions").
-const taskReadScope = " Reads are hub-wide: an ordinary token reads every project on the hub, not only the current one " +
-	"(project scope limits writes only); a team conversation reads only the team's granted projects."
+// project argument selects a project, and the token reads the projects its
+// user holds a grant on (docs/DESIGN-access-control.md, "Permissions").
+const taskReadScope = " Reads need a grant: an ordinary token reads the projects its user holds a grant on, not only the current one, " +
+	"and a project or task without a grant answers as not found; a team conversation reads only the team's granted projects."
 
 var taskToolDefs = append([]map[string]any{
 	{

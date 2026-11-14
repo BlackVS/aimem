@@ -13,6 +13,60 @@ currently 25); a binary refuses a database newer than it understands.
 
 ## [Unreleased]
 
+### Security
+
+- **Task reads follow the project grant** (security audit 2026-10,
+  finding A-10). Outside team mode an ordinary token used to read the
+  tasks, comments, history and epics of every project on the hub, and
+  list every project; scope and grants limited writes only. Now it reads
+  a project only while its user holds a current grant on it, directly or
+  through an access group, and while the token's scope reaches the project.
+  - **The check.** It is the knowledge reads' predicate, with one addition:
+    a read-only-scope token reads its user's granted projects as well.
+  - **Refusals.** A project without a grant answers `404` with the same
+    body as a project that does not exist: "unknown project, or this
+    token's user holds no grant on it; a hub admin grants access with
+    `aimem access grant`". A task id in such a project answers the same as
+    an unknown task id. An id prefix resolves among the readable tasks
+    only.
+  - **The project list** shows only the granted projects.
+  - **The hub's log** records every refused task read with the token's
+    user and the project, never task content (`task read refused: no grant
+    on the project`). Knowledge reads record no refusal; this line covers
+    task reads only.
+  - **Claims.** A personal claim proves a dependency in another project
+    only under the same grant.
+  - **Identity and tools.** The identity route answers `task_read:
+    granted-projects`, and the MCP task read tools say so.
+  - **Unchanged.** Writes, team mode (the team profile's grants decide),
+    aicrewd's peer reads (already scoped to granted instances), the admin
+    token and the local socket.
+
+### Upgrade notes
+
+- **Grant before you upgrade the hub.** A token whose user holds no grant
+  on a project loses its task reads there the moment the new hub starts:
+  - the project disappears from its project list;
+  - its board and MCP reads answer 404 as for an unknown project.
+
+  `aimem access list` on the hub host shows, per project, who is granted;
+  its users table shows each user's tokens and their scopes.
+  `aimem access list --user NAME` narrows it to one user. Grant each
+  standalone reader the projects it reads with `aimem access grant add
+  --project PROJECT --user-name NAME`, or with a group grant. After the
+  upgrade, the hub's log names every refused read (`task read refused`)
+  with the user and the project.
+- **The least-privilege limit.** A grant names a project, not a kind of
+  access; there is no read-only grant yet. A reader outside team mode either
+  holds an ordinary grant, which also lets its user- or project-scoped
+  tokens write, or reads with a token of read-only scope
+  (`aimem access token-issue --read-only`), which never writes.
+- **Team mode and aicrewd need nothing.** Team conversations already read
+  only the team's granted projects, and aicrewd's peer reads only the
+  instances its peer is granted.
+- **Clients need no upgrade.** The change is the hub's. No client acts
+  on `task_read`, and a refused read is an ordinary 404.
+
 ## [0.10.22] — 2026-11-12
 
 The reference process set's decomposition rule weighs the fixed cost of a

@@ -677,6 +677,26 @@ AND EXISTS(SELECT 1 FROM grants g WHERE g.project=? AND
 	return n == 1, err
 }
 
+// CanReadToken is the project read check for task reads: CanWriteToken's
+// live token, enabled user and current direct or access-group grant, with
+// one difference — a read-only-scope token qualifies too. A grant names a
+// project, not a kind of access, so a read-only token reads exactly the
+// projects its user may write.
+func (s *Store) CanReadToken(user, token, project string) (bool, error) {
+	if project == "" {
+		return false, nil
+	}
+	var n int
+	err := s.db.QueryRow(`SELECT count(*) FROM tokens t JOIN users u ON u.id=t.user_id
+WHERE t.id=? AND u.id=? AND u.disabled=0 AND t.revoked=0 AND t.expires_at>?
+AND (((t.scope='user' OR t.scope='read-only') AND t.project='') OR (t.scope='project' AND t.project=?))
+AND EXISTS(SELECT 1 FROM grants g WHERE g.project=? AND
+((g.kind='user' AND g.subject=u.id) OR (g.kind='group' AND EXISTS
+(SELECT 1 FROM members m WHERE m.group_id=g.subject AND m.user_id=u.id))))`,
+		token, user, time.Now().Unix(), project, project).Scan(&n)
+	return n == 1, err
+}
+
 // TokenLive reports whether token is a live, unexpired credential of the
 // enabled user whose scope reaches project. It checks no grant.
 func (s *Store) TokenLive(user, token, project string) (bool, error) {

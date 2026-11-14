@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"aimem/internal/access"
 	"aimem/internal/store"
 )
 
@@ -93,6 +94,23 @@ func TestListTasksSinceOrderAndMine(t *testing.T) {
 	page2, end := titles(f.alice, map[string]any{"mine": true, "limit": 1, "after": cursor})
 	if strings.Join(page1, ",") != "alices" || strings.Join(page2, ",") != "alices-epic" || cursor == "" || end != "" {
 		t.Fatalf("mine paged: %v %q %v %q", page1, cursor, page2, end)
+	}
+	// Bob reads alpha only under a grant on it (audit A-10): without one
+	// the project answers as not found.
+	if text, isErr := toolText(f.rpc(t, f.stranger, "tools/call", map[string]any{"name": "list_tasks", "arguments": map[string]any{"project": "alpha", "mine": true}})); !isErr || !strings.Contains(text, "holds no grant") {
+		t.Fatalf("bob's mine without a grant: %v %s", isErr, text)
+	}
+	acc, err := access.Open(f.reg.Root())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer acc.Close()
+	instance, err := f.reg.ProjectAccessID("alpha")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := acc.SetGrant("admin", instance, "user", f.bobID, true); err != nil {
+		t.Fatal(err)
 	}
 	if got, _ := titles(f.stranger, map[string]any{"mine": true}); strings.Join(got, ",") != "bobs" {
 		t.Fatalf("bob's mine: %v", got)
