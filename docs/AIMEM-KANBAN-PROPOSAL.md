@@ -150,8 +150,11 @@ See [users, access groups and tokens](DESIGN-access-control.md).
   from the aimem host console.
 - A user/agent may change tasks in its working project when both current project
   assignment and its token allow it.
-- Agents from other projects can read tasks and statuses, but cannot change them.
-- Read access spans all projects on the authenticated hub, not other hubs.
+- Agents from other projects can read tasks and statuses where their user holds
+  a grant on the project, but cannot change them without write access.
+- Read access spans the granted projects on the authenticated hub, not other
+  hubs (corrected by the 2026-10 security audit, finding A-10: reads were
+  hub-wide until then).
 
 Access groups simplify assigning users to existing projects. They are separate
 from knowledge groups. Only admin manages users, access groups, assignments, and

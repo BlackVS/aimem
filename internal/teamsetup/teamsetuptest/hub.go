@@ -134,7 +134,7 @@ type Session struct {
 func New(t *testing.T) (*Hub, *httptest.Server) {
 	sel := Selection
 	h := &Hub{Secret: "aimem_user_" + strings.Repeat("e", 64), Sessions: map[string]*Session{}, ResumeKeys: map[string]string{}, Selection: &sel}
-	h.Identity = map[string]any{"user_id": "u-1", "token_id": "t-1", "name": "pilot-a", "role": "user", "scope": "project", "task_read": "all-projects", "project": "alpha", "task_write": true, "tasks_enabled": true}
+	h.Identity = map[string]any{"user_id": "u-1", "token_id": "t-1", "name": "pilot-a", "role": "user", "scope": "project", "task_read": "granted-projects", "project": "alpha", "task_write": true, "tasks_enabled": true}
 	ts := hubtest.NewServer(http.HandlerFunc(h.serve))
 	t.Cleanup(ts.Close)
 	return h, ts

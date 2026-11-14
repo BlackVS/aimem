@@ -49,7 +49,7 @@ func heldTask(err error) bool {
 
 // triageTask is POST /v1/tasks/{id}/triage.
 func (s *Server) triageTask(w http.ResponseWriter, r *http.Request) {
-	project, db, ok := s.locateTask(w, r)
+	project, db, ok := s.locateTask(w, r, false)
 	if !ok {
 		return
 	}

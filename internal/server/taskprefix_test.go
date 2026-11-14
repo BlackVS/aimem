@@ -113,13 +113,20 @@ func TestTaskRoutesResolveAUniqueIDPrefix(t *testing.T) {
 		t.Fatalf("uppercase prefix: %d %s", w.Code, w.Body)
 	}
 
-	// Two tasks, in two projects, under one prefix: refused with both ids;
-	// the longer prefix that tells them apart still resolves.
+	// Two tasks, in two projects, under one prefix: refused with both ids
+	// to a caller who reads both; the longer prefix that tells them apart
+	// still resolves.
 	twin := sibling(task.ID)
 	cloneTask(t, f.reg, "alpha", "beta", task.ID, twin)
-	w = taskReq(t, h, "GET", "/v1/tasks/"+short, f.alice, "", "")
+	w = taskReq(t, h, "GET", "/v1/tasks/"+short, f.admin, "", "")
 	if w.Code != 409 || !strings.Contains(w.Body.String(), "ambiguous id prefix "+short) || !strings.Contains(w.Body.String(), task.ID) || !strings.Contains(w.Body.String(), twin) || strings.Contains(w.Body.String(), "cannot read") {
 		t.Fatalf("ambiguous prefix: %d %s", w.Code, w.Body)
+	}
+	// Alice reads alpha alone: the prefix resolves among her readable
+	// tasks, to alpha's, and beta's twin is never named.
+	w = taskReq(t, h, "GET", "/v1/tasks/"+short, f.alice, "", "")
+	if w.Code != 200 || decodeTask(t, w).ID != task.ID || strings.Contains(w.Body.String(), twin) {
+		t.Fatalf("prefix among the readable tasks: %d %s", w.Code, w.Body)
 	}
 	if w := taskReq(t, h, "GET", "/v1/tasks/"+task.ID, f.alice, "", ""); w.Code != 200 {
 		t.Fatalf("the full id after the clone: %d %s", w.Code, w.Body)

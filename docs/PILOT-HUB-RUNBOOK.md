@@ -363,10 +363,10 @@ curl -s -H @coordinator.auth "https://hub.example.test:8443/v1/access/identity?p
 **Expected:**
 
 ```
-{"name":"pilot-coordinator","project":"pilot","role":"user","scope":"user","task_read":"all-projects","task_write":false,"tasks_enabled":true,"token_id":"…","user_id":"…"}
+{"name":"pilot-coordinator","project":"pilot","role":"user","scope":"user","task_read":"granted-projects","task_write":false,"tasks_enabled":true,"token_id":"…","user_id":"…"}
 ```
 
-`task_write: false` is expected. The member has no personal grant on the project, and in team mode only the profile's grant counts. Give a personal grant (`aimem access grant add --project pilot --user-name NAME`) only if the member should also work in the project outside the team.
+`task_write: false` is expected. The member has no personal grant on the project, and in team mode only the profile's grant counts. Outside team mode this token also reads no tasks of the project: without a personal grant the project answers as not found. Give a personal grant (`aimem access grant add --project pilot --user-name NAME`) only if the member should also work in the project outside the team.
 
 ## 7. Linking each member through an identity proof
 

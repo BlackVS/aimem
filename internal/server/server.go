@@ -15,7 +15,6 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
-	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -894,11 +893,27 @@ func (s *Server) projects(w http.ResponseWriter, r *http.Request) {
 		s.fail(w, http.StatusInternalServerError, err)
 		return
 	}
-	// An ordinary token sees the ordinary projects only: the reserved
-	// stores (the user memory DB, the knowledge groups) never hold tasks
-	// and are not within its view.
+	// An ordinary token sees the ordinary projects its user holds a grant
+	// on, the projects whose tasks it may read: the reserved stores (the
+	// user memory DB, the knowledge groups) never hold tasks, and a project
+	// without a grant is not within its view.
 	if id, ok := IdentityFrom(r.Context()); ok && id.Role == "user" {
-		ids = slices.DeleteFunc(slices.Clone(ids), store.IsReservedProject)
+		visible := make([]string, 0, len(ids))
+		for _, p := range ids {
+			if store.IsReservedProject(p) {
+				continue
+			}
+			readable, err := s.canReadTasks(r, p)
+			if err != nil {
+				s.log.Error("project list authorization", "project", p, "err", err)
+				s.fail(w, http.StatusInternalServerError, errors.New("cannot check project access"))
+				return
+			}
+			if readable {
+				visible = append(visible, p)
+			}
+		}
+		ids = visible
 	}
 	if filterTasks {
 		filtered := make([]string, 0, len(ids))

@@ -88,10 +88,9 @@ var taskRoutes = map[string]bool{
 // handlers check the caller's grant themselves (knowledge.go); POST /mcp,
 // whose dispatcher hides every other legacy tool from such a caller; and
 // the project listing, read
-// only, with the reserved stores filtered out for such a caller — an
-// ordinary token may read tasks in every ordinary project already, so the
-// names of those projects are within its view, and the task page needs
-// them for its project picker. Matched by the mux's own rules against
+// only, filtered for such a caller to the ordinary projects its user holds
+// a grant on — the projects whose tasks it may read, which the task page
+// needs for its project picker. Matched by the mux's own rules against
 // these exact patterns — never by prefix — so a future route is refused
 // until it is listed here (and Route.Ordinary shows it).
 // repositoryReadRoute is the project repository read: on the ordinary
@@ -254,6 +253,68 @@ func (s *Server) tasksEnabledFor(w http.ResponseWriter, project string) bool {
 	return true
 }
 
+// errTaskProjectNotFound is the one answer to a project the caller cannot
+// read tasks in, whether it does not exist or the caller's user holds no
+// grant on it: the refusal reveals nothing, and it names the remedy.
+var errTaskProjectNotFound = errors.New("unknown project, or this token's user holds no grant on it; a hub admin grants access with `aimem access grant`")
+
+// errTaskNotReadable is the same answer for a task id: not found, or in a
+// project the caller's user holds no grant on.
+var errTaskNotReadable = errors.New("task not found, or it is in a project this token's user holds no grant on; a hub admin grants access with `aimem access grant`")
+
+// canReadTasks reports whether the caller may read project's tasks. Outside
+// team mode an ordinary token needs a live grant on the project
+// (access.CanReadToken); in team mode the linked profile's grant decides
+// (teamGrantAllows). The admin token, a legacy writer token and the local
+// socket read every project.
+func (s *Server) canReadTasks(r *http.Request, project string) (bool, error) {
+	id, ok := IdentityFrom(r.Context())
+	if tc, team := teamContextFrom(r.Context()); team {
+		return s.teamGrantAllows(id, tc, project)
+	}
+	if !ok || id.Role != "user" {
+		return true, nil
+	}
+	instance, err := s.knowledgeInstance(project)
+	if err != nil || instance == "" {
+		return false, err
+	}
+	db, err := s.openAccess(false)
+	if err != nil {
+		return false, err
+	}
+	return db.CanReadToken(id.UserID, id.TokenID, instance)
+}
+
+// taskReadDenied answers a task read the caller holds no grant for. In
+// team mode it is teamGrantDenied, unchanged. Outside it, the refusal is
+// the not-found answer, and the hub's log records the token's user and the
+// project — never task content — so an admin can see who needs a grant.
+func (s *Server) taskReadDenied(w http.ResponseWriter, r *http.Request, project string, notFound error) bool {
+	if _, team := teamContextFrom(r.Context()); team {
+		return s.teamGrantDenied(w, r, project)
+	}
+	allowed, err := s.canReadTasks(r, project)
+	if err != nil {
+		s.log.Error("task read authorization", "project", project, "err", err)
+		s.fail(w, http.StatusInternalServerError, errors.New("cannot check project access"))
+		return true
+	}
+	if allowed {
+		return false
+	}
+	s.logTaskReadRefused(r, project)
+	s.fail(w, http.StatusNotFound, notFound)
+	return true
+}
+
+// logTaskReadRefused records, for the hub's admin, a task read refused for
+// want of a grant: the token's user and the project, never task content.
+func (s *Server) logTaskReadRefused(r *http.Request, project string) {
+	id, _ := IdentityFrom(r.Context())
+	s.log.Warn("task read refused: no grant on the project", "user", id.Name, "user_id", id.UserID, "token_id", id.TokenID, "project", project)
+}
+
 // taskProject opens the ordinary project named in the path, never
 // creating one: a task write into a mistyped name must not resurrect a
 // dropped project as an empty husk.
@@ -265,7 +326,7 @@ func (s *Server) taskProject(w http.ResponseWriter, r *http.Request) (string, *s
 	}
 	db, err := s.reg.OpenExisting(p)
 	if errors.Is(err, store.ErrNoSuchProject) {
-		s.fail(w, http.StatusNotFound, errors.New("unknown project"))
+		s.fail(w, http.StatusNotFound, errTaskProjectNotFound)
 		return "", nil
 	}
 	if err != nil {
@@ -280,31 +341,68 @@ func (s *Server) taskProject(w http.ResponseWriter, r *http.Request) (string, *s
 	return p, db
 }
 
+// taskReadProject is taskProject for a read: the caller also needs a
+// grant on the project, and a project without one answers as unknown.
+func (s *Server) taskReadProject(w http.ResponseWriter, r *http.Request) (string, *store.DB) {
+	p, db := s.taskProject(w, r)
+	if db == nil {
+		return "", nil
+	}
+	// In team mode taskProject has applied the profile's grant already.
+	if _, team := teamContextFrom(r.Context()); !team && s.taskReadDenied(w, r, p, errTaskProjectNotFound) {
+		return "", nil
+	}
+	return p, db
+}
+
 // locateTask resolves a task ID to its owning project across every
 // existing ordinary project: the partition is the authority, so a rename
 // is reflected on the next read. A unique prefix of the task id, and of a
 // comment id in the path, is replaced by the full id before anything else
 // reads the path, so the handlers, retries and revision checks see only
 // full ids.
-func (s *Server) locateTask(w http.ResponseWriter, r *http.Request) (string, *store.DB, bool) {
-	id, err := s.reg.ResolveTaskID(r.PathValue("id"))
+//
+// read marks a read: the caller needs a grant on the owning project, and a
+// task in a project without one answers exactly as a task that does not
+// exist. A prefix resolves among the tasks the caller may read, and a
+// prefix that starts only tasks the caller may not read is refused, and
+// logged, as that task would be. A write
+// keeps its own authorization (authorizeTaskWrite) and its refusal.
+func (s *Server) locateTask(w http.ResponseWriter, r *http.Request, read bool) (string, *store.DB, bool) {
+	var id string
+	var err error
+	if _, team := teamContextFrom(r.Context()); read && !team {
+		var denied []string
+		id, denied, err = s.reg.ResolveReadableTaskID(r.PathValue("id"), func(p string) (bool, error) { return s.canReadTasks(r, p) })
+		if errors.Is(err, store.ErrTaskNotFound) {
+			for _, p := range denied {
+				s.logTaskReadRefused(r, p)
+			}
+		}
+	} else {
+		id, err = s.reg.ResolveTaskID(r.PathValue("id"))
+	}
 	if err != nil {
-		s.taskIDError(w, r, err)
+		s.taskIDError(w, r, err, read)
 		return "", nil, false
 	}
 	r.SetPathValue("id", id)
 	project, db, err := s.reg.LocateTask(id)
 	if err != nil {
-		s.taskError(w, err)
+		s.taskIDError(w, r, err, read)
 		return "", nil, false
 	}
-	if s.teamGrantDenied(w, r, project) {
+	if read {
+		if s.taskReadDenied(w, r, project, errTaskNotReadable) {
+			return "", nil, false
+		}
+	} else if s.teamGrantDenied(w, r, project) {
 		return "", nil, false
 	}
 	if c := r.PathValue("c"); c != "" {
 		cid, err := db.ResolveTaskCommentID(id, c)
 		if err != nil {
-			s.taskIDError(w, r, err)
+			s.taskIDError(w, r, err, false)
 			return "", nil, false
 		}
 		r.SetPathValue("c", cid)
@@ -313,20 +411,25 @@ func (s *Server) locateTask(w http.ResponseWriter, r *http.Request) (string, *st
 }
 
 // taskIDError answers a refused id: an ambiguous prefix names the ids it
-// matches in the projects the caller may read and counts the others.
-func (s *Server) taskIDError(w http.ResponseWriter, r *http.Request, err error) {
+// matches in the projects the caller may read and counts the others. On a
+// read outside team mode, a task that is not found gets the same answer as
+// one in a project the caller holds no grant on.
+func (s *Server) taskIDError(w http.ResponseWriter, r *http.Request, err error, read bool) {
+	_, team := teamContextFrom(r.Context())
+	if read && !team && errors.Is(err, store.ErrTaskNotFound) {
+		s.fail(w, http.StatusNotFound, errTaskNotReadable)
+		return
+	}
 	var amb *store.AmbiguousIDError
 	if !errors.As(err, &amb) {
 		s.taskError(w, err)
 		return
 	}
-	tc, team := teamContextFrom(r.Context())
-	ident, _ := IdentityFrom(r.Context())
 	var shown []string
 	hidden := 0
 	for _, m := range amb.Matches {
-		if team && m.Project != "" {
-			if ok, gerr := s.teamGrantAllows(ident, tc, m.Project); gerr != nil || !ok {
+		if m.Project != "" {
+			if ok, gerr := s.canReadTasks(r, m.Project); gerr != nil || !ok {
 				hidden++
 				continue
 			}
@@ -497,7 +600,7 @@ func queryInt(r *http.Request, name string) (int64, error) {
 }
 
 func (s *Server) listTasks(w http.ResponseWriter, r *http.Request) {
-	project, db := s.taskProject(w, r)
+	project, db := s.taskReadProject(w, r)
 	if db == nil {
 		return
 	}
@@ -542,7 +645,7 @@ func (s *Server) listTasks(w http.ResponseWriter, r *http.Request) {
 // countTasks is the board's shape: the active tasks per state and the
 // archived ones, under the list's assignee and epic filters.
 func (s *Server) countTasks(w http.ResponseWriter, r *http.Request) {
-	project, db := s.taskProject(w, r)
+	project, db := s.taskReadProject(w, r)
 	if db == nil {
 		return
 	}
@@ -610,7 +713,7 @@ func (s *Server) createTask(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) getTask(w http.ResponseWriter, r *http.Request) {
-	project, db, ok := s.locateTask(w, r)
+	project, db, ok := s.locateTask(w, r, true)
 	if !ok {
 		return
 	}
@@ -628,7 +731,7 @@ type taskUpdateBody struct {
 }
 
 func (s *Server) updateTask(w http.ResponseWriter, r *http.Request) {
-	project, db, ok := s.locateTask(w, r)
+	project, db, ok := s.locateTask(w, r, false)
 	if !ok {
 		return
 	}
@@ -673,7 +776,7 @@ func (s *Server) taskConflict(w http.ResponseWriter, project string, err error, 
 }
 
 func (s *Server) taskHistory(w http.ResponseWriter, r *http.Request) {
-	project, db, ok := s.locateTask(w, r)
+	project, db, ok := s.locateTask(w, r, true)
 	if !ok {
 		return
 	}
@@ -700,7 +803,7 @@ func (s *Server) taskHistory(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) listTaskComments(w http.ResponseWriter, r *http.Request) {
-	project, db, ok := s.locateTask(w, r)
+	project, db, ok := s.locateTask(w, r, true)
 	if !ok {
 		return
 	}
@@ -740,7 +843,7 @@ func (s *Server) listTaskComments(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) addTaskComment(w http.ResponseWriter, r *http.Request) {
-	project, db, ok := s.locateTask(w, r)
+	project, db, ok := s.locateTask(w, r, false)
 	if !ok {
 		return
 	}
@@ -782,7 +885,7 @@ func (s *Server) addTaskComment(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) getTaskComment(w http.ResponseWriter, r *http.Request) {
-	project, db, ok := s.locateTask(w, r)
+	project, db, ok := s.locateTask(w, r, true)
 	if !ok {
 		return
 	}

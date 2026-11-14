@@ -177,3 +177,67 @@ PRAGMA user_version=1;`); err != nil {
 		}
 	}
 }
+
+// CanReadToken is CanWriteToken with one difference: a read-only token
+// reads the projects its user holds a grant on. Every token scope, the
+// grant kinds, revocation and a disabled user are checked live.
+func TestCanReadTokenFollowsLiveGrants(t *testing.T) {
+	s := testStore(t)
+	u, err := s.CreateUser("admin", "Reader")
+	if err != nil {
+		t.Fatal(err)
+	}
+	issue := func(scope TokenScope, project string) Token {
+		t.Helper()
+		tok, _, err := s.IssueScoped("admin", u.ID, "tok", scope, project, time.Now().Add(time.Hour))
+		if err != nil {
+			t.Fatal(err)
+		}
+		return tok
+	}
+	readOnly, user := issue(ScopeReadOnly, ""), issue(ScopeUser, "")
+	check := func(tok Token, project string, read, write bool) {
+		t.Helper()
+		if got, err := s.CanReadToken(u.ID, tok.ID, project); err != nil || got != read {
+			t.Fatalf("read %s with %s = %v, %v; want %v", project, tok.Scope, got, err, read)
+		}
+		if got, err := s.CanWriteToken(u.ID, tok.ID, project); err != nil || got != write {
+			t.Fatalf("write %s with %s = %v, %v; want %v", project, tok.Scope, got, err, write)
+		}
+	}
+	for _, tok := range []Token{readOnly, user} {
+		check(tok, "A", false, false) // no grant yet
+	}
+	if err := s.SetGrant("admin", "A", "user", u.ID, true); err != nil {
+		t.Fatal(err)
+	}
+	scopedA := issue(ScopeProject, "A") // a project token is issued under a grant
+	check(readOnly, "A", true, false)
+	check(user, "A", true, true)
+	check(scopedA, "A", true, true)
+	check(readOnly, "", false, false)
+	g, err := s.CreateGroup("admin", "Team")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.SetMember("admin", g.ID, u.ID, true); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.SetGrant("admin", "B", "group", g.ID, true); err != nil {
+		t.Fatal(err)
+	}
+	check(readOnly, "B", true, false)
+	check(scopedA, "B", false, false) // a project token reaches its own project only
+	if err := s.SetGrant("admin", "A", "user", u.ID, false); err != nil {
+		t.Fatal(err)
+	}
+	check(readOnly, "A", false, false)
+	if err := s.Revoke("admin", readOnly.ID); err != nil {
+		t.Fatal(err)
+	}
+	check(readOnly, "B", false, false)
+	if err := s.SetUser("admin", u.ID, "Reader", true); err != nil {
+		t.Fatal(err)
+	}
+	check(user, "B", false, false)
+}

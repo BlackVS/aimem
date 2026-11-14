@@ -122,24 +122,44 @@ No nested groups or custom role language in v1.
 
 | Caller | Read tasks | Change tasks |
 | --- | --- | --- |
-| Admin token | All projects | All projects; full access to other aimem administration/data too |
-| User/agent with project assignment and matching project token | All projects on this hub | Assigned working project only |
-| Ordinary authenticated token without matching project write access | All projects on this hub | No |
+| Admin token, local socket | All projects | All projects; full access to other aimem administration/data too |
+| User/agent with project assignment and matching project token | Projects its user holds a grant on, that the token's scope reaches | Assigned working project only |
+| Read-only token | Projects its user holds a grant on | No |
+| Ordinary token whose user holds no grant on the project | No: the project and its tasks answer as not found | No |
 | Unauthenticated caller | No | No |
 
-**Current contract: task reads are hub-wide.** Any ordinary token reads the
-tasks, comments, history and epics of every ordinary project on the hub, and
-the project list. A project-scoped token and a missing project grant limit
-writes only; do not treat projects as private task tenants. The identity
-route says so (`task_read: all-projects`), and the MCP task and epic read
-tools state it in their descriptions. Team mode is the exception: a team
-conversation reads only the projects the team is granted
-(`task_read: granted-projects`). Knowledge, repository and process-set reads
-already require a live project grant. Bringing task reads under the same
-grant (unknown and ungranted projects answered alike, the project list
-filtered, read grants for crew roles) is a planned change from the
-2026-10 security audit (finding A-10); until it ships, this table is the
-contract.
+**Task reads follow the project grant** (security audit 2026-10, finding
+A-10). An ordinary token reads the tasks, comments, history and epics of a
+project only while its user holds a current grant on it, directly or
+through an access group, and while the token's scope reaches the project: a
+user-scoped or read-only token reaches every project, a project-scoped token
+its own. The check is the knowledge reads' grant predicate
+(`CanWriteToken`), with a read-only token admitted as well
+(`CanReadToken`); it is re-read on every request, so a removed grant
+refuses the next read.
+
+- **Refusals.** A project without a grant answers 404 with the same body as a
+  project that does not exist, and a task id in such a project the same as
+  a task id that does not exist. The message names both causes and the
+  remedy (`aimem access grant`). An id prefix resolves among the tasks the
+  caller may read; an ambiguous one names only those.
+- **Where they show.** The project list shows only the granted projects. The
+  hub's log records each refused task read with the token's user and the
+  project, never task content, so an admin sees who needs a grant.
+- **Identity and tools.** The identity route says `task_read:
+  granted-projects`, and the MCP task and epic read tools say so in their
+  descriptions.
+- **Claims.** A personal claim proves a dependency in another project only
+  under the same grant on that project.
+- **Team mode.** Unchanged: a team conversation reads only the projects the
+  team profile is granted, and personal grants never count there. aicrewd's
+  peer reads are scoped to the instances a peer is granted.
+
+**The least-privilege limit.** A grant names a project, not a kind of access:
+there is no read-only grant yet. Outside team mode a reader holds an ordinary
+grant, which also lets a user- or project-scoped token write, or reads with a
+read-only-scope token, which never writes. A first-class read grant is a
+separate change to the access schema.
 
 A write requires both current user access (directly or through an access group)
 and the token's write-project restriction to match the task's actual project.

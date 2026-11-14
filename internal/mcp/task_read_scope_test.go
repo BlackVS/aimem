@@ -5,10 +5,10 @@ import (
 	"testing"
 )
 
-// Every task and epic read tool states the hub-wide read as it is: an
-// ordinary token reads every project's tasks, so no description may let an
-// agent assume the current project bounds what it or another agent can see.
-func TestTaskReadToolsStateTheHubWideRead(t *testing.T) {
+// Every task and epic read tool states the read as it is: an ordinary token
+// reads the projects its user holds a grant on, and a refusal reads as not
+// found, so an agent knows a missing project or task may be a missing grant.
+func TestTaskReadToolsStateTheGrantedRead(t *testing.T) {
 	reads := map[string]bool{
 		"list_tasks": true, "search_tasks": true, "get_task": true, "get_task_history": true,
 		"list_task_comments": true, "get_task_comment": true,
@@ -21,8 +21,8 @@ func TestTaskReadToolsStateTheHubWideRead(t *testing.T) {
 		}
 		delete(reads, name)
 		desc, _ := td["description"].(string)
-		if !strings.Contains(desc, "reads every project on the hub") || !strings.Contains(desc, "project scope limits writes only") || !strings.Contains(desc, "team's granted projects") {
-			t.Errorf("%s does not state the hub-wide read: %q", name, desc)
+		if !strings.Contains(desc, "reads the projects its user holds a grant on") || !strings.Contains(desc, "without a grant answers as not found") || !strings.Contains(desc, "team's granted projects") {
+			t.Errorf("%s does not state the granted read: %q", name, desc)
 		}
 		if p, ok := td["inputSchema"].(map[string]any)["properties"].(map[string]any)["project"].(map[string]any); ok {
 			if d, _ := p["description"].(string); !strings.Contains(d, "it is not a limit") {
