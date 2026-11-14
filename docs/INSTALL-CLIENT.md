@@ -182,7 +182,7 @@ Set these before running the one-liner:
 | `AIMEM_GROUPS=a,b` | pre-declare shared knowledge groups in `.aimem.json` |
 | `AIMEM_USER_ONLY=1` | install or upgrade the user level only and wire no project |
 | `AIMEM_REINSTALL=1` | refresh the binary and hooks even if the installed aimem is already current (an older install is upgraded without it) |
-| `AIMEM_VERSION=vX.Y.Z` | install another release than the one in the URL |
+| `AIMEM_VERSION=vX.Y.Z` | install another release than the one in the URL; a release from before v0.10.23, whose assets hold no installer files, is installed by its own boot script, fetched from the repository at its tag |
 | `AIMEM_BASE=<dir or https URL>` | install from an aiforge export instead of github.com, in a closed network ([ADMIN-MANUAL](ADMIN-MANUAL.md#installing-from-an-aiforge-export)) |
 | `AIMEM_UPGRADE_WAIT=30` | seconds an upgrade waits for health at the new version before rolling back |
 | `AIMEM_REPO=owner/name` | install from a fork |

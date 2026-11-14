@@ -20,6 +20,13 @@
 # installed, only a directory that already holds .aimem.json is wired; the
 # home directory is never wired.
 #
+# A release named by AIMEM_VERSION that was published before its installer
+# files became release assets (its SHA256SUMS lists no install.sh) is
+# installed by that release's own boot.sh, fetched from the repository at
+# its tag and run with the same environment, as its own one-liner would.
+# An export holds only releases with the assets, so with AIMEM_BASE there
+# is no hand-over.
+#
 # Optional environment:
 #   AIMEM_HUB_URL, AIMEM_HUB_TOKEN   register a hub for real-time push
 #   AIMEM_GROUPS=a,b                 pre-declare shared knowledge groups
@@ -113,6 +120,15 @@ fetch_verified() { # workdir asset: the asset, checked against SHA256SUMS
 
 fetch() { curl -fsSL --proto =https --proto-redir =https "$@"; }
 
+# hand_over runs the boot.sh of release $TAG, which predates the installer
+# assets, from the repository at that tag.
+hand_over() {
+  ho_url="https://raw.githubusercontent.com/$REPO/$TAG/boot.sh"
+  echo "aimem $TAG has no installer assets; handing over to that release's own boot script ($ho_url)"
+  fetch "$ho_url" -o "$DEST/boot-$TAG.sh" || die "$ho_url could not be fetched"
+  AIMEM_VERSION=$TAG bash "$DEST/boot-$TAG.sh"
+}
+
 main() {
   for t in curl awk; do
     command -v "$t" >/dev/null 2>&1 ||
@@ -132,6 +148,10 @@ main() {
   case "$(uname -s)" in Darwin) ASSET=aimem-darwin-amd64 ;; esac
   case "$(uname -m)" in aarch64 | arm64) ASSET=$(echo "$ASSET" | sed 's/amd64/arm64/') ;; esac
   fetch_sums "$DEST"
+  if [ -z "${AIMEM_BASE:-}" ] && ! awk '$2 == "install.sh" { f = 1 } END { exit !f }' "$DEST/SHA256SUMS"; then
+    hand_over
+    return
+  fi
   for f in "$ASSET" install.sh aimem-opencode.ts; do
     fetch_verified "$DEST" "$f"
   done

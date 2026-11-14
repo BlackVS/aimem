@@ -18,9 +18,10 @@ import (
 // stays theirs), and so is the process-wide TLS setting. Its own
 // variables, $ErrorActionPreference = 'Stop' among them, never reach the
 // caller's scope. The downloads are stubbed: every asset arrives as a
-// placeholder file. A failed run's SHA256SUMS lists nothing, so the run
-// gets past setting AIMEM_TARGET_VERSION and fails on the checksum,
-// offline. A successful run's lists the placeholder hash for each asset,
+// placeholder file. A failed run's SHA256SUMS lists only install.ps1 (a
+// release with no installer listed would hand over to its own boot
+// script), so the run gets past setting AIMEM_TARGET_VERSION and fails on
+// the binary's checksum, offline. A successful run's lists the placeholder hash for each asset,
 // and the installer's shell is stubbed to succeed.
 // Get-FileHash is stubbed too: Windows PowerShell started by a test under
 // a pwsh step inherits pwsh's module path and could not load it on the CI
@@ -39,7 +40,8 @@ func TestBootPs1LeavesNoVariablesInTheCallersSession(t *testing.T) {
   if ($OutFile -like '*SHA256SUMS') { Set-Content -LiteralPath $OutFile -Value 'placeholder  aimem-windows-amd64.exe', 'placeholder  install.ps1', 'placeholder  aimem-opencode.ts' } else { Set-Content -LiteralPath $OutFile -Value "placeholder for $Uri" } }
 function powershell { $global:LASTEXITCODE = 0 }
 `
-	const fails = `function Invoke-WebRequest { param($Uri, $OutFile, [switch]$UseBasicParsing) Set-Content -LiteralPath $OutFile -Value "placeholder for $Uri" }
+	const fails = `function Invoke-WebRequest { param($Uri, $OutFile, [switch]$UseBasicParsing)
+  if ($OutFile -like '*SHA256SUMS') { Set-Content -LiteralPath $OutFile -Value 'placeholder  install.ps1' } else { Set-Content -LiteralPath $OutFile -Value "placeholder for $Uri" } }
 `
 	for _, c := range []struct {
 		name, before, stubs, failure, want string
