@@ -8,6 +8,7 @@ package installer
 import (
 	"crypto/sha256"
 	"encoding/hex"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -400,129 +401,102 @@ func TestClientHintNamesTheExport(t *testing.T) {
 // carries the Mark of the Web), nothing installed on any problem, and with
 // a base no other host contacted. Invoke-WebRequest is a stub that logs
 // each URL and serves those under MAP_FROM from MAP_TO.
+//
+// All cases run in one Windows PowerShell process, one after another, each
+// with its own variables and fetch log, and each is checked in a subtest
+// of its own. A Windows PowerShell start costs about 18 s on the CI runner
+// (#357 ran one per case, 307 s in all, and pushed the package past the
+// test timeout).
 func TestBootPs1InstallsFromAnExport(t *testing.T) {
 	ps := powerShell(t)
 	if runtime.GOOS != "windows" {
 		t.Skip("boot.ps1 runs on Windows")
 	}
-	wrapper := `function Invoke-WebRequest {
-  param([Parameter(Position = 0)][string]$Uri, [string]$OutFile, [switch]$UseBasicParsing)
-  Add-Content -LiteralPath $env:FETCH_LOG -Value $Uri
-  if (-not $Uri.StartsWith($env:MAP_FROM)) { throw "unexpected host: $Uri" }
-  $p = Join-Path $env:MAP_TO $Uri.Substring($env:MAP_FROM.Length)
-  if (-not (Test-Path -LiteralPath $p -PathType Leaf)) { throw "404 $Uri" }
-  Copy-Item -LiteralPath $p -Destination $OutFile
-}
-try { & ([scriptblock]::Create((Get-Content -Raw -LiteralPath $env:BOOT))) } catch { Write-Output "failure=[$_]" }
-`
+	dir := t.TempDir()
+	project := filepath.Join(dir, "project")
+	if err := os.Mkdir(project, 0o700); err != nil {
+		t.Fatal(err)
+	}
 	type result struct {
 		out  string
 		urls []string
 	}
-	run := func(t *testing.T, env ...string) result {
-		t.Helper()
-		dir := t.TempDir()
-		project := filepath.Join(dir, "project")
-		if err := os.Mkdir(project, 0o700); err != nil {
-			t.Fatal(err)
-		}
-		project, err := filepath.EvalSymlinks(project)
-		if err != nil {
-			t.Fatal(err)
-		}
-		file := filepath.Join(dir, "run.ps1")
-		if err := os.WriteFile(file, []byte(wrapper), 0o600); err != nil {
-			t.Fatal(err)
-		}
-		log := filepath.Join(dir, "fetch.log")
-		var e []string
-		for _, kv := range withoutAimemEnv() {
-			if strings.HasPrefix(strings.ToUpper(kv), "PSMODULEPATH=") && !strings.EqualFold(filepath.Base(ps), "pwsh.exe") {
-				continue
-			}
-			e = append(e, kv)
-		}
-		e = append(e, "BOOT="+absRepo(t, "boot.ps1"), "FETCH_LOG="+log,
-			"MAP_FROM=https://nowhere.invalid/", "MAP_TO="+dir)
-		out, _ := runPowerShell(t, ps, project, append(e, env...), file)
-		var urls []string
-		if l, err := os.ReadFile(log); err == nil {
-			urls = strings.Fields(string(l))
-		}
-		return result{out, urls}
+	type psCase struct {
+		name  string
+		env   map[string]string // AIMEM_BASE, AIMEM_VERSION, AIMEM_REPO, MAP_FROM, MAP_TO
+		check func(t *testing.T, r result)
 	}
 	installed := func(r result, tag string) bool {
 		return strings.Contains(r.out, "installer ran: bootstrap=True tag="+tag) &&
 			strings.Contains(r.out, "binary: bin-"+tag) && strings.Contains(r.out, "plugin: plugin-"+tag) &&
 			!strings.Contains(r.out, "failure=")
 	}
+	var cases []psCase
 
-	t.Run("directory export, the installer marked as downloaded", func(t *testing.T) {
-		base := writeExport(t, strings.ReplaceAll(goodManifest, "\n", "\r\n"), exportTag)
-		inst := filepath.Join(base, "aimem", exportTag, "install.ps1")
-		if err := os.WriteFile(inst+":Zone.Identifier", []byte("[ZoneTransfer]\r\nZoneId=3\r\n"), 0o644); err != nil {
-			t.Fatal(err)
-		}
-		r := run(t, "AIMEM_BASE="+base)
-		if !installed(r, exportTag) || len(r.urls) != 0 || strings.Contains(r.out, "github.com") {
-			t.Fatalf("urls %v:\n%s", r.urls, r.out)
-		}
-	})
-	t.Run("version wins", func(t *testing.T) {
-		base := writeExport(t, goodManifest, exportTag, "v2.0.0")
-		if r := run(t, "AIMEM_BASE="+base+`\`, "AIMEM_VERSION=v2.0.0"); !installed(r, "v2.0.0") {
-			t.Fatal(r.out)
-		}
-	})
-	t.Run("https export", func(t *testing.T) {
-		base := writeExport(t, goodManifest, exportTag)
-		r := run(t, "AIMEM_BASE=https://export.test/x", "MAP_FROM=https://export.test/x/", "MAP_TO="+base)
-		if !installed(r, exportTag) || len(r.urls) == 0 || r.urls[0] != "https://export.test/x/MANIFEST" {
-			t.Fatalf("urls %v:\n%s", r.urls, r.out)
-		}
-		for _, u := range r.urls {
-			if !strings.HasPrefix(u, "https://export.test/x/") {
-				t.Errorf("contacted %s", u)
+	marked := writeExport(t, strings.ReplaceAll(goodManifest, "\n", "\r\n"), exportTag)
+	inst := filepath.Join(marked, "aimem", exportTag, "install.ps1")
+	if err := os.WriteFile(inst+":Zone.Identifier", []byte("[ZoneTransfer]\r\nZoneId=3\r\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cases = append(cases, psCase{"directory export, the installer marked as downloaded", map[string]string{"AIMEM_BASE": marked},
+		func(t *testing.T, r result) {
+			if !installed(r, exportTag) || len(r.urls) != 0 || strings.Contains(r.out, "github.com") {
+				t.Fatalf("urls %v:\n%s", r.urls, r.out)
 			}
-		}
-	})
-	t.Run("connected", func(t *testing.T) {
-		base := writeExport(t, "", exportTag)
-		gh := "https://github.com/o/r/releases/download/"
-		r := run(t, "AIMEM_REPO=o/r", "AIMEM_VERSION="+exportTag, "MAP_FROM="+gh, "MAP_TO="+filepath.Join(base, "aimem"))
-		if !installed(r, exportTag) {
-			t.Fatal(r.out)
-		}
-	})
+		}})
+	cases = append(cases, psCase{"version wins", map[string]string{"AIMEM_BASE": writeExport(t, goodManifest, exportTag, "v2.0.0") + `\`, "AIMEM_VERSION": "v2.0.0"},
+		func(t *testing.T, r result) {
+			if !installed(r, "v2.0.0") {
+				t.Fatal(r.out)
+			}
+		}})
+	cases = append(cases, psCase{"https export", map[string]string{"AIMEM_BASE": "https://export.test/x", "MAP_FROM": "https://export.test/x/", "MAP_TO": writeExport(t, goodManifest, exportTag)},
+		func(t *testing.T, r result) {
+			if !installed(r, exportTag) || len(r.urls) == 0 || r.urls[0] != "https://export.test/x/MANIFEST" {
+				t.Fatalf("urls %v:\n%s", r.urls, r.out)
+			}
+			for _, u := range r.urls {
+				if !strings.HasPrefix(u, "https://export.test/x/") {
+					t.Errorf("contacted %s", u)
+				}
+			}
+		}})
+	gh := "https://github.com/o/r/releases/download/"
+	cases = append(cases, psCase{"connected", map[string]string{"AIMEM_REPO": "o/r", "AIMEM_VERSION": exportTag, "MAP_FROM": gh, "MAP_TO": filepath.Join(writeExport(t, "", exportTag), "aimem")},
+		func(t *testing.T, r result) {
+			if !installed(r, exportTag) {
+				t.Fatal(r.out)
+			}
+		}})
 
 	rel := func(base string) string { return filepath.Join(base, "aimem", exportTag) }
 	for _, c := range []struct {
 		name  string
-		setup func(t *testing.T) string
+		setup func() string
 		want  string
 	}{
-		{"missing manifest", func(t *testing.T) string { return writeExport(t, "", exportTag) }, `MANIFEST is missing (or set AIMEM_VERSION`},
-		{"unknown format", func(t *testing.T) string {
+		{"missing manifest", func() string { return writeExport(t, "", exportTag) }, `MANIFEST is missing (or set AIMEM_VERSION`},
+		{"unknown format", func() string {
 			return writeExport(t, "aiforge-export 2\naimem "+exportTag+"\n", exportTag)
 		}, "MANIFEST is 'aiforge-export 2', not a format this installer reads"},
-		{"no aimem line", func(t *testing.T) string {
+		{"no aimem line", func() string {
 			return writeExport(t, "aiforge-export 1\naiskills v9.9.9\n", exportTag)
 		}, "MANIFEST names no aimem release"},
-		{"missing asset", func(t *testing.T) string {
+		{"missing asset", func() string {
 			b := writeExport(t, goodManifest, exportTag)
 			if err := os.Remove(filepath.Join(rel(b), "install.ps1")); err != nil {
 				t.Fatal(err)
 			}
 			return b
 		}, "/install.ps1 is missing"},
-		{"sum mismatch", func(t *testing.T) string {
+		{"sum mismatch", func() string {
 			b := writeExport(t, goodManifest, exportTag)
 			if err := os.WriteFile(filepath.Join(rel(b), "aimem-windows-amd64.exe"), []byte("tampered"), 0o644); err != nil {
 				t.Fatal(err)
 			}
 			return b
 		}, "checksum mismatch for "},
-		{"sums list only a longer name", func(t *testing.T) string {
+		{"sums list only a longer name", func() string {
 			b := writeExport(t, goodManifest, exportTag)
 			sums := filepath.Join(rel(b), "SHA256SUMS")
 			s, err := os.ReadFile(sums)
@@ -535,15 +509,83 @@ try { & ([scriptblock]::Create((Get-Content -Raw -LiteralPath $env:BOOT))) } cat
 			}
 			return b
 		}, "(want absent, got "},
-		{"plain http", func(t *testing.T) string { return "http://export.test" }, "AIMEM_BASE must be an absolute directory"},
-		{"relative base", func(t *testing.T) string { return `export\dir` }, "AIMEM_BASE must be an absolute directory"},
+		{"plain http", func() string { return "http://export.test" }, "AIMEM_BASE must be an absolute directory"},
+		{"relative base", func() string { return `export\dir` }, "AIMEM_BASE must be an absolute directory"},
 	} {
+		want := c.want
+		cases = append(cases, psCase{c.name, map[string]string{"AIMEM_BASE": c.setup()},
+			func(t *testing.T, r result) {
+				if !strings.Contains(r.out, want) || !strings.Contains(r.out, "nothing was installed") ||
+					strings.Contains(r.out, "installer ran") || len(r.urls) != 0 {
+					t.Fatalf("want %q, urls %v:\n%s", want, r.urls, r.out)
+				}
+			}})
+	}
+
+	// One script: the stub, then each case between markers, its variables
+	// set before the run and removed after it.
+	psq := func(v string) string { return "'" + strings.ReplaceAll(v, "'", "''") + "'" }
+	var b strings.Builder
+	b.WriteString(`function Invoke-WebRequest {
+  param([Parameter(Position = 0)][string]$Uri, [string]$OutFile, [switch]$UseBasicParsing)
+  Add-Content -LiteralPath $env:FETCH_LOG -Value $Uri
+  if (-not $Uri.StartsWith($env:MAP_FROM)) { throw "unexpected host: $Uri" }
+  $p = Join-Path $env:MAP_TO $Uri.Substring($env:MAP_FROM.Length)
+  if (-not (Test-Path -LiteralPath $p -PathType Leaf)) { throw "404 $Uri" }
+  Copy-Item -LiteralPath $p -Destination $OutFile
+}
+$boot = Get-Content -Raw -LiteralPath $env:BOOT
+`)
+	logs := make([]string, len(cases))
+	for i, c := range cases {
+		logs[i] = filepath.Join(dir, fmt.Sprintf("fetch-%d.log", i))
+		env := map[string]string{"MAP_FROM": "https://nowhere.invalid/", "MAP_TO": dir, "FETCH_LOG": logs[i]}
+		for k, v := range c.env {
+			env[k] = v
+		}
+		fmt.Fprintf(&b, "Write-Output '=== case %d'\n", i)
+		keys := make([]string, 0, len(env))
+		for k := range env {
+			keys = append(keys, k)
+		}
+		sort.Strings(keys)
+		for _, k := range keys {
+			fmt.Fprintf(&b, "$env:%s = %s\n", k, psq(env[k]))
+		}
+		b.WriteString("try { & ([scriptblock]::Create($boot)) } catch { Write-Output \"failure=[$_]\" }\n")
+		for _, k := range keys {
+			fmt.Fprintf(&b, "Remove-Item Env:%s -ErrorAction SilentlyContinue\n", k)
+		}
+	}
+	fmt.Fprintf(&b, "Write-Output '=== case %d'\n", len(cases))
+	file := filepath.Join(dir, "run.ps1")
+	if err := os.WriteFile(file, []byte(b.String()), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	var e []string
+	for _, kv := range withoutAimemEnv() {
+		if strings.HasPrefix(strings.ToUpper(kv), "PSMODULEPATH=") && !strings.EqualFold(filepath.Base(ps), "pwsh.exe") {
+			continue
+		}
+		e = append(e, kv)
+	}
+	out, _ := runPowerShell(t, ps, project, append(e, "BOOT="+absRepo(t, "boot.ps1")), file)
+
+	for i, c := range cases {
+		start := strings.Index(out, fmt.Sprintf("=== case %d", i))
+		end := strings.Index(out, fmt.Sprintf("=== case %d", i+1))
+		r := result{}
+		if start >= 0 && end > start {
+			r.out = out[start:end]
+		}
+		if l, err := os.ReadFile(logs[i]); err == nil {
+			r.urls = strings.Fields(string(l))
+		}
 		t.Run(c.name, func(t *testing.T) {
-			r := run(t, "AIMEM_BASE="+c.setup(t))
-			if !strings.Contains(r.out, c.want) || !strings.Contains(r.out, "nothing was installed") ||
-				strings.Contains(r.out, "installer ran") || len(r.urls) != 0 {
-				t.Fatalf("want %q, urls %v:\n%s", c.want, r.urls, r.out)
+			if r.out == "" {
+				t.Fatalf("the case did not run to its end marker:\n%s", out)
 			}
+			c.check(t, r)
 		})
 	}
 }

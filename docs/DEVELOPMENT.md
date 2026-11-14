@@ -39,9 +39,13 @@ A pull request runs the fast set, so a PR's CI takes about two minutes:
   `internal/upgrade` and `internal/adapter` (paths and 8.3 short names,
   git and its environment, file locks and permissions, hooks, the
   binary swap), and the tests that run boot.ps1 itself from
-  `internal/installer` (`go test -run '^TestBootPs1'`); the rest of
-  `internal/installer` takes over five minutes on the runner and runs
-  on master;
+  `internal/installer` (`go test -run '^TestBootPs1'`). A pull request
+  that touches the installer surface (`boot.sh`, `boot.ps1`,
+  `install.sh`, `install.ps1`, `install-hub.sh`, the OpenCode plugin,
+  `.github/workflows/release.yml` or `internal/installer`) runs the
+  whole `internal/installer` package there instead, with master's
+  20-minute timeout. Otherwise the rest of the package, about 8 minutes
+  on the runner, runs on master;
 - `scenario (ubuntu-latest)` and `install-hub-container`.
 
 The slow checks run on every push to master, nightly, on a manual run
