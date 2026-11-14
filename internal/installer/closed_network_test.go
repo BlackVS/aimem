@@ -316,21 +316,82 @@ func TestHubStagesFromAnExport(t *testing.T) {
 }
 
 // With a base, the client hint tells the next person to install from the
-// same export, never from github.com.
+// same export, never from github.com, and each printed command survives a
+// paste: the test runs the printed line itself, with a base that holds a
+// space and a single quote.
 func TestClientHintNamesTheExport(t *testing.T) {
 	shellOnly(t)
 	t.Setenv("TAG", exportTag)
-	for base, want := range map[string]string{
-		"https://export.test/x/": "curl -fsSL https://export.test/x/aimem/" + exportTag + "/boot.sh | AIMEM_BASE=https://export.test/x bash\n" +
-			"    Windows:      $env:AIMEM_BASE='https://export.test/x'; try { irm https://export.test/x/aimem/" + exportTag + "/boot.ps1 | iex } finally { Remove-Item Env:AIMEM_BASE }",
-		"/media/export": "AIMEM_BASE=/media/export bash /media/export/aimem/" + exportTag + "/boot.sh",
-	} {
+	// hintLine is the command printed on the line after the heading.
+	hintLine := func(t *testing.T, out, heading string) string {
+		t.Helper()
+		lines := strings.Split(out, "\n")
+		for i, l := range lines {
+			if strings.TrimSpace(l) == heading && i+1 < len(lines) {
+				return strings.TrimSpace(lines[i+1])
+			}
+		}
+		t.Fatalf("no %q in:\n%s", heading, out)
+		return ""
+	}
+	runLine := func(t *testing.T, line string, env ...string) string {
+		t.Helper()
+		cmd := exec.Command("bash", "-c", line)
+		cmd.Env = append(withoutAimemEnv(), env...)
+		b, err := cmd.CombinedOutput()
+		if err != nil {
+			t.Fatalf("the printed command failed: %v\n%s\n%s", err, line, b)
+		}
+		return string(b)
+	}
+
+	t.Run("directory", func(t *testing.T) {
+		base := filepath.ToSlash(filepath.Join(t.TempDir(), "team export", "it's"))
+		dir := filepath.Join(base, "aimem", exportTag)
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(dir, "boot.sh"), []byte("echo \"ran base=[$AIMEM_BASE] script=[$0]\"\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		t.Setenv("AIMEM_BASE", base+"/")
+		out, errs := runClientHint(t, "", "https")
+		if strings.Contains(out+errs, "github") {
+			t.Fatalf("the hint names github:\n%s%s", out, errs)
+		}
+		got := runLine(t, hintLine(t, out, "Linux/macOS, with the export mounted at the same path:"))
+		if want := "ran base=[" + base + "] script=[" + base + "/aimem/" + exportTag + "/boot.sh]"; !strings.Contains(got, want) {
+			t.Fatalf("want %q, got:\n%s", want, got)
+		}
+	})
+
+	t.Run("https", func(t *testing.T) {
+		base := "https://export.test/team x/it's"
+		bin := t.TempDir()
+		urlFile := filepath.Join(bin, "url")
+		// The fake curl records the URL it was given and serves a script
+		// that reports the base the pipe's bash received.
+		curl := "#!/bin/bash\nfor a; do u=$a; done\nprintf '%s' \"$u\" > \"$URL_FILE\"\necho 'echo \"ran base=[$AIMEM_BASE]\"'\n"
+		if err := os.WriteFile(filepath.Join(bin, "curl"), []byte(curl), 0o755); err != nil {
+			t.Fatal(err)
+		}
 		t.Setenv("AIMEM_BASE", base)
 		out, errs := runClientHint(t, "", "https")
-		if !strings.Contains(out, want) || strings.Contains(out+errs, "github") {
-			t.Errorf("base %s: want %q in:\n%s%s", base, want, out, errs)
+		if strings.Contains(out+errs, "github") {
+			t.Fatalf("the hint names github:\n%s%s", out, errs)
 		}
-	}
+		got := runLine(t, hintLine(t, out, "Linux/macOS:"), "PATH="+bin+string(os.PathListSeparator)+os.Getenv("PATH"), "URL_FILE="+urlFile)
+		if want := "ran base=[" + base + "]"; !strings.Contains(got, want) {
+			t.Fatalf("want %q, got:\n%s", want, got)
+		}
+		if u, _ := os.ReadFile(urlFile); string(u) != base+"/aimem/"+exportTag+"/boot.sh" {
+			t.Fatalf("curl was given %q", u)
+		}
+		ps := hintLine(t, out, "Windows (PowerShell):")
+		if want := "$env:AIMEM_BASE = 'https://export.test/team x/it''s'; try { irm 'https://export.test/team x/it''s/aimem/" + exportTag + "/boot.ps1' | iex } finally { Remove-Item Env:AIMEM_BASE }"; ps != want {
+			t.Fatalf("PowerShell line:\n%s\nwant:\n%s", ps, want)
+		}
+	})
 }
 
 // boot.ps1 reads an export with the same rules: the release MANIFEST

@@ -657,14 +657,21 @@ echo "  2. on the client:  aimem hub add <name> $SCHEME://$HOST:$PORT \"<writer-
 echo "  AIMEM_HTTP_TOKEN in $ENVF is this host's admin credential: keep it on this host, never on a client."
 if [ -n "${AIMEM_BASE:-}" ]; then
   # A closed network installs clients from the same export, not github.com.
+  # Each command is printed quoted, so it survives a paste whatever the base
+  # holds: single quotes for sh, doubled single quotes for PowerShell.
   CB=${AIMEM_BASE%/}
+  shq() { printf "'%s'" "$(printf '%s' "$1" | sed "s/'/'\\\\''/g")"; }
+  psq() { printf "'%s'" "$(printf '%s' "$1" | sed "s/'/''/g")"; }
   echo "  Install aimem on a client from the same export:"
   case "$CB" in
     https://*)
-      echo "    Linux/macOS:  curl -fsSL $CB/aimem/$TAG/boot.sh | AIMEM_BASE=$CB bash"
-      echo "    Windows:      \$env:AIMEM_BASE='$CB'; try { irm $CB/aimem/$TAG/boot.ps1 | iex } finally { Remove-Item Env:AIMEM_BASE }" ;;
+      echo "    Linux/macOS:"
+      echo "      curl -fsSL $(shq "$CB/aimem/$TAG/boot.sh") | AIMEM_BASE=$(shq "$CB") bash"
+      echo "    Windows (PowerShell):"
+      echo "      \$env:AIMEM_BASE = $(psq "$CB"); try { irm $(psq "$CB/aimem/$TAG/boot.ps1") | iex } finally { Remove-Item Env:AIMEM_BASE }" ;;
     *)
-      echo "    Linux/macOS:  AIMEM_BASE=$CB bash $CB/aimem/$TAG/boot.sh    (the export mounted at the same path)" ;;
+      echo "    Linux/macOS, with the export mounted at the same path:"
+      echo "      AIMEM_BASE=$(shq "$CB") bash $(shq "$CB/aimem/$TAG/boot.sh")" ;;
   esac
 fi
 if [ -n "$TRUST" ]; then
