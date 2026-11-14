@@ -22,9 +22,11 @@ standalone reader before the hub upgrade; the upgrade notes say how. The
 installers can install from an aiforge export in a closed network, and the
 boot scripts check every file they run against the release's
 `SHA256SUMS` (audit A-11, the installer part). This is the first release
-the new boot scripts install, and the first with its installer files as
-assets. `modernc.org/sqlite` moves to v1.62.0. The on-disk schema stays at
-25 and the access schema at 9. Includes PR #352, #356 and #357.
+with its installer files as assets; the boot scripts install an older
+release by handing over to that release's own boot script.
+`modernc.org/sqlite` moves to v1.62.0. The on-disk schema stays at 25 and
+the access schema at 9. Includes PR #352, #356, #357, #359 and
+#361.
 
 ### Security
 
@@ -100,11 +102,15 @@ assets. `modernc.org/sqlite` moves to v1.62.0. The on-disk schema stays at
   so no documented install took that path. On another platform, build
   from a checkout as docs/INSTALL-CLIENT.md, "Manual install and other
   modes", describes. `tar` is no longer needed.
-- **The new boot scripts install only releases that publish their
-  installer files as assets.** The release carrying this entry is the
-  first one. `AIMEM_VERSION` naming an older release stops with a message
-  that says so, and nothing is installed. Install an older release with
-  that release's own boot script, whose URL names its tag.
+- **An older release is installed by its own boot script.** The boot
+  scripts now install a release from its assets, and the release carrying
+  this entry is the first to publish its installer files as assets. When
+  `AIMEM_VERSION` names an older release, whose `SHA256SUMS` lists no
+  installer, `boot.sh` and `boot.ps1` print that they hand over, fetch
+  that release's own boot script from the repository at its tag, and run
+  it with the same environment, as its own one-liner would. With
+  `AIMEM_BASE` there is no hand-over: an export holds only releases with
+  the assets, and the install stops with a message that says so.
 
 ### Changed
 
