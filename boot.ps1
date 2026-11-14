@@ -23,6 +23,13 @@
 # (install.ps1). When aimem was already installed, only a directory that
 # already holds .aimem.json is wired; the home directory is never wired.
 #
+# A release named by AIMEM_VERSION that was published before its installer
+# files became release assets (its SHA256SUMS lists no install.ps1) is
+# installed by that release's own boot.ps1, fetched from the repository at
+# its tag and run in this process as `irm | iex` runs it, with the same
+# environment, as its own one-liner would. An export holds only releases
+# with the assets, so with AIMEM_BASE there is no hand-over.
+#
 # Optional environment:
 #   AIMEM_HUB_URL, AIMEM_HUB_TOKEN   register a hub for real-time push
 #   AIMEM_GROUPS=a,b                 pre-declare shared knowledge groups
@@ -129,11 +136,12 @@ function Get-Verified($work, $src, $asset) {
 
 $repo = if ($env:AIMEM_REPO) { $env:AIMEM_REPO } else { 'BlackVS/aimem' }
 
-# The variables this script sets for install.ps1 are put back as they were
+# The variables this script sets for install.ps1 (or, for AIMEM_VERSION, for
+# an older release's boot script) are put back as they were
 # when it ends: run as `irm | iex` in an open window, it runs in that
 # window's process, and a stale AIMEM_PREBUILT is a knob the next run reads.
 $saved = @{}
-foreach ($k in 'AIMEM_TARGET_VERSION', 'AIMEM_PREBUILT') {
+foreach ($k in 'AIMEM_TARGET_VERSION', 'AIMEM_PREBUILT', 'AIMEM_VERSION') {
   $saved[$k] = [Environment]::GetEnvironmentVariable($k, 'Process')
 }
 $dest = Join-Path ([IO.Path]::GetTempPath()) ("aimem-" + [Guid]::NewGuid().ToString('N'))
@@ -151,6 +159,17 @@ try {
 
   if (-not (Get-SourceFile "$src/SHA256SUMS" (Join-Path $dest 'SHA256SUMS'))) {
     Stop-Install "$src/SHA256SUMS is missing; refusing unverified files"
+  }
+  $listed = Get-Content -LiteralPath (Join-Path $dest 'SHA256SUMS') | ForEach-Object { , (-split $_) } |
+    Where-Object { $_.Count -ge 2 -and $_[1] -ceq 'install.ps1' }
+  if (-not $env:AIMEM_BASE -and -not $listed) {
+    $url = "https://raw.githubusercontent.com/$repo/$tag/boot.ps1"
+    Write-Host "aimem $tag has no installer assets; handing over to that release's own boot script ($url)"
+    $old = Join-Path $dest "boot-$tag.ps1"
+    if (-not (Get-SourceFile $url $old)) { Stop-Install "$url could not be fetched" }
+    $env:AIMEM_VERSION = $tag
+    & ([scriptblock]::Create((Get-Content -Raw -LiteralPath $old)))
+    return
   }
   $exe = Get-Verified $dest $src 'aimem-windows-amd64.exe'
   $null = Get-Verified $dest $src 'install.ps1'
