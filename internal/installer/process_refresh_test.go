@@ -41,9 +41,15 @@ func TestHubProcessRefreshReportsAndNeverFailsTheUpgrade(t *testing.T) {
 			extract(t, "install-hub.sh", "process-refresh") +
 			"refresh_processes \"$FAKE\"\necho \"after: $?\"\n"
 		cmd := exec.Command("bash", "-c", script)
-		cmd.Env = append(os.Environ(), "FAKE="+fake, "FAKE_RC="+rc)
+		// With an export (AIMEM_BASE) the refresh reads what each project's
+		// configuration names; a source it cannot reach still only warns,
+		// and the installer's own text names no github.com URL.
+		cmd.Env = append(os.Environ(), "FAKE="+fake, "FAKE_RC="+rc, "AIMEM_BASE=/media/export")
 		out, err := cmd.CombinedOutput()
 		text := string(out)
+		if strings.Contains(text, "github.com") {
+			t.Fatalf("rc %s: the refresh text names github.com:\n%s", rc, text)
+		}
 		if err != nil || !strings.Contains(text, "aimem process refresh\n") || !strings.Contains(text, "legacy: refreshed") || !strings.Contains(text, "after: 0") {
 			t.Fatalf("rc %s: %v\n%s", rc, err, text)
 		}
