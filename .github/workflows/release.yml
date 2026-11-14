@@ -2,7 +2,8 @@ name: Release
 
 # Cut a release by pushing a tag:  git tag v0.2.0 && git push origin v0.2.0
 # The installers (boot.sh / boot.ps1 / install-hub.sh) download these assets
-# for the release they pin, so every platform they offer must be built here.
+# for the release they pin, so every platform they offer must be built here,
+# and every file they read is an asset listed in SHA256SUMS.
 on:
   push:
     tags: ['v*']
@@ -113,9 +114,16 @@ jobs:
           build windows amd64 aimem-windows-amd64.exe
           # The license travels with the binaries, and SHA256SUMS covers it too.
           cp LICENSE dist/LICENSE
-          # So does boot.ps1, so a Windows install can check the script
-          # against the release's SHA256SUMS before running it as a file.
+          # So do the installer files: the boot scripts check everything
+          # they run against these sums (a Windows install checks boot.ps1
+          # itself before running it as a file), and an aiforge export of
+          # this release is these assets as published.
+          cp boot.sh dist/boot.sh
           cp boot.ps1 dist/boot.ps1
+          cp install.sh dist/install.sh
+          cp install.ps1 dist/install.ps1
+          cp install-hub.sh dist/install-hub.sh
+          cp .opencode/plugin/aimem.ts dist/aimem-opencode.ts
           (cd dist && sha256sum * > SHA256SUMS)
 
       # The release body is the tag's CHANGELOG section — written by a

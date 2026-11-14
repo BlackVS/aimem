@@ -8,32 +8,41 @@ import (
 	"testing"
 )
 
-// The release publishes boot.ps1 next to the binaries and lists it in
-// SHA256SUMS, so a Windows install can check the script against the
-// release before running it as a file.
-func TestReleaseShipsBootPs1InTheChecksums(t *testing.T) {
+// The release publishes every file an installer reads next to the
+// binaries and lists it in SHA256SUMS: the boot scripts check what they run
+// against those sums, and an aiforge export is these assets as published.
+func TestReleaseShipsTheInstallerFilesInTheChecksums(t *testing.T) {
 	wf := read(t, filepath.Join(".github", "workflows", "release.yml"))
-	cp := regexp.MustCompile(`(?m)^\s*cp boot\.ps1 dist/boot\.ps1\s*$`).FindStringIndex(wf)
 	sums := strings.Index(wf, "sha256sum * > SHA256SUMS")
-	if cp == nil {
-		t.Fatal("release.yml does not copy boot.ps1 into dist/")
+	if sums < 0 {
+		t.Fatal("release.yml writes no SHA256SUMS")
 	}
-	if sums < 0 || cp[0] > sums {
-		t.Fatal("release.yml copies boot.ps1 into dist/ after SHA256SUMS is written, so the sums do not list it")
+	for src, asset := range map[string]string{
+		"boot.sh": "boot.sh", "boot.ps1": "boot.ps1", "install.sh": "install.sh", "install.ps1": "install.ps1",
+		"install-hub.sh": "install-hub.sh", ".opencode/plugin/aimem.ts": "aimem-opencode.ts",
+	} {
+		cp := regexp.MustCompile(`(?m)^\s*cp ` + regexp.QuoteMeta(src) + ` dist/` + regexp.QuoteMeta(asset) + `\s*$`).FindStringIndex(wf)
+		if cp == nil {
+			t.Errorf("release.yml does not copy %s into dist/ as %s", src, asset)
+		} else if cp[0] > sums {
+			t.Errorf("release.yml copies %s into dist/ after SHA256SUMS is written, so the sums do not list it", src)
+		}
 	}
 }
 
-// boot.ps1 runs install.ps1 under RemoteSigned, not Bypass. That runs the
-// installer extracted from the release archive even when the archive
-// itself carries the Mark of the Web, because tar does not copy the mark
-// to what it extracts, and it still refuses an installer that carries the
-// mark itself. The archive is built and extracted here with Windows' own
-// tar, the one boot.ps1 finds on a user's PATH.
+// boot.ps1 runs install.ps1 under RemoteSigned, not Bypass. The block
+// clears the Mark of the Web from the installer, which boot.ps1 has checked
+// against SHA256SUMS by then (a copy from a downloaded export carries the
+// mark), so the installer runs; without that step RemoteSigned refuses it.
 func TestBootPs1RunsTheInstallerUnderRemoteSigned(t *testing.T) {
 	ps := powerShell(t)
 	block := extract(t, "boot.ps1", "run-installer")
 	if strings.Contains(block, "Bypass") {
 		t.Fatal("boot.ps1 runs the installer with the execution policy bypassed")
+	}
+	const unblock = "  Unblock-File -LiteralPath $installer\n"
+	if !strings.Contains(block, unblock) {
+		t.Fatal("boot.ps1's run-installer block does not unblock the installer")
 	}
 	stub := `param([string]$Target, [switch]$Bootstrap, [switch]$UserOnly)
 Write-Output 'installer ran'
@@ -42,17 +51,10 @@ Write-Output 'installer ran'
 	for _, c := range []struct {
 		name, prepare, want string
 	}{
-		{"extracted from a marked archive", `$tar = Join-Path $env:SystemRoot 'System32\tar.exe'
-$src = Join-Path $env:WORK 'src'
-New-Item -ItemType Directory -Force $src | Out-Null
-Copy-Item -LiteralPath $env:STUB (Join-Path $src 'install.ps1')
-$p = Join-Path $env:WORK 'src.tar.gz'
-& $tar -czf $p -C $src install.ps1
-if ($LASTEXITCODE -ne 0) { throw 'tar -c failed' }
-` + mark + `& $tar -xzf $p -C $dest
-if ($LASTEXITCODE -ne 0) { throw 'tar -x failed' }
-`, "installer ran"},
-		{"marked itself", `$p = Join-Path $dest 'install.ps1'
+		{"marked, then unblocked by the block", `$p = Join-Path $dest 'install.ps1'
+Copy-Item -LiteralPath $env:STUB $p
+` + mark, "installer ran"},
+		{"marked, and the block's unblock removed", `$p = Join-Path $dest 'install.ps1'
 Copy-Item -LiteralPath $env:STUB $p
 ` + mark, "is not digitally signed"},
 	} {
@@ -66,8 +68,12 @@ Copy-Item -LiteralPath $env:STUB $p
 			if err := os.WriteFile(stubFile, []byte(stub), 0o600); err != nil {
 				t.Fatal(err)
 			}
+			b := block
+			if strings.Contains(c.name, "removed") {
+				b = strings.Replace(b, unblock, "", 1)
+			}
 			script := "$ErrorActionPreference = 'Stop'\n$dest = $env:DEST\n" + c.prepare +
-				"try {\n" + block + "} catch { Write-Output \"failure=[$_]\" }\n"
+				"try {\n" + b + "} catch { Write-Output \"failure=[$_]\" }\n"
 			file := filepath.Join(dir, "run.ps1")
 			if err := os.WriteFile(file, []byte(script), 0o600); err != nil {
 				t.Fatal(err)
