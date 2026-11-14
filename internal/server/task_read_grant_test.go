@@ -8,9 +8,6 @@ import (
 	"slices"
 	"strings"
 	"testing"
-
-	"aimem/internal/store"
-	"aimem/internal/uuidv7"
 )
 
 // Task reads outside team mode need a grant on the project (audit A-10).
@@ -90,7 +87,7 @@ func TestTaskReadsNeedAGrant(t *testing.T) {
 			t.Fatalf("%s: the refusal leaks the task: %s", ungranted, gb)
 		}
 	}
-	missing := uuidv7.New()
+	missing := "0ddddddd-dddd-7ddd-8ddd-dddddddddddd" // no task has it
 	for _, c := range [][2]string{
 		{"/v1/projects/beta/tasks", "/v1/projects/nosuch/tasks"},
 		{"/v1/projects/beta/tasks/counts", "/v1/projects/nosuch/tasks/counts"},
@@ -100,14 +97,18 @@ func TestTaskReadsNeedAGrant(t *testing.T) {
 		{"/v1/tasks/" + betaTask + "/history", "/v1/tasks/" + missing + "/history"},
 		{"/v1/tasks/" + betaTask + "/comments", "/v1/tasks/" + missing + "/comments"},
 		{"/v1/tasks/" + betaTask + "/comments/" + betaComment, "/v1/tasks/" + missing + "/comments/" + betaComment},
-		{"/v1/tasks/" + betaTask[:20], "/v1/tasks/" + missing[:20]}, // a unique prefix
 	} {
 		same(c[0], c[1])
 	}
-	// A second beta task under the first one's prefix: a prefix that starts
-	// only tasks bob may not read is refused, and logged, the same way.
-	cloneTask(t, f.reg, "beta", "beta", betaTask, sibling(betaTask))
-	same("/v1/tasks/"+betaTask[:store.TaskIDPrefixMin], "/v1/tasks/"+missing[:store.TaskIDPrefixMin])
+	// Prefixes, on fixed ids no other task shares (the fixture's tasks are
+	// made in one millisecond, so their own prefixes may coincide): a
+	// unique prefix of a beta task, and a prefix that starts two beta tasks
+	// and nothing bob may read, are refused, and logged, the same way.
+	cloneTask(t, f.reg, "beta", "beta", betaTask, "0fffffff-fffe-7aaa-8aaa-000000000001")
+	cloneTask(t, f.reg, "beta", "beta", betaTask, "0fffffff-ffff-7aaa-8aaa-000000000001")
+	cloneTask(t, f.reg, "beta", "beta", betaTask, "0fffffff-ffff-7aaa-8aaa-000000000002")
+	same("/v1/tasks/0fffffff-fffe-7aaa-8", "/v1/tasks/0ccccccc-cccc-7ccc-8")
+	same("/v1/tasks/0fffffff-ffff", "/v1/tasks/0eeeeeee-eeee")
 	// The admin reads beta; bob reads alpha.
 	if s, b := get(f.admin, "/v1/tasks/"+betaTask); s != 200 {
 		t.Fatalf("admin reads beta: %d %s", s, b)
