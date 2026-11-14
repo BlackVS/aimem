@@ -93,6 +93,51 @@ func absRepo(t *testing.T, rel string) string {
 
 const goodManifest = "aiforge-export 1\naiskills v9.9.9\naimem " + exportTag + "\n"
 
+// olderTag is a release published before its installer files became
+// release assets: its SHA256SUMS lists only the binaries.
+const olderTag = "v0.9.9"
+
+// writeOlderRelease writes olderTag's assets into dir as such a release has
+// them: the binaries and SHA256SUMS, no installer and no plugin.
+func writeOlderRelease(t *testing.T, dir string) {
+	t.Helper()
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	var sums []string
+	for name, body := range exportAssets(olderTag) {
+		if name == "install.sh" || name == "install.ps1" || name == "aimem-opencode.ts" {
+			continue
+		}
+		if err := os.WriteFile(filepath.Join(dir, name), []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		h := sha256.Sum256([]byte(body))
+		sums = append(sums, hex.EncodeToString(h[:])+"  "+name)
+	}
+	sort.Strings(sums)
+	if err := os.WriteFile(filepath.Join(dir, "SHA256SUMS"), []byte(strings.Join(sums, "\n")+"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// olderReleaseWeb is a web tree, served by mapping "https://" to it, that
+// holds olderTag of the repository o/r: its release assets on github.com
+// and its own boot script (name, body) in the repository at the tag.
+func olderReleaseWeb(t *testing.T, name, body string) string {
+	t.Helper()
+	root := t.TempDir()
+	writeOlderRelease(t, filepath.Join(root, "github.com", "o", "r", "releases", "download", olderTag))
+	raw := filepath.Join(root, "raw.githubusercontent.com", "o", "r", olderTag)
+	if err := os.MkdirAll(raw, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(raw, name), []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	return root
+}
+
 // fakeCurl is a curl that logs every URL it is asked for and serves the
 // ones under MAP_FROM from the directory MAP_TO; anything else fails.
 const fakeCurl = `#!/bin/bash
@@ -271,6 +316,50 @@ func TestBootShReadsHttpsExportsAndGitHub(t *testing.T) {
 			t.Errorf("connected install fetched %s", u)
 		}
 	}
+}
+
+// A release published before its installer files became release assets is
+// installed by its own boot.sh, fetched from the repository at its tag and
+// run with the same environment; its exit status is boot.sh's. aicrew's
+// instructions pipe master's boot.sh with AIMEM_VERSION naming such a
+// release. With AIMEM_BASE there is no hand-over: the export is refused.
+func TestBootShHandsOverToAnOlderRelease(t *testing.T) {
+	sums := "https://github.com/o/r/releases/download/" + olderTag + "/SHA256SUMS"
+	script := "https://raw.githubusercontent.com/o/r/" + olderTag + "/boot.sh"
+	for _, c := range []struct {
+		name, exit string
+		fails      bool
+	}{{"succeeds", "0", false}, {"fails", "7", true}} {
+		t.Run(c.name, func(t *testing.T) {
+			web := olderReleaseWeb(t, "boot.sh", "echo \"old boot ran: version=$AIMEM_VERSION repo=$AIMEM_REPO dir=$(basename \"$PWD\")\"\nexit "+c.exit+"\n")
+			out, urls, err := runBoot(t, "bash", "AIMEM_REPO=o/r", "AIMEM_VERSION="+olderTag, "MAP_FROM=https://", "MAP_TO="+web)
+			if (err != nil) != c.fails {
+				t.Fatalf("err %v:\n%s", err, out)
+			}
+			for _, want := range []string{"aimem " + olderTag + " has no installer assets; handing over to that release's own boot script (" + script + ")",
+				"old boot ran: version=" + olderTag + " repo=o/r dir=project"} {
+				if !strings.Contains(out, want) {
+					t.Errorf("no %q in:\n%s", want, out)
+				}
+			}
+			if strings.Contains(out, "installer ran") || strings.Contains(out, "is missing") {
+				t.Errorf("the new installer path ran:\n%s", out)
+			}
+			if strings.Join(urls, " ") != sums+" "+script {
+				t.Errorf("fetched %v, want the sums then the old boot script", urls)
+			}
+		})
+	}
+
+	t.Run("export", func(t *testing.T) {
+		base := filepath.Join(t.TempDir(), "export")
+		writeOlderRelease(t, filepath.Join(base, "aimem", olderTag))
+		out, urls, err := runBoot(t, "bash", "AIMEM_BASE="+base, "AIMEM_VERSION="+olderTag)
+		if err == nil || !strings.Contains(out, "/aimem/"+olderTag+"/install.sh is missing") ||
+			strings.Contains(out, "handing over") || len(urls) != 0 {
+			t.Fatalf("err %v, urls %v:\n%s", err, urls, out)
+		}
+	})
 }
 
 // install-hub.sh runs alone (curl | bash), so it carries its own copy of
@@ -466,6 +555,33 @@ func TestBootPs1InstallsFromAnExport(t *testing.T) {
 		func(t *testing.T, r result) {
 			if !installed(r, exportTag) {
 				t.Fatal(r.out)
+			}
+		}})
+
+	// A release without installer assets hands over to its own boot.ps1,
+	// run in this process with the same environment; in an export it is
+	// refused.
+	oldSums := "https://github.com/o/r/releases/download/" + olderTag + "/SHA256SUMS"
+	oldScript := "https://raw.githubusercontent.com/o/r/" + olderTag + "/boot.ps1"
+	cases = append(cases, psCase{"older release hands over", map[string]string{"AIMEM_REPO": "o/r", "AIMEM_VERSION": olderTag, "MAP_FROM": "https://",
+		"MAP_TO": olderReleaseWeb(t, "boot.ps1", "Write-Output \"old boot ran: version=$env:AIMEM_VERSION repo=$env:AIMEM_REPO dir=$(Split-Path -Leaf $PWD.Path)\"\r\n")},
+		func(t *testing.T, r result) {
+			if !strings.Contains(r.out, "aimem "+olderTag+" has no installer assets; handing over to that release's own boot script ("+oldScript+")") ||
+				!strings.Contains(r.out, "old boot ran: version="+olderTag+" repo=o/r dir=project") ||
+				strings.Contains(r.out, "installer ran") || strings.Contains(r.out, "failure=") {
+				t.Fatal(r.out)
+			}
+			if strings.Join(r.urls, " ") != oldSums+" "+oldScript {
+				t.Errorf("fetched %v, want the sums then the old boot script", r.urls)
+			}
+		}})
+	olderExport := filepath.Join(t.TempDir(), "export")
+	writeOlderRelease(t, filepath.Join(olderExport, "aimem", olderTag))
+	cases = append(cases, psCase{"older release in an export", map[string]string{"AIMEM_BASE": olderExport, "AIMEM_VERSION": olderTag},
+		func(t *testing.T, r result) {
+			if !strings.Contains(r.out, "/install.ps1 is missing") || !strings.Contains(r.out, "nothing was installed") ||
+				strings.Contains(r.out, "handing over") || len(r.urls) != 0 {
+				t.Fatalf("urls %v:\n%s", r.urls, r.out)
 			}
 		}})
 
