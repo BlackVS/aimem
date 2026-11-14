@@ -17,11 +17,11 @@ import (
 // install.ps1 are put back (unset stays unset, and a value the user set
 // stays theirs), and so is the process-wide TLS setting. Its own
 // variables, $ErrorActionPreference = 'Stop' among them, never reach the
-// caller's scope. The downloads are stubbed: the archive and the binary
-// arrive as placeholder files. A failed run's SHA256SUMS lists nothing,
-// so the run gets past setting AIMEM_PREBUILT and fails on the checksum,
-// offline. A successful run's lists the placeholder hash, its archive
-// holds an install.ps1, and the installer's shell is stubbed to succeed.
+// caller's scope. The downloads are stubbed: every asset arrives as a
+// placeholder file. A failed run's SHA256SUMS lists nothing, so the run
+// gets past setting AIMEM_TARGET_VERSION and fails on the checksum,
+// offline. A successful run's lists the placeholder hash for each asset,
+// and the installer's shell is stubbed to succeed.
 // Get-FileHash is stubbed too: Windows PowerShell started by a test under
 // a pwsh step inherits pwsh's module path and could not load it on the CI
 // runner. It is stubbed through an alias: Get-FileHash is itself a module
@@ -34,14 +34,12 @@ func TestBootPs1LeavesNoVariablesInTheCallersSession(t *testing.T) {
 		t.Fatal(err)
 	}
 	// The stubs of a successful run: SHA256SUMS lists the placeholder
-	// hash, the archive holds an install.ps1, and the installer succeeds.
+	// hash for every asset, and the installer succeeds.
 	const succeeds = `function Invoke-WebRequest { param($Uri, $OutFile, [switch]$UseBasicParsing)
-  if ($OutFile -like '*SHA256SUMS') { Set-Content -LiteralPath $OutFile -Value 'placeholder  aimem-windows-amd64.exe' } else { Set-Content -LiteralPath $OutFile -Value "placeholder for $Uri" } }
-function tar { Set-Content -LiteralPath (Join-Path $args[[array]::IndexOf($args, '-C') + 1] 'install.ps1') -Value '' }
+  if ($OutFile -like '*SHA256SUMS') { Set-Content -LiteralPath $OutFile -Value 'placeholder  aimem-windows-amd64.exe', 'placeholder  install.ps1', 'placeholder  aimem-opencode.ts' } else { Set-Content -LiteralPath $OutFile -Value "placeholder for $Uri" } }
 function powershell { $global:LASTEXITCODE = 0 }
 `
 	const fails = `function Invoke-WebRequest { param($Uri, $OutFile, [switch]$UseBasicParsing) Set-Content -LiteralPath $OutFile -Value "placeholder for $Uri" }
-function tar { }
 `
 	for _, c := range []struct {
 		name, before, stubs, failure, want string
@@ -61,7 +59,7 @@ try { Get-Content -Raw -LiteralPath $env:BOOT | Invoke-Expression } catch { $fai
 Write-Output "failure=[$failure]"
 Write-Output "target=[$env:AIMEM_TARGET_VERSION] prebuilt=[$env:AIMEM_PREBUILT]"
 Write-Output "preference=[$ErrorActionPreference]"
-Write-Output "leaked=[$(@('release', 'tag', 'saved', 'dest', 'repo', 'base') | Where-Object { Get-Variable $_ -ErrorAction SilentlyContinue })]"
+Write-Output "leaked=[$(@('release', 'tag', 'saved', 'dest', 'repo', 'source', 'src', 'prebuilt', 'installer') | Where-Object { Get-Variable $_ -ErrorAction SilentlyContinue })]"
 Write-Output "protocol kept=[$([Net.ServicePointManager]::SecurityProtocol -eq $protocol)]"
 `
 				file := filepath.Join(dir, "session.ps1")

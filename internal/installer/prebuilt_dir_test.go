@@ -27,11 +27,12 @@ func runStage(t *testing.T, env ...string) (staged string, out string, err error
 		t.Fatal(err)
 	}
 	staged = filepath.Join(bin, "aimem.new")
-	script := "set -euo pipefail\nRELEASE=v0.0.1\nBASE=https://example.invalid/repo\n" +
+	script := "set -euo pipefail\nRELEASE=v0.0.1\nREPO=example/repo\n" +
 		`fetch() { local src=${1##*/}; cp "$FAKE_RELEASE/$src" "$3"; }` + "\n" +
+		extract(t, "install-hub.sh", "release-source") +
 		extract(t, "install-hub.sh", "binary-stage") + `stage_binary "$1"` + "\n"
 	cmd := exec.Command("bash", "-c", script, "stage", staged)
-	cmd.Env = append(os.Environ(), "AIMEM_PREBUILT=", "AIMEM_PREBUILT_DIR=", "AIMEM_VERSION=")
+	cmd.Env = append(os.Environ(), "AIMEM_PREBUILT=", "AIMEM_PREBUILT_DIR=", "AIMEM_VERSION=", "AIMEM_BASE=")
 	cmd.Env = append(cmd.Env, env...)
 	b, err := cmd.CombinedOutput()
 	return staged, string(b), err
@@ -77,7 +78,7 @@ func TestHubStagesAVerifiedBinaryFromAPrebuiltDir(t *testing.T) {
 	// Nothing names a release: not the pinned one, not AIMEM_VERSION, not
 	// the forge. The version is the staged binary's own.
 	if !strings.Contains(out, "installing aimem from "+dir) || !strings.Contains(out, "checksum OK: aimem-linux-") ||
-		strings.Contains(out, "v0.0.1") || strings.Contains(out, "v9.9.9") || strings.Contains(out, "example.invalid") {
+		strings.Contains(out, "v0.0.1") || strings.Contains(out, "v9.9.9") || strings.Contains(out, "example/repo") {
 		t.Fatalf("output:\n%s", out)
 	}
 	if _, err := os.Stat(staged + ".sums"); err == nil {
@@ -128,15 +129,15 @@ func TestHubDownloadAndPrebuiltPathsUnchanged(t *testing.T) {
 	good := releaseDir(t, true, true, false)
 	if staged, out, err := runStage(t, "FAKE_RELEASE="+good); err != nil || !strings.Contains(out, "installing aimem v0.0.1 (aimem-linux-") || !strings.Contains(out, "checksum OK") {
 		t.Fatalf("download: %v\n%s", err, out)
-	} else if _, err := os.Stat(staged + ".sums"); err == nil {
-		t.Fatal("download: the sums file was left beside the binary")
+	} else if _, err := os.Stat(staged + ".src"); err == nil {
+		t.Fatal("download: the download directory was left beside the binary")
 	}
 	if staged, out, err := runStage(t, "FAKE_RELEASE="+releaseDir(t, true, true, true)); err == nil || !strings.Contains(out, "checksum mismatch") {
 		t.Fatalf("download with wrong sums: %v\n%s", err, out)
 	} else if _, err := os.Stat(staged); err == nil {
 		t.Fatal("download with wrong sums: a binary was staged")
 	}
-	if _, out, err := runStage(t, "FAKE_RELEASE="+releaseDir(t, true, false, false)); err == nil || !strings.Contains(out, "release v0.0.1 has no SHA256SUMS") {
+	if _, out, err := runStage(t, "FAKE_RELEASE="+releaseDir(t, true, false, false)); err == nil || !strings.Contains(out, "v0.0.1/SHA256SUMS is missing; refusing unverified files") {
 		t.Fatalf("download without sums: %v\n%s", err, out)
 	}
 	own := filepath.Join(t.TempDir(), "mine")

@@ -41,6 +41,57 @@ currently 25); a binary refuses a database newer than it understands.
   - **Unchanged.** Writes, team mode (the team profile's grants decide),
     aicrewd's peer reads (already scoped to granted instances), the admin
     token and the local socket.
+- **The boot scripts check every file they run** (security audit 2026-10,
+  finding A-11, the installer part). `boot.sh` and `boot.ps1` used to run
+  `install.sh` / `install.ps1` and the OpenCode plugin from the tag's
+  source archive, which nothing checked. Now the release publishes them as
+  assets (`install.sh`, `install.ps1`, `aimem-opencode.ts`, beside
+  `boot.sh`, `boot.ps1` and `install-hub.sh`), all listed in
+  `SHA256SUMS`, and the boot scripts check each against the sums before
+  they use it. `boot.sh` runs from one function called on its last line,
+  so a download cut short runs nothing. `boot.ps1` matches a sums line on
+  the whole file name, never on a suffix of another name. The rest of
+  A-11 stays open: `aimem upgrade` still reads the source archive (task
+  01a18904), and the release's provenance belongs to A-8 and A-12.
+
+### Added
+
+- **Install in a closed network from an aiforge export.** `AIMEM_BASE`
+  names an export, as an absolute directory (on Windows also a
+  `\\host\share` path) or an `https://` URL; plain http is refused.
+  `boot.sh`, `boot.ps1` and `install-hub.sh` read it.
+  - **The layout** is format 1: `<base>/MANIFEST` starts with `aiforge-export 1` and names
+    the release in an `aimem <tag>` line, and `<base>/aimem/<tag>/` holds
+    that release's assets as published, with its `SHA256SUMS`.
+  - **The release.** `AIMEM_VERSION` wins over MANIFEST.
+  - **Verification** is the same as for a github.com download.
+  - **Isolation.** With a base the installers contact no other host.
+  - **The hub's client hint** prints the client install command with the
+    same base.
+  - **Refusals.** A missing MANIFEST, an unknown format, no aimem line, a
+    missing file or a sum mismatch stops with the path, and nothing is
+    installed.
+
+  docs/ADMIN-MANUAL.md, "Installing from an aiforge export", has the
+  forms.
+- **`install-hub.sh` checks the binary before it changes the host.** It
+  resolves the release and checks the binary before it creates the
+  service user, so a bad download leaves the host as it was.
+
+### Changed behaviour
+
+- **The boot scripts no longer build from source.** When a release had
+  no binary for the machine, `boot.sh` and `boot.ps1` built one from the
+  tag's source archive with Go. Every platform the docs name has a
+  release binary (linux and macOS on amd64 and arm64, Windows on amd64),
+  so no documented install took that path. On another platform, build
+  from a checkout as docs/INSTALL-CLIENT.md, "Manual install and other
+  modes", describes. `tar` is no longer needed.
+- **The new boot scripts install only releases that publish their
+  installer files as assets.** The release carrying this entry is the
+  first one. `AIMEM_VERSION` naming an older release stops with a message
+  that says so, and nothing is installed. Install an older release with
+  that release's own boot script, whose URL names its tag.
 
 ### Upgrade notes
 
@@ -66,6 +117,9 @@ currently 25); a binary refuses a database newer than it understands.
   instances its peer is granted.
 - **Clients need no upgrade.** The change is the hub's. No client acts
   on `task_read`, and a refused read is an ordinary 404.
+- **`aimem upgrade` is unchanged.** It still downloads from github.com
+  and reads the tag's source archive. A closed network upgrades with the
+  newer release's boot script from the export.
 
 ## [0.10.22] — 2026-11-12
 

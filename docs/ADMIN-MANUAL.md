@@ -32,6 +32,9 @@ Environment knobs for the boot script:
 
 - `AIMEM_VERSION=vX.Y.Z` — install another release than the one the
   one-liner names (the boot script still comes from the URL's tag).
+- `AIMEM_BASE=<dir or https URL>` — install from an aiforge export
+  instead of github.com ([Installing from an aiforge
+  export](#installing-from-an-aiforge-export)).
 - `AIMEM_UPGRADE_WAIT=30` — seconds an upgrade waits for health at the new
   version before it rolls back.
 - `AIMEM_REPO=owner/name` — install from a fork.
@@ -167,8 +170,8 @@ individual credential (task tools, team setup, team mode) refuses it),
 plain HTTP, which carries checkpoints but not the task tools, team setup
 or team mode), `AIMEM_OPENAI_API_KEY` + `AIMEM_OPENAI_BASE_URL` + models
 (enables the curation timer's LLM work), `AIMEM_PREBUILT=<file>` (a
-binary installed as given, unverified) or `AIMEM_PREBUILT_DIR=<dir>` (see
-below; set only one of the two). Idempotent: run the newer
+binary installed as given, unverified), `AIMEM_PREBUILT_DIR=<dir>` or
+`AIMEM_BASE=<export>` (see below; set only one of the three). Idempotent: run the newer
 release's one-liner to upgrade, with the backup and rollback of
 [Upgrades](#upgrades) (the hub's backup lands in
 `~sessiond/.local/state/aimem.backup-<UTC time>`). Everything stateful
@@ -176,11 +179,64 @@ lives outside the binary — config
 `~/.config/aimem/env`, certs `~/.config/aimem/tls/`, data
 `~/.local/state/aimem/` — so an LXC backup captures the whole hub.
 
+### Installing from an aiforge export
+
+A closed network installs from an aiforge export: a copy of the
+releases, taken on a connected machine and carried in on a local
+directory, a share, or an internal https server. Its layout (format 1):
+
+```text
+<base>/MANIFEST                 aiforge-export 1
+                                aimem v0.10.22
+                                <product> <tag> ...
+<base>/aimem/<tag>/             the release's assets as published,
+                                with its SHA256SUMS
+<base>/README.txt
+```
+
+`AIMEM_BASE` names the export to the boot scripts and to
+`install-hub.sh`: an absolute directory (on Windows a drive path or a
+`\\host\share` path) or an `https://` URL; plain http is refused. The
+installer reads `<base>/MANIFEST` for the release unless `AIMEM_VERSION`
+names one, then reads the binary, the installer and the OpenCode plugin
+from `<base>/aimem/<tag>/` and checks each against that release's
+`SHA256SUMS` before it uses it. With a base it contacts no other host.
+Any of these stops it with a message naming the path, and nothing is
+installed: `MANIFEST` missing while no `AIMEM_VERSION` is set, a format
+other than `aiforge-export 1`, no `aimem` line, a missing file, a sum
+that does not match. Several releases can sit side by side;
+`MANIFEST` names the default.
+
+```sh
+# a workstation, the export mounted at /media/aiforge-export
+AIMEM_BASE=/media/aiforge-export bash /media/aiforge-export/aimem/v0.10.22/boot.sh
+
+# the same from an internal https server
+curl -fsSL https://dist.example.internal/aiforge/aimem/v0.10.22/boot.sh | AIMEM_BASE=https://dist.example.internal/aiforge bash
+
+# a hub, as root
+AIMEM_BASE=/media/aiforge-export bash /media/aiforge-export/aimem/v0.10.22/install-hub.sh
+```
+
+On Windows, set `AIMEM_BASE` to the export (a drive path such as
+`D:\aiforge-export`, a `\\host\share` path, or the https URL) and run the
+export's `aimem\<tag>\boot.ps1` as a file with `powershell -NoProfile
+-ExecutionPolicy RemoteSigned -File`, removing the variable afterwards as
+[Upgrades](#upgrades) shows for any knob. From an https export, the hub's
+printed `irm <base>/aimem/<tag>/boot.ps1 | iex` line works as well.
+
+Run with a base, `install-hub.sh` prints the client install command with
+the same base, not the github.com one-liner. `aimem upgrade` still reads
+github.com; on a closed network, upgrade with the newer release's boot
+script from the export, as above. A release older than the first one
+that publishes its installer files as assets (`install.sh`,
+`install.ps1`, `aimem-opencode.ts`) cannot be installed this way.
+
 ### Installing from a local directory
 
-A host that should not download the binary from GitHub (a closed network,
-or a container hub that installs a build that has not been released)
-installs it from a directory with `AIMEM_PREBUILT_DIR`. The directory holds
+A host that should not download the binary from GitHub (a closed network
+without an export, or a container hub that installs a build that has not
+been released) installs it from a directory with `AIMEM_PREBUILT_DIR`. The directory holds
 the release's own asset names: `aimem-linux-amd64` (or
 `aimem-linux-arm64` on arm64) and `SHA256SUMS` with a line for it, which
 is what you get by downloading those two assets of a release, or by

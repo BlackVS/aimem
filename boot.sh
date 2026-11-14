@@ -4,15 +4,21 @@
 #
 #   curl -fsSL https://raw.githubusercontent.com/BlackVS/aimem/v0.10.22/boot.sh | bash
 #
-# It installs the release this script was fetched from (RELEASE below): the
-# prebuilt static binary (no Go needed), checked against that release's
-# SHA256SUMS, and the repository archive of the same tag for the installer
-# and the OpenCode plugin. Then it runs `install.sh bootstrap` against the
-# current directory: a user-level install or upgrade if aimem is missing or
-# older, then wiring for this project. An upgrade backs up the state root
-# first and rolls back if the new release does not come up (install.sh).
-# When aimem was already installed, only a directory that already holds
-# .aimem.json is wired; the home directory is never wired.
+# In a closed network, from an aiforge export (a local directory or an
+# internal https server holding the release files):
+#
+#   AIMEM_BASE=/media/aiforge-export bash /media/aiforge-export/aimem/<tag>/boot.sh
+#
+# It installs the release this script was fetched from (RELEASE below), or
+# the one the export's MANIFEST names: the prebuilt static binary, the
+# installer (install.sh) and the OpenCode plugin, each a release asset
+# checked against that release's SHA256SUMS before it is used. Then it
+# runs `install.sh bootstrap` against the current directory: a user-level
+# install or upgrade if aimem is missing or older, then wiring for this
+# project. An upgrade backs up the state root first and rolls back if the
+# new release does not come up (install.sh). When aimem was already
+# installed, only a directory that already holds .aimem.json is wired; the
+# home directory is never wired.
 #
 # Optional environment:
 #   AIMEM_HUB_URL, AIMEM_HUB_TOKEN   register a hub for real-time push
@@ -22,58 +28,122 @@
 #   AIMEM_REINSTALL=1                refresh the binary and hooks even if
 #                                    the installed aimem is already current
 #                                    (an older install is upgraded anyway)
+#   AIMEM_BASE=/abs/dir|https://...  install from an aiforge export instead
+#                                    of github.com: <base>/MANIFEST names
+#                                    the release, <base>/aimem/<tag>/ holds
+#                                    its files; no other host is contacted
 #   AIMEM_REPO=owner/name            install from a fork
 #   AIMEM_VERSION=vX.Y.Z             install another release than RELEASE
+#                                    (or than the export's MANIFEST names)
 #   AIMEM_UPGRADE_WAIT=30            seconds an upgrade waits for health at
 #                                    the new version before rolling back
+#
+# Everything runs from main, called on the last line, so a download cut
+# short runs nothing.
 set -e
 
 # The release this script installs. Bumped together with the CHANGELOG
 # when a release is cut (internal/installer checks they agree).
 RELEASE=v0.10.22
 
-for t in curl tar; do
-  command -v "$t" >/dev/null 2>&1 ||
-    { echo "ERROR: '$t' is required but not found - install it and re-run." >&2; exit 1; }
-done
-
-REPO=${AIMEM_REPO:-BlackVS/aimem}
-BASE="https://github.com/$REPO"
-TAG=${AIMEM_VERSION:-$RELEASE}
-# Tell install.sh which release this is, so an older install gets upgraded.
-AIMEM_TARGET_VERSION=$TAG
-export AIMEM_TARGET_VERSION
-
-DEST=$(mktemp -d)
-trap 'rm -rf "$DEST"' EXIT
-
-echo "Fetching aimem $TAG ..."
-curl -fsSL "$BASE/archive/refs/tags/$TAG.tar.gz" | tar -xz -C "$DEST" --strip-components=1
-
-# Prefer the release's prebuilt binary; fall back to building from source.
-ASSET=aimem-linux-amd64
-case "$(uname -s)" in Darwin) ASSET=aimem-darwin-amd64 ;; esac
-case "$(uname -m)" in aarch64|arm64) ASSET=$(echo "$ASSET" | sed 's/amd64/arm64/') ;; esac
-if curl -fsSL "$BASE/releases/download/$TAG/$ASSET" -o "$DEST/aimem-prebuilt"; then
-  # Verify against the release's SHA256SUMS. A missing sums file or a
-  # mismatch ABORTS — it must never degrade into the source-build
-  # fallback, which is reserved for a release that has no binary at all.
-  curl -fsSL "$BASE/releases/download/$TAG/SHA256SUMS" -o "$DEST/SHA256SUMS" || {
-    echo "ERROR: release $TAG has no SHA256SUMS; refusing unverified binary." >&2
-    exit 1
-  }
-  WANT=$(awk -v a="$ASSET" '$2==a{print $1}' "$DEST/SHA256SUMS")
-  GOT=$( (sha256sum "$DEST/aimem-prebuilt" 2>/dev/null || shasum -a 256 "$DEST/aimem-prebuilt") | awk '{print $1}')
-  if [ -z "$WANT" ] || [ "$WANT" != "$GOT" ]; then
-    echo "ERROR: checksum mismatch for $ASSET (want ${WANT:-absent}, got $GOT)." >&2
-    exit 1
+# BEGIN release-source
+# Where the release's files come from, and their verification. boot.sh
+# and install-hub.sh carry the same block (internal/installer keeps the
+# copies equal).
+# Connected: the release download URL on github.com. With AIMEM_BASE: an
+# aiforge export, format 1 — <base>/MANIFEST is `aiforge-export 1` and
+# then `<product> <tag>` lines, <base>/aimem/<tag>/ holds the release's
+# assets under their published names with its SHA256SUMS. An explicit
+# AIMEM_VERSION wins over MANIFEST. Every file is checked against
+# SHA256SUMS before it is used; any failure stops with the path and
+# installs nothing. The caller defines fetch (an https download to -o).
+die() { echo "ERROR: $*; nothing was installed." >&2; exit 1; }
+get_file() { # source dest
+  case "$1" in
+    https://*) fetch "$1" -o "$2" ;;
+    *) [ -f "$1" ] && cp "$1" "$2" ;;
+  esac
+}
+valid_tag() {
+  case "$1" in
+    v[0-9]*) case "$1" in */* | *..* | *[!A-Za-z0-9._+-]*) return 1 ;; esac ;;
+    *) return 1 ;;
+  esac
+}
+resolve_source() { # workdir: sets TAG and SRC
+  if [ -z "${AIMEM_BASE:-}" ]; then
+    TAG=${AIMEM_VERSION:-$RELEASE}
+    valid_tag "$TAG" || die "'$TAG' is not a release tag"
+    SRC="https://github.com/$REPO/releases/download/$TAG"
+    return 0
   fi
-  echo "checksum OK: $ASSET"
-  chmod 755 "$DEST/aimem-prebuilt"
-  AIMEM_PREBUILT="$DEST/aimem-prebuilt"; export AIMEM_PREBUILT
-else
-  echo "NOTE: no $ASSET in release $TAG; building from source (needs Go)." >&2
-  rm -f "$DEST/aimem-prebuilt"
-fi
+  case "$AIMEM_BASE" in
+    https://* | /*) ;;
+    *) die "AIMEM_BASE must be an absolute directory or an https:// URL, not '$AIMEM_BASE'" ;;
+  esac
+  rs_base=${AIMEM_BASE%/}
+  if [ -n "${AIMEM_VERSION:-}" ]; then
+    TAG=$AIMEM_VERSION
+  else
+    get_file "$rs_base/MANIFEST" "$1/MANIFEST" ||
+      die "$rs_base/MANIFEST is missing (or set AIMEM_VERSION to name the release)"
+    rs_format=$(head -n 1 "$1/MANIFEST" | tr -d '\r')
+    [ "$rs_format" = "aiforge-export 1" ] ||
+      die "$rs_base/MANIFEST is '$rs_format', not a format this installer reads (aiforge-export 1)"
+    TAG=$(tail -n +2 "$1/MANIFEST" | tr -d '\r' | awk '$1 == "aimem" { print $2; exit }')
+    [ -n "$TAG" ] || die "$rs_base/MANIFEST names no aimem release"
+  fi
+  valid_tag "$TAG" || die "'$TAG' is not a release tag"
+  SRC="$rs_base/aimem/$TAG"
+}
+fetch_sums() { # workdir
+  get_file "$SRC/SHA256SUMS" "$1/SHA256SUMS" || die "$SRC/SHA256SUMS is missing; refusing unverified files"
+}
+fetch_verified() { # workdir asset: the asset, checked against SHA256SUMS
+  get_file "$SRC/$2" "$1/$2" ||
+    die "$SRC/$2 is missing (a release published before its installer files became release assets installs with its own boot script)"
+  fv_want=$(awk -v a="$2" '$2 == a { print $1 }' "$1/SHA256SUMS")
+  fv_got=$( (sha256sum "$1/$2" 2>/dev/null || shasum -a 256 "$1/$2") | awk '{ print $1 }')
+  if [ -z "$fv_want" ] || [ "$fv_want" != "$fv_got" ]; then
+    die "checksum mismatch for $SRC/$2 (want ${fv_want:-absent}, got $fv_got)"
+  fi
+  echo "checksum OK: $2"
+}
+# END release-source
 
-bash "$DEST/install.sh" bootstrap "$PWD"
+fetch() { curl -fsSL --proto =https --proto-redir =https "$@"; }
+
+main() {
+  for t in curl awk; do
+    command -v "$t" >/dev/null 2>&1 ||
+      { echo "ERROR: '$t' is required but not found - install it and re-run." >&2; exit 1; }
+  done
+  REPO=${AIMEM_REPO:-BlackVS/aimem}
+  DEST=$(mktemp -d)
+  trap 'rm -rf "$DEST"' EXIT
+
+  resolve_source "$DEST"
+  # Tell install.sh which release this is, so an older install gets upgraded.
+  AIMEM_TARGET_VERSION=$TAG
+  export AIMEM_TARGET_VERSION
+  echo "Fetching aimem $TAG from $SRC ..."
+
+  ASSET=aimem-linux-amd64
+  case "$(uname -s)" in Darwin) ASSET=aimem-darwin-amd64 ;; esac
+  case "$(uname -m)" in aarch64 | arm64) ASSET=$(echo "$ASSET" | sed 's/amd64/arm64/') ;; esac
+  fetch_sums "$DEST"
+  for f in "$ASSET" install.sh aimem-opencode.ts; do
+    fetch_verified "$DEST" "$f"
+  done
+  # install.sh reads the plugin beside itself, where a checkout has it.
+  mkdir -p "$DEST/.opencode/plugin"
+  mv "$DEST/aimem-opencode.ts" "$DEST/.opencode/plugin/aimem.ts"
+  mv "$DEST/$ASSET" "$DEST/aimem-prebuilt"
+  chmod 755 "$DEST/aimem-prebuilt"
+  AIMEM_PREBUILT="$DEST/aimem-prebuilt"
+  export AIMEM_PREBUILT
+
+  bash "$DEST/install.sh" bootstrap "$PWD"
+}
+
+main "$@"

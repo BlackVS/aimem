@@ -183,6 +183,7 @@ Set these before running the one-liner:
 | `AIMEM_USER_ONLY=1` | install or upgrade the user level only and wire no project |
 | `AIMEM_REINSTALL=1` | refresh the binary and hooks even if the installed aimem is already current (an older install is upgraded without it) |
 | `AIMEM_VERSION=vX.Y.Z` | install another release than the one in the URL |
+| `AIMEM_BASE=<dir or https URL>` | install from an aiforge export instead of github.com, in a closed network ([ADMIN-MANUAL](ADMIN-MANUAL.md#installing-from-an-aiforge-export)) |
 | `AIMEM_UPGRADE_WAIT=30` | seconds an upgrade waits for health at the new version before rolling back |
 | `AIMEM_REPO=owner/name` | install from a fork |
 | `AIMEM_NO_SERVICE=1` | register no service (no systemd unit, no launchd agents): run `aimem serve` yourself. `AIMEM_NO_SYSTEMD=1` does the same |

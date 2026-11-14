@@ -4,6 +4,11 @@
 #
 #   curl -fsSL https://raw.githubusercontent.com/BlackVS/aimem/v0.10.22/install-hub.sh | bash
 #
+# In a closed network, from an aiforge export (a local directory or an
+# internal https server holding the release files):
+#
+#   AIMEM_BASE=/media/aiforge-export bash /media/aiforge-export/aimem/<tag>/install-hub.sh
+#
 # What it does: creates the service user (with systemd linger), installs
 # the release this script was fetched from (RELEASE below), checked
 # against that release's SHA256SUMS, writes ~/.config/aimem/env, installs
@@ -37,8 +42,15 @@
 #   AIMEM_OPENAI_BASE_URL=         OpenAI-compatible endpoint (the vendor
 #                                  API, or a LiteLLM / vLLM / Ollama proxy)
 #   AIMEM_CURATE_MODEL=gpt-4o-mini
+#   AIMEM_BASE=/abs/dir|https://...
+#                                  install from an aiforge export instead of
+#                                  github.com: <base>/MANIFEST names the
+#                                  release, <base>/aimem/<tag>/ holds its
+#                                  files; no other host is contacted, and
+#                                  the client hint names the base
 #   AIMEM_REPO=owner/name          install from a fork
 #   AIMEM_VERSION=vX.Y.Z           install another release than RELEASE
+#                                  (or than the export's MANIFEST names)
 #   AIMEM_UPGRADE_WAIT=30          seconds to wait for health after a swap
 #   AIMEM_EMBED_MODEL="Text Embedding 3 Large"
 #   AIMEM_PREBUILT=                path to a prebuilt binary (skips download)
@@ -76,8 +88,72 @@ done
 HUB_USER=${AIMEM_HUB_USER:-sessiond}
 LISTEN=${AIMEM_HTTP_LISTEN:-:8440}
 REPO=${AIMEM_REPO:-BlackVS/aimem}
-BASE="https://github.com/$REPO"
-fetch() { curl -fsSL "$@"; }
+fetch() { curl -fsSL --proto =https --proto-redir =https "$@"; }
+
+# BEGIN release-source
+# Where the release's files come from, and their verification. boot.sh
+# and install-hub.sh carry the same block (internal/installer keeps the
+# copies equal).
+# Connected: the release download URL on github.com. With AIMEM_BASE: an
+# aiforge export, format 1 — <base>/MANIFEST is `aiforge-export 1` and
+# then `<product> <tag>` lines, <base>/aimem/<tag>/ holds the release's
+# assets under their published names with its SHA256SUMS. An explicit
+# AIMEM_VERSION wins over MANIFEST. Every file is checked against
+# SHA256SUMS before it is used; any failure stops with the path and
+# installs nothing. The caller defines fetch (an https download to -o).
+die() { echo "ERROR: $*; nothing was installed." >&2; exit 1; }
+get_file() { # source dest
+  case "$1" in
+    https://*) fetch "$1" -o "$2" ;;
+    *) [ -f "$1" ] && cp "$1" "$2" ;;
+  esac
+}
+valid_tag() {
+  case "$1" in
+    v[0-9]*) case "$1" in */* | *..* | *[!A-Za-z0-9._+-]*) return 1 ;; esac ;;
+    *) return 1 ;;
+  esac
+}
+resolve_source() { # workdir: sets TAG and SRC
+  if [ -z "${AIMEM_BASE:-}" ]; then
+    TAG=${AIMEM_VERSION:-$RELEASE}
+    valid_tag "$TAG" || die "'$TAG' is not a release tag"
+    SRC="https://github.com/$REPO/releases/download/$TAG"
+    return 0
+  fi
+  case "$AIMEM_BASE" in
+    https://* | /*) ;;
+    *) die "AIMEM_BASE must be an absolute directory or an https:// URL, not '$AIMEM_BASE'" ;;
+  esac
+  rs_base=${AIMEM_BASE%/}
+  if [ -n "${AIMEM_VERSION:-}" ]; then
+    TAG=$AIMEM_VERSION
+  else
+    get_file "$rs_base/MANIFEST" "$1/MANIFEST" ||
+      die "$rs_base/MANIFEST is missing (or set AIMEM_VERSION to name the release)"
+    rs_format=$(head -n 1 "$1/MANIFEST" | tr -d '\r')
+    [ "$rs_format" = "aiforge-export 1" ] ||
+      die "$rs_base/MANIFEST is '$rs_format', not a format this installer reads (aiforge-export 1)"
+    TAG=$(tail -n +2 "$1/MANIFEST" | tr -d '\r' | awk '$1 == "aimem" { print $2; exit }')
+    [ -n "$TAG" ] || die "$rs_base/MANIFEST names no aimem release"
+  fi
+  valid_tag "$TAG" || die "'$TAG' is not a release tag"
+  SRC="$rs_base/aimem/$TAG"
+}
+fetch_sums() { # workdir
+  get_file "$SRC/SHA256SUMS" "$1/SHA256SUMS" || die "$SRC/SHA256SUMS is missing; refusing unverified files"
+}
+fetch_verified() { # workdir asset: the asset, checked against SHA256SUMS
+  get_file "$SRC/$2" "$1/$2" ||
+    die "$SRC/$2 is missing (a release published before its installer files became release assets installs with its own boot script)"
+  fv_want=$(awk -v a="$2" '$2 == a { print $1 }' "$1/SHA256SUMS")
+  fv_got=$( (sha256sum "$1/$2" 2>/dev/null || shasum -a 256 "$1/$2") | awk '{ print $1 }')
+  if [ -z "$fv_want" ] || [ "$fv_want" != "$fv_got" ]; then
+    die "checksum mismatch for $SRC/$2 (want ${fv_want:-absent}, got $fv_got)"
+  fi
+  echo "checksum OK: $2"
+}
+# END release-source
 
 # BEGIN env-settings
 # Settings this installer writes into an env file that already exists, on
@@ -129,6 +205,68 @@ check_git() {
 }
 # END git-check
 check_git
+
+# BEGIN binary-stage
+# stage_binary dest: the binary this run installs. AIMEM_PREBUILT is the
+# operator's own file, installed as given. The release asset, from
+# AIMEM_PREBUILT_DIR, an export (AIMEM_BASE) or downloaded, is verified
+# against the release's SHA256SUMS: this script runs as root, so an
+# unverified binary is the worst place to skip the check. Any failure
+# removes the staged file and aborts before anything is installed. The
+# caller defines fetch, REPO and RELEASE and the release-source block; the
+# version installed is the staged binary's own (upgrade_txn).
+verify_asset() { # binary sums asset
+  local want got
+  want=$(awk -v a="$3" '$2==a{print $1}' "$2")
+  got=$(sha256sum "$1" | awk '{print $1}')
+  if [ -z "$want" ] || [ "$want" != "$got" ]; then
+    echo "ERROR: checksum mismatch for $3 (want ${want:-absent}, got $got)." >&2
+    return 1
+  fi
+  echo "checksum OK: $3"
+}
+stage_binary() { # dest
+  local dest=$1 asset=aimem-linux-amd64 dir ok=0
+  case "$(uname -m)" in aarch64|arm64) asset=aimem-linux-arm64 ;; esac
+  if [ -n "${AIMEM_PREBUILT:-}" ] && [ -n "${AIMEM_PREBUILT_DIR:-}" ]; then
+    echo "ERROR: AIMEM_PREBUILT and AIMEM_PREBUILT_DIR are both set; set only one of them." >&2
+    exit 1
+  fi
+  if [ -n "${AIMEM_BASE:-}" ] && [ -n "${AIMEM_PREBUILT:-}${AIMEM_PREBUILT_DIR:-}" ]; then
+    echo "ERROR: AIMEM_BASE and AIMEM_PREBUILT${AIMEM_PREBUILT_DIR:+_DIR} are both set; set only one of them." >&2
+    exit 1
+  fi
+  if [ -n "${AIMEM_PREBUILT:-}" ]; then
+    install -m 755 "$AIMEM_PREBUILT" "$dest"
+    return 0
+  fi
+  if [ -n "${AIMEM_PREBUILT_DIR:-}" ]; then
+    dir=$AIMEM_PREBUILT_DIR
+    echo "installing aimem from $dir ($asset)"
+    [ -f "$dir/$asset" ] || { echo "ERROR: $dir has no $asset; nothing was installed." >&2; exit 1; }
+    [ -f "$dir/SHA256SUMS" ] || { echo "ERROR: $dir has no SHA256SUMS; refusing unverified binary." >&2; exit 1; }
+    cp "$dir/$asset" "$dest"
+    verify_asset "$dest" "$dir/SHA256SUMS" "$asset" || ok=1
+    [ "$ok" = 0 ] || { rm -f "$dest"; exit 1; }
+  else
+    dir="$dest.src"
+    rm -rf "$dir"
+    mkdir -p "$dir"
+    resolve_source "$dir"
+    echo "installing aimem $TAG ($asset) from $SRC"
+    fetch_sums "$dir"
+    fetch_verified "$dir" "$asset"
+    mv "$dir/$asset" "$dest"
+    rm -rf "$dir"
+  fi
+  chmod 755 "$dest"
+}
+# END binary-stage
+# The binary is resolved and verified before anything on this host changes:
+# a missing file or a bad sum stops here, before the service user exists.
+STAGE=$(mktemp -d)
+trap 'rm -rf "$STAGE"' EXIT
+stage_binary "$STAGE/aimem.new"
 
 # --- service user -----------------------------------------------------------
 if ! id "$HUB_USER" >/dev/null 2>&1; then
@@ -339,59 +477,8 @@ refresh_processes() { # aimem-binary
 # END process-refresh
 
 # --- binary -----------------------------------------------------------------
-# BEGIN binary-stage
-# stage_binary dest: the binary this run installs. AIMEM_PREBUILT is the
-# operator's own file, installed as given. The release asset, from
-# AIMEM_PREBUILT_DIR or downloaded, is verified against the SHA256SUMS
-# beside it: this script runs as root, so an unverified binary is the
-# worst place to skip the check. Any failure removes the staged file and
-# aborts before anything is installed. The caller defines fetch, BASE and
-# RELEASE; the version installed is the staged binary's own (upgrade_txn).
-verify_asset() { # binary sums asset
-  local want got
-  want=$(awk -v a="$3" '$2==a{print $1}' "$2")
-  got=$(sha256sum "$1" | awk '{print $1}')
-  if [ -z "$want" ] || [ "$want" != "$got" ]; then
-    echo "ERROR: checksum mismatch for $3 (want ${want:-absent}, got $got)." >&2
-    return 1
-  fi
-  echo "checksum OK: $3"
-}
-stage_binary() { # dest
-  local dest=$1 asset=aimem-linux-amd64 dir tag ok=0
-  case "$(uname -m)" in aarch64|arm64) asset=aimem-linux-arm64 ;; esac
-  if [ -n "${AIMEM_PREBUILT:-}" ] && [ -n "${AIMEM_PREBUILT_DIR:-}" ]; then
-    echo "ERROR: AIMEM_PREBUILT and AIMEM_PREBUILT_DIR are both set; set only one of them." >&2
-    exit 1
-  fi
-  if [ -n "${AIMEM_PREBUILT:-}" ]; then
-    install -m 755 "$AIMEM_PREBUILT" "$dest"
-    return 0
-  fi
-  if [ -n "${AIMEM_PREBUILT_DIR:-}" ]; then
-    dir=$AIMEM_PREBUILT_DIR
-    echo "installing aimem from $dir ($asset)"
-    [ -f "$dir/$asset" ] || { echo "ERROR: $dir has no $asset; nothing was installed." >&2; exit 1; }
-    [ -f "$dir/SHA256SUMS" ] || { echo "ERROR: $dir has no SHA256SUMS; refusing unverified binary." >&2; exit 1; }
-    cp "$dir/$asset" "$dest"
-    verify_asset "$dest" "$dir/SHA256SUMS" "$asset" || ok=1
-  else
-    tag=${AIMEM_VERSION:-$RELEASE}
-    echo "installing aimem $tag ($asset)"
-    fetch "$BASE/releases/download/$tag/$asset" -o "$dest"
-    fetch "$BASE/releases/download/$tag/SHA256SUMS" -o "$dest.sums" || {
-      echo "ERROR: release $tag has no SHA256SUMS; refusing unverified binary." >&2
-      rm -f "$dest" "$dest.sums"; exit 1
-    }
-    verify_asset "$dest" "$dest.sums" "$asset" || ok=1
-    rm -f "$dest.sums"
-  fi
-  [ "$ok" = 0 ] || { rm -f "$dest"; exit 1; }
-  chmod 755 "$dest"
-}
-# END binary-stage
 mkdir -p "$HOME_DIR/.local/bin" "$HOME_DIR/.local/sbin"
-stage_binary "$HOME_DIR/.local/bin/aimem.new"
+install -m 755 "$STAGE/aimem.new" "$HOME_DIR/.local/bin/aimem.new"
 
 # --- self-signed TLS (optional, until a real cert is enrolled) ---------------
 if [ -n "${AIMEM_DOMAIN:-}" ] && [ -z "${AIMEM_TLS_CERT:-}" ]; then
@@ -568,6 +655,18 @@ echo "Configure each client with its own writer token:"
 echo "  1. on this host, as $HUB_USER:  aimem token add <machine>    (prints that machine's token once)"
 echo "  2. on the client:  aimem hub add <name> $SCHEME://$HOST:$PORT \"<writer-token>\"$TRUST"
 echo "  AIMEM_HTTP_TOKEN in $ENVF is this host's admin credential: keep it on this host, never on a client."
+if [ -n "${AIMEM_BASE:-}" ]; then
+  # A closed network installs clients from the same export, not github.com.
+  CB=${AIMEM_BASE%/}
+  echo "  Install aimem on a client from the same export:"
+  case "$CB" in
+    https://*)
+      echo "    Linux/macOS:  curl -fsSL $CB/aimem/$TAG/boot.sh | AIMEM_BASE=$CB bash"
+      echo "    Windows:      \$env:AIMEM_BASE='$CB'; try { irm $CB/aimem/$TAG/boot.ps1 | iex } finally { Remove-Item Env:AIMEM_BASE }" ;;
+    *)
+      echo "    Linux/macOS:  AIMEM_BASE=$CB bash $CB/aimem/$TAG/boot.sh    (the export mounted at the same path)" ;;
+  esac
+fi
 if [ -n "$TRUST" ]; then
   echo "  --pin verifies the self-signed certificate. --insecure would skip verification: use it only as a last resort."
   echo "  When a real certificate replaces the self-signed one, the pin stops matching: on each client run"
