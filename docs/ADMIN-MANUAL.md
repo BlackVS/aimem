@@ -31,7 +31,10 @@ optional stricter form). The line works the same in `powershell` and
 Environment knobs for the boot script:
 
 - `AIMEM_VERSION=vX.Y.Z` — install another release than the one the
-  one-liner names (the boot script still comes from the URL's tag).
+  one-liner names (the boot script still comes from the URL's tag). A
+  release whose assets hold no installer files (those before v0.10.23) is
+  installed by its own boot script, which the boot script fetches from the
+  repository at that release's tag and runs with the same environment.
 - `AIMEM_BASE=<dir or https URL>` — install from an aiforge export
   instead of github.com ([Installing from an aiforge
   export](#installing-from-an-aiforge-export)).
