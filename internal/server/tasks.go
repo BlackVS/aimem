@@ -303,10 +303,16 @@ func (s *Server) taskReadDenied(w http.ResponseWriter, r *http.Request, project 
 	if allowed {
 		return false
 	}
-	id, _ := IdentityFrom(r.Context())
-	s.log.Warn("task read refused: no grant on the project", "user", id.Name, "user_id", id.UserID, "token_id", id.TokenID, "project", project)
+	s.logTaskReadRefused(r, project)
 	s.fail(w, http.StatusNotFound, notFound)
 	return true
+}
+
+// logTaskReadRefused records, for the hub's admin, a task read refused for
+// want of a grant: the token's user and the project, never task content.
+func (s *Server) logTaskReadRefused(r *http.Request, project string) {
+	id, _ := IdentityFrom(r.Context())
+	s.log.Warn("task read refused: no grant on the project", "user", id.Name, "user_id", id.UserID, "token_id", id.TokenID, "project", project)
 }
 
 // taskProject opens the ordinary project named in the path, never
@@ -358,12 +364,23 @@ func (s *Server) taskReadProject(w http.ResponseWriter, r *http.Request) (string
 //
 // read marks a read: the caller needs a grant on the owning project, and a
 // task in a project without one answers exactly as a task that does not
-// exist. A prefix resolves among the tasks the caller may read. A write
+// exist. A prefix resolves among the tasks the caller may read, and a
+// prefix that starts only tasks the caller may not read is refused, and
+// logged, as that task would be. A write
 // keeps its own authorization (authorizeTaskWrite) and its refusal.
 func (s *Server) locateTask(w http.ResponseWriter, r *http.Request, read bool) (string, *store.DB, bool) {
-	id, err := s.reg.ResolveTaskID(r.PathValue("id"))
-	if err != nil && read {
-		id, err = s.readableMatch(r, err)
+	var id string
+	var err error
+	if _, team := teamContextFrom(r.Context()); read && !team {
+		var denied []string
+		id, denied, err = s.reg.ResolveReadableTaskID(r.PathValue("id"), func(p string) (bool, error) { return s.canReadTasks(r, p) })
+		if errors.Is(err, store.ErrTaskNotFound) {
+			for _, p := range denied {
+				s.logTaskReadRefused(r, p)
+			}
+		}
+	} else {
+		id, err = s.reg.ResolveTaskID(r.PathValue("id"))
 	}
 	if err != nil {
 		s.taskIDError(w, r, err, read)
@@ -391,34 +408,6 @@ func (s *Server) locateTask(w http.ResponseWriter, r *http.Request, read bool) (
 		r.SetPathValue("c", cid)
 	}
 	return project, db, true
-}
-
-// readableMatch narrows an ambiguous task id prefix, outside team mode, to
-// the tasks the caller may read: one left is the task meant, none left is
-// "not found", and several stay ambiguous among those alone. Any other
-// error, and every team-mode answer, passes through unchanged.
-func (s *Server) readableMatch(r *http.Request, err error) (string, error) {
-	var amb *store.AmbiguousIDError
-	if _, team := teamContextFrom(r.Context()); team || !errors.As(err, &amb) {
-		return "", err
-	}
-	var readable []store.TaskIDMatch
-	for _, m := range amb.Matches {
-		ok, gerr := s.canReadTasks(r, m.Project)
-		if gerr != nil {
-			return "", gerr
-		}
-		if ok {
-			readable = append(readable, m)
-		}
-	}
-	switch len(readable) {
-	case 0:
-		return "", store.ErrTaskNotFound
-	case 1:
-		return readable[0].ID, nil
-	}
-	return "", &store.AmbiguousIDError{Prefix: amb.Prefix, Matches: readable}
 }
 
 // taskIDError answers a refused id: an ambiguous prefix names the ids it

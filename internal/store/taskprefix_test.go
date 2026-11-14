@@ -2,6 +2,7 @@ package store
 
 import (
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 )
@@ -130,5 +131,55 @@ func TestResolveTaskIDPrefix(t *testing.T) {
 	other := mustCreate(t, a, "other", "k-o")
 	if _, err := a.ResolveTaskCommentID(other.ID, c.ID[:TaskIDPrefixMin]); !errors.Is(err, ErrTaskNotFound) {
 		t.Fatalf("comment prefix under another task: %v", err)
+	}
+}
+
+// A grant-filtered prefix applies the match bound after the filter: tasks
+// in a project the caller may not read neither hide the one it may read
+// nor make a single readable match look unique among several, and they
+// are reported as denied, never as matches. A filtered miss is not
+// remembered as a miss for everyone.
+func TestResolveReadableTaskID(t *testing.T) {
+	r := newTestRegistry(t)
+	a, _ := r.Open("proj-a")
+	b, _ := r.Open("proj-b")
+	src := mustCreate(t, a, "seed", "k-seed")
+	short := src.ID[:TaskIDPrefixMin]
+	clone := func(to *DB, n int) string {
+		t.Helper()
+		id := src.ID[:24] + fmt.Sprintf("%012x", n)
+		cloneTaskRow(t, a, to, src.ID, id)
+		return id
+	}
+	for n := 1; n <= taskIDMatchMax+1; n++ { // more than the bound in proj-a alone
+		clone(a, n)
+	}
+	onlyB := func(p string) (bool, error) { return p == "proj-b", nil }
+	first := clone(b, 100)
+	got, denied, err := r.ResolveReadableTaskID(short, onlyB)
+	if err != nil || got != first || len(denied) != 1 || denied[0] != "proj-a" {
+		t.Fatalf("one readable match past the bound: %q %v %v", got, denied, err)
+	}
+	second := clone(b, 101)
+	_, _, err = r.ResolveReadableTaskID(short, onlyB)
+	var amb *AmbiguousIDError
+	if !errors.As(err, &amb) || len(amb.Matches) != 2 {
+		t.Fatalf("two readable matches past the bound: %v", err)
+	}
+	for _, m := range amb.Matches {
+		if m.Project != "proj-b" || (m.ID != first && m.ID != second) {
+			t.Fatalf("an unreadable match is named: %+v", amb.Matches)
+		}
+	}
+	none := func(string) (bool, error) { return false, nil }
+	if _, denied, err := r.ResolveReadableTaskID(short, none); !errors.Is(err, ErrTaskNotFound) || len(denied) != 2 {
+		t.Fatalf("no readable match: %v %v", denied, err)
+	}
+	if _, err := r.ResolveTaskID(short); !errors.As(err, &amb) {
+		t.Fatalf("a filtered miss must not be remembered for everyone: %v", err)
+	}
+	fail := errors.New("grant store down")
+	if _, _, err := r.ResolveReadableTaskID(short, func(string) (bool, error) { return false, fail }); !errors.Is(err, fail) {
+		t.Fatalf("a failed grant check: %v", err)
 	}
 }

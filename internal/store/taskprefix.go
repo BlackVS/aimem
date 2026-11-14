@@ -186,34 +186,99 @@ func (r *Registry) ResolveTaskID(arg string) (string, error) {
 	return "", &AmbiguousIDError{Prefix: arg, Matches: matches}
 }
 
+// ResolveReadableTaskID is ResolveTaskID for a caller who reads only the
+// projects readable accepts: a prefix resolves among the tasks of those
+// projects alone, so the match bound applies after the filter and a task
+// in another project neither makes a prefix ambiguous nor resolves it.
+// denied names each other project that holds a task the prefix starts,
+// so the caller can record a refusal without answering differently. A
+// prefix found in no readable project is ErrTaskNotFound; a miss is
+// remembered only when no project at all holds it.
+func (r *Registry) ResolveReadableTaskID(arg string, readable func(project string) (bool, error)) (id string, denied []string, err error) {
+	if FullTaskID(arg) || !IDPrefixShape(arg) {
+		return arg, nil, nil
+	}
+	if len(arg) < TaskIDPrefixMin {
+		return "", nil, ErrTaskIDShort
+	}
+	if r.hints.missed(arg) {
+		return "", nil, ErrTaskNotFound
+	}
+	gen := r.lifecycleGen.Load()
+	matches, denied, err := r.readableTaskIDMatches(arg, readable)
+	if err != nil {
+		return "", nil, err
+	}
+	switch len(matches) {
+	case 0:
+		if len(denied) == 0 && r.lifecycleGen.Load() == gen {
+			r.hints.noteMiss(arg)
+		}
+		return "", denied, ErrTaskNotFound
+	case 1:
+		r.hints.put(matches[0].ID, matches[0].Project)
+		return matches[0].ID, denied, nil
+	}
+	return "", denied, &AmbiguousIDError{Prefix: arg, Matches: matches}
+}
+
 // taskIDMatches scans every ordinary project for ids that start with
 // prefix, at most taskIDMatchMax in all. A project that cannot be read
 // makes the answer incomplete, so it is an error, never a smaller list.
 func (r *Registry) taskIDMatches(prefix string) ([]TaskIDMatch, error) {
+	out, _, err := r.readableTaskIDMatches(prefix, nil)
+	return out, err
+}
+
+// readableTaskIDMatches is taskIDMatches over the projects readable
+// accepts (every project when readable is nil), with the bound counting
+// those projects' ids only. Each rejected project is probed for one match
+// and, if it holds one, named in denied.
+func (r *Registry) readableTaskIDMatches(prefix string, readable func(string) (bool, error)) ([]TaskIDMatch, []string, error) {
 	r.taskScans.Add(1)
 	projects, err := r.Projects()
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	var out []TaskIDMatch
+	var denied []string
 	for _, p := range projects {
 		if IsReservedProject(p) {
 			continue
 		}
+		allowed := true
+		if readable != nil {
+			if allowed, err = readable(p); err != nil {
+				return nil, nil, fmt.Errorf("task lookup incomplete: project %q access could not be checked: %w", p, err)
+			}
+		}
+		if allowed && len(out) >= taskIDMatchMax {
+			continue
+		}
 		db, err := r.OpenExisting(p)
 		if err != nil {
-			return nil, fmt.Errorf("task lookup incomplete: project %q could not be opened: %w", p, err)
+			return nil, nil, fmt.Errorf("task lookup incomplete: project %q could not be opened: %w", p, err)
 		}
-		ids, err := db.taskIDsWithPrefix(prefix, taskIDMatchMax-len(out))
+		limit := taskIDMatchMax - len(out)
+		if !allowed {
+			limit = 1
+		}
+		ids, err := db.taskIDsWithPrefix(prefix, limit)
 		if err != nil {
-			return nil, fmt.Errorf("task lookup incomplete: project %q could not be read: %w", p, err)
+			return nil, nil, fmt.Errorf("task lookup incomplete: project %q could not be read: %w", p, err)
+		}
+		if !allowed {
+			if len(ids) > 0 {
+				denied = append(denied, p)
+			}
+			continue
 		}
 		for _, id := range ids {
 			out = append(out, TaskIDMatch{Project: p, ID: id})
 		}
-		if len(out) >= taskIDMatchMax {
+		if readable == nil && len(out) >= taskIDMatchMax {
 			break
 		}
 	}
-	return out, nil
+	return out, denied, nil
 }
