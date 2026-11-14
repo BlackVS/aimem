@@ -13,6 +13,19 @@ currently 25); a binary refuses a database newer than it understands.
 
 ## [Unreleased]
 
+## [0.10.23] — 2026-11-14
+
+Task reads follow the project grant (audit A-10). Outside team mode, a
+token reads a project's tasks, comments, history and epics, and sees the
+project in the list, only while its user holds a grant on it. Grant every
+standalone reader before the hub upgrade; the upgrade notes say how. The
+installers can install from an aiforge export in a closed network, and the
+boot scripts check every file they run against the release's
+`SHA256SUMS` (audit A-11, the installer part). This is the first release
+the new boot scripts install, and the first with its installer files as
+assets. `modernc.org/sqlite` moves to v1.62.0. The on-disk schema stays at
+25 and the access schema at 9. Includes PR #352, #356 and #357.
+
 ### Security
 
 - **Task reads follow the project grant** (security audit 2026-10,
@@ -92,6 +105,11 @@ currently 25); a binary refuses a database newer than it understands.
   first one. `AIMEM_VERSION` naming an older release stops with a message
   that says so, and nothing is installed. Install an older release with
   that release's own boot script, whose URL names its tag.
+
+### Changed
+
+- **modernc.org/sqlite v1.61.0 to v1.62.0** (libc v1.80.1); on-disk schema
+  unchanged.
 
 ### Upgrade notes
 
