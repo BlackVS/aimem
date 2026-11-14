@@ -10,7 +10,7 @@ One-liner in any project directory (installs the binary if missing, then
 wires the project):
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/BlackVS/aimem/v0.10.22/boot.sh | bash
+curl -fsSL https://raw.githubusercontent.com/BlackVS/aimem/v0.10.23/boot.sh | bash
 ```
 
 Windows (supported, tested less than Linux), in a PowerShell window.
@@ -18,7 +18,7 @@ From cmd, or from the Run dialog (Win+R) for an upgrade, type
 `powershell` first:
 
 ```powershell
-irm https://github.com/BlackVS/aimem/releases/download/v0.10.22/boot.ps1 | iex
+irm https://github.com/BlackVS/aimem/releases/download/v0.10.23/boot.ps1 | iex
 ```
 
 `boot.ps1` checks the aimem binary against the release's `SHA256SUMS`
@@ -82,7 +82,7 @@ never wires the home directory.
 `AIMEM_USER_ONLY=1` upgrades the user level and wires nothing:
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/BlackVS/aimem/v0.10.22/boot.sh | AIMEM_USER_ONLY=1 bash
+curl -fsSL https://raw.githubusercontent.com/BlackVS/aimem/v0.10.23/boot.sh | AIMEM_USER_ONLY=1 bash
 ```
 
 The `VAR=value bash` form sets the knob for that `bash` only; your shell
@@ -93,7 +93,7 @@ On Windows, set the knob just before the run and take it out again in a
 `AIMEM_*` variable:
 
 ```powershell
-$env:AIMEM_USER_ONLY = 1; try { irm https://github.com/BlackVS/aimem/releases/download/v0.10.22/boot.ps1 | iex } finally { Remove-Item Env:AIMEM_USER_ONLY }
+$env:AIMEM_USER_ONLY = 1; try { irm https://github.com/BlackVS/aimem/releases/download/v0.10.23/boot.ps1 | iex } finally { Remove-Item Env:AIMEM_USER_ONLY }
 ```
 
 `$env:` is the whole process's environment: a knob set in your window
@@ -153,7 +153,7 @@ Fresh host (Debian/Ubuntu LXC or VM), as root — one command does user,
 binary, env, units, timers:
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/BlackVS/aimem/v0.10.22/install-hub.sh | bash
+curl -fsSL https://raw.githubusercontent.com/BlackVS/aimem/v0.10.23/install-hub.sh | bash
 ```
 
 Knobs (env): `AIMEM_HUB_USER` (default sessiond), `AIMEM_HTTP_LISTEN`
@@ -187,7 +187,7 @@ directory, a share, or an internal https server. Its layout (format 1):
 
 ```text
 <base>/MANIFEST                 aiforge-export 1
-                                aimem v0.10.22
+                                aimem v0.10.23
                                 <product> <tag> ...
 <base>/aimem/<tag>/             the release's assets as published,
                                 with its SHA256SUMS
@@ -209,13 +209,13 @@ that does not match. Several releases can sit side by side;
 
 ```sh
 # a workstation, the export mounted at /media/aiforge-export
-AIMEM_BASE=/media/aiforge-export bash /media/aiforge-export/aimem/v0.10.22/boot.sh
+AIMEM_BASE=/media/aiforge-export bash /media/aiforge-export/aimem/v0.10.23/boot.sh
 
 # the same from an internal https server
-curl -fsSL https://dist.example.internal/aiforge/aimem/v0.10.22/boot.sh | AIMEM_BASE=https://dist.example.internal/aiforge bash
+curl -fsSL https://dist.example.internal/aiforge/aimem/v0.10.23/boot.sh | AIMEM_BASE=https://dist.example.internal/aiforge bash
 
 # a hub, as root
-AIMEM_BASE=/media/aiforge-export bash /media/aiforge-export/aimem/v0.10.22/install-hub.sh
+AIMEM_BASE=/media/aiforge-export bash /media/aiforge-export/aimem/v0.10.23/install-hub.sh
 ```
 
 On Windows, set `AIMEM_BASE` to the export (a drive path such as
