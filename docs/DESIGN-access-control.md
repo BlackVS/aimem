@@ -123,7 +123,7 @@ No nested groups or custom role language in v1.
 | Caller | Read tasks | Change tasks |
 | --- | --- | --- |
 | Admin token, local socket | All projects | All projects; full access to other aimem administration/data too |
-| Legacy writer token | All projects | All projects, as before ordinary tokens existed |
+| Legacy writer token | All projects | No: task changes need an ordinary or admin token |
 | User/agent with project assignment and matching project token | Projects its user holds a grant of either kind on, that the token's scope reaches | Assigned working project, under a write grant only |
 | Read-only token | Projects its user holds a grant of either kind on | No |
 | Ordinary token whose user holds no grant on the project | No: the project and its tasks answer as not found | No |
