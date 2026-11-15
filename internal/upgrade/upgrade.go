@@ -1,18 +1,23 @@
 // Package upgrade brings an installed client to a release: `aimem
 // upgrade`. It does what boot.sh and boot.ps1 do before they hand over to
 // the installer, from inside the binary: it resolves the release, checks
-// the platform binary against the release's SHA256SUMS, and fetches the
-// tag's archive. Then it runs that archive's installer in its user-level
-// mode with the verified binary, so the swap, the state backup, the
-// health wait, the rollback and the hooks, plugin and service steps stay
-// the installers' own (install.sh `user`, install.ps1 -UserOnly).
+// the platform binary, the installer (install.sh or install.ps1) and the
+// OpenCode plugin against the release's SHA256SUMS, and lays them out as
+// the boot scripts do. Then it runs that installer in its user-level mode
+// with the verified binary, so the swap, the state backup, the health
+// wait, the rollback and the hooks, plugin and service steps stay the
+// installers' own (install.sh `user`, install.ps1 -UserOnly).
+//
+// The files come from the release on the forge or, with AIMEM_BASE, from
+// an aiforge export in format 1: <base>/MANIFEST names the release, and
+// <base>/aimem/<tag>/ holds its assets with its SHA256SUMS. A source is
+// https or a local directory; plain http is refused, on every redirect hop
+// too.
 package upgrade
 
 import (
-	"archive/tar"
 	"bufio"
 	"bytes"
-	"compress/gzip"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
@@ -23,7 +28,6 @@ import (
 	"net/http"
 	"os"
 	"os/exec"
-	"path"
 	"path/filepath"
 	"regexp"
 	"runtime"
@@ -32,32 +36,44 @@ import (
 	"time"
 )
 
-// Size bounds on what is downloaded: a release binary is about 20 MB and
-// the repository archive a few MB.
+// Size bounds on what is read: a release binary is about 20 MB, an
+// installer or the plugin some tens of KB.
 const (
-	maxSums    = 64 << 10
-	maxBinary  = 256 << 20
-	maxArchive = 128 << 20
-	maxRelease = 1 << 20
+	maxSums     = 64 << 10
+	maxBinary   = 256 << 20
+	maxScript   = 4 << 20
+	maxRelease  = 1 << 20
+	maxManifest = 64 << 10
 )
 
+// pluginAsset is the OpenCode plugin's release asset. The installers read
+// it at .opencode/plugin/aimem.ts beside themselves, where a checkout has
+// it.
+const pluginAsset = "aimem-opencode.ts"
+
+// exportFormat is the first line of an aiforge export's MANIFEST.
+const exportFormat = "aiforge-export 1"
+
 // Source is where releases come from: the repository on the forge, as
-// boot.sh names it (AIMEM_REPO, owner/name).
+// boot.sh names it (AIMEM_REPO, owner/name), or an aiforge export.
 type Source struct {
-	Repo   string       // owner/name
-	Web    string       // https://github.com
-	API    string       // https://api.github.com
+	Repo string // owner/name
+	Web  string // https://github.com
+	API  string // https://api.github.com
+	// Base is AIMEM_BASE: an aiforge export, as an absolute directory or
+	// an https:// URL. With it, Web and API are never contacted.
+	Base   string
 	Client *http.Client // nil: a client with a timeout
 }
 
-// DefaultSource is the source the installers use: AIMEM_REPO or
-// BlackVS/aimem on github.com.
+// DefaultSource is the source the installers use: AIMEM_BASE when it is
+// set, and AIMEM_REPO or BlackVS/aimem on github.com.
 func DefaultSource() Source {
 	repo := os.Getenv("AIMEM_REPO")
 	if repo == "" {
 		repo = "BlackVS/aimem"
 	}
-	return Source{Repo: repo, Web: "https://github.com", API: "https://api.github.com"}
+	return Source{Repo: repo, Web: "https://github.com", API: "https://api.github.com", Base: os.Getenv("AIMEM_BASE")}
 }
 
 // Options is one upgrade.
@@ -71,7 +87,7 @@ type Options struct {
 	// is never swapped for a client install. "" skips the check.
 	Self string
 	Out  io.Writer
-	// Install runs the extracted installer with the verified binary; nil
+	// Install runs the laid-out installer with the verified binary; nil
 	// runs it as boot.sh and boot.ps1 do (RunInstaller).
 	Install func(ctx context.Context, dir, binary, tag string, out io.Writer) error
 }
@@ -87,9 +103,13 @@ func refuse(format string, a ...any) error {
 // installed client untouched; an installer failure is the installer's,
 // which restores the previous binary itself.
 func Run(ctx context.Context, src Source, o Options) error {
-	if src.Client == nil {
-		src.Client = &http.Client{Timeout: 5 * time.Minute}
+	client := &http.Client{Timeout: 5 * time.Minute}
+	if src.Client != nil {
+		c := *src.Client
+		client = &c
 	}
+	client.CheckRedirect = httpsOnly
+	src.Client = client
 	goos, goarch := o.GOOS, o.GOARCH
 	if goos == "" {
 		goos = runtime.GOOS
@@ -116,16 +136,30 @@ func Run(ctx context.Context, src Source, o Options) error {
 		}
 	}
 
+	// A directory base keeps its form (filepath.Join cleans it), so a
+	// filesystem root stays a root.
+	if strings.HasPrefix(src.Base, "https://") && len(src.Base) > len("https://") {
+		src.Base = strings.TrimRight(src.Base, "/")
+	} else if src.Base != "" && !filepath.IsAbs(src.Base) {
+		return refuse("AIMEM_BASE must be an absolute directory or an https:// URL, not %q", src.Base)
+	}
+
 	tag := o.Release
 	if tag != "" && !strings.HasPrefix(tag, "v") {
 		tag = "v" + tag // release tags are vX.Y.Z
 	}
+	newest := "the newest release"
 	if tag == "" {
-		latest, err := src.latest(ctx)
+		var err error
+		if src.Base != "" {
+			newest = "the export's release"
+			tag, err = src.manifest(ctx)
+		} else {
+			tag, err = src.latest(ctx)
+		}
 		if err != nil {
 			return err
 		}
-		tag = latest
 	}
 	target, ok := parseVersion(tag)
 	if !ok {
@@ -137,7 +171,7 @@ func Run(ctx context.Context, src Source, o Options) error {
 		fmt.Fprintf(out, "aimem %s is already installed; nothing to do\n", o.Current)
 		return nil
 	case curOK && cmpVersion(target, cur) < 0 && o.Release == "":
-		return refuse("the newest release %s is older than the running %s; name a release with --release to install it", tag, o.Current)
+		return refuse("%s %s is older than the running %s; name a release with --release to install it", newest, tag, o.Current)
 	case !curOK && o.Release == "":
 		return refuse("the running version %q is not a release; name one with --release", o.Current)
 	}
@@ -146,47 +180,81 @@ func Run(ctx context.Context, src Source, o Options) error {
 	}
 
 	asset := AssetName(goos, goarch)
+	installer := "install.sh"
+	if goos == "windows" {
+		installer = "install.ps1"
+	}
 	work, err := os.MkdirTemp("", "aimem-upgrade-")
 	if err != nil {
 		return err
 	}
 	defer os.RemoveAll(work)
 
-	fmt.Fprintf(out, "fetching aimem %s (%s) from %s\n", tag, asset, src.Repo)
-	sums, err := src.get(ctx, src.download(tag, "SHA256SUMS"), maxSums)
+	fmt.Fprintf(out, "fetching aimem %s (%s) from %s\n", tag, asset, src.release(tag))
+	b, err := src.get(ctx, src.file(tag, "SHA256SUMS"), maxSums)
 	if err != nil {
-		return refuse("release %s has no SHA256SUMS (%v); refusing an unverified binary", tag, err)
+		return refuse("release %s has no SHA256SUMS (%v); refusing unverified files", tag, err)
 	}
-	want, listed := parseSums(sums)[asset]
-	if !listed {
-		return refuse("release %s does not list %s in its SHA256SUMS", tag, asset)
+	sums := parseSums(b)
+	if _, ok := sums[installer]; !ok {
+		return refuse("release %s publishes no installer files as assets (its SHA256SUMS lists no %s); v0.10.23 is the first release that does. Install %s with its own one-liner: %s",
+			tag, installer, tag, oneLiner(src.Repo, tag, goos))
 	}
-	bin, err := src.get(ctx, src.download(tag, asset), maxBinary)
+	for _, n := range []string{asset, pluginAsset} {
+		if _, ok := sums[n]; !ok {
+			return refuse("release %s does not list %s in its SHA256SUMS", tag, n)
+		}
+	}
+	verified := func(name string, max int64) ([]byte, error) {
+		b, err := src.get(ctx, src.file(tag, name), max)
+		if err != nil {
+			return nil, refuse("release %s: %s: %v", tag, name, err)
+		}
+		got := sha256.Sum256(b)
+		if hex.EncodeToString(got[:]) != sums[name] {
+			return nil, refuse("checksum mismatch for %s (want %s, got %s)", name, sums[name], hex.EncodeToString(got[:]))
+		}
+		fmt.Fprintf(out, "checksum OK: %s\n", name)
+		return b, nil
+	}
+	bin, err := verified(asset, maxBinary)
 	if err != nil {
-		return refuse("release %s: %s: %v", tag, asset, err)
+		return err
 	}
-	got := sha256.Sum256(bin)
-	if hex.EncodeToString(got[:]) != want {
-		return refuse("checksum mismatch for %s (want %s, got %s)", asset, want, hex.EncodeToString(got[:]))
+	script, err := verified(installer, maxScript)
+	if err != nil {
+		return err
 	}
-	fmt.Fprintf(out, "checksum OK: %s\n", asset)
+	plugin, err := verified(pluginAsset, maxScript)
+	if err != nil {
+		return err
+	}
+
+	// The layout the boot scripts give the installer: the installer, and
+	// the plugin where a checkout has it.
 	name := "aimem-prebuilt"
 	if goos == "windows" {
 		name += ".exe"
 	}
 	binary := filepath.Join(work, name)
-	if err := os.WriteFile(binary, bin, 0o755); err != nil {
+	dir := filepath.Join(work, "src")
+	pluginDir := filepath.Join(dir, ".opencode", "plugin")
+	if err := os.MkdirAll(pluginDir, 0o755); err != nil {
 		return err
 	}
+	for _, f := range []struct {
+		path string
+		body []byte
+	}{
+		{binary, bin},
+		{filepath.Join(dir, installer), script},
+		{filepath.Join(pluginDir, "aimem.ts"), plugin},
+	} {
+		if err := os.WriteFile(f.path, f.body, 0o755); err != nil {
+			return err
+		}
+	}
 
-	archive, err := src.get(ctx, src.Web+"/"+src.Repo+"/archive/refs/tags/"+tag+".tar.gz", maxArchive)
-	if err != nil {
-		return refuse("release %s: the source archive: %v", tag, err)
-	}
-	dir := filepath.Join(work, "src")
-	if err := extract(archive, dir); err != nil {
-		return refuse("release %s: the source archive: %v", tag, err)
-	}
 	if err := install(ctx, dir, binary, tag, out); err != nil {
 		return fmt.Errorf("the installer of %s failed: %w", tag, err)
 	}
@@ -203,6 +271,28 @@ func Run(ctx context.Context, src Source, o Options) error {
 	}
 	fmt.Fprintf(out, "aimem %s is installed at %s\n", came, inst)
 	return nil
+}
+
+// httpsOnly keeps every redirect hop on TLS, within the default limit of
+// ten hops.
+func httpsOnly(req *http.Request, via []*http.Request) error {
+	if req.URL.Scheme != "https" {
+		return fmt.Errorf("refusing a redirect to %s: not https", req.URL.Redacted())
+	}
+	if len(via) >= 10 {
+		return errors.New("stopped after 10 redirects")
+	}
+	return nil
+}
+
+// oneLiner is a release's own install line, its boot script fetched from
+// the repository at its tag, as boot.sh hands an older release over.
+func oneLiner(repo, tag, goos string) string {
+	raw := "https://raw.githubusercontent.com/" + repo + "/" + tag
+	if goos == "windows" {
+		return "irm " + raw + "/boot.ps1 | iex"
+	}
+	return "curl -fsSL " + raw + "/boot.sh | bash"
 }
 
 // hubMarker names what only install-hub.sh leaves in the service user's
@@ -266,7 +356,7 @@ func AssetName(goos, goarch string) string {
 	return n
 }
 
-// RunInstaller runs the archive's installer in its user-level mode with
+// RunInstaller runs the laid-out installer in its user-level mode with
 // the verified binary, as boot.sh and boot.ps1 hand it over: bash
 // install.sh user, or install.ps1 -UserOnly in a child PowerShell whose
 // execution policy is RemoteSigned for that process only.
@@ -284,8 +374,47 @@ func RunInstaller(ctx context.Context, dir, binary, tag string, out io.Writer) e
 	return cmd.Run()
 }
 
-func (s Source) download(tag, name string) string {
-	return s.Web + "/" + s.Repo + "/releases/download/" + tag + "/" + name
+// release is where the release's files are: its download URL on the
+// forge, or its directory in the export.
+func (s Source) release(tag string) string {
+	switch {
+	case s.Base == "":
+		return s.Web + "/" + s.Repo + "/releases/download/" + tag
+	case strings.HasPrefix(s.Base, "https://"):
+		return s.Base + "/aimem/" + tag
+	default:
+		return filepath.Join(s.Base, "aimem", tag)
+	}
+}
+
+// file is one file of the release.
+func (s Source) file(tag, name string) string {
+	if s.Base != "" && !strings.HasPrefix(s.Base, "https://") {
+		return filepath.Join(s.release(tag), name)
+	}
+	return s.release(tag) + "/" + name
+}
+
+// manifest is the release an export's MANIFEST names for aimem.
+func (s Source) manifest(ctx context.Context) (string, error) {
+	loc := s.Base + "/MANIFEST"
+	if !strings.HasPrefix(s.Base, "https://") {
+		loc = filepath.Join(s.Base, "MANIFEST")
+	}
+	b, err := s.get(ctx, loc, maxManifest)
+	if err != nil {
+		return "", refuse("%s is missing (%v); name the release with --release, or check AIMEM_BASE", loc, err)
+	}
+	lines := strings.Split(strings.ReplaceAll(string(b), "\r", ""), "\n")
+	if format := strings.TrimSpace(lines[0]); format != exportFormat {
+		return "", refuse("%s is %q, not a format aimem upgrade reads (%s)", loc, format, exportFormat)
+	}
+	for _, l := range lines[1:] {
+		if f := strings.Fields(l); len(f) >= 2 && f[0] == "aimem" {
+			return f[1], nil
+		}
+	}
+	return "", refuse("%s names no aimem release", loc)
 }
 
 // latest is the newest published release: GitHub's latest excludes
@@ -306,25 +435,41 @@ func (s Source) latest(ctx context.Context) (string, error) {
 	return r.Tag, nil
 }
 
-func (s Source) get(ctx context.Context, url string, max int64) ([]byte, error) {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
-	if err != nil {
-		return nil, err
+// get reads one file: over https, or from a local directory given by an
+// absolute path. Any other scheme, plain http included, is refused.
+func (s Source) get(ctx context.Context, loc string, max int64) ([]byte, error) {
+	var r io.Reader
+	switch {
+	case strings.HasPrefix(loc, "https://"):
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, loc, nil)
+		if err != nil {
+			return nil, err
+		}
+		resp, err := s.Client.Do(req)
+		if err != nil {
+			return nil, err
+		}
+		defer resp.Body.Close()
+		if resp.StatusCode != http.StatusOK {
+			return nil, fmt.Errorf("%s: %s", loc, resp.Status)
+		}
+		r = resp.Body
+	case strings.Contains(loc, "://") || !filepath.IsAbs(loc):
+		return nil, fmt.Errorf("%s: a source is an https:// URL or an absolute directory", loc)
+	default:
+		f, err := os.Open(loc)
+		if err != nil {
+			return nil, err
+		}
+		defer f.Close()
+		r = f
 	}
-	resp, err := s.Client.Do(req)
-	if err != nil {
-		return nil, err
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("%s: %s", url, resp.Status)
-	}
-	b, err := io.ReadAll(io.LimitReader(resp.Body, max+1))
+	b, err := io.ReadAll(io.LimitReader(r, max+1))
 	if err != nil {
 		return nil, err
 	}
 	if int64(len(b)) > max {
-		return nil, fmt.Errorf("%s: larger than %d bytes", url, max)
+		return nil, fmt.Errorf("%s: larger than %d bytes", loc, max)
 	}
 	return b, nil
 }
@@ -341,79 +486,6 @@ func parseSums(b []byte) map[string]string {
 		}
 	}
 	return out
-}
-
-// extract unpacks a GitHub source archive into dir, dropping its single
-// top-level directory as tar --strip-components=1 does. Only regular
-// files and directories are written, and a name that would leave dir is
-// refused.
-func extract(archive []byte, dir string) error {
-	zr, err := gzip.NewReader(bytes.NewReader(archive))
-	if err != nil {
-		return err
-	}
-	tr := tar.NewReader(zr)
-	var total int64
-	for {
-		h, err := tr.Next()
-		if err == io.EOF {
-			return nil
-		}
-		if err != nil {
-			return err
-		}
-		if unsafeName(h.Name) {
-			return fmt.Errorf("unsafe path %q", h.Name)
-		}
-		_, rest, ok := strings.Cut(path.Clean(h.Name), "/")
-		if !ok || rest == "" {
-			continue
-		}
-		dst := filepath.Join(dir, filepath.FromSlash(rest))
-		if r, err := filepath.Rel(dir, dst); err != nil || r == ".." || strings.HasPrefix(r, ".."+string(filepath.Separator)) {
-			return fmt.Errorf("unsafe path %q", h.Name)
-		}
-		switch h.Typeflag {
-		case tar.TypeDir:
-			if err := os.MkdirAll(dst, 0o755); err != nil {
-				return err
-			}
-		case tar.TypeReg:
-			total += h.Size
-			if total > 4*maxArchive {
-				return errors.New("the archive unpacks larger than expected")
-			}
-			if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
-				return err
-			}
-			f, err := os.OpenFile(dst, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, os.FileMode(h.Mode)&0o755|0o600)
-			if err != nil {
-				return err
-			}
-			_, err = io.Copy(f, io.LimitReader(tr, h.Size))
-			if cerr := f.Close(); err == nil {
-				err = cerr
-			}
-			if err != nil {
-				return err
-			}
-		}
-	}
-}
-
-// unsafeName refuses what a source archive never holds: an absolute
-// name, a ".." element, or a backslash or colon a Windows path would
-// read as a separator or a drive.
-func unsafeName(name string) bool {
-	if path.IsAbs(name) || strings.ContainsAny(name, `\:`) {
-		return true
-	}
-	for _, e := range strings.Split(name, "/") {
-		if e == ".." {
-			return true
-		}
-	}
-	return false
 }
 
 var versionRE = regexp.MustCompile(`^v?(\d+)\.(\d+)\.(\d+)$`)

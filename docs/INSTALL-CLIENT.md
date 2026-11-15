@@ -153,10 +153,15 @@ prereleases excluded. It does the following, in order:
 
 1. It refuses an older release unless `--release` names it, and says so
    and changes nothing when the release is the one already installed.
-2. It fetches the release's `SHA256SUMS` and the binary for this
-   platform, and refuses a missing sums file, a binary the sums do not
-   list, or a hash that does not match. A refusal leaves the installed
-   client as it was.
+2. It fetches the release's `SHA256SUMS`, then three of its assets: the
+   binary for this platform, the installer (`install.sh`, or
+   `install.ps1` on Windows) and the OpenCode plugin
+   (`aimem-opencode.ts`). It refuses a missing sums file, a file the sums
+   do not list, or a hash that does not match. A release whose sums list
+   no installer is from before v0.10.23, the first release that publishes
+   its installer files as assets; the command refuses it and prints that
+   release's own one-liner, which installs it. A refusal leaves the
+   installed client as it was.
 3. It runs that release's own installer in its user-level mode, as the
    one-liner does: `install.sh user`, or on Windows `install.ps1
    -UserOnly` in a child PowerShell under the `RemoteSigned` policy for
@@ -171,6 +176,23 @@ upgrades only the client the installers put in place (`~/.local/bin/aimem`,
 or `%LOCALAPPDATA%\aimem\bin\aimem.exe` on Windows). A hub upgrades with
 `install-hub.sh`. A client older than the first release with the command
 upgrades once with the newer release's one-liner.
+
+Every file is read over https or from a local directory. Plain http is
+refused, and so is a redirect to it.
+
+In a closed network, set `AIMEM_BASE` to an aiforge export, as for the
+one-liner (ADMIN-MANUAL, "Installing from an aiforge export"): an absolute
+directory (on Windows also a drive or `\\host\share` path) or an
+`https://` URL. The command then takes the release the export's
+`MANIFEST` names, or the one `--release` names, and its files from
+`<base>/aimem/<tag>/`. It makes no call to the GitHub API and contacts no
+other host. A `MANIFEST` that is missing, in a format other than
+`aiforge-export 1` or without an `aimem` line is refused, and so is a
+release the export does not hold.
+
+```sh
+AIMEM_BASE=/media/aiforge-export aimem upgrade
+```
 
 ## 2. Options
 

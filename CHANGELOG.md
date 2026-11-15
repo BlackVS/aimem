@@ -13,6 +13,32 @@ currently 25); a binary refuses a database newer than it understands.
 
 ## [Unreleased]
 
+### Security
+
+- **`aimem upgrade` checks every file it runs** (security audit 2026-10,
+  finding A-11, the rest of it). The command used to verify only the
+  binary, then run the installer from the tag's source archive, which
+  nothing checked. Now it takes the installer (`install.sh`, or
+  `install.ps1` on Windows) and the OpenCode plugin (`aimem-opencode.ts`)
+  from the release's assets, checks each against `SHA256SUMS` as the boot
+  scripts do, and never asks for the source archive. A release whose sums
+  list no installer predates v0.10.23, the first release with these
+  assets; the command refuses it and prints that release's own one-liner.
+  Every download is https, and a redirect to plain http is refused.
+  With A-11 closed in the clients, the release's provenance stays with
+  A-8 and A-12. The installers do not change.
+
+### Added
+
+- **`aimem upgrade` from an aiforge export.** With `AIMEM_BASE` set to an
+  export (format 1), as an absolute directory or an `https://` URL, the
+  command takes the release the export's `MANIFEST` names, or the one
+  `--release` names, and its files from `<base>/aimem/<tag>/`. It makes
+  no call to the GitHub API and contacts no other host. A missing
+  `MANIFEST`, a format other than `aiforge-export 1`, a `MANIFEST` with no
+  `aimem` line and a release the export does not hold are refused
+  (INSTALL-CLIENT.md, "Upgrading").
+
 ## [0.10.23] — 2026-11-14
 
 Task reads follow the project grant (audit A-10). Outside team mode, a

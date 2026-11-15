@@ -70,8 +70,9 @@ duplicate registration produces duplicate journal events.
 ### Upgrades
 
 Upgrade a workstation with `aimem upgrade`, from any directory: it
-checks the newest release (or the one `--release vX.Y.Z` names) against
-its `SHA256SUMS`, then runs that release's installer in its user-level
+checks the newest release's binary, installer and OpenCode plugin (or
+those of the release `--release vX.Y.Z` names) against its `SHA256SUMS`,
+then runs that release's installer in its user-level
 mode, which does the steps below
 ([INSTALL-CLIENT.md, Upgrading](INSTALL-CLIENT.md#upgrading)). A client
 older than the first release with the command, and an upgrade that needs
@@ -229,11 +230,15 @@ export's `aimem\<tag>\boot.ps1` as a file with `powershell -NoProfile
 printed `irm <base>/aimem/<tag>/boot.ps1 | iex` line works as well.
 
 Run with a base, `install-hub.sh` prints the client install command with
-the same base, not the github.com one-liner. `aimem upgrade` still reads
-github.com; on a closed network, upgrade with the newer release's boot
-script from the export, as above. A release older than the first one
-that publishes its installer files as assets (`install.sh`,
-`install.ps1`, `aimem-opencode.ts`) cannot be installed this way.
+the same base, not the github.com one-liner. A workstation upgrades from
+the export with `AIMEM_BASE=<base> aimem upgrade`. The command takes the
+release `MANIFEST` names, or the one `--release` names, checks the same
+three files against its `SHA256SUMS` and contacts no other host
+([INSTALL-CLIENT.md, Upgrading](INSTALL-CLIENT.md#upgrading)). The
+newer release's boot script from the export, as above, works as well. A
+release older than the first one that publishes its installer files as
+assets (`install.sh`, `install.ps1`, `aimem-opencode.ts`) cannot be
+installed either way.
 
 ### Installing from a local directory
 

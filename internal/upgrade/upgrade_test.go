@@ -1,9 +1,7 @@
 package upgrade
 
 import (
-	"archive/tar"
 	"bytes"
-	"compress/gzip"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
@@ -32,11 +30,13 @@ func TestMain(m *testing.M) {
 }
 
 // The stub installers do what the real ones do with the handed-over
-// binary in user mode: put it at the installed path. They record the
-// release they were told, and fail when STUB_FAIL is set.
+// binary in user mode: put it at the installed path. They refuse to run
+// without the plugin where the real ones read it, record the release they
+// were told, and fail when STUB_FAIL is set.
 const stubInstallSh = `#!/bin/bash
 set -e
 [ "$1" = user ] || { echo "stub installer: wrong mode $1"; exit 9; }
+[ "$(cat "$(dirname "$0")/.opencode/plugin/aimem.ts")" = "the plugin" ] || { echo "stub installer: no plugin beside it"; exit 8; }
 if [ -n "$STUB_FAIL" ]; then echo "stub installer: the new release did not come up; rolled back"; exit 3; fi
 mkdir -p "$AIMEM_BIN_DIR"
 cp "$AIMEM_PREBUILT" "$AIMEM_BIN_DIR/aimem"
@@ -46,6 +46,8 @@ printf '%s' "$AIMEM_TARGET_VERSION" > "$STUB_MARK"
 
 const stubInstallPs1 = `param([switch]$UserOnly)
 if (-not $UserOnly) { Write-Output 'stub installer: wrong mode'; exit 9 }
+$plugin = Join-Path $PSScriptRoot '.opencode\plugin\aimem.ts'
+if (-not (Test-Path -LiteralPath $plugin) -or (Get-Content -Raw -LiteralPath $plugin) -ne 'the plugin') { Write-Output 'stub installer: no plugin beside it'; exit 8 }
 if ($env:STUB_FAIL) { Write-Output 'stub installer: the new release did not come up; rolled back'; exit 3 }
 $bin = Join-Path $env:LOCALAPPDATA 'aimem\bin'
 New-Item -ItemType Directory -Force $bin | Out-Null
@@ -53,20 +55,29 @@ Copy-Item -Force -LiteralPath $env:AIMEM_PREBUILT -Destination (Join-Path $bin '
 [IO.File]::WriteAllText($env:STUB_MARK, $env:AIMEM_TARGET_VERSION)
 `
 
-// release is a stub forge: the latest-release answer and, per tag, the
-// files a release serves. Downloads counts the release-file requests.
+// release is a stub https server: the latest-release answer and the files
+// it serves by path. Hits counts every request, downloads the files
+// served; redirect sends a path elsewhere.
 type release struct {
 	latest    string
 	files     map[string][]byte // path under the web base -> body
+	redirect  map[string]string // path under the web base -> location
+	hits      atomic.Int32
 	downloads atomic.Int32
 }
 
 func (r *release) ServeHTTP(w http.ResponseWriter, q *http.Request) {
+	r.hits.Add(1)
 	if q.URL.Path == "/api/repos/o/r/releases/latest" {
 		fmt.Fprintf(w, `{"tag_name": %q, "draft": false, "prerelease": false}`, r.latest)
 		return
 	}
-	b, ok := r.files[strings.TrimPrefix(q.URL.Path, "/web")]
+	p := strings.TrimPrefix(q.URL.Path, "/web")
+	if to, ok := r.redirect[p]; ok {
+		http.Redirect(w, q, to, http.StatusFound)
+		return
+	}
+	b, ok := r.files[p]
 	if !ok {
 		http.NotFound(w, q)
 		return
@@ -75,10 +86,17 @@ func (r *release) ServeHTTP(w http.ResponseWriter, q *http.Request) {
 	w.Write(b)
 }
 
-// publish adds a release: the binary (this test binary, which runs as
-// the stub aimem), SHA256SUMS listing it, and the source archive with the
-// stub installers.
-func (r *release) publish(t *testing.T, tag string) []byte {
+// installer is the platform's installer asset.
+func installer() string {
+	if runtime.GOOS == "windows" {
+		return "install.ps1"
+	}
+	return "install.sh"
+}
+
+// assets is a release's files: the binary (this test binary, which runs as
+// the stub aimem), the installers, the plugin, and SHA256SUMS listing them.
+func assets(t *testing.T) map[string][]byte {
 	t.Helper()
 	exe, err := os.Executable()
 	if err != nil {
@@ -88,33 +106,32 @@ func (r *release) publish(t *testing.T, tag string) []byte {
 	if err != nil {
 		t.Fatal(err)
 	}
-	asset := AssetName(runtime.GOOS, runtime.GOARCH)
-	sum := sha256.Sum256(bin)
-	pre := "/o/r/releases/download/" + tag + "/"
-	r.files[pre+asset] = bin
-	r.files[pre+"SHA256SUMS"] = []byte(hex.EncodeToString(sum[:]) + "  " + asset + "\n" +
-		strings.Repeat("0", 64) + "  LICENSE\n")
-	r.files["/o/r/archive/refs/tags/"+tag+".tar.gz"] = archive(t, map[string]string{
-		"install.sh": stubInstallSh, "install.ps1": stubInstallPs1,
-	})
-	return bin
+	files := map[string][]byte{
+		AssetName(runtime.GOOS, runtime.GOARCH): bin,
+		"install.sh":                            []byte(stubInstallSh),
+		"install.ps1":                           []byte(stubInstallPs1),
+		pluginAsset:                             []byte("the plugin"),
+	}
+	var sums strings.Builder
+	for n, b := range files {
+		sum := sha256.Sum256(b)
+		sums.WriteString(hex.EncodeToString(sum[:]) + "  " + n + "\n")
+	}
+	sums.WriteString(strings.Repeat("0", 64) + "  LICENSE\n")
+	files["SHA256SUMS"] = []byte(sums.String())
+	return files
 }
 
-func archive(t *testing.T, files map[string]string) []byte {
+func releaseDir(tag string) string { return "/o/r/releases/download/" + tag + "/" }
+
+// publish adds a release to the forge and returns its binary.
+func (r *release) publish(t *testing.T, tag string) []byte {
 	t.Helper()
-	var buf bytes.Buffer
-	zw := gzip.NewWriter(&buf)
-	tw := tar.NewWriter(zw)
-	tw.WriteHeader(&tar.Header{Name: "aimem-x/", Typeflag: tar.TypeDir, Mode: 0o755})
-	for name, body := range files {
-		if err := tw.WriteHeader(&tar.Header{Name: "aimem-x/" + name, Typeflag: tar.TypeReg, Mode: 0o755, Size: int64(len(body))}); err != nil {
-			t.Fatal(err)
-		}
-		tw.Write([]byte(body))
+	files := assets(t)
+	for n, b := range files {
+		r.files[releaseDir(tag)+n] = b
 	}
-	tw.Close()
-	zw.Close()
-	return buf.Bytes()
+	return files[AssetName(runtime.GOOS, runtime.GOARCH)]
 }
 
 // sandbox is an installed client: the installed binary at the path the
@@ -157,7 +174,7 @@ func (s *sandbox) untouched(t *testing.T) {
 
 func setup(t *testing.T) (*release, Source, *sandbox) {
 	t.Helper()
-	r := &release{latest: "v0.10.18", files: map[string][]byte{}}
+	r := &release{latest: "v0.10.18", files: map[string][]byte{}, redirect: map[string]string{}}
 	srv := httptest.NewTLSServer(r)
 	t.Cleanup(srv.Close)
 	return r, Source{Repo: "o/r", Web: srv.URL + "/web", API: srv.URL + "/api", Client: srv.Client()}, newSandbox(t)
@@ -171,8 +188,8 @@ func run(src Source, o Options) (string, error) {
 }
 
 // The newest release, and a named one, are verified and installed by the
-// release's own installer, which is told the release; the installed
-// binary then reports it.
+// release's own installer asset, which is told the release; the installed
+// binary then reports it. Only release assets are fetched.
 func TestUpgradeInstallsTheNewestOrNamedRelease(t *testing.T) {
 	for _, c := range []struct{ name, release, want string }{
 		{"newest", "", "v0.10.18"},
@@ -193,10 +210,19 @@ func TestUpgradeInstallsTheNewestOrNamedRelease(t *testing.T) {
 			if m, _ := os.ReadFile(s.mark); string(m) != c.want {
 				t.Errorf("the installer was told %q, want %q", m, c.want)
 			}
-			for _, w := range []string{"checksum OK: " + AssetName(runtime.GOOS, runtime.GOARCH), "aimem " + c.want + " is installed at " + s.installed} {
+			for _, w := range []string{
+				"checksum OK: " + AssetName(runtime.GOOS, runtime.GOARCH),
+				"checksum OK: " + installer(),
+				"checksum OK: " + pluginAsset,
+				"aimem " + c.want + " is installed at " + s.installed,
+			} {
 				if !strings.Contains(out, w) {
 					t.Errorf("output lacks %q:\n%s", w, out)
 				}
+			}
+			// SHA256SUMS, the binary, the installer and the plugin.
+			if n := r.downloads.Load(); n != 4 {
+				t.Errorf("%d files fetched, want 4", n)
 			}
 		})
 	}
@@ -234,24 +260,28 @@ func TestUpgradeRefusesADowngradeUnlessNamed(t *testing.T) {
 	}
 }
 
-// A missing sums file, an unlisted asset and a mismatch each refuse
-// before anything is touched.
-func TestUpgradeRefusesAnUnverifiedBinary(t *testing.T) {
-	asset := AssetName(runtime.GOOS, runtime.GOARCH)
-	pre := "/o/r/releases/download/v0.10.18/"
-	for _, c := range []struct {
+// A missing sums file, and for each of the binary, the installer and the
+// plugin a missing sums line, a missing file and a mismatch, each refuse
+// before anything is run or touched.
+func TestUpgradeRefusesUnverifiedFiles(t *testing.T) {
+	pre := releaseDir("v0.10.18")
+	type brk struct {
 		name   string
 		break_ func(r *release)
 		want   string
-	}{
-		{"no sums", func(r *release) { delete(r.files, pre+"SHA256SUMS") }, "has no SHA256SUMS"},
-		{"unlisted", func(r *release) {
-			r.files[pre+"SHA256SUMS"] = []byte(strings.Repeat("0", 64) + "  LICENSE\n")
-		}, "does not list " + asset},
-		{"tampered", func(r *release) { r.files[pre+asset] = append(append([]byte{}, r.files[pre+asset]...), 'x') }, "checksum mismatch for " + asset},
-		{"no binary", func(r *release) { delete(r.files, pre+asset) }, asset},
-		{"no archive", func(r *release) { delete(r.files, "/o/r/archive/refs/tags/v0.10.18.tar.gz") }, "the source archive"},
-	} {
+	}
+	cases := []brk{{"no sums", func(r *release) { delete(r.files, pre+"SHA256SUMS") }, "has no SHA256SUMS"}}
+	for _, n := range []string{AssetName(runtime.GOOS, runtime.GOARCH), installer(), pluginAsset} {
+		n := n
+		cases = append(cases,
+			brk{"tampered " + n, func(r *release) { r.files[pre+n] = append(append([]byte{}, r.files[pre+n]...), 'x') }, "checksum mismatch for " + n},
+			brk{"no file " + n, func(r *release) { delete(r.files, pre+n) }, "release v0.10.18: " + n},
+		)
+		if n != installer() { // an unlisted installer is the pre-asset refusal
+			cases = append(cases, brk{"unlisted " + n, func(r *release) { r.files[pre+"SHA256SUMS"] = dropLine(r.files[pre+"SHA256SUMS"], n) }, "does not list " + n})
+		}
+	}
+	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
 			r, src, s := setup(t)
 			r.publish(t, "v0.10.18")
@@ -263,6 +293,44 @@ func TestUpgradeRefusesAnUnverifiedBinary(t *testing.T) {
 			s.untouched(t)
 		})
 	}
+}
+
+func dropLine(sums []byte, name string) []byte {
+	var keep []string
+	for _, l := range strings.Split(string(sums), "\n") {
+		if f := strings.Fields(l); len(f) == 2 && f[1] == name {
+			continue
+		}
+		keep = append(keep, l)
+	}
+	return []byte(strings.Join(keep, "\n"))
+}
+
+// A release whose sums list no installer predates the installer assets:
+// refused with the release's own one-liner, decided by the sums and not by
+// the version, and nothing but SHA256SUMS is fetched. No source archive is
+// ever asked for.
+func TestUpgradeRefusesAReleaseWithoutInstallerAssets(t *testing.T) {
+	r, src, s := setup(t)
+	r.publish(t, "v0.10.30")
+	pre := releaseDir("v0.10.30")
+	r.files[pre+"SHA256SUMS"] = dropLine(dropLine(r.files[pre+"SHA256SUMS"], "install.sh"), "install.ps1")
+	_, err := run(src, Options{Current: "v0.10.17", Release: "v0.10.30"})
+	if !errors.Is(err, ErrRefused) {
+		t.Fatalf("%v", err)
+	}
+	for _, w := range []string{"publishes no installer files as assets", "v0.10.23 is the first release that does", oneLiner("o/r", "v0.10.30", runtime.GOOS)} {
+		if !strings.Contains(err.Error(), w) {
+			t.Errorf("the refusal lacks %q: %v", w, err)
+		}
+	}
+	if n := r.downloads.Load(); n != 1 {
+		t.Errorf("%d files fetched, want only SHA256SUMS", n)
+	}
+	if n := r.hits.Load(); n != 1 {
+		t.Errorf("%d requests, want only SHA256SUMS", n)
+	}
+	s.untouched(t)
 }
 
 // The installer's failure (its rollback included) is the command's
@@ -368,22 +436,208 @@ func TestUpgradeAcceptsAReleaseWithoutItsV(t *testing.T) {
 	}
 }
 
-// An archive entry that would leave the extraction directory is refused.
-func TestExtractRefusesAnEscape(t *testing.T) {
-	for _, name := range []string{"aimem-x/../../evil", "aimem-x/../evil", "/abs/evil", `aimem-x/..\..\evil`, "aimem-x/C:evil"} {
-		var buf bytes.Buffer
-		zw := gzip.NewWriter(&buf)
-		tw := tar.NewWriter(zw)
-		tw.WriteHeader(&tar.Header{Name: name, Typeflag: tar.TypeReg, Mode: 0o644, Size: 1})
-		tw.Write([]byte("x"))
-		tw.Close()
-		zw.Close()
-		dir := t.TempDir()
-		if err := extract(buf.Bytes(), filepath.Join(dir, "src")); err == nil {
-			t.Errorf("%s: extracted", name)
+// exportFiles is an aiforge export (format 1) holding the given releases,
+// by path relative to the base, with MANIFEST naming one.
+func exportFiles(t *testing.T, manifest string, tags ...string) map[string][]byte {
+	t.Helper()
+	files := map[string][]byte{"MANIFEST": []byte(manifest)}
+	for _, tag := range tags {
+		for n, b := range assets(t) {
+			files["aimem/"+tag+"/"+n] = b
 		}
-		if _, err := os.Stat(filepath.Join(dir, "evil")); err == nil {
-			t.Errorf("%s: wrote outside", name)
+	}
+	return files
+}
+
+// writeExport puts an export in a directory and returns the directory.
+func writeExport(t *testing.T, files map[string][]byte) string {
+	t.Helper()
+	dir := t.TempDir()
+	for rel, b := range files {
+		p := filepath.Join(dir, filepath.FromSlash(rel))
+		if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
+			t.Fatal(err)
 		}
+		if err := os.WriteFile(p, b, 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	return dir
+}
+
+// serveExport serves an export over https and returns its base URL and the
+// server's record of requests.
+func serveExport(t *testing.T, files map[string][]byte) (string, *release) {
+	t.Helper()
+	e := &release{files: map[string][]byte{}, redirect: map[string]string{}}
+	for rel, b := range files {
+		e.files["/exp/"+rel] = b
+	}
+	srv := httptest.NewTLSServer(e)
+	t.Cleanup(srv.Close)
+	return srv.URL + "/web/exp", e
+}
+
+// With AIMEM_BASE, as a directory or as an https URL, the release comes
+// from MANIFEST and its files from <base>/aimem/<tag>/, and the forge is
+// never contacted. --release wins over MANIFEST.
+func TestUpgradeFromAnExport(t *testing.T) {
+	const manifest = "aiforge-export 1\naiskills v1.39.0\naimem v0.10.18\n"
+	for _, form := range []string{"directory", "https"} {
+		for _, c := range []struct{ name, release, want string }{
+			{"manifest", "", "v0.10.18"},
+			{"named", "v0.10.19", "v0.10.19"},
+		} {
+			t.Run(form+"/"+c.name, func(t *testing.T) {
+				forge, src, s := setup(t)
+				files := exportFiles(t, manifest, "v0.10.18", "v0.10.19")
+				var served *release
+				if form == "directory" {
+					src.Base = writeExport(t, files) + string(filepath.Separator)
+				} else {
+					src.Base, served = serveExport(t, files)
+					src.Base += "/"
+				}
+				t.Setenv("STUB_VERSION", c.want)
+				out, err := run(src, Options{Release: c.release, Current: "v0.10.17"})
+				if err != nil {
+					t.Fatalf("%v\n%s", err, out)
+				}
+				if m, _ := os.ReadFile(s.mark); string(m) != c.want {
+					t.Errorf("the installer was told %q, want %q", m, c.want)
+				}
+				if !strings.Contains(out, "aimem/"+c.want) && !strings.Contains(out, filepath.Join("aimem", c.want)) {
+					t.Errorf("output does not name the export's release directory:\n%s", out)
+				}
+				if n := forge.hits.Load(); n != 0 {
+					t.Errorf("the forge was contacted %d times", n)
+				}
+				if served != nil {
+					want := int32(4)
+					if c.release == "" {
+						want = 5 // and MANIFEST
+					}
+					if n := served.downloads.Load(); n != want {
+						t.Errorf("%d files fetched from the export, want %d", n, want)
+					}
+				}
+			})
+		}
+	}
+}
+
+// An export that cannot name or hold the release is refused before
+// anything is run, and so is a base that is neither an absolute directory
+// nor https.
+func TestUpgradeRefusesABadExport(t *testing.T) {
+	for _, c := range []struct {
+		name     string
+		manifest string // "" for none
+		release  string
+		want     string
+	}{
+		{"no manifest", "", "", "MANIFEST is missing"},
+		{"wrong format", "aiforge-export 2\naimem v0.10.18\n", "", `is "aiforge-export 2", not a format aimem upgrade reads (aiforge-export 1)`},
+		{"no aimem line", "aiforge-export 1\naiskills v1.39.0\n", "", "names no aimem release"},
+		{"tag not exported", "aiforge-export 1\naimem v0.10.30\n", "", "release v0.10.30 has no SHA256SUMS"},
+		{"named tag not exported", "aiforge-export 1\naimem v0.10.18\n", "v0.10.31", "release v0.10.31 has no SHA256SUMS"},
+	} {
+		for _, form := range []string{"directory", "https"} {
+			t.Run(c.name+"/"+form, func(t *testing.T) {
+				forge, src, s := setup(t)
+				files := exportFiles(t, c.manifest, "v0.10.18")
+				if c.manifest == "" {
+					delete(files, "MANIFEST")
+				}
+				if form == "directory" {
+					src.Base = writeExport(t, files)
+				} else {
+					src.Base, _ = serveExport(t, files)
+				}
+				_, err := run(src, Options{Release: c.release, Current: "v0.10.17"})
+				if !errors.Is(err, ErrRefused) || !strings.Contains(err.Error(), c.want) {
+					t.Fatalf("want a refusal naming %q, got %v", c.want, err)
+				}
+				if n := forge.hits.Load(); n != 0 {
+					t.Errorf("the forge was contacted %d times", n)
+				}
+				s.untouched(t)
+			})
+		}
+	}
+
+	// A filesystem root is a directory base like any other, never an
+	// empty one that would fall back to the forge.
+	t.Run("root directory", func(t *testing.T) {
+		forge, src, s := setup(t)
+		src.Base = filepath.VolumeName(os.TempDir()) + string(filepath.Separator)
+		_, err := run(src, Options{Current: "v0.10.17"})
+		if !errors.Is(err, ErrRefused) || !strings.Contains(err.Error(), filepath.Join(src.Base, "MANIFEST")+" is missing") {
+			t.Fatalf("%v", err)
+		}
+		if n := forge.hits.Load(); n != 0 {
+			t.Errorf("the forge was contacted %d times", n)
+		}
+		s.untouched(t)
+	})
+
+	plain := &release{files: map[string][]byte{}}
+	psrv := httptest.NewServer(plain)
+	t.Cleanup(psrv.Close)
+	for _, base := range []string{psrv.URL + "/exp", "relative/export", "file:///export", "https://"} {
+		t.Run("base "+base, func(t *testing.T) {
+			forge, src, s := setup(t)
+			src.Base = base
+			_, err := run(src, Options{Current: "v0.10.17"})
+			if !errors.Is(err, ErrRefused) || !strings.Contains(err.Error(), "AIMEM_BASE must be an absolute directory or an https:// URL") {
+				t.Fatalf("%v", err)
+			}
+			if n := forge.hits.Load() + plain.hits.Load(); n != 0 {
+				t.Errorf("%d requests", n)
+			}
+			s.untouched(t)
+		})
+	}
+}
+
+// No plain http source is read: neither a redirect hop to http, from the
+// forge or from an export, nor a forge URL that is http itself.
+func TestUpgradeRefusesPlainHTTP(t *testing.T) {
+	plain := &release{files: map[string][]byte{}}
+	psrv := httptest.NewServer(plain)
+	t.Cleanup(psrv.Close)
+
+	t.Run("redirect from the forge", func(t *testing.T) {
+		r, src, s := setup(t)
+		r.publish(t, "v0.10.18")
+		r.redirect[releaseDir("v0.10.18")+"SHA256SUMS"] = psrv.URL + "/sums"
+		_, err := run(src, Options{Current: "v0.10.17"})
+		if !errors.Is(err, ErrRefused) || !strings.Contains(err.Error(), "not https") {
+			t.Fatalf("%v", err)
+		}
+		s.untouched(t)
+	})
+	t.Run("redirect from an export", func(t *testing.T) {
+		_, src, s := setup(t)
+		base, e := serveExport(t, exportFiles(t, "aiforge-export 1\naimem v0.10.18\n", "v0.10.18"))
+		e.redirect["/exp/aimem/v0.10.18/"+installer()] = psrv.URL + "/installer"
+		src.Base = base
+		_, err := run(src, Options{Current: "v0.10.17"})
+		if !errors.Is(err, ErrRefused) || !strings.Contains(err.Error(), "not https") {
+			t.Fatalf("%v", err)
+		}
+		s.untouched(t)
+	})
+	t.Run("http forge", func(t *testing.T) {
+		_, src, s := setup(t)
+		src.Web = psrv.URL + "/web"
+		_, err := run(src, Options{Current: "v0.10.17", Release: "v0.10.18"})
+		if !errors.Is(err, ErrRefused) || !strings.Contains(err.Error(), "a source is an https:// URL or an absolute directory") {
+			t.Fatalf("%v", err)
+		}
+		s.untouched(t)
+	})
+	if n := plain.hits.Load(); n != 0 {
+		t.Errorf("the plain http server got %d requests", n)
 	}
 }
