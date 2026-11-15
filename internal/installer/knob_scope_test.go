@@ -140,9 +140,8 @@ func TestDocumentedWindowsInstallRunsBootPs1(t *testing.T) {
 	}
 
 	dir := t.TempDir()
-	stub := filepath.Join(dir, "release")
 	project := filepath.Join(dir, "project")
-	for _, d := range []string{stub, project, filepath.Join(dir, "temp")} {
+	for _, d := range []string{project, filepath.Join(dir, "temp")} {
 		if err := os.Mkdir(d, 0o700); err != nil {
 			t.Fatal(err)
 		}
@@ -157,9 +156,6 @@ func TestDocumentedWindowsInstallRunsBootPs1(t *testing.T) {
 	// does, so the child Windows PowerShell has to load its own utility
 	// module. STUB_FAIL makes it fail after it reports what it saw.
 	boot := []byte("if ($PSCommandPath) { $null = Get-FileHash -LiteralPath $PSCommandPath }\r\nWrite-Output \"run saw=[$env:AIMEM_USER_ONLY] cwd=[$($PWD.Path)]\"\r\nif ($env:STUB_FAIL) { throw 'the stub run failed' }\r\n")
-	if err := os.WriteFile(filepath.Join(stub, "boot.ps1"), boot, 0o600); err != nil {
-		t.Fatal(err)
-	}
 	// SHA256SUMS carries lower-case hashes and Get-FileHash answers in
 	// upper case; the block's -ne compares them case-insensitively on
 	// purpose.
@@ -176,78 +172,134 @@ func TestDocumentedWindowsInstallRunsBootPs1(t *testing.T) {
 		var env []string
 		for _, kv := range withoutAimemEnv() {
 			k := strings.ToUpper(kv)
-			if strings.HasPrefix(k, "TEMP=") || strings.HasPrefix(k, "STUB_FAIL=") || (strings.HasPrefix(k, "PSMODULEPATH=") && !strings.EqualFold(filepath.Base(ps), "pwsh.exe")) {
+			if strings.HasPrefix(k, "TEMP=") || strings.HasPrefix(k, "STUB=") || strings.HasPrefix(k, "STUB_FAIL=") || (strings.HasPrefix(k, "PSMODULEPATH=") && !strings.EqualFold(filepath.Base(ps), "pwsh.exe")) {
 				continue
 			}
 			env = append(env, kv)
 		}
-		return append(append(env, "STUB="+stub, "TEMP="+filepath.Join(dir, "temp")), extra...)
+		return append(append(env, "TEMP="+filepath.Join(dir, "temp")), extra...)
 	}
 
-	run := func(t *testing.T, ps, block, sums string, extra ...string) string {
-		t.Helper()
-		if err := os.WriteFile(filepath.Join(stub, "SHA256SUMS"), []byte(sums), 0o600); err != nil {
-			t.Fatal(err)
-		}
-		block = download.ReplaceAllString(block, copyMarked)
-		block = oneLine.ReplaceAllString(block, fetch)
-		var lines []string
-		for _, l := range strings.Split(block, "\n") {
+	// A run is one window: the documented code with its downloads replaced,
+	// against a stub folder of its own (boot.ps1 and the SHA256SUMS the
+	// case wants), with STUB_FAIL set when the stub should fail.
+	type run struct {
+		code, sums string
+		fail       bool
+	}
+	prepare := func(code string) string {
+		code = download.ReplaceAllString(code, copyMarked)
+		code = oneLine.ReplaceAllString(code, fetch)
+		var kept []string
+		for _, l := range strings.Split(code, "\n") {
 			if !strings.HasPrefix(l, "cd ") {
-				lines = append(lines, l)
+				kept = append(kept, l)
 			}
 		}
-		script := "try {\n" + strings.Join(lines, "\n") + "\n} catch { Write-Output \"failure=[$_]\" }\nWrite-Output \"window after=[$env:AIMEM_USER_ONLY]\"\n"
-		file := filepath.Join(dir, "window.ps1")
-		if err := os.WriteFile(file, []byte(script), 0o600); err != nil {
+		return strings.Join(kept, "\n")
+	}
+	// All runs of one shell go into one PowerShell process, one after
+	// another between markers, as TestBootPs1InstallsFromAnExport does: a
+	// Windows PowerShell start costs about 18 s on the CI runner, and a
+	// process per run made this the package's slowest test. Each run sets
+	// its own STUB and STUB_FAIL and reports the window's AIMEM_USER_ONLY
+	// after it; the variables are removed before the next run, so a leak
+	// shows in the run that leaked it.
+	batch := func(t *testing.T, ps string, runs []run) []string {
+		t.Helper()
+		var b strings.Builder
+		for i, r := range runs {
+			own := filepath.Join(dir, fmt.Sprintf("release-%s-%d", strings.TrimSuffix(filepath.Base(ps), ".exe"), i))
+			if err := os.Mkdir(own, 0o700); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(filepath.Join(own, "boot.ps1"), boot, 0o600); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(filepath.Join(own, "SHA256SUMS"), []byte(r.sums), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			fmt.Fprintf(&b, "Write-Output '=== run %d'\n$env:STUB = '%s'\n", i, strings.ReplaceAll(own, "'", "''"))
+			if r.fail {
+				b.WriteString("$env:STUB_FAIL = '1'\n")
+			}
+			b.WriteString("try {\n" + prepare(r.code) + "\n} catch { Write-Output \"failure=[$_]\" }\n")
+			b.WriteString("Write-Output \"window after=[$env:AIMEM_USER_ONLY]\"\n")
+			b.WriteString("Remove-Item Env:STUB, Env:STUB_FAIL, Env:AIMEM_USER_ONLY -ErrorAction SilentlyContinue\n")
+		}
+		fmt.Fprintf(&b, "Write-Output '=== run %d'\n", len(runs))
+		file := filepath.Join(dir, "window-"+strings.TrimSuffix(filepath.Base(ps), ".exe")+".ps1")
+		if err := os.WriteFile(file, []byte(b.String()), 0o600); err != nil {
 			t.Fatal(err)
 		}
-		out, _ := runPowerShell(t, ps, project, envFor(ps, extra...), file)
-		return out
+		out, _ := runPowerShell(t, ps, project, envFor(ps), file)
+		outs := make([]string, len(runs))
+		for i := range runs {
+			start := strings.Index(out, fmt.Sprintf("=== run %d", i))
+			end := strings.Index(out, fmt.Sprintf("=== run %d", i+1))
+			if start < 0 || end <= start {
+				t.Fatalf("run %d did not reach its end marker:\n%s", i, out)
+			}
+			outs[i] = out[start:end]
+		}
+		return outs
 	}
-	want := func(block string) string {
-		if strings.Contains(block, "AIMEM_USER_ONLY") {
+	want := func(code string) string {
+		if strings.Contains(code, "AIMEM_USER_ONLY") {
 			return "run saw=[1] cwd=[" + project + "]"
 		}
 		return "run saw=[] cwd=[" + project + "]"
 	}
+
+	// Each documented line runs twice (the stub succeeds, then fails) and
+	// the block three times (a good hash, a tampered one, and without its
+	// Unblock-File); the checks below read each run's output by its index.
+	type check struct {
+		name string
+		at   int
+		fn   func(t *testing.T, outs []string)
+	}
+	var runs []run
+	var checks []check
 	for key, line := range lines {
 		doc := strings.SplitN(key, "\n", 2)[0]
-		for _, ps := range shells {
-			t.Run("line in "+doc+" in "+filepath.Base(ps), func(t *testing.T) {
-				out := run(t, ps, line, good)
-				if !strings.Contains(out, want(line)) || strings.Contains(out, "failure=") {
-					t.Fatalf("the line did not run boot.ps1 from the caller's directory with %q:\n%s", want(line), out)
-				}
-				if !strings.Contains(out, "window after=[]") {
-					t.Fatalf("the line left AIMEM_USER_ONLY set in the window:\n%s", out)
-				}
-				out = run(t, ps, line, good, "STUB_FAIL=1")
-				if !strings.Contains(out, "the stub run failed") || !strings.Contains(out, "window after=[]") {
-					t.Fatalf("a failed run left AIMEM_USER_ONLY set in the window:\n%s", out)
-				}
-			})
-		}
+		at := len(runs)
+		runs = append(runs, run{line, good, false}, run{line, good, true})
+		checks = append(checks, check{"line in " + doc, at, func(t *testing.T, outs []string) {
+			if out := outs[0]; !strings.Contains(out, want(line)) || strings.Contains(out, "failure=") {
+				t.Fatalf("the line did not run boot.ps1 from the caller's directory with %q:\n%s", want(line), out)
+			} else if !strings.Contains(out, "window after=[]") {
+				t.Fatalf("the line left AIMEM_USER_ONLY set in the window:\n%s", out)
+			}
+			if out := outs[1]; !strings.Contains(out, "the stub run failed") || !strings.Contains(out, "window after=[]") {
+				t.Fatalf("a failed run left AIMEM_USER_ONLY set in the window:\n%s", out)
+			}
+		}})
 	}
 	for key, block := range blocks {
 		doc := strings.SplitN(key, "\n", 2)[0]
-		for _, ps := range shells {
-			t.Run("block in "+doc+" in "+filepath.Base(ps), func(t *testing.T) {
-				out := run(t, ps, block, good)
-				if !strings.Contains(out, want(block)) {
-					t.Fatalf("the block did not run boot.ps1 from the caller's directory with %q:\n%s", want(block), out)
-				}
-				if !strings.Contains(out, "window after=[]") {
-					t.Fatalf("the block left AIMEM_USER_ONLY set in the window:\n%s", out)
-				}
-				out = run(t, ps, block, tampered)
-				if strings.Contains(out, "run saw=") || !strings.Contains(out, "boot.ps1 does not match SHA256SUMS") {
-					t.Fatalf("the block ran a boot.ps1 whose hash SHA256SUMS does not list:\n%s", out)
-				}
-				out = run(t, ps, strings.Replace(block, "  Unblock-File -LiteralPath $f\n", "", 1), good)
-				if strings.Contains(out, "run saw=") {
-					t.Fatalf("a boot.ps1 marked as downloaded ran under RemoteSigned without Unblock-File, so the stub's mark does not test it:\n%s", out)
-				}
+		at := len(runs)
+		runs = append(runs, run{block, good, false}, run{block, tampered, false},
+			run{strings.Replace(block, "  Unblock-File -LiteralPath $f\n", "", 1), good, false})
+		checks = append(checks, check{"block in " + doc, at, func(t *testing.T, outs []string) {
+			if out := outs[0]; !strings.Contains(out, want(block)) {
+				t.Fatalf("the block did not run boot.ps1 from the caller's directory with %q:\n%s", want(block), out)
+			} else if !strings.Contains(out, "window after=[]") {
+				t.Fatalf("the block left AIMEM_USER_ONLY set in the window:\n%s", out)
+			}
+			if out := outs[1]; strings.Contains(out, "run saw=") || !strings.Contains(out, "boot.ps1 does not match SHA256SUMS") {
+				t.Fatalf("the block ran a boot.ps1 whose hash SHA256SUMS does not list:\n%s", out)
+			}
+			if out := outs[2]; strings.Contains(out, "run saw=") {
+				t.Fatalf("a boot.ps1 marked as downloaded ran under RemoteSigned without Unblock-File, so the stub's mark does not test it:\n%s", out)
+			}
+		}})
+	}
+	for _, ps := range shells {
+		outs := batch(t, ps, runs)
+		for _, c := range checks {
+			t.Run(c.name+" in "+filepath.Base(ps), func(t *testing.T) {
+				c.fn(t, outs[c.at:])
 			})
 		}
 	}
