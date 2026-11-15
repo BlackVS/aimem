@@ -75,6 +75,28 @@ release, never a merge. When the job fails on a real Mac problem, the
 fix goes through a pull request and the release takes the next
 version; when the runner never started, re-run the job.
 
+The client upgrade check runs a real client upgrade between two
+published releases, named in `scripts/client-upgrade.env`.
+`scripts/check-client-upgrade.sh` (and `.ps1` on Windows) installs FROM
+with the one-liner. It first upgrades to TO with TO's real installer and
+a stand-in binary that never serves, and checks that the upgrade fails,
+says ROLLED BACK and leaves FROM serving. Then it runs `aimem upgrade
+--release TO` and checks that the binary and the OpenCode plugin are
+TO's published files, that the Claude Code hooks are still wired and
+that the service answers health at TO. It never downgrades, so it does
+not depend on a downgrade working: an older binary refuses a database
+newer than it understands, and a later release may give the client such
+a database. The user-level installers
+install no skills, so there are none to check.
+
+It runs on Linux and Windows in CI's `client-upgrade` job, nightly and
+on a manual run, never on a pull request or a push. It runs on macOS at
+each tag, in the release workflow's `macos-client-upgrade` job, which the
+release does not wait for. The check proves released versions, not the
+commit it runs beside, so a failure on any of them is a finding about
+released versions: it is filed as a task, and it is never a reason to
+hold a release.
+
 A change whose risk is on Windows or macOS is tested there before the
 push; a Windows change can also get a manual run of the workflow on its
 branch.
@@ -90,6 +112,11 @@ That job runs the release-gate cards, among them the new-project path of
 the quickstart, so every released quickstart has run against the release
 candidate. When the repository marks the job as a required check, the
 merge button enforces this as well.
+
+At the release, the worker reads the result of the release run's
+`macos-client-upgrade` job and records it on the release task. After a
+release, the first pull request moves `scripts/client-upgrade.env`
+forward: FROM becomes the previous TO, and TO the release just published.
 
 ## Toolchain
 

@@ -73,6 +73,26 @@ jobs:
       - name: macOS install registers launchd agents
         run: bash scripts/check-launchd-install.sh
 
+  # A real client upgrade on macOS between the two published releases named
+  # in scripts/client-upgrade.env, with the rollback; ci.yml's
+  # client-upgrade job runs it nightly on Linux and Windows. It proves
+  # released versions, not this commit, so `publish` does not wait for it:
+  # a failure shows red on the run, is filed as a task, and never holds a
+  # release (docs/DEVELOPMENT.md, "Which checks run where").
+  macos-client-upgrade:
+    needs: ref
+    runs-on: macos-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.inputs.tag || github.ref }}
+          persist-credentials: false
+      - name: macOS client upgrade and rollback
+        run: bash scripts/check-client-upgrade.sh
+
   # Everything that runs code from the repository runs here, with read
   # access only: the tests can reach no token that writes, and no OIDC
   # token to sign with. The guards need the checkout, so they run here too;
