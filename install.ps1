@@ -106,6 +106,19 @@ function Copy-StateRoot($src, $dst) {
   $null = & robocopy $src $dst /E /COPY:DATS /DCOPY:DAT /XF aimem.sock /R:1 /W:1 /NFL /NDL /NJH /NJS /NP
   $LASTEXITCODE -lt 8
 }
+# Clear-ReadOnly clears the read-only attribute of every file under $dir
+# (git writes its pack files read-only, and robocopy /COPY:DATS keeps the
+# attribute in a state copy), so Directory.Delete can remove them. It never
+# enters a reparse point.
+function Clear-ReadOnly($dir) {
+  foreach ($e in (New-Object IO.DirectoryInfo $dir).GetFileSystemInfos()) {
+    if ($e.Attributes -band [IO.FileAttributes]::ReparsePoint) { continue }
+    if ($e -is [IO.DirectoryInfo]) { Clear-ReadOnly $e.FullName }
+    elseif ($e.Attributes -band [IO.FileAttributes]::ReadOnly) {
+      $e.Attributes = $e.Attributes -band -bnot [IO.FileAttributes]::ReadOnly
+    }
+  }
+}
 # Remove-OldStateCopies keeps, after a healthy upgrade, the newest two state
 # copies of each kind (backup-, failed-) beside $root and removes the older
 # ones. It matches only <root>.<kind>-<UTC stamp> exactly, only real
@@ -121,8 +134,11 @@ function Remove-OldStateCopies($root) {
         Sort-Object Name)
     for ($i = 0; $i -lt $copies.Count - 2; $i++) {
       $p = $copies[$i].FullName
-      # Directory.Delete removes a link inside the copy, never its target.
-      try { [IO.Directory]::Delete($p, $true); Say "removed the old state copy $p" }
+      # The installer's copies hold no links: robocopy copies a junction's
+      # content. Should one hold a link anyway, Windows PowerShell 5.1's
+      # Directory.Delete refuses it ("access denied") and leaves its
+      # target alone, so the copy stays and the warning says so.
+      try { Clear-ReadOnly $p; [IO.Directory]::Delete($p, $true); Say "removed the old state copy $p" }
       catch { Write-Warning "could not remove the old state copy ${p}: $($_.Exception.Message)" }
     }
   }

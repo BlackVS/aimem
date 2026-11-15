@@ -274,6 +274,17 @@ func seedStateCopies(t *testing.T, s *sandbox) *stateCopies {
 			t.Fatal(err)
 		}
 	}
+	// git writes its pack files read-only, and the copies keep the
+	// attribute: a copy that holds one is still removed whole.
+	for _, d := range []string{c.old[0], c.old[3]} {
+		pack := filepath.Join(d, "process", "p1", "repo.git", "objects", "pack")
+		if err := os.MkdirAll(pack, 0o700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(pack, "pack-1.pack"), []byte("x"), 0o444); err != nil {
+			t.Fatal(err)
+		}
+	}
 	file := s.state + ".backup-20250102T000000Z"
 	if err := os.WriteFile(file, []byte("x"), 0o600); err != nil {
 		t.Fatal(err)
