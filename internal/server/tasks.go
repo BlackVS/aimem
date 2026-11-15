@@ -20,6 +20,7 @@ import (
 	"strconv"
 	"strings"
 
+	"aimem/internal/access"
 	"aimem/internal/store"
 )
 
@@ -182,47 +183,84 @@ func taskActor(r *http.Request) store.TaskActor {
 
 // authorizeTaskWrite decides, for this attempt, whether the caller may
 // mutate tasks in project. Admin credentials and the local operator may;
-// legacy writer tokens never do; an ordinary token needs a scope that permits
-// this project's instance and its user's current grant. Both
-// are re-read every time — a grant removed a second ago is gone now.
+// legacy writer tokens never do; an ordinary token is decided by
+// access.Store.DecideWrite, re-read every time — a grant removed a second
+// ago is gone now. Outside team mode a caller who may not read the project
+// gets the unknown project's answer before anything else is said about it,
+// even whether its tasks are enabled; a caller who reads it is told that a
+// write needs a write grant. A team conversation's answers are unchanged.
 func (s *Server) authorizeTaskWrite(w http.ResponseWriter, r *http.Request, project string) bool {
-	if !s.tasksEnabledFor(w, project) {
-		return false
-	}
 	id, ok := IdentityFrom(r.Context())
 	if !ok || id.Role == "admin" {
-		return true
+		return s.tasksEnabledFor(w, project)
 	}
 	if id.Role != "user" {
-		s.fail(w, http.StatusForbidden, fmt.Errorf("token %q has role %q; task writes need an ordinary write token or an admin token", id.Name, id.Role))
+		if s.tasksEnabledFor(w, project) {
+			s.fail(w, http.StatusForbidden, fmt.Errorf("token %q has role %q; task writes need an ordinary write token or an admin token", id.Name, id.Role))
+		}
 		return false
 	}
+	_, team := teamContextFrom(r.Context())
+	if team && !s.tasksEnabledFor(w, project) {
+		return false
+	}
+	decision, instance, ok := s.decideTaskWrite(w, id, project)
+	if !ok {
+		return false
+	}
+	if team {
+		switch {
+		case instance == "":
+			s.fail(w, http.StatusForbidden, errors.New("project has no access identity"))
+		case decision != access.WriteAllowed:
+			s.fail(w, http.StatusForbidden, errors.New("token scope or current grant does not permit writes to this project"))
+		default:
+			return true
+		}
+		return false
+	}
+	switch decision {
+	case access.WriteHidden:
+		s.log.Warn("task write refused: no grant on the project", "user", id.Name, "user_id", id.UserID, "token_id", id.TokenID, "project", project)
+		s.fail(w, http.StatusNotFound, errTaskProjectNotFound)
+		return false
+	case access.WriteReadOnly:
+		if s.tasksEnabledFor(w, project) {
+			s.fail(w, http.StatusForbidden, errWriteNeedsWriteGrant)
+		}
+		return false
+	}
+	return s.tasksEnabledFor(w, project)
+}
+
+// decideTaskWrite is access.Store.DecideWrite for the project's current
+// instance; a project without one is hidden from every ordinary token. It
+// has answered a fault when ok is false.
+func (s *Server) decideTaskWrite(w http.ResponseWriter, id Identity, project string) (decision access.WriteDecision, instance string, ok bool) {
 	instance, err := s.reg.ExistingProjectAccessID(project)
 	if err != nil {
 		s.log.Error("task write authorization", "project", project, "err", err)
 		s.fail(w, http.StatusInternalServerError, errors.New("project access identity unavailable"))
-		return false
+		return access.WriteHidden, "", false
 	}
 	if instance == "" {
-		s.fail(w, http.StatusForbidden, errors.New("project has no access identity"))
-		return false
+		return access.WriteHidden, "", true
 	}
 	db, ok := s.accessStore(w)
 	if !ok {
-		return false
+		return access.WriteHidden, instance, false
 	}
-	allowed, err := db.CanWriteToken(id.UserID, id.TokenID, instance)
-	if err != nil {
+	if decision, err = db.DecideWrite(id.UserID, id.TokenID, instance); err != nil {
 		s.log.Error("task write authorization", "project", project, "err", err)
 		s.fail(w, http.StatusInternalServerError, errors.New("cannot check project access"))
-		return false
+		return access.WriteHidden, instance, false
 	}
-	if !allowed {
-		s.fail(w, http.StatusForbidden, errors.New("token scope or current grant does not permit writes to this project"))
-		return false
-	}
-	return true
+	return decision, instance, true
 }
+
+// errWriteNeedsWriteGrant answers a write by a caller who reads the project
+// and may not write it: a read grant, or a read-only-scope token.
+var errWriteNeedsWriteGrant = errors.New("this token reads the project but may not write it: a write needs a write grant on the project (`aimem access grant add` without --read) and a user- or project-scoped token")
 
 // ErrTasksDisabled is the refusal every task mutation gets in a project
 // whose tasks an admin has not enabled.
@@ -362,16 +400,18 @@ func (s *Server) taskReadProject(w http.ResponseWriter, r *http.Request) (string
 // reads the path, so the handlers, retries and revision checks see only
 // full ids.
 //
-// read marks a read: the caller needs a grant on the owning project, and a
-// task in a project without one answers exactly as a task that does not
-// exist. A prefix resolves among the tasks the caller may read, and a
-// prefix that starts only tasks the caller may not read is refused, and
-// logged, as that task would be. A write
-// keeps its own authorization (authorizeTaskWrite) and its refusal.
-func (s *Server) locateTask(w http.ResponseWriter, r *http.Request, read bool) (string, *store.DB, bool) {
+// Outside team mode, for a read and a write alike, the caller needs a grant
+// on the owning project, and a task in a project without one answers
+// exactly as a task that does not exist. A prefix resolves among the tasks
+// the caller may read, and a prefix that starts only tasks the caller may
+// not read is refused, and logged, as that task would be. A write then has
+// its own authorization (authorizeTaskWrite), which refuses a reader that
+// may not write. In team mode the profile's grant decides, as before.
+func (s *Server) locateTask(w http.ResponseWriter, r *http.Request) (string, *store.DB, bool) {
 	var id string
 	var err error
-	if _, team := teamContextFrom(r.Context()); read && !team {
+	_, team := teamContextFrom(r.Context())
+	if !team {
 		var denied []string
 		id, denied, err = s.reg.ResolveReadableTaskID(r.PathValue("id"), func(p string) (bool, error) { return s.canReadTasks(r, p) })
 		if errors.Is(err, store.ErrTaskNotFound) {
@@ -383,20 +423,17 @@ func (s *Server) locateTask(w http.ResponseWriter, r *http.Request, read bool) (
 		id, err = s.reg.ResolveTaskID(r.PathValue("id"))
 	}
 	if err != nil {
-		s.taskIDError(w, r, err, read)
+		s.taskIDError(w, r, err, true)
 		return "", nil, false
 	}
 	r.SetPathValue("id", id)
 	project, db, err := s.reg.LocateTask(id)
 	if err != nil {
-		s.taskIDError(w, r, err, read)
+		s.taskIDError(w, r, err, true)
 		return "", nil, false
 	}
-	if read {
-		if s.taskReadDenied(w, r, project, errTaskNotReadable) {
-			return "", nil, false
-		}
-	} else if s.teamGrantDenied(w, r, project) {
+	// taskReadDenied is teamGrantDenied in team mode.
+	if s.taskReadDenied(w, r, project, errTaskNotReadable) {
 		return "", nil, false
 	}
 	if c := r.PathValue("c"); c != "" {
@@ -713,7 +750,7 @@ func (s *Server) createTask(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) getTask(w http.ResponseWriter, r *http.Request) {
-	project, db, ok := s.locateTask(w, r, true)
+	project, db, ok := s.locateTask(w, r)
 	if !ok {
 		return
 	}
@@ -731,7 +768,7 @@ type taskUpdateBody struct {
 }
 
 func (s *Server) updateTask(w http.ResponseWriter, r *http.Request) {
-	project, db, ok := s.locateTask(w, r, false)
+	project, db, ok := s.locateTask(w, r)
 	if !ok {
 		return
 	}
@@ -776,7 +813,7 @@ func (s *Server) taskConflict(w http.ResponseWriter, project string, err error, 
 }
 
 func (s *Server) taskHistory(w http.ResponseWriter, r *http.Request) {
-	project, db, ok := s.locateTask(w, r, true)
+	project, db, ok := s.locateTask(w, r)
 	if !ok {
 		return
 	}
@@ -803,7 +840,7 @@ func (s *Server) taskHistory(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) listTaskComments(w http.ResponseWriter, r *http.Request) {
-	project, db, ok := s.locateTask(w, r, true)
+	project, db, ok := s.locateTask(w, r)
 	if !ok {
 		return
 	}
@@ -843,7 +880,7 @@ func (s *Server) listTaskComments(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) addTaskComment(w http.ResponseWriter, r *http.Request) {
-	project, db, ok := s.locateTask(w, r, false)
+	project, db, ok := s.locateTask(w, r)
 	if !ok {
 		return
 	}
@@ -885,7 +922,7 @@ func (s *Server) addTaskComment(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) getTaskComment(w http.ResponseWriter, r *http.Request) {
-	project, db, ok := s.locateTask(w, r, true)
+	project, db, ok := s.locateTask(w, r)
 	if !ok {
 		return
 	}

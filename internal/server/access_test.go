@@ -188,7 +188,12 @@ func TestAccessManagementAndOrdinaryTokenBoundary(t *testing.T) {
 	if issued.Secret == "" {
 		t.Fatal("missing secret")
 	}
-	for _, p := range []string{"alpha", "beta"} {
+	// Without a grant on beta, beta answers exactly as an unknown project.
+	unknown := authedReq(t, h, "GET", "/v1/access/identity?project=nope", issued.Secret, "")
+	if w := authedReq(t, h, "GET", "/v1/access/identity?project=beta", issued.Secret, ""); w.Code != 404 || w.Body.String() != unknown.Body.String() {
+		t.Fatalf("identity without a grant: %d %s, unknown: %d %s", w.Code, w.Body, unknown.Code, unknown.Body)
+	}
+	for _, p := range []string{"alpha"} {
 		w := authedReq(t, h, "GET", "/v1/access/identity?project="+p, issued.Secret, "")
 		if w.Code != 200 {
 			t.Fatalf("identity: %d %s", w.Code, w.Body)
@@ -229,7 +234,8 @@ func TestAccessManagementAndOrdinaryTokenBoundary(t *testing.T) {
 	}
 	request("DELETE", "/v1/access/groups/"+g.ID+"/members/"+u.ID, nil)
 	w = authedReq(t, h, "GET", "/v1/access/identity?project=alpha", issued.Secret, "")
-	if !strings.Contains(w.Body.String(), `"task_write":false`) {
+	// The grant came through the group: without it alpha answers as unknown.
+	if w.Code != 404 || !strings.Contains(w.Body.String(), "unknown project") {
 		t.Fatal("removed membership still writes", w.Body)
 	}
 	request("DELETE", "/v1/access/tokens/"+issued.Token.ID, nil)
@@ -310,9 +316,10 @@ func TestAccessListingSurvivesUninitializedAndDamagedProjects(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	// The user holds no grant: both answer as an unknown project.
 	for _, project := range []string{"unused", "good"} {
 		w := authedReq(t, h, "GET", "/v1/access/identity?project="+project, secret, "")
-		if w.Code != 200 || !strings.Contains(w.Body.String(), `"task_write":false`) {
+		if w.Code != 404 || !strings.Contains(w.Body.String(), "unknown project") {
 			t.Fatalf("read-only eligibility: %d %s", w.Code, w.Body)
 		}
 	}

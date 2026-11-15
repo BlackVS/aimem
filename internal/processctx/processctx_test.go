@@ -609,3 +609,28 @@ func TestLocalCredentialRefusesAnInsecureHubEntry(t *testing.T) {
 		t.Fatalf("the insecure entry must see only the checkpoint token: %v", h2.bearers)
 	}
 }
+
+// A hub answers a project this credential may not read exactly as one it
+// does not know (404 on the identity check). The load is a denial that
+// names both, never served from the last observed selection.
+func TestIdentityNotFoundIsADenialThatNamesBothCauses(t *testing.T) {
+	for _, local := range []bool{false, true} {
+		h := &fakeHub{}
+		h.change(ready)
+		dir, root, _ := checkout(t, h, local)
+		cache(t, root, selection, "# Handbook\n\nsecret policy\n")
+		if r := Load(dir, root, ""); r.State != Ready {
+			t.Fatalf("local=%v: first load %+v", local, r)
+		}
+		h.change(func(h *fakeHub) { h.identityStatus = http.StatusNotFound })
+		r := Load(dir, root, "")
+		if r.State != Denied || r.Set != nil || r.Unit != "" || r.ObservedAt != "" ||
+			!strings.Contains(r.Detail, "knows no project alpha, or this checkout's credential may not read it (no grant, or a token scoped to another project)") ||
+			!strings.Contains(r.Fix, "aimem access grant add") {
+			t.Errorf("local=%v: %+v", local, r)
+		}
+		if text, _ := Bootstrap(dir, root, "", false); strings.Contains(text, "secret policy") {
+			t.Errorf("local=%v: the hook served the cached selection: %q", local, text)
+		}
+	}
+}

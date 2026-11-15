@@ -17,6 +17,7 @@ import (
 	"strconv"
 	"strings"
 
+	"aimem/internal/access"
 	"aimem/internal/store"
 	"aimem/internal/uuidv7"
 )
@@ -205,11 +206,36 @@ func (s *Server) reservationPreamble(w http.ResponseWriter, r *http.Request) (st
 		r.SetPathValue("task_id", taskID)
 	}
 	project, _, err := s.reg.LocateTask(taskID)
-	if err != nil || project != r.PathValue("p") {
+	if err != nil || project != r.PathValue("p") || s.reservationHidden(r, project) {
 		s.reservationRefuse(w, r, "task_unavailable")
 		return "", false
 	}
 	return taskID, true
+}
+
+// reservationHidden reports whether, outside team mode, an ordinary token
+// may not read project. Such a caller gets the unknown task's answer before
+// its key, body or operation is looked at, so nothing it is told depends on
+// whether the project exists. A team conversation keeps its own order.
+// A fault reads as not hidden; the authorization that follows answers it.
+func (s *Server) reservationHidden(r *http.Request, project string) bool {
+	id, ok := IdentityFrom(r.Context())
+	if _, team := teamContextFrom(r.Context()); team || !ok || id.Role != "user" {
+		return false
+	}
+	instance, err := s.reg.ExistingProjectAccessID(project)
+	if err != nil {
+		return false
+	}
+	if instance == "" {
+		return true
+	}
+	db, err := s.openAccess(false)
+	if err != nil {
+		return false
+	}
+	decision, err := db.DecideWrite(id.UserID, id.TokenID, instance)
+	return err == nil && decision == access.WriteHidden
 }
 
 // reservationMutationBody is the wire's Mutation. No field names an actor.

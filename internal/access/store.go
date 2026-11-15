@@ -529,29 +529,33 @@ func (s *Store) SetMember(actor, group, user string, present bool) error {
 // SetGrant adds a write grant, or removes the grant whatever its access.
 func (s *Store) SetGrant(actor, project, kind, subject string, present bool) error {
 	if present {
-		return s.SetGrantAccess(actor, project, kind, subject, GrantWrite)
+		_, err := s.SetGrantAccess(actor, project, kind, subject, GrantWrite)
+		return err
 	}
-	return s.setGrant(actor, project, kind, subject, "", false)
+	_, err := s.setGrant(actor, project, kind, subject, "", false)
+	return err
 }
 
 // SetGrantAccess grants project to a user or group with the given access,
-// replacing the access of a grant it already holds.
-func (s *Store) SetGrantAccess(actor, project, kind, subject string, access GrantAccess) error {
+// replacing the access of a grant it already holds. previous is the access
+// the subject's own grant had before, "" for none, so a caller can say when
+// a read grant was raised to write.
+func (s *Store) SetGrantAccess(actor, project, kind, subject string, access GrantAccess) (previous GrantAccess, err error) {
 	if access != GrantRead && access != GrantWrite {
-		return fmt.Errorf("access must be read or write, not %q", access)
+		return "", fmt.Errorf("access must be read or write, not %q", access)
 	}
 	return s.setGrant(actor, project, kind, subject, access, true)
 }
 
-func (s *Store) setGrant(actor, project, kind, subject string, access GrantAccess, present bool) error {
+func (s *Store) setGrant(actor, project, kind, subject string, access GrantAccess, present bool) (previous GrantAccess, err error) {
 	if project == "" {
-		return fmt.Errorf("project instance is required")
+		return "", fmt.Errorf("project instance is required")
 	}
 	table := "users"
 	if kind == "group" {
 		table = "access_groups"
 	} else if kind != "user" {
-		return fmt.Errorf("kind must be user or group")
+		return "", fmt.Errorf("kind must be user or group")
 	}
 	// The audit action of a write grant and of a removal is the one they
 	// always had; a read grant is recorded as grant.read.
@@ -559,8 +563,12 @@ func (s *Store) setGrant(actor, project, kind, subject string, access GrantAcces
 	if access == GrantRead {
 		action = "grant.read"
 	}
-	return s.change(actor, action, project+"/"+kind+"/"+subject, func(tx *sql.Tx) error {
+	err = s.change(actor, action, project+"/"+kind+"/"+subject, func(tx *sql.Tx) error {
 		if err := requireRow(tx, table, subject); err != nil {
+			return err
+		}
+		previous = ""
+		if err := tx.QueryRow("SELECT access FROM grants WHERE project=? AND kind=? AND subject=?", project, kind, subject).Scan(&previous); err != nil && !errors.Is(err, sql.ErrNoRows) {
 			return err
 		}
 		if !present {
@@ -571,17 +579,10 @@ func (s *Store) setGrant(actor, project, kind, subject string, access GrantAcces
 ON CONFLICT(project,kind,subject) DO UPDATE SET access=excluded.access`, project, kind, subject, access)
 		return err
 	})
+	return previous, err
 }
 
 type rowQuery interface{ QueryRow(string, ...any) *sql.Row }
-
-// CanWrite reports whether user is enabled and holds a current direct or
-// group write grant on project (an access instance id). It reads current
-// state on every call; callers re-check per attempt and never cache the
-// answer.
-func (s *Store) CanWrite(user, project string) (bool, error) {
-	return canWrite(s.db, user, project, true)
-}
 
 // IdentityExists reports whether kind ("user" or "group") and id name a
 // known identity, disabled or not: an assignment must point at something
@@ -596,15 +597,15 @@ func (s *Store) IdentityExists(kind, id string) (bool, error) {
 	return n == 1, err
 }
 
-// canWrite reports whether user is enabled and holds a current direct or
-// group grant on project: a write grant when write is set, a grant of either
-// kind otherwise. Issuance asks for either kind: a project-scoped token may
-// go to a reader, and what it may do is decided at use by the grant.
-func canWrite(q rowQuery, user, project string, write bool) (bool, error) {
+// holdsGrant reports whether user is enabled and holds a current direct or
+// group grant of either kind on project. Issuance asks only this: a
+// project-scoped token may go to a reader, and what it may do is decided at
+// each use (DecideWrite, CanReadToken).
+func holdsGrant(q rowQuery, user, project string) (bool, error) {
 	var n int
 	err := q.QueryRow(`SELECT count(*) FROM users u WHERE u.id=? AND u.disabled=0 AND EXISTS(
-SELECT 1 FROM grants g WHERE g.project=? AND (g.access='write' OR ?=0) AND ((g.kind='user' AND g.subject=u.id) OR
-(g.kind='group' AND EXISTS(SELECT 1 FROM members m WHERE m.group_id=g.subject AND m.user_id=u.id))))`, user, project, write).Scan(&n)
+SELECT 1 FROM grants g WHERE g.project=? AND ((g.kind='user' AND g.subject=u.id) OR
+(g.kind='group' AND EXISTS(SELECT 1 FROM members m WHERE m.group_id=g.subject AND m.user_id=u.id))))`, user, project).Scan(&n)
 	return n == 1, err
 }
 
@@ -641,7 +642,7 @@ func (s *Store) IssueScoped(actor, user, label string, scope TokenScope, project
 			return ErrDenied
 		}
 		if project != "" {
-			ok, err := canWrite(tx, user, project, false)
+			ok, err := holdsGrant(tx, user, project)
 			if err != nil {
 				return err
 			}
@@ -704,34 +705,47 @@ func (s *Store) TokenMeta(id string) (label string, expires time.Time, err error
 	return label, time.Unix(unix, 0).UTC(), nil
 }
 
-// Authorize rechecks token and membership; it never trusts a client-supplied
-// user or a previously cached identity. Empty project denotes a read-only check.
-func (s *Store) Authorize(secret, project string) (Identity, error) {
-	id, err := s.Authenticate(secret)
-	if err != nil {
-		return Identity{}, err
+// WriteDecision is the answer to a mutation of a project by an ordinary
+// token.
+type WriteDecision int
+
+const (
+	// WriteHidden: the token may not even read the project. The caller
+	// answers exactly as it answers a project that does not exist.
+	WriteHidden WriteDecision = iota
+	// WriteReadOnly: the token reads the project (a read grant, or a
+	// read-only-scope token) but may not write it. Its existence is no secret
+	// from this caller, so the refusal says what a write needs.
+	WriteReadOnly
+	// WriteAllowed: a live user- or project-scope token of an enabled user
+	// and a current direct or access-group write grant.
+	WriteAllowed
+)
+
+// DecideWrite is the one decision on a mutation by an ordinary token: every
+// task, epic, comment, triage and team-session write, the reservation owner
+// check and the identity route's write answer come here. IDs come from
+// authentication, but token state, scope and grants are read again on every
+// call, so an in-process MCP call cannot retain stale authority.
+func (s *Store) DecideWrite(user, token, project string) (WriteDecision, error) {
+	if project == "" {
+		return WriteHidden, nil
 	}
-	if project != "" {
-		ok, err := s.CanWriteToken(id.UserID, id.TokenID, project)
-		if err != nil {
-			return Identity{}, err
-		}
-		if !ok {
-			return Identity{}, ErrDenied
-		}
+	switch ok, err := s.writesProject(user, token, project); {
+	case err != nil:
+		return WriteHidden, err
+	case ok:
+		return WriteAllowed, nil
 	}
-	return id, nil
+	if ok, err := s.CanReadToken(user, token, project); err != nil || !ok {
+		return WriteHidden, err
+	}
+	return WriteReadOnly, nil
 }
 
-// CanWriteToken is the shared write check for identity hints and every task
-// mutation: a live user- or project-scope token of an enabled user, and a
-// current direct or access-group write grant. IDs come from authentication,
-// but token state/scope and grants are read again here so an in-process MCP
-// call cannot retain stale authority.
-func (s *Store) CanWriteToken(user, token, project string) (bool, error) {
-	if project == "" {
-		return false, nil
-	}
+// writesProject is DecideWrite's write test: a live user- or project-scope
+// token of an enabled user, and a current direct or access-group write grant.
+func (s *Store) writesProject(user, token, project string) (bool, error) {
 	var n int
 	err := s.db.QueryRow(`SELECT count(*) FROM tokens t JOIN users u ON u.id=t.user_id
 WHERE t.id=? AND u.id=? AND u.disabled=0 AND t.revoked=0 AND t.expires_at>?
@@ -744,7 +758,7 @@ AND EXISTS(SELECT 1 FROM grants g WHERE g.project=? AND g.access='write' AND
 }
 
 // CanReadToken is the project read check for task, knowledge and
-// repository reads: CanWriteToken's live token and enabled user, with two
+// repository reads: DecideWrite's live token and enabled user, with two
 // differences. A read-only-scope token qualifies too, and a grant of either
 // kind, read or write, is enough.
 func (s *Store) CanReadToken(user, token, project string) (bool, error) {

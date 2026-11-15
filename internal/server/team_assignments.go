@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"strings"
 
+	"aimem/internal/access"
 	"aimem/internal/store"
 )
 
@@ -22,11 +23,11 @@ func (s *Server) assignmentAuthority(w http.ResponseWriter, r *http.Request) sto
 		return nil
 	}
 	return func(worker store.TeamSession) error {
-		allowed, err := acc.CanWriteToken(worker.UserID, worker.TokenID, instance)
+		decision, err := acc.DecideWrite(worker.UserID, worker.TokenID, instance)
 		if err != nil {
 			return err
 		}
-		if !allowed {
+		if decision != access.WriteAllowed {
 			return store.ErrTeamSessionDenied
 		}
 		return nil

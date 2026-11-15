@@ -390,13 +390,15 @@ func TestReservationRevocationAndRotation(t *testing.T) {
 		t.Fatal(err)
 	}
 	_, err = g.s.reserve(alice, store.ReservationUpdate, nextOf(task, hold, "IN_PROGRESS"), "no-grant", "")
-	expectRefusal(t, "revoked grant", err, "grant_denied")
+	// Without a grant the caller may not read the project: the unknown
+	// task's answer (task 01a1dd8c-4919).
+	expectRefusal(t, "revoked grant", err, "task_unavailable")
 	_, _, err = g.s.reservationReceipt(alice, store.ReservationClaim, task.ID, "claim")
-	expectRefusal(t, "receipt after the grant was revoked", err, "grant_denied")
+	expectRefusal(t, "receipt after the grant was revoked", err, "task_unavailable")
 	_, err = g.s.reservationStatus(alice, task.ID)
-	expectRefusal(t, "status after the grant was revoked", err, "grant_denied")
+	expectRefusal(t, "status after the grant was revoked", err, "task_unavailable")
 	_, err = g.s.reserve(alice, store.ReservationClaim, claimOf(task), "claim", "")
-	expectRefusal(t, "claim replay after the grant was revoked", err, "grant_denied")
+	expectRefusal(t, "claim replay after the grant was revoked", err, "task_unavailable")
 	g.held(t, task.ID, hold.Reservation)
 	if err := g.db.SetGrant("admin", g.alphaInstance, "user", g.aliceID, true); err != nil {
 		t.Fatal(err)
@@ -440,20 +442,21 @@ func TestReservationPrecommitRecheck(t *testing.T) {
 	beforeReservationRecheck = revoke
 	t.Cleanup(func() { beforeReservationRecheck = nil })
 	_, err = g.s.reserve(alice, store.ReservationUpdate, nextOf(task, hold, "IN_PROGRESS"), "raced", "")
-	expectRefusal(t, "revoked before commit", err, "grant_denied")
+	expectRefusal(t, "revoked before commit", err, "task_unavailable")
 	beforeReservationRecheck = nil
 	g.held(t, task.ID, hold.Reservation)
 	if got, err := g.alpha.GetTask(task.ID); err != nil || got.Revision != task.Revision {
 		t.Fatalf("a refused commit changed the task: %+v, %v", got, err)
 	}
-	// A claim rechecks inside the ledger too, and the refusal keeps its code.
+	// A claim rechecks inside the ledger too, and refuses with the same code
+	// as the other transitions: the caller reads the project no more.
 	if err := g.db.SetGrant("admin", g.alphaInstance, "user", g.aliceID, true); err != nil {
 		t.Fatal(err)
 	}
 	other := g.readyTask(t, g.alpha)
 	beforeReservationRecheck = revoke
 	_, err = g.s.reserve(alice, store.ReservationClaim, claimOf(other), "raced-claim", "")
-	expectRefusal(t, "claim revoked inside the ledger", err, "grant_denied")
+	expectRefusal(t, "claim revoked inside the ledger", err, "task_unavailable")
 	beforeReservationRecheck = nil
 	if got, err := g.alpha.GetTaskReservation(other.ID); err != nil || got.ID != "" || got.Fence != 0 {
 		t.Fatalf("a refused claim left a hold: %+v, %v", got, err)

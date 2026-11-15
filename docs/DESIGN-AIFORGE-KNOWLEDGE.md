@@ -55,6 +55,7 @@ Each cell says what a caller gets **after 19d8**. ✅ allowed · 🟡 the pilot 
 2. **The live grant of the effective profile:**
    - **Team mode.** The verified context's profile has a live grant on the project's access instance, and the individual token is live. This is the same `TeamGrantAllows` check E4 applies to task reads. Personal and access-group grants never count.
    - **Personal.** The token is live, from an enabled user, and scoped to the user or to this project. The user holds a live direct or access-group grant on the project's access instance: `CanWriteToken`'s membership predicate, used here for a read. Legacy `read-only`-scope tokens get no knowledge in v1.
+     *Correction (read grants, PR #363, and task 01a1dd8c-4919):* personal knowledge reads now use `CanReadToken`, the task reads' predicate, so a read-only-scope token with a grant reads knowledge, and a grant of either kind is enough. `CanWriteToken` is gone; writes ask `DecideWrite` (DESIGN-access-control.md).
 3. **Answer, or refuse.** The answer is the route's existing response. Recall is bounded by its existing token budget.
 
 **The current revision only (seq232).** A scoped caller reads a document's current revision: `?rev=` on the doc read is refused whatever its value, 400 for a personal token and `invalid_request` in team mode. Retained revisions and the doc history stay legacy-only.

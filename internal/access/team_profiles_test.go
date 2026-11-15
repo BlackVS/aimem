@@ -60,10 +60,10 @@ ALTER TABLE grants DROP COLUMN access; PRAGMA user_version=2;`); err != nil {
 		if err != nil || id.UserID != u.ID || id.TokenID != tok.ID {
 			t.Fatalf("migrated actor %+v: %v", id, err)
 		}
-		if ok, err := s.CanWriteToken(u.ID, tok.ID, "project-instance"); err != nil || !ok {
+		if ok, err := writes(s, u.ID, tok.ID, "project-instance"); err != nil || !ok {
 			t.Fatalf("standalone grant lost: %v, %v", ok, err)
 		}
-		if ok, err := s.CanWriteToken(u.ID, tok.ID, "another-instance"); err != nil || ok {
+		if ok, err := writes(s, u.ID, tok.ID, "another-instance"); err != nil || ok {
 			t.Fatalf("standalone grant widened: %v, %v", ok, err)
 		}
 		if err := s.Close(); err != nil {
@@ -126,10 +126,10 @@ func TestTeamProfileGrantIsSeparateAndLive(t *testing.T) {
 	if err := s.SetGrant("admin", "team-project", "user", u.ID, false); err != nil {
 		t.Fatal(err)
 	}
-	if ok, err := s.CanWriteToken(u.ID, tok.ID, "team-project"); err != nil || ok {
+	if ok, err := writes(s, u.ID, tok.ID, "team-project"); err != nil || ok {
 		t.Fatalf("profile leaked into personal grants: %v, %v", ok, err)
 	}
-	if ok, err := s.CanWriteToken(u.ID, tok.ID, "personal"); err != nil || !ok {
+	if ok, err := writes(s, u.ID, tok.ID, "personal"); err != nil || !ok {
 		t.Fatalf("personal grant changed: %v, %v", ok, err)
 	}
 	if got, err := s.TeamGrantProjects(p.ID); err != nil || len(got) != 1 || got[0] != "team-project" {

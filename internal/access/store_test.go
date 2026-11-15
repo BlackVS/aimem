@@ -64,11 +64,11 @@ func TestPermissionsAndRevocation(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, p := range []string{"", "project-A"} {
-		if _, err := s.Authorize(secret, p); err != nil {
+		if _, err := authorize(s, secret, p); err != nil {
 			t.Fatal(err)
 		}
 	}
-	if _, err := s.Authorize(secret, "project-B"); !errors.Is(err, ErrDenied) {
+	if _, err := authorize(s, secret, "project-B"); !errors.Is(err, ErrDenied) {
 		t.Fatalf("cross-project: %v", err)
 	}
 	if err := s.SetGrant("admin", "project-A", "user", u.ID, true); err != nil {
@@ -77,16 +77,16 @@ func TestPermissionsAndRevocation(t *testing.T) {
 	if err := s.SetMember("admin", g.ID, u.ID, false); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.Authorize(secret, "project-A"); err != nil {
+	if _, err := authorize(s, secret, "project-A"); err != nil {
 		t.Fatal("direct grant must survive group removal", err)
 	}
 	if err := s.SetGrant("admin", "project-A", "user", u.ID, false); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.Authorize(secret, "project-A"); !errors.Is(err, ErrDenied) {
+	if _, err := authorize(s, secret, "project-A"); !errors.Is(err, ErrDenied) {
 		t.Fatalf("removed access still writes: %v", err)
 	}
-	if _, err := s.Authorize(secret, ""); err != nil {
+	if _, err := authorize(s, secret, ""); err != nil {
 		t.Fatal("read should remain", err)
 	}
 	if err := s.SetUser("admin", u.ID, "Alice", true); err != nil {
@@ -118,10 +118,10 @@ func TestTokenExpiryReadOnlyAndAuditAtomicity(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.Authorize(secret, ""); err != nil {
+	if _, err := authorize(s, secret, ""); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.Authorize(secret, "A"); !errors.Is(err, ErrDenied) {
+	if _, err := authorize(s, secret, "A"); !errors.Is(err, ErrDenied) {
 		t.Fatal("read token wrote")
 	}
 	before, err := s.Snapshot()

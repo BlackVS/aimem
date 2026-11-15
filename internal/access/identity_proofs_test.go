@@ -206,7 +206,7 @@ func TestSchema4MigrationPreservesSchema3(t *testing.T) {
 		if err != nil || id.UserID != u.ID || id.TokenID != tok.ID {
 			t.Fatalf("migrated actor %+v: %v", id, err)
 		}
-		if ok, err := s.CanWriteToken(u.ID, tok.ID, "project-instance"); err != nil || !ok {
+		if ok, err := writes(s, u.ID, tok.ID, "project-instance"); err != nil || !ok {
 			t.Fatalf("standalone grant lost: %v %v", ok, err)
 		}
 		if p, err := s.TeamProfileByKey("aicrew-example", "team-example"); err != nil || p.ID != profile.ID {

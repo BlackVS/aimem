@@ -41,14 +41,19 @@ func TestUserScopedTokenHTTPAndMCP(t *testing.T) {
 	check := func(project, key string, want bool) {
 		t.Helper()
 		w := authedReq(t, f.h, "GET", "/v1/access/identity?project="+project, issued.Secret, "")
-		var identity struct {
-			TaskWrite bool              `json:"task_write"`
-			Scope     access.TokenScope `json:"scope"`
+		// Without a grant the project answers as unknown, here and on a write.
+		wantCode := 404
+		if want {
+			var identity struct {
+				TaskWrite bool              `json:"task_write"`
+				Scope     access.TokenScope `json:"scope"`
+			}
+			if err := json.Unmarshal(w.Body.Bytes(), &identity); err != nil || w.Code != 200 || !identity.TaskWrite || identity.Scope != access.ScopeUser {
+				t.Fatalf("identity %d %s", w.Code, w.Body)
+			}
+		} else if w.Code != 404 {
+			t.Fatalf("identity without a grant %d %s", w.Code, w.Body)
 		}
-		if err := json.Unmarshal(w.Body.Bytes(), &identity); err != nil || w.Code != 200 || identity.TaskWrite != want || identity.Scope != access.ScopeUser {
-			t.Fatalf("identity %d %s", w.Code, w.Body)
-		}
-		wantCode := 403
 		if want {
 			wantCode = 201
 		}
@@ -68,7 +73,9 @@ func TestUserScopedTokenHTTPAndMCP(t *testing.T) {
 		t.Fatalf("grant %d %s", w.Code, w.Body)
 	}
 	check("beta", "b-granted", true) // same secret, no reissue or MCP refresh
-	if w := taskReq(t, f.h, "POST", "/v1/projects/beta/tasks", f.alice, "restricted", taskBody); w.Code != 403 {
+	// alice's token is scoped to alpha: it does not reach beta even with a
+	// grant there, so beta answers it as an unknown project.
+	if w := taskReq(t, f.h, "POST", "/v1/projects/beta/tasks", f.alice, "restricted", taskBody); w.Code != 404 {
 		t.Fatal("project token broadened", w.Code)
 	}
 	if w := taskReq(t, f.h, "POST", "/v1/projects/beta/epics", issued.Secret, "epic", `{"title":"milestone"}`); w.Code != 201 {
@@ -106,7 +113,8 @@ func TestUserScopedTokenHTTPAndMCP(t *testing.T) {
 		t.Fatal(w.Code, w.Body)
 	}
 	code, body, err := call(r.Context(), "POST", "/v1/projects/alpha/tasks", map[string]string{"Idempotency-Key": "revoked"}, []byte(taskBody))
-	if err != nil || code != 403 {
+	// A revoked token reads nothing either: the unknown project's answer.
+	if err != nil || code != 404 {
 		t.Fatalf("stale MCP identity wrote after revocation: %d %s %v", code, body, err)
 	}
 	if w := authedReq(t, f.h, "GET", "/v1/access/identity", issued.Secret, ""); w.Code != 401 {

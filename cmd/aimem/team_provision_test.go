@@ -23,6 +23,7 @@ import (
 type fakeOperatorHub struct {
 	users     []access.User
 	grants    map[string]bool // instance/user
+	read      map[string]bool // instance/user holding a read grant
 	teams     []store.Team
 	tokens    []access.Token
 	requests  []string
@@ -32,7 +33,7 @@ type fakeOperatorHub struct {
 }
 
 func newFakeOperatorHub() *fakeOperatorHub {
-	return &fakeOperatorHub{grants: map[string]bool{}, users: []access.User{{ID: "u-alice", Name: "alice"}, {ID: "u-bob", Name: "bob"}, {ID: "u-dup1", Name: "dup"}, {ID: "u-dup2", Name: "dup"}, {ID: "u-off", Name: "off", Disabled: true}}}
+	return &fakeOperatorHub{grants: map[string]bool{}, read: map[string]bool{}, users: []access.User{{ID: "u-alice", Name: "alice"}, {ID: "u-bob", Name: "bob"}, {ID: "u-dup1", Name: "dup"}, {ID: "u-dup2", Name: "dup"}, {ID: "u-off", Name: "off", Disabled: true}}}
 }
 
 func (h *fakeOperatorHub) call(method, path string, body any) (int, []byte, error) {
@@ -55,8 +56,16 @@ func (h *fakeOperatorHub) call(method, path string, body any) (int, []byte, erro
 		h.users = append(h.users, u)
 		return reply(200, u)
 	case method == "PUT" && strings.HasPrefix(path, "/v1/projects/alpha/access/user/"):
-		h.grants["inst-alpha/"+strings.TrimPrefix(path, "/v1/projects/alpha/access/user/")] = true
-		return reply(200, map[string]any{"ok": true, "project_instance": "inst-alpha"})
+		key := "inst-alpha/" + strings.TrimPrefix(path, "/v1/projects/alpha/access/user/")
+		previous := ""
+		switch {
+		case h.read[key]:
+			previous = "read"
+		case h.grants[key]:
+			previous = "write"
+		}
+		h.grants[key], h.read[key] = true, false
+		return reply(200, map[string]any{"ok": true, "project_instance": "inst-alpha", "access": "write", "previous_access": previous})
 	case method == "GET" && strings.HasPrefix(path, "/v1/projects/alpha/teams?"):
 		return reply(200, map[string]any{"protocol_version": 1, "teams": h.teams, "next_cursor": ""})
 	case method == "POST" && path == "/v1/projects/alpha/teams":
@@ -336,5 +345,21 @@ func TestTeamProvisionOutput(t *testing.T) {
 	notices.Reset()
 	if _, err := runProvision(t, newFakeOperatorHub(), "create", "alpha", "--team", "Pilot", "--coordinator", "alice", "--expiry", exp, "--secret-file", filepath.Join(dir, "legacy.token")); err != nil || !strings.Contains(notices.String(), "--output in place of --secret-file") {
 		t.Fatalf("--secret-file: %v %q", err, notices)
+	}
+}
+
+// A member who held a read grant gets a write grant, which a team member
+// needs, and the run says so; one already writing is set as before.
+func TestTeamProvisionSaysARaisedReadGrant(t *testing.T) {
+	h := newFakeOperatorHub()
+	h.read["inst-alpha/u-alice"] = true
+	exp := time.Now().Add(24 * time.Hour).UTC().Format(time.RFC3339)
+	out, err := runProvision(t, h, "create", "alpha", "--team", "Pilot", "--coordinator", "alice", "--expiry", exp)
+	if err != nil || !strings.Contains(out, "grant on project alpha: user alice held a read grant; it is now a write grant") {
+		t.Fatalf("raise not said: %v\n%s", err, out)
+	}
+	out, err = runProvision(t, h, "create", "alpha", "--team", "Pilot", "--coordinator", "alice", "--expiry", exp)
+	if err != nil || strings.Contains(out, "read grant") || !strings.Contains(out, "grant on project alpha: set for user alice") {
+		t.Fatalf("rerun: %v\n%s", err, out)
 	}
 }

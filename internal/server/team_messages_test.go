@@ -267,6 +267,12 @@ func TestMessageHTTPWait(t *testing.T) {
 				if w.Code != 409 {
 					t.Fatal(w.Code, w.Body)
 				}
+			case "grant", "token":
+				// The caller can no longer read the project: the unknown
+				// project's answer (task 01a1dd8c-4919).
+				if w.Code != http.StatusNotFound {
+					t.Fatal(w.Code, w.Body)
+				}
 			default:
 				if w.Code != http.StatusForbidden {
 					t.Fatal(w.Code, w.Body)

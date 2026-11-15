@@ -210,6 +210,9 @@ func Load(dir, root, projectID string) *Result {
 		// disguised as an outage by a cached selection.
 		return r.set(Denied, "the hub refused this checkout's credential: "+ierr.Error(), credentialFix,
 			fmt.Sprintf("process context unavailable: the hub refused this checkout's credential (%v); no cached selection is used", ierr))
+	case errors.As(ierr, &refused) && refused.hidden():
+		return r.set(Denied, hiddenDetail(id), hiddenFix,
+			"process context unavailable: "+hiddenDetail(id)+"; no cached selection is used")
 	case ierr != nil && !unreachable(ierr):
 		return r.set(Unavailable, "the hub answered with an error: "+ierr.Error(), "retry; if it persists, check the hub's log", "process context unavailable: "+ierr.Error())
 	case ierr != nil:
@@ -277,6 +280,8 @@ func LoadRef(dir, root, projectID string, pinned process.Ref) *Result {
 	switch {
 	case errors.As(ierr, &refused) && refused.denied():
 		return r.set(Denied, "the hub refused this checkout's credential: "+ierr.Error(), credentialFix, "")
+	case errors.As(ierr, &refused) && refused.hidden():
+		return r.set(Denied, hiddenDetail(id), hiddenFix, "")
 	case ierr != nil && !unreachable(ierr):
 		return r.set(Unavailable, "the hub answered with an error: "+ierr.Error(), "retry; if it persists, check the hub's log", "")
 	case ierr != nil:
@@ -352,6 +357,9 @@ func (r *Result) connect(dir, root string) (*adapter.HubConfig, *http.Client, bo
 			if errors.As(err, &rejected) && (rejected.Status == http.StatusUnauthorized || rejected.Status == http.StatusForbidden) {
 				detail := fmt.Sprintf("the hub refused %s (HTTP %d); no other credential is used", rejected.Credential, rejected.Status)
 				return fail(Denied, detail, rejected.Fix, "process context unavailable: "+detail+"; replace it: "+rejected.Fix)
+			}
+			if errors.Is(err, taskcred.ErrProjectHidden) {
+				return fail(Denied, hiddenDetail(r.Project), hiddenFix, "process context unavailable: "+hiddenDetail(r.Project))
 			}
 			// A local credential that cannot be validated is not used, and
 			// nothing cached stands in for it.
@@ -567,6 +575,17 @@ func (e *hubRefusal) Error() string { return e.msg }
 func (e *hubRefusal) denied() bool {
 	return e.status == http.StatusUnauthorized || e.status == http.StatusForbidden
 }
+
+// hidden reports the identity check's 404: the hub knows no such project,
+// or this credential may not read it. A hub answers both alike, so the
+// detail names both; neither is an outage a cached selection may cover.
+func (e *hubRefusal) hidden() bool { return e.status == http.StatusNotFound }
+
+func hiddenDetail(project string) string {
+	return "the hub knows no project " + project + ", or this checkout's credential may not read it (no grant, or a token scoped to another project)"
+}
+
+const hiddenFix = "check the project in .aimem.json and the checkout's credential (aimem task-token show-source); an operator grants the project with `aimem access grant add`"
 
 // unreachable reports whether err means the hub could not be asked: a
 // transport failure, or a gateway in front of it saying so (502, 503, 504).

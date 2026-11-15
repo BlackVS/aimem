@@ -210,7 +210,8 @@ func TestAssignmentHTTPBoundary(t *testing.T) {
 	if w := taskReq(t, f.h, "POST", f.base+"/assignments", f.peer, "self", assignmentJSON(t, workerOffer)); w.Code != 409 {
 		t.Fatal("worker self offer", w.Code, w.Body)
 	}
-	if w := taskReq(t, f.h, "POST", strings.Replace(f.base, "alpha", "beta", 1)+"/assignments", f.alice, "cross-project", assignmentJSON(t, f.offer)); w.Code != 403 {
+	// alice holds no grant on beta: the unknown project's answer.
+	if w := taskReq(t, f.h, "POST", strings.Replace(f.base, "alpha", "beta", 1)+"/assignments", f.alice, "cross-project", assignmentJSON(t, f.offer)); w.Code != 404 {
 		t.Fatal(w.Code)
 	}
 	for _, suffix := range []string{"&generation=1", "&actor=x", "&limit=1", "&generation=bad", "&session_id=x"} {
@@ -290,7 +291,7 @@ func TestAssignmentHTTPLiveWorkerAuthority(t *testing.T) {
 				t.Fatal(err)
 			}
 			w := f.command(t, out.ID, "accept", f.peer, "accept", store.TeamAssignmentCommand{TeamSessionHandle: f.recipient})
-			if w.Code != 401 && w.Code != 403 && w.Code != 409 {
+			if w.Code != 401 && w.Code != 403 && w.Code != 404 && w.Code != 409 {
 				t.Fatal("accepted changed authority", w.Code, w.Body)
 			}
 			// The coordinator remains authorized to withdraw an unaccepted offer.
@@ -327,10 +328,11 @@ func TestAssignmentHTTPCallerRevocationAndConflicts(t *testing.T) {
 	if err = acc.SetGrant("admin", f.alphaInstance, "user", f.aliceUser, false); err != nil {
 		t.Fatal(err)
 	}
-	if w := f.offerRequest(t, "offer"); w.Code != 403 {
+	// Without a grant the project answers as unknown, replay or read.
+	if w := f.offerRequest(t, "offer"); w.Code != 404 {
 		t.Fatal("receipt granted authority", w.Code, w.Body)
 	}
-	if w := taskReq(t, f.h, "GET", f.attemptURL(out.ID, f.sender), f.alice, "", ""); w.Code != 403 {
+	if w := taskReq(t, f.h, "GET", f.attemptURL(out.ID, f.sender), f.alice, "", ""); w.Code != 404 {
 		t.Fatal(w.Code)
 	}
 }
