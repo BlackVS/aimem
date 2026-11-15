@@ -95,7 +95,7 @@ func TestProcessSetIsStoredWithTheSelectionAndServedUnderAGrant(t *testing.T) {
 	if code, b, _ := getSet(f.h, f.alice, ""); code != 404 || !strings.Contains(b, "no process reference") {
 		t.Fatalf("granted, nothing selected: %d %s", code, b)
 	}
-	if code, _, _ := getSet(f.h, f.bob, ""); code != 403 {
+	if code, _, _ := getSet(f.h, f.stranger, ""); code != 403 {
 		t.Fatalf("no grant: %d", code)
 	}
 	if w := taskReq(t, f.h, "GET", "/v1/projects/nope/process/set", f.alice, "", ""); w.Code != 403 {
@@ -170,7 +170,7 @@ func TestProcessSetIsStoredWithTheSelectionAndServedUnderAGrant(t *testing.T) {
 			t.Fatalf("%s: the set answer names the repository URL:\n%s", c.name, b)
 		}
 	}
-	if code, _, _ := getSet(f.h, f.bob, ""); code != 403 {
+	if code, _, _ := getSet(f.h, f.stranger, ""); code != 403 {
 		t.Fatalf("no grant after selection: %d", code)
 	}
 	cond := httptest.NewRequest("GET", "/v1/projects/alpha/process/set", nil)

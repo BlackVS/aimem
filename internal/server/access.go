@@ -246,15 +246,33 @@ func (s *Server) setAccessGrant(w http.ResponseWriter, r *http.Request) {
 		s.fail(w, 400, fmt.Errorf("project is unavailable for access assignments"))
 		return
 	}
+	// PUT takes the grant's access from ?access=read|write; without it the
+	// grant is a write grant, as every grant was before the kind existed.
+	var grant access.GrantAccess
+	if r.Method == "PUT" {
+		if grant, err = access.ParseGrantAccess(r.URL.Query().Get("access")); err != nil {
+			s.fail(w, 400, err)
+			return
+		}
+	}
 	db, ok := s.accessStore(w)
 	if !ok {
 		return
 	}
-	if err := db.SetGrant(accessActor(r), project, r.PathValue("kind"), r.PathValue("id"), r.Method == "PUT"); err != nil {
+	if r.Method == "PUT" {
+		err = db.SetGrantAccess(accessActor(r), project, r.PathValue("kind"), r.PathValue("id"), grant)
+	} else {
+		err = db.SetGrant(accessActor(r), project, r.PathValue("kind"), r.PathValue("id"), false)
+	}
+	if err != nil {
 		s.accessError(w, err)
 		return
 	}
-	s.ok(w, map[string]any{"ok": true, "project_instance": project})
+	out := map[string]any{"ok": true, "project_instance": project}
+	if r.Method == "PUT" {
+		out["access"] = grant
+	}
+	s.ok(w, out)
 }
 func (s *Server) issueAccessToken(w http.ResponseWriter, r *http.Request) {
 	var req struct {

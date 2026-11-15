@@ -115,7 +115,7 @@ func OpenExisting(root string) (*Store, error) {
 }
 
 // accessSchema is the access database version this binary writes.
-const accessSchema = 9
+const accessSchema = 10
 
 func (s *Store) migrate() error {
 	var current int
@@ -351,6 +351,15 @@ ALTER TABLE identity_peer_credentials_v9 RENAME TO identity_peer_credentials;
 PRAGMA user_version=9;`); err != nil {
 			return err
 		}
+		version = 9
+	}
+	if version == 9 {
+		// A grant carries its access: read or write. Every grant made before
+		// the kind existed let its user write, so it stays a write grant.
+		if _, err := tx.Exec(`ALTER TABLE grants ADD COLUMN access TEXT NOT NULL DEFAULT 'write' CHECK(access IN ('read','write'));
+PRAGMA user_version=10;`); err != nil {
+			return err
+		}
 	}
 	return tx.Commit()
 }
@@ -369,10 +378,33 @@ type Member struct {
 	UserID  string `json:"user_id"`
 }
 type Grant struct {
-	Project string `json:"project_instance"`
-	Kind    string `json:"kind"`
-	Subject string `json:"subject"`
+	Project string      `json:"project_instance"`
+	Kind    string      `json:"kind"`
+	Subject string      `json:"subject"`
+	Access  GrantAccess `json:"access"`
 }
+
+// GrantAccess is what a project grant allows its user or group: read, or
+// write (which includes read).
+type GrantAccess string
+
+const (
+	GrantRead  GrantAccess = "read"
+	GrantWrite GrantAccess = "write"
+)
+
+// ParseGrantAccess reads a grant's access; "" is a write grant, the only
+// kind there was before grants carried one.
+func ParseGrantAccess(s string) (GrantAccess, error) {
+	switch GrantAccess(s) {
+	case "", GrantWrite:
+		return GrantWrite, nil
+	case GrantRead:
+		return GrantRead, nil
+	}
+	return "", fmt.Errorf("access must be read or write, not %q", s)
+}
+
 type Token struct {
 	ID        string     `json:"id"`
 	UserID    string     `json:"user_id"`
@@ -493,7 +525,25 @@ func (s *Store) SetMember(actor, group, user string, present bool) error {
 		return err
 	})
 }
+
+// SetGrant adds a write grant, or removes the grant whatever its access.
 func (s *Store) SetGrant(actor, project, kind, subject string, present bool) error {
+	if present {
+		return s.SetGrantAccess(actor, project, kind, subject, GrantWrite)
+	}
+	return s.setGrant(actor, project, kind, subject, "", false)
+}
+
+// SetGrantAccess grants project to a user or group with the given access,
+// replacing the access of a grant it already holds.
+func (s *Store) SetGrantAccess(actor, project, kind, subject string, access GrantAccess) error {
+	if access != GrantRead && access != GrantWrite {
+		return fmt.Errorf("access must be read or write, not %q", access)
+	}
+	return s.setGrant(actor, project, kind, subject, access, true)
+}
+
+func (s *Store) setGrant(actor, project, kind, subject string, access GrantAccess, present bool) error {
 	if project == "" {
 		return fmt.Errorf("project instance is required")
 	}
@@ -503,15 +553,22 @@ func (s *Store) SetGrant(actor, project, kind, subject string, present bool) err
 	} else if kind != "user" {
 		return fmt.Errorf("kind must be user or group")
 	}
-	return s.change(actor, fmt.Sprintf("grant.%t", present), project+"/"+kind+"/"+subject, func(tx *sql.Tx) error {
+	// The audit action of a write grant and of a removal is the one they
+	// always had; a read grant is recorded as grant.read.
+	action := fmt.Sprintf("grant.%t", present)
+	if access == GrantRead {
+		action = "grant.read"
+	}
+	return s.change(actor, action, project+"/"+kind+"/"+subject, func(tx *sql.Tx) error {
 		if err := requireRow(tx, table, subject); err != nil {
 			return err
 		}
-		query := "DELETE FROM grants WHERE project=? AND kind=? AND subject=?"
-		if present {
-			query = "INSERT OR IGNORE INTO grants VALUES(?,?,?)"
+		if !present {
+			_, err := tx.Exec("DELETE FROM grants WHERE project=? AND kind=? AND subject=?", project, kind, subject)
+			return err
 		}
-		_, err := tx.Exec(query, project, kind, subject)
+		_, err := tx.Exec(`INSERT INTO grants(project,kind,subject,access) VALUES(?,?,?,?)
+ON CONFLICT(project,kind,subject) DO UPDATE SET access=excluded.access`, project, kind, subject, access)
 		return err
 	})
 }
@@ -519,9 +576,12 @@ func (s *Store) SetGrant(actor, project, kind, subject string, present bool) err
 type rowQuery interface{ QueryRow(string, ...any) *sql.Row }
 
 // CanWrite reports whether user is enabled and holds a current direct or
-// group grant on project (an access instance id). It reads current state
-// on every call; callers re-check per attempt and never cache the answer.
-func (s *Store) CanWrite(user, project string) (bool, error) { return canWrite(s.db, user, project) }
+// group write grant on project (an access instance id). It reads current
+// state on every call; callers re-check per attempt and never cache the
+// answer.
+func (s *Store) CanWrite(user, project string) (bool, error) {
+	return canWrite(s.db, user, project, true)
+}
 
 // IdentityExists reports whether kind ("user" or "group") and id name a
 // known identity, disabled or not: an assignment must point at something
@@ -536,11 +596,15 @@ func (s *Store) IdentityExists(kind, id string) (bool, error) {
 	return n == 1, err
 }
 
-func canWrite(q rowQuery, user, project string) (bool, error) {
+// canWrite reports whether user is enabled and holds a current direct or
+// group grant on project: a write grant when write is set, a grant of either
+// kind otherwise. Issuance asks for either kind: a project-scoped token may
+// go to a reader, and what it may do is decided at use by the grant.
+func canWrite(q rowQuery, user, project string, write bool) (bool, error) {
 	var n int
 	err := q.QueryRow(`SELECT count(*) FROM users u WHERE u.id=? AND u.disabled=0 AND EXISTS(
-SELECT 1 FROM grants g WHERE g.project=? AND ((g.kind='user' AND g.subject=u.id) OR
-(g.kind='group' AND EXISTS(SELECT 1 FROM members m WHERE m.group_id=g.subject AND m.user_id=u.id))))`, user, project).Scan(&n)
+SELECT 1 FROM grants g WHERE g.project=? AND (g.access='write' OR ?=0) AND ((g.kind='user' AND g.subject=u.id) OR
+(g.kind='group' AND EXISTS(SELECT 1 FROM members m WHERE m.group_id=g.subject AND m.user_id=u.id))))`, user, project, write).Scan(&n)
 	return n == 1, err
 }
 
@@ -577,7 +641,7 @@ func (s *Store) IssueScoped(actor, user, label string, scope TokenScope, project
 			return ErrDenied
 		}
 		if project != "" {
-			ok, err := canWrite(tx, user, project)
+			ok, err := canWrite(tx, user, project, false)
 			if err != nil {
 				return err
 			}
@@ -660,8 +724,10 @@ func (s *Store) Authorize(secret, project string) (Identity, error) {
 }
 
 // CanWriteToken is the shared write check for identity hints and every task
-// mutation. IDs come from authentication, but token state/scope and grants
-// are read again here so an in-process MCP call cannot retain stale authority.
+// mutation: a live user- or project-scope token of an enabled user, and a
+// current direct or access-group write grant. IDs come from authentication,
+// but token state/scope and grants are read again here so an in-process MCP
+// call cannot retain stale authority.
 func (s *Store) CanWriteToken(user, token, project string) (bool, error) {
 	if project == "" {
 		return false, nil
@@ -670,18 +736,17 @@ func (s *Store) CanWriteToken(user, token, project string) (bool, error) {
 	err := s.db.QueryRow(`SELECT count(*) FROM tokens t JOIN users u ON u.id=t.user_id
 WHERE t.id=? AND u.id=? AND u.disabled=0 AND t.revoked=0 AND t.expires_at>?
 AND ((t.scope='user' AND t.project='') OR (t.scope='project' AND t.project=?))
-AND EXISTS(SELECT 1 FROM grants g WHERE g.project=? AND
+AND EXISTS(SELECT 1 FROM grants g WHERE g.project=? AND g.access='write' AND
 ((g.kind='user' AND g.subject=u.id) OR (g.kind='group' AND EXISTS
 (SELECT 1 FROM members m WHERE m.group_id=g.subject AND m.user_id=u.id))))`,
 		token, user, time.Now().Unix(), project, project).Scan(&n)
 	return n == 1, err
 }
 
-// CanReadToken is the project read check for task reads: CanWriteToken's
-// live token, enabled user and current direct or access-group grant, with
-// one difference — a read-only-scope token qualifies too. A grant names a
-// project, not a kind of access, so a read-only token reads exactly the
-// projects its user may write.
+// CanReadToken is the project read check for task, knowledge and
+// repository reads: CanWriteToken's live token and enabled user, with two
+// differences. A read-only-scope token qualifies too, and a grant of either
+// kind, read or write, is enough.
 func (s *Store) CanReadToken(user, token, project string) (bool, error) {
 	if project == "" {
 		return false, nil
@@ -781,9 +846,9 @@ func (s *Store) Snapshot() (Snapshot, error) {
 			out.Members = append(out.Members, v)
 			return err
 		}},
-		{"SELECT project,kind,subject FROM grants ORDER BY project,kind,subject", func(r *sql.Rows) error {
+		{"SELECT project,kind,subject,access FROM grants ORDER BY project,kind,subject", func(r *sql.Rows) error {
 			var v Grant
-			err := r.Scan(&v.Project, &v.Kind, &v.Subject)
+			err := r.Scan(&v.Project, &v.Kind, &v.Subject, &v.Access)
 			out.Grants = append(out.Grants, v)
 			return err
 		}},

@@ -57,12 +57,14 @@ func TestHubMCPKnowledgeReadsUseTheCallersGrant(t *testing.T) {
 				t.Errorf("%s scope %s: %v %q", name, scope, isErr, text)
 			}
 		}
-		// A read-only token and a user without grants read nothing.
-		for _, token := range []string{f.reader, f.stranger} {
-			args := map[string]any{"project": "alpha", "query": "convention", "name": "RUNBOOK"}
-			if text, isErr := call(token, name, args); !isErr || strings.Contains(text, "alpha") && !strings.Contains(text, "error") {
-				t.Errorf("%s without a grant: %v %q", name, isErr, text)
-			}
+		// Alice's read-only token reads what her grant allows, as it reads
+		// tasks; a user without grants reads nothing.
+		readArgs := map[string]any{"project": "alpha", "query": "convention", "name": "RUNBOOK"}
+		if text, isErr := call(f.reader, name, readArgs); isErr || !strings.Contains(text, want) {
+			t.Errorf("%s by a granted read-only token: %v %q", name, isErr, text)
+		}
+		if text, isErr := call(f.stranger, name, readArgs); !isErr || strings.Contains(text, "alpha") && !strings.Contains(text, "error") {
+			t.Errorf("%s without a grant: %v %q", name, isErr, text)
 		}
 	}
 	if text, isErr := call(f.alice, "read_doc", map[string]any{"name": "RUNBOOK"}); !isErr || !strings.Contains(text, "project argument is required") {

@@ -184,7 +184,7 @@ func TestSchema4MigrationPreservesSchema3(t *testing.T) {
 		t.Fatal(err)
 	}
 	// Rebuild a populated schema 3 database; everything in it must survive.
-	if _, err := s.db.Exec(dropIdentitySchema4 + "PRAGMA user_version=3;"); err != nil {
+	if _, err := s.db.Exec(dropIdentitySchema4 + "ALTER TABLE grants DROP COLUMN access; PRAGMA user_version=3;"); err != nil {
 		t.Fatal(err)
 	}
 	if err := s.Close(); err != nil {

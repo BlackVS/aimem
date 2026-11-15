@@ -21,7 +21,7 @@ const accessUsage = `usage: aimem access list [--project PROJECT] [--user NAME] 
        aimem access user-set --user-id ID --user-name NAME --state enabled|disabled
        aimem access group-add --group-name NAME
        aimem access member add|rm (--group-name NAME | --group-id ID) (--user-name NAME | --user-id ID)
-       aimem access grant add|rm --project PROJECT (--user-name NAME | --user-id ID | --group-name NAME | --group-id ID)
+       aimem access grant add|rm --project PROJECT (--user-name NAME | --user-id ID | --group-name NAME | --group-id ID) [--read]
        aimem access grant-rm-instance --instance ID (--user-name NAME | --user-id ID | --group-name NAME | --group-id ID)
        aimem access token-issue (--user-name NAME | --user-id ID) --label LABEL (--project PROJECT | --read-only)
                                 --expires TIME --output FILE|-
@@ -37,6 +37,12 @@ time, a date or a number of days ago (7d). A user or group is
 named by exactly one of its name or its ID; an unknown name is refused with
 the names that exist. user-add and group-add take the name only, since the
 hub generates the ID; user-set takes the ID and the new name.
+
+A grant is a write grant unless grant add takes --read. A read grant
+lets the user's tokens read the project's tasks, knowledge and repository
+and write nothing; a write grant also lets user- and project-scoped
+tokens write. grant add on a user or group already granted sets the
+access it names.
 
 token-issue-user issues a token that follows the user's current project
 grants; token-issue issues one scoped to a project, or a read-only one.
@@ -59,6 +65,7 @@ Examples, one per command:
   aimem access group-add --group-name reviewers
   aimem access member add --group-name reviewers --user-name pilot-worker
   aimem access grant add --project example --group-name reviewers
+  aimem access grant add --project example --user-name auditor --read
   aimem access grant-rm-instance --instance 01a0e1f2-0000-7000-8000-000000000002 --user-name pilot-worker
   aimem access token-issue --user-name pilot-worker --label example-laptop --project example --expires 2026-12-28T00:00:00Z --output example.token
   aimem access token-issue-user --user-name pilot-worker --label pilot-worker --expires +90d --output worker.token
@@ -313,6 +320,7 @@ func namedAccessRequest(cmd, verb string, args []string, dir accessDirectory) (a
 	instance := f.fs.String("instance", "", "")
 	label := f.fs.String("label", "", "")
 	readOnly := f.fs.Bool("read-only", false, "")
+	readGrant := f.fs.Bool("read", false, "")
 	expires := f.fs.String("expires", "", "")
 	output := f.fs.String("output", "", "")
 	tokenID := f.fs.String("token-id", "", "")
@@ -328,7 +336,7 @@ func namedAccessRequest(cmd, verb string, args []string, dir accessDirectory) (a
 		"user-set":          "user-id user-name state",
 		"group-add":         "group-name",
 		"member":            "user-name user-id group-name group-id",
-		"grant":             "project p user-name user-id group-name group-id",
+		"grant":             "project p user-name user-id group-name group-id read",
 		"grant-rm-instance": "instance user-name user-id group-name group-id",
 		"token-issue":       "user-name user-id label project p read-only expires output",
 		"token-issue-user":  "user-name user-id label expires output",
@@ -379,11 +387,18 @@ func namedAccessRequest(cmd, verb string, args []string, dir accessDirectory) (a
 		if *project == "" {
 			return accessCall{}, errors.New("--project is required")
 		}
+		if *readGrant && verb != "add" {
+			return accessCall{}, errors.New("--read applies to grant add only; grant rm removes the grant whatever its access")
+		}
 		kind, id, err := f.subject(dir, true, true)
 		if err != nil {
 			return accessCall{}, err
 		}
-		return accessCall{method: map[string]string{"add": "PUT", "rm": "DELETE"}[verb], path: "/v1/projects/" + q(*project) + "/access/" + kind + "/" + q(id)}, nil
+		path := "/v1/projects/" + q(*project) + "/access/" + kind + "/" + q(id)
+		if *readGrant {
+			path += "?access=read"
+		}
+		return accessCall{method: map[string]string{"add": "PUT", "rm": "DELETE"}[verb], path: path}, nil
 	case "grant-rm-instance":
 		if *instance == "" {
 			return accessCall{}, errors.New("--instance is required")

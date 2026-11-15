@@ -38,6 +38,36 @@ currently 25); a binary refuses a database newer than it understands.
   `MANIFEST`, a format other than `aiforge-export 1`, a `MANIFEST` with no
   `aimem` line and a release the export does not hold are refused
   (INSTALL-CLIENT.md, "Upgrading").
+- **Read grants.** A grant is now read or write. A read grant lets every
+  token of its user, or of its group's members, read the project's tasks,
+  knowledge and repository reference, and write nothing; a write grant
+  also lets user- and project-scoped tokens write. `aimem access grant add
+  --read` makes one (`PUT /v1/projects/{p}/access/{kind}/{id}?access=read`),
+  and granting again sets the access the request names, effective on the
+  next request. `aimem access list`, `aimem project` and the readiness
+  checklist mark read grants; `aimem project onboard` raises a user's read
+  grant to write.
+
+### Changed
+
+- **Knowledge and repository reads follow the grant of either kind.** Recall,
+  the document list, a document and the project's repository reference
+  used the write predicate; they now use the task reads' predicate, so a
+  read-only-scope token with a grant reads them, as it already read the
+  project's tasks. The admin token, a legacy writer token and the local
+  socket still read every project.
+
+### Upgrade notes
+
+- The hub's access database moves to schema 10. Every existing grant
+  becomes a write grant, so every token reads and writes exactly as
+  before. An older binary refuses a schema-10 database; keep a backup of
+  the access database before the upgrade if a rollback may be needed.
+- A read-only-scope token with a grant now reads that project's knowledge
+  and repository reference.
+- A project-scoped token may be issued under a read grant; whether it
+  writes is decided at each write by the grant's kind, so raising the
+  grant later lets the same token write without a reissue.
 
 ## [0.10.23] — 2026-11-14
 

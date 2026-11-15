@@ -90,10 +90,10 @@ func (s *Server) knowledgeReadDenied(w http.ResponseWriter, r *http.Request, cur
 		if !ok {
 			return true
 		}
-		// The task write predicate, used here for a read: a live token of an
-		// enabled user, scoped to the user or to this project, and a live
-		// direct or access-group grant. A read-only-scope token fails it.
-		if allowed, err = db.CanWriteToken(id.UserID, id.TokenID, instance); err != nil {
+		// The task read predicate: a live token of an enabled user, scoped
+		// to the user, to this project or read-only, and a live direct or
+		// access-group grant of either kind.
+		if allowed, err = db.CanReadToken(id.UserID, id.TokenID, instance); err != nil {
 			s.log.Error("knowledge read authorization", "project", p, "err", err)
 			s.fail(w, http.StatusInternalServerError, errors.New("cannot check project access"))
 			return true

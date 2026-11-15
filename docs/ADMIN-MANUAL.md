@@ -777,8 +777,9 @@ resolves it; without `--process`, the hub's default process; with
 neither, the step stays open and the checklist names the command. A
 project that already has a process keeps it: a `--process` naming
 another one is refused with the `aimem process select ... --expect`
-command that changes it. A user already granted, directly or through a
-group, is not granted again.
+command that changes it. A user who already holds a write grant, directly
+or through a group, is not granted again; a direct read grant is raised to
+write.
 
 The token step issues nothing when the user already holds a live token
 that writes to the project, user-scoped or scoped to this project.

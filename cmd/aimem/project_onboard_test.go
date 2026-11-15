@@ -57,7 +57,7 @@ func readOnboardState(t *testing.T, project, user string) onboardState {
 		}
 	}
 	inst := v.instance[project]
-	st.direct = inst != "" && v.directGrant(inst, uid)
+	st.direct = inst != "" && v.directGrant(inst, uid) == "write"
 	st.tokens = len(snap.Tokens)
 	for i, tk := range snap.Tokens {
 		if tk.UserID == uid && tk.Scope == "project" && inst != "" && tk.Project == inst && v.liveToken(i) {

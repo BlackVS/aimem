@@ -112,7 +112,8 @@ func (s *Server) projectReadDenied(w http.ResponseWriter, r *http.Request, what 
 		if !ok {
 			return true
 		}
-		if allowed, err = db.CanWriteToken(id.UserID, id.TokenID, instance); err != nil {
+		// The task read predicate, as for knowledge reads.
+		if allowed, err = db.CanReadToken(id.UserID, id.TokenID, instance); err != nil {
 			s.log.Error(what+" read authorization", "project", p, "err", err)
 			s.fail(w, http.StatusInternalServerError, errors.New("cannot check project access"))
 			return true

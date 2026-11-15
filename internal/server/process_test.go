@@ -63,8 +63,11 @@ func TestProcessReferenceSelection(t *testing.T) {
 	}
 	// A token without a grant on the project is refused it, as the set
 	// route refuses it; the history is an admin read even with a grant.
-	if w := taskReq(t, f.h, "GET", "/v1/projects/alpha/process", f.bob, "", ""); w.Code != 403 || strings.Contains(w.Body.String(), c1) {
+	if w := taskReq(t, f.h, "GET", "/v1/projects/alpha/process", f.stranger, "", ""); w.Code != 403 || strings.Contains(w.Body.String(), c1) {
 		t.Fatalf("no grant: %d %s", w.Code, w.Body)
+	}
+	if w := taskReq(t, f.h, "GET", "/v1/projects/alpha/process", f.bob, "", ""); w.Code != 200 || !strings.Contains(w.Body.String(), c1) {
+		t.Fatalf("read by a granted read-only token: %d %s", w.Code, w.Body)
 	}
 	for _, token := range []string{f.alice, f.bob} {
 		if w := taskReq(t, f.h, "GET", "/v1/projects/alpha/process?history=1", token, "", ""); w.Code != 403 || strings.Contains(w.Body.String(), c1) {
@@ -101,7 +104,7 @@ func TestProcessReferenceSelection(t *testing.T) {
 	if w := taskReq(t, f.h, "GET", "/v1/projects/alpha/process", f.alice, "", ""); w.Code != 404 {
 		t.Fatalf("after clear: %d", w.Code)
 	}
-	if w := taskReq(t, f.h, "GET", "/v1/projects/alpha/process", f.bob, "", ""); w.Code != 403 {
+	if w := taskReq(t, f.h, "GET", "/v1/projects/alpha/process", f.stranger, "", ""); w.Code != 403 {
 		t.Fatalf("after clear, no grant: %d", w.Code)
 	}
 	w = taskReq(t, f.h, "GET", "/v1/projects/alpha/process?history=1", f.admin, "", "")

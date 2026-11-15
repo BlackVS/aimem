@@ -72,6 +72,7 @@ type accessSnap struct {
 		Project string `json:"project_instance"`
 		Kind    string `json:"kind"`
 		Subject string `json:"subject"`
+		Access  string `json:"access"` // read or write; "" from a hub before grants had one
 	} `json:"grants"`
 	Tokens []struct {
 		ID        string    `json:"id"`
@@ -136,11 +137,21 @@ func (v *accessView) tokenState(i int) string {
 }
 
 // grantedUsers is every enabled user granted the instance, directly or
-// through a group; all includes disabled ones.
+// through a group, with a grant of either kind; all includes disabled ones.
 func (v *accessView) grantedUsers(inst string, all bool) map[string]bool {
+	return v.usersGranted(inst, all, false)
+}
+
+// writers is grantedUsers limited to write grants: the users whose tokens
+// may write.
+func (v *accessView) writers(inst string, all bool) map[string]bool {
+	return v.usersGranted(inst, all, true)
+}
+
+func (v *accessView) usersGranted(inst string, all, write bool) map[string]bool {
 	out := map[string]bool{}
 	for _, g := range v.snap.Grants {
-		if g.Project != inst {
+		if g.Project != inst || (write && g.Access == "read") {
 			continue
 		}
 		users := []string{g.Subject}
@@ -159,28 +170,33 @@ func (v *accessView) grantedUsers(inst string, all bool) map[string]bool {
 }
 
 // grantNames names the instance's grants: users by name, groups as
-// "group NAME"; a disabled user only when all.
+// "group NAME", a read grant marked "(read)"; a disabled user only when
+// all.
 func (v *accessView) grantNames(inst string, all bool) []string {
 	var out []string
 	for _, g := range v.snap.Grants {
 		if g.Project != inst {
 			continue
 		}
+		var n string
 		switch g.Kind {
 		case "user":
 			if v.disabled[g.Subject] && !all {
 				continue
 			}
-			n := v.userName[g.Subject]
+			n = v.userName[g.Subject]
 			if v.disabled[g.Subject] {
 				n += " [disabled]"
 			}
-			out = append(out, n)
 		case "group":
-			out = append(out, "group "+v.groupName[g.Subject])
+			n = "group " + v.groupName[g.Subject]
 		default:
-			out = append(out, g.Kind+" "+g.Subject)
+			n = g.Kind + " " + g.Subject
 		}
+		if g.Access == "read" {
+			n += " (read)"
+		}
+		out = append(out, n)
 	}
 	sort.Strings(out)
 	return out
@@ -188,11 +204,11 @@ func (v *accessView) grantNames(inst string, all bool) []string {
 
 // writeTokens are the indexes of the tokens that write to the instance,
 // by the hub's own rule (access.Store.CanWriteToken): live, scoped to it
-// (project-scoped to it, or user-scoped), and its user granted it directly
-// or through a group. With all, also the dead ones and the project-scoped
-// ones whose user has no grant; noGrant marks those.
+// (project-scoped to it, or user-scoped), and its user holds a write grant
+// on it directly or through a group. With all, also the dead ones and the
+// project-scoped ones whose user holds no write grant; noGrant marks those.
 func (v *accessView) writeTokens(inst string, all bool) []int {
-	granted := v.grantedUsers(inst, all)
+	granted := v.writers(inst, all)
 	var out []int
 	for i, t := range v.snap.Tokens {
 		if !all && !v.liveToken(i) {
@@ -207,11 +223,15 @@ func (v *accessView) writeTokens(inst string, all bool) []int {
 	return out
 }
 
-// noGrant marks a token of the instance whose user has no current grant
-// on it: the hub refuses its writes.
+// noGrant marks a token of the instance whose user holds no current write
+// grant on it: the hub refuses its writes. A user with a read grant reads.
 func (v *accessView) noGrant(inst string, i int) string {
-	if v.grantedUsers(inst, true)[v.snap.Tokens[i].UserID] {
+	u := v.snap.Tokens[i].UserID
+	switch {
+	case v.writers(inst, true)[u]:
 		return ""
+	case v.grantedUsers(inst, true)[u]:
+		return " [read grant]"
 	}
 	return " [no grant]"
 }
