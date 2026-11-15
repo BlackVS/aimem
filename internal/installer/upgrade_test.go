@@ -237,3 +237,118 @@ func checkRolledBack(t *testing.T, s *sandbox, out string) {
 		t.Error("the backup did not stay after the rollback")
 	}
 }
+
+// stateCopies seeds the directory beside the state root with three older
+// state copies of each kind and with neighbours that look like copies but
+// are not ones the installers made, so they must survive any pruning: a
+// name without a stamp, a stamp with something after it, another root's
+// copy, a file, and (where links can be made) a link to a directory.
+type stateCopies struct {
+	old, neighbours []string
+	target          string // the link's target, which must keep its file
+}
+
+func seedStateCopies(t *testing.T, s *sandbox) *stateCopies {
+	t.Helper()
+	c := &stateCopies{}
+	for _, kind := range []string{".backup-", ".failed-"} {
+		for _, stamp := range []string{"20260101T000000Z", "20260201T000000Z", "20260301T000000Z"} {
+			c.old = append(c.old, s.state+kind+stamp)
+		}
+	}
+	dirs := append([]string{}, c.old...)
+	for _, n := range []string{
+		s.state + ".backup-manual",
+		s.state + ".backup-20250101T000000Z.keep",
+		s.state + ".failed-2025010T000000Z",
+		s.state + "2.backup-20250101T000000Z",
+	} {
+		c.neighbours = append(c.neighbours, n)
+		dirs = append(dirs, n)
+	}
+	for _, d := range dirs {
+		if err := os.MkdirAll(d, 0o700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(d, "f"), []byte("x"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	file := s.state + ".backup-20250102T000000Z"
+	if err := os.WriteFile(file, []byte("x"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	c.neighbours = append(c.neighbours, file)
+	if runtime.GOOS != "windows" {
+		c.target = filepath.Join(s.dir, "linked")
+		if err := os.MkdirAll(c.target, 0o700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(c.target, "f"), []byte("x"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		link := s.state + ".backup-20250103T000000Z"
+		if err := os.Symlink(c.target, link); err != nil {
+			t.Fatal(err)
+		}
+		c.neighbours = append(c.neighbours, link)
+	}
+	return c
+}
+
+func lexists(p string) bool { _, err := os.Lstat(p); return err == nil }
+
+// checkPruned: after a healthy upgrade the newest two copies of each kind
+// remain (for backup-, the one just taken and 20260301), the older ones
+// are gone and named in the output, and every neighbour is untouched.
+func (c *stateCopies) checkPruned(t *testing.T, s *sandbox, out string) {
+	t.Helper()
+	gone := []string{c.old[0], c.old[1], c.old[3]}
+	kept := []string{c.old[2], c.old[4], c.old[5]}
+	for _, p := range gone {
+		if lexists(p) {
+			t.Errorf("the old state copy %s was not removed\n%s", p, out)
+		}
+		if !strings.Contains(out, "removed the old state copy "+p) {
+			t.Errorf("the output does not name the removed copy %s\n%s", p, out)
+		}
+	}
+	for _, p := range kept {
+		if !exists(filepath.Join(p, "f")) {
+			t.Errorf("the state copy %s, one of the newest two, was removed\n%s", p, out)
+		}
+	}
+	if n := strings.Count(out, "removed the old state copy "); n != len(gone) {
+		t.Errorf("%d removals reported, want %d\n%s", n, len(gone), out)
+	}
+	c.checkNeighbours(t, out)
+	if !strings.Contains(out, "the installer keeps the newest two state copies") {
+		t.Errorf("the output does not say what the installer keeps:\n%s", out)
+	}
+}
+
+// checkNothingRemoved: a failed or rolled-back upgrade removes no copy.
+func (c *stateCopies) checkNothingRemoved(t *testing.T, out string) {
+	t.Helper()
+	for _, p := range c.old {
+		if !exists(filepath.Join(p, "f")) {
+			t.Errorf("a failed upgrade removed the state copy %s\n%s", p, out)
+		}
+	}
+	if strings.Contains(out, "removed the old state copy") {
+		t.Errorf("a failed upgrade reported a removal:\n%s", out)
+	}
+	c.checkNeighbours(t, out)
+}
+
+func (c *stateCopies) checkNeighbours(t *testing.T, out string) {
+	t.Helper()
+	for _, p := range c.neighbours {
+		if !lexists(p) {
+			t.Errorf("%s is not a state copy the installer made, but it was removed\n%s", p, out)
+		}
+	}
+	if c.target != "" && !exists(filepath.Join(c.target, "f")) {
+		t.Errorf("the directory a link pointed at lost its file\n%s", out)
+	}
+}

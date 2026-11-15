@@ -22,10 +22,10 @@ if ($env:CI -ne 'true' -or $env:OS -ne 'Windows_NT') {
 $root = Split-Path -Parent $PSScriptRoot
 $cfg = @{}
 foreach ($l in Get-Content (Join-Path $root 'scripts\client-upgrade.env')) {
-  if ($l -match '^(FROM|TO)=(.*)$') { $cfg[$Matches[1]] = $Matches[2] }
+  if ($l -match '^(FROM|TO|ROLLBACK_LINE_SINCE)=(.*)$') { $cfg[$Matches[1]] = $Matches[2] }
 }
-$From = $cfg['FROM']; $To = $cfg['TO']
-foreach ($v in $From, $To) {
+$From = $cfg['FROM']; $To = $cfg['TO']; $Since = $cfg['ROLLBACK_LINE_SINCE']
+foreach ($v in $From, $To, $Since) {
   if ($v -notmatch '^v[0-9]+\.[0-9]+\.[0-9]+$') { throw "scripts/client-upgrade.env: bad version '$v'" }
 }
 $Repo = 'BlackVS/aimem'
@@ -46,13 +46,18 @@ function Get-Sums($tag) {
   foreach ($l in Get-Content $f) { $p = $l -split '\s+'; if ($p.Count -ge 2) { $m[$p[1].TrimStart('*')] = $p[0].ToLower() } }
   $m
 }
-# Runs a native command with its output in a log; returns its exit code.
+# Runs the installed aimem with its output in a log; returns its exit code.
+# Start-Process, not &: PowerShell 5.1 would wrap the command's stderr
+# lines in error records. Its stderr (its error line) goes last in the log.
 function Invoke-Logged($log, [string[]]$a) {
-  $ErrorActionPreference = 'Continue'
-  & $Bin @a *> $log
-  $rc = $LASTEXITCODE
+  # No -Wait: it waits for every process the command started, too.
+  $p = Start-Process -FilePath $Bin -ArgumentList $a -NoNewWindow -PassThru `
+    -RedirectStandardOutput "$log.out" -RedirectStandardError "$log.err"
+  $null = $p.Handle # keeps the exit code readable after the exit
+  $p.WaitForExit()
+  Get-Content "$log.out", "$log.err" | Set-Content $log
   Get-Content $log | Out-Host
-  $rc
+  $p.ExitCode
 }
 function Assert-Serving($v, $when) {
   $ErrorActionPreference = 'Continue'
@@ -100,6 +105,12 @@ $rc = Invoke-Logged (Join-Path $W 'fail.log') @('upgrade', '--release', $To)
 Remove-Item Env:AIMEM_BASE, Env:AIMEM_UPGRADE_WAIT
 if ($rc -eq 0) { Fail 'the upgrade to a binary that never serves exited 0' }
 if (-not (Select-String -LiteralPath (Join-Path $W 'fail.log') -SimpleMatch 'ROLLED BACK')) { Fail 'the failed upgrade did not say ROLLED BACK' }
+if ([version]$From.TrimStart('v') -ge [version]$Since.TrimStart('v')) {
+  $last = Get-Content (Join-Path $W 'fail.log') | Where-Object { $_.Trim() } | Select-Object -Last 1
+  if (-not "$last".StartsWith("aimem: the upgrade to $To failed and was rolled back: aimem $From is running again")) {
+    Fail 'the failed upgrade did not end with the line that says it was rolled back'
+  }
+}
 if ((Sha $Bin) -ne $SumsFrom[$Asset]) { Fail "the binary after the rollback is not $From's $Asset" }
 Assert-Serving $From 'after the rollback'
 

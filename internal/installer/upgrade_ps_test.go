@@ -5,6 +5,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"testing"
 )
 
@@ -102,4 +103,39 @@ func TestPowerShellUpgradeRollsBackBinaryAndState(t *testing.T) {
 			checkRolledBack(t, s, runPowerShellUpgrade(t, s, binary(t, "broken"), "15"))
 		})
 	}
+}
+
+// A healthy upgrade keeps the newest two state copies of each kind and
+// removes the older ones; a rolled-back one removes nothing, and its report
+// is a plain line before the thrown one.
+func TestPowerShellUpgradeKeepsTheNewestTwoStateCopies(t *testing.T) {
+	if runtime.GOOS != "windows" {
+		t.Skip("install.ps1 runs on Windows only; the Windows test job runs this")
+	}
+	s := newSandbox(t, binary(t, "v0.0.1"), false)
+	c := seedStateCopies(t, s)
+	out := runPowerShellUpgrade(t, s, binary(t, "v0.0.2"), "20")
+	if strings.Contains(out, "THROWN:") {
+		t.Fatalf("the upgrade failed:\n%s", out)
+	}
+	c.checkPruned(t, s, out)
+}
+
+func TestPowerShellUpgradeThatRollsBackRemovesNoStateCopy(t *testing.T) {
+	if runtime.GOOS != "windows" {
+		t.Skip("install.ps1 runs on Windows only; the Windows test job runs this")
+	}
+	s := newSandbox(t, binary(t, "v0.0.1"), false)
+	c := seedStateCopies(t, s)
+	out := runPowerShellUpgrade(t, s, binary(t, "broken"), "15")
+	plain := false
+	for _, l := range strings.Split(out, "\n") {
+		if strings.HasPrefix(strings.TrimSpace(l), "ROLLED BACK: aimem v0.0.1 is running again") {
+			plain = true
+		}
+	}
+	if !plain || !strings.Contains(out, "THROWN: ROLLED BACK:") {
+		t.Errorf("want the rollback report as a plain line and as the thrown message:\n%s", out)
+	}
+	c.checkNothingRemoved(t, out)
 }

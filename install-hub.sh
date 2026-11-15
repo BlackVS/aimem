@@ -22,7 +22,9 @@
 # it stops this hub's service and curation, copies the state root (without
 # the socket) to <state root>.backup-<UTC time>, swaps the binary, and
 # waits for health at the new version. If the new release does not come
-# up, the previous binary and the state copy are both put back.
+# up, the previous binary and the state copy are both put back. After a
+# healthy upgrade it keeps the newest two state copies and removes older
+# ones.
 #
 # Environment knobs:
 #   AIMEM_HUB_USER=sessiond        service account (created if missing)
@@ -338,6 +340,37 @@ txn_wait() { # version: wait until the service answers health at that version
   done
   return 1
 }
+# txn_copy_of root kind path: path is a state copy this transaction made,
+# <root>.<kind>-<UTC stamp> exactly, and a real directory (not a symlink).
+txn_copy_of() {
+  local re='^[0-9]{8}T[0-9]{6}Z$' stamp=${3#"$1.$2-"}
+  [ "$stamp" != "$3" ] && [[ $stamp =~ $re ]] && [ -d "$3" ] && [ ! -L "$3" ]
+}
+# txn_prune root: after a healthy upgrade, keep the newest two state copies
+# of each kind (backup-, failed-) and remove the older ones. The fixed-width
+# stamp makes the glob's order the copies' age. Nothing else beside the
+# root is touched, and a copy that cannot be removed is only a warning.
+txn_prune() {
+  local root=$1 kind p n i
+  for kind in backup failed; do
+    n=0
+    for p in "$root.$kind-"*; do
+      if txn_copy_of "$root" "$kind" "$p"; then n=$((n + 1)); fi
+    done
+    i=0
+    for p in "$root.$kind-"*; do
+      txn_copy_of "$root" "$kind" "$p" || continue
+      i=$((i + 1))
+      [ "$i" -le $((n - 2)) ] || break
+      if rm -rf -- "$p"; then
+        printf '==> removed the old state copy %s\n' "$p"
+      else
+        echo "WARNING: could not remove the old state copy $p" >&2
+      fi
+    done
+  done
+  return 0
+}
 upgrade_txn() { # new-binary
   local new=$1 old_v new_v root ts t0 backup="" prev="$AIMEM_BIN.prev"
   new_v=$(aimem_as "$new" version 2>/dev/null | awk '{print $2}') || true
@@ -385,7 +418,7 @@ upgrade_txn() { # new-binary
   if txn_wait "$new_v"; then
     rm -f "$prev"
     printf '==> upgraded aimem %s -> %s; service healthy at %s\n' "${old_v:-unknown}" "$new_v" "$new_v"
-    [ -z "$backup" ] || printf '==> the state backup stays at %s (remove it once satisfied)\n' "$backup"
+    [ -z "$backup" ] || { printf '==> the state backup stays at %s; the installer keeps the newest two state copies\n' "$backup"; txn_prune "$root"; }
     return 0
   fi
   echo "ERROR: aimem ${new_v:-(new)} did not answer health at its version within ${AIMEM_UPGRADE_WAIT:-30}s; rolling back." >&2

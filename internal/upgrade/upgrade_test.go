@@ -7,6 +7,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -37,6 +38,7 @@ const stubInstallSh = `#!/bin/bash
 set -e
 [ "$1" = user ] || { echo "stub installer: wrong mode $1"; exit 9; }
 [ "$(cat "$(dirname "$0")/.opencode/plugin/aimem.ts")" = "the plugin" ] || { echo "stub installer: no plugin beside it"; exit 8; }
+if [ "$STUB_FAIL" = rolled ]; then echo "ROLLED BACK: aimem v0.10.17 is running again on the state copied before the upgrade." >&2; exit 1; fi
 if [ -n "$STUB_FAIL" ]; then echo "stub installer: the new release did not come up; rolled back"; exit 3; fi
 mkdir -p "$AIMEM_BIN_DIR"
 cp "$AIMEM_PREBUILT" "$AIMEM_BIN_DIR/aimem"
@@ -48,6 +50,7 @@ const stubInstallPs1 = `param([switch]$UserOnly)
 if (-not $UserOnly) { Write-Output 'stub installer: wrong mode'; exit 9 }
 $plugin = Join-Path $PSScriptRoot '.opencode\plugin\aimem.ts'
 if (-not (Test-Path -LiteralPath $plugin) -or (Get-Content -Raw -LiteralPath $plugin) -ne 'the plugin') { Write-Output 'stub installer: no plugin beside it'; exit 8 }
+if ($env:STUB_FAIL -eq 'rolled') { $m = 'ROLLED BACK: aimem v0.10.17 is running again on the state copied before the upgrade.'; Write-Host $m; throw $m }
 if ($env:STUB_FAIL) { Write-Output 'stub installer: the new release did not come up; rolled back'; exit 3 }
 $bin = Join-Path $env:LOCALAPPDATA 'aimem\bin'
 New-Item -ItemType Directory -Force $bin | Out-Null
@@ -340,7 +343,8 @@ func TestUpgradeReportsAFailingInstaller(t *testing.T) {
 	r.publish(t, "v0.10.18")
 	t.Setenv("STUB_FAIL", "1")
 	out, err := run(src, Options{Current: "v0.10.17"})
-	if err == nil || errors.Is(err, ErrRefused) || !strings.Contains(err.Error(), "the installer of v0.10.18 failed") {
+	if err == nil || errors.Is(err, ErrRefused) || !strings.Contains(err.Error(), "the upgrade to v0.10.18 failed (the installer of v0.10.18: ") ||
+		!strings.HasSuffix(err.Error(), "the installer reported no rollback, see its output above") {
 		t.Fatalf("%v\n%s", err, out)
 	}
 	if !strings.Contains(out, "stub installer: the new release did not come up; rolled back") {
@@ -348,6 +352,53 @@ func TestUpgradeReportsAFailingInstaller(t *testing.T) {
 	}
 	if b, _ := os.ReadFile(s.installed); !bytes.Equal(b, s.before) {
 		t.Error("the installed binary changed")
+	}
+}
+
+// A failed run ends with one line that says how it ended: the installer's
+// rollback report when it printed one, here once as a plain line and, from
+// install.ps1, again inside the error record of its throw.
+func TestUpgradeEndsWithTheInstallersRollbackReport(t *testing.T) {
+	r, src, s := setup(t)
+	r.publish(t, "v0.10.18")
+	t.Setenv("STUB_FAIL", "rolled")
+	out, err := run(src, Options{Current: "v0.10.17"})
+	want := "the upgrade to v0.10.18 failed and was rolled back: aimem v0.10.17 is running again on the state copied before the upgrade."
+	if err == nil || err.Error() != want {
+		t.Fatalf("got %v, want %q\n%s", err, want, out)
+	}
+	if b, _ := os.ReadFile(s.installed); !bytes.Equal(b, s.before) {
+		t.Error("the installed binary changed")
+	}
+}
+
+// The rollback report is a line that starts with the prefix, found however
+// the output is split into writes; a later copy of it (the error record)
+// and a line that only mentions it do not replace the first.
+func TestRollbackWatchKeepsTheFirstReport(t *testing.T) {
+	var sink bytes.Buffer
+	w := &rollbackWatch{w: &sink}
+	in := "==> upgrading\nsee the ROLLED BACK: line below\r\nROLLED BACK: aimem v1 is running\r\n again.\nROLLED BACK: aimem v1 is\n"
+	for i := 0; i < len(in); i += 3 {
+		if _, err := w.Write([]byte(in[i:min(i+3, len(in))])); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if got := w.report(); got != "ROLLED BACK: aimem v1 is running" {
+		t.Errorf("report = %q", got)
+	}
+	if sink.String() != in {
+		t.Error("the output did not pass through unchanged")
+	}
+	if got := (&rollbackWatch{w: io.Discard}).report(); got != "" {
+		t.Errorf("no output gave the report %q", got)
+	}
+	tail := &rollbackWatch{w: io.Discard}
+	if _, err := tail.Write([]byte("x\nROLLED BACK: no newline at the end")); err != nil {
+		t.Fatal(err)
+	}
+	if got := tail.report(); got != "ROLLED BACK: no newline at the end" {
+		t.Errorf("a last line without a newline gave %q", got)
 	}
 }
 

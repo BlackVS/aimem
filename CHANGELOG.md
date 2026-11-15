@@ -26,6 +26,26 @@ currently 25); a binary refuses a database newer than it understands.
   `scripts/client-upgrade.env`, moved forward after each release
   (docs/DEVELOPMENT.md).
 
+### Changed
+
+- **Upgrades remove old state copies.** Every upgrade copies the state
+  root to `<state root>.backup-<UTC time>`, and a rolled-back one leaves
+  `<state root>.failed-<UTC time>`; nothing removed them, and a hub
+  collected one per upgrade. After an upgrade that comes up healthy,
+  `install.sh`, `install-hub.sh` and `install.ps1` now keep the newest
+  two copies of each kind, remove the older ones and print
+  `removed the old state copy <path>` for each. A failed or rolled-back
+  upgrade removes nothing, and only directories named exactly that way
+  beside the state root are touched.
+- **`aimem upgrade` says when the installer rolled back.** A failed run
+  now ends with one line: `aimem: the upgrade to <release> failed and
+  was rolled back: aimem <previous> is running again ...`, the
+  installer's own report, or a line that says the installer reported no
+  rollback. On Windows the report no longer reaches the reader only
+  inside a PowerShell error record. The client-upgrade check asserts the
+  line once its FROM release has it (`ROLLBACK_LINE_SINCE` in
+  `scripts/client-upgrade.env`).
+
 ## [0.10.25] — 2026-11-15
 
 The release is built in two jobs. A `build` job with read access only runs

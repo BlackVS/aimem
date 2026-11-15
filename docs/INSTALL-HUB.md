@@ -28,6 +28,9 @@ socket) to `<state root>.backup-<UTC time>` beside it, by default
 `~sessiond/.local/state/aimem.backup-…`, swaps the binary and waits for
 health at the new version. If the new release does not come up, the
 previous binary and the state copy both go back and the script says so.
+After an upgrade that came up healthy it keeps the newest two state
+copies and removes older ones, naming each (docs/ADMIN-MANUAL.md has the
+rule); after a failed one it removes none.
 The hub is down from the stop until the new release answers: the copy
 takes about a second for 128 MiB of state on a local disk, and the
 output prints the state's size and the copy's time. A copy that changed
