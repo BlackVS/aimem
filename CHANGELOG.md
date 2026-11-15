@@ -55,7 +55,8 @@ currently 25); a binary refuses a database newer than it understands.
 - **The Windows export install copies boot.ps1 first.** Windows PowerShell
   refuses to run an unsigned script straight from a share named by a
   dotted host name or an address; ADMIN-MANUAL, "Installing from an
-  aiforge export", copies `boot.ps1` to a local folder and runs the copy,
+  aiforge export", copies `boot.ps1` to a local folder and runs the copy
+  (a failed copy stops it, so a copy an interrupted run left is never run),
   and says how a private certificate authority is trusted for an https
   export.
 - **Faster Windows installer tests.** The documented Windows install test

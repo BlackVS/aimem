@@ -196,6 +196,7 @@ func TestDocumentedWindowsInstallRunsBootPs1(t *testing.T) {
 	// case wants), with STUB_FAIL set when the stub should fail.
 	type run struct {
 		code, sums, tag string // tag: the export release the stub folder holds
+		stale           string // a file left in TEMP before the run, as by an interrupted one
 		fail            bool
 	}
 	prepare := func(code string) string {
@@ -244,8 +245,11 @@ func TestDocumentedWindowsInstallRunsBootPs1(t *testing.T) {
 			if r.fail {
 				b.WriteString("$env:STUB_FAIL = '1'\n")
 			}
+			if r.stale != "" {
+				fmt.Fprintf(&b, "Set-Content -LiteralPath (Join-Path $env:TEMP '%s') -Value 'Write-Output \"stale copy ran\"'\n", r.stale)
+			}
 			b.WriteString("try {\n" + prepare(r.code) + "\n} catch { Write-Output \"failure=[$_]\" }\n")
-			b.WriteString("Write-Output \"window after=[$env:AIMEM_USER_ONLY] base after=[$env:AIMEM_BASE]\"\n")
+			b.WriteString("Write-Output \"window after=[$env:AIMEM_USER_ONLY] base after=[$env:AIMEM_BASE] temp after=[$((Get-ChildItem -LiteralPath $env:TEMP -Filter *.ps1).Name -join ',')]\"\n")
 			b.WriteString("Remove-Item Env:STUB, Env:STUB_FAIL, Env:AIMEM_USER_ONLY, Env:AIMEM_BASE -ErrorAction SilentlyContinue\n")
 		}
 		fmt.Fprintf(&b, "Write-Output '=== run %d'\n", len(runs))
@@ -285,7 +289,7 @@ func TestDocumentedWindowsInstallRunsBootPs1(t *testing.T) {
 	for key, line := range lines {
 		doc := strings.SplitN(key, "\n", 2)[0]
 		at := len(runs)
-		runs = append(runs, run{line, good, "", false}, run{line, good, "", true})
+		runs = append(runs, run{line, good, "", "", false}, run{line, good, "", "", true})
 		checks = append(checks, check{"line in " + doc, at, func(t *testing.T, outs []string) {
 			if out := outs[0]; !strings.Contains(out, want(line)) || strings.Contains(out, "failure=") {
 				t.Fatalf("the line did not run boot.ps1 from the caller's directory with %q:\n%s", want(line), out)
@@ -300,8 +304,8 @@ func TestDocumentedWindowsInstallRunsBootPs1(t *testing.T) {
 	for key, block := range blocks {
 		doc := strings.SplitN(key, "\n", 2)[0]
 		at := len(runs)
-		runs = append(runs, run{block, good, "", false}, run{block, tampered, "", false},
-			run{strings.Replace(block, "  Unblock-File -LiteralPath $f\n", "", 1), good, "", false})
+		runs = append(runs, run{block, good, "", "", false}, run{block, tampered, "", "", false},
+			run{strings.Replace(block, "  Unblock-File -LiteralPath $f\n", "", 1), good, "", "", false})
 		checks = append(checks, check{"block in " + doc, at, func(t *testing.T, outs []string) {
 			if out := outs[0]; !strings.Contains(out, want(block)) {
 				t.Fatalf("the block did not run boot.ps1 from the caller's directory with %q:\n%s", want(block), out)
@@ -319,23 +323,28 @@ func TestDocumentedWindowsInstallRunsBootPs1(t *testing.T) {
 	// The export form copies boot.ps1 from the share to a local folder and
 	// runs the copy as a file: the run sees the share as its base and the
 	// caller's directory, and the window keeps neither the variable nor
-	// the copy, even when the run fails.
+	// the copy, even when the run fails. A copy that fails stops the form:
+	// a copy an interrupted earlier run left in TEMP does not run, and is
+	// removed with the variable. Each run reports what TEMP holds after it.
 	tagIn := regexp.MustCompile(`\\aimem\\(v[^\\]+)\\boot\.ps1`)
+	copyIn := regexp.MustCompile(`Join-Path \$env:TEMP '([^']+\.ps1)'`)
 	for key, form := range exports {
 		doc := strings.SplitN(key, "\n", 2)[0]
-		tag := tagIn.FindStringSubmatch(form)
-		if tag == nil {
-			t.Fatalf("%s: the export form names no aimem\\<tag>\\boot.ps1:\n%s", doc, form)
+		tag, copied := tagIn.FindStringSubmatch(form), copyIn.FindStringSubmatch(form)
+		if tag == nil || copied == nil {
+			t.Fatalf("%s: the export form names no aimem\\<tag>\\boot.ps1 or no copy in TEMP:\n%s", doc, form)
 		}
 		at := len(runs)
-		runs = append(runs, run{form, good, tag[1], false}, run{form, good, tag[1], true})
+		runs = append(runs, run{form, good, tag[1], "", false}, run{form, good, tag[1], "", true}, run{form, good, "", copied[1], false})
 		checks = append(checks, check{"export form in " + doc, at, func(t *testing.T, outs []string) {
+			for i, out := range outs[:3] {
+				if !strings.Contains(out, "base after=[] temp after=[]") {
+					t.Fatalf("run %d left AIMEM_BASE or a copy in the window:\n%s", i, out)
+				}
+			}
 			for i, out := range outs[:2] {
 				if !strings.Contains(out, "run saw=[] cwd=["+project+"] base=[") || strings.Contains(out, "base=[]") {
 					t.Fatalf("run %d did not run boot.ps1 from the caller's directory with the export as its base:\n%s", i, out)
-				}
-				if !strings.Contains(out, "base after=[]") {
-					t.Fatalf("run %d left AIMEM_BASE set in the window:\n%s", i, out)
 				}
 			}
 			if strings.Contains(outs[0], "failure=") {
@@ -344,8 +353,8 @@ func TestDocumentedWindowsInstallRunsBootPs1(t *testing.T) {
 			if !strings.Contains(outs[1], "the stub run failed") {
 				t.Fatalf("the failing stub did not run:\n%s", outs[1])
 			}
-			if left, _ := filepath.Glob(filepath.Join(dir, "temp", "*.ps1")); len(left) != 0 {
-				t.Fatalf("the copy was left behind: %v", left)
+			if out := outs[2]; strings.Contains(out, "stale copy ran") || strings.Contains(out, "run saw=") || !strings.Contains(out, "failure=") {
+				t.Fatalf("a failed copy did not stop the form before a stale copy ran:\n%s", out)
 			}
 		}})
 	}

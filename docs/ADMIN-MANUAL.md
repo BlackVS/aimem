@@ -228,13 +228,17 @@ export's `aimem\<tag>\boot.ps1` to a local folder and run the copy as a
 file under `RemoteSigned`, removing the variable and the copy afterwards.
 Windows PowerShell refuses to run an unsigned script straight from a
 share named by a dotted host name or an address, as most shares are; the
-copy runs, and `AIMEM_BASE` still names the share:
+copy runs, and `AIMEM_BASE` still names the share. The copy stops the
+block when it fails, so a copy an interrupted earlier run left behind is
+never run:
 
 ```powershell
 $env:AIMEM_BASE = '\\fileserver.example.internal\aiforge-export'
 $boot = Join-Path $env:TEMP 'aimem-boot.ps1'
-Copy-Item -LiteralPath "$env:AIMEM_BASE\aimem\v0.10.24\boot.ps1" -Destination $boot
-try { powershell -NoProfile -ExecutionPolicy RemoteSigned -File $boot } finally { Remove-Item Env:AIMEM_BASE; Remove-Item -LiteralPath $boot }
+try {
+  Copy-Item -LiteralPath "$env:AIMEM_BASE\aimem\v0.10.24\boot.ps1" -Destination $boot -ErrorAction Stop
+  powershell -NoProfile -ExecutionPolicy RemoteSigned -File $boot
+} finally { Remove-Item Env:AIMEM_BASE; Remove-Item -LiteralPath $boot -ErrorAction SilentlyContinue }
 ```
 
 From an https export, the hub's printed
