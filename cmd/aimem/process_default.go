@@ -63,7 +63,7 @@ func processDefaultCmd(args []string) error {
 		var source string
 		var err error
 		if *archive != "" {
-			bundle, sel.Commit, err = archiveDefaultSet(sel, *archive, *sums)
+			bundle, sel.Commit, err = archiveSet(sel, *archive, *sums)
 			source = filepath.Base(*archive)
 		} else if sel.Commit, err = resolveRef(sel.Repo, sel.Ref); err != nil {
 			err = fmt.Errorf("resolving %s: %w", sel.Ref, err)
@@ -119,11 +119,12 @@ func processDefaultCmd(args []string) error {
 	return errors.New(processDefaultUsage)
 }
 
-// archiveDefaultSet reads the set of a default from an archive verified
-// against its SHA256SUMS, and the commit the archive records: what
-// `aimem process export` and a forge's source tarball write. It reads
-// nothing else, so a hub host with no network sets its default.
-func archiveDefaultSet(sel process.Ref, archive, sums string) (*process.Bundle, string, error) {
+// archiveSet reads the set from an archive verified against its
+// SHA256SUMS, and the commit the archive records: what `aimem process
+// export` and a forge's source tarball write. It reads nothing else, so a
+// hub host with no network sets its default or selects a project's
+// process; an archive that records no commit is refused.
+func archiveSet(sel process.Ref, archive, sums string) (*process.Bundle, string, error) {
 	bundle, _, err := importBundle(sel, archive, sums)
 	if err != nil {
 		return nil, "", err

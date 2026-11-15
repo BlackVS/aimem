@@ -71,6 +71,23 @@ currently 25); a binary refuses a database newer than it understands.
   export.
 - **Faster Windows installer tests.** The documented Windows install test
   runs all its cases in one PowerShell process per shell.
+- **`process select --from-archive` takes the commit from the archive.**
+  `aimem process select <repo> <tag> --from-archive FILE` now selects
+  the commit the archive records and stores the tag as given, as
+  `process default set` does, without resolving the tag over the network,
+  so a closed-network hub host selects the release's
+  `aimem-process.tar.gz` by its tag with neither `git` nor
+  `git get-tar-commit-id`. With `--commit`, a commit that is not the one
+  the archive records is refused, naming both, and nothing is selected; it
+  used to be stored as typed. An archive that records no commit (exported
+  by 0.10.16 or earlier, or made by hand) is now refused by `select`, as
+  `default set` already refused it: export it again.
+- **`process refresh --from-archive` checks the archive's commit, not its
+  name.** It compares the commit the archive records with the selection's,
+  so the release's fixed name `aimem-process.tar.gz` refreshes the
+  selection made from it, and an archive of another commit is refused
+  whatever it is called. An archive that records no commit is refused here
+  too.
 
 ### Added
 
