@@ -13,6 +13,20 @@ currently 25); a binary refuses a database newer than it understands.
 
 ## [Unreleased]
 
+## [0.10.26] — 2026-11-15
+
+The stdio document and record tools now confirm the checkout's pinned
+project with the member's task credential before they use the machine's
+checkpoint credential, and name the hub and the credential in every result
+(audit A-9). Upgrades keep the newest two state copies of each kind and
+remove the older ones, and `aimem upgrade` ends a failed run with one line
+that says how the rollback ended. A standing check runs a real client
+upgrade and its rollback, nightly and at each tag. Upgrade the clients: a
+member whose task credential holds only a read grant on a project can no
+longer write its documents or records through these tools, and a hub entry
+that holds a task credential over plain http or `insecure` refuses them
+(see Security). Includes PR #371, #372 and #373.
+
 ### Security
 
 - **The stdio document and record tools confirm the project before they
