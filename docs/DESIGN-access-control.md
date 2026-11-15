@@ -307,10 +307,15 @@ client confirms the pinned project
   cannot be read. A project-local requirement in `.aimem.json` does not stand
   for a missing credential when the hub entry holds one.
 - **Without a task credential** on the hub entry, the call proceeds, and its
-  result says the scope is not confirmed.
+  result says the scope is not confirmed. A machine that keeps only
+  project-local task credentials has none on the hub entry, so a checkout
+  without the local marker proceeds unconfirmed there, as on a writer-only
+  machine. A checkout with the marker whose local credential cannot be used
+  (bound to another project, or unreadable) is refused.
 - **A group space** carries no grant, so no answer confirms it. A group call
   proceeds when the pinned project was not refused, and its result names the
-  group as declared by the repository.
+  group as declared by the repository. So does a project call that also reads
+  the declared groups (the default `list_docs`).
 - **Every result** names the hub, its URL and the credential used. The first
   use of a hub, project and groups from a checkout is announced, and so is a
   later change of any of them for the same checkout (`doc-scope-seen.json` in
@@ -319,7 +324,11 @@ client confirms the pinned project
 - **`list_docs` and `read_doc`** of the confirmed project go out with the task
   credential, through the routes on which the hub checks its grant (the
   knowledge pilot). Group reads, `update_doc` and the records tools keep the
-  checkpoint token.
+  checkpoint token. The task credential travels only over the strict client
+  (https with the entry's pin or CA, no proxy, no redirect followed): the copy
+  of the hub entry that carries it is marked `Strict`, and
+  `HubConfig.HTTPClient` then hands out that client or, when it cannot be built,
+  one that sends nothing.
 
 **Next step.** The hub exposes no route on which an ordinary token writes a
 document, or reads or writes a record. Once it does, these tools move to the

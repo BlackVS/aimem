@@ -1,7 +1,9 @@
 package mcp
 
 import (
+	"context"
 	"encoding/json"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -13,11 +15,14 @@ import (
 
 	"aimem/internal/adapter"
 	"aimem/internal/hubtest"
+	"aimem/internal/taskcred"
 )
 
 const (
 	a9Writer = "aimem_writer_CHECKPOINT"
 	a9Task   = "aimem_user_TASK"
+	// a9Local is a project-local task credential, in the form taskcred.Set accepts.
+	a9Local = "aimem_user_" + "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
 )
 
 // a9Hub is a fake hub that records every request's route and credential and
@@ -27,6 +32,9 @@ type a9Hub struct {
 	mu       sync.Mutex
 	seen     []string // "METHOD path bearer"
 	identity http.HandlerFunc
+	// docRedirect, when set, answers every read of projQ's documents with a
+	// redirect there.
+	docRedirect string
 }
 
 func (h *a9Hub) saw() []string {
@@ -50,7 +58,7 @@ func newA9Hub(t *testing.T, identity http.HandlerFunc) *a9Hub {
 	h := &a9Hub{identity: identity}
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /v1/access/identity", func(w http.ResponseWriter, r *http.Request) {
-		if r.Header.Get("Authorization") != "Bearer "+a9Task {
+		if a := r.Header.Get("Authorization"); a != "Bearer "+a9Task && a != "Bearer "+a9Local {
 			w.WriteHeader(http.StatusUnauthorized)
 			return
 		}
@@ -77,7 +85,12 @@ func newA9Hub(t *testing.T, identity http.HandlerFunc) *a9Hub {
 	h.Server = httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		h.mu.Lock()
 		h.seen = append(h.seen, r.Method+" "+r.URL.Path+" "+strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer "))
+		to := h.docRedirect
 		h.mu.Unlock()
+		if to != "" && r.Method == "GET" && strings.HasPrefix(r.URL.Path, "/v1/projects/projQ/docs") {
+			http.Redirect(w, r, to+r.URL.Path, http.StatusFound)
+			return
+		}
 		mux.ServeHTTP(w, r)
 	}))
 	t.Cleanup(h.Close)
@@ -177,6 +190,12 @@ func TestA9UnclearIdentityAnswerIsNotConfirmed(t *testing.T) {
 		"no user": func(w http.ResponseWriter, r *http.Request) {
 			w.Write([]byte(`{"name":"ci","role":"writer","project":"projQ"}`))
 		},
+		"user without token id": func(w http.ResponseWriter, r *http.Request) {
+			w.Write([]byte(`{"user_id":"u1","name":"member","role":"user","project":"projQ","task_write":true}`))
+		},
+		"token id without user": func(w http.ResponseWriter, r *http.Request) {
+			w.Write([]byte(`{"token_id":"t1","name":"member","role":"user","project":"projQ","task_write":true}`))
+		},
 		"empty object":  func(w http.ResponseWriter, r *http.Request) { w.Write([]byte(`{}`)) },
 		"redirect away": func(w http.ResponseWriter, r *http.Request) { http.Redirect(w, r, "/elsewhere", http.StatusFound) },
 		"timeout": func(w http.ResponseWriter, r *http.Request) {
@@ -261,6 +280,26 @@ func TestA9ReadOnlyGrantRefusesProjectWrites(t *testing.T) {
 			t.Fatalf("a write reached the hub: %s", s)
 		}
 	}
+	// A group space carries no grant: a group write is refused only when the
+	// pinned project is, so a read grant on the project lets it through,
+	// labelled as declared by the repository.
+	for _, tool := range []string{"update_doc", "put_record"} {
+		msg, err := a9Run(a9Call(tool, "group:fw"))
+		if err != nil || !strings.Contains(msg, "group space group-fw as declared by this repository's .aimem.json, not confirmed") {
+			t.Fatalf("group %s: %q %v", tool, msg, err)
+		}
+	}
+	puts := 0
+	for _, s := range hub.saw() {
+		if strings.HasPrefix(s, "PUT /v1/projects/group-fw/") {
+			puts++
+		} else if strings.HasPrefix(s, "PUT ") {
+			t.Fatalf("a write reached another space: %s", s)
+		}
+	}
+	if puts != 2 {
+		t.Fatalf("the group writes did not reach the hub: %d", puts)
+	}
 }
 
 // Without a task credential on the hub entry the tools proceed with the
@@ -323,8 +362,20 @@ func TestA9GroupScopeIsDeclaredNotConfirmed(t *testing.T) {
 	hub := newA9Hub(t, a9Identity(true))
 	a9Checkout(t, hub, true, "")
 	msg, err := a9Run(a9Call("list_docs", ""))
-	if err != nil || !strings.Contains(msg, "RUNBOOK-group-fw") || !strings.Contains(msg, "group spaces: the machine's checkpoint credential") {
-		t.Fatalf("the default listing: %q %v", msg, err)
+	if err != nil || !strings.Contains(msg, "RUNBOOK-group-fw") || !strings.Contains(msg, "group spaces: the machine's checkpoint credential") ||
+		!strings.Contains(msg, "project projQ, confirmed by your task credential; group spaces group-fw as declared by this repository's .aimem.json, not confirmed") {
+		t.Fatalf("the default listing does not label its group: %q %v", msg, err)
+	}
+	// Without a task credential the default listing labels the group too.
+	hub = newA9Hub(t, a9Identity(true))
+	a9Checkout(t, hub, false, "")
+	if msg, err := a9Run(a9Call("list_docs", "")); err != nil ||
+		!strings.Contains(msg, "scope not confirmed (hub \"hubA\" holds no task credential); group spaces group-fw as declared by this repository's .aimem.json, not confirmed") {
+		t.Fatalf("the unconfirmed default listing does not label its group: %q %v", msg, err)
+	}
+	// A project-only call names no group.
+	if msg, err := a9Run(a9Call("read_doc", "")); err != nil || strings.Contains(msg, "group spaces") {
+		t.Fatalf("a project read names a group: %q %v", msg, err)
 	}
 }
 
@@ -354,5 +405,139 @@ func TestA9FirstUseAndChangeAreAnnounced(t *testing.T) {
 	t.Chdir(other)
 	if msg, err := a9Run(a9Call("list_docs", "")); err != nil || !strings.Contains(msg, "first use") {
 		t.Fatalf("another checkout is not announced: %q %v", msg, err)
+	}
+}
+
+// A machine whose hub entry holds no task credential but whose checkout
+// requires a local one that cannot be used is refused, not let through as a
+// machine without credentials: a local credential bound to another project
+// (a pulled commit changed the pinned project) or one that is malformed.
+func TestA9UnusableLocalCredentialIsRefused(t *testing.T) {
+	for _, damage := range []string{"bound to another project", "malformed"} {
+		t.Run(damage, func(t *testing.T) {
+			hub := newA9Hub(t, func(w http.ResponseWriter, r *http.Request) {
+				json.NewEncoder(w).Encode(map[string]any{"user_id": "u1", "token_id": "t2", "name": "member", "role": "user",
+					"scope": "project", "project": r.URL.Query().Get("project"), "task_write": true})
+			})
+			root, dir := a9Checkout(t, hub, false, "")
+			cfg := filepath.Join(dir, ".aimem.json")
+			os.WriteFile(cfg, []byte(`{"project":"projP","groups":["fw"]}`), 0o600)
+			if err := taskcred.Set(context.Background(), dir, root, a9Local); err != nil {
+				t.Fatal(err)
+			}
+			switch damage {
+			case "bound to another project":
+				raw, _ := os.ReadFile(cfg)
+				os.WriteFile(cfg, []byte(strings.Replace(string(raw), "projP", "projQ", 1)), 0o600)
+			case "malformed":
+				raw, _ := os.ReadFile(cfg)
+				os.WriteFile(cfg, []byte(strings.Replace(string(raw), "projP", "projQ", 1)), 0o600)
+				files, _ := filepath.Glob(filepath.Join(root, "task-credentials", "*.json"))
+				if len(files) != 1 {
+					t.Fatalf("expected one local credential, found %v", files)
+				}
+				os.WriteFile(files[0], []byte("not a credential"), 0o600)
+			}
+			if raw, _ := os.ReadFile(cfg); !strings.Contains(string(raw), `"task_credential"`) || !strings.Contains(string(raw), "projQ") {
+				t.Fatalf("the checkout is not marked local and pinned to projQ: %s", raw)
+			}
+			for _, tool := range a9Tools {
+				if _, err := a9Run(a9Call(tool, "")); err == nil || !strings.Contains(err.Error(), "task credential cannot be used") {
+					t.Fatalf("%s: not refused: %v", tool, err)
+				}
+			}
+			if got := hub.sentOn(a9Writer); len(got) > 0 {
+				t.Fatalf("the checkpoint credential reached the hub: %v", got)
+			}
+		})
+	}
+}
+
+// A .aimem.json changed under the running server: the server's pinned
+// project and the file's differ, and the task credential resolves the file's.
+// A grant on the file's project does not confirm the server's.
+func TestA9PinChangedUnderTheServerIsRefused(t *testing.T) {
+	hub := newA9Hub(t, func(w http.ResponseWriter, r *http.Request) {
+		json.NewEncoder(w).Encode(map[string]any{"user_id": "u1", "token_id": "t1", "name": "member", "role": "user",
+			"scope": "user", "project": r.URL.Query().Get("project"), "task_write": true})
+	})
+	_, dir := a9Checkout(t, hub, true, "")
+	os.WriteFile(filepath.Join(dir, ".aimem.json"), []byte(`{"project":"projR","groups":["fw"]}`), 0o600)
+	for _, tool := range a9Tools {
+		_, err := a9Run(a9Call(tool, "")) // the server still pins projQ
+		if err == nil || !strings.Contains(err.Error(), "the task credential is bound to project projR") {
+			t.Fatalf("%s: not refused: %v", tool, err)
+		}
+	}
+	if got := hub.sentOn(a9Writer); len(got) > 0 {
+		t.Fatalf("the checkpoint credential reached the hub: %v", got)
+	}
+	if got := hub.sentOn(a9Task); len(got) > 0 {
+		t.Fatalf("the task credential reached a docs route: %v", got)
+	}
+}
+
+// The document reads that carry the task credential go out over the strict
+// client only: a redirect is not followed, whether to plain http on the same
+// host or to another host, so the far side sees no request and no bearer.
+func TestA9TaskCredentialReadsFollowNoRedirect(t *testing.T) {
+	var got sync.Map // what the redirect target saw: "METHOD path" -> bearer
+	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		got.Store(r.Method+" "+r.URL.Path, r.Header.Get("Authorization"))
+		json.NewEncoder(w).Encode(map[string]any{"docs": []any{}, "name": "RUNBOOK", "rev": 9, "body": "from the target"})
+	}))
+	defer target.Close()
+	_, port, _ := net.SplitHostPort(strings.TrimPrefix(target.URL, "http://"))
+	for name, to := range map[string]string{
+		"plain http, same host": "http://127.0.0.1:" + port,
+		"another host":          "http://localhost:" + port,
+	} {
+		t.Run(name, func(t *testing.T) {
+			hub := newA9Hub(t, a9Identity(true))
+			hub.docRedirect = to
+			a9Checkout(t, hub, true, "")
+			for _, tool := range []string{"list_docs", "read_doc"} {
+				if msg, err := a9Run(a9Call(tool, "")); err == nil {
+					t.Fatalf("%s followed the redirect: %q", tool, msg)
+				}
+			}
+			n := 0
+			got.Range(func(k, v any) bool {
+				n++
+				t.Errorf("the redirect target saw %v with %q", k, v)
+				return true
+			})
+			if n > 0 {
+				t.FailNow()
+			}
+			// The redirect was answered to the task credential, so it was
+			// the task credential's read that stopped there.
+			if reads := hub.sentOn(a9Task); len(reads) == 0 {
+				t.Fatal("no document read went out with the task credential")
+			}
+		})
+	}
+}
+
+// The announcement record may be damaged: null, an array or a string in its
+// place. The call still returns its result, announces as a first use and
+// rewrites the record as an object.
+func TestA9DamagedAnnouncementRecord(t *testing.T) {
+	for _, raw := range []string{"null", "[]", `"text"`, "{not json", `{"x":1}`} {
+		t.Run(raw, func(t *testing.T) {
+			hub := newA9Hub(t, a9Identity(true))
+			root, _ := a9Checkout(t, hub, false, "")
+			path := filepath.Join(root, "doc-scope-seen.json")
+			os.WriteFile(path, []byte(raw), 0o600)
+			msg, err := a9Run(a9Call("update_doc", ""))
+			if err != nil || !strings.Contains(msg, "RUNBOOK updated to rev 3") || !strings.Contains(msg, "first use") {
+				t.Fatalf("the result is lost or not announced: %q %v", msg, err)
+			}
+			var seen map[string]scopeSeen
+			b, _ := os.ReadFile(path)
+			if json.Unmarshal(b, &seen) != nil || len(seen) == 0 {
+				t.Fatalf("the record was not rewritten as an object: %s", b)
+			}
+		})
 	}
 }

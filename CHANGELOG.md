@@ -26,7 +26,9 @@ currently 25); a binary refuses a database newer than it understands.
     (and writable, for `update_doc` and `put_record`). It is refused when
     the answer is a 404, and when it is anything else that is not a
     grant: an error, a timeout or an unreadable answer. `list_docs` and
-    `read_doc` of the project now read with the task credential.
+    `read_doc` of the project now read with the task credential, over the
+    strict client only: no proxy, no redirect followed, and nothing sent
+    when that client cannot be built for the hub entry.
   - **Without one**, the call proceeds and its result says "scope not
     confirmed".
   - **Group scopes** are named as declared by the repository, never as

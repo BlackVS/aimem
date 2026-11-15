@@ -41,8 +41,11 @@ type docScope struct {
 	task      *adapter.HubConfig
 	taskLabel string
 	usedTask  bool // the call went out with the task credential
-	root      string
-	checkout  string
+	// alsoRead are the group spaces a project-scoped call read beside the
+	// project (the default list_docs), each named in the note as declared.
+	alsoRead []string
+	root     string
+	checkout string
 }
 
 // docProject resolves a doc or record tool's scope and confirms it. Shared
@@ -119,6 +122,7 @@ func (d *docScope) confirm(write bool) error {
 	}
 	t := *sel.Hub
 	t.Token = sel.Token
+	t.Strict = true // the task credential travels only over the strict client
 	d.task, d.taskLabel = &t, id.Label
 	return nil
 }
@@ -136,6 +140,9 @@ func (d *docScope) confirmed() bool { return d.task != nil }
 // A group space is never readable with a task credential, so a group read
 // keeps the checkpoint credential.
 func (d *docScope) readHub(scope string) *adapter.HubConfig {
+	if scope != d.project && !slices.Contains(d.alsoRead, scope) {
+		d.alsoRead = append(d.alsoRead, scope)
+	}
 	if d.task != nil && scope == d.pinned {
 		d.usedTask = true
 		return d.task
@@ -151,7 +158,7 @@ func (d *docScope) note() string {
 		if d.taskLabel != "" {
 			cred += fmt.Sprintf(" %q", d.taskLabel)
 		}
-		if d.group || len(d.groups) > 0 {
+		if len(d.alsoRead) > 0 {
 			cred += " (group spaces: the machine's checkpoint credential)"
 		}
 	}
@@ -165,6 +172,9 @@ func (d *docScope) note() string {
 		scope = fmt.Sprintf("project %s, confirmed by your task credential", d.project)
 	default:
 		scope = fmt.Sprintf("project %s from this repository's .aimem.json; scope not confirmed (hub %q holds no task credential)", d.project, d.hubName)
+	}
+	if len(d.alsoRead) > 0 {
+		scope += fmt.Sprintf("; group spaces %s as declared by this repository's .aimem.json, not confirmed", strings.Join(d.alsoRead, ", "))
 	}
 	return fmt.Sprintf("[aimem: hub %q (%s), %s; %s]", d.hubName, d.hub.URL, cred, scope)
 }
@@ -200,9 +210,9 @@ func (d *docScope) announce() string {
 	cur := scopeSeen{Hub: d.hubName, URL: d.hub.URL, Project: d.pinned, Groups: slices.Clone(d.groups)}
 	slices.Sort(cur.Groups)
 	path := filepath.Join(d.root, scopeSeenFile)
-	seen := map[string]scopeSeen{}
-	if raw, err := os.ReadFile(path); err == nil {
-		json.Unmarshal(raw, &seen) // an unreadable record announces again
+	var seen map[string]scopeSeen
+	if raw, err := os.ReadFile(path); err != nil || json.Unmarshal(raw, &seen) != nil || seen == nil {
+		seen = map[string]scopeSeen{} // a missing, unreadable or null record announces again
 	}
 	prev, had := seen[d.checkout]
 	if had && prev.Hub == cur.Hub && prev.URL == cur.URL && prev.Project == cur.Project && slices.Equal(prev.Groups, cur.Groups) {
