@@ -258,10 +258,23 @@ func TestBootShRefusesABadExport(t *testing.T) {
 				t.Fatal(err)
 			}
 			return b, nil
-		}, "/aimem/" + exportTag + "/install.sh is missing"},
+		}, "/aimem/" + exportTag + "/install.sh is missing: the export holds an incomplete copy of release " + exportTag + "; export the release again"},
 		{"sum mismatch", func(t *testing.T) (string, []string) {
 			b := good(t)
 			if err := os.WriteFile(filepath.Join(rel(b), "aimem-opencode.ts"), []byte("tampered\n"), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			return b, nil
+		}, "checksum mismatch for "},
+		{"sums list only a longer name", func(t *testing.T) (string, []string) {
+			b := good(t)
+			sums := filepath.Join(rel(b), "SHA256SUMS")
+			s, err := os.ReadFile(sums)
+			if err != nil {
+				t.Fatal(err)
+			}
+			s = []byte(strings.Replace(string(s), "  aimem-opencode.ts", "  old-aimem-opencode.ts", 1))
+			if err := os.WriteFile(sums, s, 0o644); err != nil {
 				t.Fatal(err)
 			}
 			return b, nil
@@ -284,6 +297,52 @@ func TestBootShRefusesABadExport(t *testing.T) {
 			}
 			if strings.Contains(out, "installer ran") || len(urls) != 0 {
 				t.Fatalf("the installer ran or a host was contacted (%v):\n%s", urls, out)
+			}
+			if strings.Contains(out, "own boot script") {
+				t.Fatalf("an export names the hand-over of an older release:\n%s", out)
+			}
+		})
+	}
+}
+
+// curl fetches only from github.com or an https export: an install from a
+// directory export runs on a machine without it, and the others say it
+// is required. PATH holds every command of the test's own PATH but curl.
+func TestBootShNeedsCurlOnlyForHttps(t *testing.T) {
+	shellOnly(t)
+	bin := filepath.Join(t.TempDir(), "bin")
+	if err := os.Mkdir(bin, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	for _, d := range filepath.SplitList(os.Getenv("PATH")) {
+		entries, _ := os.ReadDir(d)
+		for _, e := range entries {
+			if e.Name() == "curl" {
+				continue
+			}
+			_ = os.Symlink(filepath.Join(d, e.Name()), filepath.Join(bin, e.Name())) // the first on PATH wins
+		}
+	}
+	base := writeExport(t, goodManifest, exportTag)
+	for _, c := range []struct {
+		name, base string
+		ok         bool
+	}{{"directory export", base, true}, {"https export", "https://export.test/x", false}, {"connected", "", false}} {
+		t.Run(c.name, func(t *testing.T) {
+			project := t.TempDir()
+			cmd := exec.Command(filepath.Join(bin, "bash"), absRepo(t, "boot.sh"))
+			cmd.Dir = project
+			cmd.Env = append(withoutAimemEnv(), "PATH="+bin)
+			if c.base != "" {
+				cmd.Env = append(cmd.Env, "AIMEM_BASE="+c.base)
+			}
+			b, err := cmd.CombinedOutput()
+			out := string(b)
+			if c.ok && (err != nil || !strings.Contains(out, "installer ran: bootstrap tag="+exportTag)) {
+				t.Fatalf("%v:\n%s", err, out)
+			}
+			if !c.ok && (err == nil || !strings.Contains(out, "'curl' is required but not found")) {
+				t.Fatalf("%v:\n%s", err, out)
 			}
 		})
 	}
@@ -355,8 +414,8 @@ func TestBootShHandsOverToAnOlderRelease(t *testing.T) {
 		base := filepath.Join(t.TempDir(), "export")
 		writeOlderRelease(t, filepath.Join(base, "aimem", olderTag))
 		out, urls, err := runBoot(t, "bash", "AIMEM_BASE="+base, "AIMEM_VERSION="+olderTag)
-		if err == nil || !strings.Contains(out, "/aimem/"+olderTag+"/install.sh is missing") ||
-			strings.Contains(out, "handing over") || len(urls) != 0 {
+		if err == nil || !strings.Contains(out, "/aimem/"+olderTag+"/install.sh is missing: the export holds an incomplete copy") ||
+			strings.Contains(out, "handing over") || strings.Contains(out, "own boot script") || len(urls) != 0 {
 			t.Fatalf("err %v, urls %v:\n%s", err, urls, out)
 		}
 	})
@@ -402,6 +461,37 @@ func TestHubStagesFromAnExport(t *testing.T) {
 	}
 	if _, err := os.Stat(staged); err == nil {
 		t.Fatal("a tampered binary was staged")
+	}
+
+	// The binary's line is matched on its whole name: a sums file that
+	// lists it only under a longer name, or not at all, stages nothing.
+	for _, c := range []struct{ name, from, to string }{
+		{"a longer name", "  aimem-linux-", "  old-aimem-linux-"},
+		{"not listed", "  aimem-linux-", "  "},
+	} {
+		base := writeExport(t, goodManifest, exportTag)
+		sums := filepath.Join(base, "aimem", exportTag, "SHA256SUMS")
+		b, err := os.ReadFile(sums)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var keep []string
+		for _, l := range strings.Split(string(b), "\n") {
+			if c.to == "  " && strings.Contains(l, c.from) {
+				continue
+			}
+			keep = append(keep, strings.ReplaceAll(l, c.from, c.to))
+		}
+		if err := os.WriteFile(sums, []byte(strings.Join(keep, "\n")), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		staged, out, err := runStage(t, "AIMEM_BASE="+base)
+		if err == nil || !strings.Contains(out, "checksum mismatch") || !strings.Contains(out, "(want absent, got ") {
+			t.Fatalf("%s: %v\n%s", c.name, err, out)
+		}
+		if _, err := os.Stat(staged); err == nil {
+			t.Fatalf("%s: a binary was staged", c.name)
+		}
 	}
 }
 

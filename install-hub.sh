@@ -149,8 +149,12 @@ fetch_sums() { # workdir
   get_file "$SRC/SHA256SUMS" "$1/SHA256SUMS" || die "$SRC/SHA256SUMS is missing; refusing unverified files"
 }
 fetch_verified() { # workdir asset: the asset, checked against SHA256SUMS
-  get_file "$SRC/$2" "$1/$2" ||
+  if ! get_file "$SRC/$2" "$1/$2"; then
+    # An export holds only releases with the installer files.
+    [ -z "${AIMEM_BASE:-}" ] ||
+      die "$SRC/$2 is missing: the export holds an incomplete copy of release $TAG; export the release again"
     die "$SRC/$2 is missing (a release published before its installer files became release assets installs with its own boot script)"
+  fi
   fv_want=$(awk -v a="$2" '$2 == a { print $1 }' "$1/SHA256SUMS")
   fv_got=$( (sha256sum "$1/$2" 2>/dev/null || shasum -a 256 "$1/$2") | awk '{ print $1 }')
   if [ -z "$fv_want" ] || [ "$fv_want" != "$fv_got" ]; then

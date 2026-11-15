@@ -196,19 +196,28 @@ func Run(ctx context.Context, src Source, o Options) error {
 		return refuse("release %s has no SHA256SUMS (%v); refusing unverified files", tag, err)
 	}
 	sums := parseSums(b)
-	if _, ok := sums[installer]; !ok {
+	if _, ok := sums[installer]; !ok && src.Base == "" {
 		return refuse("release %s publishes no installer files as assets (its SHA256SUMS lists no %s); v0.10.23 is the first release that does. Install %s with its own one-liner: %s",
 			tag, installer, tag, oneLiner(src.Repo, tag, goos))
 	}
-	for _, n := range []string{asset, pluginAsset} {
+	// An export holds only releases that publish the installer files, so
+	// with a base a file the release lacks means the export is incomplete,
+	// and no one-liner of the forge is offered.
+	missing := func(what string) error {
+		if src.Base != "" {
+			return refuse("the export at %s holds an incomplete copy of release %s (%s); export the release again", src.Base, tag, what)
+		}
+		return refuse("release %s: %s", tag, what)
+	}
+	for _, n := range []string{installer, asset, pluginAsset} {
 		if _, ok := sums[n]; !ok {
-			return refuse("release %s does not list %s in its SHA256SUMS", tag, n)
+			return missing("its SHA256SUMS does not list " + n)
 		}
 	}
 	verified := func(name string, max int64) ([]byte, error) {
 		b, err := src.get(ctx, src.file(tag, name), max)
 		if err != nil {
-			return nil, refuse("release %s: %s: %v", tag, name, err)
+			return nil, missing(fmt.Sprintf("%s: %v", name, err))
 		}
 		got := sha256.Sum256(b)
 		if hex.EncodeToString(got[:]) != sums[name] {
