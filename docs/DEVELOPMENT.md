@@ -67,8 +67,7 @@ therefore still surfaces on master.
 
 macOS runs only in the release workflow, at the tag: the `macos` job
 runs `go vet`, `go test ./...`, a native build and the launchd install
-check (`scripts/check-launchd-install.sh`) and the client upgrade check
-(below) on `macos-latest`, and the
+check (`scripts/check-launchd-install.sh`) on `macos-latest`, and the
 job that publishes the release waits for it. GitHub's macOS
 runners can go unassigned for long stretches, and a starved job held
 merges until someone re-ran it, so a Mac-only break now stops a
@@ -76,32 +75,26 @@ release, never a merge. When the job fails on a real Mac problem, the
 fix goes through a pull request and the release takes the next
 version; when the runner never started, re-run the job.
 
-The `client-upgrade` job runs a real client upgrade between two
-published releases, named in `scripts/client-upgrade.env`, on
-`ubuntu-latest` and `windows-latest`, nightly and on a manual run, never
-on a pull request or a push. `scripts/check-client-upgrade.sh` (and
-`.ps1` on Windows) installs FROM with the one-liner. It first upgrades
-to TO with TO's real installer and a stand-in binary that never serves,
-and checks that the upgrade fails, says ROLLED BACK and leaves FROM
-serving. Then it runs `aimem upgrade --release TO` and checks that the
-binary and the OpenCode plugin are TO's published files, that the Claude
-Code hooks are still wired and that the service answers health at TO.
-It never downgrades: a binary refuses a database newer than it
-understands, so a downgrade would fail whenever the pair spans a schema
-change. The user-level installers install no skills, so there are none
-to check.
+The client upgrade check runs a real client upgrade between two
+published releases, named in `scripts/client-upgrade.env`.
+`scripts/check-client-upgrade.sh` (and `.ps1` on Windows) installs FROM
+with the one-liner. It first upgrades to TO with TO's real installer and
+a stand-in binary that never serves, and checks that the upgrade fails,
+says ROLLED BACK and leaves FROM serving. Then it runs `aimem upgrade
+--release TO` and checks that the binary and the OpenCode plugin are
+TO's published files, that the Claude Code hooks are still wired and
+that the service answers health at TO. It never downgrades: a binary
+refuses a database newer than it understands, so a downgrade would fail
+whenever the pair spans a schema change. The user-level installers
+install no skills, so there are none to check.
 
-The release's `macos` job runs the same script, before the launchd
-check. That step reads two published releases over the network and
-proves them, not the commit being released. When it fails for a reason
-outside the commit, such as the network or the runner, the job is run
-again and the tag stays. When the published pair itself is broken on
-macOS, that is a finding about released versions, not about the
-candidate: it is filed as a task, and a pull request either moves the
-pair in `scripts/client-upgrade.env` to releases that work or turns the
-step off with a comment naming the task. The release workflow runs the
-files at its tag, so the release then takes the next version, as for any
-Mac failure above.
+It runs on Linux and Windows in CI's `client-upgrade` job, nightly and
+on a manual run, never on a pull request or a push. It runs on macOS at
+each tag, in the release workflow's `macos-client-upgrade` job, which the
+release does not wait for. The check proves released versions, not the
+commit it runs beside, so a failure on any of them is a finding about
+released versions: it is filed as a task, and it is never a reason to
+hold a release.
 
 A change whose risk is on Windows or macOS is tested there before the
 push; a Windows change can also get a manual run of the workflow on its
@@ -119,7 +112,9 @@ the quickstart, so every released quickstart has run against the release
 candidate. When the repository marks the job as a required check, the
 merge button enforces this as well.
 
-After a release, the first pull request moves `scripts/client-upgrade.env`
+At the release, the worker reads the result of the release run's
+`macos-client-upgrade` job and records it on the release task. After a
+release, the first pull request moves `scripts/client-upgrade.env`
 forward: FROM becomes the previous TO, and TO the release just published.
 
 ## Toolchain

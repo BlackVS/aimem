@@ -252,8 +252,8 @@ jobs:
   # the one-liner installs FROM, `aimem upgrade` moves it to TO, and a failed
   # upgrade rolls back. It installs into the runner's account and reads only
   # the public releases, so it runs nightly and on a manual run, never on a
-  # pull request or a push. macOS runs the same script in the release
-  # workflow's macos job.
+  # pull request or a push. macOS runs the same script at each tag in the
+  # release workflow's macos-client-upgrade job.
   client-upgrade:
     if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
     strategy:

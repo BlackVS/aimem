@@ -19,9 +19,11 @@ currently 25); a binary refuses a database newer than it understands.
   published release with the one-liner, checks that an upgrade to a
   binary that never serves rolls back, then runs `aimem upgrade` to the
   next release and checks the binary, the OpenCode plugin, the Claude
-  Code hooks and the service. It runs nightly and on a manual run on Linux and
-  Windows, and at the tag in the release's macOS job. The two versions
-  are in `scripts/client-upgrade.env`, moved forward after each release
+  Code hooks and the service. It runs nightly and on a manual run on
+  Linux and Windows, and on macOS at each tag in a release job that the
+  release does not wait for: it proves published releases, so a failure
+  is filed as a task and never holds a release. The two versions are in
+  `scripts/client-upgrade.env`, moved forward after each release
   (docs/DEVELOPMENT.md).
 
 ## [0.10.25] — 2026-11-15

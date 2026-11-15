@@ -15,8 +15,7 @@
 # The order is fixed, and nothing ever goes back from TO to FROM: a binary
 # refuses a database newer than it understands, so a downgrade fails as
 # soon as the pair spans a schema change. The rollback restores FROM on its
-# own state, and the account ends at TO, so a later check on this runner
-# (the release's launchd check) only ever moves the state forward.
+# own state, and the account ends at TO.
 #
 # It installs into the account it runs in, so it runs only on a CI runner.
 set -euo pipefail

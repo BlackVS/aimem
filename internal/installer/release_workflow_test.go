@@ -106,6 +106,34 @@ func TestReleaseBuildsWithoutWritePermissions(t *testing.T) {
 	}
 }
 
+// The macOS client upgrade check proves two published releases, not the
+// commit being released, so it runs at each tag with read access only and
+// the release never waits for it.
+func TestReleaseDoesNotWaitForTheClientUpgradeCheck(t *testing.T) {
+	jobs := workflowJobs(t, read(t, filepath.Join(".github", "workflows", "release.yml")))
+	job := jobs["macos-client-upgrade"]
+	if job == "" {
+		t.Fatal("release.yml has no macos-client-upgrade job")
+	}
+	perms := regexp.MustCompile(`(?m)^    permissions:\n((?:      .*\n)*)`)
+	if m := perms.FindStringSubmatch(job); m == nil || strings.TrimSpace(m[1]) != "contents: read" {
+		t.Errorf("the macos-client-upgrade job's permissions are not contents: read alone: %q", m)
+	}
+	for _, s := range []string{"needs: ref\n", "runs-on: macos-latest\n", "run: bash scripts/check-client-upgrade.sh\n"} {
+		if !strings.Contains(job, s) {
+			t.Errorf("the macos-client-upgrade job lacks %q", s)
+		}
+	}
+	if strings.Contains(job, "continue-on-error") {
+		t.Error("the macos-client-upgrade job hides its failure with continue-on-error")
+	}
+	for name, body := range jobs {
+		if name != "macos-client-upgrade" && strings.Contains(body, "macos-client-upgrade") {
+			t.Errorf("job %s refers to macos-client-upgrade: no job may wait for it", name)
+		}
+	}
+}
+
 // Every checkout drops the token from its git configuration, and every
 // action is named by a full commit SHA.
 func TestWorkflowsPinActionsAndKeepNoCredential(t *testing.T) {
