@@ -74,9 +74,35 @@ $release = 'v0.10.24'
 # Every file is checked against SHA256SUMS before it is used; any failure
 # stops with the path and installs nothing.
 function Stop-Install($msg) { throw "$msg; nothing was installed." }
+# Windows PowerShell 5.1 follows a redirect from https to http and
+# downloads over http; PowerShell 7 refuses one. A release download is
+# itself redirected by the forge, so redirects are followed here, one hop
+# at a time, and only to https. Under 5.1 -MaximumRedirection 0 returns
+# the 3xx only with -ErrorAction SilentlyContinue; under 7 only with
+# -SkipHttpErrorCheck, and 7's own guard still refuses an http Location.
+function Get-HttpsFile($url, $dest) {
+  $extra = @{}
+  if ($PSVersionTable.PSEdition -eq 'Core') { $extra.SkipHttpErrorCheck = $true }
+  for ($hop = 0; $hop -le 10; $hop++) {
+    if ($url -notlike 'https://*') { Stop-Install "refusing a redirect to $url, which is not https" }
+    $r = Invoke-WebRequest $url -OutFile $dest -PassThru -UseBasicParsing -MaximumRedirection 0 -ErrorAction SilentlyContinue -ErrorVariable failed @extra
+    if ($null -eq $r) { throw "$failed" }
+    $code = [int]$r.StatusCode
+    if ($code -ge 300 -and $code -lt 400) {
+      $url = [Uri]::new([Uri]$url, "$($r.Headers['Location'])").AbsoluteUri
+      continue
+    }
+    if ($code -ne 200) { throw "HTTP $code from $url" }
+    return
+  }
+  throw "more than 10 redirects from $url"
+}
 function Get-SourceFile($src, $dest) {
   if ($src -like 'https://*') {
-    try { Invoke-WebRequest $src -OutFile $dest -UseBasicParsing } catch { Write-Warning "$src : $_"; return $false }
+    try { Get-HttpsFile $src $dest } catch {
+      if ("$_" -like 'refusing a redirect*') { throw }
+      Write-Warning "$src : $_"; return $false
+    }
     return $true
   }
   if (-not (Test-Path -LiteralPath $src -PathType Leaf)) { return $false }

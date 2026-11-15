@@ -512,7 +512,7 @@ func TestBootPs1InstallsFromAnExport(t *testing.T) {
 	}
 	type psCase struct {
 		name  string
-		env   map[string]string // AIMEM_BASE, AIMEM_VERSION, AIMEM_REPO, MAP_FROM, MAP_TO
+		env   map[string]string // AIMEM_BASE, AIMEM_VERSION, AIMEM_REPO, MAP_FROM, MAP_TO, REDIRECT_FROM, REDIRECT_TO
 		check func(t *testing.T, r result)
 	}
 	installed := func(r result, tag string) bool {
@@ -548,6 +548,25 @@ func TestBootPs1InstallsFromAnExport(t *testing.T) {
 				if !strings.HasPrefix(u, "https://export.test/x/") {
 					t.Errorf("contacted %s", u)
 				}
+			}
+		}})
+	// A download is redirected hop by hop, a relative Location against the
+	// URL it came from, and never to anything but https: Windows
+	// PowerShell 5.1 would follow a redirect to http on its own.
+	cases = append(cases, psCase{"https export redirected over https", map[string]string{"AIMEM_BASE": "https://export.test/hop", "REDIRECT_FROM": "https://export.test/hop/", "REDIRECT_TO": "/x/",
+		"MAP_FROM": "https://export.test/x/", "MAP_TO": writeExport(t, goodManifest, exportTag)},
+		func(t *testing.T, r result) {
+			if !installed(r, exportTag) || len(r.urls) < 2 || r.urls[0] != "https://export.test/hop/MANIFEST" || r.urls[1] != "https://export.test/x/MANIFEST" {
+				t.Fatalf("urls %v:\n%s", r.urls, r.out)
+			}
+		}})
+	cases = append(cases, psCase{"redirect to http refused", map[string]string{"AIMEM_BASE": "https://export.test/down", "REDIRECT_FROM": "https://export.test/down/", "REDIRECT_TO": "http://export.test/x/",
+		"MAP_FROM": "http://export.test/x/", "MAP_TO": writeExport(t, goodManifest, exportTag)},
+		func(t *testing.T, r result) {
+			if !strings.Contains(r.out, "refusing a redirect to http://export.test/x/MANIFEST, which is not https") ||
+				!strings.Contains(r.out, "nothing was installed") || strings.Contains(r.out, "installer ran") ||
+				strings.Join(r.urls, " ") != "https://export.test/down/MANIFEST" {
+				t.Fatalf("urls %v:\n%s", r.urls, r.out)
 			}
 		}})
 	gh := "https://github.com/o/r/releases/download/"
@@ -643,12 +662,18 @@ func TestBootPs1InstallsFromAnExport(t *testing.T) {
 	psq := func(v string) string { return "'" + strings.ReplaceAll(v, "'", "''") + "'" }
 	var b strings.Builder
 	b.WriteString(`function Invoke-WebRequest {
-  param([Parameter(Position = 0)][string]$Uri, [string]$OutFile, [switch]$UseBasicParsing)
+  [CmdletBinding()]
+  param([Parameter(Position = 0)][string]$Uri, [string]$OutFile, [switch]$UseBasicParsing, [switch]$PassThru, $MaximumRedirection, [switch]$SkipHttpErrorCheck)
   Add-Content -LiteralPath $env:FETCH_LOG -Value $Uri
-  if (-not $Uri.StartsWith($env:MAP_FROM)) { throw "unexpected host: $Uri" }
+  if ($env:REDIRECT_FROM -and $Uri.StartsWith($env:REDIRECT_FROM)) {
+    if ($MaximumRedirection -ne 0) { Write-Error "the stub serves a redirect only hop by hop: $Uri"; return }
+    return [pscustomobject]@{ StatusCode = 302; Headers = @{ Location = $env:REDIRECT_TO + $Uri.Substring($env:REDIRECT_FROM.Length) } }
+  }
+  if (-not $Uri.StartsWith($env:MAP_FROM)) { Write-Error "unexpected host: $Uri"; return }
   $p = Join-Path $env:MAP_TO $Uri.Substring($env:MAP_FROM.Length)
-  if (-not (Test-Path -LiteralPath $p -PathType Leaf)) { throw "404 $Uri" }
+  if (-not (Test-Path -LiteralPath $p -PathType Leaf)) { Write-Error "404 $Uri"; return }
   Copy-Item -LiteralPath $p -Destination $OutFile
+  if ($PassThru) { [pscustomobject]@{ StatusCode = 200; Headers = @{} } }
 }
 $boot = Get-Content -Raw -LiteralPath $env:BOOT
 `)

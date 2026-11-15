@@ -36,12 +36,14 @@ func TestBootPs1LeavesNoVariablesInTheCallersSession(t *testing.T) {
 	}
 	// The stubs of a successful run: SHA256SUMS lists the placeholder
 	// hash for every asset, and the installer succeeds.
-	const succeeds = `function Invoke-WebRequest { param($Uri, $OutFile, [switch]$UseBasicParsing)
-  if ($OutFile -like '*SHA256SUMS') { Set-Content -LiteralPath $OutFile -Value 'placeholder  aimem-windows-amd64.exe', 'placeholder  install.ps1', 'placeholder  aimem-opencode.ts' } else { Set-Content -LiteralPath $OutFile -Value "placeholder for $Uri" } }
+	const succeeds = `function Invoke-WebRequest { [CmdletBinding()] param([Parameter(Position = 0)]$Uri, $OutFile, [switch]$UseBasicParsing, [switch]$PassThru, $MaximumRedirection, [switch]$SkipHttpErrorCheck)
+  if ($OutFile -like '*SHA256SUMS') { Set-Content -LiteralPath $OutFile -Value 'placeholder  aimem-windows-amd64.exe', 'placeholder  install.ps1', 'placeholder  aimem-opencode.ts' } else { Set-Content -LiteralPath $OutFile -Value "placeholder for $Uri" }
+  if ($PassThru) { [pscustomobject]@{ StatusCode = 200; Headers = @{} } } }
 function powershell { $global:LASTEXITCODE = 0 }
 `
-	const fails = `function Invoke-WebRequest { param($Uri, $OutFile, [switch]$UseBasicParsing)
-  if ($OutFile -like '*SHA256SUMS') { Set-Content -LiteralPath $OutFile -Value 'placeholder  install.ps1' } else { Set-Content -LiteralPath $OutFile -Value "placeholder for $Uri" } }
+	const fails = `function Invoke-WebRequest { [CmdletBinding()] param([Parameter(Position = 0)]$Uri, $OutFile, [switch]$UseBasicParsing, [switch]$PassThru, $MaximumRedirection, [switch]$SkipHttpErrorCheck)
+  if ($OutFile -like '*SHA256SUMS') { Set-Content -LiteralPath $OutFile -Value 'placeholder  install.ps1' } else { Set-Content -LiteralPath $OutFile -Value "placeholder for $Uri" }
+  if ($PassThru) { [pscustomobject]@{ StatusCode = 200; Headers = @{} } } }
 `
 	for _, c := range []struct {
 		name, before, stubs, failure, want string
