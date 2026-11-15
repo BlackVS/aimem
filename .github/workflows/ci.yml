@@ -248,6 +248,30 @@ jobs:
           cache: true
       - run: bash scripts/check-install-hub-container.sh
 
+  # A real client upgrade from published releases (scripts/client-upgrade.env):
+  # the one-liner installs FROM, `aimem upgrade` moves it to TO, and a failed
+  # upgrade rolls back. It installs into the runner's account and reads only
+  # the public releases, so it runs nightly and on a manual run, never on a
+  # pull request or a push. macOS runs the same script in the release
+  # workflow's macos job.
+  client-upgrade:
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - if: runner.os == 'Linux'
+        run: bash scripts/check-client-upgrade.sh
+      - if: runner.os == 'Windows'
+        shell: powershell
+        run: powershell -NoProfile -ExecutionPolicy Bypass -File scripts/check-client-upgrade.ps1
+
   build:
     runs-on: ubuntu-latest
     steps:
