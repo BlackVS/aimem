@@ -223,11 +223,32 @@ AIMEM_BASE=/media/aiforge-export bash /media/aiforge-export/aimem/v0.10.24/insta
 ```
 
 On Windows, set `AIMEM_BASE` to the export (a drive path such as
-`D:\aiforge-export`, a `\\host\share` path, or the https URL) and run the
-export's `aimem\<tag>\boot.ps1` as a file with `powershell -NoProfile
--ExecutionPolicy RemoteSigned -File`, removing the variable afterwards as
-[Upgrades](#upgrades) shows for any knob. From an https export, the hub's
-printed `irm <base>/aimem/<tag>/boot.ps1 | iex` line works as well.
+`D:\aiforge-export`, a `\\host\share` path, or the https URL), copy the
+export's `aimem\<tag>\boot.ps1` to a local folder and run the copy as a
+file under `RemoteSigned`, removing the variable and the copy afterwards.
+Windows PowerShell refuses to run an unsigned script straight from a
+share named by a dotted host name or an address, as most shares are; the
+copy runs, and `AIMEM_BASE` still names the share:
+
+```powershell
+$env:AIMEM_BASE = '\\fileserver.example.internal\aiforge-export'
+$boot = Join-Path $env:TEMP 'aimem-boot.ps1'
+Copy-Item -LiteralPath "$env:AIMEM_BASE\aimem\v0.10.24\boot.ps1" -Destination $boot
+try { powershell -NoProfile -ExecutionPolicy RemoteSigned -File $boot } finally { Remove-Item Env:AIMEM_BASE; Remove-Item -LiteralPath $boot }
+```
+
+From an https export, the hub's printed
+`irm <base>/aimem/<tag>/boot.ps1 | iex` line works as well.
+
+An https export served with a certificate from a private certificate
+authority needs that authority trusted where the download runs: in the
+system trust store for `curl` on Linux and macOS (for example
+`/usr/local/share/ca-certificates/` and `update-ca-certificates` on
+Debian and Ubuntu), and in the machine's Trusted Root Certification
+Authorities store for PowerShell on Windows
+(`Import-Certificate -FilePath ca.crt -CertStoreLocation Cert:\LocalMachine\Root`,
+as an administrator). The installers keep verification on and take no
+option to skip it; `aimem upgrade` reads the same stores.
 
 Run with a base, `install-hub.sh` prints the client install command with
 the same base, not the github.com one-liner. A workstation upgrades from
