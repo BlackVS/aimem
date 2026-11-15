@@ -13,6 +13,23 @@ currently 25); a binary refuses a database newer than it understands.
 
 ## [Unreleased]
 
+## [0.10.25] — 2026-11-15
+
+The release is built in two jobs. A `build` job with read access only runs
+the guards, the tests and the build; a `publish` job checks out nothing,
+checks the files `build` handed over against `SHA256SUMS`, attests the
+build provenance of every asset (audit A-8; `gh attestation verify <file>
+--repo BlackVS/aimem`) and creates the release. Actions are pinned by
+commit, and staticcheck and govulncheck are pinned as tools in `go.mod`
+(audit A-12). Every release now publishes the reference process set as
+`aimem-process.tar.gz`, and `process select --from-archive` and
+`process refresh --from-archive` take it by its tag with neither `git`
+nor the network; `select` now refuses an archive that records no commit,
+or one whose commit differs from a typed `--commit`. `boot.ps1` follows a
+download's redirects only to https, and `install-hub.sh` runs nothing
+from a truncated download. The on-disk schema stays at 25 and the access
+schema at 10. Includes PR #366, #367, #368 and #369.
+
 ### Security
 
 - **Release provenance (audit A-8).** The release job attests the build
