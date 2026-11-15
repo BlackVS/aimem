@@ -266,9 +266,9 @@ func TestUpgradeRefusesADowngradeUnlessNamed(t *testing.T) {
 func TestUpgradeRefusesUnverifiedFiles(t *testing.T) {
 	pre := releaseDir("v0.10.18")
 	type brk struct {
-		name   string
-		break_ func(r *release)
-		want   string
+		name  string
+		spoil func(r *release)
+		want  string
 	}
 	cases := []brk{{"no sums", func(r *release) { delete(r.files, pre+"SHA256SUMS") }, "has no SHA256SUMS"}}
 	for _, n := range []string{AssetName(runtime.GOOS, runtime.GOARCH), installer(), pluginAsset} {
@@ -285,7 +285,7 @@ func TestUpgradeRefusesUnverifiedFiles(t *testing.T) {
 		t.Run(c.name, func(t *testing.T) {
 			r, src, s := setup(t)
 			r.publish(t, "v0.10.18")
-			c.break_(r)
+			c.spoil(r)
 			_, err := run(src, Options{Current: "v0.10.17"})
 			if !errors.Is(err, ErrRefused) || !strings.Contains(err.Error(), c.want) {
 				t.Fatalf("want a refusal naming %q, got %v", c.want, err)
@@ -521,6 +521,59 @@ func TestUpgradeFromAnExport(t *testing.T) {
 						t.Errorf("%d files fetched from the export, want %d", n, want)
 					}
 				}
+			})
+		}
+	}
+}
+
+// An export holds only releases that publish the installer files, so a
+// file its copy of the release lacks, unlisted in SHA256SUMS or absent,
+// is reported as an incomplete export, and the forge's one-liner for an
+// older release is never offered.
+func TestUpgradeReportsAnIncompleteExport(t *testing.T) {
+	installer := "install.sh"
+	if runtime.GOOS == "windows" {
+		installer = "install.ps1"
+	}
+	const manifest = "aiforge-export 1\naimem v0.10.18\n"
+	dir := "aimem/v0.10.18/"
+	for _, c := range []struct {
+		name  string
+		spoil func(files map[string][]byte)
+		want  string
+	}{
+		{"installer unlisted", func(f map[string][]byte) { f[dir+"SHA256SUMS"] = dropLine(f[dir+"SHA256SUMS"], installer) }, "its SHA256SUMS does not list " + installer},
+		{"plugin unlisted", func(f map[string][]byte) { f[dir+"SHA256SUMS"] = dropLine(f[dir+"SHA256SUMS"], pluginAsset) }, "its SHA256SUMS does not list " + pluginAsset},
+		{"installer absent", func(f map[string][]byte) { delete(f, dir+installer) }, "(" + installer + ": "},
+	} {
+		for _, form := range []string{"directory", "https"} {
+			t.Run(c.name+"/"+form, func(t *testing.T) {
+				forge, src, s := setup(t)
+				files := exportFiles(t, manifest, "v0.10.18")
+				c.spoil(files)
+				if form == "directory" {
+					src.Base = writeExport(t, files)
+				} else {
+					src.Base, _ = serveExport(t, files)
+				}
+				_, err := run(src, Options{Current: "v0.10.17"})
+				if !errors.Is(err, ErrRefused) {
+					t.Fatalf("%v", err)
+				}
+				for _, w := range []string{"the export at " + src.Base + " holds an incomplete copy of release v0.10.18", c.want, "export the release again"} {
+					if !strings.Contains(err.Error(), w) {
+						t.Errorf("the refusal lacks %q: %v", w, err)
+					}
+				}
+				for _, w := range []string{"one-liner", "raw.githubusercontent.com", "v0.10.23 is the first"} {
+					if strings.Contains(err.Error(), w) {
+						t.Errorf("the refusal names %q: %v", w, err)
+					}
+				}
+				if n := forge.hits.Load(); n != 0 {
+					t.Errorf("the forge was contacted %d times", n)
+				}
+				s.untouched(t)
 			})
 		}
 	}

@@ -33,6 +33,34 @@ currently 25); a binary refuses a database newer than it understands.
   `go tool staticcheck` and `go tool govulncheck` in CI and in the
   documents, instead of `@latest`. They build on the pinned Go 1.26, so the
   lint job no longer switches the toolchain.
+- **boot.ps1 follows a download's redirects only to https.** Windows
+  PowerShell 5.1 follows a redirect from https to http and downloads over
+  http (PowerShell 7 refuses one). `boot.ps1` now follows each redirect
+  itself, as the forge's release downloads need, and stops the install,
+  with nothing installed, at a redirect to anything but https.
+
+### Changed
+
+- **install-hub.sh runs nothing when its download is cut short.** Like
+  `boot.sh`, it defines its functions and runs everything from `main` on
+  its last line, so `curl ... | bash` as root runs nothing from a
+  truncated download. A test runs every prefix of both scripts.
+- **An incomplete export is named as such.** With `AIMEM_BASE`, a file the
+  export's copy of a release lacks is reported as an incomplete export to
+  export again, by `boot.sh`, `install-hub.sh` and `aimem upgrade`,
+  instead of as an older release; `aimem upgrade` no longer offers the
+  forge's one-liner then.
+- **boot.sh needs curl only to fetch.** An install from a directory export
+  runs on a machine without `curl`.
+- **The Windows export install copies boot.ps1 first.** Windows PowerShell
+  refuses to run an unsigned script straight from a share named by a
+  dotted host name or an address; ADMIN-MANUAL, "Installing from an
+  aiforge export", copies `boot.ps1` to a local folder and runs the copy
+  (a failed copy stops it, so a copy an interrupted run left is never run),
+  and says how a private certificate authority is trusted for an https
+  export.
+- **Faster Windows installer tests.** The documented Windows install test
+  runs all its cases in one PowerShell process per shell.
 
 ## [0.10.24] — 2026-11-15
 
