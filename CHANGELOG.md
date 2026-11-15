@@ -21,7 +21,9 @@ currently 25); a binary refuses a database newer than it understands.
   arrived as published; `gh attestation verify <file> --repo BlackVS/aimem`
   shows that this repository's release workflow built it (ADMIN-MANUAL,
   "Releases"). The write permissions the release and the attestation need
-  are scoped to the release job.
+  are scoped to the release job. The attestation names the ref the run
+  started from, so a manual run started from a branch instead of its tag is
+  refused (`gh workflow run release.yml --ref vX.Y.Z -f tag=vX.Y.Z`).
 - **Actions pinned by commit (audit A-8).** Every action in
   `.github/workflows` is named by a full commit SHA with its version in a
   comment, so a tag moved upstream cannot change what runs here.

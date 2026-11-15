@@ -1123,6 +1123,11 @@ gh attestation verify aimem-linux-amd64 --repo BlackVS/aimem
 gh attestation verify SHA256SUMS --repo BlackVS/aimem
 ```
 
+The attestation names the ref the run started from, not the one it checked
+out, so a manual run must start from its tag
+(`gh workflow run release.yml --ref vX.Y.Z -f tag=vX.Y.Z`); the workflow
+refuses a manual run started from a branch.
+
 Every action the workflows use is named by a full commit SHA with its
 version in a comment, so a moved tag upstream changes nothing here;
 Dependabot's weekly `github-actions` update moves the pins.

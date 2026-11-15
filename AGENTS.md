@@ -179,7 +179,7 @@ Build and test exactly as CI does:
     go test ./...            # full output, check the pass/fail summary
     gofmt -l .               # must print nothing
     go tool staticcheck ./...
-    go tool govulncheck ./...
+    go tool govulncheck ./...   # on an older Go 1.26 patch: exit 3, stdlib findings only
 
 Package map: `cmd/aimem` CLI + subcommand wiring; `internal/store`
 SQLite layer (journal, memories, docs, collections, migrations);
