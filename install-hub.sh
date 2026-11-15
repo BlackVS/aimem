@@ -78,6 +78,11 @@ set -euo pipefail
 # when a release is cut (internal/installer checks they agree).
 RELEASE=v0.10.24
 
+# Everything below runs from main, called on the last line: piped to a
+# root shell, a download cut short at any line defines functions and
+# runs nothing. The body keeps its column-0 layout, as its heredocs and
+# the BEGIN/END sections the tests extract need.
+main() {
 [ "$(id -u)" = 0 ] || { echo "ERROR: run as root." >&2; exit 1; }
 NO_SERVICE=""
 [ "${AIMEM_NO_SERVICE:-}" != 1 ] || NO_SERVICE=1
@@ -700,3 +705,6 @@ if [ -n "${NO_SERVICE:-}" ]; then
   echo "$SERVE_CMD"
 fi
 # END no-service-finish
+}
+
+main "$@"
