@@ -33,7 +33,8 @@ cd "$(dirname "$0")/.."
 
 FROM=$(sed -n 's/^FROM=//p' scripts/client-upgrade.env)
 TO=$(sed -n 's/^TO=//p' scripts/client-upgrade.env)
-for v in "$FROM" "$TO"; do
+SINCE=$(sed -n 's/^ROLLBACK_LINE_SINCE=//p' scripts/client-upgrade.env)
+for v in "$FROM" "$TO" "$SINCE"; do
   echo "$v" | grep -Eqx 'v[0-9]+\.[0-9]+\.[0-9]+' || { echo "FAIL: scripts/client-upgrade.env: bad version '$v'" >&2; exit 1; }
 done
 repo=BlackVS/aimem
@@ -43,6 +44,11 @@ plugin="$HOME/.config/opencode/plugins/aimem.ts"
 tmp=$(mktemp -d)
 
 fail() { echo "FAIL: $*" >&2; exit 1; }
+# at_least a b: release a is b or later.
+at_least() {
+  awk -v a="${1#v}" -v b="${2#v}" 'BEGIN { split(a, x, "."); split(b, y, ".")
+    for (i = 1; i <= 3; i++) { if (x[i] + 0 != y[i] + 0) exit !(x[i] + 0 > y[i] + 0) } }'
+}
 sha() { shasum -a 256 "$1" | awk '{print $1}'; }
 sum_of() { awk -v n="$2" '$2==n || $2=="*"n {print $1}' "$tmp/SHA256SUMS.$1"; }
 serving() {
@@ -81,6 +87,12 @@ AIMEM_BASE="$tmp/export" AIMEM_UPGRADE_WAIT=10 "$bin" upgrade --release "$TO" > 
 cat "$tmp/fail.log"
 [ "$rc" -ne 0 ] || fail "the upgrade to a binary that never serves exited 0"
 grep -q 'ROLLED BACK' "$tmp/fail.log" || fail "the failed upgrade did not say ROLLED BACK"
+if at_least "$FROM" "$SINCE"; then
+  case "$(tail -n 1 "$tmp/fail.log")" in
+    "aimem: the upgrade to $TO failed and was rolled back: aimem $FROM is running again"*) ;;
+    *) fail "the failed upgrade did not end with the line that says it was rolled back" ;;
+  esac
+fi
 [ "$(sha "$bin")" = "$(sum_of "$FROM" "$asset")" ] || fail "the binary after the rollback is not $FROM's $asset"
 serving "$FROM" "after the rollback"
 

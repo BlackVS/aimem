@@ -235,3 +235,30 @@ func checkUntouched(t *testing.T, s *sandbox, out string) {
 		t.Errorf("a refused upgrade left backups %v", b)
 	}
 }
+
+// A healthy upgrade keeps the newest two state copies of each kind and
+// removes the older ones; a rolled-back one removes nothing.
+func TestShellUpgradeKeepsTheNewestTwoStateCopies(t *testing.T) {
+	shellOnly(t)
+	s := newSandbox(t, binary(t, "v0.0.1"), false)
+	c := seedStateCopies(t, s)
+	out, code := runShellUpgrade(t, s, binary(t, "v0.0.2"), "20")
+	if code != 0 {
+		t.Fatalf("upgrade failed (exit %d):\n%s", code, out)
+	}
+	c.checkPruned(t, s, out)
+}
+
+func TestShellUpgradeThatRollsBackRemovesNoStateCopy(t *testing.T) {
+	shellOnly(t)
+	s := newSandbox(t, binary(t, "v0.0.1"), false)
+	c := seedStateCopies(t, s)
+	out, code := runShellUpgrade(t, s, binary(t, "broken"), "15")
+	if code == 0 {
+		t.Fatalf("an upgrade to a release that cannot start reported success:\n%s", out)
+	}
+	if !strings.Contains(out, "ROLLED BACK: aimem v0.0.1 is running again") {
+		t.Errorf("the upgrade did not roll back:\n%s", out)
+	}
+	c.checkNothingRemoved(t, out)
+}

@@ -133,13 +133,23 @@ On an existing installation the installer:
 5. if the new release does not answer at its version in time, stops it,
    puts the previous binary back, moves the state it left to
    `<state root>.failed-<UTC time>`, restores the copy, starts the
-   previous release, and exits with an error that says so.
+   previous release, and exits with an error that says so. `aimem
+   upgrade` ends such a run with one line, `the upgrade to <release>
+   failed and was rolled back: ...`, which repeats the installer's
+   report, or says that the installer reported no rollback.
 
 A schema move is one-way (a binary refuses a database newer than it
 understands), which is why the copy is taken before the new release
 first opens the state. The backup stays after a successful upgrade.
 It holds everything the state root holds, credentials included, with
-the same permissions; remove it once the new release has proved itself.
+the same permissions. The installer keeps the newest two backups: after
+an upgrade that came up healthy it removes the older
+`<state root>.backup-<UTC time>` copies, and the older
+`<state root>.failed-<UTC time>` copies beyond the newest two, and names
+each one it removes. It removes nothing after a failed or rolled-back
+upgrade, and nothing on an upgrade without a service manager. It touches
+only directories named exactly that way beside the state root; a copy
+you renamed, or one of another state root, stays.
 On macOS the service is a launchd user agent, which the upgrade stops
 and starts the same way. Without a service manager (`AIMEM_NO_SERVICE=1`
 or `AIMEM_NO_SYSTEMD=1`, or no login session on a Mac) the installer

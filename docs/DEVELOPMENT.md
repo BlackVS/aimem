@@ -117,6 +117,9 @@ At the release, the worker reads the result of the release run's
 `macos-client-upgrade` job and records it on the release task. After a
 release, the first pull request moves `scripts/client-upgrade.env`
 forward: FROM becomes the previous TO, and TO the release just published.
+`ROLLBACK_LINE_SINCE` in the same file names the first release whose
+`aimem upgrade` ends a failed run with the rollback line; the release
+that first carries the line sets it to its own version if it differs.
 
 ## Toolchain
 

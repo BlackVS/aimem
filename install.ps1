@@ -106,6 +106,45 @@ function Copy-StateRoot($src, $dst) {
   $null = & robocopy $src $dst /E /COPY:DATS /DCOPY:DAT /XF aimem.sock /R:1 /W:1 /NFL /NDL /NJH /NJS /NP
   $LASTEXITCODE -lt 8
 }
+# Clear-ReadOnly clears the read-only attribute of every file and directory
+# under $dir (git writes its pack files read-only, and robocopy /COPY:DATS
+# keeps the attribute in a state copy), so Directory.Delete can remove
+# them. It never enters or changes a reparse point.
+function Clear-ReadOnly($dir) {
+  foreach ($e in (New-Object IO.DirectoryInfo $dir).GetFileSystemInfos()) {
+    if ($e.Attributes -band [IO.FileAttributes]::ReparsePoint) { continue }
+    if ($e.Attributes -band [IO.FileAttributes]::ReadOnly) {
+      $e.Attributes = $e.Attributes -band -bnot [IO.FileAttributes]::ReadOnly
+    }
+    if ($e -is [IO.DirectoryInfo]) { Clear-ReadOnly $e.FullName }
+  }
+}
+# Remove-OldStateCopies keeps, after a healthy upgrade, the newest two state
+# copies of each kind (backup-, failed-) beside $root and removes the older
+# ones. It matches only <root>.<kind>-<UTC stamp> exactly, only real
+# directories (no reparse point), and the fixed-width stamp makes the name
+# order the copies' age. A copy that cannot be removed is only a warning.
+function Remove-OldStateCopies($root) {
+  $parent = Split-Path -Parent $root
+  $leaf = Split-Path -Leaf $root
+  foreach ($kind in 'backup', 'failed') {
+    $re = '^' + [regex]::Escape("$leaf.$kind-") + '[0-9]{8}T[0-9]{6}Z$'
+    $copies = @(Get-ChildItem -LiteralPath $parent -Directory -Force -ErrorAction SilentlyContinue |
+        Where-Object { $_.Name -match $re -and -not ($_.Attributes -band [IO.FileAttributes]::ReparsePoint) } |
+        Sort-Object Name)
+    for ($i = 0; $i -lt $copies.Count - 2; $i++) {
+      # The root's own spelling (a short 8.3 path stays one), as the
+      # backup line above names it.
+      $p = Join-Path $parent $copies[$i].Name
+      # The installer's copies hold no links: robocopy copies a junction's
+      # content. Should one hold a link anyway, Windows PowerShell 5.1's
+      # Directory.Delete refuses it ("access denied") and leaves its
+      # target alone, so the copy stays and the warning says so.
+      try { Clear-ReadOnly $p; [IO.Directory]::Delete($p, $true); Say "removed the old state copy $p" }
+      catch { Write-Warning "could not remove the old state copy ${p}: $($_.Exception.Message)" }
+    }
+  }
+}
 function Invoke-Upgrade($exe, $new) {
   $wait = if ($env:AIMEM_UPGRADE_WAIT) { [int]$env:AIMEM_UPGRADE_WAIT } else { 30 }
   $oldV = Get-AimemVersion $exe
@@ -136,7 +175,10 @@ function Invoke-Upgrade($exe, $new) {
   Start-AimemService
   if (Wait-AimemHealth $exe $newV $wait) {
     Say "upgraded aimem $oldV -> $newV; service healthy at $newV"
-    if ($backup) { Say "the state backup stays at $backup (remove it once satisfied)" }
+    if ($backup) {
+      Say "the state backup stays at $backup; the installer keeps the newest two state copies"
+      Remove-OldStateCopies $root
+    }
     return
   }
   Write-Warning "aimem $newV did not answer health at its version within ${wait}s; rolling back"
@@ -153,10 +195,15 @@ function Invoke-Upgrade($exe, $new) {
   }
   Start-AimemService
   $kept = if ($backup) { " ($backup; the state the failed upgrade left is in $root.failed-$ts)" } else { '' }
-  if (Wait-AimemHealth $exe $oldV $wait) {
-    throw "ROLLED BACK: aimem $oldV is running again on the state copied before the upgrade$kept"
+  $msg = if (Wait-AimemHealth $exe $oldV $wait) {
+    "ROLLED BACK: aimem $oldV is running again on the state copied before the upgrade$kept."
+  } else {
+    "ROLLED BACK: the previous binary and state are restored$kept, but the service does not answer health; check it."
   }
-  throw "ROLLED BACK: the previous binary and state are restored$kept, but the service does not answer health; check it"
+  # A plain line first: the thrown message reaches the reader inside an
+  # error record, which `aimem upgrade` cannot read as one line.
+  Write-Host $msg
+  throw $msg
 }
 # END Invoke-Upgrade
 

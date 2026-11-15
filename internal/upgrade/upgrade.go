@@ -264,8 +264,15 @@ func Run(ctx context.Context, src Source, o Options) error {
 		}
 	}
 
-	if err := install(ctx, dir, binary, tag, out); err != nil {
-		return fmt.Errorf("the installer of %s failed: %w", tag, err)
+	watch := &rollbackWatch{w: out}
+	if err := install(ctx, dir, binary, tag, watch); err != nil {
+		// One line that says how the failed run ended, as the installer
+		// reported it: install.ps1's report otherwise reaches the reader
+		// only inside a PowerShell error record.
+		if l := watch.report(); l != "" {
+			return fmt.Errorf("the upgrade to %s failed and was rolled back: %s", tag, strings.TrimSpace(strings.TrimPrefix(l, rollbackPrefix)))
+		}
+		return fmt.Errorf("the upgrade to %s failed (the installer of %s: %w); the installer reported no rollback, see its output above", tag, tag, err)
 	}
 	// The installer waited for the service at the new version, or rolled
 	// back; the installed binary says which one came up.
@@ -280,6 +287,46 @@ func Run(ctx context.Context, src Source, o Options) error {
 	}
 	fmt.Fprintf(out, "aimem %s is installed at %s\n", came, inst)
 	return nil
+}
+
+// rollbackPrefix starts the line in which the installers report a
+// rollback (install.sh, install-hub.sh and install.ps1 alike).
+const rollbackPrefix = "ROLLED BACK:"
+
+// rollbackWatch passes the installer's output through and keeps the first
+// line that starts with rollbackPrefix. The first, because install.ps1
+// prints its report as a plain line and then throws it again inside an
+// error record, which PowerShell may wrap.
+type rollbackWatch struct {
+	w    io.Writer
+	line []byte
+	seen string
+}
+
+func (r *rollbackWatch) Write(p []byte) (int, error) {
+	n, err := r.w.Write(p)
+	for _, b := range p[:n] {
+		if b == '\n' {
+			r.end()
+		} else if len(r.line) < 4096 {
+			r.line = append(r.line, b)
+		}
+	}
+	return n, err
+}
+
+func (r *rollbackWatch) end() {
+	l := strings.TrimSpace(string(r.line))
+	r.line = r.line[:0]
+	if r.seen == "" && strings.HasPrefix(l, rollbackPrefix) {
+		r.seen = l
+	}
+}
+
+// report is the installer's rollback line, or "" when it printed none.
+func (r *rollbackWatch) report() string {
+	r.end()
+	return r.seen
 }
 
 // httpsOnly keeps every redirect hop on TLS, within the default limit of
