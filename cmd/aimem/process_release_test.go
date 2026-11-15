@@ -10,6 +10,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"io/fs"
+	"net/netip"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -152,16 +153,34 @@ var fileExtensions = []string{"md", "json", "py", "sh", "ps1", "txt", "yml", "ya
 var (
 	urlHost    = regexp.MustCompile(`[A-Za-z][A-Za-z0-9+.-]*://([^\s/?#"'<>()\[\]` + "`" + `]+)`)
 	atHost     = regexp.MustCompile(`[\w.+-]+@([A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)+)`)
+	ipv4       = regexp.MustCompile(`(?:^|[^\w.])(\d{1,3}(?:\.\d{1,3}){3})(?:$|[^\w.]|\.(?:[^\w]|$))`)
 	dottedWord = regexp.MustCompile(`[A-Za-z0-9_-]+(?:\.[A-Za-z0-9_-]+)*\.[A-Za-z][A-Za-z0-9-]+`)
 )
 
-// unlistedHosts is every host-like name in text that the allow-list does
-// not admit. It fails closed: a dotted word is a host unless it is a file
-// name or an id of the set (idPrefixes), so a new kind of word fails here
-// until it is classified.
-func unlistedHosts(text string, idPrefixes []string) []string {
+// Addresses a text may name: loopback and the documentation networks
+// (RFC 5737).
+var allowedNets = []netip.Prefix{
+	netip.MustParsePrefix("127.0.0.0/8"),
+	netip.MustParsePrefix("192.0.2.0/24"),
+	netip.MustParsePrefix("198.51.100.0/24"),
+	netip.MustParsePrefix("203.0.113.0/24"),
+}
+
+// unlistedHosts is every host-like name or IPv4 address in text that the
+// allow-list does not admit. It fails closed: a dotted word is a host
+// unless it is a file name or exactly one of the set's ids, so a new kind
+// of word fails here until it is classified.
+func unlistedHosts(text string, ids []string) []string {
 	allowed := func(h string) bool {
 		h = strings.ToLower(h)
+		if a, err := netip.ParseAddr(h); err == nil {
+			for _, n := range allowedNets {
+				if n.Contains(a) {
+					return true
+				}
+			}
+			return false
+		}
 		if slices.Contains(allowedHosts, h) {
 			return true
 		}
@@ -193,9 +212,12 @@ func unlistedHosts(text string, idPrefixes []string) []string {
 		add(m[1])
 	}
 	text = atHost.ReplaceAllString(text, " ")
+	for _, m := range ipv4.FindAllStringSubmatch(text, -1) {
+		add(m[1])
+	}
 	for _, w := range dottedWord.FindAllString(text, -1) {
 		labels := strings.Split(w, ".")
-		if slices.Contains(fileExtensions, strings.ToLower(labels[len(labels)-1])) || slices.Contains(idPrefixes, strings.ToLower(labels[0])) {
+		if slices.Contains(fileExtensions, strings.ToLower(labels[len(labels)-1])) || slices.Contains(ids, w) {
 			continue
 		}
 		add(w)
@@ -203,9 +225,9 @@ func unlistedHosts(text string, idPrefixes []string) []string {
 	return bad
 }
 
-// The ids of the set: its checklist kinds and template kinds, lowercased,
-// which prefix its item ids (ready.plan, done.review).
-func setIDPrefixes(t *testing.T) []string {
+// setItemIDs is the ids of the items of the set's checklists (ready.plan,
+// done.review): the only dotted words the check takes as the set's own.
+func setItemIDs(t *testing.T) []string {
 	t.Helper()
 	raw, err := os.ReadFile(filepath.Join(referenceSet, "manifest.json"))
 	if err != nil {
@@ -213,23 +235,36 @@ func setIDPrefixes(t *testing.T) []string {
 	}
 	var m struct {
 		Checklists map[string]string `json:"checklists"`
-		Templates  map[string]string `json:"templates"`
 	}
 	if err := json.Unmarshal(raw, &m); err != nil {
 		t.Fatal(err)
 	}
-	var p []string
-	for k := range m.Checklists {
-		p = append(p, strings.ToLower(k))
+	var ids []string
+	for _, p := range m.Checklists {
+		raw, err := os.ReadFile(filepath.Join(referenceSet, "..", "..", filepath.FromSlash(p)))
+		if err != nil {
+			t.Fatal(err)
+		}
+		var c struct {
+			Items []struct {
+				ID string `json:"id"`
+			} `json:"items"`
+		}
+		if err := json.Unmarshal(raw, &c); err != nil {
+			t.Fatal(err)
+		}
+		for _, it := range c.Items {
+			ids = append(ids, it.ID)
+		}
 	}
-	for k := range m.Templates {
-		p = append(p, strings.ToLower(k))
+	if len(ids) == 0 {
+		t.Fatal("the set's checklists name no items")
 	}
-	return p
+	return ids
 }
 
 func TestReferenceProcessSetNamesNoUnlistedHost(t *testing.T) {
-	prefixes := setIDPrefixes(t)
+	ids := setItemIDs(t)
 	n := 0
 	err := filepath.WalkDir(referenceSet, func(p string, d fs.DirEntry, err error) error {
 		if err != nil || d.IsDir() {
@@ -240,7 +275,7 @@ func TestReferenceProcessSetNamesNoUnlistedHost(t *testing.T) {
 			return err
 		}
 		n++
-		if bad := unlistedHosts(string(raw), prefixes); len(bad) > 0 {
+		if bad := unlistedHosts(string(raw), ids); len(bad) > 0 {
 			t.Errorf("%s names hosts that are not on the allow-list: %v", filepath.ToSlash(p), bad)
 		}
 		return nil
@@ -252,7 +287,7 @@ func TestReferenceProcessSetNamesNoUnlistedHost(t *testing.T) {
 
 // The check itself: what it refuses and what it lets through.
 func TestUnlistedHostsFailsClosed(t *testing.T) {
-	prefixes := []string{"ready", "done", "task"}
+	ids := []string{"ready.plan", "done.review"}
 	for _, c := range []struct {
 		text string
 		want []string
@@ -265,8 +300,14 @@ func TestUnlistedHostsFailsClosed(t *testing.T) {
 		{"ask ops@mail.acme.co", []string{"mail.acme.co"}},
 		{"the hub at hub.office.lan serves it", []string{"hub.office.lan"}},
 		{"a new word like widget.frobnicate", []string{"widget.frobnicate"}},
+		// Only an exact id of the set is exempt, never a word that starts with a kind.
+		{"the hub task.office.lan and done.corp.example.com and ready.planner", []string{"task.office.lan", "done.corp.example.com", "ready.planner"}},
+		// A bare address is a host too, unless loopback or a documentation address.
+		{"the hub is 10.0.12.7, or 10.0.12.8:8443.", []string{"10.0.12.7", "10.0.12.8"}},
+		{"listen on 127.0.0.1 or 192.0.2.10; see http://203.0.113.5/x and http://172.16.0.4/y", []string{"172.16.0.4"}},
+		{"a version 1.2.3 is no address", nil},
 	} {
-		if got := unlistedHosts(c.text, prefixes); !slices.Equal(got, c.want) {
+		if got := unlistedHosts(c.text, ids); !slices.Equal(got, c.want) {
 			t.Errorf("%q: got %v, want %v", c.text, got, c.want)
 		}
 	}

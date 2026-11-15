@@ -83,7 +83,8 @@ currently 25); a binary refuses a database newer than it understands.
   export` on a connected machine (ADMIN-MANUAL, "Selecting a project's
   process documents"). `scripts/process-archive.sh` builds it from the
   checkout, with no network, and a test imports what it builds. A test
-  fails when a text of the set names a host that is not on its allow-list.
+  fails when a text of the set names a host or an IPv4 address that is not
+  on its allow-list (loopback and documentation addresses are).
 
 ## [0.10.24] — 2026-11-15
 

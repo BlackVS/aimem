@@ -943,21 +943,32 @@ reference set as `aimem-process.tar.gz`, listed in its `SHA256SUMS` and
 attested with the other assets: the tag's `processes/aimem`, recording the
 tag's commit. An aiforge export carries it with the release's other assets
 under `<base>/aimem/<tag>/`, `SHA256SUMS` beside it, so a hub host in a
-closed network needs no `process export`. Select it by the repository and
-the commit the archive records, which `git get-tar-commit-id` prints:
+closed network needs no `process export`.
+
+The route that needs no `git` makes it the hub's default, which takes the
+commit from the archive itself (see "On a hub host without network
+access" above); `tasks on` then applies it to a project with no process:
 
 ```sh
 cd /media/aiforge-export/aimem/<tag>
-commit=$(gunzip -c aimem-process.tar.gz | git get-tar-commit-id)
-aimem process select https://github.com/BlackVS/aimem "$commit" --commit \
-    --from-archive aimem-process.tar.gz -p <project>
+aimem process default set https://github.com/BlackVS/aimem <tag> \
+    --from-archive aimem-process.tar.gz
+```
+
+To select it for one project, give `select` the commit the archive
+records. `git get-tar-commit-id` prints it, on any machine that has
+`git`; a closed-network hub host may have none (`install-hub.sh` warns
+about such a host), so read it where `git` is and carry it over with the
+archive:
+
+```sh
+gunzip -c aimem-process.tar.gz | git get-tar-commit-id    # any machine with git
+aimem process select https://github.com/BlackVS/aimem <commit> --commit \
+    --from-archive aimem-process.tar.gz -p <project>        # on the hub host
 ```
 
 The hub then shows the public repository and that commit, as a
-selection read from Git would. To make it the hub's default instead,
-`aimem process default set https://github.com/BlackVS/aimem <tag>
---from-archive aimem-process.tar.gz` takes the commit from the archive
-itself (see "On a hub host without network access" above).
+selection read from Git would.
 
 The forge reads (the tarball and the ref advertisement) are anonymous
 unless `AIMEM_PROCESS_FORGE_TOKEN` is set in the hub user's
