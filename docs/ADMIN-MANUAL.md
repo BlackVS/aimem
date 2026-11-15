@@ -241,14 +241,15 @@ From an https export, the hub's printed
 `irm <base>/aimem/<tag>/boot.ps1 | iex` line works as well.
 
 An https export served with a certificate from a private certificate
-authority needs that authority trusted where the download runs: in the
-system trust store for `curl` on Linux and macOS (for example
-`/usr/local/share/ca-certificates/` and `update-ca-certificates` on
-Debian and Ubuntu), and in the machine's Trusted Root Certification
-Authorities store for PowerShell on Windows
+authority needs that authority trusted where the download runs. On
+Linux, add it to the system store, which `curl` and `aimem upgrade` both
+read (on Debian and Ubuntu, copy it into
+`/usr/local/share/ca-certificates/` and run `update-ca-certificates`).
+On Windows, add it to the machine's Trusted Root Certification
+Authorities store, which PowerShell and `aimem upgrade` both read
 (`Import-Certificate -FilePath ca.crt -CertStoreLocation Cert:\LocalMachine\Root`,
 as an administrator). The installers keep verification on and take no
-option to skip it; `aimem upgrade` reads the same stores.
+option to skip it.
 
 Run with a base, `install-hub.sh` prints the client install command with
 the same base, not the github.com one-liner. A workstation upgrades from
