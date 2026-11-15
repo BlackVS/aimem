@@ -25,7 +25,8 @@ upgrade and its rollback, nightly and at each tag. Upgrade the clients: a
 member whose task credential holds only a read grant on a project can no
 longer write its documents or records through these tools, and a hub entry
 that holds a task credential over plain http or `insecure` refuses them
-(see Security). Includes PR #371, #372 and #373.
+(see Security). The on-disk schema stays at 25 and the access schema at
+10. Includes PR #371, #372 and #373.
 
 ### Security
 
