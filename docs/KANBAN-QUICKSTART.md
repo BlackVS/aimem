@@ -187,8 +187,8 @@ aimem access grant add --project my-project --group-name developers
 
 Tokens are still issued to users, not groups. Use `--read-only` instead of
 `--project` in `token-issue` to issue a read-only ordinary token. An ordinary
-token reads the tasks, knowledge and repository reference of the projects
-its user holds a grant on, and no others; a project-scoped token reads and
+token reads the tasks, knowledge, repository reference, process and skills
+of the projects its user holds a grant on, and no others; a project-scoped token reads and
 writes only its own project.
 
 A grant is a write grant unless `--read` makes it a read grant. A read grant

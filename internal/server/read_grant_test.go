@@ -28,6 +28,15 @@ func newGrantRig(t *testing.T) *grantRig {
 	if r := g.call(t, g.tls, "PUT", "/v1/projects/alpha/repository", g.env, nil, body, true); r.status != 200 {
 		t.Fatalf("set the repository: %d %s", r.status, r.body)
 	}
+	// The process reference and its set, and a release skills set: the
+	// other reads the project read rule guards.
+	sel := withSet(t, `{"repo":"https://example.com/process.git","commit":"`+strings.Repeat("1", 40)+`","manifest":"m.json","expected_commit":""}`, "rules")
+	if r := g.call(t, g.tls, "PUT", "/v1/projects/alpha/process", g.env, nil, sel, true); r.status != 200 {
+		t.Fatalf("select the process: %d %s", r.status, r.body)
+	}
+	if r := g.call(t, g.tls, "PUT", "/v1/skills/release", g.env, nil, skillsBody("1.0", map[string]string{"grant-skill/SKILL.md": "grant skill"}), true); r.status != 200 {
+		t.Fatalf("import the skills: %d %s", r.status, r.body)
+	}
 	return g
 }
 
@@ -58,8 +67,8 @@ func (g *grantRig) tokens(t *testing.T, name string, grant func(user string)) ma
 	return out
 }
 
-// reads are alpha's task, knowledge and repository reads; each answers 200
-// when allowed.
+// grantReads are alpha's task, knowledge, repository, process and skills
+// reads; each answers 200 when allowed.
 var grantReads = []string{
 	"/v1/projects/alpha/tasks",
 	"/v1/tasks/{task}",
@@ -67,7 +76,14 @@ var grantReads = []string{
 	"/v1/projects/alpha/docs",
 	"/v1/projects/alpha/docs/RUNBOOK",
 	"/v1/projects/alpha/repository",
+	"/v1/projects/alpha/process",
+	"/v1/projects/alpha/process/set",
+	"/v1/projects/alpha/skills",
+	"/v1/projects/alpha/skills/set?source=release",
 }
+
+// leaks are strings only an allowed read's answer carries.
+var leaks = []string{"runbook", "example.git", "process.git", "grant skill", "grant-skill"}
 
 func (g *grantRig) canRead(t *testing.T, bearer, path string) bool {
 	t.Helper()
@@ -76,8 +92,10 @@ func (g *grantRig) canRead(t *testing.T, bearer, path string) bool {
 	case 200:
 		return true
 	case 403, 404:
-		if strings.Contains(string(r.body), "runbook") || strings.Contains(string(r.body), "example.git") {
-			t.Errorf("%s: a refusal carries content: %s", path, r.body)
+		for _, leak := range leaks {
+			if strings.Contains(string(r.body), leak) {
+				t.Errorf("%s: a refusal carries content: %s", path, r.body)
+			}
 		}
 		return false
 	}

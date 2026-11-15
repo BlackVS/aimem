@@ -134,8 +134,9 @@ A-10). An ordinary token reads the tasks, comments, history and epics of a
 project only while its user holds a current grant on it, directly or
 through an access group, and while the token's scope reaches the project: a
 user-scoped or read-only token reaches every project, a project-scoped token
-its own. Knowledge reads (recall, the document list, a document) and the
-project's repository reference use the same predicate (`CanReadToken`); it
+its own. Knowledge reads (recall, the document list, a document), the
+project's repository reference, its process reference and process set, and
+its skills index and skills set use the same predicate (`CanReadToken`); it
 is re-read on every request, so a removed grant refuses the next read. The
 admin token, a legacy writer token and the local socket read every
 project.
@@ -163,7 +164,8 @@ project.
 
 **A grant is read or write** (access schema 10). A read grant lets every
 token of its user (or of its group's members) read the project's tasks,
-knowledge and repository reference, and write nothing. A write grant also
+knowledge, repository reference, process reference and set, and skills index
+and set, and write nothing. A write grant also
 lets the user- and project-scoped tokens write. A project-scoped token may
 be issued under a grant of either kind; whether it writes is decided at each
 write by the grant's kind (`CanWriteToken`), so raising or lowering a grant

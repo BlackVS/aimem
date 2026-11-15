@@ -39,8 +39,8 @@ the names that exist. user-add and group-add take the name only, since the
 hub generates the ID; user-set takes the ID and the new name.
 
 A grant is a write grant unless grant add takes --read. A read grant
-lets the user's tokens read the project's tasks, knowledge and repository
-and write nothing; a write grant also lets user- and project-scoped
+lets the user's tokens read the project's tasks, knowledge, repository,
+process and skills and write nothing; a write grant also lets user- and project-scoped
 tokens write. grant add on a user or group already granted sets the
 access it names.
 

@@ -40,7 +40,8 @@ currently 25); a binary refuses a database newer than it understands.
   (INSTALL-CLIENT.md, "Upgrading").
 - **Read grants.** A grant is now read or write. A read grant lets every
   token of its user, or of its group's members, read the project's tasks,
-  knowledge and repository reference, and write nothing; a write grant
+  knowledge, repository reference, process reference and set, and skills
+  index and set, and write nothing; a write grant
   also lets user- and project-scoped tokens write. `aimem access grant add
   --read` makes one (`PUT /v1/projects/{p}/access/{kind}/{id}?access=read`),
   and granting again sets the access the request names, effective on the
@@ -50,11 +51,13 @@ currently 25); a binary refuses a database newer than it understands.
 
 ### Changed
 
-- **Knowledge and repository reads follow the grant of either kind.** Recall,
-  the document list, a document and the project's repository reference
-  used the write predicate; they now use the task reads' predicate, so a
-  read-only-scope token with a grant reads them, as it already read the
-  project's tasks. The admin token, a legacy writer token and the local
+- **Knowledge, repository, process and skills reads follow the grant of
+  either kind.** Recall, the document list, a document, the project's
+  repository reference, its process reference (`GET
+  /v1/projects/{p}/process`) and process set, and its skills index and
+  skills set used the write predicate; they now use the task reads'
+  predicate, so a read-only-scope token with a grant reads them, as it
+  already read the project's tasks. The admin token, a legacy writer token and the local
   socket still read every project.
 
 ### Upgrade notes
@@ -63,8 +66,9 @@ currently 25); a binary refuses a database newer than it understands.
   becomes a write grant, so every token reads and writes exactly as
   before. An older binary refuses a schema-10 database; keep a backup of
   the access database before the upgrade if a rollback may be needed.
-- A read-only-scope token with a grant now reads that project's knowledge
-  and repository reference.
+- A read-only-scope token with a grant now reads that project's knowledge,
+  repository reference, process reference and set, and skills index and
+  set.
 - A project-scoped token may be issued under a read grant; whether it
   writes is decided at each write by the grant's kind, so raising the
   grant later lets the same token write without a reissue.
