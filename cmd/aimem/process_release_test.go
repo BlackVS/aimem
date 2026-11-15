@@ -153,7 +153,7 @@ var fileExtensions = []string{"md", "json", "py", "sh", "ps1", "txt", "yml", "ya
 var (
 	urlHost    = regexp.MustCompile(`[A-Za-z][A-Za-z0-9+.-]*://([^\s/?#"'<>()\[\]` + "`" + `]+)`)
 	atHost     = regexp.MustCompile(`[\w.+-]+@([A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)+)`)
-	ipv4       = regexp.MustCompile(`(?:^|[^\w.])(\d{1,3}(?:\.\d{1,3}){3})(?:$|[^\w.]|\.(?:[^\w]|$))`)
+	ipv4       = regexp.MustCompile(`\d{1,3}(?:\.\d{1,3}){3}`)
 	dottedWord = regexp.MustCompile(`[A-Za-z0-9_-]+(?:\.[A-Za-z0-9_-]+)*\.[A-Za-z][A-Za-z0-9-]+`)
 )
 
@@ -212,8 +212,22 @@ func unlistedHosts(text string, ids []string) []string {
 		add(m[1])
 	}
 	text = atHost.ReplaceAllString(text, " ")
-	for _, m := range ipv4.FindAllStringSubmatch(text, -1) {
-		add(m[1])
+	// An address stands alone: no word character or dot before it, and
+	// after it none either, except a dot that ends a sentence. The
+	// boundaries are checked beside the match, not matched, so one
+	// separator serves the addresses on both sides of it.
+	word := func(b byte) bool {
+		return b == '_' || b >= '0' && b <= '9' || b >= 'A' && b <= 'Z' || b >= 'a' && b <= 'z'
+	}
+	for _, m := range ipv4.FindAllStringIndex(text, -1) {
+		i, j := m[0], m[1]
+		if i > 0 && (word(text[i-1]) || text[i-1] == '.') {
+			continue
+		}
+		if j < len(text) && (word(text[j]) || text[j] == '.' && j+1 < len(text) && word(text[j+1])) {
+			continue
+		}
+		add(text[i:j])
 	}
 	for _, w := range dottedWord.FindAllString(text, -1) {
 		labels := strings.Split(w, ".")
@@ -306,6 +320,10 @@ func TestUnlistedHostsFailsClosed(t *testing.T) {
 		{"the hub is 10.0.12.7, or 10.0.12.8:8443.", []string{"10.0.12.7", "10.0.12.8"}},
 		{"listen on 127.0.0.1 or 192.0.2.10; see http://203.0.113.5/x and http://172.16.0.4/y", []string{"172.16.0.4"}},
 		{"a version 1.2.3 is no address", nil},
+		// Addresses one separator apart: an allowed one does not hide the next.
+		{"127.0.0.1 10.20.30.40", []string{"10.20.30.40"}},
+		{"127.0.0.1\n10.20.30.41,10.20.30.42", []string{"10.20.30.41", "10.20.30.42"}},
+		{"192.0.2.1,10.20.30.43.", []string{"10.20.30.43"}},
 	} {
 		if got := unlistedHosts(c.text, ids); !slices.Equal(got, c.want) {
 			t.Errorf("%q: got %v, want %v", c.text, got, c.want)
