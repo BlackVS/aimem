@@ -242,10 +242,10 @@ func checkRolledBack(t *testing.T, s *sandbox, out string) {
 // state copies of each kind and with neighbours that look like copies but
 // are not ones the installers made, so they must survive any pruning: a
 // name without a stamp, a stamp with something after it, another root's
-// copy, a file, and (where links can be made) a link to a directory.
+// copy, a file, and a link to a directory.
 type stateCopies struct {
 	old, neighbours []string
-	target          string // the link's target, which must keep its file
+	target          string // the link's target, whose read-only file must stay as it is
 }
 
 func seedStateCopies(t *testing.T, s *sandbox) *stateCopies {
@@ -290,20 +290,26 @@ func seedStateCopies(t *testing.T, s *sandbox) *stateCopies {
 		t.Fatal(err)
 	}
 	c.neighbours = append(c.neighbours, file)
-	if runtime.GOOS != "windows" {
-		c.target = filepath.Join(s.dir, "linked")
-		if err := os.MkdirAll(c.target, 0o700); err != nil {
-			t.Fatal(err)
-		}
-		if err := os.WriteFile(filepath.Join(c.target, "f"), []byte("x"), 0o600); err != nil {
-			t.Fatal(err)
-		}
-		link := s.state + ".backup-20250103T000000Z"
-		if err := os.Symlink(c.target, link); err != nil {
-			t.Fatal(err)
-		}
-		c.neighbours = append(c.neighbours, link)
+	// A link named like the oldest backup, to a directory outside that holds
+	// a read-only file: a symlink on Unix, a junction on Windows (mklink /J
+	// needs no privilege). It sorts first, so a removal that followed it or
+	// took it for a copy would show on the link or on its target.
+	c.target = filepath.Join(s.dir, "linked")
+	if err := os.MkdirAll(c.target, 0o700); err != nil {
+		t.Fatal(err)
 	}
+	if err := os.WriteFile(filepath.Join(c.target, "f"), []byte("x"), 0o444); err != nil {
+		t.Fatal(err)
+	}
+	link := s.state + ".backup-20250103T000000Z"
+	if runtime.GOOS == "windows" {
+		if b, err := exec.Command("cmd", "/c", "mklink", "/J", link, c.target).CombinedOutput(); err != nil {
+			t.Fatalf("mklink /J: %v\n%s", err, b)
+		}
+	} else if err := os.Symlink(c.target, link); err != nil {
+		t.Fatal(err)
+	}
+	c.neighbours = append(c.neighbours, link)
 	return c
 }
 
@@ -359,7 +365,10 @@ func (c *stateCopies) checkNeighbours(t *testing.T, out string) {
 			t.Errorf("%s is not a state copy the installer made, but it was removed\n%s", p, out)
 		}
 	}
-	if c.target != "" && !exists(filepath.Join(c.target, "f")) {
-		t.Errorf("the directory a link pointed at lost its file\n%s", out)
+	fi, err := os.Stat(filepath.Join(c.target, "f"))
+	if err != nil {
+		t.Errorf("the directory a link pointed at lost its file: %v\n%s", err, out)
+	} else if fi.Mode().Perm()&0o200 != 0 {
+		t.Errorf("the file behind a link is no longer read-only (%v)\n%s", fi.Mode(), out)
 	}
 }

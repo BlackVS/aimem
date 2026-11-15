@@ -106,17 +106,17 @@ function Copy-StateRoot($src, $dst) {
   $null = & robocopy $src $dst /E /COPY:DATS /DCOPY:DAT /XF aimem.sock /R:1 /W:1 /NFL /NDL /NJH /NJS /NP
   $LASTEXITCODE -lt 8
 }
-# Clear-ReadOnly clears the read-only attribute of every file under $dir
-# (git writes its pack files read-only, and robocopy /COPY:DATS keeps the
-# attribute in a state copy), so Directory.Delete can remove them. It never
-# enters a reparse point.
+# Clear-ReadOnly clears the read-only attribute of every file and directory
+# under $dir (git writes its pack files read-only, and robocopy /COPY:DATS
+# keeps the attribute in a state copy), so Directory.Delete can remove
+# them. It never enters or changes a reparse point.
 function Clear-ReadOnly($dir) {
   foreach ($e in (New-Object IO.DirectoryInfo $dir).GetFileSystemInfos()) {
     if ($e.Attributes -band [IO.FileAttributes]::ReparsePoint) { continue }
-    if ($e -is [IO.DirectoryInfo]) { Clear-ReadOnly $e.FullName }
-    elseif ($e.Attributes -band [IO.FileAttributes]::ReadOnly) {
+    if ($e.Attributes -band [IO.FileAttributes]::ReadOnly) {
       $e.Attributes = $e.Attributes -band -bnot [IO.FileAttributes]::ReadOnly
     }
+    if ($e -is [IO.DirectoryInfo]) { Clear-ReadOnly $e.FullName }
   }
 }
 # Remove-OldStateCopies keeps, after a healthy upgrade, the newest two state
