@@ -5,10 +5,10 @@
 # scripts/check-client-upgrade.sh; the service is the aimem-serve logon task.
 #
 # The failure run comes first and the real upgrade last, and nothing ever
-# goes back from TO to FROM: a binary refuses a database newer than it
-# understands, so a downgrade fails as soon as the pair spans a schema
-# change. The rollback restores FROM on its own state, and the account
-# ends at TO.
+# goes back from TO to FROM, so the check does not depend on a downgrade
+# working: an older binary refuses a database newer than it understands,
+# and a later release may give the client such a database. The rollback
+# restores FROM on its own state, and the account ends at TO.
 #
 # The failure run's stand-in binary is compiled here with Add-Type, so the
 # check needs no Go toolchain.

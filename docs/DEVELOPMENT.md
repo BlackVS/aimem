@@ -83,9 +83,10 @@ a stand-in binary that never serves, and checks that the upgrade fails,
 says ROLLED BACK and leaves FROM serving. Then it runs `aimem upgrade
 --release TO` and checks that the binary and the OpenCode plugin are
 TO's published files, that the Claude Code hooks are still wired and
-that the service answers health at TO. It never downgrades: a binary
-refuses a database newer than it understands, so a downgrade would fail
-whenever the pair spans a schema change. The user-level installers
+that the service answers health at TO. It never downgrades, so it does
+not depend on a downgrade working: an older binary refuses a database
+newer than it understands, and a later release may give the client such
+a database. The user-level installers
 install no skills, so there are none to check.
 
 It runs on Linux and Windows in CI's `client-upgrade` job, nightly and
