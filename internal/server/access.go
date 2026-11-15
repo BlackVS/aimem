@@ -259,8 +259,9 @@ func (s *Server) setAccessGrant(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	var previous access.GrantAccess
 	if r.Method == "PUT" {
-		err = db.SetGrantAccess(accessActor(r), project, r.PathValue("kind"), r.PathValue("id"), grant)
+		previous, err = db.SetGrantAccess(accessActor(r), project, r.PathValue("kind"), r.PathValue("id"), grant)
 	} else {
 		err = db.SetGrant(accessActor(r), project, r.PathValue("kind"), r.PathValue("id"), false)
 	}
@@ -270,7 +271,9 @@ func (s *Server) setAccessGrant(w http.ResponseWriter, r *http.Request) {
 	}
 	out := map[string]any{"ok": true, "project_instance": project}
 	if r.Method == "PUT" {
-		out["access"] = grant
+		// previous_access is the subject's grant before this request, ""
+		// for none: a client says so when a read grant became a write grant.
+		out["access"], out["previous_access"] = grant, previous
 	}
 	s.ok(w, out)
 }
@@ -378,18 +381,25 @@ func (s *Server) accessIdentity(w http.ResponseWriter, r *http.Request) {
 			}
 			return
 		}
+		// A project this token may not read answers exactly as an unknown
+		// one; a project without an access identity is readable by no
+		// ordinary token.
+		decision := access.WriteHidden
 		if instance != "" {
 			db, ok := s.accessStore(w)
 			if !ok {
 				return
 			}
-			_, err = db.Authorize(strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer "), instance)
-			if err != nil && !errors.Is(err, access.ErrDenied) {
+			if decision, err = db.DecideWrite(id.UserID, id.TokenID, instance); err != nil {
 				s.fail(w, 500, fmt.Errorf("cannot check project access"))
 				return
 			}
-			allowed = err == nil
 		}
+		if decision == access.WriteHidden {
+			s.fail(w, 404, fmt.Errorf("unknown project"))
+			return
+		}
+		allowed = decision == access.WriteAllowed
 	}
 	out := map[string]any{"user_id": id.UserID, "token_id": id.TokenID, "name": id.Name, "role": "user", "scope": id.Scope, "task_read": "granted-projects", "project": project, "task_write": allowed, "tasks_enabled": tasksOn}
 	// The client records the label and expiry beside the binding, to name

@@ -18,6 +18,7 @@ import (
 	"errors"
 	"time"
 
+	"aimem/internal/access"
 	"aimem/internal/store"
 )
 
@@ -147,6 +148,13 @@ func (s *Server) reservationAuthority(c reservationCaller, project, instance str
 	switch {
 	case err != nil:
 		return refuseReservation("context_unavailable", "access store")
+	case !live && c.team == nil && owner:
+		// A read-only token that reads the project is refused the write as
+		// any reader is (task 01a1dd8c-4919); any other is not live here.
+		if readable, rerr := db.CanReadToken(c.id.UserID, c.id.TokenID, instance); rerr == nil && readable {
+			return refuseReservation("grant_denied", "this token reads the project but may not write it")
+		}
+		return refuseReservation("invalid_credential", "credential revoked, expired or out of scope")
 	case !live:
 		return refuseReservation("invalid_credential", "credential revoked, expired or out of scope")
 	}
@@ -156,7 +164,14 @@ func (s *Server) reservationAuthority(c reservationCaller, project, instance str
 		// needs the grant a task read needs, so a claim proves no more than
 		// the caller could read.
 		if owner {
-			allowed, err = db.CanWriteToken(c.id.UserID, c.id.TokenID, instance)
+			var decision access.WriteDecision
+			decision, err = db.DecideWrite(c.id.UserID, c.id.TokenID, instance)
+			if err == nil && decision == access.WriteHidden {
+				// The caller may not read the project: the unknown task's
+				// answer, as the route preamble gives it.
+				return refuseReservation("task_unavailable", "project not readable in this context")
+			}
+			allowed = decision == access.WriteAllowed
 		} else {
 			allowed, err = db.CanReadToken(c.id.UserID, c.id.TokenID, instance)
 		}

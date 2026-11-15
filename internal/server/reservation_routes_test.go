@@ -101,8 +101,8 @@ func TestReservationRoutesPersonalLifecycle(t *testing.T) {
 	wantRefusal(t, "no key", call("POST", "/claim", "", claim), 400, "invalid_request", "")
 	wantRefusal(t, "an actor field", call("POST", "/claim", "c1", strings.Replace(claim, "{", `{"actor_id":"someone",`, 1)), 400, "invalid_request", "")
 	wantRefusal(t, "the admin", g.call(t, g.tls, "POST", g.rpath(task.ID, "/claim"), g.env, rhdr("c1", nil), claim, true), 403, "grant_denied", "personal")
-	// An authenticated token outside its scope is refused by the authorizer,
-	// and the envelope still shows no active mode.
+	// An authenticated token outside its scope may not read the project: the
+	// unknown task's answer, the same as for a project that does not exist.
 	beta, err := g.s.reg.Open("beta")
 	if err != nil {
 		t.Fatal(err)
@@ -110,7 +110,7 @@ func TestReservationRoutesPersonalLifecycle(t *testing.T) {
 	bt := g.readyTask(t, beta)
 	wantRefusal(t, "a token out of its scope", g.call(t, g.tls, "POST", "/v1/projects/beta/tasks/"+bt.ID+"/reservation/claim", g.project,
 		rhdr("c-out", nil), body(t, map[string]any{"expected_revision": bt.Revision, "holder": map[string]any{"mode": "standalone", "work_ref": "x"}}), true),
-		401, "invalid_credential", "")
+		404, "task_unavailable", "personal")
 
 	o := decodeOutcome(t, call("POST", "/claim", "c1", claim))
 	if o.Receipt.State != "committed" || o.Receipt.Replayed || o.Receipt.ActorID != g.aliceID || o.Receipt.VerifiedMode != "personal" ||

@@ -6,12 +6,14 @@ package server
 // write; without a grant, or after its removal, neither.
 
 import (
+	"net/http"
 	"strconv"
 	"strings"
 	"testing"
 	"time"
 
 	"aimem/internal/access"
+	"aimem/internal/store"
 )
 
 // grantRig is the knowledge rig with alpha's repository set and, per grant
@@ -91,7 +93,7 @@ func (g *grantRig) canRead(t *testing.T, bearer, path string) bool {
 	switch r.status {
 	case 200:
 		return true
-	case 403, 404:
+	case 401, 403, 404:
 		for _, leak := range leaks {
 			if strings.Contains(string(r.body), leak) {
 				t.Errorf("%s: a refusal carries content: %s", path, r.body)
@@ -100,6 +102,49 @@ func (g *grantRig) canRead(t *testing.T, bearer, path string) bool {
 		return false
 	}
 	t.Fatalf("%s: %d %s", path, r.status, r.body)
+	return false
+}
+
+// refusal is the status a refused write answers this bearer: 403 to a
+// caller who reads the project, the unknown project's 404 to one who does
+// not (task 01a1dd8c-4919), 401 to a credential the hub does not accept.
+func (g *grantRig) refusal(t *testing.T, bearer string) int {
+	t.Helper()
+	r := g.personalGet(t, bearer, "/v1/projects/alpha/tasks")
+	switch r.status {
+	case 200:
+		return http.StatusForbidden
+	case 401:
+		return http.StatusUnauthorized
+	}
+	return http.StatusNotFound
+}
+
+// canReserve claims a fresh READY alpha task through the reservation route;
+// a refusal is grant_denied to a reader, the unknown task's
+// task_unavailable to anyone else, invalid_credential to a credential the
+// hub does not accept.
+func (g *grantRig) canReserve(t *testing.T, scope, bearer string) bool {
+	t.Helper()
+	db, err := g.s.reg.Open("alpha")
+	if err != nil {
+		t.Fatal(err)
+	}
+	g.keys++
+	task, err := db.CreateTask(store.TaskContent{Title: "reserve", State: "READY"}, store.TaskActor{Kind: "admin", Name: "admin"}, "grant-ready-"+strconv.Itoa(g.keys))
+	if err != nil {
+		t.Fatal(err)
+	}
+	claim := body(t, map[string]any{"expected_revision": task.Revision, "holder": map[string]any{"mode": "standalone", "work_ref": "grant"}})
+	r := g.call(t, g.tls, "POST", "/v1/projects/alpha/tasks/"+task.ID+"/reservation/claim", bearer, rhdr("grant-claim-"+strconv.Itoa(g.keys), nil), claim, true)
+	if r.status == 200 {
+		return true
+	}
+	want := map[int]string{http.StatusForbidden: "grant_denied", http.StatusNotFound: "task_unavailable", http.StatusUnauthorized: "invalid_credential"}
+	status := g.refusal(t, bearer)
+	if r.status != status || r.code() != want[status] {
+		t.Fatalf("%s token, claim: %d %s, a refusal here is %d %s", scope, r.status, r.body, status, want[status])
+	}
 	return false
 }
 
@@ -112,19 +157,20 @@ func (g *grantRig) canWrite(t *testing.T, bearer string) (bool, bool) {
 	g.keys++
 	key["Idempotency-Key"] = "grant-" + strconv.Itoa(g.keys)
 	comment := g.call(t, g.tls, "POST", "/v1/tasks/"+g.alphaTask+"/comments", bearer, key, `{"body":"hi"}`, true)
+	refusal := g.refusal(t, bearer)
 	for _, r := range []identityResp{task, comment} {
-		if r.status != 200 && r.status != 201 && r.status != 403 {
-			t.Fatalf("write: %d %s", r.status, r.body)
+		if r.status != 200 && r.status != 201 && r.status != refusal {
+			t.Fatalf("write: %d %s, a refusal here is %d", r.status, r.body, refusal)
 		}
 	}
-	return task.status != 403, comment.status != 403
+	return task.status < 300, comment.status < 300
 }
 
 func TestReadGrantReadsAndWritesNothing(t *testing.T) {
 	g := newGrantRig(t)
 	grant := func(a access.GrantAccess) func(string) {
 		return func(user string) {
-			if err := g.db.SetGrantAccess("admin", g.alphaInstance, "user", user, a); err != nil {
+			if _, err := g.db.SetGrantAccess("admin", g.alphaInstance, "user", user, a); err != nil {
 				t.Fatal(err)
 			}
 		}
@@ -150,6 +196,11 @@ func TestReadGrantReadsAndWritesNothing(t *testing.T) {
 		{name: "write grant lowered to read", grant: grant(access.GrantWrite), after: grant(access.GrantRead),
 			read:  map[string]bool{"user": true, "project": true, "read-only": true},
 			write: map[string]bool{}},
+		{name: "user disabled", grant: grant(access.GrantWrite), after: func(user string) {
+			if err := g.db.SetUser("admin", user, "disabled-"+user, true); err != nil {
+				t.Fatal(err)
+			}
+		}, read: map[string]bool{}, write: map[string]bool{}},
 	}
 	for i, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -175,6 +226,9 @@ func TestReadGrantReadsAndWritesNothing(t *testing.T) {
 				if task != c.write[scope] || comment != c.write[scope] {
 					t.Errorf("%s token: task write %v, comment %v, want %v", scope, task, comment, c.write[scope])
 				}
+				if got := g.canReserve(t, scope, bearer); got != c.write[scope] {
+					t.Errorf("%s token: reservation claim %v, want %v", scope, got, c.write[scope])
+				}
 			}
 		})
 	}
@@ -188,7 +242,7 @@ func TestProjectTokenUnderAReadGrant(t *testing.T) {
 	var uid string
 	toks := g.tokens(t, "auditor", func(u string) {
 		uid = u
-		if err := g.db.SetGrantAccess("admin", g.alphaInstance, "user", u, access.GrantRead); err != nil {
+		if _, err := g.db.SetGrantAccess("admin", g.alphaInstance, "user", u, access.GrantRead); err != nil {
 			t.Fatal(err)
 		}
 	})
@@ -204,7 +258,7 @@ func TestProjectTokenUnderAReadGrant(t *testing.T) {
 	if task, comment := g.canWrite(t, project); task || comment {
 		t.Fatalf("wrote under a read grant: task %v, comment %v", task, comment)
 	}
-	if err := g.db.SetGrantAccess("admin", g.alphaInstance, "user", uid, access.GrantWrite); err != nil {
+	if _, err := g.db.SetGrantAccess("admin", g.alphaInstance, "user", uid, access.GrantWrite); err != nil {
 		t.Fatal(err)
 	}
 	if task, comment := g.canWrite(t, project); !task || !comment {
@@ -220,7 +274,7 @@ func TestReadGrantThroughAGroup(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := g.db.SetGrantAccess("admin", g.alphaInstance, "group", readers.ID, access.GrantRead); err != nil {
+	if _, err := g.db.SetGrantAccess("admin", g.alphaInstance, "group", readers.ID, access.GrantRead); err != nil {
 		t.Fatal(err)
 	}
 	toks := g.tokens(t, "member", func(u string) {
@@ -282,5 +336,39 @@ func TestGrantRouteSetsTheAccess(t *testing.T) {
 	snap := g.call(t, g.tls, "GET", "/v1/access", g.env, nil, "", true)
 	if !strings.Contains(string(snap.body), `"subject":"`+u.ID+`","access":"write"`) {
 		t.Fatalf("snapshot: %s", snap.body)
+	}
+}
+
+// A project recreated under a granted project's name is a new instance:
+// the grant stays with the old one, so the name answers as an unknown
+// project to read and write, and the old project's task still reads under
+// the grant that moved with it.
+func TestProjectInstanceChangeKeepsTheGrantWithTheInstance(t *testing.T) {
+	g := newGrantRig(t)
+	toks := g.tokens(t, "mover", func(u string) {
+		if _, err := g.db.SetGrantAccess("admin", g.alphaInstance, "user", u, access.GrantWrite); err != nil {
+			t.Fatal(err)
+		}
+	})
+	if err := g.s.reg.Rename("alpha", "alpha-old"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := g.s.reg.Open("alpha"); err != nil {
+		t.Fatal(err)
+	}
+	unknown := g.personalGet(t, toks["user"], "/v1/projects/nope/tasks")
+	for _, scope := range []string{"user", "project", "read-only"} {
+		bearer := toks[scope]
+		if r := g.personalGet(t, bearer, "/v1/projects/alpha/tasks"); r.status != 404 || string(r.body) != string(unknown.body) {
+			t.Errorf("%s token, the new alpha: %d %s, want the unknown answer %s", scope, r.status, r.body, unknown.body)
+		}
+		g.keys++
+		key := map[string]string{"Idempotency-Key": "mover-" + strconv.Itoa(g.keys), "Content-Type": "application/json"}
+		if r := g.call(t, g.tls, "POST", "/v1/projects/alpha/tasks", bearer, key, taskBody, true); r.status != 404 {
+			t.Errorf("%s token, a write to the new alpha: %d %s", scope, r.status, r.body)
+		}
+		if r := g.personalGet(t, bearer, "/v1/tasks/"+g.alphaTask); r.status != 200 {
+			t.Errorf("%s token, the old alpha's task: %d %s", scope, r.status, r.body)
+		}
 	}
 }

@@ -212,7 +212,9 @@ func checkRefusal(raw string, bad bool, want string) error {
 const (
 	refusedConflict = "HTTP 409: assignment state, task readiness or worker capacity conflict"
 	refusedStale    = "HTTP 409: team session is closed or generation is stale"
-	refusedScope    = "HTTP 403: token scope or current grant does not permit writes to this project"
+	// A token that does not reach the project gets the unknown project's
+	// answer (task 01a1dd8c-4919).
+	refusedScope = "HTTP 404: unknown project, or this token's user holds no grant on it"
 )
 
 func (r *rehearsalHub) createTask(key string) (string, int64) {

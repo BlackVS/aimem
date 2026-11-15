@@ -84,6 +84,10 @@ type accessCall struct {
 	body         any
 	output       string
 	newForm      string
+	// grantOf names a grant add's subject and project ("user alice on
+	// project example"), so the command can say when it raised a read
+	// grant to write.
+	grantOf string
 }
 
 func accessCmd(args []string) error {
@@ -145,7 +149,20 @@ func accessCmd(args []string) error {
 		return err
 	}
 	fmt.Fprintln(out, pretty.String())
+	if call.grantOf != "" && grantRaised(data) {
+		fmt.Fprintf(noticeOut, "%s held a read grant; it is now a write grant\n", call.grantOf)
+	}
 	return nil
+}
+
+// grantRaised reports whether a grant answer says a read grant became a
+// write grant (previous_access read, access write).
+func grantRaised(data []byte) bool {
+	var g struct {
+		Access   string `json:"access"`
+		Previous string `json:"previous_access"`
+	}
+	return json.Unmarshal(data, &g) == nil && g.Previous == "read" && g.Access == "write"
 }
 
 // accessDo sends one request to the local service and returns a 200 answer.
@@ -398,7 +415,17 @@ func namedAccessRequest(cmd, verb string, args []string, dir accessDirectory) (a
 		if *readGrant {
 			path += "?access=read"
 		}
-		return accessCall{method: map[string]string{"add": "PUT", "rm": "DELETE"}[verb], path: path}, nil
+		call := accessCall{method: map[string]string{"add": "PUT", "rm": "DELETE"}[verb], path: path}
+		if verb == "add" {
+			name := id
+			for _, n := range []string{*f.userName, *f.groupName} {
+				if n != "" {
+					name = n
+				}
+			}
+			call.grantOf = kind + " " + name + " on project " + *project
+		}
+		return call, nil
 	case "grant-rm-instance":
 		if *instance == "" {
 			return accessCall{}, errors.New("--instance is required")

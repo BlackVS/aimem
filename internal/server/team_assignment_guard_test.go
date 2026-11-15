@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 
+	"aimem/internal/access"
 	"aimem/internal/store"
 )
 
@@ -38,7 +39,8 @@ func TestManagedTaskHTTPGuardAndProjection(t *testing.T) {
 		t.Fatal(err)
 	}
 	check := func(worker store.TeamSession) error {
-		ok, err := acc.CanWriteToken(worker.UserID, worker.TokenID, f.alphaInstance)
+		decision, err := acc.DecideWrite(worker.UserID, worker.TokenID, f.alphaInstance)
+		ok := decision == access.WriteAllowed
 		if err != nil {
 			return err
 		}

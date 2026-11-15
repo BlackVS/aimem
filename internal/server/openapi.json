@@ -1636,7 +1636,7 @@
         ],
         "responses": {
           "200": {
-            "description": "Grant present; returns the stable host-local project instance and the grant's access"
+            "description": "Grant present; returns the stable host-local project instance, the grant's access, and previous_access: the subject's own grant before this request (read, write, or empty for none)"
           },
           "400": {
             "description": "access is neither read nor write"

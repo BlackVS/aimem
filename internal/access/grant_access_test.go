@@ -56,7 +56,7 @@ func TestAccessSchema10KeepsEveryGrantAWriteGrant(t *testing.T) {
 				if err != nil {
 					t.Fatal(err)
 				}
-				w, err := s.CanWriteToken(c.user, c.id, inst)
+				w, err := writes(s, c.user, c.id, inst)
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -112,7 +112,7 @@ func TestAccessSchema10KeepsEveryGrantAWriteGrant(t *testing.T) {
 func TestGrantAccessDecidesWrites(t *testing.T) {
 	s := testStore(t)
 	u, _ := s.CreateUser("admin", "auditor")
-	if err := s.SetGrantAccess("admin", "inst", "user", u.ID, GrantRead); err != nil {
+	if _, err := s.SetGrantAccess("admin", "inst", "user", u.ID, GrantRead); err != nil {
 		t.Fatal(err)
 	}
 	tk, _, err := s.IssueScoped("admin", u.ID, "auditor-inst", ScopeProject, "inst", time.Now().Add(time.Hour))
@@ -122,18 +122,18 @@ func TestGrantAccessDecidesWrites(t *testing.T) {
 	check := func(stage string, read, write bool) {
 		t.Helper()
 		r, _ := s.CanReadToken(u.ID, tk.ID, "inst")
-		w, _ := s.CanWriteToken(u.ID, tk.ID, "inst")
-		cw, _ := s.CanWrite(u.ID, "inst")
-		if r != read || w != write || cw != write {
-			t.Fatalf("%s: read %v write %v CanWrite %v, want %v %v", stage, r, w, cw, read, write)
+		d, _ := s.DecideWrite(u.ID, tk.ID, "inst")
+		want := map[[2]bool]WriteDecision{{false, false}: WriteHidden, {true, false}: WriteReadOnly, {true, true}: WriteAllowed}[[2]bool{read, write}]
+		if r != read || d != want {
+			t.Fatalf("%s: read %v decision %v, want %v %v", stage, r, d, read, want)
 		}
 	}
 	check("read grant", true, false)
-	if err := s.SetGrantAccess("admin", "inst", "user", u.ID, GrantWrite); err != nil {
+	if _, err := s.SetGrantAccess("admin", "inst", "user", u.ID, GrantWrite); err != nil {
 		t.Fatal(err)
 	}
 	check("raised to write", true, true)
-	if err := s.SetGrantAccess("admin", "inst", "user", u.ID, GrantRead); err != nil {
+	if _, err := s.SetGrantAccess("admin", "inst", "user", u.ID, GrantRead); err != nil {
 		t.Fatal(err)
 	}
 	check("lowered to read", true, false)
@@ -141,7 +141,7 @@ func TestGrantAccessDecidesWrites(t *testing.T) {
 		t.Fatal(err)
 	}
 	check("removed", false, false)
-	if err := s.SetGrantAccess("admin", "inst", "user", u.ID, "admin"); err == nil {
+	if _, err := s.SetGrantAccess("admin", "inst", "user", u.ID, "admin"); err == nil {
 		t.Fatal("an unknown access was stored")
 	}
 	events, err := s.AuditEvents(time.Time{}, "", "", 100)
@@ -163,4 +163,10 @@ func TestGrantAccessDecidesWrites(t *testing.T) {
 			t.Errorf("no %s audit event among %v", a, actions)
 		}
 	}
+}
+
+// writes is DecideWrite's yes: the token may write project.
+func writes(s *Store, user, token, project string) (bool, error) {
+	d, err := s.DecideWrite(user, token, project)
+	return d == WriteAllowed, err
 }

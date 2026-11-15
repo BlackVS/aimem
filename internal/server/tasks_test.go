@@ -166,9 +166,11 @@ func TestTaskRoutesAuthorization(t *testing.T) {
 		t.Fatalf("actor stamp: %+v", hist.Changes)
 	}
 
-	// Alice's token is issued for alpha only: beta is a foreign project.
-	if w := taskReq(t, h, "POST", "/v1/projects/beta/tasks", f.alice, "k2", taskBody); w.Code != 403 {
-		t.Fatalf("alice writes beta: %d %s", w.Code, w.Body)
+	// Alice's token is issued for alpha only, and she holds no grant on
+	// beta: beta answers exactly as an unknown project.
+	unknown := taskReq(t, h, "POST", "/v1/projects/nope/tasks", f.alice, "k2u", taskBody)
+	if w := taskReq(t, h, "POST", "/v1/projects/beta/tasks", f.alice, "k2", taskBody); w.Code != 404 || w.Body.String() != unknown.Body.String() {
+		t.Fatalf("alice writes beta: %d %s, unknown: %d %s", w.Code, w.Body, unknown.Code, unknown.Body)
 	}
 	// Bob (read-only, cross-project) reads everything, writes nothing.
 	if w := taskReq(t, h, "GET", "/v1/projects/alpha/tasks", f.bob, "", ""); w.Code != 200 || !strings.Contains(w.Body.String(), task.ID) {
@@ -177,10 +179,11 @@ func TestTaskRoutesAuthorization(t *testing.T) {
 	if w := taskReq(t, h, "GET", "/v1/tasks/"+task.ID, f.bob, "", ""); w.Code != 200 {
 		t.Fatalf("bob reads task: %d", w.Code)
 	}
-	if w := taskReq(t, h, "POST", "/v1/projects/alpha/tasks", f.bob, "k3", taskBody); w.Code != 403 {
+	// Bob reads alpha, so a refused write says what a write needs.
+	if w := taskReq(t, h, "POST", "/v1/projects/alpha/tasks", f.bob, "k3", taskBody); w.Code != 403 || !strings.Contains(w.Body.String(), "write grant") {
 		t.Fatalf("bob creates: %d %s", w.Code, w.Body)
 	}
-	if w := taskReq(t, h, "POST", "/v1/tasks/"+task.ID+"/comments", f.bob, "c1", `{"body":"hi"}`); w.Code != 403 {
+	if w := taskReq(t, h, "POST", "/v1/tasks/"+task.ID+"/comments", f.bob, "c1", `{"body":"hi"}`); w.Code != 403 || !strings.Contains(w.Body.String(), "write grant") {
 		t.Fatalf("bob comments: %d %s", w.Code, w.Body)
 	}
 	// Legacy writer token: reads, never writes tasks.
@@ -641,16 +644,17 @@ func TestTaskRoutesCASCommentsAndPermissionChanges(t *testing.T) {
 	}
 
 	// Permission changes take effect on the next attempt: a removed grant
-	// refuses, a replay with the same key is refused too (receipts never
-	// grant), a restored grant allows, a revoked token is 401.
+	// refuses (as an unknown project: the caller reads it no more), a
+	// replay with the same key is refused too (receipts never grant), a
+	// restored grant allows, a revoked token is 401.
 	db, _ := f.s.openAccess(false)
 	if err := db.SetGrant("admin", f.alphaInstance, "user", f.aliceUser, false); err != nil {
 		t.Fatal(err)
 	}
-	if w := taskReq(t, h, "POST", "/v1/projects/alpha/tasks", f.alice, "k9", taskBody); w.Code != 403 {
+	if w := taskReq(t, h, "POST", "/v1/projects/alpha/tasks", f.alice, "k9", taskBody); w.Code != 404 {
 		t.Fatalf("after grant removal: %d %s", w.Code, w.Body)
 	}
-	if w := taskReq(t, h, "POST", "/v1/projects/alpha/tasks", f.alice, "k1", taskBody); w.Code != 403 {
+	if w := taskReq(t, h, "POST", "/v1/projects/alpha/tasks", f.alice, "k1", taskBody); w.Code != 404 {
 		t.Fatalf("replay after grant removal: %d %s", w.Code, w.Body)
 	}
 	if w := taskReq(t, h, "GET", "/v1/tasks/"+other.ID, f.alice, "", ""); w.Code != 404 || !strings.Contains(w.Body.String(), "holds no grant") {
@@ -840,11 +844,12 @@ func TestTaskRoutesProjectsRenameAndReservedScopes(t *testing.T) {
 	if w := taskReq(t, h, "PUT", "/v1/tasks/"+task.ID, f.alice, "u1", `{"title":"after rename","state":"READY","expected_revision":1}`); w.Code != 200 {
 		t.Fatalf("write after rename: %d %s", w.Code, w.Body)
 	}
-	// A project recreated under the old name inherits nothing.
+	// A project recreated under the old name inherits nothing: no grant,
+	// so it answers as an unknown project.
 	if _, err := f.reg.Open("alpha"); err != nil {
 		t.Fatal(err)
 	}
-	if w := taskReq(t, h, "POST", "/v1/projects/alpha/tasks", f.alice, "k2", taskBody); w.Code != 403 {
+	if w := taskReq(t, h, "POST", "/v1/projects/alpha/tasks", f.alice, "k2", taskBody); w.Code != 404 {
 		t.Fatalf("name reuse: %d %s", w.Code, w.Body)
 	}
 }
@@ -1060,7 +1065,7 @@ func TestMCPPrincipalDispatch(t *testing.T) {
 		t.Fatalf("dispatched task view: %+v", task)
 	}
 	status, body, _ = call(r.Context(), "POST", "/v1/projects/beta/tasks", map[string]string{"Idempotency-Key": "m2"}, []byte(taskBody))
-	if status != 403 {
+	if status != 404 {
 		t.Fatalf("dispatch is bound to alice's authority: %d %s", status, body)
 	}
 	if _, _, err := call(r.Context(), "GET", "/v1/projects/alpha/memories", nil, nil); err == nil {
@@ -1077,7 +1082,7 @@ func TestMCPPrincipalDispatch(t *testing.T) {
 	// dispatcher passes: a bare context still acts as alice, never as the
 	// local operator.
 	status, body, err = call(httptest.NewRequest("GET", "/", nil).Context(), "POST", "/v1/projects/beta/tasks", map[string]string{"Idempotency-Key": "m3"}, []byte(taskBody))
-	if err != nil || status != 403 {
+	if err != nil || status != 404 {
 		t.Fatalf("bare context must still be alice: %d %v %s", status, err, body)
 	}
 	if _, _, err := call(r.Context(), "POST", "/mcp", nil, nil); err == nil {

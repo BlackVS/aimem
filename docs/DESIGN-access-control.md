@@ -168,7 +168,7 @@ knowledge, repository reference, process reference and set, and skills index
 and set, and write nothing. A write grant also
 lets the user- and project-scoped tokens write. A project-scoped token may
 be issued under a grant of either kind; whether it writes is decided at each
-write by the grant's kind (`CanWriteToken`), so raising or lowering a grant
+write by the grant's kind (`DecideWrite`), so raising or lowering a grant
 takes effect on the next request without reissuing tokens. Grants made
 before schema 10 migrated as write grants. `aimem access grant add --read`
 (`PUT /v1/projects/{p}/access/{kind}/{id}?access=read`) makes a read grant;
@@ -177,6 +177,58 @@ granting a subject already granted sets the access the request names.
 A write requires both a current write grant (directly or through an access
 group) and the token's write-project restriction to match the task's actual
 project.
+
+**One write decision** (task 01a1dd8c-4919). Every write by an ordinary
+token asks `access.Store.DecideWrite(user, token, project instance)`, which
+answers one of three:
+
+- **Allowed:** a live user- or project-scoped token of an enabled user whose
+  scope reaches the project, and a current write grant.
+- **Read-only:** not allowed, but the token reads the project
+  (`CanReadToken`): a read grant, or a read-only-scope token with a grant.
+- **Hidden:** the token may not read the project, or the project has no
+  access instance.
+
+The task, epic, comment and triage writes, the team-session routes, the
+reservation owner check, the project form of `Authorize` and the identity
+route's `?project=` all come here; nothing else decides a write. Grant
+issuance alone asks whether the user holds a grant of either kind.
+
+**An unreadable project answers as unknown.** Outside team mode, every
+ordinary route answers a project the caller cannot read exactly as it
+answers a project that does not exist, and a task in such a project exactly
+as a task that does not exist:
+
+- A Hidden write answers 404 with the unknown project's body; the
+  reservation routes answer 404 `task_unavailable`. In personal mode they
+  decide the grant and the project before the body and the role, so a bad
+  body sent to an unreadable project gets `task_unavailable` too; the
+  version check stays first.
+- A Read-only write answers 403. The task routes' message names the write
+  grant and the writing token it needs; the reservation routes answer
+  `grant_denied`.
+- `GET /v1/access/identity?project=` answers 404 "unknown project" for a
+  Hidden project and `task_write` for the others.
+- A task id prefix resolves among the tasks the caller reads, on writes as
+  on reads.
+
+`TestUngrantedAnswersAsUnknownOnEveryRoute` walks every pattern in the
+ordinary route table with a token that holds no grant and compares the
+existing project's answer with an unknown project's. A route that tells
+them apart fails the walk unless it is listed here as an exception, with
+its reason. There are none.
+
+Two rules sit beside this one and are not exceptions to it:
+
+- **Team mode is unchanged.** A team conversation is refused a project its
+  profile is not granted with `grant_denied`, and an ambiguous prefix there
+  counts the ids it may not name. aicrew's peer contract depends on these
+  answers; `TestTeamModeUngrantedAnswersUnchanged` pins them.
+- **The team-session reads need a write grant.** `GET
+  /v1/projects/{p}/teams/mine`, the members list and the assignment reads
+  serve team members, who act on the project, so they ask `DecideWrite`
+  like the writes: a read-grant holder gets 403, and a caller with no
+  grant the unknown project's answer.
 A user assigned to several projects can have a separate agent token for each.
 Removing the user's last assignment to a project removes write access there.
 Disabled users and expired/revoked tokens cannot access tasks.

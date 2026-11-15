@@ -90,7 +90,8 @@ func TestSessionHTTPAuthority(t *testing.T) {
 			t.Fatalf("bad accepted: %d %s", w.Code, w.Body)
 		}
 	}
-	if w = taskReq(t, f.h, "POST", strings.Replace(base, "alpha", "beta", 1)+"/join", f.alice, "cross", join); w.Code != 403 {
+	// alice holds no grant on beta: the unknown project's answer.
+	if w = taskReq(t, f.h, "POST", strings.Replace(base, "alpha", "beta", 1)+"/join", f.alice, "cross", join); w.Code != 404 {
 		t.Fatal(w.Code)
 	}
 	acc, err := f.s.openAccess(false)
@@ -101,7 +102,7 @@ func TestSessionHTTPAuthority(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, req := range []struct{ method, path, key, body string }{{"POST", base + "/join", "join", join}, {"POST", base + "/resume", "resume", handle}, {"GET", roster, "", ""}} {
-		if w = taskReq(t, f.h, req.method, req.path, f.alice, req.key, req.body); w.Code != 403 {
+		if w = taskReq(t, f.h, req.method, req.path, f.alice, req.key, req.body); w.Code != 404 {
 			t.Fatalf("revoked grant replay/read %d", w.Code)
 		}
 	}

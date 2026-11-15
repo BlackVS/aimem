@@ -22,7 +22,7 @@ func TestUserTokenFollowsLiveGrants(t *testing.T) {
 		if (err == nil) != want || (err != nil && !errors.Is(err, ErrDenied)) {
 			t.Fatalf("authorize %s = %v, want %v", project, err, want)
 		}
-		got, err := s.CanWriteToken(u.ID, tok.ID, project)
+		got, err := writes(s, u.ID, tok.ID, project)
 		if err != nil || got != want {
 			t.Fatalf("write %s = %v, %v", project, got, err)
 		}
@@ -178,7 +178,7 @@ ALTER TABLE grants DROP COLUMN access; PRAGMA user_version=1;`); err != nil {
 	}
 }
 
-// CanReadToken is CanWriteToken with one difference: a read-only token
+// CanReadToken is the write test with one difference: a read-only token
 // reads the projects its user holds a grant on. Every token scope, the
 // grant kinds, revocation and a disabled user are checked live.
 func TestCanReadTokenFollowsLiveGrants(t *testing.T) {
@@ -201,7 +201,7 @@ func TestCanReadTokenFollowsLiveGrants(t *testing.T) {
 		if got, err := s.CanReadToken(u.ID, tok.ID, project); err != nil || got != read {
 			t.Fatalf("read %s with %s = %v, %v; want %v", project, tok.Scope, got, err, read)
 		}
-		if got, err := s.CanWriteToken(u.ID, tok.ID, project); err != nil || got != write {
+		if got, err := writes(s, u.ID, tok.ID, project); err != nil || got != write {
 			t.Fatalf("write %s with %s = %v, %v; want %v", project, tok.Scope, got, err, write)
 		}
 	}

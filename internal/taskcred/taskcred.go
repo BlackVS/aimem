@@ -371,6 +371,10 @@ func (id Identity) projectWrite() error {
 	return nil
 }
 
+// ErrProjectHidden is the identity check's 404: the hub knows no such
+// project, or this credential may not read it, which a hub answers alike.
+var ErrProjectHidden = errors.New("project unknown or not granted")
+
 // Identity asks the hub who the selected credential is, for this project:
 // a *Rejected when the hub refuses it, another error when it cannot ask.
 func (s *Selection) Identity(ctx context.Context) (Identity, error) {
@@ -392,6 +396,10 @@ func (s *Selection) Identity(ctx context.Context) (Identity, error) {
 	case http.StatusOK:
 	case http.StatusUnauthorized, http.StatusForbidden:
 		return Identity{}, s.Rejected(resp.StatusCode)
+	case http.StatusNotFound:
+		// The hub answers a project this credential may not read exactly as
+		// one it does not know.
+		return Identity{}, fmt.Errorf("%w: the hub knows no project %s, or this credential's user holds no grant on it; check the project, or an operator grants it with `aimem access grant add`", ErrProjectHidden, s.Project)
 	default:
 		return Identity{}, fmt.Errorf("the hub answered HTTP %d to the task credential check", resp.StatusCode)
 	}

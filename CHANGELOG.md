@@ -59,6 +59,20 @@ currently 25); a binary refuses a database newer than it understands.
   predicate, so a read-only-scope token with a grant reads them, as it
   already read the project's tasks. The admin token, a legacy writer token and the local
   socket still read every project.
+- **One write decision, and a project the caller cannot read answers as
+  unknown everywhere.** Every write, task, epic, comment, triage, team
+  session and reservation, is decided by one access-store call that says
+  allowed, read-only or hidden, and `Store.CanWrite` is gone. Outside team
+  mode, a caller who cannot read a project now gets the answer of a
+  project that does not exist on every route, writes included, and a
+  caller who reads it but may not write gets a 403 that names the missing
+  write grant or writing token. A test walks the whole ordinary route
+  table and fails on any route that tells the two apart. Team mode keeps
+  its answers.
+- **`aimem access grant add` and `aimem team provision` say when they
+  raise a read grant to write.** The grant route's answer names the
+  `previous_access`, and both commands print a line when a read grant
+  became a write grant.
 
 ### Upgrade notes
 
@@ -72,6 +86,33 @@ currently 25); a binary refuses a database newer than it understands.
 - A project-scoped token may be issued under a read grant; whether it
   writes is decided at each write by the grant's kind, so raising the
   grant later lets the same token write without a reissue.
+- What a client now receives for a project its token cannot read, outside
+  team mode:
+  - A task, epic, comment, triage or team-session write answers 404 with
+    the unknown project's body (before: 403 "token scope or current grant
+    does not permit writes"). The same holds for a project recreated under
+    an old name, whose grants stay with the old instance.
+  - The reservation routes answer 404 `task_unavailable` (before: 403
+    `grant_denied`, or a 400 `invalid_request` or 403 `role_forbidden`
+    decided from the body before the grant). The grant and the project
+    are now checked before the body and the role.
+  - `GET /v1/access/identity?project=` answers 404 "unknown project"
+    (before: 200 with `task_write: false`).
+  - A task id prefix on a write resolves among the tasks the caller
+    reads, as a read's already did, so an ambiguous one names no task the
+    caller cannot read.
+- A caller who reads the project but may not write it, a read-grant
+  holder or a read-only-scope token with a grant, gets 403 on a write.
+  The task routes' message names the write grant and the writing token it
+  needs; the reservation routes answer `grant_denied`, a read-only-scope
+  token included (before: 401 `invalid_credential`). The team-session
+  reads (`teams/mine`, members, assignments) still need a write grant: a
+  read-grant holder gets 403 there.
+- `PUT /v1/projects/{p}/access/{kind}/{id}` adds `previous_access` to its
+  answer (`read`, `write`, or empty for a new grant).
+- `aimem` clients built before this change report the identity check's
+  404 as an unavailable hub; this release's clients say the project is
+  unknown or not granted and name `aimem access grant add`.
 
 ## [0.10.23] — 2026-11-14
 

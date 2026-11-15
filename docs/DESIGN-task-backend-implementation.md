@@ -82,7 +82,8 @@ Decisions taken while implementing stage 2:
   own rules (never a prefix), shown by `Route.Ordinary()` and pinned by a
   test that walks the whole route table. Every task write re-runs the
   authorization: the explicit token scope permits this project AND the
-  user holds a current grant (`CanWriteToken`), both read fresh; reads need only
+  user holds a current grant (`access.Store.DecideWrite`, see
+  DESIGN-access-control.md), both read fresh; reads need only
   a valid credential. Legacy writer tokens read tasks, never write them.
 - **MCP on the hub** dispatches task tools in-process against the task
   routes with the request's own identity (`Server.MCPPrincipal`), never via
@@ -678,7 +679,8 @@ Recorded by the stage-2 review (service), owned by stage 3 or later:
 - **Two spellings of "may this user write this project".** The identity
   endpoint uses `Authorize(secret, instance)`; the task routes use the
   instance match plus `CanWrite`. Equivalent today; fold into one helper
-  before either is tightened.
+  before either is tightened. Resolved: both, and every other write, ask
+  `access.Store.DecideWrite`, and `CanWrite` is gone (task 01a1dd8c-4919).
 - **Admin token names reach the actor validator.** A tokens.json entry named
   with more than 128 bytes or a control character makes every task write a
   500 ("invalid actor name" is only in the log). Validate names in `aimem

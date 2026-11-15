@@ -300,6 +300,10 @@ func (p *provisioner) grant(u access.User) error {
 		return errors.New("unexpected grant reply: no project instance")
 	}
 	p.instance = res.Instance
+	if grantRaised(body) {
+		p.say("grant on project %s: user %s held a read grant; it is now a write grant", p.o.project, u.Name)
+		return nil
+	}
 	p.say("grant on project %s: set for user %s (idempotent)", p.o.project, u.Name)
 	return nil
 }

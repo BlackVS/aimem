@@ -470,7 +470,9 @@ func (s *setup) checkIdentity() bool {
 	case http.StatusUnauthorized:
 		return s.fail("identity", "the selected credential was rejected (HTTP 401): expired, revoked or wrong hub", "obtain a valid member token from the operator and install it with `aimem task-token set` (project-local) or `aimem hub task-token` (per hub); no fallback is attempted")
 	case http.StatusNotFound:
-		return s.fail("identity", fmt.Sprintf("project %s is unknown to hub %s", s.sel.Project, s.sel.HubName), "check the project in .aimem.json and the hub binding")
+		// The hub answers a project this credential may not read exactly as
+		// one it does not know.
+		return s.fail("identity", fmt.Sprintf("project %s is unknown to hub %s, or the selected credential's user holds no grant on it", s.sel.Project, s.sel.HubName), "check the project in .aimem.json and the hub binding; an operator grants the project with `aimem access grant add`")
 	default:
 		return s.fail("identity", fmt.Sprintf("identity probe HTTP %d: %s", status, hubErrorText(body)), "")
 	}

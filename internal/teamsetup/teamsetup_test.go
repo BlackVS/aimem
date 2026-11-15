@@ -325,3 +325,37 @@ func TestRunRefusesAnInsecureHubEntry(t *testing.T) {
 		t.Fatalf("no identity check: %+v", rep.Checks)
 	}
 }
+
+// The hub answers a project the credential's user holds no grant on as it
+// answers an unknown one (task 01a1dd8c-4919), so the identity check names
+// both causes and the grant fix, and no session operation follows.
+func TestIdentityNotFoundNamesBothCauses(t *testing.T) {
+	inner := identityHub(t)
+	var hidden atomic.Bool
+	ts := hubtest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if hidden.Load() && r.URL.Path == "/v1/access/identity" {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(404)
+			json.NewEncoder(w).Encode(map[string]any{"error": "unknown project"})
+			return
+		}
+		inner.Config.Handler.ServeHTTP(w, r)
+	}))
+	defer ts.Close()
+	repo, root := checkout(t, ts)
+	hidden.Store(true)
+	caller := &sessionCaller{}
+	rep := Run(Env{Dir: repo, Root: root, Version: "v0.7.1", TeamCall: caller.call}, &Options{Team: "Pilot", Role: "worker"})
+	if rep.Joined() || caller.names() != "" {
+		t.Fatalf("joined %v, operations %q", rep.Joined(), caller.names())
+	}
+	for _, c := range rep.Checks {
+		if c.Name == "identity" {
+			if c.Level != "fail" || !strings.Contains(c.Detail, "project alpha is unknown to hub hub, or the selected credential's user holds no grant on it") || !strings.Contains(c.Fix, "aimem access grant add") {
+				t.Fatalf("identity: %+v", c)
+			}
+			return
+		}
+	}
+	t.Fatalf("no identity check: %+v", rep.Checks)
+}
