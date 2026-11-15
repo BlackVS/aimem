@@ -582,7 +582,7 @@ func (e *hubRefusal) denied() bool {
 func (e *hubRefusal) hidden() bool { return e.status == http.StatusNotFound }
 
 func hiddenDetail(project string) string {
-	return "the hub knows no project " + project + ", or this checkout's credential holds no grant on it"
+	return "the hub knows no project " + project + ", or this checkout's credential may not read it (no grant, or a token scoped to another project)"
 }
 
 const hiddenFix = "check the project in .aimem.json and the checkout's credential (aimem task-token show-source); an operator grants the project with `aimem access grant add`"

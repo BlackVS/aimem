@@ -351,7 +351,7 @@ func TestIdentityNotFoundNamesBothCauses(t *testing.T) {
 	}
 	for _, c := range rep.Checks {
 		if c.Name == "identity" {
-			if c.Level != "fail" || !strings.Contains(c.Detail, "project alpha is unknown to hub hub, or the selected credential's user holds no grant on it") || !strings.Contains(c.Fix, "aimem access grant add") {
+			if c.Level != "fail" || !strings.Contains(c.Detail, "project alpha is unknown to hub hub, or the selected credential may not read it (no grant, or a token scoped to another project)") || !strings.Contains(c.Fix, "aimem access grant add") {
 				t.Fatalf("identity: %+v", c)
 			}
 			return

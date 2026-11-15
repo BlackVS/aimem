@@ -472,7 +472,7 @@ func (s *setup) checkIdentity() bool {
 	case http.StatusNotFound:
 		// The hub answers a project this credential may not read exactly as
 		// one it does not know.
-		return s.fail("identity", fmt.Sprintf("project %s is unknown to hub %s, or the selected credential's user holds no grant on it", s.sel.Project, s.sel.HubName), "check the project in .aimem.json and the hub binding; an operator grants the project with `aimem access grant add`")
+		return s.fail("identity", fmt.Sprintf("project %s is unknown to hub %s, or the selected credential may not read it (no grant, or a token scoped to another project)", s.sel.Project, s.sel.HubName), "check the project in .aimem.json and the hub binding; an operator grants the project with `aimem access grant add`")
 	default:
 		return s.fail("identity", fmt.Sprintf("identity probe HTTP %d: %s", status, hubErrorText(body)), "")
 	}

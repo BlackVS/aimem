@@ -352,7 +352,7 @@ func TestSelectionStrictClient(t *testing.T) {
 }
 
 // The identity check's 404 means the hub knows no such project or this
-// credential's user holds no grant on it; both read the same (task
+// credential may not read it; both read the same (task
 // 01a1dd8c-4919), and Set stores nothing.
 func TestIdentityNotFoundIsProjectHidden(t *testing.T) {
 	root, repo, _, _ := fixture(t)
@@ -364,7 +364,7 @@ func TestIdentityNotFoundIsProjectHidden(t *testing.T) {
 		t.Fatal(err)
 	}
 	err := Set(context.Background(), repo, root, token("a"))
-	if !errors.Is(err, ErrProjectHidden) || !strings.Contains(err.Error(), "holds no grant") {
+	if !errors.Is(err, ErrProjectHidden) || !strings.Contains(err.Error(), "may not read it") {
 		t.Fatalf("Set on a 404: %v", err)
 	}
 	// No credential store, or none in it for this checkout.

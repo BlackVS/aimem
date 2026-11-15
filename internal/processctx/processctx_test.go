@@ -625,7 +625,7 @@ func TestIdentityNotFoundIsADenialThatNamesBothCauses(t *testing.T) {
 		h.change(func(h *fakeHub) { h.identityStatus = http.StatusNotFound })
 		r := Load(dir, root, "")
 		if r.State != Denied || r.Set != nil || r.Unit != "" || r.ObservedAt != "" ||
-			!strings.Contains(r.Detail, "knows no project alpha, or this checkout's credential holds no grant on it") ||
+			!strings.Contains(r.Detail, "knows no project alpha, or this checkout's credential may not read it (no grant, or a token scoped to another project)") ||
 			!strings.Contains(r.Fix, "aimem access grant add") {
 			t.Errorf("local=%v: %+v", local, r)
 		}

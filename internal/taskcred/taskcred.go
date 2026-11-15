@@ -399,7 +399,7 @@ func (s *Selection) Identity(ctx context.Context) (Identity, error) {
 	case http.StatusNotFound:
 		// The hub answers a project this credential may not read exactly as
 		// one it does not know.
-		return Identity{}, fmt.Errorf("%w: the hub knows no project %s, or this credential's user holds no grant on it; check the project, or an operator grants it with `aimem access grant add`", ErrProjectHidden, s.Project)
+		return Identity{}, fmt.Errorf("%w: the hub knows no project %s, or this credential may not read it (no grant, or a token scoped to another project); check the project, or an operator grants it with `aimem access grant add`", ErrProjectHidden, s.Project)
 	default:
 		return Identity{}, fmt.Errorf("the hub answered HTTP %d to the task credential check", resp.StatusCode)
 	}
