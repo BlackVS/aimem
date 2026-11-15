@@ -38,6 +38,16 @@ currently 25); a binary refuses a database newer than it understands.
   http (PowerShell 7 refuses one). `boot.ps1` now follows each redirect
   itself, as the forge's release downloads need, and stops the install,
   with nothing installed, at a redirect to anything but https.
+- **The release is built without write permissions.** The tests and the
+  cross-build ran in the job that held `contents: write` and the OIDC token
+  the attestation is signed with, and its checkout kept the token in the git
+  configuration. A `build` job with read access only now runs the guards,
+  the tests and the build, and hands the files to a `publish` job as a
+  workflow artifact. `publish` checks out nothing: it checks the artifact
+  against the digests `build` passed as job outputs, every file against
+  `SHA256SUMS`, and that the files are exactly the ones `SHA256SUMS` lists,
+  then attests them and creates the release. No checkout in
+  `.github/workflows` keeps the token (`persist-credentials: false`).
 
 ### Changed
 

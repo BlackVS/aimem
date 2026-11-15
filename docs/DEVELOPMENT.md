@@ -68,7 +68,7 @@ therefore still surfaces on master.
 macOS runs only in the release workflow, at the tag: the `macos` job
 runs `go vet`, `go test ./...`, a native build and the launchd install
 check (`scripts/check-launchd-install.sh`) on `macos-latest`, and the
-job that builds and publishes the release waits for it. GitHub's macOS
+job that publishes the release waits for it. GitHub's macOS
 runners can go unassigned for long stretches, and a starved job held
 merges until someone re-ran it, so a Mac-only break now stops a
 release, never a merge. When the job fails on a real Mac problem, the

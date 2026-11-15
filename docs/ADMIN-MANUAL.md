@@ -1136,9 +1136,29 @@ It publishes them as release assets with `LICENSE` and a `SHA256SUMS` that
 covers both. The release notes are the tag's CHANGELOG section, followed by
 the license URL and the `Required Notice:` lines from `LICENSE`.
 
+Two jobs make the release, so the code the tests run never holds a token
+that writes:
+
+- `build` has read access only. It checks out the tag, refuses a tag that
+  is not on master or that the installers do not pin, runs the tests,
+  builds every asset into `dist/` with its `SHA256SUMS`, writes the
+  release notes, and hands these over as a workflow artifact. The digests
+  of `SHA256SUMS` and of the notes leave the job separately, as job
+  outputs.
+- `publish` holds `contents: write` and the OIDC token the attestation is
+  signed with, checks out nothing and runs no code from the repository.
+  It checks the downloaded `SHA256SUMS` and notes against those digests,
+  every file against `SHA256SUMS`, and that the files are exactly the
+  ones `SHA256SUMS` lists, nothing more and nothing missing. Then it
+  attests the files and creates the release with all of them in one step.
+
+A failure anywhere in `build`, or in any check of `publish`, publishes
+nothing. No checkout in the workflows keeps the token in its git
+configuration (`persist-credentials: false`).
+
 `SHA256SUMS` is a transport check: it shows that a download arrived as
 published, not who published it, because whoever could replace an asset
-could replace the sums with it. The release job also attests the build
+could replace the sums with it. The publish job also attests the build
 provenance of every published file, `SHA256SUMS` included, through
 `actions/attest-build-provenance`. The attestation ties each file's digest
 to this repository's release workflow at the tagged commit, and GitHub's

@@ -23,6 +23,9 @@ on:
 
 permissions:
   contents: read
+# No checkout keeps the token in its git configuration
+# (persist-credentials: false): no step pushes, and the one git fetch reads
+# this public repository anonymously.
 
 # One run per branch: an agent pushing fixups in quick succession should
 # not queue stale 3-OS matrices. Master merges are never cancelled — every
@@ -36,6 +39,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version: '1.26'
@@ -94,6 +99,8 @@ jobs:
         if: env.RUN != 'true'
         run: echo "The ${{ matrix.os }} tests run on pushes to master, nightly and on release/ pull requests (docs/DEVELOPMENT.md)."
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
         if: env.RUN == 'true'
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         if: env.RUN == 'true'
@@ -147,6 +154,8 @@ jobs:
         ./internal/taskcred/... ./internal/upgrade/... ./internal/adapter/...
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version: '1.26'
@@ -207,6 +216,8 @@ jobs:
         if: env.RUN != 'true'
         run: echo "The ${{ matrix.os }} scenarios run on pushes to master, nightly and on release/ pull requests (docs/DEVELOPMENT.md)."
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
         if: env.RUN == 'true'
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         if: env.RUN == 'true'
@@ -228,6 +239,8 @@ jobs:
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version: '1.26'
@@ -239,6 +252,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version: '1.26'
