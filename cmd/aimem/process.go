@@ -63,7 +63,10 @@ selected needs none. select reads the set at the commit from Git (without
 git, from the forge's tarball of the commit over https), or with
 --from-archive from a tar.gz verified against the SHA256SUMS beside it
 (--sums names another file), and stores it on the hub with the
-selection. Without git, a private repository needs
+selection. An archive names its commit: with a tag, select takes the
+archive's commit and stores the tag as given, resolving nothing; with
+--commit, the commit must be the archive's; an archive that records no
+commit is refused. Without git, a private repository needs
 AIMEM_PROCESS_FORGE_TOKEN in the hub's env file: a token the forge
 accepts, sent only to the repository's host (AIMEM_PROCESS_FORGE_TOKENS,
 host=token entries, gives each forge host its own). A set the hub already keeps
@@ -74,7 +77,7 @@ stored. refresh stores the set of every selection that has none (made
 before the hub stored sets) from its recorded repository, commit, manifest
 and ref, and reports each project; a set it cannot read from Git is
 reported as needing an archive, which refresh -p <project> --from-archive
-then imports. show runs anywhere and prints what the session-start hook
+then imports when the archive records the selection's commit. show runs anywhere and prints what the session-start hook
 injects for this project; in a directory with no hub binding on a machine
 with no hub configured (the hub host), it reads this host's stored
 selection and set. --full prints the whole unit, even one over the
@@ -235,10 +238,29 @@ func selectRequest(proj, repo, tag, manifest, ref, expect, archive, sums string,
 	case byCommit && !process.IsCommit(tag):
 		return nil, fmt.Errorf("--commit takes a full 40-character lowercase hex commit, not %s", tag)
 	}
-	if !process.IsCommit(tag) {
-		if ref != "" {
-			return nil, errors.New("--ref goes with a commit; a tag or branch is resolved to its commit and stored as the ref")
+	if !process.IsCommit(tag) && ref != "" {
+		return nil, errors.New("--ref goes with a commit; a tag or branch is resolved to its commit and stored as the ref")
+	}
+	// An archive names its own commit: the set is the one recorded at it, so
+	// the selection takes that commit. A tag is taken as given and stored as
+	// the ref, as `process default set` does, since nothing can check it
+	// offline; a typed commit must be the archive's.
+	var bundle *process.Bundle
+	if archive != "" {
+		b, recorded, err := archiveSet(sel, archive, sums)
+		if err != nil {
+			return nil, err
 		}
+		if process.IsCommit(tag) {
+			if tag != recorded {
+				return nil, fmt.Errorf("archive %s records commit %s, not %s; nothing selected (select by a tag to take the archive's commit)", archive, recorded, tag)
+			}
+		} else {
+			sel.Ref, sel.Commit = tag, recorded
+			fmt.Fprintf(os.Stderr, "archive %s records commit %s: selecting it as %s\n", filepath.Base(archive), recorded, tag)
+		}
+		bundle = b
+	} else if !process.IsCommit(tag) {
 		commit, err := resolveRef(sel.Repo, tag)
 		if err != nil {
 			if looksLikeCommit(tag) {
@@ -265,9 +287,11 @@ func selectRequest(proj, repo, tag, manifest, ref, expect, archive, sums string,
 		body["digest"] = kept
 		return body, nil
 	}
-	bundle, source, err := importBundle(sel, archive, sums)
-	if err != nil {
-		return nil, err
+	source := filepath.Base(archive)
+	if bundle == nil {
+		if bundle, source, err = importBundle(sel, "", ""); err != nil {
+			return nil, err
+		}
 	}
 	body["files"] = bundle.Files
 	fmt.Fprintf(os.Stderr, "importing set %s (%d files, %d bytes, from %s)\n", bundle.Digest()[:12], len(bundle.Files), bundle.Bytes(), source)

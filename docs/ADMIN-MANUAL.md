@@ -929,7 +929,13 @@ which must record that commit (`git archive` writes
 it in the tarball's header), and the report names the source. With
 `--from-archive FILE` it reads a tar.gz
 verified against the `SHA256SUMS` beside it (`--sums` names another
-file); a forge's source tarball of the commit works as the archive. For
+file); a forge's source tarball of the commit works as the archive. The
+archive names the commit: `select <repo> <tag> --from-archive FILE` takes
+the commit the archive records and stores the tag as given, with no
+resolution over the network, and `--commit` with a commit that is not the
+archive's is refused, naming both. An archive that records no commit,
+such as one exported by 0.10.16 or earlier, is refused; export it again.
+For
 a hub host without access to the repository, `aimem process export
 <repo> <commit> <manifest>` on a machine that has it writes
 `<name>-<commit12>.tar.gz` and its `SHA256SUMS` line, to carry over and
@@ -945,30 +951,26 @@ tag's commit. An aiforge export carries it with the release's other assets
 under `<base>/aimem/<tag>/`, `SHA256SUMS` beside it, so a hub host in a
 closed network needs no `process export`.
 
-The route that needs no `git` makes it the hub's default, which takes the
-commit from the archive itself (see "On a hub host without network
-access" above); `tasks on` then applies it to a project with no process:
+Both commands below take the commit from the archive and need neither
+`git` nor the network. Select it for one project by the release's tag:
 
 ```sh
 cd /media/aiforge-export/aimem/<tag>
-aimem process default set https://github.com/BlackVS/aimem <tag> \
-    --from-archive aimem-process.tar.gz
+aimem process select https://github.com/BlackVS/aimem <tag> \
+    --from-archive aimem-process.tar.gz --sums SHA256SUMS -p <project>
 ```
 
-To select it for one project, give `select` the commit the archive
-records. `git get-tar-commit-id` prints it, on any machine that has
-`git`; a closed-network hub host may have none (`install-hub.sh` warns
-about such a host), so read it where `git` is and carry it over with the
-archive:
+or make it the hub's default, which `tasks on` applies to a project with
+no process (see "On a hub host without network access" above):
 
 ```sh
-gunzip -c aimem-process.tar.gz | git get-tar-commit-id    # any machine with git
-aimem process select https://github.com/BlackVS/aimem <commit> --commit \
-    --from-archive aimem-process.tar.gz -p <project>        # on the hub host
+aimem process default set https://github.com/BlackVS/aimem <tag> \
+    --from-archive aimem-process.tar.gz --sums SHA256SUMS
 ```
 
-The hub then shows the public repository and that commit, as a
-selection read from Git would.
+The hub then shows the public repository, the tag and the commit the
+archive records, as a selection read from Git would. The tag is taken as
+given, since nothing can check it offline.
 
 The forge reads (the tarball and the ref advertisement) are anonymous
 unless `AIMEM_PROCESS_FORGE_TOKEN` is set in the hub user's
@@ -1056,9 +1058,10 @@ installer runs it after an upgrade, and warns at its start when the host
 has no `git`. A set the host can read neither from Git nor from the
 forge's tarball is reported with the `aimem process export` command that writes its
 archive elsewhere, and `aimem process refresh -p <project> --from-archive
-FILE` imports it. Because the commit comes from the record and is not
-typed, the archive's file name must carry the commit's first 12
-characters, as the exported `<name>-<commit12>.tar.gz` does.
+FILE` imports it when the archive records the selection's commit,
+whatever the file is called (the release's `aimem-process.tar.gz`
+included); an archive of another commit, or one that records none, is
+refused and nothing is stored.
 `aimem process list` shows which selections still lack a set.
 
 `aimem process show` prints what a session receives for the project. In

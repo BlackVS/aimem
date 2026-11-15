@@ -205,11 +205,20 @@ func refreshOne(s projectSelection, archive, sums string) (string, refreshOutcom
 	if kept := keptSetFor(s.Project, sel); kept != "" {
 		body["digest"] = kept
 		from = "a set this hub keeps"
-	} else {
-		if archive != "" && !strings.Contains(filepath.Base(archive), sel.Commit[:12]) {
-			return fmt.Sprintf("the archive %s is not named for commit %s (aimem process export names it <set>-%s.tar.gz); nothing stored", filepath.Base(archive), sel.Commit[:12], sel.Commit[:12]), refreshFailed
+	} else if archive != "" {
+		// The archive's recorded commit decides, not its file name: the
+		// release ships one fixed name for every commit.
+		b, recorded, err := archiveSet(sel, archive, sums)
+		if err != nil {
+			return err.Error() + "; nothing stored", refreshFailed
 		}
-		b, source, err := importBundle(sel, archive, sums)
+		if recorded != sel.Commit {
+			return fmt.Sprintf("the archive %s records commit %s, not the selected %s; nothing stored", filepath.Base(archive), recorded, sel.Commit), refreshFailed
+		}
+		body["files"] = b.Files
+		from = fmt.Sprintf("%d files from %s", len(b.Files), filepath.Base(archive))
+	} else {
+		b, source, err := importBundle(sel, "", "")
 		if err != nil {
 			// The commands are pasted into a shell: a manifest path may
 			// hold $, ; or a quote, so each value is quoted where needed.

@@ -6,13 +6,58 @@ package main
 // the run; `aimem process list` shows which selections lack a set.
 
 import (
+	"bytes"
 	"encoding/json"
+	"os"
 	"os/exec"
+	"path"
+	"path/filepath"
 	"strings"
 	"testing"
 
 	"aimem/internal/process"
 )
+
+// copyWithSums copies archive to dst and writes the SHA256SUMS beside dst
+// that names it, returning that file.
+func copyWithSums(t *testing.T, archive, dst string) string {
+	t.Helper()
+	data, err := os.ReadFile(archive)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return writeWithSums(t, dst, data)
+}
+
+func writeWithSums(t *testing.T, dst string, data []byte) string {
+	t.Helper()
+	if err := os.WriteFile(dst, data, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	sums := filepath.Join(filepath.Dir(dst), "SHA256SUMS")
+	if err := os.WriteFile(sums, []byte(process.SumsLine(data, filepath.Base(dst))), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	return sums
+}
+
+// writeArchiveWithoutCommit writes a valid set for manifest at dst, with
+// its SHA256SUMS beside it, as an archive that records no commit (what
+// aimem process export wrote up to 0.10.16).
+func writeArchiveWithoutCommit(t *testing.T, dst, manifest string) {
+	t.Helper()
+	dir := path.Dir(manifest)
+	b := &process.Bundle{Version: 1, Manifest: manifest, Files: map[string][]byte{
+		manifest:             []byte(`{"version":1,"handbook":"` + dir + `/HANDBOOK.md","templates":{"task":"` + dir + `/task.json"}}`),
+		dir + "/HANDBOOK.md": []byte("# Handbook\n\nExported rules.\n"),
+		dir + "/task.json":   []byte(`{"title":""}`),
+	}}
+	var buf bytes.Buffer
+	if err := process.WriteArchive(&buf, b); err != nil {
+		t.Fatal(err)
+	}
+	writeWithSums(t, dst, buf.Bytes())
+}
 
 func TestProcessRefreshStoresTheSetsOfOldSelections(t *testing.T) {
 	reg := projectService(t)
@@ -137,20 +182,36 @@ func TestProcessRefreshStoresTheSetsOfOldSelections(t *testing.T) {
 		t.Fatalf("refresh -p of an unreadable selection: %v", err)
 	}
 
-	// An archive is one selection's set: it needs -p, and it must be the
-	// one exported for that commit.
+	// An archive is one selection's set: it needs -p, and the commit it
+	// records must be the selection's, whatever the file is called.
 	if _, err := stdoutOf(t, func() error { return processCmd([]string{"refresh", "--from-archive", archive2}) }); err == nil || !strings.Contains(err.Error(), "-p") {
 		t.Fatalf("--from-archive without -p: %v", err)
 	}
-	out = run("refresh", "-p", "legacy", "--from-archive", archive2)
-	if l := lineOf(out, "legacy"); !strings.Contains(l, "not named for commit "+c1[:12]) {
-		t.Fatalf("archive of another commit: %q", l)
+	refused := func(name, archive, want string) {
+		t.Helper()
+		out := run("refresh", "-p", "legacy", "--from-archive", archive)
+		if l := lineOf(out, "legacy"); !strings.Contains(l, want) || !strings.Contains(l, "nothing stored") {
+			t.Fatalf("%s: %q", name, l)
+		}
+		if selection("legacy").Digest != "" {
+			t.Fatalf("%s was stored", name)
+		}
 	}
-	if selection("legacy").Digest != "" {
-		t.Fatal("an archive of another commit was stored")
-	}
+	refused("an archive of another commit", archive2, "records commit "+c2+", not the selected "+c1)
+	// Named for the selection's commit, recording another: the name decides nothing.
+	misnamed := filepath.Join(t.TempDir(), "process-"+c1[:12]+".tar.gz")
+	copyWithSums(t, archive2, misnamed)
+	refused("an archive named for the commit but recording another", misnamed, "records commit "+c2+", not the selected "+c1)
+	// An archive that records no commit cannot be checked against the selection.
+	plain := filepath.Join(t.TempDir(), "process-"+c1[:12]+".tar.gz")
+	writeArchiveWithoutCommit(t, plain, manifest)
+	refused("an archive that records no commit", plain, "records no commit")
 
-	archive1, sums1 := exportFixture(t, repo, c1, manifest)
+	// The release's fixed name refreshes the selection whose commit it records.
+	archive1, _ := exportFixture(t, repo, c1, manifest)
+	fixed := filepath.Join(t.TempDir(), "aimem-process.tar.gz")
+	sums1 := copyWithSums(t, archive1, fixed)
+	archive1 = fixed
 	out = run("refresh", "-p", "legacy", "--from-archive", archive1)
 	if l := lineOf(out, "legacy"); !strings.Contains(l, "refreshed") {
 		t.Fatalf("refresh from the archive: %q", l)
