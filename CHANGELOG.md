@@ -13,6 +13,21 @@ currently 25); a binary refuses a database newer than it understands.
 
 ## [Unreleased]
 
+## [0.10.24] — 2026-11-15
+
+A grant is now read or write (access schema 10). A read grant reads a
+project's tasks, knowledge, repository, process and skills, and writes
+nothing. Every write is decided in one place. Outside team mode, a
+project the caller cannot read now answers as an unknown project on every
+route, writes and reservations included, and a reader that may not write
+gets a 403 naming what a write needs; team mode keeps its answers.
+`aimem upgrade` checks every file it runs against the release's
+`SHA256SUMS` (audit A-11, the client part) and can upgrade from an
+aiforge export. `golang.org/x/sys` moves to v0.50.0. The on-disk schema
+stays at 25; the access schema moves to 10, so back up the access
+database before the hub upgrade (see the upgrade notes). Includes PR
+#360, #362, #363 and #364.
+
 ### Security
 
 - **`aimem upgrade` checks every file it runs** (security audit 2026-10,
@@ -73,6 +88,7 @@ currently 25); a binary refuses a database newer than it understands.
   raise a read grant to write.** The grant route's answer names the
   `previous_access`, and both commands print a line when a read grant
   became a write grant.
+- **golang.org/x/sys v0.49.0 to v0.50.0** (#360).
 
 ### Upgrade notes
 
