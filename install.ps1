@@ -133,7 +133,9 @@ function Remove-OldStateCopies($root) {
         Where-Object { $_.Name -match $re -and -not ($_.Attributes -band [IO.FileAttributes]::ReparsePoint) } |
         Sort-Object Name)
     for ($i = 0; $i -lt $copies.Count - 2; $i++) {
-      $p = $copies[$i].FullName
+      # The root's own spelling (a short 8.3 path stays one), as the
+      # backup line above names it.
+      $p = Join-Path $parent $copies[$i].Name
       # The installer's copies hold no links: robocopy copies a junction's
       # content. Should one hold a link anyway, Windows PowerShell 5.1's
       # Directory.Delete refuses it ("access denied") and leaves its
