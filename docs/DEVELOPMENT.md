@@ -6,7 +6,8 @@
 CGO_ENABLED=0 go build -o aimem ./cmd/aimem
 go test ./...
 gofmt -l .                       # must print nothing
-go run honnef.co/go/tools/cmd/staticcheck@latest ./...
+go tool staticcheck ./...
+go tool govulncheck ./...
 sh scripts/check-process-stops.sh
 sh scripts/check-doc-versions.sh
 sh scripts/check-doc-examples.sh
@@ -95,7 +96,7 @@ merge button enforces this as well.
 aimem needs Go 1.26 (`go 1.26.0` in `go.mod`). The floor moved from 1.25 for the standard library's `crypto/hpke`, which enrollment delivery (D1) will use.
 
 - **CI and the release build on the runner's Go.** Each job installs Go 1.26 with `actions/setup-go` (`go-version: '1.26'` with `check-latest: true`, so the newest patch and its security fixes), which exports `GOTOOLCHAIN=local`. A step then checks that `go env GOTOOLCHAIN` is `local` and that `go version` names 1.26, so a build never uses a toolchain that `go.mod` downloaded.
-- **Only the `@latest` tools may use another Go.** staticcheck and govulncheck run with an inline `GOTOOLCHAIN=auto`, because a tool's own `go.mod` may need a newer Go. Build, vet and test stay on the pinned 1.26.
+- **The lint tools are pinned in `go.mod`.** staticcheck and govulncheck are tool directives, so `go tool staticcheck` and `go tool govulncheck` run the versions `go.sum` records, built on the same Go as everything else. Dependabot's `gomod` updates move them like any other requirement. govulncheck also scans the standard library of the Go that runs it, so on a Go older than the newest 1.26 patch it reports standard-library findings that CI, which installs that patch, does not.
 - **Raising the floor is its own PR.** Change `go.mod`, every `go-version` in `.github/workflows/`, the toolchain checks, this section, the Go version in `README.md` and `docs/INSTALL-CLIENT.md`, and the CHANGELOG together. Do it only for a feature that needs it, and only to a Go minor release older than seven days (the supply-chain wait). Patch releases within the pinned minor are taken as they appear, because they carry security fixes.
 - **A developer machine** needs Go 1.26 or newer. With an older Go, the default `GOTOOLCHAIN=auto` downloads 1.26 for this module, and `GOTOOLCHAIN=local` stops with an error that names the version.
 

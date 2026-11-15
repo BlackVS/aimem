@@ -13,6 +13,25 @@ currently 25); a binary refuses a database newer than it understands.
 
 ## [Unreleased]
 
+### Security
+
+- **Release provenance (audit A-8).** The release job attests the build
+  provenance of every file it publishes, `SHA256SUMS` included, with
+  `actions/attest-build-provenance`. `SHA256SUMS` only shows that a download
+  arrived as published; `gh attestation verify <file> --repo BlackVS/aimem`
+  shows that this repository's release workflow built it (ADMIN-MANUAL,
+  "Releases"). The write permissions the release and the attestation need
+  are scoped to the release job.
+- **Actions pinned by commit (audit A-8).** Every action in
+  `.github/workflows` is named by a full commit SHA with its version in a
+  comment, so a tag moved upstream cannot change what runs here.
+  Dependabot's weekly `github-actions` update keeps the pins.
+- **Lint tools pinned in go.mod (audit A-12).** staticcheck v0.8.2 and
+  govulncheck v1.9.0 are tool directives in `go.mod`, run with
+  `go tool staticcheck` and `go tool govulncheck` in CI and in the
+  documents, instead of `@latest`. They build on the pinned Go 1.26, so the
+  lint job no longer switches the toolchain.
+
 ## [0.10.24] — 2026-11-15
 
 A grant is now read or write (access schema 10). A read grant reads a

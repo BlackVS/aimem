@@ -72,6 +72,11 @@ network filter, and nothing was installed. Retry, or install from a
 checkout (section 5), which never touches the network for the script
 itself.
 
+The checksum shows that a download arrived as published, not who built
+it. To check that, verify the file's build attestation with GitHub's CLI
+(`gh attestation verify aimem-windows-amd64.exe --repo BlackVS/aimem`);
+ADMIN-MANUAL, "Releases", explains what it proves.
+
 ### What the user-level install puts on the machine
 
 | Path | What |

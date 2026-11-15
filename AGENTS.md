@@ -178,7 +178,8 @@ Build and test exactly as CI does:
     CGO_ENABLED=0 go build -o aimem ./cmd/aimem
     go test ./...            # full output, check the pass/fail summary
     gofmt -l .               # must print nothing
-    go run honnef.co/go/tools/cmd/staticcheck@latest ./...
+    go tool staticcheck ./...
+    go tool govulncheck ./...
 
 Package map: `cmd/aimem` CLI + subcommand wiring; `internal/store`
 SQLite layer (journal, memories, docs, collections, migrations);
