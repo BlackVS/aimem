@@ -4,13 +4,19 @@
 # it to TO, and a failed upgrade rolls back. The versions come from
 # scripts/client-upgrade.env.
 #
-# After the upgrade the binary and the OpenCode plugin must be TO's
-# published files, the Claude Code hooks must still be wired, and the
-# service (systemd user unit or launchd agent) must answer health at TO.
-# The failure run serves TO's real installer with a stand-in binary that
-# answers `version` and nothing else, so the new service never becomes
-# healthy: the upgrade must exit non-zero, say ROLLED BACK, and leave FROM's
-# binary serving.
+# The failure run comes first: TO's real installer with a stand-in binary
+# that answers `version` and nothing else, so the new service never becomes
+# healthy. The upgrade must exit non-zero, say ROLLED BACK, and leave FROM's
+# binary serving. Then the real upgrade: the binary and the OpenCode plugin
+# must be TO's published files, the Claude Code hooks must still be wired,
+# and the service (systemd user unit or launchd agent) must answer health
+# at TO.
+#
+# The order is fixed, and nothing ever goes back from TO to FROM: a binary
+# refuses a database newer than it understands, so a downgrade fails as
+# soon as the pair spans a schema change. The rollback restores FROM on its
+# own state, and the account ends at TO, so a later check on this runner
+# (the release's launchd check) only ever moves the state forward.
 #
 # It installs into the account it runs in, so it runs only on a CI runner.
 set -euo pipefail
@@ -55,19 +61,6 @@ echo "--- one-liner install of $FROM"
 curl -fsSL "https://raw.githubusercontent.com/$repo/$FROM/boot.sh" | AIMEM_USER_ONLY=1 bash
 serving "$FROM" "after install"
 
-echo "--- aimem upgrade --release $TO"
-"$bin" upgrade --release "$TO" 2>&1 | tee "$tmp/upgrade.log"
-grep -qF "upgraded aimem $FROM -> $TO; service healthy at $TO" "$tmp/upgrade.log" ||
-  fail "the upgrade did not report a healthy service at $TO"
-[ "$(sha "$bin")" = "$(sum_of "$TO" "$asset")" ] || fail "the binary is not $TO's $asset"
-[ "$(sha "$plugin")" = "$(sum_of "$TO" aimem-opencode.ts)" ] || fail "the OpenCode plugin is not $TO's aimem-opencode.ts"
-grep -qF 'aimem submit-claude' "$HOME/.claude/settings.json" || fail "the Claude Code hooks are gone after the upgrade"
-serving "$TO" "after upgrade"
-
-echo "--- back to $FROM"
-"$bin" upgrade --release "$FROM" 2>&1 | tee "$tmp/down.log"
-serving "$FROM" "after downgrade"
-
 echo "--- $TO with a binary that never answers health: the upgrade must roll back"
 x="$tmp/export/aimem/$TO"
 mkdir -p "$x"
@@ -90,5 +83,14 @@ cat "$tmp/fail.log"
 grep -q 'ROLLED BACK' "$tmp/fail.log" || fail "the failed upgrade did not say ROLLED BACK"
 [ "$(sha "$bin")" = "$(sum_of "$FROM" "$asset")" ] || fail "the binary after the rollback is not $FROM's $asset"
 serving "$FROM" "after the rollback"
+
+echo "--- aimem upgrade --release $TO"
+"$bin" upgrade --release "$TO" 2>&1 | tee "$tmp/upgrade.log"
+grep -qF "upgraded aimem $FROM -> $TO; service healthy at $TO" "$tmp/upgrade.log" ||
+  fail "the upgrade did not report a healthy service at $TO"
+[ "$(sha "$bin")" = "$(sum_of "$TO" "$asset")" ] || fail "the binary is not $TO's $asset"
+[ "$(sha "$plugin")" = "$(sum_of "$TO" aimem-opencode.ts)" ] || fail "the OpenCode plugin is not $TO's aimem-opencode.ts"
+grep -qF 'aimem submit-claude' "$HOME/.claude/settings.json" || fail "the Claude Code hooks are gone after the upgrade"
+serving "$TO" "after upgrade"
 
 echo "PASS: client upgrade $FROM -> $TO, and the rollback"

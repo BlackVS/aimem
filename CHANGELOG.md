@@ -16,10 +16,10 @@ currently 25); a binary refuses a database newer than it understands.
 ### Added
 
 - **A real client upgrade in CI.** The `client-upgrade` job installs a
-  published release with the one-liner, runs `aimem upgrade` to the next
-  one and checks the binary, the OpenCode plugin, the Claude Code hooks
-  and the service, then checks that an upgrade to a binary that never
-  serves rolls back. It runs nightly and on a manual run on Linux and
+  published release with the one-liner, checks that an upgrade to a
+  binary that never serves rolls back, then runs `aimem upgrade` to the
+  next release and checks the binary, the OpenCode plugin, the Claude
+  Code hooks and the service. It runs nightly and on a manual run on Linux and
   Windows, and at the tag in the release's macOS job. The two versions
   are in `scripts/client-upgrade.env`, moved forward after each release
   (docs/DEVELOPMENT.md).

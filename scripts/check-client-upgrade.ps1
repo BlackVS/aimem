@@ -4,6 +4,12 @@
 # scripts/client-upgrade.env. The checks are those of
 # scripts/check-client-upgrade.sh; the service is the aimem-serve logon task.
 #
+# The failure run comes first and the real upgrade last, and nothing ever
+# goes back from TO to FROM: a binary refuses a database newer than it
+# understands, so a downgrade fails as soon as the pair spans a schema
+# change. The rollback restores FROM on its own state, and the account
+# ends at TO.
+#
 # The failure run's stand-in binary is compiled here with Add-Type, so the
 # check needs no Go toolchain.
 #
@@ -72,24 +78,6 @@ Remove-Item Env:AIMEM_USER_ONLY
 if ($rc -ne 0) { Fail "the install of $From exited $rc" }
 Assert-Serving $From 'after install'
 
-"--- aimem upgrade --release $To"
-$rc = Invoke-Logged (Join-Path $W 'upgrade.log') @('upgrade', '--release', $To)
-if ($rc -ne 0) { Fail "the upgrade to $To exited $rc" }
-if (-not (Select-String -LiteralPath (Join-Path $W 'upgrade.log') -SimpleMatch "upgraded aimem $From -> $To; service healthy at $To")) {
-  Fail "the upgrade did not report a healthy service at $To"
-}
-if ((Sha $Bin) -ne $SumsTo[$Asset]) { Fail "the binary is not $To's $Asset" }
-if ((Sha $Plugin) -ne $SumsTo['aimem-opencode.ts']) { Fail "the OpenCode plugin is not $To's aimem-opencode.ts" }
-if (-not (Select-String -LiteralPath (Join-Path $env:USERPROFILE '.claude\settings.json') -SimpleMatch 'aimem submit-claude')) {
-  Fail 'the Claude Code hooks are gone after the upgrade'
-}
-Assert-Serving $To 'after upgrade'
-
-"--- back to $From"
-$rc = Invoke-Logged (Join-Path $W 'down.log') @('upgrade', '--release', $From)
-if ($rc -ne 0) { Fail "the downgrade to $From exited $rc" }
-Assert-Serving $From 'after downgrade'
-
 "--- $To with a binary that never answers health: the upgrade must roll back"
 $X = Join-Path $W "export\aimem\$To"; New-Item -ItemType Directory -Path $X -Force | Out-Null
 foreach ($n in 'install.sh', 'install.ps1', 'aimem-opencode.ts') {
@@ -114,5 +102,18 @@ if ($rc -eq 0) { Fail 'the upgrade to a binary that never serves exited 0' }
 if (-not (Select-String -LiteralPath (Join-Path $W 'fail.log') -SimpleMatch 'ROLLED BACK')) { Fail 'the failed upgrade did not say ROLLED BACK' }
 if ((Sha $Bin) -ne $SumsFrom[$Asset]) { Fail "the binary after the rollback is not $From's $Asset" }
 Assert-Serving $From 'after the rollback'
+
+"--- aimem upgrade --release $To"
+$rc = Invoke-Logged (Join-Path $W 'upgrade.log') @('upgrade', '--release', $To)
+if ($rc -ne 0) { Fail "the upgrade to $To exited $rc" }
+if (-not (Select-String -LiteralPath (Join-Path $W 'upgrade.log') -SimpleMatch "upgraded aimem $From -> $To; service healthy at $To")) {
+  Fail "the upgrade did not report a healthy service at $To"
+}
+if ((Sha $Bin) -ne $SumsTo[$Asset]) { Fail "the binary is not $To's $Asset" }
+if ((Sha $Plugin) -ne $SumsTo['aimem-opencode.ts']) { Fail "the OpenCode plugin is not $To's aimem-opencode.ts" }
+if (-not (Select-String -LiteralPath (Join-Path $env:USERPROFILE '.claude\settings.json') -SimpleMatch 'aimem submit-claude')) {
+  Fail 'the Claude Code hooks are gone after the upgrade'
+}
+Assert-Serving $To 'after upgrade'
 
 "PASS: client upgrade $From -> $To, and the rollback"

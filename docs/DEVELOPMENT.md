@@ -80,15 +80,28 @@ The `client-upgrade` job runs a real client upgrade between two
 published releases, named in `scripts/client-upgrade.env`, on
 `ubuntu-latest` and `windows-latest`, nightly and on a manual run, never
 on a pull request or a push. `scripts/check-client-upgrade.sh` (and
-`.ps1` on Windows) installs FROM with the one-liner, runs `aimem upgrade
---release TO`, and checks that the binary and the OpenCode plugin are
-TO's published files, that the Claude Code hooks are still wired and
-that the service answers health at TO. It then goes back to FROM and
-upgrades to TO once more with TO's real installer and a stand-in binary
-that never serves, and checks that the upgrade fails, says ROLLED BACK
-and leaves FROM serving. The user-level installers install no skills,
-so there are none to check. The release's `macos` job runs the same
-script.
+`.ps1` on Windows) installs FROM with the one-liner. It first upgrades
+to TO with TO's real installer and a stand-in binary that never serves,
+and checks that the upgrade fails, says ROLLED BACK and leaves FROM
+serving. Then it runs `aimem upgrade --release TO` and checks that the
+binary and the OpenCode plugin are TO's published files, that the Claude
+Code hooks are still wired and that the service answers health at TO.
+It never downgrades: a binary refuses a database newer than it
+understands, so a downgrade would fail whenever the pair spans a schema
+change. The user-level installers install no skills, so there are none
+to check.
+
+The release's `macos` job runs the same script, before the launchd
+check. That step reads two published releases over the network and
+proves them, not the commit being released. When it fails for a reason
+outside the commit, such as the network or the runner, the job is run
+again and the tag stays. When the published pair itself is broken on
+macOS, that is a finding about released versions, not about the
+candidate: it is filed as a task, and a pull request either moves the
+pair in `scripts/client-upgrade.env` to releases that work or turns the
+step off with a comment naming the task. The release workflow runs the
+files at its tag, so the release then takes the next version, as for any
+Mac failure above.
 
 A change whose risk is on Windows or macOS is tested there before the
 push; a Windows change can also get a manual run of the workflow on its
