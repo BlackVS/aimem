@@ -202,7 +202,7 @@ AGENTS.md review gates and serial-PR rule. External review preference is
 | --- | --- | --- |
 | Project databases | `internal/store/store.go`, `Registry`, `DB` | One `journal.db` per existing project; schema version 11 (tasks added in stage 1) |
 | Project identity | `internal/store/access.go` | Host-local `access-id` survives rename; never replace it from writable meta |
-| Access decisions | `internal/access/store.go`, `Authorize` | Match token project instance and current direct/group grants |
+| Access decisions | `internal/access/store.go`, `DecideWrite` | Match token project instance and current direct/group grants |
 | Server auth/store ownership | `internal/server/tokens.go`, `access.go` | Shared lazy access handle; never cache identity/grant decisions |
 | Routes | `internal/server/server.go`, `openapi.json` | Route parity and explicit ordinary-token allow-list |
 | MCP | `internal/mcp/mcp.go`, `cmd/aimem/main.go` | HTTP MCP currently forwards legacy operations through a trusted local client |
@@ -680,7 +680,8 @@ Recorded by the stage-2 review (service), owned by stage 3 or later:
   endpoint uses `Authorize(secret, instance)`; the task routes use the
   instance match plus `CanWrite`. Equivalent today; fold into one helper
   before either is tightened. Resolved: both, and every other write, ask
-  `access.Store.DecideWrite`, and `CanWrite` is gone (task 01a1dd8c-4919).
+  `access.Store.DecideWrite`, and `CanWrite` and `Authorize` are gone (task
+  01a1dd8c-4919).
 - **Admin token names reach the actor validator.** A tokens.json entry named
   with more than 128 bytes or a control character makes every task write a
   500 ("invalid actor name" is only in the log). Validate names in `aimem

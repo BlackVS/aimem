@@ -339,6 +339,7 @@ func TestAccessGrantAddSaysARaisedReadGrant(t *testing.T) {
 	saved := noticeOut
 	noticeOut = &notices
 	t.Cleanup(func() { noticeOut = saved })
+	var answer map[string]any
 	run := func(args ...string) string {
 		t.Helper()
 		notices.Reset()
@@ -346,13 +347,17 @@ func TestAccessGrantAddSaysARaisedReadGrant(t *testing.T) {
 		if err != nil {
 			t.Fatalf("%v: %v\n%s", args, err, out)
 		}
-		var answer map[string]any
+		answer = nil
 		if json.Unmarshal([]byte(out), &answer) != nil {
 			t.Fatalf("%v: stdout is not the hub's JSON: %s", args, out)
 		}
 		return notices.String()
 	}
 	run("user-add", "--user-name", "auditor")
+	id, _ := answer["id"].(string)
+	if id == "" {
+		t.Fatalf("user-add answered no id: %v", answer)
+	}
 	if n := run("grant", "add", "--project", "example", "--user-name", "auditor", "--read"); n != "" {
 		t.Fatalf("a first read grant: %q", n)
 	}
@@ -361,5 +366,10 @@ func TestAccessGrantAddSaysARaisedReadGrant(t *testing.T) {
 	}
 	if n := run("grant", "add", "--project", "example", "--user-name", "auditor"); n != "" {
 		t.Fatalf("a repeated write grant: %q", n)
+	}
+	// The positional form says it too.
+	run("grant", "add", "--project", "example", "--user-name", "auditor", "--read")
+	if n := run("grant", "add", "example", "user", id); !strings.Contains(n, "user "+id+" on project example held a read grant; it is now a write grant\n") {
+		t.Fatalf("the positional raise: %q", n)
 	}
 }

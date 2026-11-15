@@ -496,8 +496,12 @@ func legacyAccessRequest(cmd, verb string, args []string) (accessCall, error) {
 		}
 	case "grant":
 		if len(args) == 3 && (args[1] == "user" || args[1] == "group") {
-			return accessCall{method: map[string]string{"add": "PUT", "rm": "DELETE"}[verb], path: "/v1/projects/" + q(args[0]) + "/access/" + args[1] + "/" + q(args[2]),
-				newForm: "aimem access grant " + verb + " --project " + quote(args[0]) + " --" + args[1] + "-id " + quote(args[2])}, nil
+			call := accessCall{method: map[string]string{"add": "PUT", "rm": "DELETE"}[verb], path: "/v1/projects/" + q(args[0]) + "/access/" + args[1] + "/" + q(args[2]),
+				newForm: "aimem access grant " + verb + " --project " + quote(args[0]) + " --" + args[1] + "-id " + quote(args[2])}
+			if verb == "add" {
+				call.grantOf = args[1] + " " + args[2] + " on project " + args[0]
+			}
+			return call, nil
 		}
 	case "grant-rm-instance":
 		if len(args) == 3 && (args[1] == "user" || args[1] == "group") {

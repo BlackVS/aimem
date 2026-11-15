@@ -112,7 +112,10 @@ currently 25); a binary refuses a database newer than it understands.
   answer (`read`, `write`, or empty for a new grant).
 - `aimem` clients built before this change report the identity check's
   404 as an unavailable hub; this release's clients say the project is
-  unknown or not granted and name `aimem access grant add`.
+  unknown or not readable by the credential and name `aimem access grant
+  add`. `aimem teams setup` still prints the operator handoff for a member
+  with no grant: on that 404 it reads the credential's identity without a
+  project for the user to grant.
 
 ## [0.10.23] — 2026-11-14
 

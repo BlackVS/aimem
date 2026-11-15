@@ -170,3 +170,20 @@ func writes(s *Store, user, token, project string) (bool, error) {
 	d, err := s.DecideWrite(user, token, project)
 	return d == WriteAllowed, err
 }
+
+// authorize is a request's whole check as the hub makes it: authenticate
+// the secret, then, for a project, DecideWrite must allow the write.
+func authorize(s *Store, secret, project string) (Identity, error) {
+	id, err := s.Authenticate(secret)
+	if err != nil || project == "" {
+		return id, err
+	}
+	d, err := s.DecideWrite(id.UserID, id.TokenID, project)
+	if err != nil {
+		return Identity{}, err
+	}
+	if d != WriteAllowed {
+		return Identity{}, ErrDenied
+	}
+	return id, nil
+}

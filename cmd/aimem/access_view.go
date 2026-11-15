@@ -203,7 +203,7 @@ func (v *accessView) grantNames(inst string, all bool) []string {
 }
 
 // writeTokens are the indexes of the tokens that write to the instance,
-// by the hub's own rule (access.Store.CanWriteToken): live, scoped to it
+// by the hub's own rule (access.Store.DecideWrite, its allowed answer): live, scoped to it
 // (project-scoped to it, or user-scoped), and its user holds a write grant
 // on it directly or through a group. With all, also the dead ones and the
 // project-scoped ones whose user holds no write grant; noGrant marks those.

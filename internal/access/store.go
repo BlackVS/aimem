@@ -705,25 +705,6 @@ func (s *Store) TokenMeta(id string) (label string, expires time.Time, err error
 	return label, time.Unix(unix, 0).UTC(), nil
 }
 
-// Authorize rechecks token and membership; it never trusts a client-supplied
-// user or a previously cached identity. Empty project denotes a read-only check.
-func (s *Store) Authorize(secret, project string) (Identity, error) {
-	id, err := s.Authenticate(secret)
-	if err != nil {
-		return Identity{}, err
-	}
-	if project != "" {
-		d, err := s.DecideWrite(id.UserID, id.TokenID, project)
-		if err != nil {
-			return Identity{}, err
-		}
-		if d != WriteAllowed {
-			return Identity{}, ErrDenied
-		}
-	}
-	return id, nil
-}
-
 // WriteDecision is the answer to a mutation of a project by an ordinary
 // token.
 type WriteDecision int
@@ -741,11 +722,11 @@ const (
 	WriteAllowed
 )
 
-// DecideWrite is the one decision on a mutation by an ordinary token: the
-// project form of Authorize, every task, epic and team-session write and the
-// reservation owner check come here. IDs come from authentication, but
-// token state, scope and grants are read again on every call, so an
-// in-process MCP call cannot retain stale authority.
+// DecideWrite is the one decision on a mutation by an ordinary token: every
+// task, epic, comment, triage and team-session write, the reservation owner
+// check and the identity route's write answer come here. IDs come from
+// authentication, but token state, scope and grants are read again on every
+// call, so an in-process MCP call cannot retain stale authority.
 func (s *Store) DecideWrite(user, token, project string) (WriteDecision, error) {
 	if project == "" {
 		return WriteHidden, nil

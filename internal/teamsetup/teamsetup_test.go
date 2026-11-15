@@ -326,36 +326,56 @@ func TestRunRefusesAnInsecureHubEntry(t *testing.T) {
 	}
 }
 
-// The hub answers a project the credential's user holds no grant on as it
-// answers an unknown one (task 01a1dd8c-4919), so the identity check names
-// both causes and the grant fix, and no session operation follows.
+// The hub answers a project the credential may not read as it answers an
+// unknown one (task 01a1dd8c-4919), so the identity check names both
+// causes and no session operation follows. A hub that still names the
+// credential without a project, as the real one does, gives the operator
+// handoff for the member's user; one that does not gives the grant fix.
 func TestIdentityNotFoundNamesBothCauses(t *testing.T) {
-	inner := identityHub(t)
-	var hidden atomic.Bool
-	ts := hubtest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if hidden.Load() && r.URL.Path == "/v1/access/identity" {
-			w.Header().Set("Content-Type", "application/json")
-			w.WriteHeader(404)
-			json.NewEncoder(w).Encode(map[string]any{"error": "unknown project"})
-			return
-		}
-		inner.Config.Handler.ServeHTTP(w, r)
-	}))
-	defer ts.Close()
-	repo, root := checkout(t, ts)
-	hidden.Store(true)
-	caller := &sessionCaller{}
-	rep := Run(Env{Dir: repo, Root: root, Version: "v0.7.1", TeamCall: caller.call}, &Options{Team: "Pilot", Role: "worker"})
-	if rep.Joined() || caller.names() != "" {
-		t.Fatalf("joined %v, operations %q", rep.Joined(), caller.names())
-	}
-	for _, c := range rep.Checks {
-		if c.Name == "identity" {
-			if c.Level != "fail" || !strings.Contains(c.Detail, "project alpha is unknown to hub hub, or the selected credential may not read it (no grant, or a token scoped to another project)") || !strings.Contains(c.Fix, "aimem access grant add") {
-				t.Fatalf("identity: %+v", c)
+	for _, c := range []struct {
+		name          string
+		withoutToo    bool // the identity without a project is 404 too
+		handoff       bool
+		fixMustNameIt string
+	}{
+		{name: "the real hub", handoff: true, fixMustNameIt: "see the operator handoff"},
+		{name: "no identity at all", withoutToo: true, fixMustNameIt: "aimem access grant add"},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			inner := identityHub(t)
+			var hidden atomic.Bool
+			ts := hubtest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if hidden.Load() && r.URL.Path == "/v1/access/identity" && (c.withoutToo || r.URL.Query().Has("project")) {
+					w.Header().Set("Content-Type", "application/json")
+					w.WriteHeader(404)
+					json.NewEncoder(w).Encode(map[string]any{"error": "unknown project"})
+					return
+				}
+				inner.Config.Handler.ServeHTTP(w, r)
+			}))
+			defer ts.Close()
+			repo, root := checkout(t, ts)
+			hidden.Store(true)
+			caller := &sessionCaller{}
+			rep := Run(Env{Dir: repo, Root: root, Version: "v0.7.1", TeamCall: caller.call}, &Options{Team: "Pilot", Role: "worker"})
+			if rep.Joined() || caller.names() != "" {
+				t.Fatalf("joined %v, operations %q", rep.Joined(), caller.names())
 			}
-			return
-		}
+			if got := rep.Handoff != ""; got != c.handoff {
+				t.Fatalf("handoff %v, want %v: %q", got, c.handoff, rep.Handoff)
+			}
+			if c.handoff && (!strings.Contains(rep.Handoff, "--member u-1 --role worker") || !strings.Contains(rep.Handoff, "user pilot-a (id u-1)")) {
+				t.Fatalf("the handoff does not name the member: %s", rep.Handoff)
+			}
+			for _, ch := range rep.Checks {
+				if ch.Name == "identity" {
+					if ch.Level != "fail" || !strings.Contains(ch.Detail, "project alpha is unknown to hub hub, or the selected credential may not read it (no grant, or a token scoped to another project)") || !strings.Contains(ch.Fix, c.fixMustNameIt) {
+						t.Fatalf("identity: %+v", ch)
+					}
+					return
+				}
+			}
+			t.Fatalf("no identity check: %+v", rep.Checks)
+		})
 	}
-	t.Fatalf("no identity check: %+v", rep.Checks)
 }

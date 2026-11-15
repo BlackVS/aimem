@@ -190,8 +190,9 @@ answers one of three:
   access instance.
 
 The task, epic, comment and triage writes, the team-session routes, the
-reservation owner check, the project form of `Authorize` and the identity
-route's `?project=` all come here; nothing else decides a write. Grant
+reservation owner check, the team-assignment authority and the identity
+route's `?project=` all come here; nothing else decides a write.
+`Store.Authorize`, which had no caller left outside tests, is removed. Grant
 issuance alone asks whether the user holds a grant of either kind.
 
 **An unreadable project answers as unknown.** Outside team mode, every

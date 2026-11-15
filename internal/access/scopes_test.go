@@ -18,7 +18,7 @@ func TestUserTokenFollowsLiveGrants(t *testing.T) {
 	}
 	check := func(project string, want bool) {
 		t.Helper()
-		_, err := s.Authorize(secret, project)
+		_, err := authorize(s, secret, project)
 		if (err == nil) != want || (err != nil && !errors.Is(err, ErrDenied)) {
 			t.Fatalf("authorize %s = %v, want %v", project, err, want)
 		}
@@ -105,7 +105,7 @@ func TestScopeValidationAndRestrictions(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if _, err := s.Authorize(secret, "B"); !errors.Is(err, ErrDenied) {
+		if _, err := authorize(s, secret, "B"); !errors.Is(err, ErrDenied) {
 			t.Fatalf("restricted token wrote B: %v", err)
 		}
 	}
@@ -162,14 +162,14 @@ ALTER TABLE grants DROP COLUMN access; PRAGMA user_version=1;`); err != nil {
 			if err != nil || id.TokenID != tc.id || id.Scope != tc.scope {
 				t.Fatalf("migrated identity %+v: %v", id, err)
 			}
-			if _, err := s.Authorize(tc.secret, "B"); !errors.Is(err, ErrDenied) {
+			if _, err := authorize(s, tc.secret, "B"); !errors.Is(err, ErrDenied) {
 				t.Fatalf("migration broadened token: %v", err)
 			}
 		}
-		if _, err := s.Authorize(projectSecret, "A"); err != nil {
+		if _, err := authorize(s, projectSecret, "A"); err != nil {
 			t.Fatal(err)
 		}
-		if _, err := s.Authorize(readSecret, "A"); !errors.Is(err, ErrDenied) {
+		if _, err := authorize(s, readSecret, "A"); !errors.Is(err, ErrDenied) {
 			t.Fatalf("read-only gained writes: %v", err)
 		}
 		if err := s.Close(); err != nil {
