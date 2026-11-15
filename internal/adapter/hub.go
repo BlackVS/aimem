@@ -75,6 +75,12 @@ type HubConfig struct {
 	// (sha256-BASE64): the hub is trusted by that key alone. At most one of
 	// CAFile and Pin; `aimem hub add … --pin` records it.
 	Pin string `json:"pin,omitempty"`
+	// Strict marks an in-memory copy of the entry whose Token is an
+	// individual credential: HTTPClient then hands out only the strict
+	// client (https with the entry's trust, no proxy, no redirect), and a
+	// failing transport when that client cannot be built. It is never
+	// stored.
+	Strict bool `json:"-"`
 }
 
 // TokenMeta is what a hub's identity answer says about a task credential:
@@ -88,9 +94,17 @@ type TokenMeta struct {
 	ExpiresAt string `json:"expires_at,omitempty"`
 }
 
-// HTTPClient returns the client to talk to this hub with: its ca_file or
-// pin when set (TLSConfig), else the self-signed phase or the system roots.
+// HTTPClient returns the client to talk to this hub with: the strict client
+// for an entry marked Strict, else its ca_file or pin when set (TLSConfig),
+// else the self-signed phase or the system roots.
 func (h *HubConfig) HTTPClient() *http.Client {
+	if h.Strict {
+		c, err := h.StrictClient(PushTimeout)
+		if err != nil {
+			return &http.Client{Transport: failTransport{err}} // nothing is sent
+		}
+		return c
+	}
 	if h.CAFile != "" || h.Pin != "" {
 		return h.cachedClient()
 	}

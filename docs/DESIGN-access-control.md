@@ -281,12 +281,62 @@ project assignments, or expiring project-scoped tokens; see
 
 Current MCP has two paths: local `aimem mcp` uses stdio and trusts the local
 process/socket, with no separate agent login; remote `/mcp` authenticates the
-connection with a bearer token. Hub document/collection calls use the configured
-hub token. None of these establishes a distinct user and working-project grant
-today. The remote MCP handler also needs to carry authenticated caller identity
-into task operations instead of relying on its shared local API client; see
-[MCP handler](../internal/mcp/mcp.go). New task tools use the user's project token
-behind the scenes; the model does not need to put secrets in tool arguments.
+connection with a bearer token. The remote MCP handler also needs to carry
+authenticated caller identity into task operations instead of relying on its
+shared local API client; see [MCP handler](../internal/mcp/mcp.go). New task
+tools use the user's project token behind the scenes; the model does not need to
+put secrets in tool arguments.
+
+### Stdio document and collection tools (audit A-9)
+
+The stdio `list_docs`, `read_doc`, `update_doc`, `list_records`, `get_record`
+and `put_record` reach the hub named by the checkout's `.aimem.json`, for the
+project and groups it declares. Most of their calls go out with the hub entry's
+checkpoint token, a legacy writer credential for which the hub checks no project
+grant (see Permissions). The repository file alone would therefore choose where
+the machine's broad credential is used. Before that credential is used, the
+client confirms the pinned project
+([docscope.go](../internal/mcp/docscope.go)):
+
+- **With a task credential** (the one the task tools select, see
+  [TASK-CREDENTIALS.md](TASK-CREDENTIALS.md)), it asks
+  `GET /v1/access/identity?project=<pinned>` with that credential. Only a
+  readable answer that names a user confirms the project, and `update_doc` and
+  `put_record` also need its `task_write`. A 404 refuses. Any other answer
+  refuses too: a refused credential, a server error, a timeout, or a body that
+  cannot be read. A project-local requirement in `.aimem.json` does not stand
+  for a missing credential when the hub entry holds one.
+- **Without a task credential** on the hub entry, the call proceeds, and its
+  result says the scope is not confirmed. A machine that keeps only
+  project-local task credentials has none on the hub entry, so a checkout
+  without the local marker proceeds unconfirmed there, as on a writer-only
+  machine. A checkout with the marker whose local credential cannot be used
+  (bound to another project, or unreadable) is refused.
+- **A group space** carries no grant, so no answer confirms it. A group call
+  proceeds when the pinned project was not refused, and its result names the
+  group as declared by the repository. So does a project call that also reads
+  the declared groups (the default `list_docs`).
+- **Every result** names the hub, its URL and the credential used. The first
+  use of a hub, project and groups from a checkout is announced, and so is a
+  later change of any of them for the same checkout (`doc-scope-seen.json` in
+  the state root). Without a task credential that line is the only signal a
+  person gets.
+- **`list_docs` and `read_doc`** of the confirmed project go out with the task
+  credential, through the routes on which the hub checks its grant (the
+  knowledge pilot). Group reads, `update_doc` and the records tools keep the
+  checkpoint token. The task credential travels only over the strict client
+  (https with the entry's pin or CA, no proxy, no redirect followed): the copy
+  of the hub entry that carries it is marked `Strict`, and
+  `HubConfig.HTTPClient` then hands out that client or, when it cannot be built,
+  one that sends nothing.
+
+**Next step.** The hub exposes no route on which an ordinary token writes a
+document, or reads or writes a record. Once it does, these tools move to the
+task credential entirely, and the checkpoint token is left to the journal push
+and the sync it was made for. The first increment is the document write; the
+records routes follow. The same client-side scoping still governs the
+checkpoint push, the meta writes and the sync pulls, which this guard does not
+cover.
 
 Store identity, memberships, and ordinary-token metadata in one hub-local store;
 use one authorization function for all task surfaces. Record who changed access

@@ -13,6 +13,38 @@ currently 25); a binary refuses a database newer than it understands.
 
 ## [Unreleased]
 
+### Security
+
+- **The stdio document and record tools confirm the project before they
+  use the machine's checkpoint credential** (security audit 2026-10,
+  finding A-9). `list_docs`, `read_doc`, `update_doc`, `list_records`,
+  `get_record` and `put_record` took the project, groups and hub from the
+  checkout's `.aimem.json` and sent the hub entry's checkpoint token, for
+  which the hub checks no project grant.
+  - **With a task credential on the hub entry**, each call first asks
+    the hub, with that credential, whether the pinned project is readable
+    (and writable, for `update_doc` and `put_record`). It is refused when
+    the answer is a 404, and when it is anything else that is not a
+    grant: an error, a timeout or an unreadable answer. `list_docs` and
+    `read_doc` of the project now read with the task credential, over the
+    strict client only: no proxy, no redirect followed, and nothing sent
+    when that client cannot be built for the hub entry.
+  - **Without one**, the call proceeds and its result says "scope not
+    confirmed".
+  - **Group scopes** are named as declared by the repository, never as
+    confirmed.
+  - **Every result** names the hub and the credential.
+  - **Announcements:** the first use of a hub, project and groups from a
+    checkout is announced, and so is any later change of them.
+  - **What changes for a member:** a member whose task credential holds
+    only a read grant on the project can no longer write its documents or
+    records through these tools. A hub entry that holds a task credential
+    but is plain `http://` or `insecure` refuses too, since a task
+    credential is sent only over verified https (`aimem hub list` shows
+    each entry's trust).
+  - **What it does not cover:** the checkpoint push, meta writes and sync
+    pulls still follow `.aimem.json` alone.
+
 ### Added
 
 - **A real client upgrade in CI.** The `client-upgrade` job installs a

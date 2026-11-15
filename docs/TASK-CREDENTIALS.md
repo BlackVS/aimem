@@ -20,6 +20,13 @@ The client chooses one credential:
 2. Otherwise the OS user's task credential for the project's configured hub.
 
 Both are ordinary credentials, separate from the hub's checkpoint token.
+
+The stdio document and record tools use the same credential to confirm the
+checkout's pinned project before they use the checkpoint token, and read the
+project's documents with it. A hub entry without one lets those tools proceed
+with results marked "scope not confirmed"
+([DESIGN-access-control.md](DESIGN-access-control.md), "Stdio document and
+collection tools").
 Existing per-hub project/read-only tokens keep their restrictions; changing
 the client does not change their scope. Projects still need Kanban enabled.
 
