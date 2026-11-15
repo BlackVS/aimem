@@ -76,6 +76,11 @@ func TestReleaseBuildsWithoutWritePermissions(t *testing.T) {
 			t.Errorf("the publish job runs %q: it must check out and run nothing from the repository", s)
 		}
 	}
+	// The process set archive is built before the sums, so they list it
+	// (cmd/aimem runs the same script and imports what it writes).
+	if a, s := strings.Index(build, "sh scripts/process-archive.sh dist/aimem-linux-amd64 . dist\n"), strings.Index(build, "sha256sum * > SHA256SUMS"); a < 0 || a > s {
+		t.Error("the build job does not write the process set archive before SHA256SUMS")
+	}
 	if !strings.HasPrefix(jobs["ref"], "  ref:\n") || !strings.Contains(jobs["ref"], "permissions: {}") {
 		t.Error("the guard job for a manual run is not first, or holds permissions")
 	}

@@ -160,6 +160,11 @@ jobs:
           cp install.ps1 dist/install.ps1
           cp install-hub.sh dist/install-hub.sh
           cp .opencode/plugin/aimem.ts dist/aimem-opencode.ts
+          # The reference process set as an archive, for a hub host without
+          # access to this repository (ADMIN-MANUAL, "Selecting a project's
+          # process documents"): the tag's processes/aimem, read from this
+          # checkout, recording the tag's commit.
+          sh scripts/process-archive.sh dist/aimem-linux-amd64 . dist
           (cd dist && sha256sum * > SHA256SUMS)
 
       # The release body is the tag's CHANGELOG section — written by a

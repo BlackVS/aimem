@@ -72,6 +72,19 @@ currently 25); a binary refuses a database newer than it understands.
 - **Faster Windows installer tests.** The documented Windows install test
   runs all its cases in one PowerShell process per shell.
 
+### Added
+
+- **The reference process set is a release asset.** Every release
+  publishes `aimem-process.tar.gz`: the tag's `processes/aimem`, recording
+  the tag's commit, in the form `aimem process select --from-archive`
+  reads, listed in `SHA256SUMS` and attested with the other assets. An
+  aiforge export carries it under `<base>/aimem/<tag>/`, so a hub host in a
+  closed network selects the reference process without `aimem process
+  export` on a connected machine (ADMIN-MANUAL, "Selecting a project's
+  process documents"). `scripts/process-archive.sh` builds it from the
+  checkout, with no network, and a test imports what it builds. A test
+  fails when a text of the set names a host that is not on its allow-list.
+
 ## [0.10.24] — 2026-11-15
 
 A grant is now read or write (access schema 10). A read grant reads a

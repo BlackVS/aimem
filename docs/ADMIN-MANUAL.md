@@ -938,6 +938,27 @@ one is re-selected without an import; the hub itself never runs Git.
 The prerequisites on the hub host are therefore those of these admin
 commands only: `git`, or https to the forge.
 
+**The reference set from a release.** Every release publishes the
+reference set as `aimem-process.tar.gz`, listed in its `SHA256SUMS` and
+attested with the other assets: the tag's `processes/aimem`, recording the
+tag's commit. An aiforge export carries it with the release's other assets
+under `<base>/aimem/<tag>/`, `SHA256SUMS` beside it, so a hub host in a
+closed network needs no `process export`. Select it by the repository and
+the commit the archive records, which `git get-tar-commit-id` prints:
+
+```sh
+cd /media/aiforge-export/aimem/<tag>
+commit=$(gunzip -c aimem-process.tar.gz | git get-tar-commit-id)
+aimem process select https://github.com/BlackVS/aimem "$commit" --commit \
+    --from-archive aimem-process.tar.gz -p <project>
+```
+
+The hub then shows the public repository and that commit, as a
+selection read from Git would. To make it the hub's default instead,
+`aimem process default set https://github.com/BlackVS/aimem <tag>
+--from-archive aimem-process.tar.gz` takes the commit from the archive
+itself (see "On a hub host without network access" above).
+
 The forge reads (the tarball and the ref advertisement) are anonymous
 unless `AIMEM_PROCESS_FORGE_TOKEN` is set in the hub user's
 `~/.config/aimem/env`: a read-only token the forge accepts for the
