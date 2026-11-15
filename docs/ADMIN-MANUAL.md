@@ -1110,6 +1110,28 @@ It publishes them as release assets with `LICENSE` and a `SHA256SUMS` that
 covers both. The release notes are the tag's CHANGELOG section, followed by
 the license URL and the `Required Notice:` lines from `LICENSE`.
 
+`SHA256SUMS` is a transport check: it shows that a download arrived as
+published, not who published it, because whoever could replace an asset
+could replace the sums with it. The release job also attests the build
+provenance of every published file, `SHA256SUMS` included, through
+`actions/attest-build-provenance`. The attestation ties each file's digest
+to this repository's release workflow at the tagged commit, and GitHub's
+CLI checks it:
+
+```sh
+gh attestation verify aimem-linux-amd64 --repo BlackVS/aimem
+gh attestation verify SHA256SUMS --repo BlackVS/aimem
+```
+
+The attestation names the ref the run started from, not the one it checked
+out, so a manual run must start from its tag
+(`gh workflow run release.yml --ref vX.Y.Z -f tag=vX.Y.Z`); the workflow
+refuses a manual run started from a branch.
+
+Every action the workflows use is named by a full commit SHA with its
+version in a comment, so a moved tag upstream changes nothing here;
+Dependabot's weekly `github-actions` update moves the pins.
+
 The installers are pinned to a release. The commit that rolls the
 CHANGELOG into the new version also bumps `RELEASE` in `boot.sh`,
 `install-hub.sh` and `$release` in `boot.ps1`, and the tag in every
