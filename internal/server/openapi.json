@@ -1593,7 +1593,8 @@
     },
     "/v1/projects/{p}/access/{kind}/{id}": {
       "put": {
-        "summary": "Grant project task contribution to a user or access group",
+        "summary": "Grant a project to a user or access group, for reading or for writing",
+        "description": "A write grant (the default) lets the subject's user- and project-scoped tokens read and write the project's tasks, and read its knowledge and repository. A read grant lets every token of the subject read them, and write nothing. Granting a subject already granted sets the access this request names.",
         "x-role": "admin",
         "parameters": [
           {
@@ -1618,11 +1619,27 @@
             "schema": {
               "type": "string"
             }
+          },
+          {
+            "name": "access",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "read",
+                "write"
+              ],
+              "default": "write"
+            }
           }
         ],
         "responses": {
           "200": {
-            "description": "Grant present; returns stable host-local project instance"
+            "description": "Grant present; returns the stable host-local project instance and the grant's access"
+          },
+          "400": {
+            "description": "access is neither read nor write"
           }
         }
       },

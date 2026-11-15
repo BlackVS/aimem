@@ -13,6 +13,7 @@ import (
 	"testing"
 	"time"
 
+	"aimem/internal/access"
 	"aimem/internal/store"
 	"aimem/internal/uuidv7"
 )
@@ -47,12 +48,14 @@ func decodeTask(t *testing.T, w *httptest.ResponseRecorder) taskResponse {
 
 // taskFixture is a hub with two ordinary projects, legacy writer/admin
 // tokens, and two ordinary users: alice holds a grant and a project token
-// on alpha; bob holds a read-only token and a grant on alpha, none on beta.
+// on alpha; bob holds a read-only token and a grant on alpha, none on beta;
+// stranger holds a user-scope token and no grant at all.
 type taskFixture struct {
 	s                                *Server
 	reg                              *store.Registry
 	h                                http.Handler
 	env, admin, writer, alice, bob   string
+	stranger                         string
 	aliceUser, bobUser, aliceTokenID string
 	alphaInstance                    string
 }
@@ -104,7 +107,15 @@ func newTaskFixture(t *testing.T) *taskFixture {
 	if err != nil {
 		t.Fatal(err)
 	}
-	f := &taskFixture{s: s, reg: reg, env: "env-admin-secret", admin: admin, writer: writer, alice: aliceSecret, bob: bobSecret,
+	carol, err := db.CreateUser("admin", "Carol")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, strangerSecret, err := db.IssueScoped("admin", carol.ID, "stranger", access.ScopeUser, "", time.Now().Add(time.Hour))
+	if err != nil {
+		t.Fatal(err)
+	}
+	f := &taskFixture{s: s, reg: reg, env: "env-admin-secret", admin: admin, writer: writer, alice: aliceSecret, bob: bobSecret, stranger: strangerSecret,
 		aliceUser: alice.ID, bobUser: bob.ID, aliceTokenID: aliceTok.ID, alphaInstance: instance}
 	f.h = s.TCPHandler(f.env, nil)
 	return f

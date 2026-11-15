@@ -103,9 +103,16 @@ func TestKnowledgeReadsPersonal(t *testing.T) {
 		t.Fatal(err)
 	}
 	g.secrets = append(g.secrets, readOnly)
+	// A read-only-scope token reads what its user's grant allows, as it
+	// reads tasks, and still nothing where the user holds no grant.
 	for _, path := range knowledgePaths("alpha") {
-		if r := g.personalGet(t, readOnly, path); r.status != 403 {
+		if r := g.personalGet(t, readOnly, path); r.status != 200 {
 			t.Errorf("read-only token %s: %d %s", path, r.status, r.body)
+		}
+	}
+	for _, path := range knowledgePaths("beta") {
+		if r := g.personalGet(t, readOnly, path); r.status != 403 || strings.Contains(string(r.body), "runbook") {
+			t.Errorf("read-only token without a grant %s: %d %s", path, r.status, r.body)
 		}
 	}
 	// Outside the pilot set the ordinary token is refused at the gate.

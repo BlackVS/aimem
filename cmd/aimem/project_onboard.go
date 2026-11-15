@@ -200,15 +200,21 @@ func onboard(a onboardArgs, stdout io.Writer) error {
 	}
 
 	switch {
-	case inst != "" && v.directGrant(inst, uid):
+	case inst != "" && v.directGrant(inst, uid) == "write":
 		fmt.Fprintf(out, "  grant: user %s already granted\n", a.user)
-	case inst != "" && v.grantedUsers(inst, false)[uid]:
+	case inst != "" && v.writers(inst, false)[uid]:
 		fmt.Fprintf(out, "  grant: user %s already granted through a group (%s)\n", a.user, strings.Join(v.groupsOf[uid], ", "))
 	default:
-		if _, err := accessDo("PUT", base+"/access/user/"+url.PathEscape(uid), nil); err != nil {
+		// A write grant: the agent writes tasks. A read grant the user
+		// already holds becomes a write grant.
+		if _, err := accessDo("PUT", base+"/access/user/"+url.PathEscape(uid)+"?access=write", nil); err != nil {
 			return fmt.Errorf("granting user %s: %w", a.user, err)
 		}
-		fmt.Fprintf(out, "  grant: granted user %s\n", a.user)
+		if inst != "" && v.directGrant(inst, uid) == "read" {
+			fmt.Fprintf(out, "  grant: user %s held a read grant; it is now a write grant\n", a.user)
+		} else {
+			fmt.Fprintf(out, "  grant: granted user %s\n", a.user)
+		}
 	}
 
 	if !issue {
@@ -269,13 +275,16 @@ func describeSelection(r process.Ref) string {
 	return fmt.Sprintf("%s (tag %s, commit %s)", name, r.Ref, r.Commit)
 }
 
-// directGrant reports whether the user holds a grant on the instance of
-// its own, not only through a group.
-func (v *accessView) directGrant(inst, uid string) bool {
+// directGrant is the access of the user's own grant on the instance, not
+// one through a group: "read", "write", or "" for none.
+func (v *accessView) directGrant(inst, uid string) string {
 	for _, g := range v.snap.Grants {
 		if g.Project == inst && g.Kind == "user" && g.Subject == uid {
-			return true
+			if g.Access == "read" {
+				return "read"
+			}
+			return "write"
 		}
 	}
-	return false
+	return ""
 }

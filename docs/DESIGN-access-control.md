@@ -123,8 +123,9 @@ No nested groups or custom role language in v1.
 | Caller | Read tasks | Change tasks |
 | --- | --- | --- |
 | Admin token, local socket | All projects | All projects; full access to other aimem administration/data too |
-| User/agent with project assignment and matching project token | Projects its user holds a grant on, that the token's scope reaches | Assigned working project only |
-| Read-only token | Projects its user holds a grant on | No |
+| Legacy writer token | All projects | No: task changes need an ordinary or admin token |
+| User/agent with project assignment and matching project token | Projects its user holds a grant of either kind on, that the token's scope reaches | Assigned working project, under a write grant only |
+| Read-only token | Projects its user holds a grant of either kind on | No |
 | Ordinary token whose user holds no grant on the project | No: the project and its tasks answer as not found | No |
 | Unauthenticated caller | No | No |
 
@@ -133,10 +134,12 @@ A-10). An ordinary token reads the tasks, comments, history and epics of a
 project only while its user holds a current grant on it, directly or
 through an access group, and while the token's scope reaches the project: a
 user-scoped or read-only token reaches every project, a project-scoped token
-its own. The check is the knowledge reads' grant predicate
-(`CanWriteToken`), with a read-only token admitted as well
-(`CanReadToken`); it is re-read on every request, so a removed grant
-refuses the next read.
+its own. Knowledge reads (recall, the document list, a document), the
+project's repository reference, its process reference and process set, and
+its skills index and skills set use the same predicate (`CanReadToken`); it
+is re-read on every request, so a removed grant refuses the next read. The
+admin token, a legacy writer token and the local socket read every
+project.
 
 - **Refusals.** A project without a grant answers 404 with the same body as a
   project that does not exist, and a task id in such a project the same as
@@ -145,7 +148,11 @@ refuses the next read.
   caller may read; an ambiguous one names only those.
 - **Where they show.** The project list shows only the granted projects. The
   hub's log records each refused task read with the token's user and the
-  project, never task content, so an admin sees who needs a grant.
+  project, never task content, so an admin sees who needs a grant. The line
+  is not rate-bounded. About ten hours after the hubs' upgrade to v0.10.23
+  there was one such line in total, on one hub, from a single command, and
+  none on the other. A bound per token and project would add state for no
+  observed noise.
 - **Identity and tools.** The identity route says `task_read:
   granted-projects`, and the MCP task and epic read tools say so in their
   descriptions.
@@ -155,14 +162,21 @@ refuses the next read.
   team profile is granted, and personal grants never count there. aicrewd's
   peer reads are scoped to the instances a peer is granted.
 
-**The least-privilege limit.** A grant names a project, not a kind of access:
-there is no read-only grant yet. Outside team mode a reader holds an ordinary
-grant, which also lets a user- or project-scoped token write, or reads with a
-read-only-scope token, which never writes. A first-class read grant is a
-separate change to the access schema.
+**A grant is read or write** (access schema 10). A read grant lets every
+token of its user (or of its group's members) read the project's tasks,
+knowledge, repository reference, process reference and set, and skills index
+and set, and write nothing. A write grant also
+lets the user- and project-scoped tokens write. A project-scoped token may
+be issued under a grant of either kind; whether it writes is decided at each
+write by the grant's kind (`CanWriteToken`), so raising or lowering a grant
+takes effect on the next request without reissuing tokens. Grants made
+before schema 10 migrated as write grants. `aimem access grant add --read`
+(`PUT /v1/projects/{p}/access/{kind}/{id}?access=read`) makes a read grant;
+granting a subject already granted sets the access the request names.
 
-A write requires both current user access (directly or through an access group)
-and the token's write-project restriction to match the task's actual project.
+A write requires both a current write grant (directly or through an access
+group) and the token's write-project restriction to match the task's actual
+project.
 A user assigned to several projects can have a separate agent token for each.
 Removing the user's last assignment to a project removes write access there.
 Disabled users and expired/revoked tokens cannot access tasks.

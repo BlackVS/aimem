@@ -139,7 +139,7 @@ func TestScopeMigrationPreservesLegacyTokens(t *testing.T) {
 DROP TABLE team_access_profiles;
 DROP TABLE hub_identity;
 ALTER TABLE tokens DROP COLUMN scope;
-PRAGMA user_version=1;`); err != nil {
+ALTER TABLE grants DROP COLUMN access; PRAGMA user_version=1;`); err != nil {
 		t.Fatal(err)
 	}
 	if err := s.Close(); err != nil {

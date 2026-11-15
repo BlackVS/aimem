@@ -32,7 +32,7 @@ func TestSchema3MigrationPreservesStandaloneAccess(t *testing.T) {
 	if _, err := s.db.Exec(dropIdentitySchema4 + `DROP TABLE team_profile_grants;
 DROP TABLE team_access_profiles;
 DROP TABLE hub_identity;
-PRAGMA user_version=2;`); err != nil {
+ALTER TABLE grants DROP COLUMN access; PRAGMA user_version=2;`); err != nil {
 		t.Fatal(err)
 	}
 	if err := s.Close(); err != nil {

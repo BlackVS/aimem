@@ -114,7 +114,7 @@ func TestAccessSchema5KeepsCredentialsAsRedemption(t *testing.T) {
 	// Back to schema 4: the column did not exist, nor schema 6's team name
 	// or schema 7's enrollment ledger.
 	if _, err := s.db.Exec(`DROP TABLE enrollments; DROP INDEX team_access_profiles_name; ALTER TABLE team_access_profiles DROP COLUMN team_name;
-ALTER TABLE identity_peer_credentials DROP COLUMN operation; PRAGMA user_version=4;`); err != nil {
+ALTER TABLE identity_peer_credentials DROP COLUMN operation; ALTER TABLE grants DROP COLUMN access; PRAGMA user_version=4;`); err != nil {
 		t.Fatal(err)
 	}
 	if err := s.Close(); err != nil {
@@ -189,7 +189,7 @@ DROP TABLE identity_peer_credentials;
 ALTER TABLE c5 RENAME TO identity_peer_credentials;
 DROP INDEX team_access_profiles_name;
 ALTER TABLE team_access_profiles DROP COLUMN team_name;
-PRAGMA user_version=5;`); err != nil {
+ALTER TABLE grants DROP COLUMN access; PRAGMA user_version=5;`); err != nil {
 		t.Fatal(err)
 	}
 	if err := s.Close(); err != nil {
@@ -274,7 +274,7 @@ CREATE TABLE c7(
 INSERT INTO c7 SELECT id,service_id,digest,created_at,expires_at,revoked,operation FROM identity_peer_credentials;
 DROP TABLE identity_peer_credentials;
 ALTER TABLE c7 RENAME TO identity_peer_credentials;
-PRAGMA user_version=7;`); err != nil {
+ALTER TABLE grants DROP COLUMN access; PRAGMA user_version=7;`); err != nil {
 		t.Fatal(err)
 	}
 	if _, _, err := s.IssuePeerCredential("admin", "aicrew-example", PeerOperationBoardRead, time.Now().Add(time.Hour)); err == nil {
@@ -354,7 +354,7 @@ CREATE TABLE c8(
 INSERT INTO c8 SELECT id,service_id,digest,created_at,expires_at,revoked,operation FROM identity_peer_credentials;
 DROP TABLE identity_peer_credentials;
 ALTER TABLE c8 RENAME TO identity_peer_credentials;
-PRAGMA user_version=8;`); err != nil {
+ALTER TABLE grants DROP COLUMN access; PRAGMA user_version=8;`); err != nil {
 		t.Fatal(err)
 	}
 	if _, _, err := s.IssuePeerCredential("admin", "aicrew-example", PeerOperationTaskRead, time.Now().Add(time.Hour)); err == nil {
@@ -368,7 +368,7 @@ PRAGMA user_version=8;`); err != nil {
 			t.Fatal(err)
 		}
 		var version int
-		if err := s.db.QueryRow("PRAGMA user_version").Scan(&version); err != nil || version != accessSchema || accessSchema != 9 {
+		if err := s.db.QueryRow("PRAGMA user_version").Scan(&version); err != nil || version != accessSchema || accessSchema != 10 {
 			t.Fatalf("schema version %d: %v", version, err)
 		}
 		for _, c := range creds {

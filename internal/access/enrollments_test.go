@@ -37,7 +37,7 @@ func TestAccessSchema7AddsEnrollmentsAndKeepsRows(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.db.Exec("DROP TABLE enrollments; PRAGMA user_version=6;"); err != nil {
+	if _, err := s.db.Exec("DROP TABLE enrollments; ALTER TABLE grants DROP COLUMN access; PRAGMA user_version=6;"); err != nil {
 		t.Fatal(err)
 	}
 	if err := s.Close(); err != nil {

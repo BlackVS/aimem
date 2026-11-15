@@ -87,8 +87,11 @@ func TestProjectRepositorySetReadClear(t *testing.T) {
 		t.Fatal(err)
 	}
 	g.secrets = append(g.secrets, readOnly)
-	if r := get(readOnly, "/v1/projects/alpha/repository"); r.status != 403 {
-		t.Fatalf("read-only token: %d %s", r.status, r.body)
+	if r := get(readOnly, "/v1/projects/alpha/repository"); r.status != 200 {
+		t.Fatalf("read-only token with a grant: %d %s", r.status, r.body)
+	}
+	if r := get(readOnly, "/v1/projects/beta/repository"); r.status != 403 || strings.Contains(string(r.body), "forge.example.org") {
+		t.Fatalf("read-only token without a grant: %d %s", r.status, r.body)
 	}
 	if r := get(g.alice, "/v1/projects/user/repository"); r.status != 400 {
 		t.Fatalf("reserved project: %d %s", r.status, r.body)
@@ -171,8 +174,8 @@ func TestProjectGrants(t *testing.T) {
 		t.Fatalf("grants: %d %s", r.status, r.body)
 	}
 	want := []access.ProjectGrantee{
-		{Kind: "user", ID: g.aliceID, Name: "Alice"},
-		{Kind: "group", ID: grp.ID, Name: "reviewers"},
+		{Kind: "user", ID: g.aliceID, Name: "Alice", Access: access.GrantWrite},
+		{Kind: "group", ID: grp.ID, Name: "reviewers", Access: access.GrantWrite},
 		{Kind: "team_profile", ID: g.profile.ID, Disabled: true, ServiceID: "aicrew-example", TeamID: "team-1"},
 	}
 	for i := range want {

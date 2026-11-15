@@ -289,3 +289,40 @@ func TestReadinessTeamWriter(t *testing.T) {
 		"readiness: 2 of 4 open\n",
 		"  [ ] a live token that can write\n      aimem access token-issue-user --user-name <user> --label <user>")
 }
+
+// A read grant is listed as one, and its user's tokens are not writers:
+// a project-scoped token under it is marked [read grant], a user-scoped
+// one is not listed as able to write, and the readiness item stays open.
+func TestAccessViewReadGrant(t *testing.T) {
+	now := time.Date(2026, 11, 15, 0, 0, 0, 0, time.UTC)
+	var snap accessSnap
+	if err := json.Unmarshal([]byte(`{
+		"users": [{"id": "u1", "name": "auditor", "disabled": false}],
+		"groups": [], "members": [],
+		"grants": [{"project_instance": "i1", "kind": "user", "subject": "u1", "access": "read"}],
+		"tokens": [
+			{"id": "t1", "user_id": "u1", "label": "audit-alpha", "scope": "project", "project_instance": "i1", "expires_at": "2027-01-01T00:00:00Z"},
+			{"id": "t2", "user_id": "u1", "label": "audit-all", "scope": "user", "expires_at": "2027-01-01T00:00:00Z"}],
+		"projects": {"i1": "alpha"}}`), &snap); err != nil {
+		t.Fatal(err)
+	}
+	v := newAccessView(snap, now)
+	if got := v.grantNames("i1", false); len(got) != 1 || got[0] != "auditor (read)" {
+		t.Fatalf("grant names: %q", got)
+	}
+	if got := v.writeTokens("i1", false); len(got) != 0 {
+		t.Fatalf("writers under a read grant: %v", got)
+	}
+	var b strings.Builder
+	if err := renderAccess(&b, v, "", "", true); err != nil {
+		t.Fatal(err)
+	}
+	projects, _, _ := strings.Cut(b.String(), "\n\n") // the project table, before the users
+	if !strings.Contains(projects, "audit-alpha [read grant]") || strings.Contains(projects, "audit-all") {
+		t.Fatalf("list --all:\n%s", b.String())
+	}
+	list := readinessChecklist(readinessInput{project: "alpha", instance: "i1", tasksOn: true, process: "p (v1)", view: v})
+	if !strings.Contains(list, "[x] granted: auditor (read)") || !strings.Contains(list, "[ ] a live token that can write") {
+		t.Fatalf("readiness:\n%s", list)
+	}
+}

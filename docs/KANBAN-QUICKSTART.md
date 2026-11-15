@@ -165,7 +165,7 @@ retain the ID for revocation. If the secret is lost,
 revoke that token and issue another; `access list` cannot recover it.
 
 A write needs all of these: tasks enabled, an enabled user, a current
-user or group grant for the current project instance, and a valid unrevoked
+user or group write grant for the current project instance, and a valid unrevoked
 token whose scope permits the write. A token alone does not grant write access.
 Adding another project grant works with the same user token; no reissue is
 needed. Removing access takes effect on subsequent writes.
@@ -186,9 +186,19 @@ aimem access grant add --project my-project --group-name developers
 ```
 
 Tokens are still issued to users, not groups. Use `--read-only` instead of
-`--project` in `token-issue` to issue a read-only ordinary token. Ordinary tokens
-can read tasks across ordinary projects; project scope restricts writes,
-not task-read visibility. Do not treat projects as private task tenants.
+`--project` in `token-issue` to issue a read-only ordinary token. An ordinary
+token reads the tasks, knowledge, repository reference, process and skills
+of the projects its user holds a grant on, and no others; a project-scoped token reads and
+writes only its own project.
+
+A grant is a write grant unless `--read` makes it a read grant. A read grant
+lets every token of the user (or of the group's members) read the project
+and write nothing; granting again without `--read` raises it to write, and
+with `--read` lowers it, both effective on the next request:
+
+```sh
+aimem access grant add --project my-project --user-name auditor --read
+```
 
 | Credential | Purpose |
 |---|---|

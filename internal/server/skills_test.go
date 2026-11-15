@@ -66,8 +66,12 @@ func TestSkillsSetsAreImportedByTheAdminAndServedUnderAGrant(t *testing.T) {
 	if code, ix, b := index(f.h, f.alice); code != 200 || ix.Project != "alpha" || ix.Sources["release"] != nil || len(ix.Effective) != 0 {
 		t.Fatalf("empty index: %d %s", code, b)
 	}
-	if code, _, _ := index(f.h, f.bob); code != 403 {
+	if code, _, _ := index(f.h, f.stranger); code != 403 {
 		t.Fatalf("index without a grant: %d", code)
+	}
+	// A read-only-scope token with a grant reads it, as it reads tasks.
+	if code, _, b := index(f.h, f.bob); code != 200 {
+		t.Fatalf("index by a granted read-only token: %d %s", code, b)
 	}
 	if w := taskReq(t, f.h, "GET", "/v1/projects/alpha/skills", "", "", ""); w.Code != 401 {
 		t.Fatalf("anonymous: %d", w.Code)
@@ -113,7 +117,7 @@ func TestSkillsSetsAreImportedByTheAdminAndServedUnderAGrant(t *testing.T) {
 			t.Fatalf("%s index: %d %s", c.name, code, b)
 		}
 	}
-	if code, _, _ := index(f.h, f.bob); code != 403 {
+	if code, _, _ := index(f.h, f.stranger); code != 403 {
 		t.Fatalf("index without a grant after import: %d", code)
 	}
 	// The set by source and by digest, verified against the digest; ETag.
@@ -139,7 +143,7 @@ func TestSkillsSetsAreImportedByTheAdminAndServedUnderAGrant(t *testing.T) {
 			t.Fatalf("served files are not the stored set: %v", got.Files)
 		}
 	}
-	if code, _, _ := getSet(f.h, f.bob, "?source=release"); code != 403 {
+	if code, _, _ := getSet(f.h, f.stranger, "?source=release"); code != 403 {
 		t.Fatalf("set without a grant: %d", code)
 	}
 	cond := httptest.NewRequest("GET", "/v1/projects/alpha/skills/set?source=release", nil)

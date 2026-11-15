@@ -374,6 +374,7 @@ func projectShowCmd(args []string) error {
 			Disabled  bool   `json:"disabled"`
 			ServiceID string `json:"service_id"`
 			TeamID    string `json:"team_id"`
+			Access    string `json:"access"`
 		} `json:"grants"`
 	}
 	if err := localJSON(http.MethodGet, base+"/grants", nil, &grants); err != nil {
@@ -434,6 +435,9 @@ func projectShowCmd(args []string) error {
 			}
 			fmt.Fprintf(w, "  team         %s (profile %s, service %s, team %s)%s\n", name, g.ID, g.ServiceID, g.TeamID, state)
 		default:
+			if g.Access == "read" {
+				state = " [read]" + state
+			}
 			fmt.Fprintf(w, "  %-12s %s (%s)%s\n", g.Kind, g.Name, g.ID, state)
 		}
 	}
