@@ -816,43 +816,17 @@ func NewHTTPHandler(api *http.Client, principal PrincipalFunc) http.Handler {
 	})
 }
 
-// docProject resolves a doc tool's scope to (projectID, hub). Shared
-// documents are hub-authoritative - the local service holds none - so
-// unlike the other tools these talk to the project's hub directly and
-// refuse plainly when offline: CAS needs the hub, and the bound file plus
-// the checkpoint publisher already cover the offline case.
-func (s *srv) docProject(scope string) (string, *adapter.HubConfig, error) {
-	project := s.project
-	if strings.HasPrefix(scope, "group:") {
-		id, err := ident.GroupProject(strings.TrimPrefix(scope, "group:"))
-		if err != nil {
-			return "", nil, err
-		}
-		if s.project != "" && !slices.Contains(s.groups, id) {
-			return "", nil, fmt.Errorf("this project has not declared group %q in .aimem.json", strings.TrimPrefix(scope, "group:"))
-		}
-		project = id
-	}
-	if project == "" {
-		return "", nil, fmt.Errorf("a project or group scope is required on this server")
-	}
-	hubName, err := ident.ProjectHubNameStrict(".")
-	if err != nil {
-		return "", nil, err // an invalid or unreadable binding fails loudly, never routes to the default hub
-	}
-	_, hub := adapter.ResolveHub(mcpStateRoot(), hubName)
-	if hub == nil {
-		return "", nil, fmt.Errorf("no hub configured - shared documents live on the project's hub; for a bound file, edit it directly and the checkpoint publisher delivers it when a hub is reachable")
-	}
-	return project, hub, nil
-}
-
 func (s *srv) docTool(p *toolParams) (string, error) {
-	a := p.Arguments
-	project, hub, err := s.docProject(a.Scope)
+	d, err := s.docProject(p.Arguments.Scope, p.Name == "update_doc")
 	if err != nil {
 		return "", err
 	}
+	return d.finish(s.docCall(p, d))
+}
+
+func (s *srv) docCall(p *toolParams, d *docScope) (string, error) {
+	a := p.Arguments
+	project, hub := d.project, d.hub
 	c := adapter.NewClient(mcpStateRoot())
 	switch p.Name {
 	case "list_docs":
@@ -867,7 +841,7 @@ func (s *srv) docTool(p *toolParams) (string, error) {
 		var b strings.Builder
 		total := 0
 		for _, sc := range scopes {
-			docs, err := c.ListHubDocs(hub, sc)
+			docs, err := c.ListHubDocs(d.readHub(sc), sc)
 			if err != nil {
 				if sc == project {
 					return "", err
@@ -893,7 +867,7 @@ func (s *srv) docTool(p *toolParams) (string, error) {
 		}
 		return b.String(), nil
 	case "read_doc":
-		doc, err := c.GetHubDoc(hub, project, a.Name, 0)
+		doc, err := c.GetHubDoc(d.readHub(project), project, a.Name, 0)
 		if err != nil {
 			return "", err
 		}
@@ -958,10 +932,19 @@ func (s *srv) colTool(p *toolParams) (string, error) {
 			}
 		}
 	}
-	project, hub, err := s.docProject(scope)
+	d, err := s.docProject(scope, p.Name == "put_record")
 	if err != nil {
 		return "", err
 	}
+	return d.finish(s.colCall(p, d))
+}
+
+// colCall runs one collection tool. Records have no route a task credential
+// may use, so every call goes out with the checkpoint credential, after
+// docProject confirmed the scope.
+func (s *srv) colCall(p *toolParams, d *docScope) (string, error) {
+	a := p.Arguments
+	project, hub := d.project, d.hub
 	c := adapter.NewClient(mcpStateRoot())
 	switch p.Name {
 	case "list_records":

@@ -46,6 +46,12 @@ system specifics.
      (`scope: "group:<name>"`) are how a runbook shared by a knowledge
      group reaches you — most member checkouts have no bound file, so
      the tools are the only access.
+   - The document and record tools end each result with a bracketed
+     line naming the hub, the credential and whether your task
+     credential confirmed the project ("scope not confirmed" means the
+     hub entry holds no task credential). A refusal that says the
+     project "was not confirmed" sent nothing; report it rather than
+     working around it.
    - `list_records` / `get_record` / `put_record` — the **wiki**
      (structured collections): live trees of small JSON records with
      slash-path ids (`api/messages/create`), for structured reference
