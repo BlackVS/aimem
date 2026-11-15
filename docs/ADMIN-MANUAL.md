@@ -938,6 +938,38 @@ one is re-selected without an import; the hub itself never runs Git.
 The prerequisites on the hub host are therefore those of these admin
 commands only: `git`, or https to the forge.
 
+**The reference set from a release.** Every release publishes the
+reference set as `aimem-process.tar.gz`, listed in its `SHA256SUMS` and
+attested with the other assets: the tag's `processes/aimem`, recording the
+tag's commit. An aiforge export carries it with the release's other assets
+under `<base>/aimem/<tag>/`, `SHA256SUMS` beside it, so a hub host in a
+closed network needs no `process export`.
+
+The route that needs no `git` makes it the hub's default, which takes the
+commit from the archive itself (see "On a hub host without network
+access" above); `tasks on` then applies it to a project with no process:
+
+```sh
+cd /media/aiforge-export/aimem/<tag>
+aimem process default set https://github.com/BlackVS/aimem <tag> \
+    --from-archive aimem-process.tar.gz
+```
+
+To select it for one project, give `select` the commit the archive
+records. `git get-tar-commit-id` prints it, on any machine that has
+`git`; a closed-network hub host may have none (`install-hub.sh` warns
+about such a host), so read it where `git` is and carry it over with the
+archive:
+
+```sh
+gunzip -c aimem-process.tar.gz | git get-tar-commit-id    # any machine with git
+aimem process select https://github.com/BlackVS/aimem <commit> --commit \
+    --from-archive aimem-process.tar.gz -p <project>        # on the hub host
+```
+
+The hub then shows the public repository and that commit, as a
+selection read from Git would.
+
 The forge reads (the tarball and the ref advertisement) are anonymous
 unless `AIMEM_PROCESS_FORGE_TOKEN` is set in the hub user's
 `~/.config/aimem/env`: a read-only token the forge accepts for the
@@ -1136,9 +1168,29 @@ It publishes them as release assets with `LICENSE` and a `SHA256SUMS` that
 covers both. The release notes are the tag's CHANGELOG section, followed by
 the license URL and the `Required Notice:` lines from `LICENSE`.
 
+Two jobs make the release, so the code the tests run never holds a token
+that writes:
+
+- `build` has read access only. It checks out the tag, refuses a tag that
+  is not on master or that the installers do not pin, runs the tests,
+  builds every asset into `dist/` with its `SHA256SUMS`, writes the
+  release notes, and hands these over as a workflow artifact. The digests
+  of `SHA256SUMS` and of the notes leave the job separately, as job
+  outputs.
+- `publish` holds `contents: write` and the OIDC token the attestation is
+  signed with, checks out nothing and runs no code from the repository.
+  It checks the downloaded `SHA256SUMS` and notes against those digests,
+  every file against `SHA256SUMS`, and that the files are exactly the
+  ones `SHA256SUMS` lists, nothing more and nothing missing. Then it
+  attests the files and creates the release with all of them in one step.
+
+A failure anywhere in `build`, or in any check of `publish`, publishes
+nothing. No checkout in the workflows keeps the token in its git
+configuration (`persist-credentials: false`).
+
 `SHA256SUMS` is a transport check: it shows that a download arrived as
 published, not who published it, because whoever could replace an asset
-could replace the sums with it. The release job also attests the build
+could replace the sums with it. The publish job also attests the build
 provenance of every published file, `SHA256SUMS` included, through
 `actions/attest-build-provenance`. The attestation ties each file's digest
 to this repository's release workflow at the tagged commit, and GitHub's

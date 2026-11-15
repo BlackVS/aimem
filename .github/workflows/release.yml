@@ -4,6 +4,12 @@ name: Release
 # The installers (boot.sh / boot.ps1 / install-hub.sh) download these assets
 # for the release they pin, so every platform they offer must be built here,
 # and every file they read is an asset listed in SHA256SUMS.
+#
+# Two jobs make the release. `build` checks out the tag, runs the tests and
+# builds every asset with read access only; `publish` holds the write
+# permissions and the OIDC token the attestation is signed with, checks out
+# nothing and runs no code from the repository: it checks the files `build`
+# handed over, attests them and creates the release.
 on:
   push:
     tags: ['v*']
@@ -67,18 +73,25 @@ jobs:
       - name: macOS install registers launchd agents
         run: bash scripts/check-launchd-install.sh
 
-  release:
-    needs: [ref, macos]
+  # Everything that runs code from the repository runs here, with read
+  # access only: the tests can reach no token that writes, and no OIDC
+  # token to sign with. The guards need the checkout, so they run here too;
+  # a failure in any step of this job publishes nothing, since `publish`
+  # needs it.
+  build:
+    needs: ref
     runs-on: ubuntu-latest
     permissions:
-      contents: write       # create the release and upload its assets
-      id-token: write       # the OIDC token the attestation is signed with
-      attestations: write   # store the attestation
+      contents: read
+    outputs:
+      sums: ${{ steps.hand-over.outputs.sums }}
+      notes: ${{ steps.hand-over.outputs.notes }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ github.event.inputs.tag || github.ref }}
           fetch-depth: 0   # full history: the guard below needs merge-base
+          persist-credentials: false   # the fetch below reads this public repository anonymously
 
       # Releases ship only what master has merged: refuse to build a tag
       # whose commit is not reachable from master, so a commit that never
@@ -147,6 +160,11 @@ jobs:
           cp install.ps1 dist/install.ps1
           cp install-hub.sh dist/install-hub.sh
           cp .opencode/plugin/aimem.ts dist/aimem-opencode.ts
+          # The reference process set as an archive, for a hub host without
+          # access to this repository (ADMIN-MANUAL, "Selecting a project's
+          # process documents"): the tag's processes/aimem, read from this
+          # checkout, recording the tag's commit.
+          sh scripts/process-archive.sh dist/aimem-linux-amd64 . dist
           (cd dist && sha256sum * > SHA256SUMS)
 
       # The release body is the tag's CHANGELOG section — written by a
@@ -180,6 +198,68 @@ jobs:
             printf '%s\n' "$notices"
           } >> release_notes.md
 
+      # The digests of SHA256SUMS and the notes leave this job as job
+      # outputs, apart from the artifact: `publish` checks the artifact it
+      # downloads against them, and SHA256SUMS then vouches for every other
+      # file.
+      - name: Hand over the digests
+        id: hand-over
+        run: |
+          echo "sums=$(sha256sum dist/SHA256SUMS | cut -d' ' -f1)" >> "$GITHUB_OUTPUT"
+          echo "notes=$(sha256sum release_notes.md | cut -d' ' -f1)" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: release
+          path: |
+            dist/
+            release_notes.md
+          if-no-files-found: error
+          retention-days: 1
+
+  publish:
+    needs: [ref, macos, build]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write       # create the release and upload its assets
+      id-token: write       # the OIDC token the attestation is signed with
+      attestations: write   # store the attestation
+    steps:
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: release
+          path: release
+
+      - name: SHA256SUMS and the notes are the ones build produced
+        working-directory: release
+        env:
+          SUMS: ${{ needs.build.outputs.sums }}
+          NOTES: ${{ needs.build.outputs.notes }}
+        run: |
+          printf '%s  %s\n' "$SUMS" dist/SHA256SUMS "$NOTES" release_notes.md | sha256sum -c --strict - ||
+            { echo "::error::the downloaded SHA256SUMS or release notes are not the ones the build job produced"; exit 1; }
+
+      - name: Every file matches SHA256SUMS
+        working-directory: release/dist
+        run: |
+          sha256sum -c --strict SHA256SUMS ||
+            { echo "::error::a file does not match its line in SHA256SUMS"; exit 1; }
+
+      # `sha256sum -c` ignores a file SHA256SUMS does not list, and the two
+      # steps below attest and publish dist/*: the files must be exactly the
+      # ones listed, nothing more and nothing missing.
+      - name: dist holds exactly the files SHA256SUMS lists
+        working-directory: release/dist
+        run: |
+          listed=$(sed 's/^[0-9a-f]\{64\} [ *]//' SHA256SUMS | LC_ALL=C sort)
+          present=$(find . -mindepth 1 -maxdepth 1 ! -name SHA256SUMS -printf '%P\n' | LC_ALL=C sort)
+          if [ "$listed" != "$present" ]; then
+            echo "::error::the files handed over are not exactly the files SHA256SUMS lists"
+            echo "listed only in SHA256SUMS:"; comm -23 <(printf '%s\n' "$listed") <(printf '%s\n' "$present")
+            echo "present but not listed:"; comm -13 <(printf '%s\n' "$listed") <(printf '%s\n' "$present")
+            exit 1
+          fi
+
       # SHA256SUMS proves a download arrived intact, not who built it: one
       # who could change an asset could change the sums with it. The
       # attestation ties every published file, SHA256SUMS included, to this
@@ -190,10 +270,10 @@ jobs:
       - name: Attest build provenance
         uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
         with:
-          subject-path: dist/*
+          subject-path: release/dist/*
 
       - uses: softprops/action-gh-release@8a0cd651e5b2365bd640854a3fa5dfc70e4875f3 # v3.0.4
         with:
           tag_name: ${{ github.event.inputs.tag || github.ref_name }}
-          body_path: release_notes.md
-          files: dist/*
+          body_path: release/release_notes.md
+          files: release/dist/*

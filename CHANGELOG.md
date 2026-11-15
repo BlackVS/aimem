@@ -38,6 +38,16 @@ currently 25); a binary refuses a database newer than it understands.
   http (PowerShell 7 refuses one). `boot.ps1` now follows each redirect
   itself, as the forge's release downloads need, and stops the install,
   with nothing installed, at a redirect to anything but https.
+- **The release is built without write permissions.** The tests and the
+  cross-build ran in the job that held `contents: write` and the OIDC token
+  the attestation is signed with, and its checkout kept the token in the git
+  configuration. A `build` job with read access only now runs the guards,
+  the tests and the build, and hands the files to a `publish` job as a
+  workflow artifact. `publish` checks out nothing: it checks the artifact
+  against the digests `build` passed as job outputs, every file against
+  `SHA256SUMS`, and that the files are exactly the ones `SHA256SUMS` lists,
+  then attests them and creates the release. No checkout in
+  `.github/workflows` keeps the token (`persist-credentials: false`).
 
 ### Changed
 
@@ -61,6 +71,20 @@ currently 25); a binary refuses a database newer than it understands.
   export.
 - **Faster Windows installer tests.** The documented Windows install test
   runs all its cases in one PowerShell process per shell.
+
+### Added
+
+- **The reference process set is a release asset.** Every release
+  publishes `aimem-process.tar.gz`: the tag's `processes/aimem`, recording
+  the tag's commit, in the form `aimem process select --from-archive`
+  reads, listed in `SHA256SUMS` and attested with the other assets. An
+  aiforge export carries it under `<base>/aimem/<tag>/`, so a hub host in a
+  closed network selects the reference process without `aimem process
+  export` on a connected machine (ADMIN-MANUAL, "Selecting a project's
+  process documents"). `scripts/process-archive.sh` builds it from the
+  checkout, with no network, and a test imports what it builds. A test
+  fails when a text of the set names a host or an IPv4 address that is not
+  on its allow-list (loopback and documentation addresses are).
 
 ## [0.10.24] — 2026-11-15
 
