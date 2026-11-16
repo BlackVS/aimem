@@ -146,7 +146,7 @@ func TestGroupPublishAdopt(t *testing.T) {
 	}
 	for _, line := range []string{
 		`publishing this machine's config to hub "primary"`,
-		"chapters: replaced on the hub (chapters [alpha, gamma] -> [alpha, beta])",
+		`chapters: replaced on the hub (chapters ["alpha", "gamma"] -> ["alpha", "beta"])`,
 		"about: replaced on the hub (17 -> 19 characters)",
 		"policy: not sent (empty on this machine; the hub keeps its value)",
 		"features: not sent",
@@ -202,7 +202,7 @@ func TestGroupPublishAdopt(t *testing.T) {
 	if err != nil {
 		t.Fatalf("adopt: %v\n%s", err, out)
 	}
-	if !strings.Contains(out, "chapters: replaced here (chapters [delta] -> [alpha, beta])") ||
+	if !strings.Contains(out, `chapters: replaced here (chapters ["delta"] -> ["alpha", "beta"])`) ||
 		!strings.Contains(out, "about: replaced here (17 -> 19 characters)") || !strings.Contains(out, "policy: unchanged") {
 		t.Fatalf("adopt output:\n%s", out)
 	}

@@ -17,7 +17,9 @@ import (
 	"net/url"
 	"os"
 	"slices"
+	"strconv"
 	"strings"
+	"time"
 	"unicode/utf8"
 
 	"aimem/internal/adapter"
@@ -68,13 +70,17 @@ func groupHubCmd(reg *store.Registry, db *store.DB, name, gid, flagHub, mode str
 	}
 	fmt.Printf("group %s: adopting the config of hub %q\n", gid, hubName)
 	failed := 0
-	for _, k := range store.GroupConfigKeys {
+	for i, k := range store.GroupConfigKeys {
 		local, _ := db.GetMeta(k)
 		hv, err := hubMeta(h, gid, k)
-		switch {
-		case noSuchGroup(err):
+		if noSuchGroup(err) {
 			return missing()
-		case err != nil:
+		}
+		if unreachable(err) {
+			failed += stopKeys(os.Stdout, k, i, err)
+			break
+		}
+		if err != nil {
 			fmt.Printf("  %s: failed to read the hub's value: %v\n", k, err)
 			failed++
 			continue
@@ -111,7 +117,7 @@ func groupHubCmd(reg *store.Registry, db *store.DB, name, gid, flagHub, mode str
 // number of keys that failed.
 func publishKeys(w io.Writer, db *store.DB, h *adapter.HubConfig, gid string) int {
 	failed := 0
-	for _, k := range store.GroupConfigKeys {
+	for i, k := range store.GroupConfigKeys {
 		local, _ := db.GetMeta(k)
 		if local == "" {
 			fmt.Fprintf(w, "  %s: not sent (empty on this machine; the hub keeps its value)\n", k)
@@ -121,6 +127,8 @@ func publishKeys(w io.Writer, db *store.DB, h *adapter.HubConfig, gid string) in
 		switch {
 		case noSuchGroup(err):
 			hv = "" // the PUT below creates the group on the hub
+		case unreachable(err):
+			return failed + stopKeys(w, k, i, err)
 		case err != nil:
 			fmt.Fprintf(w, "  %s: failed to read the hub's value: %v\n", k, err)
 			failed++
@@ -130,7 +138,9 @@ func publishKeys(w io.Writer, db *store.DB, h *adapter.HubConfig, gid string) in
 			fmt.Fprintf(w, "  %s: unchanged\n", k)
 			continue
 		}
-		if err := putHubMeta(h, gid, k, local); err != nil {
+		if err := putHubMeta(h, gid, k, local); unreachable(err) {
+			return failed + stopKeys(w, k, i, err)
+		} else if err != nil {
 			fmt.Fprintf(w, "  %s: hub refused: %v\n", k, err)
 			failed++
 			continue
@@ -154,8 +164,8 @@ func publishAfterEdit(reg *store.Registry, db *store.DB, name, gid string) {
 			hn = def
 		}
 		h, ok := hubs[hn]
-		if !ok || h.Token == "" {
-			continue
+		if !ok || h.URL == "" || h.Token == "" {
+			continue // as resolveGroupHub refuses it: no API entry for this hub
 		}
 		fmt.Fprintf(os.Stderr, "aimem: group %s: publishing the edit to hub %q\n", gid, hn)
 		if failed := publishKeys(os.Stderr, db, h, gid); failed > 0 {
@@ -208,7 +218,7 @@ func groupMetaPath(gid, key string) string {
 }
 
 func hubMeta(h *adapter.HubConfig, gid, key string) (string, error) {
-	resp, err := hubDo(h, "GET", groupMetaPath(gid, key), nil, "", nil)
+	resp, err := hubDo(h, groupMetaTimeout, "GET", groupMetaPath(gid, key), nil, "", nil)
 	if err != nil {
 		return "", err
 	}
@@ -227,12 +237,32 @@ func putHubMeta(h *adapter.HubConfig, gid, key, value string) error {
 	if err != nil {
 		return err
 	}
-	resp, err := hubDo(h, "PUT", groupMetaPath(gid, key), nil, "application/json", bytes.NewReader(body))
+	resp, err := hubDo(h, groupMetaTimeout, "PUT", groupMetaPath(gid, key), nil, "application/json", bytes.NewReader(body))
 	if err != nil {
 		return err
 	}
 	resp.Body.Close()
 	return nil
+}
+
+// groupMetaTimeout bounds one meta request: a person waits on it, and a
+// hub that accepts the connection and never answers must not hold an
+// edit for the sync's minutes.
+var groupMetaTimeout = 10 * time.Second
+
+// unreachable is an error that is not the hub's answer: the request did
+// not reach the hub or got no answer in time. The remaining keys would
+// meet the same wall, so the loops stop instead of waiting on each.
+func unreachable(err error) bool {
+	var he *hubError
+	return err != nil && !errors.As(err, &he)
+}
+
+// stopKeys reports where a loop over the charter keys stopped and
+// returns the number of keys that did not land: this one and the rest.
+func stopKeys(w io.Writer, k string, i int, err error) int {
+	fmt.Fprintf(w, "  %s: %v; this and the remaining keys were not tried\n", k, err)
+	return len(store.GroupConfigKeys) - i
 }
 
 // noSuchGroup is the hub's deliberate "no such store" answer
@@ -279,9 +309,9 @@ func describeChange(key, from, to string) string {
 		return fmt.Sprintf("%d -> %d characters", utf8.RuneCountInString(from), utf8.RuneCountInString(to))
 	}
 	if from == "" {
-		from = "(empty)"
+		return fmt.Sprintf("(empty) -> %q", to)
 	}
-	return fmt.Sprintf("%s -> %s", from, to)
+	return fmt.Sprintf("%q -> %q", from, to)
 }
 
 func chapterNames(raw string) string {
@@ -291,7 +321,7 @@ func chapterNames(raw string) string {
 	}
 	names := make([]string, len(chs))
 	for i, c := range chs {
-		names[i] = c.Name
+		names[i] = strconv.Quote(c.Name)
 	}
 	return "[" + strings.Join(names, ", ") + "]"
 }

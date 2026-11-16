@@ -564,7 +564,9 @@ common one, over the hub's API with the hub entry's token:
   this machine's, after the same checks. A key empty on the hub keeps
   the local value.
 
-Each prints one line per key and exits non-zero when any key failed.
+Each prints one line per key and exits non-zero when any key failed. A
+hub that cannot be reached, or does not answer within 10 seconds, stops
+the command at that key; the remaining keys are not tried.
 `--hub` may be left out when the group's projects use one hub. A
 publish reaches the hub only: every other machine that already holds a
 value keeps it, and is told at its next sync, until someone runs

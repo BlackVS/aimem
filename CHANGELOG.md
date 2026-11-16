@@ -51,7 +51,8 @@ currently 25); a binary refuses a database newer than it understands.
   - **Editing:** the push after `aimem group <name> --about …` (or any
     edit flag) sends only the keys this machine holds. Before, a machine
     whose `chapters` were empty cleared the hub's chapters when it edited
-    another key. It now uses the sync's hub client.
+    another key. It now uses the sync's hub client, gives each request 10
+    seconds, and stops at the first key that cannot reach the hub.
 
 ## [0.10.26] — 2026-11-15
 

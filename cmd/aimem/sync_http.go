@@ -93,22 +93,26 @@ func syncHub(name string, h *adapter.HubConfig, def, destOverride string) error 
 	return syncOne(h.Sync, name, def)
 }
 
-// syncHTTPClient allows minutes-long streams (a first sync moves whole
+// syncTimeout allows minutes-long streams (a first sync moves whole
 // journals); the adapter's 5s client is for checkpoint pushes only.
+const syncTimeout = 15 * time.Minute
+
 func syncHTTPClient(h *adapter.HubConfig) *http.Client {
-	return h.Client(15 * time.Minute)
+	return h.Client(syncTimeout)
 }
 
 func syncDo(h *adapter.HubConfig, method, path string, q url.Values, body io.Reader) (*http.Response, error) {
-	return hubDo(h, method, path, q, "application/x-ndjson", body)
+	return hubDo(h, syncTimeout, method, path, q, "application/x-ndjson", body)
 }
 
 // hubDo is the one request the writer token goes out on: the sync legs
 // and `aimem group --publish/--adopt/--hub` all reach the hub through it,
 // with the hub entry's URL, token and TLS trust (HubConfig.Client). A
 // non-200 answer comes back as a *hubError carrying the hub's own
-// message and code; a 404 means the hub has no such route.
-func hubDo(h *adapter.HubConfig, method, path string, q url.Values, ctype string, body io.Reader) (*http.Response, error) {
+// message and code; a 404 means the hub has no such route. The timeout
+// bounds the whole request: the sync streams get minutes, one meta key
+// seconds.
+func hubDo(h *adapter.HubConfig, timeout time.Duration, method, path string, q url.Values, ctype string, body io.Reader) (*http.Response, error) {
 	u := strings.TrimRight(h.URL, "/") + path
 	if len(q) > 0 {
 		u += "?" + q.Encode()
@@ -121,7 +125,7 @@ func hubDo(h *adapter.HubConfig, method, path string, q url.Values, ctype string
 	if body != nil {
 		req.Header.Set("Content-Type", ctype)
 	}
-	resp, err := syncHTTPClient(h).Do(req)
+	resp, err := h.Client(timeout).Do(req)
 	if err != nil {
 		return nil, err
 	}
@@ -155,7 +159,7 @@ func (e *hubError) Error() string {
 	if e.msg == "" {
 		return fmt.Sprintf("hub HTTP %d on %s", e.status, e.path)
 	}
-	return fmt.Sprintf("hub HTTP %d on %s: %s", e.status, e.path, e.msg)
+	return fmt.Sprintf("hub HTTP %d on %s: %q", e.status, e.path, e.msg)
 }
 
 // syncPost streams a locally-produced JSONL dump to a sync route and
