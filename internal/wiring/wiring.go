@@ -142,7 +142,8 @@ func checkHandoff(dir string, repair bool) Finding {
 	rel := "docs/SESSION-STATE.md"
 	// os.Stat follows a link, so a handoff reached through one would read
 	// as present while the checkpoint publisher refuses it every time.
-	if err := confine.Check(dir, path); err != nil {
+	// Any other error falls through to the checks below, as before.
+	if err := confine.Check(dir, path); errors.Is(err, confine.ErrLink) {
 		return Finding{File: rel, Level: "fail", Detail: "the handoff is not published: " + err.Error(),
 			Fix: "replace the link with a real directory and file; aimem never reads or writes through a link"}
 	}
