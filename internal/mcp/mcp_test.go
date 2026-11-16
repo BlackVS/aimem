@@ -125,6 +125,54 @@ func TestUpdateDocRefusesSessionState(t *testing.T) {
 	}
 }
 
+// TestUpdateDocRefusesALikelySecretLocally: update_doc applies the document
+// policy before any hub call, names the project, the document and the rule
+// (never the text), and says what to do; a stand-in publishes with a warning
+// that names the project.
+func TestUpdateDocRefusesALikelySecretLocally(t *testing.T) {
+	puts := 0
+	mux := http.NewServeMux()
+	mux.HandleFunc("PUT /v1/projects/{p}/docs/{name}", func(w http.ResponseWriter, r *http.Request) {
+		puts++
+		json.NewEncoder(w).Encode(map[string]any{"rev": 1})
+	})
+	hub := httptest.NewServer(mux)
+	defer hub.Close()
+	root := t.TempDir()
+	t.Setenv("AIMEM_STATE_DIR", root)
+	if err := adapter.SaveHubs(root, map[string]*adapter.HubConfig{
+		"home": {URL: hub.URL, Token: "t"},
+	}, "home"); err != nil {
+		t.Fatal(err)
+	}
+	t.Chdir(t.TempDir())
+
+	s := &srv{project: "projX"}
+	var p toolParams
+	p.Name = "update_doc"
+	p.Arguments.Name = "RUNBOOK"
+	value := strings.Join([]string{"a1b2c3d4e5", "f6g7h8i9j0"}, "")
+	p.Arguments.Body = "api_key = " + value
+	_, err := s.docTool(&p)
+	if err == nil || puts != 0 {
+		t.Fatalf("a long mixed credential was not refused locally: %v (puts %d)", err, puts)
+	}
+	for _, want := range []string{"project projX", "RUNBOOK", "credential assignment", "placeholder"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("the refusal does not name %q: %v", want, err)
+		}
+	}
+	if strings.Contains(err.Error(), value) {
+		t.Fatalf("the refusal carries the matched text: %v", err)
+	}
+
+	p.Arguments.Body = "call with Bearer hub-admin-token-value"
+	msg, err := s.docTool(&p)
+	if err != nil || puts != 1 || !strings.Contains(msg, "WARNING: project projX") {
+		t.Fatalf("a stand-in: msg %q err %v puts %d", msg, err, puts)
+	}
+}
+
 func TestUpdateDocConflictHandsBackBothSides(t *testing.T) {
 	mux := http.NewServeMux()
 	mux.HandleFunc("PUT /v1/projects/{p}/docs/{name}", func(w http.ResponseWriter, r *http.Request) {

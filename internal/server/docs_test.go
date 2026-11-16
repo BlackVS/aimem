@@ -49,3 +49,58 @@ func TestMergeDocEndpoint(t *testing.T) {
 		t.Fatalf("conflict merge: %+v", res)
 	}
 }
+
+// TestPutDocRefusesALikelySecretAndNamesTheProject: the hub applies the
+// document policy itself, so a client that skips or predates the scan
+// cannot publish a secret to every writer; nothing is stored, and the
+// answer names the project and the rule, never the text.
+func TestPutDocRefusesALikelySecretAndNamesTheProject(t *testing.T) {
+	s, reg := testServer(t)
+	value := strings.Join([]string{"abcdefghij", "klmnop123456"}, "")
+	body, _ := json.Marshal(map[string]any{"body": "call with Authorization: Bearer " + value, "base_rev": 0})
+	w := req(t, s.Handler(), "PUT", "/v1/projects/proj-sec/docs/RUNBOOK", string(body))
+	if w.Code != 400 {
+		t.Fatalf("PUT: %d %s, want 400", w.Code, w.Body)
+	}
+	got := w.Body.String()
+	for _, want := range []string{"proj-sec", "RUNBOOK", "bearer token", "placeholder"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("the refusal does not name %q: %s", want, got)
+		}
+	}
+	if strings.Contains(got, value) {
+		t.Fatalf("the refusal carries the matched text: %s", got)
+	}
+	db, _ := reg.Open("proj-sec")
+	if _, err := db.GetDoc("RUNBOOK", 0); err == nil {
+		t.Fatal("a refused document was stored")
+	}
+	// The same value in a wrapper, or with the text a pasted request or
+	// response carries right after it, is still the value.
+	for _, text := range []string{
+		"call with Authorization: Bearer <" + value + ">",
+		`{"Authorization": "Bearer ` + value + `"}`,
+		`["Authorization: Bearer ` + value + `"]`,
+		`<code>Authorization: Bearer ` + value + `</code>`,
+		"Authorization: Bearer " + value + "|next",
+		"Bearer " + value + "&x=1",
+	} {
+		body, _ = json.Marshal(map[string]any{"body": text, "base_rev": 0})
+		if w := req(t, s.Handler(), "PUT", "/v1/projects/proj-sec/docs/RUNBOOK", string(body)); w.Code != 400 {
+			t.Fatalf("%q: PUT %d %s, want 400", text, w.Code, w.Body)
+		}
+		if _, err := db.GetDoc("RUNBOOK", 0); err == nil {
+			t.Fatalf("%q: a refused document was stored", text)
+		}
+	}
+	// A long template name inside a JSON header is a placeholder and publishes.
+	body, _ = json.Marshal(map[string]any{"body": `{"Authorization": "Bearer ${CONFIG_VALUE_123}"}`, "base_rev": 0})
+	if w := req(t, s.Handler(), "PUT", "/v1/projects/proj-sec/docs/HEADERS", string(body)); w.Code != 200 {
+		t.Fatalf("JSON template PUT: %d %s", w.Code, w.Body)
+	}
+	// A placeholder showing the header's form publishes.
+	body, _ = json.Marshal(map[string]any{"body": "call with Authorization: Bearer <token>", "base_rev": 0})
+	if w := req(t, s.Handler(), "PUT", "/v1/projects/proj-sec/docs/RUNBOOK", string(body)); w.Code != 200 {
+		t.Fatalf("placeholder PUT: %d %s", w.Code, w.Body)
+	}
+}

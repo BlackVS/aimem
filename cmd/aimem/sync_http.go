@@ -387,7 +387,7 @@ func syncOneHTTP(name string, h *adapter.HubConfig, def string) error {
 		if dir := c.DocDir(id); dir != "" {
 			for _, r := range c.PublishDocs(dir, id, name, host+"/sync") {
 				if r.Err != nil {
-					adapter.Note(stateRoot(), "aimem: shared doc %s not published during sync: %v", r.Name, r.Err)
+					adapter.Note(stateRoot(), "%s", adapter.DocNotPublished(id, r))
 				}
 			}
 		}

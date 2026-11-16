@@ -67,6 +67,10 @@ func TestUpdateDocDoesNotWriteThroughALink(t *testing.T) {
 			if !strings.Contains(msg, "NOT rewritten") || !strings.Contains(msg, "symbolic link or junction") {
 				t.Fatalf("the reply does not report the refused rewrite: %q", msg)
 			}
+			// docs pull refuses the same link, so the reply names the fix instead.
+			if strings.Contains(msg, "docs pull") || !strings.Contains(msg, "replace the link with a real file") {
+				t.Fatalf("the reply does not give the fix for a link: %q", msg)
+			}
 			if b, _ := os.ReadFile(victim); string(b) != "outside\n" {
 				t.Fatalf("the file behind the link was rewritten: %q", b)
 			}

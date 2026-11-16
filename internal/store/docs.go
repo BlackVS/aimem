@@ -58,6 +58,19 @@ func (e *DocConflict) Error() string {
 		e.Current.Rev, e.Current.UpdatedAt, e.Current.UpdatedBy)
 }
 
+// DocSecretError is the refusal of a document that holds a likely secret
+// under the document policy (redact.ScanDocument). It names the rules,
+// never the matched text; the hub adds the project when it answers.
+type DocSecretError struct {
+	Name  string
+	Rules []string
+}
+
+func (e *DocSecretError) Error() string {
+	return fmt.Sprintf("document %q contains secret-shaped content (%s); refusing to publish it — %s",
+		e.Name, strings.Join(e.Rules, ", "), redact.DocumentFix)
+}
+
 // PutDoc writes a document revision with compare-and-swap semantics:
 // baseRev must equal the current revision (0 for a new document). Two
 // deliberate softenings keep retries safe: an IDENTICAL body succeeds with
@@ -76,12 +89,11 @@ func (d *DB) PutDoc(name, body, updatedBy string, baseRev int64, deleted bool) (
 	}
 	// A pasted secret must not fan out to every machine on the project.
 	// Authored text is otherwise accepted as written (silently redacting
-	// a document would corrupt intended content), so only the unambiguous
-	// shapes refuse — private keys and recognised vendor token formats;
-	// softer matches are the caller's warning (adapter.PublishDocs).
-	if _, refuse := redact.ScanAuthored(body); len(refuse) > 0 {
-		return Doc{}, fmt.Errorf("document %q contains secret-shaped content (%s); refusing to publish it — remove the secret first",
-			name, strings.Join(refuse, ", "))
+	// a document would corrupt intended content), so the document policy
+	// refuses only what it names; its warnings are the caller's to show
+	// (adapter.PublishDocs, MCP update_doc).
+	if _, refuse := redact.ScanDocument(body); len(refuse) > 0 {
+		return Doc{}, &DocSecretError{Name: name, Rules: refuse}
 	}
 	tx, err := d.sql.Begin()
 	if err != nil {
