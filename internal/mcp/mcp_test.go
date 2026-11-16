@@ -130,7 +130,7 @@ func TestUpdateDocConflictHandsBackBothSides(t *testing.T) {
 	mux.HandleFunc("PUT /v1/projects/{p}/docs/{name}", func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusConflict)
 		json.NewEncoder(w).Encode(map[string]any{
-			"error": "stale base_rev", "rev": 9, "updated_by": "minis/opencode",
+			"error": "stale base_rev", "rev": 9, "updated_by": "laptop/opencode",
 			"body": "the hub's current text",
 		})
 	})
@@ -157,7 +157,7 @@ func TestUpdateDocConflictHandsBackBothSides(t *testing.T) {
 	}
 	// The error is the agent's merge input: new rev, the other writer,
 	// and the current body must all be present.
-	for _, want := range []string{"CONFLICT", "rev 9", "minis/opencode", "the hub's current text", "base_rev 9"} {
+	for _, want := range []string{"CONFLICT", "rev 9", "laptop/opencode", "the hub's current text", "base_rev 9"} {
 		if !strings.Contains(err.Error(), want) {
 			t.Fatalf("conflict message missing %q: %v", want, err)
 		}

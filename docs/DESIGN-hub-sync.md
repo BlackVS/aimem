@@ -111,7 +111,7 @@ same posture as `providers.json`):
 
 ```json
 {"tokens": [
-  {"name": "dmbunker", "role": "writer", "sha256": "<hex>"},
+  {"name": "alice", "role": "writer", "sha256": "<hex>"},
   {"name": "ops",      "role": "admin",  "sha256": "<hex>"}
 ]}
 ```

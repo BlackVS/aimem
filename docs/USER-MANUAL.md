@@ -90,7 +90,7 @@ into memories.
 - **project** — default, per-repo.
 - **user** — your cross-project preferences (project ID `user`).
 - **groups** — shared knowledge DBs; a repo opts in via `.aimem.json`:
-  `{"groups":["ai-infra"]}`. Recall with scope=both surfaces group facts.
+  `{"groups":["platform"]}`. Recall with scope=both surfaces group facts.
   The installer creates `.aimem.json` with empty groups (isolated) unless
   `AIMEM_GROUPS` was set; edit and commit it to join groups later.
   **The name IS the group's identity** — there is no hub-scoped

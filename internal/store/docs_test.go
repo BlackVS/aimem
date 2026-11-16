@@ -21,33 +21,33 @@ func TestDocCAS(t *testing.T) {
 	db := openDocDB(t)
 
 	// Create requires base_rev 0.
-	if _, err := db.PutDoc("RUNBOOK", "v1", "minis/test", 3, false); err == nil {
+	if _, err := db.PutDoc("RUNBOOK", "v1", "laptop/test", 3, false); err == nil {
 		t.Fatal("creation with nonzero base_rev accepted")
 	}
-	d1, err := db.PutDoc("RUNBOOK", "v1", "minis/test", 0, false)
+	d1, err := db.PutDoc("RUNBOOK", "v1", "laptop/test", 0, false)
 	if err != nil || d1.Rev != 1 {
 		t.Fatalf("create: %+v, %v", d1, err)
 	}
 
 	// Normal CAS bump.
-	d2, err := db.PutDoc("RUNBOOK", "v2", "dmbunker/test", 1, false)
+	d2, err := db.PutDoc("RUNBOOK", "v2", "alice/test", 1, false)
 	if err != nil || d2.Rev != 2 {
 		t.Fatalf("update: %+v, %v", d2, err)
 	}
 
 	// Identical body: idempotent success at the current rev, ANY base_rev.
-	d3, err := db.PutDoc("RUNBOOK", "v2", "dmbunker/test", 99, false)
+	d3, err := db.PutDoc("RUNBOOK", "v2", "alice/test", 99, false)
 	if err != nil || d3.Rev != 2 {
 		t.Fatalf("identical-body retry not idempotent: %+v, %v", d3, err)
 	}
 
 	// Stale write: refused, and the conflict carries the current doc.
-	_, err = db.PutDoc("RUNBOOK", "v2-from-elsewhere", "minis/test", 1, false)
+	_, err = db.PutDoc("RUNBOOK", "v2-from-elsewhere", "laptop/test", 1, false)
 	var conflict *DocConflict
 	if !errors.As(err, &conflict) {
 		t.Fatalf("stale write returned %v; want *DocConflict", err)
 	}
-	if conflict.Current.Rev != 2 || conflict.Current.Body != "v2" || conflict.Current.UpdatedBy != "dmbunker/test" {
+	if conflict.Current.Rev != 2 || conflict.Current.Body != "v2" || conflict.Current.UpdatedBy != "alice/test" {
 		t.Fatalf("conflict does not carry the current doc: %+v", conflict.Current)
 	}
 

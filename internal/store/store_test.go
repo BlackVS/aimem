@@ -228,7 +228,7 @@ func TestRenameProject(t *testing.T) {
 	}
 
 	// A group DB cites the contributor by id; the rename must follow.
-	grp, err := r.Open("group-ai-infra")
+	grp, err := r.Open("group-platform")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -255,7 +255,7 @@ func TestRenameProject(t *testing.T) {
 		t.Fatalf("memories = %v, %v; want the one fact", mems, err)
 	}
 
-	grp2, err := r.OpenExisting("group-ai-infra")
+	grp2, err := r.OpenExisting("group-platform")
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -27,7 +27,7 @@ func TestNamedTokensRolesAndStamping(t *testing.T) {
 	}
 	aSecret, aDigest, _ := NewTokenSecret()
 	if err := SaveTokens(reg.Root(), []TokenEntry{
-		{Name: "dmbunker", Role: "writer", SHA256: wDigest},
+		{Name: "alice", Role: "writer", SHA256: wDigest},
 		{Name: "ops", Role: "admin", SHA256: aDigest},
 	}); err != nil {
 		t.Fatal(err)
@@ -42,7 +42,7 @@ func TestNamedTokensRolesAndStamping(t *testing.T) {
 		t.Fatalf("writer on writer route: %d", w.Code)
 	}
 	if w := authedReq(t, authed, "GET", "/v1/logs", wSecret, ""); w.Code != 403 ||
-		!strings.Contains(w.Body.String(), "dmbunker") {
+		!strings.Contains(w.Body.String(), "alice") {
 		t.Fatalf("writer on admin route: %d %s", w.Code, w.Body)
 	}
 	// Admin and env tokens pass the admin surface.
@@ -67,7 +67,7 @@ func TestNamedTokensRolesAndStamping(t *testing.T) {
 	}
 	db, _ := reg.OpenExisting("proj-t")
 	doc, err := db.GetDoc("NOTE", 0)
-	if err != nil || doc.UpdatedBy != "dmbunker/host/cli" {
+	if err != nil || doc.UpdatedBy != "alice/host/cli" {
 		t.Fatalf("writer not stamped: %+v err=%v", doc, err)
 	}
 	put2 := `{"body":"# doc v2","base_rev":1,"updated_by":"host/cli"}`

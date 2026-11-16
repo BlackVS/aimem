@@ -26,7 +26,7 @@ func TestMergeOriginAliases(t *testing.T) {
 
 func TestOriginAliasImportHealsGhost(t *testing.T) {
 	r := newTestRegistry(t)
-	grp, err := r.Open("group-oboro")
+	grp, err := r.Open("group-shared")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -41,7 +41,7 @@ func TestOriginAliasImportHealsGhost(t *testing.T) {
 	// The peer's alias record arrives via group-config sync.
 	val, _ := json.Marshal(map[string]string{"gitea-old-id": "aimem"})
 	res := ImportGroupConfigRecord(r, ConfigRecord{
-		Project: "group-oboro", Key: "origin_aliases", Value: string(val),
+		Project: "group-shared", Key: "origin_aliases", Value: string(val),
 	})
 	msg, applied := res.Msg, res.Applied
 	if !applied || !strings.Contains(msg, "1 citation(s) relabeled") {
@@ -66,7 +66,7 @@ func TestOriginAliasImportHealsGhost(t *testing.T) {
 	}
 	// Idempotent: the same record again changes nothing and reports so.
 	if res := ImportGroupConfigRecord(r, ConfigRecord{
-		Project: "group-oboro", Key: "origin_aliases", Value: string(val),
+		Project: "group-shared", Key: "origin_aliases", Value: string(val),
 	}); res.Applied {
 		t.Fatalf("re-import must be a no-op, got applied=true (%s)", res.Msg)
 	}

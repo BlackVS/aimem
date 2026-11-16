@@ -93,7 +93,7 @@ sync's job; capture never grows a network dependency.
 
 - **Staleness banner.** While a doc is open in the editor, poll its rev
   (~every 15s, HEAD-weight GET). If it moves: a banner — "rev N+1 by
-  dmbunker/… arrived — [merge into my draft] [discard mine, load
+  alice/… arrived — [merge into my draft] [discard mine, load
   theirs]" — editor text untouched.
 - **Server-side merge preview.** `POST /v1/projects/{p}/docs/{name}/
   merge {base_rev, body}` → `{merged, conflicts, against_rev}`.
