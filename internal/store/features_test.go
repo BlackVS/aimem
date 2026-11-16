@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"regexp"
 	"slices"
 	"strings"
@@ -537,5 +538,93 @@ func TestFeatureExistingDependencyDoesNotBlockRelease(t *testing.T) {
 	in := TaskReservationInput{TaskID: held.ID, ExpectedRevision: current.Revision, ID: out.Reservation.ID, Fence: out.Reservation.Fence, Content: &c, Reason: "handing back"}
 	if _, err := db.ApplyTaskReservation(ReservationRelease, in, aliceActor, testBinding(aliceActor), "release", nil, allowReservation); err != nil {
 		t.Fatalf("release of a record naming a feature: %v", err)
+	}
+}
+
+// Every rule of a feature's link refuses through both writes that take
+// one, a creation and a conversion, with its own message: the epic rule of
+// every write refuses some of the same links, so the message is what shows
+// the link's own rule ran.
+func TestFeatureLinkValidation(t *testing.T) {
+	_, db := taskDB(t)
+	goal := goalEpic(t, db, "goal")
+	other := goalEpic(t, db, "other")
+	for i, tc := range []struct {
+		name string
+		want string // the rule's own message
+		epic string
+		link FeatureLink
+	}{
+		{"position zero", "position must be", goal, FeatureLink{Goal: goal, Position: 0, Mark: "optional"}},
+		{"position too large", "position must be", goal, FeatureLink{Goal: goal, Position: maxFeaturePosition + 1, Mark: "optional"}},
+		{"mandatory without a ground", "needs a ground", goal, FeatureLink{Goal: goal, Position: 1, Mark: "mandatory"}},
+		{"mandatory with an unknown ground", "needs a ground", goal, FeatureLink{Goal: goal, Position: 1, Mark: "mandatory", Ground: "vibes"}},
+		{"optional with a ground", "has no ground", goal, FeatureLink{Goal: goal, Position: 1, Mark: "optional", Ground: "check"}},
+		{"unknown mark", "mark must be", goal, FeatureLink{Goal: goal, Position: 1, Mark: "nice"}},
+		{"goal differs from the epic", "must be the record's epic", goal, FeatureLink{Goal: other, Position: 1, Mark: "optional"}},
+		{"no epic", "set the record's epic first", "", FeatureLink{Goal: goal, Position: 1, Mark: "optional"}},
+		{"ground note with a control character", "ground_note", goal, FeatureLink{Goal: goal, Position: 1, Mark: "optional", GroundNote: "a\x00b"}},
+		{"alternative too long", "alternative", goal, FeatureLink{Goal: goal, Position: 1, Mark: "optional", Alternative: strings.Repeat("a", maxFeatureNoteBytes+1)}},
+	} {
+		c := content("feature " + tc.name)
+		c.Epic = tc.epic
+		if _, err := db.CreateFeature(c, tc.link, aliceActor, fmt.Sprintf("create-%d", i)); !errors.Is(err, ErrTaskInvalid) || !strings.Contains(err.Error(), tc.want) {
+			t.Errorf("%s: create: %v", tc.name, err)
+		}
+		task, err := db.CreateTask(c, aliceActor, fmt.Sprintf("task-%d", i))
+		if err != nil {
+			t.Fatal(err)
+		}
+		link := tc.link
+		if _, err := db.SetFeature(task.ID, &link, false, task.Revision, aliceActor, fmt.Sprintf("convert-%d", i)); !errors.Is(err, ErrTaskInvalid) || !strings.Contains(err.Error(), tc.want) {
+			t.Errorf("%s: convert: %v", tc.name, err)
+		}
+		if got, err := db.GetTask(task.ID); err != nil || got.Kind != "" || got.Revision != task.Revision {
+			t.Errorf("%s: the refused conversion wrote: %+v, %v", tc.name, got, err)
+		}
+	}
+	if p, err := db.ListTasks(TaskFilter{Kind: "feature"}); err != nil || len(p.Tasks) != 0 {
+		t.Fatalf("a refused link left a feature: %+v, %v", p, err)
+	}
+}
+
+// SetFeature's own input rules: a removal needs a feature, exactly one of
+// a link and remove is given, and a stale revision is a conflict carrying
+// the current record.
+func TestFeatureSetInputs(t *testing.T) {
+	_, db := taskDB(t)
+	goal := goalEpic(t, db, "goal")
+	c := content("plain")
+	c.Epic = goal
+	plain, err := db.CreateTask(c, aliceActor, "plain")
+	if err != nil {
+		t.Fatal(err)
+	}
+	before := len(feedOf(t, db))
+	if _, err := db.SetFeature(plain.ID, nil, true, plain.Revision, aliceActor, "remove-plain"); !errors.Is(err, ErrTaskInvalid) {
+		t.Fatalf("removal on a plain task: %v", err)
+	}
+	if got, _ := db.GetTask(plain.ID); got.Revision != plain.Revision || len(feedOf(t, db)) != before {
+		t.Fatalf("the refused removal wrote: rev %d, feed %d", got.Revision, len(feedOf(t, db)))
+	}
+	link := mandatory(goal)
+	if _, err := db.SetFeature(plain.ID, &link, true, plain.Revision, aliceActor, "both"); !errors.Is(err, ErrTaskInvalid) {
+		t.Fatalf("both a link and remove: %v", err)
+	}
+	if _, err := db.SetFeature(plain.ID, nil, false, plain.Revision, aliceActor, "neither"); !errors.Is(err, ErrTaskInvalid) {
+		t.Fatalf("neither a link nor remove: %v", err)
+	}
+	f, err := db.SetFeature(plain.ID, &link, false, plain.Revision, aliceActor, "convert")
+	if err != nil {
+		t.Fatal(err)
+	}
+	moved := FeatureLink{Goal: goal, Position: 2, Mark: "optional"}
+	_, err = db.SetFeature(f.ID, &moved, false, plain.Revision, aliceActor, "stale")
+	var conflict *TaskConflict
+	if !errors.As(err, &conflict) || conflict.Current.Revision != f.Revision || *conflict.Current.Feature != link {
+		t.Fatalf("stale revision: %v", err)
+	}
+	if got, _ := db.GetTask(f.ID); *got.Feature != link {
+		t.Fatalf("a stale write changed the link: %+v", got.Feature)
 	}
 }
