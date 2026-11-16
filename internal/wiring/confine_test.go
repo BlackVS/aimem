@@ -69,6 +69,18 @@ func TestRepairRefusesFilesBehindALink(t *testing.T) {
 	}
 }
 
+// Only a link gives the link finding. A regular file named docs makes the
+// walk fail with a plain error on Unix (ENOTDIR), which must fall through to
+// the ordinary "missing" finding instead of advice about a link.
+func TestCheckHandoffOtherErrorIsNoLinkFinding(t *testing.T) {
+	dir := t.TempDir()
+	write(t, filepath.Join(dir, "docs"), "a file, not a directory\n")
+	f := checkHandoff(dir, false)
+	if f.Level != "warn" || strings.Contains(f.Detail, "symbolic link") || strings.Contains(f.Fix, "link") {
+		t.Fatalf("a plain error read as a link: %+v", f)
+	}
+}
+
 // A handoff that exists behind a link is no "present" handoff: the
 // checkpoint publisher refuses it, so the check fails, names the link and
 // says how to fix it, with and without repair.

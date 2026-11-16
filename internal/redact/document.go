@@ -75,11 +75,14 @@ const (
 	docRefuse
 )
 
-// The soft rules of patterns, with the value captured. Each matches the same
-// text as its counterpart in patterns.
+// The soft rules of patterns, with the value captured. The bearer value is
+// captured as a whole word, so that a wrapped value is judged too;
+// bearerShape is its counterpart's own shape.
 var (
 	authValue       = regexp.MustCompile(`(?i)\bauthorization\b\s*[:=]\s*(\S+)(?:\s+(\S+))?`)
-	bearerValue     = regexp.MustCompile(`(?i)\bbearer\s+([A-Za-z0-9._~+/=-]{16,})`)
+	bearerValue     = regexp.MustCompile(`(?i)\bbearer\s+(\S+)`)
+	bearerShape     = regexp.MustCompile(`^[A-Za-z0-9._~+/=-]{16,}`)
+	bearerToken     = regexp.MustCompile(`^[A-Za-z0-9._~+/=-]{16,}$`)
 	credentialValue = regexp.MustCompile(`(?i)\b(?:api[_-]?key|apikey|secret[_-]?key|client[_-]?secret|secret|access[_-]?token|refresh[_-]?token|auth[_-]?token|token|passwd|password|access[_-]?key)\b["']?\s*[:=]\s*["']?([^\s"',;]{8,})`)
 
 	scheme = regexp.MustCompile(`(?i)^(bearer|basic|token|digest|negotiate)$`)
@@ -100,16 +103,22 @@ var (
 // after it is most of a secret.
 const shortCut = 12
 
+// bearerOutcome judges the word after "bearer". The word is captured whole,
+// so a wrapper that is no placeholder (`<generated value>`, `*value*`) is
+// unwrapped and judged like a bare value; prose ("bearer of") is no token.
 func bearerOutcome(raw string) docOutcome {
 	if isPlaceholder(raw) {
 		return docNone
 	}
-	v := trimValue(raw)
+	v := strings.Trim(trimValue(raw), "<>[]{}*$%")
 	switch {
+	case !bearerToken.MatchString(v):
+		if bearerShape.MatchString(raw) {
+			return docWarn // the soft rule's shape, cut short by trailing punctuation
+		}
+		return docNone
 	case standIn.MatchString(v):
 		return docWarn
-	case len(v) < 16:
-		return docWarn // what is left once trailing punctuation is trimmed
 	}
 	return docRefuse
 }

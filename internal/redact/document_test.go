@@ -35,6 +35,17 @@ func TestScanDocumentBearerHasThreeOutcomes(t *testing.T) {
 		{fx("Bearer abcdefghij", "klmnop123456"), "refuse"},
 		{fx("Bearer Hub-Admin-", "Token-Value"), "refuse"}, // mixed case is no stand-in
 		{fx("Bearer hubadmintoken", "valuexx"), "refuse"},  // no separator is no stand-in
+		// A wrapper around a generated value is that value (external review of 179ef84).
+		{fx("Authorization: Bearer <a1b2c3d4e5", "f6g7h8i9j0k1>"), "refuse"},
+		{fx("Bearer [a1b2c3d4e5", "f6g7h8i9j0k1]"), "refuse"},
+		{fx("Bearer *a1b2c3d4e5", "f6g7h8i9j0k1*"), "refuse"},
+		{fx("Bearer ${a1b2c3d4e5", "f6g7h8i9j0k1}"), "refuse"},
+		{"Bearer <HUB_ADMIN_TOKEN>", ""},
+		{"Bearer *hub-admin-token-value*", ""},
+		// Prose and short words are no token, as before.
+		{"the bearer of bad news", ""},
+		{"Bearer abc123", ""},
+		{"Bearer abcdefghijklmno.", "warn"}, // the soft shape, cut short by the full stop
 	} {
 		if got := outcome(t, c.text, "bearer token"); got != c.want {
 			t.Errorf("%q: bearer token %q, want %q", c.text, got, c.want)
