@@ -88,7 +88,9 @@ var (
 	scheme = regexp.MustCompile(`(?i)^(bearer|basic|token|digest|negotiate)$`)
 	// A template: <name>, {name}, {{name}}, ${name}, %{name}, [name], $NAME, %NAME%.
 	template = regexp.MustCompile(`^(<[^<>]*>|\{\{.*\}\}|\$\{[^{}]*\}|%\{[^{}]*\}|\{[^{}]*\}|\[[^\[\]]*\]|\$[A-Za-z_][A-Za-z0-9_]*|%[A-Za-z_][A-Za-z0-9_]*%)$`)
-	standIn  = regexp.MustCompile(`^(?:[a-z]+(?:[-_][a-z]+)+|[A-Z]+(?:[-_][A-Z]+)+)$`)
+	// The same forms, plus *name*, at the start of a word that goes on.
+	leadingTemplate = regexp.MustCompile(`^(<[^<>]*>|\{\{.*?\}\}|\$\{[^{}]*\}|%\{[^{}]*\}|\{[^{}]*\}|\[[^\[\]]*\]|\$[A-Za-z_][A-Za-z0-9_]*|%[A-Za-z_][A-Za-z0-9_]*%|\*[^*\s]+\*)`)
+	standIn         = regexp.MustCompile(`^(?:[a-z]+(?:[-_][a-z]+)+|[A-Z]+(?:[-_][A-Z]+)+)$`)
 	// A filesystem path names where a secret lives; it is not one.
 	pathStart  = regexp.MustCompile(`^(?:/|\./|\.\./|~/|[A-Za-z]:[\\/])`)
 	hasLetter  = regexp.MustCompile(`[A-Za-z]`)
@@ -109,10 +111,17 @@ const shortCut = 12
 // follows it (`"}`, `</code>`, `|next`, `&x=1`) is the text around a pasted
 // token, not part of the decision. Prose ("bearer of") is no token.
 func bearerOutcome(raw string) docOutcome {
-	if isPlaceholder(raw) {
+	if isPlaceholder(raw) || leadsWithPlaceholder(raw) {
 		return docNone
 	}
-	run := tokenRun.FindString(strings.TrimLeft(raw, "\"'`(<[{*$%"))
+	s := strings.TrimLeft(raw, "\"'`(")
+	run := tokenRun.FindString(strings.TrimLeft(s, "<[{*$%"))
+	// A value glued onto a short placeholder (`<x>a1b2…`) is judged too.
+	if m := leadingTemplate.FindString(s); m != "" {
+		if after := tokenRun.FindString(s[len(m):]); len(after) > len(run) {
+			run = after
+		}
+	}
 	run = strings.TrimRight(run, ".") // a full stop ends the sentence, not the token
 	switch {
 	case len(run) < 16:
@@ -126,8 +135,22 @@ func bearerOutcome(raw string) docOutcome {
 	return docRefuse
 }
 
+// leadsWithPlaceholder reports a word that begins with a whole placeholder
+// followed by the syntax around it: `${CONFIG_VALUE_123}"}` in a JSON header,
+// `${API_KEY}&x=1` in a query string. A wrapper around a generated value is
+// no placeholder, and neither is one that token characters continue
+// (`<x>a1b2…` is a value glued to a short name).
+func leadsWithPlaceholder(raw string) bool {
+	s := strings.TrimLeft(raw, "\"'`(")
+	m := leadingTemplate.FindString(s)
+	if m == "" || !isPlaceholder(m) {
+		return false
+	}
+	return !tokenRun.MatchString(s[len(m):])
+}
+
 func credentialOutcome(raw string) docOutcome {
-	if isPlaceholder(raw) {
+	if isPlaceholder(raw) || leadsWithPlaceholder(raw) {
 		return docNone
 	}
 	v := trimValue(raw)

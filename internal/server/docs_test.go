@@ -93,6 +93,11 @@ func TestPutDocRefusesALikelySecretAndNamesTheProject(t *testing.T) {
 			t.Fatalf("%q: a refused document was stored", text)
 		}
 	}
+	// A long template name inside a JSON header is a placeholder and publishes.
+	body, _ = json.Marshal(map[string]any{"body": `{"Authorization": "Bearer ${CONFIG_VALUE_123}"}`, "base_rev": 0})
+	if w := req(t, s.Handler(), "PUT", "/v1/projects/proj-sec/docs/HEADERS", string(body)); w.Code != 200 {
+		t.Fatalf("JSON template PUT: %d %s", w.Code, w.Body)
+	}
 	// A placeholder showing the header's form publishes.
 	body, _ = json.Marshal(map[string]any{"body": "call with Authorization: Bearer <token>", "base_rev": 0})
 	if w := req(t, s.Handler(), "PUT", "/v1/projects/proj-sec/docs/RUNBOOK", string(body)); w.Code != 200 {

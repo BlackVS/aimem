@@ -71,6 +71,20 @@ func TestScanDocumentInputsAgainstEveryRule(t *testing.T) {
 		{"Authorization: Bearer <" + v + ">", "warn", "refuse", ""},
 		{"Authorization: Bearer *" + v + "*", "warn", "refuse", ""},
 		{`{"Authorization": "Bearer <token>"}`, "", "", ""},
+		// A long template name with the syntax that follows it (external
+		// review of f46b26e), after either rule, is still a placeholder.
+		{`{"Authorization": "Bearer ${CONFIG_VALUE_123}"}`, "", "", ""},
+		{"Authorization: Bearer $CONFIG_VALUE_123|next", "warn", "", ""},
+		{"Bearer <CONFIG_VALUE_123>.", "", "", ""},
+		{"Bearer ${CONFIG_VALUE_123}.", "", "", ""},
+		{"curl https://h.example/v1?api_key=${CONFIG_VALUE_123}&x=1", "", "", ""},
+		{`{"api_key": "{{ .ConfigValue123 }}"}`, "", "", ""},
+		// A wrapped generated value with syntax after it, and a value glued
+		// onto a short placeholder, are values.
+		{`{"Authorization": "Bearer <` + v + `>"}`, "", "refuse", ""},
+		{"api_key=<" + v + ">&x=1", "", "", "refuse"},
+		{"Bearer <x>" + v, "", "refuse", ""},
+		{"api_key=<x>" + v, "", "", "refuse"},
 		{`curl -H "Authorization: Bearer ${TOKEN}"`, "", "", ""},
 		{"Authorization: Bearer <HUB_ADMIN_TOKEN>", "", "", ""},
 		// Stand-ins and prose.
