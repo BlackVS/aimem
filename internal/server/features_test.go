@@ -336,6 +336,38 @@ func TestFeatureRouteRefusals(t *testing.T) {
 	}
 }
 
+// TestFeatureRetryReplaysBeforeTheTextCheck: a retry of a feature's create
+// or set returns the first answer even when the model, which cleared the
+// text the first time, now refuses it; other content under the key is a
+// new write and is checked.
+func TestFeatureRetryReplaysBeforeTheTextCheck(t *testing.T) {
+	g := newFeatureRig(t)
+	j := &fakeJudge{readable: true}
+	g.s.judge = j
+	create := fmt.Sprintf(`{"title":"flagged","epic":%q,"feature":{"goal":%q,"position":1,"mark":"optional","alternative":"Checkpoint74files written"}}`, g.goal, g.goal)
+	first := decodeTask(t, taskReq(t, g.h, "POST", "/v1/projects/alpha/tasks", g.alice, "fc", create))
+	j.readable = false
+	if again := decodeTask(t, taskReq(t, g.h, "POST", "/v1/projects/alpha/tasks", g.alice, "fc", create)); again.ID != first.ID || again.Revision != 1 {
+		t.Fatalf("retried feature create returned %+v, want %+v", again, first)
+	}
+	refusedText(t, taskReq(t, g.h, "POST", "/v1/projects/alpha/tasks", g.alice, "fc", strings.Replace(create, `"flagged"`, `"other"`, 1)),
+		"alternative", "Checkpoint74files", stageFilterModel)
+
+	// set_feature: A sets cleared text, B replaces it, A is retried.
+	id := g.task(t, "plain", "READY")
+	j.readable = true
+	setA := fmt.Sprintf(`{"goal":%q,"position":2,"mark":"optional","alternative":"Checkpoint74files written","expected_revision":1}`, g.goal)
+	a := decodeTask(t, g.setFeature(t, g.alice, id, "sa", setA))
+	j.readable = false
+	if w := g.setFeature(t, g.alice, id, "sb", fmt.Sprintf(`{"goal":%q,"position":2,"mark":"optional","alternative":"none","expected_revision":2}`, g.goal)); w.Code != 200 {
+		t.Fatalf("set B: %d %s", w.Code, w.Body)
+	}
+	if again := decodeTask(t, g.setFeature(t, g.alice, id, "sa", setA)); again.Revision != a.Revision || again.Feature == nil || again.Feature.Alternative != a.Feature.Alternative {
+		t.Fatalf("retried set_feature returned %+v, want A's receipt %+v", again, a)
+	}
+	refusedText(t, g.setFeature(t, g.alice, id, "sa", strings.Replace(setA, `"position":2`, `"position":3`, 1)), "alternative", "Checkpoint74files", stageFilterModel)
+}
+
 // A client one release older reads a feature by its id and its full update
 // keeps the kind and the link; its list (no kind) shows work only.
 func TestFeatureOlderClientOnThisHub(t *testing.T) {
@@ -458,5 +490,63 @@ func TestListFeaturesArchivedAndCap(t *testing.T) {
 	}
 	if read(); len(page.Features) != maxGoalFeatures || !page.Truncated {
 		t.Fatalf("over the cap: %d, truncated %v", len(page.Features), page.Truncated)
+	}
+}
+
+// A confirmation's retry returns its receipt although the task changed
+// since: it was taken out and turned into a feature (the order hands found).
+func TestFeatureConfirmRetryAfterTheTaskChanged(t *testing.T) {
+	g := newFeatureRig(t)
+	f := g.feature(t, "the feature", 1)
+	task := g.task(t, "the work", "READY")
+	confirm := fmt.Sprintf(`{"task":%q,"expected_revision":1}`, task)
+	first := decodeTask(t, g.confirm(t, g.alice, f, "ck", confirm))
+	if w := g.confirm(t, g.alice, f, g.key(), fmt.Sprintf(`{"task":%q,"remove":true,"expected_revision":2}`, task)); w.Code != 200 {
+		t.Fatalf("remove: %d %s", w.Code, w.Body)
+	}
+	if w := g.setFeature(t, g.alice, task, g.key(), fmt.Sprintf(`{"goal":%q,"position":2,"mark":"optional","expected_revision":1}`, g.goal)); w.Code != 200 {
+		t.Fatalf("convert: %d %s", w.Code, w.Body)
+	}
+	if w := g.confirm(t, g.alice, f, g.key(), confirm); w.Code != 400 || !strings.Contains(w.Body.String(), "is a feature") {
+		t.Fatalf("a new confirmation of a feature: %d %s", w.Code, w.Body)
+	}
+	// By the full id, and by a prefix that resolves to it.
+	for _, arg := range []string{task, task[:18]} {
+		again := decodeTask(t, g.confirm(t, g.alice, f, "ck", fmt.Sprintf(`{"task":%q,"expected_revision":1}`, arg)))
+		if again.Revision != first.Revision || len(again.Dependencies) != 1 {
+			t.Fatalf("retried confirmation returned %+v, want %+v", again, first)
+		}
+	}
+}
+
+// A receipt never grants: after the caller's grant is removed, a retry of
+// each feature write with its first key is refused and returns no record.
+func TestFeatureRetryAfterTheGrantIsRemovedIsRefused(t *testing.T) {
+	g := newFeatureRig(t)
+	create := fmt.Sprintf(`{"title":"f","epic":%q,"feature":{"goal":%q,"position":1,"mark":"optional"}}`, g.goal, g.goal)
+	w := taskReq(t, g.h, "POST", "/v1/projects/alpha/tasks", g.alice, "gc", create)
+	f := decodeTask(t, w).ID
+	task := g.task(t, "work", "READY")
+	set := fmt.Sprintf(`{"goal":%q,"position":2,"mark":"optional","expected_revision":1}`, g.goal)
+	other := g.task(t, "to convert", "READY")
+	if w := g.setFeature(t, g.alice, other, "gs", set); w.Code != 200 {
+		t.Fatalf("set: %d %s", w.Code, w.Body)
+	}
+	confirm := fmt.Sprintf(`{"task":%q,"expected_revision":1}`, task)
+	if w := g.confirm(t, g.alice, f, "gk", confirm); w.Code != 200 {
+		t.Fatalf("confirm: %d %s", w.Code, w.Body)
+	}
+	db, _ := g.s.openAccess(false)
+	if err := db.SetGrant("admin", g.alphaInstance, "user", g.aliceUser, false); err != nil {
+		t.Fatal(err)
+	}
+	for name, w := range map[string]*httptest.ResponseRecorder{
+		"create":  taskReq(t, g.h, "POST", "/v1/projects/alpha/tasks", g.alice, "gc", create),
+		"set":     g.setFeature(t, g.alice, other, "gs", set),
+		"confirm": g.confirm(t, g.alice, f, "gk", confirm),
+	} {
+		if w.Code != 404 || strings.Contains(w.Body.String(), `"revision"`) {
+			t.Errorf("%s retried without a grant: %d %s", name, w.Code, w.Body)
+		}
 	}
 }

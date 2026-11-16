@@ -77,6 +77,11 @@ func (s *Server) setFeature(w http.ResponseWriter, r *http.Request) {
 	} else {
 		l := body.link()
 		link = &l
+	}
+	// A retry of a stored write returns its receipt unchecked: its text was
+	// accepted when it was first written.
+	if link != nil && !db.SetFeatureReplays(r.PathValue("id"), link, false, body.ExpectedRevision, taskActor(r), key) {
+		l := *link
 		var prev *store.FeatureLink
 		if cur, err := db.GetTask(r.PathValue("id")); err == nil {
 			prev = cur.Feature
@@ -128,7 +133,10 @@ func (s *Server) confirmFeatureTask(w http.ResponseWriter, r *http.Request) {
 	// Taking a task out needs only its id, which the feature holds: the
 	// task may have been dropped or become unreadable since.
 	if !body.Remove || !store.FullTaskID(taskID) {
-		id, ok := s.confirmableTask(w, r, taskID)
+		replays := func(id string) bool {
+			return db.ConfirmFeatureTaskReplays(r.PathValue("id"), id, body.Remove, body.ExpectedRevision, taskActor(r), key)
+		}
+		id, ok := s.confirmableTask(w, r, taskID, replays)
 		if !ok {
 			return
 		}
@@ -149,8 +157,10 @@ func (s *Server) confirmFeatureTask(w http.ResponseWriter, r *http.Request) {
 }
 
 // confirmableTask resolves the task argument among the tasks the caller may
-// read, in any project, and refuses a feature.
-func (s *Server) confirmableTask(w http.ResponseWriter, r *http.Request, arg string) (string, bool) {
+// read, in any project, and refuses a feature. A retry of a stored write
+// (replays) returns its receipt: the task was accepted when it was first
+// written, and may have changed since.
+func (s *Server) confirmableTask(w http.ResponseWriter, r *http.Request, arg string, replays func(id string) bool) (string, bool) {
 	if arg == "" {
 		s.fail(w, http.StatusBadRequest, errors.New("task is required: the id of the task to confirm"))
 		return "", false
@@ -178,6 +188,9 @@ func (s *Server) confirmableTask(w http.ResponseWriter, r *http.Request, arg str
 	if ok, err := readable(p); err != nil || !ok {
 		s.fail(w, http.StatusBadRequest, errConfirmTaskUnknown)
 		return "", false
+	}
+	if replays(id) {
+		return id, true
 	}
 	t, err := pdb.GetTask(id)
 	if err != nil {

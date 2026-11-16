@@ -777,13 +777,14 @@ func (s *Server) createTask(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	content := body.TaskContent
-	// A retry of a stored task create returns its receipt unchecked: the
-	// text was accepted when it was first written. A feature's create is
-	// always checked: CreateReplays answers for the task create, whose
-	// receipt the feature's create does not return, so a key reused from a
-	// task create would otherwise store the link's text unchecked. On a
-	// true retry the text passes again.
-	if body.Feature != nil || !db.CreateReplays(content, taskActor(r), key) {
+	// A retry of a stored create returns its receipt unchecked: the text was
+	// accepted when it was first written. The two creates keep their own
+	// receipts, so each asks its own.
+	replays := db.CreateReplays(content, taskActor(r), key)
+	if body.Feature != nil {
+		replays = db.CreateFeatureReplays(content, *body.Feature, taskActor(r), key)
+	}
+	if !replays {
 		ref := s.checkTaskFields(r.Context(), content, nil)
 		if ref == nil && body.Feature != nil {
 			ref = s.checkFeatureText(r.Context(), *body.Feature, nil)
