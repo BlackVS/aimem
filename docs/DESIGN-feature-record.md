@@ -43,7 +43,8 @@ task's editable content.
   No new table.
 - Routes and MCP: every existing task route and tool serves features as
   they are. Two new writes (set the link, confirm a task) and one new read
-  (the features of a goal), plus a `kind` filter on the existing reads.
+  (the features of a goal), plus a `feature` link on creation and a `kind`
+  filter on the existing reads.
 - Readers of tasks: each one decides once whether it sees features
   ([section 7](#7-readers-of-tasks-and-what-each-sees)). Most need no change,
   because a feature is a board record like a task. The ones that do (lists,
@@ -78,20 +79,41 @@ duplicates the task surface for the sake of a few fields, and its carry-over
 is a copy that can lose data. (c) is rejected because it moves a cheap
 column filter into a join that every excluding reader must remember.
 
-Two rules make (a) safe to share a table with work:
+Four rules make (a) safe to share a table with work:
 
 - **The kind and the link are not task content.** `update_task` replaces
   the whole content, and a client that does not know features (one release
   older, or the board's page) sends content without them. So neither is in
-  `TaskContent`: the kind is set by the link write ([section 6](#6-the-surface))
-  and never by a task write, and a task write keeps the stored link as it
-  is. A full update of a feature by an older client therefore cannot turn
-  it back into a task or drop its link.
+  `TaskContent`. The kind is set only by a feature's creation or by the
+  link write ([section 6](#6-the-surface)), never by a task write, and a task
+  write keeps the stored link as it is. A full update of a feature by an
+  older client therefore cannot turn it back into a task or drop its link.
 - **A feature is never work.** It cannot be reserved, offered to a team
-  member or put under team management, and no task may list a feature
-  among its dependencies. The last rule keeps the dependency graph one-way
-  (feature → tasks → tasks), so the reservation code that walks a claimed
-  task's dependencies never meets a feature.
+  member or put under team management.
+- **No task depends on a feature, and the readers carry that guarantee.**
+  Dependencies cross projects and a task write checks only each id's shape
+  today, so a write cannot know about every project. The guarantee
+  therefore sits where a dependency is acted on:
+  - a reservation claim refuses a task whose dependency is a feature, and so
+    does the reconciliation of a held reservation (the walker in
+    `store/task_reservation_dependencies.go` reads every dependency already);
+  - a team offer refuses one too (`assignmentReady` reads every dependency
+    already).
+
+  Both name the feature in the refusal. The writes add a cheap check
+  inside their own project, in their transaction:
+  - a task write refuses a dependency on a feature of the same project;
+  - `set_feature` refuses to convert a task that a task of the same project
+    depends on, and names those tasks.
+
+  A task in another project can still list a feature, before or after the
+  conversion. That is why the readers, not the writes, are the guarantee.
+- **A feature never enters the board feed.** The feed
+  ([section 7](#7-readers-of-tasks-and-what-each-sees)) is how a team learns
+  of work, and its consumer keeps each task's last state. So a feature born
+  as one is created in a single write and never appears in the feed. A task
+  turned into a feature gets one closing entry, which ends its life as
+  work for every consumer ([section 9](#9-migration-and-the-carry-over)).
 
 ### What a plain list of the aicrew goal returns, before and after
 
@@ -215,7 +237,7 @@ Every route below sits beside the task routes and is guarded as they are:
 
 | MCP tool | HTTP | Inputs | Result |
 | --- | --- | --- | --- |
-| `set_feature` | `PUT /v1/tasks/{id}/feature` | `id` (a task), `goal`, `position`, `mark`, `ground`, `ground_note`, `alternative`, `expected_revision`, `idempotency_key` | The feature record, with `kind` and `feature`. The first call turns the task into a feature, refused while the task is reserved, team-managed, or listed in another task's dependencies (the refusal names those tasks). Later calls change the link. |
+| `set_feature` | `PUT /v1/tasks/{id}/feature` | `id` (a task or a feature), `goal`, `position`, `mark`, `ground`, `ground_note`, `alternative`, `remove` (optional), `expected_revision`, `idempotency_key` | The record, with `kind` and `feature`. On a task, it turns the task into a feature and appends the feed's closing entry in the same write. It is refused while the task is reserved, team-managed, or depended on by a task of its own project; the refusal names those tasks. On a feature, it changes the link. With `remove`, it turns a feature back into a task (below). |
 | `confirm_feature_task` | `POST /v1/tasks/{id}/feature/tasks` | `id` (the feature), `task`, `remove` (optional), `expected_revision`, `idempotency_key` | The feature record. Refuses a task that is a feature, and a task that does not exist or that the caller cannot read. |
 | `list_features` | `GET /v1/projects/{p}/epics/{epic}/features` | `epic`, `project` (optional), `include_archived` (optional) | The goal's features in position order. Each row has id, title, state, assignee, revision, `feature` (the link) and the number of confirmed tasks. There is no paging: a goal has 10 to 15 features, and the route caps the list at 100. |
 
@@ -225,13 +247,28 @@ Every route below sits beside the task routes and is guarded as they are:
 | --- | --- | --- |
 | `list_tasks`, `search_tasks` | `GET /v1/projects/{p}/tasks` | New `kind`: `task` (the default for a list), `feature` or `any`. New `feature`: only the tasks that feature's dependencies name in this project. Each row carries `kind` when it is a feature. `search_tasks` defaults to `any`: a search finds a record by its words, whatever it is. |
 | (counts in `list_tasks`) | `GET /v1/projects/{p}/tasks/counts` | New `kind`, default `task`. |
+| `create_task` | `POST /v1/projects/{p}/tasks` | New optional `feature`, the link as `set_feature` takes it. With it, the record is created as a feature in one write: no feed entry, and no moment in which a reader sees it as work. Without it, the record is a task, as today. |
 | `get_task` | `GET /v1/tasks/{id}` | A feature's record carries `kind: "feature"` and its `feature` link. For a task, both are omitted, so a task reads exactly as it does today. |
 | `update_task`, `triage_task` | `PUT /v1/tasks/{id}`, `POST /v1/tasks/{id}/triage` | Unchanged inputs. On a feature they keep the kind and the link. A feature moves to DONE only with at least one evidence reference: "DONE when its check passes and the evidence is recorded" (proposal, 3.3). |
 
+**The way back.** `set_feature` with `remove` turns a feature back into a
+task:
+- it drops the link and appends a feed entry that reopens the record with
+  its current state;
+- it is allowed only while the feature has no confirmed tasks, so a
+  mistaken conversion of a real task is undone in one call;
+- a feature that already has confirmed tasks has them taken out first with
+  `confirm_feature_task` and `remove`, one by one. That is deliberate:
+  turning a feature with work under it into a task is a decision, not an
+  accident to be undone silently.
+
+Like every write, the removal is a revision in the record's history.
+
 How each operation of the goal's check is done:
 
-1. **Set features up:** `create_task` (title, check as acceptance criteria,
-   owner as assignee, state, `epic` = the goal), then `set_feature`.
+1. **Set features up:** `create_task` with the `feature` link (title, check
+   as acceptance criteria, owner as assignee, state, `epic` = the goal).
+   An existing task is turned into one with `set_feature`.
 2. **Confirm a task:** `confirm_feature_task`.
 3. **Read the features of a goal:** `list_features`.
 4. **Read the tasks of a feature:** `list_tasks` with `feature`, plus
@@ -255,15 +292,15 @@ callers.
 | Counts | `store/tasks.go` `CountTasks`; `server/tasks.go` `countTasks` | Only with `kind` | Counts are the workload; features would double-count it. A filter. |
 | One record | `store/tasks.go` `GetTask`, `readTask`; `server/tasks.go` `getTask` | Yes | A feature is read by its id. It adds `kind` and `feature`. |
 | History, comments | `store/tasks.go` `TaskHistory`, `TaskCommentsOrdered`, `AddTaskComment`; their server handlers | Yes | Unchanged: a feature's history and comments are those of its record. A link write is a revision in the history like any other. |
-| Write, triage | `store/tasks.go` `UpdateTask`; `store/task_triage.go` `TriageTask`; `server/textcheck.go` `checkTaskChange`; `server/triage.go` `triageTask` | Yes | They keep the stored kind and link. They refuse a dependency on a feature, a feature's DONE without evidence, and a change of `epic` away from the link's goal. |
+| Write, triage | `store/tasks.go` `CreateTask`, `UpdateTask`; `store/task_triage.go` `TriageTask`; `server/textcheck.go` `checkTaskChange`; `server/triage.go` `triageTask` | Yes | They keep the stored kind and link. A write of a feature records no feed entry (`recordStateChange`). They refuse a dependency on a feature of the same project, a feature's DONE without evidence, and a change of `epic` away from the link's goal. |
 | Id prefix and location | `store/taskprefix.go` (prefix lookup); `store/taskloc.go` `LocateTask`, `scanForTask`; `server/tasks.go` `locateTask` | Yes | Unchanged: a feature id resolves like a task id. |
 | Full-text index | `store/store.go` (the `task_fts` rebuild) and the task writes | Yes | Unchanged: a feature is indexed as a task. |
 | Typed references migration | `store/taskrefs.go` `migrateTypedRefs` | Yes | Unchanged: a past migration that rewrites every body. |
 | Project presence | `store/tasks.go` `HasTasks`, `fileHasTasks`, `EnableTasksWherePresent`; `store/store.go` `Drop`, `MergeProject` | Yes | Unchanged: a project holding only features still holds board records. Dropping or merging it is refused exactly as with tasks. |
-| Board feed (aicrew's `board.read`) | `store/store.go` `task_state_changes` (schema 24) and its writers; `server/boardread.go` `readBoard` | No | The feed exists for pickup, and a feature is never picked up. Its rows are not written for a feature, and a task turned into a feature stops appearing from that revision. |
+| Board feed (aicrew's `board.read`) | `store/task_state_changes.go` `recordStateChange`, `TaskStateChanges`; schema 24 in `store/store.go`; `server/boardread.go` `readBoard` | Once, to close | The feed exists for pickup, and its consumer keeps each task's last state. A feature created as one never enters it. A task turned into one gets a single closing entry, `to: "FEATURE"`, and nothing after it. A feature turned back gets an entry from `FEATURE` to its current state. Section 9 says what a consumer does with them. |
 | Team task read for an offer | `server/taskread.go` `readTaskText` | No | Answers a feature as not found, so a member's offer never reads one. |
-| Reservation claim, dependencies | `store/task_reservation_dependencies.go` `ClaimTaskReservation`, `locateDependencyGraph`, `ReconcileReservationDependencies`; `store/task_reservations.go` `ApplyTaskReservation` | No | A claim on a feature is refused (a feature is not work). The graph cannot reach one, since no task depends on a feature. |
-| Team offer and management | `store/team_assignments.go` `OfferTeamAssignment` (`assignmentReady`); `store/team_managed.go` `EditManagedTask`, `FinalizeManagedTask`, `UnmanageTask` | No | Refused for a feature, and `set_feature` refuses a managed task. |
+| Reservation claim, dependencies | `store/task_reservation_dependencies.go` `ClaimTaskReservation`, `locateDependencyGraph`, `ReconcileReservationDependencies`; `store/task_reservations.go` `ApplyTaskReservation` | No | A claim on a feature is refused (a feature is not work). The walker refuses a claim, and fails the reconciliation, when a dependency it reads is a feature, and names it. This is the guarantee of section 2: the walker resolves dependencies across projects, and the writes cannot. |
+| Team offer and management | `store/team_assignments.go` `OfferTeamAssignment` (`assignmentReady`); `store/team_managed.go` `EditManagedTask`, `FinalizeManagedTask`, `UnmanageTask` | No | An offer of a feature is refused, and so is an offer of a task with a feature among its dependencies (`assignmentReady` reads each one). `set_feature` refuses a managed task. |
 | Board page | `server/tasks.html` (list, counts, detail, edit) via the routes above | Only by direct link | The page lists through `listTasks` and `countTasks` with no `kind`, so it shows work only and its counts stop counting features. A feature's detail opens by its id, and its edit keeps the link. Showing features is feature 3. |
 
 **A client or hub one release older.**
@@ -274,8 +311,11 @@ callers.
   reach features through `list_tasks`, which is the intended separation.
 - *A new client on an old hub* gets 404 for the three new routes; the MCP
   tool says the hub must be upgraded. The client sends `kind` and `feature`
-  only when asked. An old hub ignores the unknown parameters and answers
-  with the mixed list it always gave, which is today's behavior.
+  only when asked. An old hub ignores the unknown query parameters and
+  answers with the mixed list it always gave, which is today's behavior.
+  A `create_task` with a `feature` link is refused by an old hub, whose
+  task body decoder rejects unknown fields (`decodeTaskBody`). So a feature
+  can never be created there as plain work by mistake.
 - *An old binary on a migrated database* refuses it on the schema version,
   as after every schema step.
 
@@ -290,17 +330,35 @@ coordinator or a member's launcher.
   and none needs a team context, a peer service or a reservation.
 - The owner is the record's `assignee`. Its kinds are `user` and `group`
   (`TaskAssignee`). A person is a user. A standalone session acts as its
-  token's user, so it can own a feature. A team member acts as its own
-  user, so it can too. Nothing in the link names a team.
-- The trial's practice for a person's step (an owner who is the operator)
-  is an assignee like any other.
+  token's user. A team member acts as its own user. So any of them can own
+  a feature, and nothing in the link names a team.
+
+**Where several sessions share one user, the owner is a group per role.**
+On the trial's board, the architect session and the aimem worker write
+with the same user and token, so a `user` assignee cannot tell them, or
+the operator, apart. The trial keeps owners as prose ("the operator", "the
+operator, with the architect", "worker", "the team"). In this model each
+role is an access group: `operator`, `architect`, `worker`, and so on,
+with the people or users that act in it. A feature's assignee names the
+group.
+- Groups already exist and are already an assignee kind, so this needs no
+  new field.
+- A hub admin creates them, so the operator does, once per project.
+- A team member can also be named by its own user, where the team has
+  one per member.
+
+Until the operator has created the groups, the carry-over sets no
+assignee, and the owner stays prose in the record's objective, as in the
+trial. The course check's "who holds it" then reads that prose, as it does
+today. Computing it from the assignee is left to feature 2, and is listed
+in [section 11](#11-left-out).
 
 **The goal's check, performed by one standalone session** with a token
 holding write access to the `aimem` project, no team running. The epic is
 the aimem goal `01a1e571-73fc-7000-a652-c99832a9dde1`.
 
-1. `create_task` for each of features 1 to 4 (or reuse the trial's
-   records), then `set_feature` on each:
+1. `create_task` with a `feature` link for each of features 1 to 4 (or
+   `set_feature` on the trial's records):
    - feature 1: `position 1, mark mandatory, ground check`, with the
      ground note "it is the goal's check";
    - features 2, 3 and 4: positions 2 to 4, `mark optional`, each with the
@@ -332,7 +390,46 @@ CREATE INDEX idx_tasks_kind ON tasks(kind, archived, state, id);
   content a task write replaces. (The record's `coordination` is different:
   it is read from the team tables by a join, and is not in the body.)
 - Existing rows default to `task`, so nothing changes until a link is set.
-- The board feed's writer skips rows whose kind is `feature`.
+- `recordStateChange` writes nothing for a row whose kind is `feature`.
+  The conversion writes the one closing entry itself (below).
+
+**The feed's closing entry.** The board feed is a sequence of state
+changes, and its consumer keeps each task's last state. Its consumer is
+aicrewd, the only caller of the peer route `board.read`. As read in
+aicrew's `internal/store/readytasks.go` on 2026-11-16 (`recordBoardTask`,
+`noticeReadyTasks`), aicrewd stores the last state per task, tells a team's
+coordinators at each session start which tasks are READY with no open
+attempt, and announces a task when it becomes READY. A record turned into
+a feature has its earlier states in the feed already: aicrew's feature 4
+was created READY. If the feed simply went silent, the consumer would hold
+that READY for ever and keep naming the feature as work.
+
+So the write that turns a task into a feature appends one entry:
+
+- `from` is the record's state, `to` is `FEATURE` at the new revision, and
+  the entry carries no content, like every feed entry;
+- `FEATURE` is not one of the task states, so no reader can take it for
+  one;
+- after that entry, nothing more about the record enters the feed;
+- `set_feature` with `remove` appends the reverse entry, from `FEATURE` to
+  the record's state, so a consumer sees it as work again from that
+  revision.
+
+What a consumer does with it:
+
+- *aicrewd as it is today* checks only that `to` is not empty and acts only
+  on READY. It stores `FEATURE` as the last state, so the record is
+  neither named to the coordinators nor announced, and no offer is made.
+  It needs no change.
+- *A consumer that checks `to` against the task states* would refuse the
+  entry. aicrewd does not. The implementation confirms this against
+  aicrew's tests before it merges. The feed's description in `server/boardread.go`
+  and in the OpenAPI document gains one line: `FEATURE` means "no longer
+  work", and a consumer drops the record.
+
+A feature created with `create_task` and its `feature` link is a feature
+from its first revision, so it never enters the feed: there is no moment
+between two writes in which a reader could announce it.
 
 **The carry-over of the trial's records is a documented procedure, not a
 command.** Each record's position is in its title, but its mark, ground and
@@ -342,15 +439,26 @@ that prose, for about fifteen records in two epics, once. For each epic
 `01a1e571-73fc-7000-a652-c99832a9dde1`), a session with write access:
 
 1. Lists the epic's records whose title begins `[feature]`.
-2. Checks that no task lists one of them among its dependencies. `set_feature`
-   refuses such a record and names the tasks, and the dependency is moved
-   onto the feature the other way round before the record is retried.
-3. Calls `set_feature` on each record with the position from its title and
-   the mark, ground, ground note and alternative from the epic's list.
-4. Compares `list_features` with the epic's list: the same ids, the same
+2. Checks that no task lists one of them among its dependencies. Within
+   the project, `set_feature` refuses such a record and names the tasks;
+   the dependency is then moved onto the feature the other way round before
+   the record is retried. A task in another project that depends on the
+   record is not visible to this write, and the full-text search does not
+   index dependencies. Such a task is found when its claim or offer is
+   refused with the feature named (section 2), and its dependency is moved
+   then.
+3. Releases any reservation or team attempt on a record. `set_feature`
+   refuses a held or managed record, and a feature is never work.
+4. Calls `set_feature` on each record with the position from its title and
+   the mark, ground, ground note and alternative from the epic's list. A
+   record whose last state is READY or IN_PROGRESS needs no extra step:
+   the conversion's closing entry ends it in the feed, whatever its state.
+   Where a team is running, the check is that the coordinators' list of
+   READY work at the next session start no longer names it.
+5. Compares `list_features` with the epic's list: the same ids, the same
    order, the same marks. Any difference is fixed with `set_feature`
    before the next epic.
-5. Records the result as a comment on the goal's log.
+6. Records the result as a comment on the goal's log.
 
 **Why nothing is lost:** the records keep their ids, revisions, history,
 comments, dependencies, evidence and assignees. The `[feature]` title
@@ -408,6 +516,8 @@ By name, and each for a later step if the trial shows the need:
 - the board's page showing features (feature 3);
 - the process set and the pickup policy carrying the tiers (feature 4);
 - the goal's check and criterion as epic fields (section 3);
+- the owner computed from the assignee for the course check, and the role
+  groups themselves, which the operator creates (section 8);
 - a feature on more than one goal (section 4);
 - the goal's log as a record kind (it stays a task);
 - numeric weights, estimates in days and a drawn graph;
@@ -421,15 +531,24 @@ merged by the operator:
 
 1. **[P1/M, feature record] The feature kind in the store.** Covers:
    - the schema step and the link in the body;
-   - the rules: a kind outside content, never work, no dependency on a
-     feature, DONE with evidence, the goal equals the epic;
+   - the rules: a kind outside content, never work, DONE with evidence,
+     the goal equals the epic;
+   - the dependency guarantee: the walker and the offer refuse a feature
+     dependency, and the writes check their own project;
    - `kind` and `feature` in `ListTasks` and `CountTasks`;
-   - the feed's skip, and the refusals in reservations, offers and
-     management;
-   - the store's part of `set_feature` and `confirm_feature_task`.
+   - the feed: no entry for a feature, the closing entry on conversion and
+     the reverse entry on removal;
+   - the refusals in reservations, offers and management;
+   - the store's part of creation as a feature, `set_feature` (with
+     `remove`) and `confirm_feature_task`.
 
-   Its tests include an older client's full update of a feature, and each
-   reader of section 7.
+   Its tests include:
+   - an older client's full update of a feature;
+   - a READY task converted to a feature, read back through the feed as
+     closed;
+   - a task in another project that depends on a feature, refused at the
+     claim and at the offer;
+   - each reader of section 7.
 2. **[P1/M, feature record] The feature routes and MCP tools.** Covers:
    - the three new routes and the changed parameters, with OpenAPI and its
      parity test;
