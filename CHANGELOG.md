@@ -13,6 +13,22 @@ currently 25); a binary refuses a database newer than it understands.
 
 ## [Unreleased]
 
+## [0.10.27] — 2026-11-16
+
+Two fixes to how group knowledge reaches a machine. A machine now syncs
+every group its projects declare, also one it has never written to, and
+the stdio tools read such a group as empty until the first sync pulls it,
+where `recall_memory` used to fail with `no such project` (#375). A
+group's config that differs between a machine and the hub can now be
+converged on purpose with `aimem group <name> --publish` or `--adopt`, and
+`--hub <hub>` shows both sides; an edit with `aimem group` no longer
+clears a hub key that is empty on the editing machine (#376). Upgrade the
+clients, then run `aimem sync --hub <name>` (or `aimem sync --all-hubs`)
+once, so a declared group is pulled. Hubs and clients upgrade in either
+order; an older hub answers `--adopt` and `--hub` for a group it does not
+hold with a plain refusal instead of naming the missing group. The on-disk
+schema stays at 25 and the access schema at 10.
+
 ### Fixed
 
 - **A declared group that this machine has never written to is now

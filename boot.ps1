@@ -1,7 +1,7 @@
 # aimem bootstrap for Windows. A first install runs it inside a project
 # directory; an upgrade runs it from anywhere.
 #
-#   Invoke-WebRequest https://github.com/BlackVS/aimem/releases/download/v0.10.26/boot.ps1 -OutFile $f -UseBasicParsing
+#   Invoke-WebRequest https://github.com/BlackVS/aimem/releases/download/v0.10.27/boot.ps1 -OutFile $f -UseBasicParsing
 #   (check $f against the same release's SHA256SUMS, then Unblock-File $f)
 #   powershell -NoProfile -ExecutionPolicy RemoteSigned -File $f
 #
@@ -62,7 +62,7 @@ $ErrorActionPreference = 'Stop'
 
 # The release this script installs. Bumped together with the CHANGELOG
 # when a release is cut (internal/installer checks they agree).
-$release = 'v0.10.26'
+$release = 'v0.10.27'
 
 # BEGIN release-source
 # Where the release's files come from, and their verification; the same
