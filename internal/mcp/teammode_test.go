@@ -151,6 +151,7 @@ func TestTeamModeToolListMatchesHubTeamRoutes(t *testing.T) {
 		"list_tasks": "GET /v1/projects/{p}/tasks", "search_tasks": "GET /v1/projects/{p}/tasks", "get_task": "GET /v1/tasks/{id}", "get_task_history": "GET /v1/tasks/{id}/history",
 		"list_task_comments": "GET /v1/tasks/{id}/comments", "get_task_comment": "GET /v1/tasks/{id}/comments/{c}",
 		"list_epics": "GET /v1/projects/{p}/epics", "get_epic": "GET /v1/projects/{p}/epics/{e}",
+		"list_features":    "GET /v1/projects/{p}/epics/{e}/features",
 		sessionContextTool: "GET /v1/access/identity",
 		// The member reservation tools (C6a).
 		"task_reservation_claim":    "POST /v1/projects/{p}/tasks/{task_id}/reservation/claim",

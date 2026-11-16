@@ -298,6 +298,7 @@ Grouped by the steps in [Four ways to run it](#four-ways-to-run-it).
 | 2. With a hub | [DESIGN-structured-docs.md](docs/DESIGN-structured-docs.md) | structured collections: record-granular CAS, generated markdown |
 | 3. Hub with tasks | [KANBAN-QUICKSTART.md](docs/KANBAN-QUICKSTART.md) | enabling a project's task board, granting access, connecting an agent, selecting the process |
 | 3. Hub with tasks | [TASK-CREDENTIALS.md](docs/TASK-CREDENTIALS.md) | which task credential an agent machine uses, and how to install it |
+| 3. Hub with tasks | [FEATURES.md](docs/FEATURES.md) | a goal's features: setting them up, confirming tasks, reading the goal, and carrying over trial records |
 | 4. Hub in a team | [TEAM-QUICKSTART.md](docs/TEAM-QUICKSTART.md) | starting a coordinator and workers, step by step |
 | 4. Hub in a team | [TEAM-AGENT-QUICKSTART.md](docs/TEAM-AGENT-QUICKSTART.md) | registration, messages, assignments and execution over MCP, CLI and HTTP |
 | 4. Hub in a team | [DESIGN-AIFORGE.md](docs/DESIGN-AIFORGE.md) | the boundary between aimem (knowledge and backlog) and aicrew (agent coordination) |

@@ -12,7 +12,7 @@ func TestTaskReadToolsStateTheGrantedRead(t *testing.T) {
 	reads := map[string]bool{
 		"list_tasks": true, "search_tasks": true, "get_task": true, "get_task_history": true,
 		"list_task_comments": true, "get_task_comment": true,
-		"list_epics": true, "get_epic": true,
+		"list_epics": true, "get_epic": true, "list_features": true,
 	}
 	for _, td := range taskToolDefs {
 		name, _ := td["name"].(string)

@@ -55,6 +55,8 @@ var taskToolDefs = append([]map[string]any{
 			"state":            propEnum("only this state", "BACKLOG", "READY", "IN_PROGRESS", "REVIEW", "BLOCKED", "DONE", "CANCELLED"),
 			"assignee":         assigneeProp("only this assignee"),
 			"epic":             prop("string", "only tasks under this epic id"),
+			"kind":             propEnum("which records: task (the default: work only), feature, or any", "task", "feature", "any"),
+			"feature":          prop("string", "only the tasks of this project that this feature confirms: the feature's id or a unique prefix"),
 			"include_archived": prop("boolean", "include archived tasks"),
 			"updated_since":    prop("string", "only tasks updated at or after this RFC 3339 time, such as 2026-10-21T08:00:00Z"),
 			"order":            propEnum("sort order (default id: creation order)", "id", "updated_desc", "updated_asc", "title", "state"),
@@ -75,6 +77,8 @@ var taskToolDefs = append([]map[string]any{
 			"state":            propEnum("only this state", "BACKLOG", "READY", "IN_PROGRESS", "REVIEW", "BLOCKED", "DONE", "CANCELLED"),
 			"assignee":         assigneeProp("only this assignee"),
 			"epic":             prop("string", "only tasks under this epic id"),
+			"kind":             propEnum("which records: any (the default for a search), task or feature", "task", "feature", "any"),
+			"feature":          prop("string", "only the tasks of this project that this feature confirms: the feature's id or a unique prefix"),
 			"include_archived": prop("boolean", "include archived tasks"),
 			"after":            prop("string", "next_cursor from the previous page of this search"),
 			"limit":            prop("integer", "page size (default 10, max 50)"),
@@ -88,10 +92,13 @@ var taskToolDefs = append([]map[string]any{
 	{
 		"name": "create_task",
 		"description": "Create a task in a project. Requires an idempotency_key you choose (any unique string); " +
-			"retrying with the same key and content returns the task created the first time.",
+			"retrying with the same key and content returns the task created the first time. " +
+			"With `feature` (the link to its goal, as set_feature takes it) the record is created as a feature in one write; " +
+			"its epic must be the goal.",
 		"inputSchema": objSchema(taskContentProps(map[string]any{
 			"project":         prop("string", "project id (defaults to the current project)"),
 			"idempotency_key": prop("string", "your unique key for this create (retry-safe)"),
+			"feature":         featureLinkProp(),
 		}), "title", "idempotency_key"),
 	},
 	{
@@ -199,6 +206,43 @@ var taskToolDefs = append([]map[string]any{
 		}, "id", "title", "expected_revision", "idempotency_key"),
 	},
 	{
+		"name": "set_feature",
+		"description": "Turn a task into a feature of its goal, change a feature's link, or with `remove` turn a feature back into a task. " +
+			"The goal is the record's epic; position is its place in the goal's order; a mandatory feature needs a ground " +
+			"(check or owner_condition), an optional one has none and may name its cheaper alternative. Refused while the task is " +
+			"reserved, team-managed or depended on by a task of its project (named); remove is refused while the feature has confirmed tasks. " +
+			"Send the expected_revision you read; a stale revision returns the current record.",
+		"inputSchema": objSchema(featureLinkProps(map[string]any{
+			"id":                prop("string", taskIDArg),
+			"remove":            prop("boolean", "turn the feature back into a task (no link fields with it)"),
+			"expected_revision": prop("integer", "the revision you read"),
+			"idempotency_key":   prop("string", "your unique key for this write (retry-safe)"),
+		}), "id", "expected_revision", "idempotency_key"),
+	},
+	{
+		"name": "confirm_feature_task",
+		"description": "Confirm a task on a feature (add it to the feature's confirmed tasks, its dependencies), or with `remove` take it out; " +
+			"nothing else changes. The task may be in another project you can read; it may not be a feature. " +
+			"Send the feature's expected_revision; a stale revision returns the current record.",
+		"inputSchema": objSchema(map[string]any{
+			"id":                prop("string", "the feature: "+taskIDArg),
+			"task":              prop("string", "the task to confirm: "+taskIDArg),
+			"remove":            prop("boolean", "take the task out instead"),
+			"expected_revision": prop("integer", "the feature's revision you read"),
+			"idempotency_key":   prop("string", "your unique key for this write (retry-safe)"),
+		}, "id", "task", "expected_revision", "idempotency_key"),
+	},
+	{
+		"name": "list_features",
+		"description": "The features of a goal (an epic) in position order: id, title, state, assignee, revision, the link and the number of " +
+			"confirmed tasks; tie marks a position two features share. At most 100, no paging. Read a feature's tasks with list_tasks and `feature`." + taskReadScope,
+		"inputSchema": objSchema(map[string]any{
+			"project":          prop("string", "project id (defaults to the current project; it selects what to read, it is not a limit)"),
+			"epic":             prop("string", "the goal's epic id"),
+			"include_archived": prop("boolean", "include archived features"),
+		}, "epic"),
+	},
+	{
 		"name": "add_task_comment",
 		"description": "Append a Markdown comment to a task (never edits the task). Requires an idempotency_key; " +
 			"the author and time are recorded by the service.",
@@ -262,6 +306,31 @@ func taskContentProps(extra map[string]any) map[string]any {
 	return props
 }
 
+// featureLinkProps are the link's fields, as set_feature takes them flat.
+func featureLinkProps(extra map[string]any) map[string]any {
+	props := map[string]any{
+		"goal":        prop("string", "the goal: the record's epic id"),
+		"position":    prop("integer", "its place in the goal's order of delivery, from 1"),
+		"mark":        propEnum("for this goal", "mandatory", "optional"),
+		"ground":      propEnum("why mandatory (required for a mandatory feature, none for an optional one)", "check", "owner_condition"),
+		"ground_note": prop("string", "the condition's words and date, or why the goal's check needs it"),
+		"alternative": prop("string", "the cheaper way, if one exists"),
+	}
+	for k, v := range extra {
+		props[k] = v
+	}
+	return props
+}
+
+func featureLinkProp() map[string]any {
+	return map[string]any{"type": "object", "description": "optional: create the record as a feature with this link to its goal",
+		"properties": featureLinkProps(nil), "required": []string{"goal", "position", "mark"}}
+}
+
+// featureTools are the tools of the feature routes, which a hub one
+// release older does not serve.
+var featureTools = map[string]bool{"set_feature": true, "confirm_feature_task": true, "list_features": true}
+
 var taskToolNames = func() map[string]bool {
 	m := map[string]bool{}
 	for _, d := range taskToolDefs {
@@ -296,6 +365,18 @@ type taskArgs struct {
 	UpdatedSince     string          `json:"updated_since"`
 	Order            string          `json:"order"`
 	Mine             bool            `json:"mine"`
+	Kind             string          `json:"kind"`
+	// Feature is the feature's id on a list or a search, and the link
+	// object on create_task.
+	Feature     json.RawMessage `json:"feature"`
+	Goal        string          `json:"goal"`
+	Position    int             `json:"position"`
+	Mark        string          `json:"mark"`
+	Ground      string          `json:"ground"`
+	GroundNote  string          `json:"ground_note"`
+	Alternative string          `json:"alternative"`
+	Remove      bool            `json:"remove"`
+	Task        string          `json:"task"`
 }
 
 func decodeTaskArgs(raw json.RawMessage) (taskArgs, error) {
@@ -417,6 +498,9 @@ func (s *srv) taskTool(ctx context.Context, name string, raw json.RawMessage) (s
 			return "", err
 		}
 		if status/100 != 2 {
+			if old := olderHubAnswer(name, status, resp); old != "" {
+				return "", errors.New(old)
+			}
 			// A team-mode refusal carries the contract's envelope: pass its
 			// code, message and next step through instead of "HTTP 403".
 			if r := teamsession.ParseRefusal(status, resp); r != nil {
@@ -521,6 +605,16 @@ func (s *srv) taskTool(ctx context.Context, name string, raw json.RawMessage) (s
 		if a.Epic != "" {
 			q.Set("epic", a.Epic)
 		}
+		if a.Kind != "" {
+			q.Set("kind", a.Kind)
+		}
+		if len(a.Feature) > 0 && string(a.Feature) != "null" {
+			var id string
+			if json.Unmarshal(a.Feature, &id) != nil {
+				return "", errors.New("feature is the feature's id on a list or a search")
+			}
+			q.Set("feature", id)
+		}
 		after, err := a.afterString()
 		if err != nil {
 			return "", err
@@ -606,6 +700,13 @@ func (s *srv) taskTool(ctx context.Context, name string, raw json.RawMessage) (s
 		if err != nil {
 			return "", err
 		}
+		if len(a.Feature) > 0 && string(a.Feature) != "null" {
+			var link map[string]any
+			if json.Unmarshal(a.Feature, &link) != nil {
+				return "", errors.New("feature is the link object {goal, position, mark, ground?, ground_note?, alternative?}")
+			}
+			body["feature"] = link
+		}
 		return call("POST", "/v1/projects/"+p+"/tasks", body, k)
 	case "update_task":
 		id, err := taskID(a.ID)
@@ -680,6 +781,44 @@ func (s *srv) taskTool(ctx context.Context, name string, raw json.RawMessage) (s
 			return "", errors.New("comment_id is required")
 		}
 		return call("GET", "/v1/tasks/"+id+"/comments/"+url.PathEscape(a.CommentID), nil, "")
+	case "set_feature":
+		id, err := taskID(a.ID)
+		if err != nil {
+			return "", err
+		}
+		k, err := key()
+		if err != nil {
+			return "", err
+		}
+		// Every field is sent, so the hub refuses remove with a link.
+		return call("PUT", "/v1/tasks/"+id+"/feature", map[string]any{"goal": a.Goal, "position": a.Position, "mark": a.Mark, "ground": a.Ground,
+			"ground_note": a.GroundNote, "alternative": a.Alternative, "remove": a.Remove, "expected_revision": a.ExpectedRevision}, k)
+	case "confirm_feature_task":
+		id, err := taskID(a.ID)
+		if err != nil {
+			return "", err
+		}
+		k, err := key()
+		if err != nil {
+			return "", err
+		}
+		if a.Task == "" {
+			return "", errors.New("task is required: the task to confirm on the feature")
+		}
+		return call("POST", "/v1/tasks/"+id+"/feature/tasks", map[string]any{"task": a.Task, "remove": a.Remove, "expected_revision": a.ExpectedRevision}, k)
+	case "list_features":
+		p, err := project()
+		if err != nil {
+			return "", err
+		}
+		if a.Epic == "" {
+			return "", errors.New("epic is required: the goal whose features to list")
+		}
+		path := "/v1/projects/" + p + "/epics/" + url.PathEscape(a.Epic) + "/features"
+		if a.IncludeArchived {
+			path += "?include_archived=true"
+		}
+		return call("GET", path, nil, "")
 	case "add_task_comment":
 		id, err := taskID(a.ID)
 		if err != nil {
@@ -694,13 +833,34 @@ func (s *srv) taskTool(ctx context.Context, name string, raw json.RawMessage) (s
 	return "", fmt.Errorf("unknown tool %q", name)
 }
 
+// errOlderHub is what a feature tool answers when the hub does not know
+// features: it is one release older.
+const errOlderHub = "this hub does not serve features: upgrade the hub to a release that has them"
+
+// olderHubAnswer recognises a hub one release older from its refusal of a
+// feature call. Such a hub does not route the feature paths (a plain 404,
+// or the ordinary-token gate's 403 for a path it does not list), and its
+// strict task decoder refuses a create that carries a link, so nothing is
+// ever stored as work by mistake.
+func olderHubAnswer(name string, status int, resp []byte) string {
+	switch {
+	case featureTools[name] && status == http.StatusNotFound && !bytes.Contains(resp, []byte(`"error"`)):
+		return errOlderHub
+	case featureTools[name] && status == http.StatusForbidden && bytes.Contains(resp, []byte("ordinary token is not authorized for this endpoint")):
+		return errOlderHub
+	case name == "create_task" && status == http.StatusBadRequest && bytes.Contains(resp, []byte(`unknown field \"feature\"`)):
+		return errOlderHub + "; nothing was created"
+	}
+	return ""
+}
+
 // withCounts adds the board's shape to a first list page: the counts
 // under the page's assignee and epic filters (not its state or time,
 // since the counts are per state). A hub that cannot count (one older
 // than the counts route) leaves the page as it was.
 func withCounts(call func(method, path string, body any, key string) (string, error), project string, q url.Values, page string) string {
 	cq := url.Values{}
-	for _, k := range []string{"assignee", "epic"} {
+	for _, k := range []string{"assignee", "epic", "kind", "feature"} {
 		if v := q.Get(k); v != "" {
 			cq.Set(k, v)
 		}

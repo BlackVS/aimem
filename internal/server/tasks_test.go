@@ -428,6 +428,8 @@ func TestOrdinaryTokenGateMatrix(t *testing.T) {
 		"GET /v1/projects/{p}/repository",                                                                                               // the project's repository, grant-checked in the handler (TestProjectRepository*)
 		"GET /v1/projects/{p}/epics", "POST /v1/projects/{p}/epics", "GET /v1/projects/{p}/epics/{e}", "PUT /v1/projects/{p}/epics/{e}", // epics (TestEpicRoutes)
 		"GET /v1/access/directory", // the identity directory (TestAccessDirectory)
+		// the feature routes, under the task read and write checks (TestFeatureRoutes*)
+		"PUT /v1/tasks/{id}/feature", "POST /v1/tasks/{id}/feature/tasks", "GET /v1/projects/{p}/epics/{e}/features",
 		// the pilot's knowledge reads, grant-checked in the handler (TestKnowledgeReads*)
 		"GET /v1/projects/{p}/memories/recall", "GET /v1/projects/{p}/docs", "GET /v1/projects/{p}/docs/{name}",
 		"POST /v1/identity/proofs", // identity.v1 proof receipt over TLS only (TestIdentityRoutes*)

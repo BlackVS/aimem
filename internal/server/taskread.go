@@ -81,6 +81,10 @@ func (s *Server) readTaskText(w http.ResponseWriter, r *http.Request) {
 		notFound("unknown_task")
 		return
 	}
+	if err == nil && t.Kind == store.KindFeature {
+		notFound("feature") // a feature is not work: no offer reads it
+		return
+	}
 	if err != nil {
 		s.teamReadFailed(w, err)
 		return
