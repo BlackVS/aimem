@@ -482,6 +482,7 @@ func (s *srv) run(p *toolParams) (string, error) {
 			budget = 1000 // mirror the server-side default
 		}
 		trim := recallTrim{budget: budget}
+		storeless := false
 		for _, proj := range projs {
 			var res struct {
 				Memories []store.Memory `json:"memories"`
@@ -490,6 +491,7 @@ func (s *srv) run(p *toolParams) (string, error) {
 				url.PathEscape(proj), url.QueryEscape(a.Query), budget,
 				url.QueryEscape(a.Tag), url.QueryEscape(a.Kind)), &res); err != nil {
 				if s.noGroupStore(proj, err) {
+					storeless = true
 					continue
 				}
 				return "", err
@@ -499,6 +501,13 @@ func (s *srv) run(p *toolParams) (string, error) {
 					return trim.String(), nil
 				}
 			}
+		}
+		if trim.hits == 0 && storeless && len(projs) == 1 {
+			// Only for the explicit group scope: under "both" a group not yet
+			// pulled is skipped quietly, beside the scopes that answered.
+			return fmt.Sprintf("no memories match (this machine holds no store of group %q yet: "+
+				"`aimem sync --hub <name>` or `aimem sync --all-hubs` pulls it; a group the hub does not hold stays empty)",
+				strings.TrimPrefix(projs[0], "group-")), nil
 		}
 		if trim.hits == 0 {
 			return "no memories match", nil

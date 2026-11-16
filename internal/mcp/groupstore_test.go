@@ -56,9 +56,12 @@ func runTool(s *srv, name, scope string) (string, error) {
 func TestDeclaredGroupWithoutLocalStoreReadsEmpty(t *testing.T) {
 	s, root := groupStoreSrv(t)
 
+	// The explicit scope says why it is empty and how the group arrives,
+	// since a mistyped group name answers the same way.
 	out, err := runTool(s, "recall_memory", "group:g1")
-	if err != nil || out != "no memories match" {
-		t.Fatalf("recall group:g1 = %q, %v; want no memories match", out, err)
+	if err != nil || !strings.HasPrefix(out, `no memories match (this machine holds no store of group "g1" yet`) ||
+		!strings.Contains(out, "aimem sync --hub <name>") {
+		t.Fatalf("recall group:g1 = %q, %v; want no memories match with the note", out, err)
 	}
 	out, err = runTool(s, "recall_memory", "both")
 	if err != nil {
@@ -66,6 +69,25 @@ func TestDeclaredGroupWithoutLocalStoreReadsEmpty(t *testing.T) {
 	}
 	if !strings.Contains(out, "projA-m1") || !strings.Contains(out, "user-m1") {
 		t.Fatalf("recall both lost the project's or the user's hit:\n%s", out)
+	}
+	if strings.Contains(out, "holds no store") {
+		t.Fatalf("recall both carries the note of the explicit scope:\n%s", out)
+	}
+	// "both" with nothing matching anywhere stays the plain answer.
+	var q toolParams
+	q.Name, q.Arguments.Query, q.Arguments.Scope = "recall_memory", "nothingmatchesthis", "both"
+	if out, err := s.run(&q); err != nil || out != "no memories match" {
+		t.Fatalf("recall both without hits = %q, %v; want the plain answer", out, err)
+	}
+	// A group whose store exists and holds no match gets the plain answer too.
+	var r toolParams
+	r.Name, r.Arguments.Text, r.Arguments.Scope = "remember", "a gadget fact of g2", "group:g2"
+	if _, err := s.run(&r); err != nil {
+		t.Fatal(err)
+	}
+	q.Arguments.Scope = "group:g2"
+	if out, err := s.run(&q); err != nil || out != "no memories match" {
+		t.Fatalf("recall of an existing group store without hits = %q, %v; want the plain answer", out, err)
 	}
 	out, err = runTool(s, "review_memories", "group:g1")
 	if err != nil || !strings.HasPrefix(out, "review queue is clear") {
