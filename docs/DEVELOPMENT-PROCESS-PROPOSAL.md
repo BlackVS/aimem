@@ -87,8 +87,9 @@ document. The **goal** is an epic with a check that passes or fails. Its
 **features**, the intermediate outcomes the goal needs, are records on the
 board like tasks, each with its own check, an owner and a state, and each
 marked mandatory or optional **for that goal**. **Tasks** are all of one
-kind. The levels are tied by the board's dependencies: the goal depends on
-its features, a feature on its tasks, a task on whatever it waits for.
+kind. The levels are tied by links the board already has: a goal lists
+its features, a feature depends on its tasks, a task on whatever it waits
+for.
 A task's place then follows from what depends on it, and work is picked in
 three tiers: the path (everything a mandatory feature depends on), then
 what comes next (the same for optional features), then support work, the
@@ -98,8 +99,8 @@ whether the picks followed the tiers. All of it is plain counting over the
 board, so it can later be automated; first it is done by hand.
 
 This is the owner's graph of goal and tasks in its smallest form. The
-nodes are the goal, its features and their tasks. The edges are
-dependencies. The weight of the edge between a goal and a feature is its
+nodes are the goal, its features and their tasks. The edges are the
+goal's list of features and the dependencies below it. The weight of the edge between a goal and a feature is its
 mark; the weight of a task is its complexity. The algorithm is the three
 tiers, and the criterion says when the goal counts as reached.
 
