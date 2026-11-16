@@ -2,7 +2,7 @@
 # aimem bootstrap for Linux and macOS. A first install runs it inside a
 # project directory; an upgrade runs it from anywhere.
 #
-#   curl -fsSL https://raw.githubusercontent.com/BlackVS/aimem/v0.10.26/boot.sh | bash
+#   curl -fsSL https://raw.githubusercontent.com/BlackVS/aimem/v0.10.27/boot.sh | bash
 #
 # In a closed network, from an aiforge export (a local directory or an
 # internal https server holding the release files):
@@ -51,7 +51,7 @@ set -e
 
 # The release this script installs. Bumped together with the CHANGELOG
 # when a release is cut (internal/installer checks they agree).
-RELEASE=v0.10.26
+RELEASE=v0.10.27
 
 # BEGIN release-source
 # Where the release's files come from, and their verification. boot.sh
