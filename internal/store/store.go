@@ -502,7 +502,7 @@ func (r *Registry) Close() {
 	r.dbs = map[string]*DB{}
 }
 
-const currentSchema = 25
+const currentSchema = 26
 
 // SetMeta / GetMeta store small key-value project metadata (e.g. the
 // project's declared knowledge groups, stamped from event pushes so the
@@ -1143,6 +1143,23 @@ CREATE TRIGGER IF NOT EXISTS task_comments_fts_ai AFTER INSERT ON task_comments 
 END;
 ` + taskFTSFill + `
 UPDATE meta SET value='25' WHERE key='schema_version';`); err != nil {
+			return err
+		}
+	}
+	if v < 26 {
+		// A feature is a task row of kind feature (DESIGN-feature-record.md).
+		// The column is added only when missing, so the step is safe to run
+		// again over a schema version that was set back.
+		var has bool
+		if err := d.sql.QueryRow(`SELECT EXISTS(SELECT 1 FROM pragma_table_info('tasks') WHERE name='kind')`).Scan(&has); err != nil {
+			return err
+		}
+		add := ""
+		if !has {
+			add = "ALTER TABLE tasks ADD COLUMN kind TEXT NOT NULL DEFAULT 'task' CHECK(kind IN ('task','feature'));\n"
+		}
+		if err := d.step(add + `CREATE INDEX IF NOT EXISTS idx_tasks_kind ON tasks(kind, archived, state, id);
+UPDATE meta SET value='26' WHERE key='schema_version';`); err != nil {
 			return err
 		}
 	}

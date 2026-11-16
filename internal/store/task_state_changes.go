@@ -21,13 +21,19 @@ type TaskStateChange struct {
 }
 
 // recordStateChange appends the feed entry of a write that created the
-// task or changed its state, in the write's transaction.
+// task or changed its state, in the write's transaction. A feature is not
+// work and writes no entry; turning a task into one, or back, writes its
+// own entry (SetFeature).
 func recordStateChange(tx *sql.Tx, t Task, from string, create bool) error {
-	if !create && from == t.State {
+	if t.isFeature() || !create && from == t.State {
 		return nil
 	}
+	return insertStateChange(tx, t.ID, t.Revision, from, t.State, t.UpdatedAt)
+}
+
+func insertStateChange(tx *sql.Tx, id string, revision int64, from, to, at string) error {
 	_, err := tx.Exec(`INSERT INTO task_state_changes(task_id, revision, from_state, to_state, at) VALUES(?,?,?,?,?)`,
-		t.ID, t.Revision, from, t.State, t.UpdatedAt)
+		id, revision, from, to, at)
 	return err
 }
 

@@ -147,6 +147,12 @@ type Task struct {
 	ID           string            `json:"id"`
 	Revision     int64             `json:"revision"`
 	Coordination *TaskCoordination `json:"coordination,omitempty"`
+	// Kind and Feature are beside the content, never in it: a task write
+	// replaces the content and keeps them, so a client that does not know
+	// features cannot drop them. Only the feature writes (features.go) set
+	// them. Both are omitted for a task.
+	Kind    string       `json:"kind,omitempty"`
+	Feature *FeatureLink `json:"feature,omitempty"`
 	TaskContent
 	CreatedAt string `json:"created_at"`
 	UpdatedAt string `json:"updated_at"`
@@ -595,13 +601,25 @@ func writeTask(tx *sql.Tx, t Task, actor TaskActor, create bool) error {
 	if err != nil {
 		return err
 	}
-	from := ""
+	kind := "task"
+	if t.isFeature() {
+		kind = KindFeature
+	}
+	from, priorDeps := "", "[]"
+	if !create {
+		if err = tx.QueryRow(`SELECT state, COALESCE(json_extract(body,'$.dependencies'),'[]') FROM tasks WHERE id=?`, t.ID).Scan(&from, &priorDeps); err != nil {
+			return err
+		}
+	}
+	if err := checkFeatureRules(tx, t, from, priorDeps, create); err != nil {
+		return err
+	}
 	if create {
-		_, err = tx.Exec(`INSERT INTO tasks(id, state, archived, assignee, epic, body) VALUES(?,?,?,?,?,?)`,
-			t.ID, t.State, boolInt(t.Archived), t.Assignee.column(), t.Epic, string(body))
-	} else if err = tx.QueryRow(`SELECT state FROM tasks WHERE id=?`, t.ID).Scan(&from); err == nil {
-		_, err = tx.Exec(`UPDATE tasks SET state=?, archived=?, assignee=?, epic=?, body=? WHERE id=?`,
-			t.State, boolInt(t.Archived), t.Assignee.column(), t.Epic, string(body), t.ID)
+		_, err = tx.Exec(`INSERT INTO tasks(id, state, archived, assignee, epic, kind, body) VALUES(?,?,?,?,?,?,?)`,
+			t.ID, t.State, boolInt(t.Archived), t.Assignee.column(), t.Epic, kind, string(body))
+	} else {
+		_, err = tx.Exec(`UPDATE tasks SET state=?, archived=?, assignee=?, epic=?, kind=?, body=? WHERE id=?`,
+			t.State, boolInt(t.Archived), t.Assignee.column(), t.Epic, kind, string(body), t.ID)
 	}
 	if err != nil {
 		return err
@@ -753,6 +771,58 @@ type TaskFilter struct {
 	Order           string // a TaskOrder*; empty is TaskOrderID
 	After           string
 	Limit           int
+	// Kind is task, feature or any. Empty is task for a list and the
+	// counts, and any for a search: a list is of work, a search finds a
+	// record by its words, whatever it is.
+	Kind string
+	// Feature lists only the tasks of this project that the feature's
+	// dependencies name (its confirmed tasks).
+	Feature string
+}
+
+// Task kinds a filter names.
+const (
+	TaskKindTask    = "task"
+	TaskKindFeature = KindFeature
+	TaskKindAny     = "any"
+)
+
+// kindClause returns the condition on tasks.kind for a filter's kind,
+// defaulting to def.
+func kindClause(kind, def string) (string, []any, error) {
+	if kind == "" {
+		kind = def
+	}
+	switch kind {
+	case TaskKindAny:
+		return "", nil, nil
+	case TaskKindTask, TaskKindFeature:
+		return ` AND tasks.kind = ?`, []any{kind}, nil
+	}
+	return "", nil, invalid(errors.New("invalid kind filter (want task, feature or any)"))
+}
+
+// featureClause returns the condition that keeps a feature's confirmed
+// tasks of this project. An id that is not a feature here is refused.
+func (d *DB) featureClause(id string) (string, []any, error) {
+	if id == "" {
+		return "", nil, nil
+	}
+	if !taskIDRE.MatchString(id) {
+		return "", nil, invalid(errors.New("invalid feature filter"))
+	}
+	f, err := d.GetTask(id)
+	if errors.Is(err, ErrTaskNotFound) || err == nil && !f.isFeature() {
+		return "", nil, invalid(errors.New("the feature filter names no feature of this project"))
+	}
+	if err != nil {
+		return "", nil, err
+	}
+	deps, err := json.Marshal(f.Dependencies)
+	if err != nil {
+		return "", nil, err
+	}
+	return ` AND tasks.id IN (SELECT value FROM json_each(?))`, []any{string(deps)}, nil
 }
 
 // The list orders. Every order ends in the task id, so it is total and a
@@ -912,6 +982,7 @@ func (s scanner) Scan(dest ...any) error { return s(dest...) }
 type TaskSummary struct {
 	Coordination *TaskCoordination `json:"coordination,omitempty"`
 	ID           string            `json:"id"`
+	Kind         string            `json:"kind,omitempty"` // feature, or omitted for a task
 	Title        string            `json:"title"`
 	State        string            `json:"state"`
 	Assignee     *TaskAssignee     `json:"assignee,omitempty"`
@@ -964,6 +1035,18 @@ func (d *DB) ListTasks(f TaskFilter) (TaskPage, error) {
 		if since, err = taskSinceKey(f.UpdatedSince); err != nil {
 			return out, err
 		}
+	}
+	defKind := TaskKindTask
+	if f.Query != "" {
+		defKind = TaskKindAny
+	}
+	kindSQL, kindArgs, err := kindClause(f.Kind, defKind)
+	if err != nil {
+		return out, err
+	}
+	featureSQL, featureArgs, err := d.featureClause(f.Feature)
+	if err != nil {
+		return out, err
 	}
 	query := taskReadQuery + ` WHERE tasks.id > ?`
 	args := []any{f.After}
@@ -1026,6 +1109,8 @@ func (d *DB) ListTasks(f TaskFilter) (TaskPage, error) {
 		query += ` AND ` + taskUpdatedSQL + ` >= ?`
 		args = append(args, since)
 	}
+	query += kindSQL + featureSQL
+	args = append(append(args, kindArgs...), featureArgs...)
 	query += ` ORDER BY ` + by + ` LIMIT ?`
 	args = append(args, limit+1)
 	rows, err := d.sql.Query(query, args...)
@@ -1052,7 +1137,7 @@ func (d *DB) ListTasks(f TaskFilter) (TaskPage, error) {
 		if err != nil {
 			return out, err
 		}
-		out.Tasks = append(out.Tasks, TaskSummary{ID: t.ID, Title: t.Title, State: t.State, Assignee: t.Assignee, Epic: t.Epic,
+		out.Tasks = append(out.Tasks, TaskSummary{ID: t.ID, Kind: t.Kind, Title: t.Title, State: t.State, Assignee: t.Assignee, Epic: t.Epic,
 			Archived: t.Archived, Revision: t.Revision, UpdatedAt: t.UpdatedAt, Coordination: t.Coordination, Matched: kind,
 			Snippet: strings.Join(strings.Fields(snip), " ")}) // one line: the indexed fields are joined by newlines
 		last = score
@@ -1068,8 +1153,9 @@ type TaskCounts struct {
 	Total    int            `json:"total"`
 }
 
-// CountTasks counts the tasks under f's assignee and epic filters; the
-// other fields of f are not read.
+// CountTasks counts the records under f's assignee, epic, kind and feature
+// filters (kind defaults to task: the counts are the workload); the other
+// fields of f are not read.
 func (d *DB) CountTasks(f TaskFilter) (TaskCounts, error) {
 	out := TaskCounts{Counts: make(map[string]int, len(TaskStates))}
 	for _, st := range TaskStates {
@@ -1081,8 +1167,16 @@ func (d *DB) CountTasks(f TaskFilter) (TaskCounts, error) {
 	if f.Epic != "" && !taskIDRE.MatchString(f.Epic) {
 		return out, invalid(errors.New("invalid epic filter"))
 	}
-	query := `SELECT state, archived, COUNT(*) FROM tasks WHERE 1`
-	var args []any
+	kindSQL, kindArgs, err := kindClause(f.Kind, TaskKindTask)
+	if err != nil {
+		return out, err
+	}
+	featureSQL, featureArgs, err := d.featureClause(f.Feature)
+	if err != nil {
+		return out, err
+	}
+	query := `SELECT state, archived, COUNT(*) FROM tasks WHERE 1` + kindSQL + featureSQL
+	args := append(kindArgs, featureArgs...)
 	if f.Assignee != nil {
 		query += ` AND assignee = ?`
 		args = append(args, f.Assignee.column())

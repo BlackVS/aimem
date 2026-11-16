@@ -490,6 +490,9 @@ func (d *DB) ApplyTaskReservation(op ReservationOperation, in TaskReservationInp
 			}
 			before := r
 			if op == ReservationClaim {
+				if t.isFeature() {
+					return TaskReservationOutcome{}, featureWorkError(ErrTaskNotReady, t.ID)
+				}
 				if len(t.Dependencies) != 0 {
 					return TaskReservationOutcome{}, ErrDependencyUnresolved
 				}
