@@ -97,10 +97,14 @@ Four rules make (a) safe to share a table with work:
   - a reservation claim refuses a task whose dependency is a feature, and so
     does the reconciliation of a held reservation (the walker in
     `store/task_reservation_dependencies.go` reads every dependency already);
-  - a team offer refuses one too (`assignmentReady` reads every dependency
-    already).
+  - a team offer refuses one too: `assignmentReady` reads every dependency
+    already, and refuses a dependency that is a feature.
 
-  Both name the feature in the refusal. The writes add a cheap check
+  The walker names the feature in its refusal. The offer reads
+  dependencies only inside the offered task's own project (`readTask` on
+  the offer's transaction), so a dependency in another project, feature or
+  not, already fails the offer today. Across projects, the offer's
+  guarantee is that failure, without the feature's name. The writes add a cheap check
   inside their own project, in their transaction:
   - a task write refuses a dependency on a feature of the same project;
   - `set_feature` refuses to convert a task that a task of the same project
@@ -300,7 +304,8 @@ callers.
 | Board feed (aicrew's `board.read`) | `store/task_state_changes.go` `recordStateChange`, `TaskStateChanges`; schema 24 in `store/store.go`; `server/boardread.go` `readBoard` | Once, to close | The feed exists for pickup, and its consumer keeps each task's last state. A feature created as one never enters it. A task turned into one gets a single closing entry, `to: "FEATURE"`, and nothing after it. A feature turned back gets an entry from `FEATURE` to its current state. Section 9 says what a consumer does with them. |
 | Team task read for an offer | `server/taskread.go` `readTaskText` | No | Answers a feature as not found, so a member's offer never reads one. |
 | Reservation claim, dependencies | `store/task_reservation_dependencies.go` `ClaimTaskReservation`, `locateDependencyGraph`, `ReconcileReservationDependencies`; `store/task_reservations.go` `ApplyTaskReservation` | No | A claim on a feature is refused (a feature is not work). The walker refuses a claim, and fails the reconciliation, when a dependency it reads is a feature, and names it. This is the guarantee of section 2: the walker resolves dependencies across projects, and the writes cannot. |
-| Team offer and management | `store/team_assignments.go` `OfferTeamAssignment` (`assignmentReady`); `store/team_managed.go` `EditManagedTask`, `FinalizeManagedTask`, `UnmanageTask` | No | An offer of a feature is refused, and so is an offer of a task with a feature among its dependencies (`assignmentReady` reads each one). `set_feature` refuses a managed task. |
+| Team offer and management | `store/team_assignments.go` `OfferTeamAssignment` (`assignmentReady`); `store/team_managed.go` `EditManagedTask`, `FinalizeManagedTask`, `UnmanageTask` | No | An offer of a feature is refused, and so is an offer of a task with a feature of its own project among its dependencies (`assignmentReady` reads each one in that project). A dependency in another project fails the offer already today. `set_feature` refuses a managed task. |
+| Reservation routes and recovery | `server/reservations.go` `reservationTarget`, `reserve`, `reservationStatus`, `reservationReceipt`; `server/reservation_routes.go`; `server/reservation_readscope.go`; `server/recovery.go` `recoverReservation` | No | They locate a task by id, and recovery writes task content, but each acts on a reservation. A feature has no active one: a claim on a feature is refused, and the conversion refuses a reserved record. A released reservation's ledger may remain readable for a converted record, as a read of history. |
 | Board page | `server/tasks.html` (list, counts, detail, edit) via the routes above | Only by direct link | The page lists through `listTasks` and `countTasks` with no `kind`, so it shows work only and its counts stop counting features. A feature's detail opens by its id, and its edit keeps the link. Showing features is feature 3. |
 
 **A client or hub one release older.**
@@ -410,6 +415,13 @@ So the write that turns a task into a feature appends one entry:
   the entry carries no content, like every feed entry;
 - `FEATURE` is not one of the task states, so no reader can take it for
   one;
+- the value has the shape of a state name: an upper-case letter, then up
+  to 31 upper-case letters or underscores. aicrew's hub client checks every
+  entry's `to`, and a non-empty `from`, against that shape (aicrew
+  `internal/hubteams/hubteams.go`, `stateShape` and `BoardPage.valid`). It
+  rejects the whole page when one entry fails, which would stop that hub's
+  feed. `FEATURE` passes in both directions. Any later closing value must
+  keep the shape;
 - after that entry, nothing more about the record enters the feed;
 - `set_feature` with `remove` appends the reverse entry, from `FEATURE` to
   the record's state, so a consumer sees it as work again from that
@@ -417,13 +429,14 @@ So the write that turns a task into a feature appends one entry:
 
 What a consumer does with it:
 
-- *aicrewd as it is today* checks only that `to` is not empty and acts only
-  on READY. It stores `FEATURE` as the last state, so the record is
-  neither named to the coordinators nor announced, and no offer is made.
-  It needs no change.
-- *A consumer that checks `to` against the task states* would refuse the
-  entry. aicrewd does not. The implementation confirms this against
-  aicrew's tests before it merges. The feed's description in `server/boardread.go`
+- *aicrewd as it is today* accepts the entry, since `FEATURE` has a state
+  name's shape, and it acts only on READY. It stores `FEATURE` as the last
+  state, so the record is neither named to the coordinators nor announced,
+  and no offer is made. It needs no change.
+- *A consumer that checks `to` against the list of task states* would
+  refuse the entry. aicrewd checks the shape, not the list. The
+  implementation confirms this against aicrew's tests before it merges.
+  The feed's description in `server/boardread.go`
   and in the OpenAPI document gains one line: `FEATURE` means "no longer
   work", and a consumer drops the record.
 
@@ -547,7 +560,9 @@ merged by the operator:
    - a READY task converted to a feature, read back through the feed as
      closed;
    - a task in another project that depends on a feature, refused at the
-     claim and at the offer;
+     claim with the feature named;
+   - a task that depends on a feature of its own project, refused at the
+     offer;
    - each reader of section 7.
 2. **[P1/M, feature record] The feature routes and MCP tools.** Covers:
    - the three new routes and the changed parameters, with OpenAPI and its
