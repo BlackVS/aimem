@@ -118,15 +118,23 @@ func TestUnopenableGroupStoreStillFails(t *testing.T) {
 // The absence code is set by the service and nothing else: an error that
 // carries the same words without the code stays an error.
 func TestNoGroupStoreNeedsTheCode(t *testing.T) {
+	s := &srv{project: "projA", groups: []string{"group-g1"}}
 	plain := &apiError{msg: `no such project: "group-g1"`}
 	coded := &apiError{msg: "anything", code: store.CodeNoSuchProject}
-	if noGroupStore("group-g1", plain) {
+	if s.noGroupStore("group-g1", plain) {
 		t.Error("the message alone counted as an absent store")
 	}
-	if !noGroupStore("group-g1", coded) {
+	if !s.noGroupStore("group-g1", coded) {
 		t.Error("the code did not count as an absent store")
 	}
-	if noGroupStore("projA", coded) {
+	if s.noGroupStore("projA", coded) {
 		t.Error("a missing project store counted as empty; only a group's may")
+	}
+	if s.noGroupStore("group-other", coded) {
+		t.Error("an undeclared group counted as empty")
+	}
+	// Hub mode declares nothing: a group the hub lacks stays an error.
+	if (&srv{}).noGroupStore("group-g1", coded) {
+		t.Error("hub mode read a missing group as empty")
 	}
 }
