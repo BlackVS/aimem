@@ -1,0 +1,187 @@
+package redact
+
+import (
+	"regexp"
+	"slices"
+	"strings"
+	"unicode/utf8"
+)
+
+// ScanDocument is the stricter scan for a shared document: the client
+// publisher, MCP update_doc and the hub's document write all call it, so
+// what they refuse cannot drift apart. It differs from ScanAuthored (which
+// records and task text keep, unchanged) in three ways:
+//
+//   - a value that is a placeholder is no finding: a document that shows a
+//     header's or an assignment's form must still publish;
+//   - a bearer token refuses, unless its value is a placeholder or a
+//     descriptive stand-in (lowercase words joined by - or _, no digit),
+//     which only warns;
+//   - a credential assignment refuses when its value is 20 characters or
+//     more and mixes letters and digits; a shorter or letters-only value
+//     warns.
+//
+// The authorization header stays a warning. Like ScanAuthored it reports
+// rule names only, never the matched text.
+func ScanDocument(s string) (warn, refuse []string) {
+	for _, p := range patterns {
+		if p.high && p.re.MatchString(s) {
+			refuse = append(refuse, p.kind)
+		}
+	}
+	add := func(kind string, outcome docOutcome) {
+		switch outcome {
+		case docRefuse:
+			refuse = appendOnce(refuse, kind)
+		case docWarn:
+			warn = appendOnce(warn, kind)
+		}
+	}
+	for _, m := range authValue.FindAllStringSubmatch(s, -1) {
+		v := m[1]
+		if scheme.MatchString(v) && m[2] != "" {
+			v = m[2]
+		}
+		if !isPlaceholder(v) {
+			add("authorization header", docWarn)
+		}
+	}
+	for _, m := range bearerValue.FindAllStringSubmatch(s, -1) {
+		add("bearer token", bearerOutcome(m[1]))
+	}
+	for _, m := range credentialValue.FindAllStringSubmatch(s, -1) {
+		add("credential assignment", credentialOutcome(m[1]))
+	}
+	// A refused rule is not also a warning.
+	kept := warn[:0]
+	for _, w := range warn {
+		if !slices.Contains(refuse, w) {
+			kept = append(kept, w)
+		}
+	}
+	return kept, refuse
+}
+
+// DocumentFix is what every refusal of a document tells its author to do.
+// There is no override: a document that must show a token's form shows it
+// with a placeholder, which the policy never refuses.
+const DocumentFix = "remove the secret, or show its form with a placeholder such as <token>"
+
+type docOutcome int
+
+const (
+	docNone docOutcome = iota
+	docWarn
+	docRefuse
+)
+
+// The soft rules of patterns, with the value captured. Each matches the same
+// text as its counterpart in patterns.
+var (
+	authValue       = regexp.MustCompile(`(?i)\bauthorization\b\s*[:=]\s*(\S+)(?:\s+(\S+))?`)
+	bearerValue     = regexp.MustCompile(`(?i)\bbearer\s+([A-Za-z0-9._~+/=-]{16,})`)
+	credentialValue = regexp.MustCompile(`(?i)\b(?:api[_-]?key|apikey|secret[_-]?key|client[_-]?secret|secret|access[_-]?token|refresh[_-]?token|auth[_-]?token|token|passwd|password|access[_-]?key)\b["']?\s*[:=]\s*["']?([^\s"',;]{8,})`)
+
+	scheme = regexp.MustCompile(`(?i)^(bearer|basic|token|digest|negotiate)$`)
+	// A template: <name>, {name}, {{name}}, ${name}, %{name}, [name], $NAME, %NAME%.
+	template   = regexp.MustCompile(`^(<[^<>]*>|\{\{.*\}\}|\$\{[^{}]*\}|%\{[^{}]*\}|\{[^{}]*\}|\[[^\[\]]*\]|\$[A-Za-z_][A-Za-z0-9_]*|%[A-Za-z_][A-Za-z0-9_]*%)$`)
+	standIn    = regexp.MustCompile(`^[a-z]+(?:[-_][a-z]+)+$`)
+	hasLetter  = regexp.MustCompile(`[A-Za-z]`)
+	hasDigit   = regexp.MustCompile(`[0-9]`)
+	dummyStart = []string{"your", "example", "placeholder", "changeme", "dummy", "redacted"}
+	dummyEqual = []string{"token", "secret", "password"}
+)
+
+// shortCut is the longest part a "..." cut may show and still be an
+// illustration: a short prefix shows a token's form, a long one with dots
+// after it is most of a secret.
+const shortCut = 12
+
+func bearerOutcome(raw string) docOutcome {
+	if isPlaceholder(raw) {
+		return docNone
+	}
+	v := trimValue(raw)
+	switch {
+	case standIn.MatchString(v):
+		return docWarn
+	case len(v) < 16:
+		return docWarn // what is left once trailing punctuation is trimmed
+	}
+	return docRefuse
+}
+
+func credentialOutcome(raw string) docOutcome {
+	if isPlaceholder(raw) {
+		return docNone
+	}
+	v := trimValue(raw)
+	switch {
+	case len(v) >= 20 && hasLetter.MatchString(v) && hasDigit.MatchString(v):
+		return docRefuse
+	}
+	return docWarn
+}
+
+// trimValue strips the quoting and sentence punctuation around a value as
+// it stands in prose or markdown.
+func trimValue(v string) string {
+	return strings.Trim(v, "\"'`.,;:()")
+}
+
+// isPlaceholder reports whether a value shows a form instead of a secret:
+// a template, a mask, an obvious dummy, or a short prefix cut with dots.
+func isPlaceholder(v string) bool {
+	v = strings.Trim(v, "\"'`,;:()")
+	// The cut first, while its dots are still there.
+	if i := strings.Index(v, "..."); i >= 0 {
+		if utf8.RuneCountInString(v[:i]) < shortCut {
+			return true
+		}
+	} else if i := strings.Index(v, "…"); i >= 0 {
+		if utf8.RuneCountInString(v[:i]) < shortCut {
+			return true
+		}
+	}
+	// Then the value without the sentence around it: `<token>`. ends a
+	// sentence as often as it stands alone.
+	v = strings.Trim(v, ".\"'`,;:()")
+	if v == "" {
+		return true
+	}
+	if template.MatchString(v) {
+		return true
+	}
+	if len(v) > 2 && strings.HasPrefix(v, "*") && strings.HasSuffix(v, "*") {
+		return true
+	}
+	if isMask(v) {
+		return true
+	}
+	k := strings.NewReplacer("-", "", "_", "").Replace(strings.ToLower(v))
+	if slices.Contains(dummyEqual, k) {
+		return true
+	}
+	for _, d := range dummyStart {
+		if strings.HasPrefix(k, d) {
+			return true
+		}
+	}
+	return false
+}
+
+// isMask reports a value of one repeated character (xxxxxxxx, ********).
+func isMask(v string) bool {
+	if utf8.RuneCountInString(v) < 3 {
+		return false
+	}
+	first, _ := utf8.DecodeRuneInString(v)
+	return strings.Trim(v, string(first)) == ""
+}
+
+func appendOnce(list []string, s string) []string {
+	if slices.Contains(list, s) {
+		return list
+	}
+	return append(list, s)
+}

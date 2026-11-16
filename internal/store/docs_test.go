@@ -150,10 +150,34 @@ func TestPutDocRefusesSecretShapes(t *testing.T) {
 		!strings.Contains(err.Error(), "secret-shaped") {
 		t.Fatalf("vendor token accepted: %v", err)
 	}
-	// Soft shapes publish (the client warns instead): authored prose
-	// legitimately talks about passwords and tokens.
-	if _, err := db.PutDoc("RUNBOOK", "reset flow: password = placeholder123", "t", 0, false); err != nil {
-		t.Fatalf("soft match refused: %v", err)
+	// The document policy also refuses a real bearer value and a long
+	// mixed credential, and stores nothing; the error names the rule only.
+	for _, body := range []string{
+		"call with Authorization: Bearer " + strings.Join([]string{"abcdefghij", "klmnop123456"}, ""),
+		"api_key = " + strings.Join([]string{"a1b2c3d4e5", "f6g7h8i9j0"}, ""),
+	} {
+		_, err := db.PutDoc("CREDS", body, "t", 0, false)
+		var refused *DocSecretError
+		if !errors.As(err, &refused) || strings.Contains(err.Error(), "123456") || strings.Contains(err.Error(), "f6g7") {
+			t.Fatalf("%q: want a DocSecretError naming no text, got %v", body, err)
+		}
+		if _, err := db.GetDoc("CREDS", 0); err == nil {
+			t.Fatalf("%q: a refused document was stored", body)
+		}
+	}
+	// Soft shapes and placeholders publish (the client warns instead):
+	// authored prose legitimately talks about passwords and tokens.
+	for _, body := range []string{
+		"reset flow: password = placeholder123",
+		"Authorization: Bearer <token>",
+		"Bearer hub-admin-token-value is the stand-in",
+	} {
+		if _, err := db.PutDoc("RUNBOOK", body, "t", 0, false); err != nil {
+			var conflict *DocConflict
+			if !errors.As(err, &conflict) {
+				t.Fatalf("%q refused: %v", body, err)
+			}
+		}
 	}
 }
 

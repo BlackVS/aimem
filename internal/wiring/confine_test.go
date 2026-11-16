@@ -44,6 +44,12 @@ func TestRepairRefusesFilesBehindALink(t *testing.T) {
 	if refused < 4 { // the two hook files, the handoff and the Claude command assets
 		t.Errorf("only %d refusals: %+v", refused, r.Findings)
 	}
+	// The handoff under the linked docs directory fails with the fix, not
+	// "missing" or "present".
+	if fs := by["docs/SESSION-STATE.md"]; len(fs) == 0 || fs[0].Level != "fail" ||
+		!strings.Contains(fs[0].Fix, "replace the link with a real directory and file") {
+		t.Errorf("docs/SESSION-STATE.md: %+v", fs)
+	}
 	for _, d := range []string{"claude", "codex", "docs"} {
 		es, _ := os.ReadDir(filepath.Join(outside, d))
 		want := 1
@@ -60,5 +66,33 @@ func TestRepairRefusesFilesBehindALink(t *testing.T) {
 	// The plain files beside the links are still repaired.
 	if _, err := os.Stat(filepath.Join(dir, ".mcp.json")); err != nil {
 		t.Errorf(".mcp.json was not written: %v", err)
+	}
+}
+
+// A handoff that exists behind a link is no "present" handoff: the
+// checkpoint publisher refuses it, so the check fails, names the link and
+// says how to fix it, with and without repair.
+func TestCheckHandoffFailsForAHandoffBehindALink(t *testing.T) {
+	for _, linkFile := range []bool{false, true} {
+		base := t.TempDir()
+		dir, outside := filepath.Join(base, "checkout"), filepath.Join(base, "outside")
+		write(t, filepath.Join(outside, "SESSION-STATE.md"), "# handoff outside\n")
+		if linkFile {
+			os.MkdirAll(filepath.Join(dir, "docs"), 0o755)
+			linktest.File(t, filepath.Join(dir, "docs", "SESSION-STATE.md"), filepath.Join(outside, "SESSION-STATE.md"))
+		} else {
+			os.MkdirAll(dir, 0o755)
+			linktest.Dir(t, filepath.Join(dir, "docs"), outside)
+		}
+		for _, repair := range []bool{false, true} {
+			f := checkHandoff(dir, repair)
+			if f.Level != "fail" || !strings.Contains(f.Detail, "symbolic link or junction") ||
+				!strings.Contains(f.Fix, "replace the link") || f.Repaired {
+				t.Errorf("linked file %v, repair %v: %+v", linkFile, repair, f)
+			}
+		}
+		if read(t, filepath.Join(outside, "SESSION-STATE.md")) != "# handoff outside\n" {
+			t.Errorf("linked file %v: the handoff behind the link was rewritten", linkFile)
+		}
 	}
 }

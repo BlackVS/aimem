@@ -153,19 +153,19 @@ func (c *Client) PublishDocs(projectDir, projectID, hubName, by string) []DocPus
 			continue
 		}
 		// Docs publish AS WRITTEN — the journal's redact-on-write does not
-		// run here, so scan instead: refuse the unambiguous secret shapes
-		// (the hub refuses them too; failing here names the file), warn
-		// the softer ones. A refused doc retries (and re-warns) on every
+		// run here, so scan instead with the document policy the hub applies
+		// too (failing here names the file and spares the hub call), and
+		// warn on the rest. A refused doc retries (and re-warns) on every
 		// checkpoint until the secret is removed or the file opted out.
-		warn, refuse := redact.ScanAuthored(string(body))
+		warn, refuse := redact.ScanDocument(string(body))
 		if len(refuse) > 0 {
 			out = append(out, DocPushResult{Name: docName,
-				Err: fmt.Errorf("%s contains secret-shaped content (%s); not published — remove it or opt the file out via .aimem.json \"docs\"", rel, strings.Join(refuse, ", "))})
+				Err: fmt.Errorf("%s contains secret-shaped content (%s) — %s, or opt the file out via .aimem.json \"docs\"", rel, strings.Join(refuse, ", "), redact.DocumentFix)})
 			continue
 		}
 		if len(warn) > 0 {
-			c.note("aimem: shared doc %s has secret-shaped content (%s) — it publishes as written to every machine on the project",
-				docName, strings.Join(warn, ", "))
+			c.note("aimem: project %s: shared doc %s may hold a secret (%s) — it publishes as written to every machine on the project",
+				projectID, docName, strings.Join(warn, ", "))
 		}
 		h := hashBody(body)
 		st := state[docName]
@@ -200,9 +200,16 @@ func (c *Client) publishDocsQuiet(p *Payload) {
 	host, _ := os.Hostname()
 	for _, r := range c.PublishDocs(p.ProjectDir, p.ProjectID, hubName, host+"/"+p.Event.Client) {
 		if r.Err != nil {
-			c.note("aimem: shared doc %s not published: %v", r.Name, r.Err)
+			c.note("%s", DocNotPublished(p.ProjectID, r))
 		}
 	}
+}
+
+// DocNotPublished is the one line every caller of PublishDocs shows for a
+// document that failed: it names the project as well as the document, since
+// one sync may cover several projects.
+func DocNotPublished(projectID string, r DocPushResult) string {
+	return fmt.Sprintf("aimem: project %s: shared doc %s not published: %v", projectID, r.Name, r.Err)
 }
 
 // HubDoc mirrors the hub's document representation (a subset of

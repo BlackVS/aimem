@@ -317,12 +317,19 @@ text the conflict message is telling the user to preserve.
 1. **Size cap.** RESOLVED as proposed: refuse over 256 KB
    (`store.MaxDocBytes`), warn past 64 KB.
 2. **Redaction.** RESOLVED as proposed (2026-08-29): documents publish
-   as written, never silently redacted. `redact.ScanAuthored` classifies
-   secret shapes; high-confidence matches (private key blocks,
-   recognised vendor token formats) refuse publication at BOTH the
-   publisher (`adapter.PublishDocs`, naming the file) and the hub
-   (`store.PutDoc`, covering console/MCP/REST writes); softer shapes
-   warn on stderr and publish.
+   as written, never silently redacted. `redact.ScanDocument` is the
+   document policy, applied at the publisher (`adapter.PublishDocs`,
+   naming the file), in MCP `update_doc` before any hub call, and at the
+   hub (`store.PutDoc`, covering console/MCP/REST writes). It refuses
+   the high-confidence shapes (private key blocks, recognised vendor
+   token formats), a bearer token's value, and a credential assignment
+   of 20 or more characters mixing letters and digits; a placeholder
+   (`<token>`, `${NAME}`, a mask, a dummy word, a short `...` prefix) is
+   no finding; the rest warns and publishes. Every message names the
+   project, the document and the rule, never the text. Records and task
+   text keep `redact.ScanAuthored`, which refuses the high-confidence
+   shapes only. (Policy call of 2026-11-16, measured over the
+   repositories' own documents before the thresholds were fixed.)
 3. **Do bound files publish by default?** RESOLVED as proposed:
    `docs/SESSION-STATE.md` yes, everything else opt-in; `"docs": []`
    opts out entirely.

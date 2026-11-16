@@ -317,8 +317,10 @@ configure one.
 - Redaction runs **on write**, before storage or indexing. Shared
   documents are the one exception: authored files publish as written
   (silently rewriting them would corrupt intended content) — instead
-  they are scanned, unambiguous secret shapes refuse to publish, and
-  softer matches warn.
+  they are scanned on the client and again on the hub: likely secrets
+  (key blocks, vendor token formats, a bearer value, a long generated
+  credential) refuse to publish, placeholders such as `<token>` pass,
+  and softer matches warn.
 - Curation and embeddings are opt-in per deployment. Unset means fully
   local, BM25-only operation with no egress at all.
 - Provider tokens live in a host-local `providers.json` (mode 0600) that

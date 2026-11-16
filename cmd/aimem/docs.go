@@ -96,7 +96,7 @@ func docsCmd(args []string) error {
 		}
 		for _, r := range res {
 			if r.Err != nil {
-				fmt.Fprintf(os.Stderr, "aimem: %s: %v\n", r.Name, r.Err)
+				fmt.Fprintln(os.Stderr, adapter.DocNotPublished(projID, r))
 			} else {
 				fmt.Printf("%s -> rev %d\n", r.Name, r.Rev)
 			}
@@ -144,7 +144,7 @@ func docsCmd(args []string) error {
 			}
 			for _, r := range res {
 				if r.Err != nil {
-					fmt.Fprintf(os.Stderr, "aimem: %s: %v\n", r.Name, r.Err)
+					fmt.Fprintln(os.Stderr, adapter.DocNotPublished(projID, r))
 				} else {
 					fmt.Printf("%s -> rev %d\n", r.Name, r.Rev)
 				}

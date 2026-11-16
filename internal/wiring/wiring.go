@@ -140,6 +140,12 @@ func Check(dir string, o Options) Report {
 func checkHandoff(dir string, repair bool) Finding {
 	path := filepath.Join(dir, "docs", "SESSION-STATE.md")
 	rel := "docs/SESSION-STATE.md"
+	// os.Stat follows a link, so a handoff reached through one would read
+	// as present while the checkpoint publisher refuses it every time.
+	if err := confine.Check(dir, path); err != nil {
+		return Finding{File: rel, Level: "fail", Detail: "the handoff is not published: " + err.Error(),
+			Fix: "replace the link with a real directory and file; aimem never reads or writes through a link"}
+	}
 	if fi, err := os.Stat(path); err == nil && fi.Mode().IsRegular() {
 		return Finding{File: rel, Level: "ok", Detail: "handoff file present"}
 	}

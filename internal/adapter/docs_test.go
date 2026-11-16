@@ -155,6 +155,44 @@ func TestPublishDocsRefusesSecretLocally(t *testing.T) {
 	}
 }
 
+// TestPublishDocsAppliesTheDocumentPolicy: a real bearer value refuses
+// locally without a hub call, and the line shown for it names the project,
+// the document and the rule, never the text; a placeholder publishes, and
+// a stand-in warns with the project in the warning.
+func TestPublishDocsAppliesTheDocumentPolicy(t *testing.T) {
+	c, fake, root, proj := docTestSetup(t)
+	value := strings.Join([]string{"abcdefghij", "klmnop123456"}, "")
+	handoff := filepath.Join(proj, "docs", "SESSION-STATE.md")
+	os.WriteFile(handoff, []byte("call with Authorization: Bearer "+value+"\n"), 0o644)
+	res := c.PublishDocs(proj, "projX", "home", "host/test")
+	if len(res) != 1 || res[0].Err == nil || fake.puts != 0 {
+		t.Fatalf("bearer value not refused locally: %+v (puts %d)", res, fake.puts)
+	}
+	line := DocNotPublished("projX", res[0])
+	for _, want := range []string{"project projX", "SESSION-STATE", "bearer token", "placeholder"} {
+		if !strings.Contains(line, want) {
+			t.Errorf("the line does not name %q: %s", want, line)
+		}
+	}
+	if strings.Contains(line, value) {
+		t.Fatalf("the line carries the matched text: %s", line)
+	}
+
+	os.WriteFile(handoff, []byte("call with Authorization: Bearer <token>\n"), 0o644)
+	if res := c.PublishDocs(proj, "projX", "home", "host/test"); len(res) != 1 || res[0].Err != nil || fake.puts != 1 {
+		t.Fatalf("placeholder not published: %+v (puts %d)", res, fake.puts)
+	}
+
+	os.WriteFile(handoff, []byte("call with Bearer hub-admin-token-value\n"), 0o644)
+	if res := c.PublishDocs(proj, "projX", "home", "host/test"); len(res) != 1 || res[0].Err != nil {
+		t.Fatalf("stand-in not published: %+v", res)
+	}
+	log, _ := os.ReadFile(filepath.Join(root, "adapter.log"))
+	if !strings.Contains(string(log), "project projX: shared doc SESSION-STATE may hold a secret (bearer token)") {
+		t.Fatalf("the warning does not name the project: %s", log)
+	}
+}
+
 func TestPublishDocsRefusesNameCollision(t *testing.T) {
 	c, fake, _, proj := docTestSetup(t)
 	// docs/SESSION-STATE.md is bound by default; bind a second file whose

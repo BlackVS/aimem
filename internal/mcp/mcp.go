@@ -915,6 +915,13 @@ func (s *srv) docCall(p *toolParams, d *docScope) (string, error) {
 		if a.Name == "SESSION-STATE" {
 			return "", fmt.Errorf("SESSION-STATE is file-only: edit docs/SESSION-STATE.md - it publishes automatically on the next checkpoint")
 		}
+		// The document policy the hub applies too, before any hub call: a
+		// refusal here costs no request and says what to do.
+		warn, refuse := redact.ScanDocument(a.Body)
+		if len(refuse) > 0 {
+			return "", fmt.Errorf("project %s: document %s is not published: it contains secret-shaped content (%s) — %s",
+				project, a.Name, strings.Join(refuse, ", "), redact.DocumentFix)
+		}
 		host, _ := os.Hostname()
 		doc, err := c.PutHubDoc(hub, project, a.Name, a.Body, host+"/mcp", a.BaseRev)
 		var conflict *adapter.DocConflictError
@@ -926,6 +933,10 @@ func (s *srv) docCall(p *toolParams, d *docScope) (string, error) {
 			return "", err
 		}
 		msg := fmt.Sprintf("%s updated to rev %d", a.Name, doc.Rev)
+		if len(warn) > 0 {
+			msg += fmt.Sprintf(" — WARNING: project %s: it may hold a secret (%s) and publishes as written to every machine on the project",
+				project, strings.Join(warn, ", "))
+		}
 		// DESIGN-shared-docs §4b: a successful update of a BOUND doc also
 		// rewrites the local file and the sidecar bookkeeping (equivalent
 		// to push followed by pull) — otherwise the next checkpoint's
@@ -938,6 +949,9 @@ func (s *srv) docCall(p *toolParams, d *docScope) (string, error) {
 				if werr := confine.WriteFile(root, path, []byte(a.Body), 0o644); werr == nil {
 					c.DocSyncRecord(project, a.Name, doc.Rev, adapter.DocBodyHash([]byte(a.Body)))
 					msg += ", bound file " + rel + " rewritten"
+				} else if errors.Is(werr, confine.ErrLink) {
+					// docs pull refuses the same link, so it is no advice here.
+					msg += fmt.Sprintf(" — but bound file %s was NOT rewritten (%v); aimem never writes through a link: replace the link with a real file", rel, werr)
 				} else {
 					msg += fmt.Sprintf(" — but bound file %s was NOT rewritten (%v); run `aimem docs pull %s`", rel, werr, a.Name)
 				}
