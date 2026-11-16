@@ -79,49 +79,63 @@ func ExportGroupConfig(reg *Registry, ids []string, enc *json.Encoder) error {
 // hub bindings and charter keys are FILL-ONLY (meta rows carry no
 // timestamps, so a blind overwrite could undo a newer edit; divergence
 // warns and keeps local), and the generated design doc is newest-wins
-// by its companion timestamp. The returned message, when non-empty, is
-// for the caller's log/stderr; applied reports whether anything was
-// written.
-func ImportGroupConfigRecord(reg *Registry, rec ConfigRecord) (msg string, applied bool) {
+// by its companion timestamp. Msg, when non-empty, is for the caller's
+// log or stderr and names no command, because the hub runs this too;
+// Applied reports whether anything was written, and Differs that a
+// charter key was kept although the peer holds another value, so a
+// client can name the commands that converge it.
+func ImportGroupConfigRecord(reg *Registry, rec ConfigRecord) ConfigResult {
+	msg, applied, differs := importGroupConfig(reg, rec)
+	return ConfigResult{Msg: msg, Applied: applied, Differs: differs}
+}
+
+// ConfigResult is the outcome of one imported config record.
+type ConfigResult struct {
+	Msg     string
+	Applied bool
+	Differs bool
+}
+
+func importGroupConfig(reg *Registry, rec ConfigRecord) (msg string, applied, differs bool) {
 	if rec.Value == "" || rec.Project == "" {
-		return "", false
+		return "", false, false
 	}
 	if !strings.HasPrefix(rec.Project, "group-") {
 		if rec.Key != "hub" {
-			return "", false
+			return "", false, false
 		}
 		db, err := reg.Open(rec.Project)
 		if err != nil {
-			return "", false
+			return "", false, false
 		}
 		if cur, _ := db.GetMeta("hub"); cur == "" {
 			if db.SetMeta("hub", rec.Value) == nil {
-				return fmt.Sprintf("%s is bound to hub %q (adopted from peer)", rec.Project, rec.Value), true
+				return fmt.Sprintf("%s is bound to hub %q (adopted from peer)", rec.Project, rec.Value), true, false
 			}
 		}
-		return "", false
+		return "", false, false
 	}
 	if rec.Key == "design_doc" {
 		db, err := reg.Open(rec.Project)
 		if err != nil {
-			return "", false
+			return "", false, false
 		}
 		if cur, _ := db.GetMeta("design_doc_ts"); rec.TS > cur {
 			if db.SetMeta("design_doc", rec.Value) == nil &&
 				db.SetMeta("design_doc_ts", rec.TS) == nil {
-				return fmt.Sprintf("design doc %s updated from peer (%s)", rec.Project, rec.TS), true
+				return fmt.Sprintf("design doc %s updated from peer (%s)", rec.Project, rec.TS), true, false
 			}
 		}
-		return "", false
+		return "", false, false
 	}
 	if rec.Key == "origin_aliases" {
 		peer := map[string]string{}
 		if json.Unmarshal([]byte(rec.Value), &peer) != nil || len(peer) == 0 {
-			return "", false
+			return "", false, false
 		}
 		db, err := reg.Open(rec.Project)
 		if err != nil {
-			return "", false
+			return "", false, false
 		}
 		// Merge semantics are neither fill-only nor newest-wins: aliases
 		// UNION (local precedence on a conflicting key), chains re-point,
@@ -129,32 +143,31 @@ func ImportGroupConfigRecord(reg *Registry, rec ConfigRecord) (msg string, appli
 		// repair a merge/rename performed elsewhere completes here.
 		touched, changed, err := db.ApplyOriginAliases(peer)
 		if err != nil || (!changed && touched == 0) {
-			return "", false
+			return "", false, false
 		}
-		return fmt.Sprintf("origin aliases %s merged from peer (%d citation(s) relabeled)", rec.Project, touched), true
+		return fmt.Sprintf("origin aliases %s merged from peer (%d citation(s) relabeled)", rec.Project, touched), true, false
 	}
 	if !slices.Contains(GroupConfigKeys, rec.Key) {
-		return "", false
+		return "", false, false
 	}
 	if rec.Key == "chapters" {
 		if err := CheckChapters(rec.Value); err != nil {
-			return fmt.Sprintf("group config %s/chapters from peer refused: %v", rec.Project, err), false
+			return fmt.Sprintf("group config %s/chapters from peer refused: %v", rec.Project, err), false, false
 		}
 	}
 	db, err := reg.Open(rec.Project)
 	if err != nil {
-		return "", false
+		return "", false, false
 	}
 	switch cur, _ := db.GetMeta(rec.Key); {
 	case cur == "":
 		if db.SetMeta(rec.Key, rec.Value) == nil {
-			return fmt.Sprintf("group config %s/%s adopted from peer", rec.Project, rec.Key), true
+			return fmt.Sprintf("group config %s/%s adopted from peer", rec.Project, rec.Key), true, false
 		}
 	case cur != rec.Value:
-		return fmt.Sprintf("group config %s/%s differs from peer (kept local; re-save with `aimem group` to republish)",
-			rec.Project, rec.Key), false
+		return fmt.Sprintf("group config %s/%s differs from peer (kept local)", rec.Project, rec.Key), false, true
 	}
-	return "", false
+	return "", false, false
 }
 
 // CheckChapters keeps the chapters meta a list of named chapters whose

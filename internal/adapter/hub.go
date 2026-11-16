@@ -14,7 +14,6 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
-	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -411,39 +410,6 @@ func (c *Client) hubPost(hub *HubConfig, body []byte) error {
 	}
 	// Other 4xx: record is invalid; retrying forever is pointless — drop
 	// from the hub path (it stays in the local journal regardless).
-	return nil
-}
-
-// PushMeta writes one project meta key on a hub (PUT /v1/projects/{p}/
-// meta/{key}). Used to distribute group config (charter/policy/chapters)
-// the moment it is edited, so hub-side nightly curation never runs on
-// stale routing rules. hubName selects a named hub ("" = default hub).
-// Returns an error — callers decide whether the write is best-effort.
-func PushMeta(root, hubName, project, key, value string) error {
-	_, hub := ResolveHub(root, hubName)
-	if hub == nil {
-		return nil // no hub configured: local-only install, nothing to do
-	}
-	body, err := json.Marshal(map[string]string{"value": value})
-	if err != nil {
-		return err
-	}
-	req, err := http.NewRequest("PUT",
-		hub.URL+"/v1/projects/"+url.PathEscape(project)+"/meta/"+url.PathEscape(key),
-		bytes.NewReader(body))
-	if err != nil {
-		return err
-	}
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Authorization", "Bearer "+hub.Token)
-	resp, err := hub.HTTPClient().Do(req)
-	if err != nil {
-		return err
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("hub HTTP %d", resp.StatusCode)
-	}
 	return nil
 }
 

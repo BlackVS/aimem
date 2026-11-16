@@ -222,11 +222,11 @@ func (s *Server) syncConfigIn(w http.ResponseWriter, r *http.Request) {
 		if json.Unmarshal([]byte(line), &rec) != nil {
 			continue
 		}
-		msg, ok := store.ImportGroupConfigRecord(s.reg, rec)
-		if msg != "" {
-			s.log.Info("sync config in", "msg", msg)
+		res := store.ImportGroupConfigRecord(s.reg, rec)
+		if res.Msg != "" {
+			s.log.Info("sync config in", "msg", res.Msg)
 		}
-		if ok {
+		if res.Applied {
 			applied++
 		}
 	}

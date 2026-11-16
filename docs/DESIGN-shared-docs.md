@@ -65,7 +65,9 @@ supersession and RRF ranking are all the wrong operations on a runbook.
   (`export-group-config` / `import-group-config`, `cmd/aimem/main.go`).
   Ordinary config is **fill-only**: a peer's value adopts into an empty
   local key, divergence warns and keeps local, because meta rows carry no
-  timestamps and a blind overwrite could undo a newer edit.
+  timestamps and a blind overwrite could undo a newer edit. A person
+  converges a group's divergent config deliberately with
+  `aimem group <name> --publish` or `--adopt` (ADMIN-MANUAL, section 3).
 - **`design_doc` is the exception and the precedent**: it travels with a
   companion `design_doc_ts` so import can apply **newest-wins**. It is
   safe there only because the document is *generated* — losing an edit

@@ -546,7 +546,32 @@ groups) and is stored as project meta, which is what partitions sync:
   plain `aimem sync <dest>` form refuses to run when several hubs are
   configured (it would cross-pollinate them).
 - Group config edits (`aimem group`) push to every hub that has a
-  member project of that group.
+  member project of that group. Only the keys this machine holds are
+  sent, so an edit never clears a key on the hub.
+
+Sync treats a group's config (`about`, `policy`, `chapters`,
+`features`) as fill-only: a key empty on one side is filled from the
+other, and a key both sides hold with different values is kept on each
+side and reported at every sync. Two commands make one side's value the
+common one, over the hub's API with the hub entry's token:
+
+- `aimem group <name> --hub <hub>` prints this machine's config and the
+  hub's side by side, with the keys that differ.
+- `aimem group <name> --publish [--hub <hub>]` writes this machine's
+  keys over the hub's. A key empty here is not sent. The hub checks each
+  value as for any edit (`chapters` names, `policy` all or domain).
+- `aimem group <name> --adopt [--hub <hub>]` writes the hub's keys over
+  this machine's, after the same checks. A key empty on the hub keeps
+  the local value.
+
+Each prints one line per key and exits non-zero when any key failed. A
+hub that cannot be reached, or does not answer within 10 seconds, stops
+the command at that key; the remaining keys are not tried.
+`--hub` may be left out when the group's projects use one hub. A
+publish reaches the hub only: every other machine that already holds a
+value keeps it, and is told at its next sync, until someone runs
+`--adopt` there. Any machine holding the hub's writer token can replace
+a group's config on the hub; that was so before these commands too.
 
 Hub names are machine-local config, but use the same names everywhere —
 the binding stored in `.aimem.json` travels with the repo. The TUI Hub
