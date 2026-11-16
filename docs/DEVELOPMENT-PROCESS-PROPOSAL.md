@@ -75,10 +75,13 @@ requests, and no closer to the pilot.
 
 Each goal is one record on the board: an outcome that can be checked, and
 a short ordered list of features, each with its own check and each marked
-mandatory or optional **for that goal**. A task names the feature it
-serves, or it is support work. Work is picked in three tiers: the path
-(mandatory features), then what comes next (optional features, in the
-list's order), then support work, which has a budget. A short course
+mandatory or optional **for that goal**. Tasks are all of one kind, with
+a priority, a complexity and dependencies; a task's place comes from its
+links: the feature it serves, or the tasks that depend on it. Work is
+picked in three tiers: the path (mandatory features and whatever their
+tasks depend on), then what comes next (optional features, in the list's
+order), then support work, the tasks nothing on the way depends on, which
+has a budget. A short course
 check, written once a working day into the goal's record, says how far the
 goal is, what it waits on, and whether the picks followed the tiers. All
 of it is plain counting over the board, so it can later be automated;
@@ -130,10 +133,24 @@ A feature is mandatory on one of two grounds, and the record says which:
 
 Everything else is optional.
 
-### 3.4 Tasks inherit; nobody rates a task by hand
+### 3.4 A task's place comes from its links
 
-A task serves one feature and inherits its mark. Its importance for the
-goal follows from where it stands, not from a label chosen for it. A task
+Tasks are all of one kind. A defect, a fix, a cleanup and a new function
+are tasks alike: each has a priority, a complexity and dependencies. What
+differs is where a task stands, and that follows from two links the board
+already records:
+
+- **the feature it serves.** A task of a feature inherits the feature's
+  mark;
+- **the tasks that depend on it.** A task that a task on the path cannot
+  proceed without is on the path itself, from the moment the dependency is
+  recorded, whatever kind of work it is. This is what puts a defect or a
+  fix first when later work rests on it: it is not an exception to the
+  order, it is the order.
+
+So a task's importance for the goal follows from where it stands, not
+from a label chosen for it, and it changes by itself when a dependency is
+added or a feature's mark changes. Nobody rates a task by hand. A task
 claims its feature when it is filed; the claim is confirmed, against the
 feature's check, by whoever promotes the task to READY. A task that does
 not move its feature's check is not that feature's task.
@@ -146,10 +163,12 @@ feature and inside support work. Complexity remains the size.
 
 ### 3.5 Support work
 
-A task that serves no feature of the goal is support work: a defect, a
-review follow-up, a cleanup, hardening, a convenience. Support work is not
-bad work. It is work that does not move the goal, and the process must
-show that plainly and bound it.
+Support work is not a kind of task. It is the name for the tasks that
+serve no feature of the goal and that no task of a feature depends on: a
+review follow-up nobody waits for, a cleanup, hardening, a convenience, a
+defect off the way. It is not bad work. It is work that does not move the
+goal, and the process must show that plainly and bound it. A support task
+stops being one the day something on the way is found to depend on it.
 
 ### 3.6 A person's action is part of the plan
 
@@ -172,14 +191,16 @@ keeps that judgement open to review.
 For a worker, among the tasks it may take that are READY with their
 dependencies DONE:
 
-1. **The path:** a task of a mandatory feature, the earliest feature in
-   the list first.
-2. **Next:** a task of an optional feature, the earliest in the list
-   first.
+1. **The path:** a task of a mandatory feature, or one that such a task
+   depends on; the earliest feature in the list first.
+2. **Next:** a task of an optional feature, or one that such a task
+   depends on; the earliest in the list first.
 3. **Support work,** within its budget ([4.3](#43-the-budget-for-support-work)).
 
 Inside one feature and inside support work, the order is priority, then
-oldest task id, as today.
+oldest task id, as today. A task with unfinished dependencies is not
+eligible, so the task it waits for is the one that is picked: the order
+among dependent tasks needs no rule of its own.
 
 The rule binds the one who assigns the queue as much as the one who picks:
 before support work is assigned to a worker, the next task of tier 1 or 2
@@ -221,17 +242,22 @@ budget, and that fact is itself reported in the course check, because it
 means the goal does not reach that worker
 ([7.5](#75-one-goal-several-projects-and-workers)).
 
-Four kinds of support work pass ahead of the tiers and outside the budget:
+Most of what used to jump the queue needs no exception under
+[3.4](#34-a-tasks-place-comes-from-its-links). A defect that makes a
+feature's check fail again makes that feature not done, and its fix serves
+the feature. A fault that later work rests on, a release that a task on
+the way waits for, a fix that unblocks the next step: each is recorded as
+a dependency of the task that waits, and is path or next-tier work by that
+link.
 
-- a defect that makes a feature's check fail again, which reopens that
-  feature and puts the task on the path;
-- a defect that stops a user's work now and has no workaround;
-- a fault that stops a release from shipping;
-- a security finding that the project's own rules class as blocking.
-
-The one who assigns the queue records which of the four applies on the
-task. Exceptions are counted and listed in every course check, so their
-number is seen. Anything else over the budget needs the owner's word.
+One thing passes ahead of the tiers and outside the budget: a task of
+priority **P0**, which the handbook already calls urgent. P0 is for work
+that cannot wait whatever the goal is: a defect that stops a user's work
+now and has no workaround, or a security finding that the project's own
+rules class as blocking. The one who assigns the queue sets P0 and records
+the ground on the task. Urgent tasks are counted and listed in every
+course check, so their number is seen. Anything else over the budget needs
+the owner's word.
 
 ## 5. Seeing progress
 
@@ -245,8 +271,10 @@ Six lines, counted from the board:
 3. **The wait:** the earliest feature on the path that is not done, who
    holds it, and since when.
 4. **The picks:** tasks delivered since the last check in each of four
-   groups: path, next, support within the budget, exceptions; and
-   separately any support task over the budget, with whose word.
+   groups: path, next, support within the budget, urgent; and separately
+   any support task over the budget, with whose word. A task that stood on
+   the path or next by a dependency is counted there and named, with the
+   task that waited for it.
 5. **Out of order:** tasks taken while a task of a higher tier was READY
    for the same worker without one of the recorded reasons. The aim is
    none.
@@ -300,7 +328,9 @@ and its search show titles; the mark follows that practice, and the
 difference from the handbook's wording is part of what the trial tests. An
 existing task gets its mark when it is promoted to READY, where the
 handbook already asks for old tasks to be assessed; until then it is not
-picked.
+picked. A task that stands on the way by a dependency carries the feature
+of the task that waits for it, and that task lists it in the board's
+dependencies field, which exists today.
 
 **The tiers of [4.1](#41-three-tiers) and the course check of
 [5.1](#51-the-course-check)** are applied by whoever assigns the queue.
@@ -343,20 +373,24 @@ mistake before its review ([section 8](#8-a-worked-example)).
 
 ### 7.3 Support work is starved, and quality drops
 
-The budget can be spent while path work is READY, the four exceptions
-cover what must not wait, and a worker the goal does not reach is not
-bound at all. If the trial shows defects piling up, the owner raises the
+The budget can be spent while path work is READY, a fault that later
+work rests on is path work by its dependency, P0 covers what cannot wait,
+and a worker the goal does not reach is not bound at all. If the trial shows defects piling up, the owner raises the
 figure. The trial counts open support tasks at its start and its end for
 this reason.
 
-### 7.4 The exceptions swallow the rule
+### 7.4 Everything becomes a dependency, or urgent
 
-"Stops a user's work now" is elastic where the users are the developers
-themselves. The defences are that the one who assigns the queue, not the
-one who wants the task, records the exception; that a workaround removes
-the ground; and that every check lists the exceptions. If a week shows
-more exceptions than budgeted support tasks, the exceptions are the rule
-and the list of four must be cut.
+A dependency is the cheapest way to move a favourite task onto the path,
+and "stops a user's work now" is elastic where the users are the
+developers themselves. The defences: a dependency is recorded on the task
+that waits, which must itself be a confirmed task of a feature, and the
+one who promotes that task to READY confirms that it cannot proceed
+without the other; P0 is set by the one who assigns the queue, not by the
+one who wants the task, and a workaround removes its ground; every check
+names the tasks that stood on the way by a dependency and lists the
+urgent ones. If a week shows more of those two together than tasks of
+features, the links are being used to go around the order.
 
 ### 7.5 One goal, several projects and workers
 
@@ -442,8 +476,8 @@ belong to the check, not to the record):
 3. The wait: feature 4, held by the operator. Two searches of the board
    found no task for it and none for feature 5, so "since when" has no
    date. That absence is the finding.
-4. The picks that day: path 0, next 0, support 11, exceptions none
-   recorded.
+4. The picks that day: path 0, next 0, support 11, urgent none; no task
+   of a feature depended on any of the eleven.
 5. Out of order: three in aicrew ([8.1](#81-the-rule-replayed-on-that-day)).
 6. Change proposed: file the tasks of features 4 and 5; a worker prepares
    what shortens them (a host checklist and a bring-up runbook are tasks of
@@ -487,9 +521,9 @@ Of the eleven pull requests merged on 2026-11-16:
   budget was empty: all three would have waited behind next-tier work.
 - **Eight were in aimem and its skills repository** (two fixes after a
   user's report, a hook, a cleanup, a check, three release preparations).
-  One of the fixes might have passed as an exception, but the user had a
-  workaround within minutes, so by [4.3](#43-the-budget-for-support-work)
-  it would not. For that worker no task of tier 1 or 2 existed, so the
+  One of the fixes might have been urgent, but the user had a workaround
+  within minutes, so by [4.3](#43-the-budget-for-support-work) it was
+  not, and no task of a feature waited for either fix. For that worker no task of tier 1 or 2 existed, so the
   budget did not bind, and the rule would have deferred none of the eight.
 
 So the rule by itself would have changed three of eleven. The other eight
@@ -511,7 +545,7 @@ from the board:
 | --- | --- |
 | Out-of-order picks per day (line 5) | the rule's purpose; the day replayed in 8.1 had three |
 | Picks by group per day (line 4) | where the work went |
-| Exceptions, against budgeted support tasks | whether the exceptions stayed exceptions |
+| Urgent tasks and tasks on the way by a dependency, against tasks of features | whether the links were used to go around the order |
 | Minutes to write each check, noted in it | the cost |
 | Working days a path feature waited on a person | whether a person on the path became visible and was acted on |
 | Open support tasks at the start and at the end | whether support work was starved |
@@ -521,8 +555,8 @@ from the board:
 
 - **Stop** if the checks took more than ten minutes on three of the five
   days, or if any of the last three days had three or more out-of-order
-  picks, as the replayed day did, or if exceptions outnumbered budgeted
-  support tasks.
+  picks, as the replayed day did, or if urgent tasks and tasks on the way
+  by a dependency together outnumbered the tasks of features.
 - **Build** if it did not stop and the minutes went mostly into the same
   mechanical steps: finding the tasks of a feature, reading their states,
   sorting the week's deliveries into groups. Those steps are then what is
@@ -602,14 +636,14 @@ pickup policy would gain text of this kind:
 > A goal is a record on the board: an outcome with a check, a criterion,
 > and an ordered list of features, each with its own check and marked
 > mandatory or optional for that goal. A task names its feature in its
-> title, or is support work; the mark is confirmed when the task is
-> promoted to READY. Pick eligible READY work in this order: a task of a
-> mandatory feature, the earliest in the list first; then a task of an
-> optional feature, the earliest first; then support work within the
-> budget the owner set. Before assigning support work, make the next task
-> of the first two kinds READY. A defect that reopens a feature, stops a
-> user without a workaround, stops a release, or is a blocking security
-> finding passes ahead, with the ground recorded by the assigner. Once per
+> title; a task that a task of a feature depends on stands where that
+> task stands; a task with neither link is support work. The mark is
+> confirmed when the task is promoted to READY. Pick eligible READY work
+> in this order: a task of a mandatory feature or one it depends on, the
+> earliest feature in the list first; then the same for optional features;
+> then support work within the budget the owner set. Before assigning
+> support work, make the next task of the first two kinds READY. A task of
+> priority P0 passes ahead, with its ground recorded by the assigner. Once per
 > working day and after each release, write the course check as a comment
 > on the goal's record: the goal, the distance, the wait, the picks, the
 > picks out of order, and the change proposed.
