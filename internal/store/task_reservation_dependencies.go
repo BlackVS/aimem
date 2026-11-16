@@ -145,6 +145,12 @@ func (r *Registry) locateDependencyGraph(ctx context.Context, owner Task,
 			return nil, fmt.Errorf("%w: %w", ErrDependencyUnresolved, err)
 		}
 		nodes[id] = dependencyNode{task: task, project: project, accessID: accessID, db: db}
+		if task.isFeature() {
+			if id == owner.ID {
+				return nil, featureWorkError(ErrTaskNotReady, id)
+			}
+			return nil, featureDependencyError(ErrDependencyUnresolved, dependentOf(nodes, id), id)
+		}
 		pending = append(pending, task.Dependencies...)
 	}
 	return nodes, nil
@@ -206,6 +212,12 @@ func validateDependencyGraph(ownerID string, nodes map[string]dependencyNode, tx
 		task, err := readTask(tx, id)
 		if err != nil {
 			return Task{}, nil, ErrDependencyUnresolved
+		}
+		if task.isFeature() {
+			if id == ownerID {
+				return Task{}, nil, featureWorkError(ErrTaskNotReady, id)
+			}
+			return Task{}, nil, featureDependencyError(ErrDependencyUnresolved, dependentOf(nodes, id), id)
 		}
 		if task.Revision != node.task.Revision ||
 			!taskDependenciesEqual(task.Dependencies, node.task.Dependencies) {
@@ -517,6 +529,9 @@ func (r *Registry) ReconcileReservationDependencies(ctx context.Context, taskID 
 			return true, ErrDependencyUnresolved
 		}
 		dep, err := depDB.GetTask(proof.TaskID)
+		if err == nil && dep.isFeature() {
+			return true, featureDependencyError(ErrDependencyUnresolved, taskID, dep.ID)
+		}
 		if err != nil || dep.State != "DONE" || dep.Revision != proof.Revision {
 			return true, ErrDependencyUnresolved
 		}

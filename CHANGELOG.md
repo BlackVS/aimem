@@ -9,7 +9,7 @@ upgrading a fleet.
 The format follows [Keep a Changelog](https://keepachangelog.com/1.1.0/);
 this project does not yet promise semantic versioning. The on-disk schema
 version is tracked separately (`currentSchema` in `internal/store/store.go`,
-currently 25); a binary refuses a database newer than it understands.
+currently 26); a binary refuses a database newer than it understands.
 
 ## [Unreleased]
 
@@ -56,6 +56,24 @@ currently 25); a binary refuses a database newer than it understands.
   publish it. `update_doc`'s
   reply for a bound file behind a link no longer suggests `aimem docs
   pull`, which refuses the same link; it names the link and the fix.
+
+### Added
+
+- **The store keeps features** (docs/DESIGN-feature-record.md, the store
+  half; the routes and MCP tools follow). Schema 26 adds a `kind` column
+  to the task table, `task` for every existing row. A feature is a task
+  row of kind `feature`, with its link to one goal (the epic: position,
+  mandatory or optional, the ground of a mandatory one, a note and an
+  alternative) stored beside the content. A task write keeps both, so an
+  older client's full update cannot drop them, and it cannot move a
+  feature off its goal. A feature is not work: a claim, an offer and team
+  management refuse it, no task may depend on one (the claim's dependency
+  walk, the offer and a task write each refuse it and name it), and it
+  moves into DONE only with an evidence reference. The board feed gets
+  one entry when a task becomes a feature (`to: "FEATURE"`) and one when
+  it is turned back, and nothing in between. Lists and counts show tasks
+  by default, a search finds any record, and both take a kind and a
+  feature filter.
 
 ## [0.10.27] — 2026-11-16
 

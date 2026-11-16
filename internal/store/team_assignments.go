@@ -110,6 +110,9 @@ func assignmentReady(tx *sql.Tx, id string, revision int64) (Task, error) {
 	if t.Revision != revision {
 		return t, &TaskConflict{Current: t}
 	}
+	if t.isFeature() {
+		return t, featureWorkError(ErrTeamAssignmentConflict, t.ID)
+	}
 	if t.State != "READY" || t.Archived {
 		return t, ErrTeamAssignmentConflict
 	}
@@ -117,6 +120,9 @@ func assignmentReady(tx *sql.Tx, id string, revision int64) (Task, error) {
 		dep, err := readTask(tx, id)
 		if err != nil {
 			return t, err
+		}
+		if dep.isFeature() {
+			return t, featureDependencyError(ErrTeamAssignmentConflict, t.ID, id)
 		}
 		if dep.State != "DONE" {
 			return t, ErrTeamAssignmentConflict
