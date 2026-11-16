@@ -955,6 +955,12 @@ func (s *Server) withDB(w http.ResponseWriter, r *http.Request) *store.DB {
 		open = s.reg.OpenExisting
 	}
 	db, err := open(r.PathValue("p"))
+	if errors.Is(err, store.ErrNoSuchProject) {
+		// The code says on purpose that the store is absent, so a caller
+		// can tell it from any other failure without reading the text.
+		s.failCode(w, http.StatusBadRequest, err, store.CodeNoSuchProject)
+		return nil
+	}
 	if err != nil {
 		s.fail(w, http.StatusBadRequest, err)
 		return nil
@@ -1060,8 +1066,18 @@ func (s *Server) ok(w http.ResponseWriter, v any) {
 }
 
 func (s *Server) fail(w http.ResponseWriter, code int, err error) {
+	s.failCode(w, code, err, "")
+}
+
+// failCode is fail with an error code in the body, for a refusal a client
+// tells apart by the code rather than by the message.
+func (s *Server) failCode(w http.ResponseWriter, code int, err error, errCode string) {
 	s.log.Warn("request failed", "code", code, "err", err)
+	body := map[string]string{"error": err.Error()}
+	if errCode != "" {
+		body["code"] = errCode
+	}
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(code)
-	json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
+	json.NewEncoder(w).Encode(body)
 }

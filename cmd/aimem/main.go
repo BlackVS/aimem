@@ -37,6 +37,7 @@ import (
 	"aimem/internal/mcp"
 	"aimem/internal/process"
 	"aimem/internal/provider"
+	"aimem/internal/schema"
 	"aimem/internal/server"
 	"aimem/internal/store"
 	"aimem/internal/teamsession"
@@ -2606,8 +2607,11 @@ func hubNamesForGroup(reg *store.Registry, gid string) []string {
 
 // hubProjects partitions the registry for one hub: the projects bound to
 // hubName (meta "hub"; unbound projects belong to the default hub), plus
-// the user DB and the group DBs those projects declare. This is the sync
-// boundary that keeps different hubs' data physically separate.
+// the user DB and the groups those projects declare. This is the sync
+// boundary that keeps different hubs' data physically separate. A
+// declared group is listed whether or not it has a local store: a group
+// this machine only reads must still be pulled, and the pull creates the
+// store with its first record.
 func hubProjects(reg *store.Registry, hubName, def string) ([]string, error) {
 	ids, err := reg.Projects()
 	if err != nil {
@@ -2632,15 +2636,13 @@ func hubProjects(reg *store.Registry, hubName, def string) ([]string, error) {
 		var gs []string
 		if raw != "" && json.Unmarshal([]byte(raw), &gs) == nil {
 			for _, g := range gs {
-				groups[g] = true
+				if strings.HasPrefix(g, "group-") && schema.ValidProjectID(g) {
+					groups[g] = true
+				}
 			}
 		}
 	}
-	for _, id := range ids {
-		if strings.HasPrefix(id, "group-") && groups[id] {
-			out = append(out, id)
-		}
-	}
+	out = append(out, slices.Collect(maps.Keys(groups))...)
 	out = append(out, "user")
 	slices.Sort(out)
 	return out, nil

@@ -181,6 +181,11 @@ func closeAndDrain(sdb *sql.DB) error {
 // opposed to a project that exists but cannot be opened.
 var ErrNoSuchProject = errors.New("no such project")
 
+// CodeNoSuchProject is the error code the service sends with a read
+// refused by ErrNoSuchProject, so a client can tell an absent store from
+// any other failure without matching the message.
+const CodeNoSuchProject = "no_such_project"
+
 // classifyMissing turns a stat failure into ErrNoSuchProject only when the
 // path does not exist; a permission or I/O failure on an existing tree is
 // a storage fault and must never read as absence.
