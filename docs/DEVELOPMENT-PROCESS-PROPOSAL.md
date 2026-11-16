@@ -198,8 +198,9 @@ confirmed link counts.
 Work that makes a person's step on the path shorter (a checklist for the
 hosts, a runbook for bringing a team up) is a task of that feature.
 
-Priority and complexity stay as they are. Priority orders the tasks of
-one feature and orders support work. Complexity remains the size.
+The scales of priority and complexity stay as they are. Priority gains
+a use it does not have today: it orders the tasks of one feature, and it
+orders support work. Complexity remains the size.
 
 ### 3.6 Support work
 
@@ -237,7 +238,9 @@ dependencies DONE:
 3. **Support work,** within its budget ([4.3](#43-the-budget-for-support-work)).
 
 Among the tasks of one feature and among support tasks, the order is
-priority, then oldest task id, as today. A task with unfinished
+priority, then oldest task id. That is a change in itself: today priority
+does not rank pickup at all ([1.1](#11-what-the-process-says-today)), and
+ranking by it is only planned. A task with unfinished
 dependencies is not eligible, so the task it waits for is the one that is
 picked: the order among dependent tasks needs no rule of its own.
 
@@ -625,6 +628,26 @@ show what the workers did instead.
 
 A sketch only; nothing here is designed.
 
+**The principle: automate whatever can be automated.** What is counting,
+ordering or checking is done by the product; a person or a model is asked
+only for a judgement. The process is built so that most of it can be
+derived from the board, and the line between the two can be drawn now:
+
+- **Done by the product:** a task's place, from what depends on it; the
+  order of the ready tasks for each worker; the count against the budget;
+  lines 2 to 5 of the course check (the distance, the wait, the picks, the
+  picks out of order); raising a step that has waited on a person; finding
+  a feature without a record, a READY task without a confirmed feature, a
+  record left in one state for weeks; the events that call for
+  replanning.
+- **A judgement, by the owner or the architect:** the goal's check and
+  criterion; which features a specification yields, with their checks,
+  marks and order; confirming that a task moves a feature's check;
+  priority P0; what to change when a replanning event fires.
+
+The trial is manual on purpose. What it measures is which of the product's
+lines cost the most by hand, and those are built first.
+
 **aimem** owns tasks and the board, so it would hold what the first
 version writes by hand:
 
@@ -639,7 +662,19 @@ version writes by hand:
 - on the board: features shown in a colour of their own; a view of the
   features alone; a view of the tasks of one chosen feature; and the
   dependencies between goal, features and tasks drawn as a graph;
-- computed views of the next task per assignee and of the course check.
+- computed views of the next task per assignee and of the course check;
+- all of the above through the HTTP API and the MCP tools, not only on
+  the board's page: features and their link to a goal read and written
+  there as tasks and epics are today, and the computed views served
+  there, because agents work through MCP;
+- helpers for the mechanical steps, as candidates to be chosen from what
+  the trial repeats most: setting a goal up from a list of features in one
+  step; confirming a task on a feature, the claim checked and the
+  feature's dependencies updated together, so that the two places cannot
+  disagree; the tasks of one feature, and the place of one task with the
+  reason for it; a draft of the course check counted from the board; a
+  check of the plan itself. Whether a helper is a command of the client,
+  an MCP tool or a skill with a script is decided then.
 
 **aicrew** owns teams and roles, so they would use those views: the
 coordinator takes the next task from the computed order, the architect
@@ -656,9 +691,14 @@ the owner's word:
    roadmap names) are revised: the feature becomes a field beside priority
    and complexity, goal-first becomes the default mode, and the planned
    modes rank inside a tier.
-3. aimem: the feature record and its link to a goal.
-4. aimem: the board views and the computed views.
-5. aicrew: the coordinator's selection and the architect's course check.
+3. aimem: the feature record and its link to a goal, in the store, the
+   HTTP API and the MCP tools together.
+4. aimem: the computed views (the next task, the course check, the check
+   of the plan), served through the API and MCP, and the helpers the trial
+   called for.
+5. aimem: the board views.
+6. aicrew: the coordinator's selection and the architect's course check,
+   taken from those views.
 
 ## 11. What is not proposed
 
