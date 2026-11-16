@@ -31,7 +31,7 @@ var errNoSyncTransport = errors.New("no sync transport")
 // configured. Such a project syncs NOWHERE and its checkpoints spool
 // indefinitely — correct since the no-fallback partition guard, but
 // quiet enough to hide a project for four hours (observed live
-// 2026-08-29: a binding said "work" where the hub was named "seclab").
+// 2026-08-29: a binding said "work" where the hub was named "office").
 // Sync is where an operator actually looks, so sync says it.
 func orphanBindings(reg *store.Registry, hubs map[string]*adapter.HubConfig) []string {
 	ids, err := reg.Projects()
@@ -256,7 +256,7 @@ func syncOneHTTP(name string, h *adapter.HubConfig, def string) error {
 	// Preflight: the hub's version gates stream verification below, and a
 	// self-declared hub_name that differs from what this machine calls the
 	// hub is exactly the mismatch that silently disabled hub-side curation
-	// for a day (2026-09-04, "work" vs "seclab") — say it where the
+	// for a day (2026-09-04, "work" vs "office") — say it where the
 	// operator looks.
 	hubVersion, hubSelfName := hubStatus(h)
 	if hubSelfName != "" && hubSelfName != name {

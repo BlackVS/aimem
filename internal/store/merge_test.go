@@ -13,11 +13,11 @@ func TestMergeProject(t *testing.T) {
 	defer r.Close()
 
 	// One real project under two ids: the old derived id and the pin.
-	old, err := r.Open("rc-0f05aa6db5cf")
+	old, err := r.Open("demo-0f05aa6db5cf")
 	if err != nil {
 		t.Fatal(err)
 	}
-	dst, err := r.Open("rc")
+	dst, err := r.Open("demo")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -31,17 +31,17 @@ func TestMergeProject(t *testing.T) {
 	old.AddCurateRun(&CurateRun{ID: "run-1", TS: "2026-08-01T00:00:00Z"})
 
 	// A group cites the old id; the merge must relabel it.
-	grp, err := r.Open("group-ai-infra")
+	grp, err := r.Open("group-platform")
 	if err != nil {
 		t.Fatal(err)
 	}
 	if _, _, err := grp.Remember("shared fact", "curator", RememberOpts{
-		Kind: "fact", Sources: []string{"project:rc-0f05aa6db5cf"},
+		Kind: "fact", Sources: []string{"project:demo-0f05aa6db5cf"},
 	}); err != nil {
 		t.Fatal(err)
 	}
 
-	events, mems, runs, cites, err := r.MergeProject("rc-0f05aa6db5cf", "rc")
+	events, mems, runs, cites, err := r.MergeProject("demo-0f05aa6db5cf", "demo")
 	if err != nil {
 		t.Fatalf("merge: %v", err)
 	}
@@ -49,10 +49,10 @@ func TestMergeProject(t *testing.T) {
 	if events != 1 || mems != 1 || runs != 1 || cites != 1 {
 		t.Fatalf("merged events=%d mems=%d runs=%d cites=%d; want 1/1/1/1", events, mems, runs, cites)
 	}
-	if _, err := r.OpenExisting("rc-0f05aa6db5cf"); err == nil {
+	if _, err := r.OpenExisting("demo-0f05aa6db5cf"); err == nil {
 		t.Fatal("source still resolves after merge")
 	}
-	got, err := r.OpenExisting("rc")
+	got, err := r.OpenExisting("demo")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -69,8 +69,8 @@ func TestMergeProject(t *testing.T) {
 			cited = s
 		}
 	}
-	if cited != "project:rc" {
-		t.Fatalf("group fact cites %q; want project:rc", cited)
+	if cited != "project:demo" {
+		t.Fatalf("group fact cites %q; want project:demo", cited)
 	}
 }
 
@@ -119,19 +119,19 @@ func TestMergeOrphanedOrigin(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer r.Close()
-	if _, err := r.Open("rc"); err != nil {
+	if _, err := r.Open("demo"); err != nil {
 		t.Fatal(err)
 	}
-	grp, err := r.Open("group-oboro")
+	grp, err := r.Open("group-shared")
 	if err != nil {
 		t.Fatal(err)
 	}
 	if _, _, err := grp.Remember("orphan-cited fact", "curator", RememberOpts{
-		Kind: "fact", Sources: []string{"project:RC-000668815ca9"},
+		Kind: "fact", Sources: []string{"project:demo-000668815ca9"},
 	}); err != nil {
 		t.Fatal(err)
 	}
-	events, mems, runs, cites, err := r.MergeProject("RC-000668815ca9", "rc")
+	events, mems, runs, cites, err := r.MergeProject("demo-000668815ca9", "demo")
 	if err != nil || events != 0 || mems != 0 || runs != 0 || cites != 1 {
 		t.Fatalf("orphan relabel: ev=%d mems=%d runs=%d cites=%d err=%v; want 0/0/0/1 nil",
 			events, mems, runs, cites, err)
@@ -143,27 +143,27 @@ func TestMergeOrphanedOrigin(t *testing.T) {
 			cited = s
 		}
 	}
-	if cited != "project:rc" {
-		t.Fatalf("citation is %q; want project:rc", cited)
+	if cited != "project:demo" {
+		t.Fatalf("citation is %q; want project:demo", cited)
 	}
 
 	// DURABILITY (the resurrection case, lived live): sync UNIONS
 	// sources, so a lagging peer re-pushes the old label. The recorded
 	// alias must normalize it on import instead of resurrecting it.
 	peer := gm[0]
-	peer.Sources = []string{"project:RC-000668815ca9"}
+	peer.Sources = []string{"project:demo-000668815ca9"}
 	if err := grp.ImportMemory(&peer); err != nil {
 		t.Fatal(err)
 	}
 	gm, _ = grp.Memories(false)
 	for _, s := range gm[0].Sources {
-		if strings.Contains(s, "RC-000") {
+		if strings.Contains(s, "demo-000") {
 			t.Fatalf("old label resurrected through import: %v", gm[0].Sources)
 		}
 	}
 	// And a brand-new fact citing the old id files under the new one.
 	nid, _, err := grp.Remember("late fact from a lagging peer", "curator", RememberOpts{
-		Kind: "fact", Sources: []string{"project:RC-000668815ca9"},
+		Kind: "fact", Sources: []string{"project:demo-000668815ca9"},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -174,7 +174,7 @@ func TestMergeOrphanedOrigin(t *testing.T) {
 			continue
 		}
 		for _, s := range m.Sources {
-			if strings.Contains(s, "RC-000") {
+			if strings.Contains(s, "demo-000") {
 				t.Fatalf("new fact carries the dead label: %v", m.Sources)
 			}
 		}

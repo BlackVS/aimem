@@ -26,19 +26,19 @@ func TestProjectIDPin(t *testing.T) {
 	}
 
 	// Pinned name is used verbatim — same name, same journal, everywhere.
-	writeConfig(t, dir, `{"project": "RC", "groups": ["oboro"]}`)
+	writeConfig(t, dir, `{"project": "demo", "groups": ["shared"]}`)
 	id, err = ProjectID(dir)
-	if err != nil || id != "RC" {
+	if err != nil || id != "demo" {
 		t.Fatalf("pinned id: %q err=%v", id, err)
 	}
 	// Groups parsing still works from the same file.
 	gs, err := ProjectGroups(dir)
-	if err != nil || len(gs) != 1 || gs[0] != "group-oboro" {
+	if err != nil || len(gs) != 1 || gs[0] != "group-shared" {
 		t.Fatalf("groups: %v err=%v", gs, err)
 	}
 
 	// Reserved and malformed names are errors, not silent fallbacks.
-	for _, bad := range []string{"user", "group-oboro", "has space", "/etc/x"} {
+	for _, bad := range []string{"user", "group-shared", "has space", "/etc/x"} {
 		writeConfig(t, dir, `{"project": "`+bad+`"}`)
 		if _, err := ProjectID(dir); err == nil {
 			t.Errorf("pin %q accepted", bad)
@@ -55,12 +55,12 @@ func TestProjectHubName(t *testing.T) {
 	}
 
 	// Config without a hub key: default hub.
-	writeConfig(t, dir, `{"groups": ["oboro"]}`)
+	writeConfig(t, dir, `{"groups": ["shared"]}`)
 	if h, err := ProjectHubName(dir); err != nil || h != "" {
 		t.Fatalf("no hub key: %q err=%v", h, err)
 	}
 
-	writeConfig(t, dir, `{"hub": "home", "groups": ["oboro"]}`)
+	writeConfig(t, dir, `{"hub": "home", "groups": ["shared"]}`)
 	if h, err := ProjectHubName(dir); err != nil || h != "home" {
 		t.Fatalf("bound: %q err=%v", h, err)
 	}
@@ -112,7 +112,7 @@ func TestUnreadableConfigIsStrictForRouting(t *testing.T) {
 // write BOMs routinely; parsing must survive one.
 func TestConfigWithUTF8BOM(t *testing.T) {
 	dir := t.TempDir()
-	body := append([]byte("\xef\xbb\xbf"), []byte(`{"hub":"home","groups":["ai-infra"],"project":"pinned"}`)...)
+	body := append([]byte("\xef\xbb\xbf"), []byte(`{"hub":"home","groups":["platform"],"project":"pinned"}`)...)
 	if err := os.WriteFile(filepath.Join(dir, ".aimem.json"), body, 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -121,8 +121,8 @@ func TestConfigWithUTF8BOM(t *testing.T) {
 		t.Fatalf("hub = %q, %v; want \"home\", nil", hub, err)
 	}
 	groups, err := ProjectGroups(dir)
-	if err != nil || len(groups) != 1 || groups[0] != "group-ai-infra" {
-		t.Fatalf("groups = %v, %v; want [group-ai-infra], nil", groups, err)
+	if err != nil || len(groups) != 1 || groups[0] != "group-platform" {
+		t.Fatalf("groups = %v, %v; want [group-platform], nil", groups, err)
 	}
 	id, err := ProjectID(dir)
 	if err != nil || id != "pinned" {

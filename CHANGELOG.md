@@ -4833,7 +4833,7 @@ deferred", a later entry in this same release delivers it.
 
 - Merge-into handles the **orphaned-origin** case found live minutes
   after 0.3.6: a project dropped before merge existed leaves group
-  facts citing a ghost id ("from RC-000668815ca9" with no such
+  facts citing a ghost id ("from demo-000668815ca9" with no such
   project). When the merge source no longer exists but group facts
   still cite it, the operation degrades to a pure citation relabel
   (zero citations = typo, refused); responses now count relabeled
@@ -5040,7 +5040,7 @@ aimem API wiki minutes after 0.3.0:
   drops) are now also persisted to `<state-root>/adapter.log`
   (timestamped, rotated at 512KB) — previously they lived only on the
   submit process's stderr, which OpenCode's detached spawn discards
-  and Windows hook plumbing buries; that silence is how the RC binding
+  and Windows hook plumbing buries; that silence is how a project's binding
   incident hid for four hours. The orphaned-binding sync warning
   (0.2.2) persists there too.
 
@@ -5053,7 +5053,7 @@ aimem API wiki minutes after 0.3.0:
   no-fallback partition guard such a project syncs NOWHERE and its
   checkpoints spool indefinitely — correct, but quiet enough to hide a
   project for four hours (found live: a `.aimem.json` said
-  `"hub": "work"` on a machine whose hub is named `seclab`; facts
+  `"hub": "work"` on a machine whose hub is named `office`; facts
   stayed local and curation saw no events until the binding was
   fixed). Hub names are machine-local — use the same names everywhere,
   as ADMIN-MANUAL already said.

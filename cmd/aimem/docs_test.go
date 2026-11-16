@@ -20,7 +20,7 @@ func TestDocsPullRefusesLocalChanges(t *testing.T) {
 	hub := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		json.NewEncoder(w).Encode(map[string]any{
 			"name": "RUNBOOK", "body": "hub version\n", "rev": 5,
-			"updated_at": "2026-08-29T00:00:00Z", "updated_by": "minis/cli",
+			"updated_at": "2026-08-29T00:00:00Z", "updated_by": "laptop/cli",
 		})
 	}))
 	defer hub.Close()
@@ -80,7 +80,7 @@ func TestDocsMergeThreeWay(t *testing.T) {
 		}
 		json.NewEncoder(w).Encode(map[string]any{
 			"name": "RUNBOOK", "body": body, "rev": rev,
-			"updated_at": "2026-08-29T00:00:00Z", "updated_by": "minis/cli",
+			"updated_at": "2026-08-29T00:00:00Z", "updated_by": "laptop/cli",
 		})
 	}))
 	defer hub.Close()

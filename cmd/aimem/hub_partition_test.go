@@ -33,14 +33,14 @@ func TestHubProjectsPartition(t *testing.T) {
 			}
 		}
 	}
-	seed("work-a", "", `["group-ai-infra"]`) // unbound -> default hub
+	seed("work-a", "", `["group-platform"]`) // unbound -> default hub
 	seed("work-b", "-", "")                  // no meta at all -> default hub
 	// A group this machine only reads: declared, with no local store. A
 	// malformed entry is never listed.
 	seed("work-c", "", `["group-read-only","group-../x","plain"]`)
 	seed("home-a", "home", `["group-family"]`)
 	// group-stray has a store that no bound project declares.
-	for _, g := range []string{"group-ai-infra", "group-family", "group-stray"} {
+	for _, g := range []string{"group-platform", "group-family", "group-stray"} {
 		if _, err := reg.Open(g); err != nil {
 			t.Fatal(err)
 		}
@@ -53,7 +53,7 @@ func TestHubProjectsPartition(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := []string{"group-ai-infra", "group-read-only", "user", "work-a", "work-b", "work-c"}
+	want := []string{"group-platform", "group-read-only", "user", "work-a", "work-b", "work-c"}
 	if !slices.Equal(got, want) {
 		t.Fatalf("default hub partition: got %v want %v", got, want)
 	}

@@ -3,7 +3,7 @@ package adapter
 // Adapter-side warnings — spooled checkpoints, orphaned hub bindings,
 // shared-doc conflicts — used to exist only on the submit process's
 // stderr, which OpenCode's detached spawn discards and Windows hook
-// plumbing buries; the RC binding incident ran silent for four hours
+// plumbing buries; a project's binding incident ran silent for four hours
 // behind a green sync log. Note keeps the stderr line AND appends it,
 // timestamped, to <state-root>/adapter.log, which `aimem logs` reads.
 // A file rather than an API on purpose: these warnings matter most

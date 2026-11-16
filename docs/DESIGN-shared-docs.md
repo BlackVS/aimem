@@ -86,7 +86,7 @@ CREATE TABLE docs(
   body       TEXT NOT NULL,
   rev        INTEGER NOT NULL,   -- monotonic per doc; the CAS token
   updated_at TEXT NOT NULL,      -- RFC3339 UTC
-  updated_by TEXT NOT NULL       -- host + client, e.g. "minis/claude-code"
+  updated_by TEXT NOT NULL       -- host + client, e.g. "laptop/claude-code"
 );
 CREATE TABLE doc_revisions(      -- bounded history: the last N bodies
   name TEXT NOT NULL, rev INTEGER NOT NULL,
@@ -111,7 +111,7 @@ and the response carries the current body so the caller can merge:
 ```
 PUT /v1/projects/{p}/docs/{name}   {"body": "...", "base_rev": 7}
   -> 200 {"rev": 8}
-  -> 409 {"error": "...", "rev": 9, "body": "<current>", "updated_by": "minis/..."}
+  -> 409 {"error": "...", "rev": 9, "body": "<current>", "updated_by": "laptop/..."}
 ```
 
 Two refinements make CAS safe under retries:

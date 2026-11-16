@@ -96,14 +96,14 @@ func TestPublishDocsLifecycle(t *testing.T) {
 
 	// Divergence: hub moves ahead, local edit conflicts, sidecar keeps the
 	// stale hash so the NEXT publish retries (no queue needed).
-	fake.docs["SESSION-STATE"] = store.Doc{Name: "SESSION-STATE", Body: "hub side", Rev: 9, UpdatedBy: "minis/x"}
+	fake.docs["SESSION-STATE"] = store.Doc{Name: "SESSION-STATE", Body: "hub side", Rev: 9, UpdatedBy: "laptop/x"}
 	os.WriteFile(filepath.Join(proj, "docs", "SESSION-STATE.md"), []byte("# Handoff v3\n"), 0o644)
 	res = c.PublishDocs(proj, "projX", "home", "host/test")
 	if len(res) != 1 || res[0].Err == nil {
 		t.Fatalf("conflict not reported: %+v", res)
 	}
 	var conflict *DocConflictError
-	if !asDocConflict(res[0].Err, &conflict) || conflict.Doc.Rev != 9 || conflict.Doc.UpdatedBy != "minis/x" {
+	if !asDocConflict(res[0].Err, &conflict) || conflict.Doc.Rev != 9 || conflict.Doc.UpdatedBy != "laptop/x" {
 		t.Fatalf("conflict payload: %v", res[0].Err)
 	}
 	// Retry happens on the next checkpoint because the hash stayed stale.
