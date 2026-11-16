@@ -108,7 +108,7 @@ func (s *Server) putDoc(w http.ResponseWriter, r *http.Request) {
 	}
 	doc, err := db.PutDoc(r.PathValue("name"), body.Body, by, body.BaseRev, false)
 	if err != nil {
-		s.docWriteError(w, err)
+		s.docWriteError(w, r.PathValue("p"), err)
 		return
 	}
 	if team {
@@ -128,7 +128,7 @@ func (s *Server) deleteDoc(w http.ResponseWriter, r *http.Request) {
 	by := stampWriter(r, r.URL.Query().Get("by"))
 	doc, err := db.PutDoc(r.PathValue("name"), "", by, baseRev, true)
 	if err != nil {
-		s.docWriteError(w, err)
+		s.docWriteError(w, r.PathValue("p"), err)
 		return
 	}
 	s.log.Warn("doc retired", "project", r.PathValue("p"), "doc", doc.Name, "rev", doc.Rev, "by", by)
@@ -180,7 +180,7 @@ func (s *Server) mergeDoc(w http.ResponseWriter, r *http.Request) {
 // docWriteError maps a CAS refusal to 409 carrying the current document
 // (body capped), everything else to 400. The 409 payload is the merge
 // input: rev to rebase onto, writer to blame, body to diff against.
-func (s *Server) docWriteError(w http.ResponseWriter, err error) {
+func (s *Server) docWriteError(w http.ResponseWriter, project string, err error) {
 	var conflict *store.DocConflict
 	if errors.As(err, &conflict) {
 		cur := conflict.Current
@@ -203,6 +203,12 @@ func (s *Server) docWriteError(w http.ResponseWriter, err error) {
 			"body": cur.Body, "body_truncated": truncated,
 		})
 		return
+	}
+	// A refusal for a likely secret names the project too: a client that
+	// syncs several projects must be able to tell where to look.
+	var secret *store.DocSecretError
+	if errors.As(err, &secret) {
+		err = fmt.Errorf("project %s: %w", project, err)
 	}
 	s.fail(w, http.StatusBadRequest, err)
 }

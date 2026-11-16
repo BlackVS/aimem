@@ -13,6 +13,50 @@ currently 25); a binary refuses a database newer than it understands.
 
 ## [Unreleased]
 
+### Security
+
+- **A shared document that holds a likely secret is refused, on the hub
+  as well as on the client, and the user is told why** (a follow-up of
+  security audit finding A-2). One document policy (`redact.ScanDocument`)
+  is applied by the client publisher, by MCP `update_doc` before any hub
+  call, and by the hub's document write, so the three cannot drift apart:
+  - **It refuses** what it refused before (private key blocks and the
+    recognised vendor token formats), and now also a bearer token's value
+    of 16 or more token characters, and a credential assignment
+    (`api_key = …`, `password: …`) whose value is 20 characters or more
+    and mixes letters and digits.
+  - **A placeholder is no finding**: `<token>`, `${NAME}`, `%{name}`,
+    `{{ … }}`, `[REDACTED]`, `$NAME`, `%NAME%`, a mask such as `********`
+    or `***NAME***`, a value that ends in a `...` cut after fewer than 12
+    characters, and a value starting with `your`,
+    `example`, `placeholder`, `changeme`, `dummy` or `redacted` (or
+    equal to `token`, `secret` or `password`). A wrapper around a
+    generated-looking value (a run of 12 or more letters and digits
+    holding both) is that value, not a placeholder. A document that must
+    show a credential's form uses one; there is no override.
+  - **It warns** on an authorization header, on a bearer value made of
+    letter-only words joined by `-` or `_` (all lowercase or all
+    uppercase, as `MY_SECRET_TOKEN_HERE`), on a shorter or letters-only
+    credential assignment, and on one whose value is a filesystem path
+    (`/…`, `./…`, `../…`, `~/…`, `C:\…`) made of names, which says where
+    a secret lives; a generated-looking run inside it still refuses, since
+    base64 may start with a slash.
+  - **Every message on this path names the project** as well as the
+    document and the rule, never the matched text, and says what to do.
+    A sync over several projects used to name only the document.
+
+  Records and task text keep exactly today's refusals. A document already
+  on a hub is not rescanned; an edit of it meets the policy. The hub
+  answers a refusal with the same 400 as before, now naming the project;
+  an older client meets it as that error.
+- **The setup check no longer reports a handoff reached through a link as
+  present.** `aimem wire` (with or without `--check`) and the team setup
+  fail it, name the link and say to replace it with a real file, where
+  they said "handoff file present" while every checkpoint refused to
+  publish it. `update_doc`'s
+  reply for a bound file behind a link no longer suggests `aimem docs
+  pull`, which refuses the same link; it names the link and the fix.
+
 ## [0.10.27] — 2026-11-16
 
 Two fixes to how group knowledge reaches a machine. A machine now syncs
