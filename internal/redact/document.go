@@ -15,11 +15,11 @@ import (
 //   - a value that is a placeholder is no finding: a document that shows a
 //     header's or an assignment's form must still publish;
 //   - a bearer token refuses, unless its value is a placeholder or a
-//     descriptive stand-in (lowercase words joined by - or _, no digit),
-//     which only warns;
+//     descriptive stand-in (letter-only words joined by - or _, all
+//     lowercase or all uppercase), which only warns;
 //   - a credential assignment refuses when its value is 20 characters or
-//     more and mixes letters and digits; a shorter or letters-only value
-//     warns.
+//     more and mixes letters and digits; a shorter or letters-only value,
+//     or a filesystem path, warns.
 //
 // The authorization header stays a warning. Like ScanAuthored it reports
 // rule names only, never the matched text.
@@ -84,10 +84,13 @@ var (
 
 	scheme = regexp.MustCompile(`(?i)^(bearer|basic|token|digest|negotiate)$`)
 	// A template: <name>, {name}, {{name}}, ${name}, %{name}, [name], $NAME, %NAME%.
-	template   = regexp.MustCompile(`^(<[^<>]*>|\{\{.*\}\}|\$\{[^{}]*\}|%\{[^{}]*\}|\{[^{}]*\}|\[[^\[\]]*\]|\$[A-Za-z_][A-Za-z0-9_]*|%[A-Za-z_][A-Za-z0-9_]*%)$`)
-	standIn    = regexp.MustCompile(`^[a-z]+(?:[-_][a-z]+)+$`)
+	template = regexp.MustCompile(`^(<[^<>]*>|\{\{.*\}\}|\$\{[^{}]*\}|%\{[^{}]*\}|\{[^{}]*\}|\[[^\[\]]*\]|\$[A-Za-z_][A-Za-z0-9_]*|%[A-Za-z_][A-Za-z0-9_]*%)$`)
+	standIn  = regexp.MustCompile(`^(?:[a-z]+(?:[-_][a-z]+)+|[A-Z]+(?:[-_][A-Z]+)+)$`)
+	// A filesystem path names where a secret lives; it is not one.
+	pathStart  = regexp.MustCompile(`^(?:/|\./|\.\./|~/|[A-Za-z]:[\\/])`)
 	hasLetter  = regexp.MustCompile(`[A-Za-z]`)
 	hasDigit   = regexp.MustCompile(`[0-9]`)
+	alnumRun   = regexp.MustCompile(`[A-Za-z0-9]+`)
 	dummyStart = []string{"your", "example", "placeholder", "changeme", "dummy", "redacted"}
 	dummyEqual = []string{"token", "secret", "password"}
 )
@@ -117,6 +120,8 @@ func credentialOutcome(raw string) docOutcome {
 	}
 	v := trimValue(raw)
 	switch {
+	case pathStart.MatchString(v) && !longMixed(v):
+		return docWarn // a path made of names; base64 may start with / too
 	case len(v) >= 20 && hasLetter.MatchString(v) && hasDigit.MatchString(v):
 		return docRefuse
 	}
@@ -133,13 +138,11 @@ func trimValue(v string) string {
 // a template, a mask, an obvious dummy, or a short prefix cut with dots.
 func isPlaceholder(v string) bool {
 	v = strings.Trim(v, "\"'`,;:()")
-	// The cut first, while its dots are still there.
-	if i := strings.Index(v, "..."); i >= 0 {
-		if utf8.RuneCountInString(v[:i]) < shortCut {
-			return true
-		}
-	} else if i := strings.Index(v, "…"); i >= 0 {
-		if utf8.RuneCountInString(v[:i]) < shortCut {
+	// The cut first, while its dots are still there. It is a form only when
+	// it ends the value after a short part: whatever follows the dots is
+	// more of the value, and a long part before them is most of a secret.
+	if strings.HasSuffix(v, "...") || strings.HasSuffix(v, "…") {
+		if utf8.RuneCountInString(strings.TrimRight(v, ".…")) < shortCut {
 			return true
 		}
 	}
@@ -149,11 +152,10 @@ func isPlaceholder(v string) bool {
 	if v == "" {
 		return true
 	}
-	if template.MatchString(v) {
-		return true
-	}
-	if len(v) > 2 && strings.HasPrefix(v, "*") && strings.HasSuffix(v, "*") {
-		return true
+	// A wrapper names a value; one around a generated-looking value is the
+	// value itself in emphasis or brackets.
+	if template.MatchString(v) || len(v) > 2 && strings.HasPrefix(v, "*") && strings.HasSuffix(v, "*") {
+		return !longMixed(v)
 	}
 	if isMask(v) {
 		return true
@@ -164,6 +166,18 @@ func isPlaceholder(v string) bool {
 	}
 	for _, d := range dummyStart {
 		if strings.HasPrefix(k, d) {
+			return true
+		}
+	}
+	return false
+}
+
+// longMixed reports a run of 12 or more letters and digits that holds both,
+// the shape of a generated value; names such as DB_PASSWORD or api-key are
+// not one.
+func longMixed(v string) bool {
+	for _, run := range alnumRun.FindAllString(v, -1) {
+		if len(run) >= shortCut && hasLetter.MatchString(run) && hasDigit.MatchString(run) {
 			return true
 		}
 	}

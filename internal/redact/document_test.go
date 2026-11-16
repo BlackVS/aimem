@@ -29,6 +29,8 @@ func TestScanDocumentBearerHasThreeOutcomes(t *testing.T) {
 		{"Bearer your-hub-admin-token-here-xx", ""}, // starts with a dummy word
 		{"Bearer hub-admin-token-value", "warn"},
 		{"Bearer hub_admin_token_value", "warn"},
+		{"Authorization: Bearer MY_SECRET_TOKEN_HERE", "warn"},
+		{"Bearer HUB-ADMIN-TOKEN-VALUE", "warn"},
 		// Anything else of 16 or more token characters refuses.
 		{fx("Bearer abcdefghij", "klmnop123456"), "refuse"},
 		{fx("Bearer Hub-Admin-", "Token-Value"), "refuse"}, // mixed case is no stand-in
@@ -54,6 +56,17 @@ func TestScanDocumentCredentialAssignment(t *testing.T) {
 		{fx("password = hunter2", "again"), "warn"},
 		{fx("api_key = a1b2c3d4e5", "f6g7h8i9j"), "warn"},    // 19
 		{fx("api_key = a1b2c3d4e5", "f6g7h8i9j0"), "refuse"}, // 20
+		// A filesystem path names where a secret lives: a warning, never a
+		// refusal. A URL is no path and keeps the rule.
+		{"secret_key: /home/user1/keys/app2/secret.pem", "warn"},
+		{"api_key = ./keys/app2/deploy-2024.pem", "warn"},
+		{"api_key = ../keys/app2/id_ed25519", "warn"},
+		{"api_key = ~/.ssh/id_ed25519", "warn"},
+		{`api_key = C:\keys\app2\id_ed25519.pem`, "warn"},
+		{"api_key = D:/keys/app2/service.json", "warn"},
+		{fx("api_key = https://example.test/k/a1b2c3", "d4e5f6g7h8"), "refuse"},
+		// Base64 may start with a slash: a generated run inside refuses.
+		{fx("api_key = /9j4AbCd5Ef", "6Gh7Ij8Kl9Mn0"), "refuse"},
 		// Placeholders are no finding.
 		{"api_key: <your key here>", ""}, // the value regex stops at the space: "<your"
 		{"api_key: <api-key>", ""},
@@ -92,6 +105,43 @@ func TestScanDocumentDotCutLength(t *testing.T) {
 	}
 	if got := outcome(t, "api_key = abcdefghij1…", "credential assignment"); got != "" {
 		t.Errorf("an 11-character prefix with an ellipsis: %q, want no finding", got)
+	}
+	// A cut is a form only when it ends the value: anything after the dots
+	// is more of the value.
+	for _, c := range []struct{ text, rule, want string }{
+		{fx("token: ghp_Ab", "12..."), "credential assignment", ""},
+		{fx("token: ghp_Ab", "12...") + ".", "credential assignment", ""},
+		{"api_key = sk-...wxyz", "credential assignment", "warn"},
+		{fx("token: ab...Zx9Kq2Lm", "8Pv4Rt6Yw1Bn3Qd5"), "credential assignment", "refuse"},
+		{fx("api_key = sk...a1b2c3d4e5", "f6g7h8i9j0k1"), "credential assignment", "refuse"},
+		{fx("Bearer sk...a1b2c3d4e5", "f6g7h8i9j0k1"), "bearer token", "refuse"},
+	} {
+		if got := outcome(t, c.text, c.rule); got != c.want {
+			t.Errorf("%q: %s %q, want %q", c.text, c.rule, got, c.want)
+		}
+	}
+}
+
+// A wrapper names a value only when what it wraps is no generated-looking
+// value: a secret in emphasis or brackets is still the secret.
+func TestScanDocumentWrappedValues(t *testing.T) {
+	value := fx("a1b2c3d4e5", "f6g7h8i9j0k1")
+	for _, c := range []struct{ text, want string }{
+		{"api_key = *" + value + "*", "refuse"},
+		{"api_key = [" + value + "]", "refuse"},
+		{"api_key = {" + value + "}", "refuse"},
+		{"api_key = <" + value + ">", "refuse"},
+		{"api_key = ${" + value + "}", "refuse"},
+		// Names inside wrappers stay placeholders, digits included.
+		{"api_key = <api-key-v2>", ""},
+		{"api_key = <key2024>", ""}, // a short mixed run is a name
+		{"password = ${DB_PASSWORD_2}", ""},
+		{"token = [REDACTED]", ""},
+		{"password = ***PASSWORD***", ""},
+	} {
+		if got := outcome(t, c.text, "credential assignment"); got != c.want {
+			t.Errorf("%q: credential assignment %q, want %q", c.text, got, c.want)
+		}
 	}
 }
 

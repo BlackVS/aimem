@@ -324,8 +324,10 @@ text the conflict message is telling the user to preserve.
    the high-confidence shapes (private key blocks, recognised vendor
    token formats), a bearer token's value, and a credential assignment
    of 20 or more characters mixing letters and digits; a placeholder
-   (`<token>`, `${NAME}`, a mask, a dummy word, a short `...` prefix) is
-   no finding; the rest warns and publishes. Every message names the
+   (`<token>`, `${NAME}`, a mask, a dummy word, a short value ending
+   in a `...` cut, but never a wrapper around a generated-looking
+   value) is no finding; a filesystem path after a credential keyword
+   warns; the rest warns and publishes. Every message names the
    project, the document and the rule, never the text. Records and task
    text keep `redact.ScanAuthored`, which refuses the high-confidence
    shapes only. (Policy call of 2026-11-16, measured over the

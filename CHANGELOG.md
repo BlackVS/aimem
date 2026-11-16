@@ -27,14 +27,20 @@ currently 25); a binary refuses a database newer than it understands.
     and mixes letters and digits.
   - **A placeholder is no finding**: `<token>`, `${NAME}`, `%{name}`,
     `{{ … }}`, `[REDACTED]`, `$NAME`, `%NAME%`, a mask such as `********`
-    or `***NAME***`, a short prefix cut with `...` (fewer than 12
-    characters shown), and a value starting with `your`, `example`,
-    `placeholder`, `changeme`, `dummy` or `redacted` (or equal to
-    `token`, `secret` or `password`). A document that must show a
-    credential's form uses one; there is no override.
+    or `***NAME***`, a value that ends in a `...` cut after fewer than 12
+    characters, and a value starting with `your`,
+    `example`, `placeholder`, `changeme`, `dummy` or `redacted` (or
+    equal to `token`, `secret` or `password`). A wrapper around a
+    generated-looking value (a run of 12 or more letters and digits
+    holding both) is that value, not a placeholder. A document that must
+    show a credential's form uses one; there is no override.
   - **It warns** on an authorization header, on a bearer value made of
-    lowercase words joined by `-` or `_`, and on a shorter or letters-only
-    credential assignment.
+    letter-only words joined by `-` or `_` (all lowercase or all
+    uppercase, as `MY_SECRET_TOKEN_HERE`), on a shorter or letters-only
+    credential assignment, and on one whose value is a filesystem path
+    (`/…`, `./…`, `../…`, `~/…`, `C:\…`) made of names, which says where
+    a secret lives; a generated-looking run inside it still refuses, since
+    base64 may start with a slash.
   - **Every message on this path names the project** as well as the
     document and the rule, never the matched text, and says what to do.
     A sync over several projects used to name only the document.
