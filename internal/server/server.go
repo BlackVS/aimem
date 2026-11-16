@@ -955,6 +955,15 @@ func (s *Server) withDB(w http.ResponseWriter, r *http.Request) *store.DB {
 		open = s.reg.OpenExisting
 	}
 	db, err := open(r.PathValue("p"))
+	if errors.Is(err, store.ErrNoSuchProject) {
+		// The code says on purpose that the store is absent, so a caller
+		// can tell it from any other failure without reading the text.
+		s.log.Warn("request failed", "code", http.StatusBadRequest, "err", err)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusBadRequest)
+		json.NewEncoder(w).Encode(map[string]string{"error": err.Error(), "code": store.CodeNoSuchProject})
+		return nil
+	}
 	if err != nil {
 		s.fail(w, http.StatusBadRequest, err)
 		return nil

@@ -489,6 +489,9 @@ func (s *srv) run(p *toolParams) (string, error) {
 			if err := s.get(fmt.Sprintf("/v1/projects/%s/memories/recall?q=%s&budget=%d&tag=%s&kind=%s",
 				url.PathEscape(proj), url.QueryEscape(a.Query), budget,
 				url.QueryEscape(a.Tag), url.QueryEscape(a.Kind)), &res); err != nil {
+				if noGroupStore(proj, err) {
+					continue
+				}
 				return "", err
 			}
 			for _, m := range res.Memories {
@@ -567,6 +570,9 @@ func (s *srv) run(p *toolParams) (string, error) {
 		}
 		if err := s.get(fmt.Sprintf("/v1/projects/%s/memories/review?days=%d&limit=%d",
 			url.PathEscape(projs[0]), days, limit), &res); err != nil {
+			if noGroupStore(projs[0], err) {
+				return "review queue is clear (this machine holds no facts of the group yet)", nil
+			}
 			return "", err
 		}
 		if len(res.Items) == 0 {
@@ -663,7 +669,7 @@ func (s *srv) run(p *toolParams) (string, error) {
 		var res struct {
 			Value string `json:"value"`
 		}
-		if err := s.get(fmt.Sprintf("/v1/projects/%s/meta/design_doc", url.PathEscape(gid)), &res); err != nil {
+		if err := s.get(fmt.Sprintf("/v1/projects/%s/meta/design_doc", url.PathEscape(gid)), &res); err != nil && !noGroupStore(gid, err) {
 			return "", err
 		}
 		if res.Value == "" {
@@ -754,14 +760,30 @@ func decodeAPI(resp *http.Response, into any) error {
 	if resp.StatusCode >= 400 {
 		var e struct {
 			Error string `json:"error"`
+			Code  string `json:"code"`
 		}
 		json.Unmarshal(raw, &e)
 		if e.Error == "" {
 			e.Error = fmt.Sprintf("HTTP %d", resp.StatusCode)
 		}
-		return fmt.Errorf("%s", e.Error)
+		return &apiError{msg: e.Error, code: e.Code}
 	}
 	return json.Unmarshal(raw, into)
+}
+
+// apiError is a service refusal: its message, and the code the service
+// set on purpose, if any.
+type apiError struct{ msg, code string }
+
+func (e *apiError) Error() string { return e.msg }
+
+// noGroupStore reports a read of a group that has no local store yet,
+// which a group this machine only reads has until its first sync pulls a
+// record. Only the service's code counts; every other failure, a storage
+// fault on an existing store included, stays an error.
+func noGroupStore(proj string, err error) bool {
+	var e *apiError
+	return strings.HasPrefix(proj, "group-") && errors.As(err, &e) && e.code == store.CodeNoSuchProject
 }
 
 // DefaultProject resolves the MCP server's project scope and declared

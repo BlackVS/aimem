@@ -13,6 +13,26 @@ currently 25); a binary refuses a database newer than it understands.
 
 ## [Unreleased]
 
+### Fixed
+
+- **A declared group that this machine has never written to is now
+  synced.** Sync asked the hub only for the groups with a local store, so
+  a machine that only read a group never received its memories. In that
+  state, `recall_memory` with the group's scope, and with scope `both`,
+  failed with `no such project` and dropped the project's own hits.
+  - **Sync:** it now asks for every group declared by a project bound to
+    that hub, and the store appears with the first record the pull
+    imports. Run `aimem sync --hub <name>` (or `--all-hubs`) once after
+    the upgrade.
+  - **The stdio tools:** a declared group without a local store reads as
+    empty in `recall_memory`, `review_memories` and `get_design_doc`.
+    The local service now marks that refusal with the error code
+    `no_such_project`, and the tools act on the code, not the message.
+    Any other failure, including an existing store that cannot be
+    opened, is still an error, and a read still creates no store.
+  - **Before this fix:** `aimem group <name>` creates the empty store, and
+    the next sync then pulls the group.
+
 ## [0.10.26] — 2026-11-15
 
 The stdio document and record tools now confirm the checkout's pinned

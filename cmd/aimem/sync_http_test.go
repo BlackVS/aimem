@@ -6,6 +6,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -192,5 +193,92 @@ func TestVerifyEventStream(t *testing.T) {
 	}
 	if err := verifyEventStream(nil, 3, "dev"); err != nil {
 		t.Errorf("undatable hub version must not require the terminator: %v", err)
+	}
+}
+
+// syncMachine is one workstation: a state root and its running local
+// service, the shape syncOneHTTP's pull legs land through.
+func syncMachine(t *testing.T, name string) (*store.Registry, func()) {
+	t.Helper()
+	root := t.TempDir()
+	t.Setenv("AIMEM_STATE_DIR", root)
+	sock := filepath.Join(os.TempDir(), "aimem-grp-"+name+".sock")
+	os.Remove(sock)
+	t.Setenv("AIMEM_SOCKET", sock)
+	reg, err := store.NewRegistry(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	srv := server.New(reg, slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError})))
+	httpSrv, ln, err := srv.ListenAndServe(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return reg, func() { httpSrv.Close(); ln.Close(); reg.Close(); os.Remove(sock) }
+}
+
+// declare binds a project on the machine and declares the shared group,
+// as the event pushes of a session in that project record it.
+func declare(t *testing.T, reg *store.Registry, project string) {
+	t.Helper()
+	db, err := reg.Open(project)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := db.SetMeta("groups", `["group-shared"]`); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// A group this machine has never written is still pulled: machine B
+// declares the group A wrote, has no store of it, and after one sync
+// holds and recalls A's fact.
+func TestSyncPullsDeclaredGroupWithoutLocalStore(t *testing.T) {
+	t.Setenv("AIMEM_EMBED_MODEL", "")
+	hubReg, err := store.NewRegistry(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer hubReg.Close()
+	ts := httptest.NewServer(server.New(hubReg, slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))).Handler())
+	defer ts.Close()
+	hub := &adapter.HubConfig{URL: ts.URL, Token: "t"}
+
+	// Machine A writes a group fact and syncs it to the hub.
+	regA, stopA := syncMachine(t, "a")
+	declare(t, regA, "proj-a")
+	gA, err := regA.Open("group-shared")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := gA.ImportMemory(&store.Memory{
+		ID: "grp-m1", Text: "the shared widget runs on port 9", Kind: "fact", Confidence: 0.7,
+		CreatedAt: "2026-11-16T00:00:00Z", Actor: "test",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := syncOneHTTP("primary", hub, "primary"); err != nil {
+		t.Fatal(err)
+	}
+	stopA()
+
+	// Machine B declares the group and has never written to it.
+	regB, stopB := syncMachine(t, "b")
+	defer stopB()
+	declare(t, regB, "proj-b")
+	if ids, _ := regB.Projects(); slices.Contains(ids, "group-shared") {
+		t.Fatal("machine B has a group store before its first sync")
+	}
+	if err := syncOneHTTP("primary", hub, "primary"); err != nil {
+		t.Fatal(err)
+	}
+	var res struct {
+		Memories []store.Memory `json:"memories"`
+	}
+	if err := localGetJSON("/v1/projects/group-shared/memories/recall?q=widget&budget=1000", &res); err != nil {
+		t.Fatalf("recall of the group on machine B after its sync: %v", err)
+	}
+	if len(res.Memories) != 1 || res.Memories[0].ID != "grp-m1" {
+		t.Fatalf("machine B recalled %+v; want machine A's grp-m1", res.Memories)
 	}
 }
