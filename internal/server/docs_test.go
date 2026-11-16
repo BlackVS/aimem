@@ -75,13 +75,23 @@ func TestPutDocRefusesALikelySecretAndNamesTheProject(t *testing.T) {
 	if _, err := db.GetDoc("RUNBOOK", 0); err == nil {
 		t.Fatal("a refused document was stored")
 	}
-	// The same value in a wrapper is still the value.
-	body, _ = json.Marshal(map[string]any{"body": "call with Authorization: Bearer <" + value + ">", "base_rev": 0})
-	if w := req(t, s.Handler(), "PUT", "/v1/projects/proj-sec/docs/RUNBOOK", string(body)); w.Code != 400 {
-		t.Fatalf("wrapped value PUT: %d %s, want 400", w.Code, w.Body)
-	}
-	if _, err := db.GetDoc("RUNBOOK", 0); err == nil {
-		t.Fatal("a refused wrapped value was stored")
+	// The same value in a wrapper, or with the text a pasted request or
+	// response carries right after it, is still the value.
+	for _, text := range []string{
+		"call with Authorization: Bearer <" + value + ">",
+		`{"Authorization": "Bearer ` + value + `"}`,
+		`["Authorization: Bearer ` + value + `"]`,
+		`<code>Authorization: Bearer ` + value + `</code>`,
+		"Authorization: Bearer " + value + "|next",
+		"Bearer " + value + "&x=1",
+	} {
+		body, _ = json.Marshal(map[string]any{"body": text, "base_rev": 0})
+		if w := req(t, s.Handler(), "PUT", "/v1/projects/proj-sec/docs/RUNBOOK", string(body)); w.Code != 400 {
+			t.Fatalf("%q: PUT %d %s, want 400", text, w.Code, w.Body)
+		}
+		if _, err := db.GetDoc("RUNBOOK", 0); err == nil {
+			t.Fatalf("%q: a refused document was stored", text)
+		}
 	}
 	// A placeholder showing the header's form publishes.
 	body, _ = json.Marshal(map[string]any{"body": "call with Authorization: Bearer <token>", "base_rev": 0})

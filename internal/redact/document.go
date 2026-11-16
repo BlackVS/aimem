@@ -82,7 +82,7 @@ var (
 	authValue       = regexp.MustCompile(`(?i)\bauthorization\b\s*[:=]\s*(\S+)(?:\s+(\S+))?`)
 	bearerValue     = regexp.MustCompile(`(?i)\bbearer\s+(\S+)`)
 	bearerShape     = regexp.MustCompile(`^[A-Za-z0-9._~+/=-]{16,}`)
-	bearerToken     = regexp.MustCompile(`^[A-Za-z0-9._~+/=-]{16,}$`)
+	tokenRun        = regexp.MustCompile(`^[A-Za-z0-9._~+/=-]+`)
 	credentialValue = regexp.MustCompile(`(?i)\b(?:api[_-]?key|apikey|secret[_-]?key|client[_-]?secret|secret|access[_-]?token|refresh[_-]?token|auth[_-]?token|token|passwd|password|access[_-]?key)\b["']?\s*[:=]\s*["']?([^\s"',;]{8,})`)
 
 	scheme = regexp.MustCompile(`(?i)^(bearer|basic|token|digest|negotiate)$`)
@@ -105,19 +105,22 @@ const shortCut = 12
 
 // bearerOutcome judges the word after "bearer". The word is captured whole,
 // so a wrapper that is no placeholder (`<generated value>`, `*value*`) is
-// unwrapped and judged like a bare value; prose ("bearer of") is no token.
+// opened, and the leading run of token characters is judged: whatever
+// follows it (`"}`, `</code>`, `|next`, `&x=1`) is the text around a pasted
+// token, not part of the decision. Prose ("bearer of") is no token.
 func bearerOutcome(raw string) docOutcome {
 	if isPlaceholder(raw) {
 		return docNone
 	}
-	v := strings.Trim(trimValue(raw), "<>[]{}*$%")
+	run := tokenRun.FindString(strings.TrimLeft(raw, "\"'`(<[{*$%"))
+	run = strings.TrimRight(run, ".") // a full stop ends the sentence, not the token
 	switch {
-	case !bearerToken.MatchString(v):
+	case len(run) < 16:
 		if bearerShape.MatchString(raw) {
 			return docWarn // the soft rule's shape, cut short by trailing punctuation
 		}
 		return docNone
-	case standIn.MatchString(v):
+	case standIn.MatchString(run):
 		return docWarn
 	}
 	return docRefuse

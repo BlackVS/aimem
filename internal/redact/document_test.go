@@ -53,6 +53,46 @@ func TestScanDocumentBearerHasThreeOutcomes(t *testing.T) {
 	}
 }
 
+// TestScanDocumentInputsAgainstEveryRule judges each input by all three soft
+// rules at once, so a fix to one rule cannot leave a hole beside it unseen
+// (the external review of 179ef84 and the architect's review of 6b7c9a2 each
+// found a form that only one rule's tests would have caught).
+func TestScanDocumentInputsAgainstEveryRule(t *testing.T) {
+	v := fx("Zx9Kq2Lm8Pv4", "Rt6Yw1Bn3Qd5") // 24 characters, mixed
+	for _, c := range []struct{ text, auth, bearer, cred string }{
+		// A token pasted with the text that follows it in a request or response.
+		{`{"Authorization": "Bearer ` + v + `"}`, "", "refuse", ""},
+		{`["Authorization: Bearer ` + v + `"]`, "warn", "refuse", ""},
+		{`<code>Authorization: Bearer ` + v + `</code>`, "warn", "refuse", ""},
+		{"Authorization: Bearer " + v + "|next", "warn", "refuse", ""},
+		{"Bearer " + v + "&x=1", "", "refuse", ""},
+		{"Bearer " + v + ".", "", "refuse", ""},
+		// Wrapped: a generated value is the value, a name is a placeholder.
+		{"Authorization: Bearer <" + v + ">", "warn", "refuse", ""},
+		{"Authorization: Bearer *" + v + "*", "warn", "refuse", ""},
+		{`{"Authorization": "Bearer <token>"}`, "", "", ""},
+		{`curl -H "Authorization: Bearer ${TOKEN}"`, "", "", ""},
+		{"Authorization: Bearer <HUB_ADMIN_TOKEN>", "", "", ""},
+		// Stand-ins and prose.
+		{"Authorization: Bearer hub-admin-token-value", "warn", "warn", ""},
+		{`"Bearer HUB_ADMIN_TOKEN_VALUE"}`, "", "warn", ""},
+		{"the bearer of bad news", "", "", ""},
+		// The credential rule beside the bearer rule.
+		{"token: " + v, "", "", "refuse"},
+		{"api_key = <" + v + ">", "", "", "refuse"},
+		{`{"token": "` + v + `"}`, "", "", "refuse"},
+		{"api_key = <api-key>", "", "", ""},
+	} {
+		for _, r := range []struct{ rule, want string }{
+			{"authorization header", c.auth}, {"bearer token", c.bearer}, {"credential assignment", c.cred},
+		} {
+			if got := outcome(t, c.text, r.rule); got != r.want {
+				t.Errorf("%q: %s %q, want %q", c.text, r.rule, got, r.want)
+			}
+		}
+	}
+}
+
 func TestScanDocumentCredentialAssignment(t *testing.T) {
 	for _, c := range []struct{ text, want string }{
 		// 20 or more characters mixing letters and digits refuse.
