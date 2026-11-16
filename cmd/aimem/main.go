@@ -797,7 +797,10 @@ func tasksCmd(args []string) error {
 // it to every machine and the hub.
 func groupCmd(args []string) error {
 	usage := "usage: aimem group <name> [--about <charter>] [--policy all|domain]" +
-		" [--chapter \"<name>: <which facts belong here>\"]... [--drop-chapter <name>]"
+		" [--chapter \"<name>: <which facts belong here>\"]... [--drop-chapter <name>]\n" +
+		"       aimem group <name> --publish [--hub <hub>]   make this machine's config the hub's\n" +
+		"       aimem group <name> --adopt [--hub <hub>]     replace this machine's config with the hub's\n" +
+		"       aimem group <name> --hub <hub>               show this machine's and the hub's config side by side"
 	if len(args) == 0 || strings.HasPrefix(args[0], "-") {
 		return fmt.Errorf("%s", usage)
 	}
@@ -810,7 +813,15 @@ func groupCmd(args []string) error {
 	fs.Var(&drops, "drop-chapter", "remove a knowledge-base chapter by name (repeatable)")
 	fs.Var(&enable, "enable", "switch on an optional feature: "+strings.Join(curate.KnownFeatures, ", ")+" (repeatable)")
 	fs.Var(&disable, "disable", "switch off an optional feature (repeatable)")
+	publish := fs.Bool("publish", false, "write this machine's group config over the hub's (keys empty here are not sent)")
+	adopt := fs.Bool("adopt", false, "write the hub's group config over this machine's")
+	hubFlag := fs.String("hub", "", "the hub to publish to, adopt from or compare with (default: the one hub the group's projects use)")
 	fs.Parse(rest)
+	editing := *about != "" || *policy != "" || len(chapters)+len(drops)+len(enable)+len(disable) > 0
+	converge := *publish || *adopt || *hubFlag != ""
+	if (*publish && *adopt) || (converge && editing) {
+		return fmt.Errorf("--publish and --adopt exclude each other, and neither they nor --hub take edit flags: edit first, then publish in a second call\n%s", usage)
+	}
 	gid, err := ident.GroupProject(name)
 	if err != nil {
 		return err
@@ -823,6 +834,14 @@ func groupCmd(args []string) error {
 	db, err := reg.Open(gid)
 	if err != nil {
 		return err
+	}
+	switch {
+	case *publish:
+		return groupHubCmd(reg, db, name, gid, *hubFlag, "publish")
+	case *adopt:
+		return groupHubCmd(reg, db, name, gid, *hubFlag, "adopt")
+	case *hubFlag != "":
+		return groupHubCmd(reg, db, name, gid, *hubFlag, "compare")
 	}
 	if *policy != "" && *policy != "all" && *policy != "domain" {
 		return fmt.Errorf("%s", usage)
@@ -907,20 +926,11 @@ func groupCmd(args []string) error {
 		_ = json.Unmarshal([]byte(rawFeatures), &curFeatures)
 	}
 	// Distribute edits to the hub right away: nightly curation runs there
-	// and must see current routing rules, not last sync's. Best-effort —
-	// the local write already succeeded.
-	if *about != "" || *policy != "" || len(chapters) > 0 || len(drops) > 0 ||
-		len(enable) > 0 || len(disable) > 0 {
-		for _, hn := range hubNamesForGroup(reg, gid) {
-			for k, v := range map[string]string{
-				"about": curAbout, "policy": curPolicy, "chapters": rawChapters, "features": rawFeatures,
-			} {
-				if err := adapter.PushMeta(stateRoot(), hn, gid, k, v); err != nil {
-					fmt.Fprintf(os.Stderr, "aimem: hub push of %s/%s failed: %v (sync will retry)\n", gid, k, err)
-					break
-				}
-			}
-		}
+	// and must see current routing rules, not last sync's. The same
+	// publish as --publish (non-empty keys only, the sync's client);
+	// best-effort, since the local write already succeeded.
+	if editing {
+		publishAfterEdit(reg, db, name, gid)
 	}
 	return json.NewEncoder(os.Stdout).Encode(map[string]any{
 		"group": name, "about": curAbout, "policy": curPolicy,
@@ -1255,13 +1265,15 @@ func importGroupConfigCmd() error {
 		return err
 	}
 	defer reg.Close()
-	return importGroupConfigFrom(reg, os.Stdin)
+	return importGroupConfigFrom(reg, os.Stdin, "")
 }
 
 // importGroupConfigFrom applies a config stream with the shared
-// semantics (store.ImportGroupConfigRecord); messages go to stderr
-// exactly as the ssh legs always printed them.
-func importGroupConfigFrom(reg *store.Registry, r io.Reader) error {
+// semantics (store.ImportGroupConfigRecord); messages go to stderr. A
+// charter key that differs from the named hub's is reported with the
+// two commands that converge it; the ssh legs (hub "") get the plain
+// message, since publish and adopt go over the hub API only.
+func importGroupConfigFrom(reg *store.Registry, r io.Reader, hub string) error {
 	sc := bufio.NewScanner(r)
 	sc.Buffer(make([]byte, 1024*1024), 16*1024*1024)
 	for sc.Scan() {
@@ -1273,8 +1285,15 @@ func importGroupConfigFrom(reg *store.Registry, r io.Reader) error {
 		if json.Unmarshal([]byte(line), &rec) != nil {
 			continue
 		}
-		if msg, _ := store.ImportGroupConfigRecord(reg, rec); msg != "" {
-			fmt.Fprintf(os.Stderr, "aimem: %s\n", msg)
+		res := store.ImportGroupConfigRecord(reg, rec)
+		switch {
+		case res.Differs && hub != "":
+			g := strings.TrimPrefix(rec.Project, "group-")
+			fmt.Fprintf(os.Stderr, "aimem: group config %s/%s differs from hub %q (kept local): "+
+				"`aimem group %s --adopt --hub %s` takes the hub's, `aimem group %s --publish --hub %s` makes this machine's the hub's\n",
+				rec.Project, rec.Key, hub, g, hub, g, hub)
+		case res.Msg != "":
+			fmt.Fprintf(os.Stderr, "aimem: %s\n", res.Msg)
 		}
 	}
 	return sc.Err()
@@ -2578,9 +2597,19 @@ func hubCmd(args []string) error {
 // of a group's member projects, so group-config edits reach every hub
 // that will curate this group. No members known locally → default hub.
 func hubNamesForGroup(reg *store.Registry, gid string) []string {
+	if names := groupBindings(reg, gid); len(names) > 0 {
+		return names
+	}
+	return []string{""}
+}
+
+// groupBindings is hubNamesForGroup without the fallback: nil when no
+// bound project declares the group, so a caller can tell "none" apart
+// from "the default hub".
+func groupBindings(reg *store.Registry, gid string) []string {
 	ids, err := reg.Projects()
 	if err != nil {
-		return []string{""}
+		return nil
 	}
 	seen := map[string]bool{}
 	for _, id := range ids {
@@ -2598,9 +2627,6 @@ func hubNamesForGroup(reg *store.Registry, gid string) []string {
 		}
 		h, _ := db.GetMeta("hub")
 		seen[h] = true
-	}
-	if len(seen) == 0 {
-		return []string{""}
 	}
 	return slices.Sorted(maps.Keys(seen))
 }

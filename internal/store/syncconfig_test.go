@@ -40,9 +40,10 @@ func TestOriginAliasImportHealsGhost(t *testing.T) {
 
 	// The peer's alias record arrives via group-config sync.
 	val, _ := json.Marshal(map[string]string{"gitea-old-id": "aimem"})
-	msg, applied := ImportGroupConfigRecord(r, ConfigRecord{
+	res := ImportGroupConfigRecord(r, ConfigRecord{
 		Project: "group-oboro", Key: "origin_aliases", Value: string(val),
 	})
+	msg, applied := res.Msg, res.Applied
 	if !applied || !strings.Contains(msg, "1 citation(s) relabeled") {
 		t.Fatalf("import: applied=%v msg=%q", applied, msg)
 	}
@@ -64,10 +65,10 @@ func TestOriginAliasImportHealsGhost(t *testing.T) {
 		t.Fatalf("alias not recorded: %v", al)
 	}
 	// Idempotent: the same record again changes nothing and reports so.
-	if msg, applied := ImportGroupConfigRecord(r, ConfigRecord{
+	if res := ImportGroupConfigRecord(r, ConfigRecord{
 		Project: "group-oboro", Key: "origin_aliases", Value: string(val),
-	}); applied {
-		t.Fatalf("re-import must be a no-op, got applied=true (%s)", msg)
+	}); res.Applied {
+		t.Fatalf("re-import must be a no-op, got applied=true (%s)", res.Msg)
 	}
 }
 
@@ -83,5 +84,28 @@ func TestExportGroupConfigCarriesAliases(t *testing.T) {
 	}
 	if !strings.Contains(buf.String(), `"origin_aliases"`) || !strings.Contains(buf.String(), "new-p") {
 		t.Fatalf("export missing alias record: %s", buf.String())
+	}
+}
+
+// A differing charter key is kept and reported through Differs; the
+// message names no command, because the hub logs it on its own host.
+func TestImportGroupConfigDiffers(t *testing.T) {
+	r := newTestRegistry(t)
+	grp, _ := r.Open("group-x")
+	if err := grp.SetMeta("about", "local"); err != nil {
+		t.Fatal(err)
+	}
+	res := ImportGroupConfigRecord(r, ConfigRecord{Project: "group-x", Key: "about", Value: "peer"})
+	if !res.Differs || res.Applied || res.Msg != "group config group-x/about differs from peer (kept local)" {
+		t.Fatalf("differing key: %+v", res)
+	}
+	if v, _ := grp.GetMeta("about"); v != "local" {
+		t.Fatalf("local value replaced: %q", v)
+	}
+	if res := ImportGroupConfigRecord(r, ConfigRecord{Project: "group-x", Key: "about", Value: "local"}); res.Differs || res.Msg != "" {
+		t.Fatalf("equal key: %+v", res)
+	}
+	if res := ImportGroupConfigRecord(r, ConfigRecord{Project: "group-x", Key: "policy", Value: "all"}); res.Differs || !res.Applied {
+		t.Fatalf("empty key: %+v", res)
 	}
 }

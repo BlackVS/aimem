@@ -100,6 +100,15 @@ func syncHTTPClient(h *adapter.HubConfig) *http.Client {
 }
 
 func syncDo(h *adapter.HubConfig, method, path string, q url.Values, body io.Reader) (*http.Response, error) {
+	return hubDo(h, method, path, q, "application/x-ndjson", body)
+}
+
+// hubDo is the one request the writer token goes out on: the sync legs
+// and `aimem group --publish/--adopt/--hub` all reach the hub through it,
+// with the hub entry's URL, token and TLS trust (HubConfig.Client). A
+// non-200 answer comes back as a *hubError carrying the hub's own
+// message and code; a 404 means the hub has no such route.
+func hubDo(h *adapter.HubConfig, method, path string, q url.Values, ctype string, body io.Reader) (*http.Response, error) {
 	u := strings.TrimRight(h.URL, "/") + path
 	if len(q) > 0 {
 		u += "?" + q.Encode()
@@ -110,7 +119,7 @@ func syncDo(h *adapter.HubConfig, method, path string, q url.Values, body io.Rea
 	}
 	req.Header.Set("Authorization", "Bearer "+h.Token)
 	if body != nil {
-		req.Header.Set("Content-Type", "application/x-ndjson")
+		req.Header.Set("Content-Type", ctype)
 	}
 	resp, err := syncHTTPClient(h).Do(req)
 	if err != nil {
@@ -121,10 +130,32 @@ func syncDo(h *adapter.HubConfig, method, path string, q url.Values, body io.Rea
 		return nil, errNoSyncRoutes
 	}
 	if resp.StatusCode != http.StatusOK {
-		resp.Body.Close()
-		return nil, fmt.Errorf("hub HTTP %d on %s", resp.StatusCode, path)
+		defer resp.Body.Close()
+		he := &hubError{status: resp.StatusCode, path: path}
+		var b struct {
+			Error string `json:"error"`
+			Code  string `json:"code"`
+		}
+		if json.NewDecoder(io.LimitReader(resp.Body, 64<<10)).Decode(&b) == nil {
+			he.msg, he.code = b.Error, b.Code
+		}
+		return nil, he
 	}
 	return resp, nil
+}
+
+// hubError is a hub's refusal: the status, the hub's message, and its
+// machine-readable code when it sent one (store.CodeNoSuchProject).
+type hubError struct {
+	status          int
+	path, msg, code string
+}
+
+func (e *hubError) Error() string {
+	if e.msg == "" {
+		return fmt.Sprintf("hub HTTP %d on %s", e.status, e.path)
+	}
+	return fmt.Sprintf("hub HTTP %d on %s: %s", e.status, e.path, e.msg)
 }
 
 // syncPost streams a locally-produced JSONL dump to a sync route and
@@ -368,7 +399,7 @@ func syncOneHTTP(name string, h *adapter.HubConfig, def string) error {
 	if resp, err := syncDo(h, "GET", "/v1/sync/group-config", projects, nil); err != nil {
 		fmt.Fprintln(os.Stderr, "aimem: group config pull skipped:", err)
 	} else {
-		err := importGroupConfigFrom(reg, resp.Body)
+		err := importGroupConfigFrom(reg, resp.Body, name)
 		resp.Body.Close()
 		if err != nil {
 			fmt.Fprintln(os.Stderr, "aimem: group config pull skipped:", err)

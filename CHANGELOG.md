@@ -36,6 +36,22 @@ currently 25); a binary refuses a database newer than it understands.
     opened, is still an error, and a read still creates no store.
   - **Before this fix:** `aimem group <name>` creates the empty store, and
     the next sync then pulls the group.
+- **A group's config that differs between a machine and the hub can now
+  be converged.** Sync keeps a differing `about`, `policy`, `chapters` or
+  `features` value on both sides, and its message advised a re-save that
+  only an edit flag performed.
+  - **New:** `aimem group <name> --publish` makes this machine's config
+    the hub's, `--adopt` takes the hub's, and `--hub <hub>` alone shows
+    both side by side. Each reports every key and fails when any key
+    failed; publish never sends an empty key, and adopt checks the hub's
+    values before it saves them. A publish reaches the hub only: other
+    machines keep their own value until they adopt.
+  - **Sync:** stays fill-only. Its message for a differing key now names
+    both commands with the hub's name, and the hub's own log names none.
+  - **Editing:** the push after `aimem group <name> --about …` (or any
+    edit flag) sends only the keys this machine holds. Before, a machine
+    whose `chapters` were empty cleared the hub's chapters when it edited
+    another key. It now uses the sync's hub client.
 
 ## [0.10.26] — 2026-11-15
 
