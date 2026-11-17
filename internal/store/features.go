@@ -133,11 +133,15 @@ func checkFeatureRules(tx *sql.Tx, t Task, from, priorDeps string, create bool) 
 	return invalid(featureDependencyError(errors.New("refused"), t.ID, feature))
 }
 
+// createFeatureRetry shares the task create's operation: one route and one
+// key, so a key used for one kind of creation answers the other with
+// ErrTaskRetryConflict. The input carries the link, so the plain create's
+// digest (its content alone) is unchanged.
 func createFeatureRetry(content TaskContent, link FeatureLink) retry {
 	if content.State == "" {
 		content.State = "BACKLOG"
 	}
-	return retry{"create_feature", "", struct {
+	return retry{"create", "", struct {
 		Content TaskContent `json:"content"`
 		Feature FeatureLink `json:"feature"`
 	}{content, link}}

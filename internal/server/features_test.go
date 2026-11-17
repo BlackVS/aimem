@@ -550,3 +550,35 @@ func TestFeatureRetryAfterTheGrantIsRemovedIsRefused(t *testing.T) {
 		}
 	}
 }
+
+// One route, one key: a creation with a link and one without under the
+// same key are different input, refused as such in either order, and only
+// the first record exists.
+func TestFeatureCreateAndTaskCreateShareTheKey(t *testing.T) {
+	g := newFeatureRig(t)
+	plain := func(title string) string { return fmt.Sprintf(`{"title":%q,"epic":%q}`, title, g.goal) }
+	linked := func(title string) string {
+		return fmt.Sprintf(`{"title":%q,"epic":%q,"feature":{"goal":%q,"position":1,"mark":"optional"}}`, title, g.goal, g.goal)
+	}
+	for _, c := range []struct{ name, title, first, second string }{
+		{"a feature, then a plain task", "first way", linked("first way"), plain("first way")},
+		{"a plain task, then a feature", "second way", plain("second way"), linked("second way")},
+	} {
+		key := g.key()
+		if w := taskReq(t, g.h, "POST", "/v1/projects/alpha/tasks", g.alice, key, c.first); w.Code != 201 {
+			t.Fatalf("%s: first: %d %s", c.name, w.Code, w.Body)
+		}
+		if w := taskReq(t, g.h, "POST", "/v1/projects/alpha/tasks", g.alice, key, c.second); w.Code != 409 || !strings.Contains(w.Body.String(), "idempotency key already used with different input") {
+			t.Fatalf("%s: second: %d %s", c.name, w.Code, w.Body)
+		}
+		n := 0
+		for _, id := range listed(t, taskReq(t, g.h, "GET", "/v1/projects/alpha/tasks?kind=any", g.alice, "", "")) {
+			if decodeTask(t, taskReq(t, g.h, "GET", "/v1/tasks/"+strings.Split(id, "/")[0], g.alice, "", "")).Title == c.title {
+				n++
+			}
+		}
+		if n != 1 {
+			t.Fatalf("%s: %d records titled %q, want 1", c.name, n, c.title)
+		}
+	}
+}
