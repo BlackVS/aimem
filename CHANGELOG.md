@@ -13,6 +13,19 @@ currently 26); a binary refuses a database newer than it understands.
 
 ## [Unreleased]
 
+## [0.11.1] — 2026-11-17
+
+Tool sets per mode. The MCP server lists the tools a session's mode needs:
+a checkout that has not joined a team lists 37 tools, 43,199 bytes of
+definitions instead of 97,069, and the team protocol's tools arrive once a
+join is confirmed, with the changed list announced. A team tool called by
+name outside the list still answers, with a notice, for the period stated
+below; the hub's MCP endpoint takes `?tools=teams`. Clients that joined a
+team before this release keep their team tools without a migration. The
+release gate now runs the client's upgrade from the previous release to
+the release candidate, on Linux, Windows and macOS, before the tag. No
+schema step. Includes PR #385 to #388.
+
 ### Changed
 
 - **The MCP server lists the tools a session's mode needs** (docs/DESIGN-tool-sets.md).
@@ -32,11 +45,9 @@ currently 26); a binary refuses a database newer than it understands.
 - **Tools outside a session's list still answer by name**, with a notice
   line. The reservation tools answer without an end. The served-by-name
   period of the team tools: a team tool called by name outside the
-  session's list answers in this release and in the release after it, and
-  is refused from the release after those two. (The release preparation
-  writes this release's number here; this sentence is the one place the
-  period is stated.) The seven reservation tools are no longer listed in a personal or a
-  team member's session (`aimem reservation` is how a member's steps call
+  session's list answers in v0.11.1 and in the release after it, and is
+  refused from the release after those two. The seven reservation tools
+  are no longer listed in a personal or a team member's session (`aimem reservation` is how a member's steps call
   them, unchanged); the hub's MCP endpoint lists the holder's three
   (`task_reservation_status`, `task_reservation_release`,
   `task_reservation_finalize`).
