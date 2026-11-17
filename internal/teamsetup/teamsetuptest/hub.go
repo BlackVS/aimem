@@ -35,9 +35,10 @@ type Hub struct {
 	JoinMsg  string // error text for a refusal
 	JoinKeys []string
 	Garbage  int // number of join replies to send as unreadable 201s
-	// JoinDrop closes the connection before applying the next join (it never
-	// landed). net/http replays a keyed POST once on a dropped keep-alive
-	// connection, so a join that stays unconfirmed needs a count of 2.
+	// JoinDrop is the number of join requests whose connection is closed
+	// before the join is applied (it never landed). net/http may replay a
+	// keyed POST on a reused connection, so a test that needs the join
+	// unconfirmed sets a count no run reaches and resets it to 0 after.
 	JoinDrop int
 	Sessions map[string]*Session
 	NextID   int

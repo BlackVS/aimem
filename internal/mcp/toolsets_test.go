@@ -295,6 +295,10 @@ func setupReport(t *testing.T, line string) string {
 	return text
 }
 
+// dropEveryJoin keeps every join of a run unconfirmed, however often the
+// HTTP client replays it.
+const dropEveryJoin = 1 << 20
+
 const listChangedLine = `{"jsonrpc":"2.0","method":"notifications/tools/list_changed"}`
 
 // A join the hub never received leaves the record with its retry key and no
@@ -305,7 +309,7 @@ func TestUnconfirmedJoinLeavesTheSettingOff(t *testing.T) {
 	h, ts := teamsetuptest.New(t)
 	repo, root := teamsetuptest.Checkout(t, h, ts)
 	s := stdioFor(repo, root)
-	h.JoinDrop = 2 // net/http replays a keyed POST once on a dropped connection
+	h.JoinDrop = dropEveryJoin
 	lines := serveLines(t, s, setupCall(), map[string]any{"method": "tools/list"})
 	if len(lines) != 2 {
 		t.Fatalf("%d lines, want the answer and the list, no announcement:\n%s", len(lines), strings.Join(lines, "\n"))
@@ -319,6 +323,7 @@ func TestUnconfirmedJoinLeavesTheSettingOff(t *testing.T) {
 	}
 	checkStandalone(t, "after an unconfirmed join", toolSet(t, s))
 
+	h.JoinDrop = 0
 	lines = serveLines(t, s, setupCall(), setupCall())
 	if len(lines) != 3 || lines[1] != listChangedLine {
 		t.Fatalf("the retry: want the answer, one announcement, the second answer:\n%s", strings.Join(lines, "\n"))
@@ -356,7 +361,7 @@ func TestUnconfirmedRejoinTurnsTheSettingOffAndAnnouncesIt(t *testing.T) {
 	// which drops the saved handle and saves a pending record.
 	rejoin := setupCall()
 	rejoin["params"].(map[string]any)["arguments"].(map[string]any)["new_session"] = true
-	h.JoinDrop = 2
+	h.JoinDrop = dropEveryJoin
 	lines := serveLines(t, s, rejoin, map[string]any{"method": "tools/list"})
 	if len(lines) != 3 || lines[1] != listChangedLine {
 		t.Fatalf("want the answer, the announcement, the list:\n%s", strings.Join(lines, "\n"))
