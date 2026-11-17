@@ -314,7 +314,7 @@ memory. No pair differs only in a parameter.
 | standalone | a session on a project, personal or tasks-enabled | 37 | 43,199 |
 | teams | added to standalone by a setting (4.2) | +26 | +41,638 |
 | member | a team member's session (team-mode facade) | 18 | 15,173 |
-| tasks-only | the hub's MCP under a project credential | 25 | 31,527 |
+| tasks-only | the hub's MCP under a project credential | 27 | 33,029 |
 
 - **standalone:** the 13 knowledge tools, the 18 task, epic and feature
   tools, `writing_rule`, `process_context`, and the four entry tools of a
@@ -329,11 +329,15 @@ memory. No pair differs only in a parameter.
   `add_task_comment`, `recall_memory`, `list_docs`, `read_doc`,
   `write_report`, `session_context` and `writing_rule`.
 - **tasks-only:** the 18 task tools, the three knowledge reads it already
-  serves (`recall_memory`, `list_docs`, `read_doc`), `writing_rule`, and the
+  serves (`recall_memory`, `list_docs`, `read_doc`), `writing_rule`, the
   reservation holder's three: `task_reservation_status`,
-  `task_reservation_release` and `task_reservation_finalize` (4,862 bytes).
-  Its team tools follow the teams setting; for the hub's MCP the setting is
-  a parameter of the MCP URL (open question 1).
+  `task_reservation_release` and `task_reservation_finalize` (4,862 bytes),
+  and `team_context` and `team_list`, which it listed before and which a
+  credential reads before joining: 27 tools, 33,029 bytes. With the teams
+  setting on it adds the other 26 team tools. For the hub's MCP the setting
+  is the URL parameter `tools=teams` (section 8, question 1). Corrected
+  2026-11-17 in the implementation: the first text left out `team_context`
+  and `team_list`, which both reviews of the design noted.
 - **The reservation tools, per set.**
   - standalone: none listed. Listing all seven would cost 12,232 bytes
     and take the set to 55,431, over its test. A holder releases or finalizes with
@@ -368,8 +372,17 @@ depends on the announcement.
 
 ### 4.2 The teams setting
 
-A per-checkout setting, readable with `aimem project show`. A session reads
-it at start, like the task state. It is per checkout because a team is
+A per-checkout setting: it is on exactly when the checkout holds a team
+record (`internal/teamstate`), which every join path writes and leaving
+clears, so it adds no state and a checkout that joined before it existed
+is on. `aimem wire --check` prints it. The checkout's MCP server reads it on
+every list, so a join turns it on in the running session. (Corrected
+2026-11-17 in the implementation: the first text named `aimem project show`,
+which is the hub administrator's command for a hub project, not a
+checkout's; and it said the session reads the setting at start.) A
+membership that ended on the hub keeps its record, and so the setting, until
+the next join or the record's removal; `team_continue` reports it ended and
+the hub refuses its team calls. It is per checkout because a team is
 joined from one checkout, and a standalone session elsewhere should not pay
 for it. `aimem wire` does not set it: it installs the entry points in every
 wired checkout (`internal/wiring/project.go:77`, `Commands: true`), and a
@@ -541,6 +554,10 @@ in member, as today.
 
 ## 8. Open questions
 
-1. The teams setting on the hub's MCP: a URL parameter, or the credential's
-   profile. The profile is cleaner but touches the access schema.
+1. Closed on 2026-11-17: the teams setting on the hub's MCP is the URL
+   parameter `tools=teams` (`/mcp?tools=teams`), chosen at connection.
+   Absent means off; any other value is refused with a message, never
+   ignored. The credential's profile was not taken: the list is what a
+   client is shown, not what its credential may do, and the profile would
+   have put that into the access schema.
 2. The length of the served-by-name period (5.2): two releases is proposed.

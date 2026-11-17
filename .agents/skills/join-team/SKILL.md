@@ -69,6 +69,12 @@ question: worker or coordinator? Never assume coordinator.
      tool keeps the nonsecret session state; you keep nothing else.
      `joined` is membership, not permission to work: read `readiness`
      (step 4) before anything else.
+   - The join turns on this checkout's team setting: the server now lists
+     the team protocol's tools (`team_inbox`, `team_heartbeat`, `team_ack`
+     and the others) and has announced the changed list. If a `team_*`
+     tool a later step names is not listed, your client did not pick up the
+     change. That is not an outdated binary (step 0): tell the user to
+     restart the client and run /resume_team, then stop.
 
 4. Read the readiness and the delivered context.
    - `readiness.ready_for_work` is true only when `membership` is `active`,

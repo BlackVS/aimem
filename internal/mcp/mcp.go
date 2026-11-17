@@ -33,9 +33,6 @@ const protocolVersion = "2024-11-05"
 // HTTP API; projectID scopes project memories and journal search; groups
 // are the shared knowledge scopes the project has opted into.
 func Serve(api *http.Client, projectID string, groups []string) error {
-	in := bufio.NewScanner(os.Stdin)
-	in.Buffer(make([]byte, 1024*1024), 16*1024*1024)
-	out := bufio.NewWriter(os.Stdout)
 	var s *srv
 	if path := os.Getenv(teamsession.EnvVar); path != "" {
 		// A team conversation: nothing personal is probed or served.
@@ -44,6 +41,14 @@ func Serve(api *http.Client, projectID string, groups []string) error {
 		s = &srv{api: api, project: projectID, groups: groups, taskSetup: localTaskCaller,
 			taskState: probeTaskState(".", mcpStateRoot(), projectID), local: &localCheckout{dir: ".", root: mcpStateRoot()}}
 	}
+	return s.serve(os.Stdin, os.Stdout)
+}
+
+// serve answers one JSON-RPC message per line of r on w until r ends.
+func (s *srv) serve(r io.Reader, w io.Writer) error {
+	in := bufio.NewScanner(r)
+	in.Buffer(make([]byte, 1024*1024), 16*1024*1024)
+	out := bufio.NewWriter(w)
 	for in.Scan() {
 		line := strings.TrimSpace(in.Text())
 		if line == "" {
@@ -51,6 +56,13 @@ func Serve(api *http.Client, projectID string, groups []string) error {
 		}
 		if resp := s.handle(context.Background(), []byte(line)); resp != nil {
 			out.Write(append(resp, '\n'))
+			out.Flush()
+		}
+		if s.listChanged {
+			// A join turned the teams setting on: the list grew. Sent after
+			// the reply, so the client reads the tool's answer first.
+			s.listChanged = false
+			out.WriteString(`{"jsonrpc":"2.0","method":"notifications/tools/list_changed"}` + "\n")
 			out.Flush()
 		}
 	}
@@ -84,6 +96,11 @@ type srv struct {
 	// team is set only in a team conversation (teammode.go); it replaces
 	// every other tool source.
 	team *teamMode
+	// teamsByURL is the hub facade's teams setting, from its URL
+	// (toolsets.go); the stdio facade reads the checkout's team record.
+	teamsByURL bool
+	// listChanged asks Serve to announce the changed list after the reply.
+	listChanged bool
 }
 
 // newTeamSrv is the facade of a team conversation: no local API client, no
@@ -126,9 +143,15 @@ func (s *srv) handle(ctx context.Context, raw []byte) []byte {
 	}
 	switch req.Method {
 	case "initialize":
+		tools := map[string]any{}
+		if s.local != nil {
+			// Only the stdio facade announces: a join turns the checkout's
+			// teams setting on during the session.
+			tools["listChanged"] = true
+		}
 		return reply(req.ID, map[string]any{
 			"protocolVersion": protocolVersion,
-			"capabilities":    map[string]any{"tools": map[string]any{}},
+			"capabilities":    map[string]any{"tools": tools},
 			"serverInfo":      map[string]any{"name": "aimem", "version": "0.1.0"},
 		}, nil)
 	case "notifications/initialized", "notifications/cancelled":
@@ -136,19 +159,20 @@ func (s *srv) handle(ctx context.Context, raw []byte) []byte {
 	case "ping":
 		return reply(req.ID, map[string]any{}, nil)
 	case "tools/list":
+		// The sets per mode (toolsets.go, docs/DESIGN-tool-sets.md §4).
 		if s.team != nil {
-			return reply(req.ID, map[string]any{"tools": teamToolList()}, nil)
+			return reply(req.ID, map[string]any{"tools": memberToolList()}, nil)
 		}
 		// The public team guidance is listed for every caller a facade
 		// admits: it reads nothing but this binary.
 		if s.tasksOnly {
-			tools := append(append([]map[string]any{}, taskToolDefs...), scopedKnowledgeToolDefs...)
+			tools := append(taskSetDefs(s.teamsOn(), reservationHolderTools), scopedKnowledgeToolDefs...)
 			return reply(req.ID, map[string]any{"tools": append(tools, guidanceToolDefs...)}, nil)
 		}
 		if s.taskState == taskStateDisabled {
 			return reply(req.ID, map[string]any{"tools": append(append([]map[string]any{}, toolDefs...), guidanceToolDefs...)}, nil)
 		}
-		tools := append(append([]map[string]any{}, toolDefs...), taskToolDefs...)
+		tools := append(append([]map[string]any{}, toolDefs...), taskSetDefs(s.teamsOn(), nil)...)
 		if s.local != nil {
 			tools = append(tools, onboardToolDefs...)
 			tools = append(tools, processToolDefs...)
@@ -400,18 +424,25 @@ func (s *srv) toolCall(ctx context.Context, req rpcRequest) []byte {
 		}
 		text, err = s.run(&p)
 	}
+	err = s.reservedHint(head.Name, err)
+	notice := s.noticeFor(head.Name)
 	if err != nil {
 		// Tool-level errors go back as content with isError, per MCP. A
 		// reservation refusal is the hub's envelope itself, unprefixed, so a
-		// client parses its code and retryable flag (reservation wire).
+		// client parses its code and retryable flag (reservation wire); a
+		// notice follows it as a block of its own.
 		text := "error: " + err.Error()
 		if reservationTools[head.Name] {
 			text = reservationToolError(err).envelope
 		}
-		return reply(req.ID, map[string]any{
-			"content": []map[string]any{{"type": "text", "text": text}},
-			"isError": true,
-		}, nil)
+		content := []map[string]any{{"type": "text", "text": text}}
+		if notice != "" {
+			content = append(content, map[string]any{"type": "text", "text": notice})
+		}
+		return reply(req.ID, map[string]any{"content": content, "isError": true}, nil)
+	}
+	if notice != "" {
+		extra = append(extra, notice)
 	}
 	content := []map[string]any{{"type": "text", "text": text}}
 	for _, block := range extra {
@@ -834,7 +865,14 @@ func NewHTTPHandler(api *http.Client, principal PrincipalFunc) http.Handler {
 			w.WriteHeader(http.StatusRequestEntityTooLarge)
 			return
 		}
-		s := &srv{api: api}
+		teams, err := teamsFromURL(r.URL.Query()[teamsParam])
+		if err != nil {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusBadRequest)
+			w.Write(reply(json.RawMessage("null"), nil, &rpcError{Code: -32602, Message: err.Error()}))
+			return
+		}
+		s := &srv{api: api, teamsByURL: teams}
 		if principal != nil {
 			s.tasks, s.tasksOnly = principal(r)
 		}

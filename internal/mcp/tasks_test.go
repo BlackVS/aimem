@@ -135,6 +135,11 @@ func TestMCPGenericTaskWriteRefusedDuringReservation(t *testing.T) {
 	if !isErr || !strings.Contains(text, "active reservation") || strings.Contains(text, "mcp-work") {
 		t.Fatalf("MCP generic write bypassed or leaked holder: %v %s", isErr, text)
 	}
+	// The hub's MCP names the holder's three listed tools, never the
+	// command a client without a checkout cannot run.
+	if !strings.Contains(text, "task_reservation_release or task_reservation_finalize") || strings.Contains(text, "aimem reservation") {
+		t.Fatalf("the refusal's hint on the hub's MCP: %s", text)
+	}
 	text, isErr = toolText(f.rpc(t, f.alice, "tools/call", map[string]any{"name": "add_task_comment", "arguments": map[string]any{
 		"id": task.ID, "body": "discussion", "idempotency_key": "held-comment"}}))
 	if isErr {
@@ -148,8 +153,15 @@ func TestMCPGenericTaskWriteRefusedDuringReservation(t *testing.T) {
 
 func (f *hubFixture) rpc(t *testing.T, token, method string, params any) map[string]any {
 	t.Helper()
+	return f.rpcAt(t, "/mcp", token, method, params)
+}
+
+// rpcAt is rpc against the MCP URL target, which may carry the "tools"
+// parameter.
+func (f *hubFixture) rpcAt(t *testing.T, target, token, method string, params any) map[string]any {
+	t.Helper()
 	raw, _ := json.Marshal(map[string]any{"jsonrpc": "2.0", "id": 1, "method": method, "params": params})
-	r := httptest.NewRequest("POST", "/mcp", strings.NewReader(string(raw)))
+	r := httptest.NewRequest("POST", target, strings.NewReader(string(raw)))
 	r.Header.Set("Authorization", "Bearer "+token)
 	w := httptest.NewRecorder()
 	f.h.ServeHTTP(w, r)
@@ -195,8 +207,23 @@ func TestRemoteMCPTaskToolsUseTheCallersAuthority(t *testing.T) {
 	// public team guidance only, and hidden tools stay hidden when called by
 	// name.
 	names := toolNames(f.rpc(t, f.alice, "tools/list", nil))
-	if len(names) != len(taskToolDefs)+len(scopedKnowledgeToolDefs)+len(guidanceToolDefs) {
+	if len(names) != len(taskSetDefs(false, reservationHolderTools))+len(scopedKnowledgeToolDefs)+len(guidanceToolDefs) {
 		t.Fatalf("ordinary token tool list: %v", names)
+	}
+	// The URL's tools=teams adds the team protocol's 26 work tools; absent
+	// is off, and an unknown value is refused, not ignored.
+	if n := len(toolNames(f.rpcAt(t, "/mcp?tools=teams", f.alice, "tools/list", nil))); n != len(names)+26 {
+		t.Fatalf("tasks-only with tools=teams: %d tools, want %d", n, len(names)+26)
+	}
+	for _, q := range []string{"?tools=team", "?tools=", "?tools=teams&tools=teams"} {
+		raw, _ := json.Marshal(map[string]any{"jsonrpc": "2.0", "id": 1, "method": "tools/list"})
+		r := httptest.NewRequest("POST", "/mcp"+q, strings.NewReader(string(raw)))
+		r.Header.Set("Authorization", "Bearer "+f.alice)
+		w := httptest.NewRecorder()
+		f.h.ServeHTTP(w, r)
+		if w.Code != 400 || !strings.Contains(w.Body.String(), `takes one value, \"teams\"`) {
+			t.Fatalf("%s: HTTP %d %s", q, w.Code, w.Body)
+		}
 	}
 	for _, n := range names {
 		if !isTaskTool(n) && !isGuidanceTool(n) && !scopedKnowledgeTools[n] {
@@ -208,7 +235,7 @@ func TestRemoteMCPTaskToolsUseTheCallersAuthority(t *testing.T) {
 		t.Fatalf("hidden tool by name: %q %v", text, isErr)
 	}
 	// The admin sees everything.
-	if n := len(toolNames(f.rpc(t, f.env, "tools/list", nil))); n != len(toolDefs)+len(taskToolDefs)+len(guidanceToolDefs) {
+	if n := len(toolNames(f.rpc(t, f.env, "tools/list", nil))); n != len(toolDefs)+len(taskSetDefs(false, nil))+len(guidanceToolDefs) {
 		t.Fatalf("admin tool list: %d", n)
 	}
 

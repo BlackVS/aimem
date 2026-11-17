@@ -13,6 +13,35 @@ currently 26); a binary refuses a database newer than it understands.
 
 ## [Unreleased]
 
+### Changed
+
+- **The MCP server lists the tools a session's mode needs** (docs/DESIGN-tool-sets.md).
+  A checkout that has not joined a team lists 37 tools, 43,199 bytes of
+  definitions instead of 97,069: the knowledge, task, epic and feature
+  tools, `writing_rule`, `process_context` and the four tools a join needs
+  (`team_setup`, `team_continue`, `team_context`, `team_list`). Joining a
+  team turns the checkout's team setting on: the server lists the team
+  protocol's other 26 tools and announces the changed list
+  (`tools.listChanged`); a client that ignores the announcement shows them
+  after a restart, and `/join_team` says so. A checkout that joined before
+  this release is on already, so `/resume_team` needs no restart. The
+  setting is the checkout's team record, which `aimem teams leave` clears;
+  `aimem wire --check` prints it.
+- **Tools outside a session's list still answer by name**, with a notice
+  line: the team tools for two releases, the reservation tools without an
+  end. The seven reservation tools are no longer listed in a personal or a
+  team member's session (`aimem reservation` is how a member's steps call
+  them, unchanged); the hub's MCP endpoint lists the holder's three
+  (`task_reservation_status`, `task_reservation_release`,
+  `task_reservation_finalize`).
+- **The hub's MCP endpoint takes `?tools=teams`** to list the team
+  protocol's tools; without it a project credential's session lists 27
+  tools. Any other value of the parameter is refused (HTTP 400).
+- **A generic write refused on a reserved task names the way out**, in the
+  MCP answer only: `aimem reservation release|finalize` from the checkout's
+  server, the holder's three tools from the hub's. The HTTP API's text is
+  unchanged.
+
 ## [0.11.0] — 2026-11-17
 
 Features of a goal. A goal (an epic) can now hold its features: records of

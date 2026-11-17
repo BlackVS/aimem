@@ -49,6 +49,12 @@ team. Never pass a role: it comes from the saved membership.
      the report says the session was resumed, the generation changed: use
      the new one everywhere from now on. `joined` is membership, not
      permission to work: read `readiness` (step 3) before anything else.
+   - A checkout that has joined lists the team protocol's tools from the
+     start. If a `team_*` tool a later step names is not listed although the
+     report says `joined`, the client started before the join (for example
+     one made with `aimem teams setup` in a shell). That is not an outdated
+     binary (step 0): tell the user to restart the client and run
+     /resume_team again, then stop.
 
 3. Read the readiness and the delivered context.
    - `readiness.ready_for_work` is true only when `membership` is `active`,
