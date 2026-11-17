@@ -248,25 +248,44 @@ jobs:
           cache: true
       - run: bash scripts/check-install-hub-container.sh
 
-  # A real client upgrade from published releases (scripts/client-upgrade.env):
-  # the one-liner installs FROM, `aimem upgrade` moves it to TO, and a failed
-  # upgrade rolls back. It installs into the runner's account and reads only
-  # the public releases, so it runs nightly and on a manual run, never on a
-  # pull request or a push. macOS runs the same script at each tag in the
-  # release workflow's macos-client-upgrade job.
+  # A real client upgrade from the previous release to this tree
+  # (scripts/check-client-upgrade.sh): the previous release's one-liner
+  # installs it, its own `aimem upgrade` installs an export of the tree, a
+  # failed upgrade rolls back, and the lists a session sees after it are the
+  # tree's. The previous release comes from the tags (full history). It
+  # installs into the runner's account, so it runs on a release prepare pull
+  # request from this repository's release/ branches, nightly and on a
+  # manual run, never on another pull request; macOS on a release prepare
+  # pull request and a manual run (docs/DEVELOPMENT.md, "Release gate").
   client-upgrade:
-    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    if: >-
+      github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' ||
+      (github.event_name == 'pull_request' && startsWith(github.head_ref, 'release/') &&
+      github.event.pull_request.head.repo.full_name == github.repository)
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, windows-latest]
+        os: ${{ fromJSON(github.event_name == 'schedule' && '["ubuntu-latest","windows-latest"]' || '["ubuntu-latest","windows-latest","macos-latest"]') }}
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 15
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          fetch-depth: 0
           persist-credentials: false
-      - if: runner.os == 'Linux'
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version: '1.26'
+          check-latest: true
+          cache: true
+      # Build on the Go that setup-go installed, never a toolchain that
+      # go.mod would download (docs/DEVELOPMENT.md, "Toolchain").
+      - name: toolchain is the runner's Go 1.26
+        shell: bash
+        run: |
+          test "$(go env GOTOOLCHAIN)" = local
+          go version | grep -q ' go1\.26'
+      - if: runner.os != 'Windows'
         run: bash scripts/check-client-upgrade.sh
       - if: runner.os == 'Windows'
         shell: powershell

@@ -48,6 +48,16 @@ currently 26); a binary refuses a database newer than it understands.
   server, the holder's three tools from the hub's. The HTTP API's text is
   unchanged. A reservation tool called by name on the hub's endpoint is
   told of the holder's three tools there, not of the command.
+- **The client upgrade check tests the release being cut, before its tag.**
+  It upgrades from the previous release, derived from the tags, to the
+  tree under test, built as the release that does not exist yet:
+  the previous release's one-liner installs it and its own `aimem upgrade`
+  installs an export of the tree. A checkout that joined a team before the
+  upgrade lists its team tools after it, and one that never joined the
+  standalone set. It runs on a release prepare pull request (Linux, Windows and
+  macOS), nightly and on a manual run; `scripts/client-upgrade.env` no
+  longer names the two versions, so nothing moves after a release
+  (docs/DEVELOPMENT.md, "Release gate").
 
 ## [0.11.0] — 2026-11-17
 

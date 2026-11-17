@@ -73,23 +73,36 @@ jobs:
       - name: macOS install registers launchd agents
         run: bash scripts/check-launchd-install.sh
 
-  # A real client upgrade on macOS between the two published releases named
-  # in scripts/client-upgrade.env, with the rollback; ci.yml's
-  # client-upgrade job runs it nightly on Linux and Windows. It proves
-  # released versions, not this commit, so `publish` does not wait for it:
-  # a failure shows red on the run, is filed as a task, and never holds a
-  # release (docs/DEVELOPMENT.md, "Which checks run where").
+  # A real client upgrade on macOS from the previous release to the tagged
+  # tree, with the rollback (scripts/check-client-upgrade.sh); ci.yml's
+  # client-upgrade job runs it before the tag, on the release prepare pull
+  # request. Here `publish` does not wait for it: a failure shows red on the
+  # run, is filed as a task, and never holds a release (docs/DEVELOPMENT.md,
+  # "Which checks run where").
   macos-client-upgrade:
     needs: ref
     runs-on: macos-latest
-    timeout-minutes: 15
+    timeout-minutes: 20
     permissions:
       contents: read
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ github.event.inputs.tag || github.ref }}
+          fetch-depth: 0
           persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version: '1.26'
+          check-latest: true
+          cache: true
+      # Build on the Go that setup-go installed, never a toolchain that
+      # go.mod would download (docs/DEVELOPMENT.md, "Toolchain").
+      - name: toolchain is the runner's Go 1.26
+        shell: bash
+        run: |
+          test "$(go env GOTOOLCHAIN)" = local
+          go version | grep -q ' go1\.26'
       - name: macOS client upgrade and rollback
         run: bash scripts/check-client-upgrade.sh
 
