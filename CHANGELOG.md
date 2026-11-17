@@ -65,6 +65,11 @@ Includes PR #378 to #383.
   value: a task that becomes a feature gets one entry `to: "FEATURE"`,
   and one that is turned back gets an entry that reopens it. A consumer
   that treats an unknown closing value as an error is updated first.
+  aicrewd needs no change, checked against aicrew v0.11.0: it accepts
+  any upper-case state name in `from` and `to`, `FEATURE` included, and
+  its default board wake announces a change only when it is to READY or
+  touches a task the team has an attempt for. Upgrading the hub does not
+  force an aicrew upgrade.
 - **No setting changes.** No new environment setting, and the existing
   routes and tools keep their defaults: lists and counts show tasks only
   unless `kind` is given.
