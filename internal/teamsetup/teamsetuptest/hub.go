@@ -35,6 +35,10 @@ type Hub struct {
 	JoinMsg  string // error text for a refusal
 	JoinKeys []string
 	Garbage  int // number of join replies to send as unreadable 201s
+	// JoinDrop closes the connection before applying the next join (it never
+	// landed). net/http replays a keyed POST once on a dropped keep-alive
+	// connection, so a join that stays unconfirmed needs a count of 2.
+	JoinDrop int
 	Sessions map[string]*Session
 	NextID   int
 	Roster   int // 0 means 200; 409 means closed/stale
@@ -204,6 +208,15 @@ func (h *Hub) serve(w http.ResponseWriter, r *http.Request) {
 	case strings.HasSuffix(r.URL.Path, "/join"):
 		if r.Header.Get("Idempotency-Key") == "" {
 			write(400, map[string]any{"error": "Idempotency-Key header is required for task writes"})
+			return
+		}
+		if h.JoinDrop > 0 {
+			h.JoinDrop--
+			if hj, ok := w.(http.Hijacker); ok {
+				if conn, _, err := hj.Hijack(); err == nil {
+					conn.Close()
+				}
+			}
 			return
 		}
 		h.JoinKeys = append(h.JoinKeys, r.Header.Get("Idempotency-Key"))

@@ -275,8 +275,8 @@ point stops with an upgrade-and-restart message instead of falling back
 to a shell command.
 
 A checkout lists the team protocol's tools only once it has joined: the
-join writes its team record, which turns the checkout's team setting on,
-and the server announces the changed list. A client that does not act on
+confirmed join writes its record, which turns the checkout's team setting
+on, and the server announces the changed list. A client that does not act on
 the announcement shows the tools after a restart, and the entry point
 says so with its own restart message, distinct from the upgrade message.
 `aimem wire --check` in the checkout prints the setting, and `aimem teams

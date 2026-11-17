@@ -49,15 +49,17 @@ Which tools the server lists depends on the session (docs/DESIGN-tool-sets.md).
 A checkout that has not joined a team lists the task and knowledge tools and
 four team tools, the ones a join needs: `team_setup`, `team_continue`,
 `team_context` and `team_list`. Joining (`team_setup`, `team_continue` or
-`aimem teams setup`) writes the checkout's team record, which turns its
-team setting on: the server then lists the team protocol's other tools as
+`aimem teams setup`) writes the record of a confirmed join, which turns
+the checkout's team setting on (a join the hub never confirmed leaves it
+off): the server then lists the team protocol's other tools as
 well and, when the join ran through the MCP tools, announces the changed
 list; a client that does not act on that lists them after a restart.
 `aimem teams leave` clears the record and the setting with it, and `aimem
 wire --check` prints the setting. A membership that ended on the hub keeps
 its record until the next join or the file's removal; its calls are refused
 by the hub. A team tool called by name in a session that does not list it
-still answers, with a notice, for two releases. The hub's MCP endpoint
+still answers, with a notice, for the period the CHANGELOG's entry on the
+tool sets states. The hub's MCP endpoint
 lists the team protocol's tools when its URL carries `?tools=teams`; any
 other value of that parameter is refused. The reservation tools are not
 listed in a personal session (a member's steps call them through `aimem

@@ -25,11 +25,17 @@ currently 26); a binary refuses a database newer than it understands.
   (`tools.listChanged`); a client that ignores the announcement shows them
   after a restart, and `/join_team` says so. A checkout that joined before
   this release is on already, so `/resume_team` needs no restart. The
-  setting is the checkout's team record, which `aimem teams leave` clears;
-  `aimem wire --check` prints it.
+  setting is the checkout's record of a confirmed join: a join the hub
+  never confirmed leaves it off, and a new join that is not confirmed turns
+  it off, with the changed list announced either way. `aimem teams leave`
+  clears the record; `aimem wire --check` prints the setting.
 - **Tools outside a session's list still answer by name**, with a notice
-  line: the team tools for two releases, the reservation tools without an
-  end. The seven reservation tools are no longer listed in a personal or a
+  line. The reservation tools answer without an end. The served-by-name
+  period of the team tools: a team tool called by name outside the
+  session's list answers in this release and in the release after it, and
+  is refused from the release after those two. (The release preparation
+  writes this release's number here; this sentence is the one place the
+  period is stated.) The seven reservation tools are no longer listed in a personal or a
   team member's session (`aimem reservation` is how a member's steps call
   them, unchanged); the hub's MCP endpoint lists the holder's three
   (`task_reservation_status`, `task_reservation_release`,
@@ -40,7 +46,8 @@ currently 26); a binary refuses a database newer than it understands.
 - **A generic write refused on a reserved task names the way out**, in the
   MCP answer only: `aimem reservation release|finalize` from the checkout's
   server, the holder's three tools from the hub's. The HTTP API's text is
-  unchanged.
+  unchanged. A reservation tool called by name on the hub's endpoint is
+  told of the holder's three tools there, not of the command.
 
 ## [0.11.0] — 2026-11-17
 

@@ -121,6 +121,13 @@ forward: FROM becomes the previous TO, and TO the release just published.
 `aimem upgrade` ends a failed run with the rollback line; the release
 that first carries the line sets it to its own version if it differs.
 
+While the CHANGELOG's entry on the tool sets states the served-by-name
+period of the team tools by position ("in this release and in the release
+after it"), the prepare pull request of the release that carries the entry
+writes that release's number into the sentence, and the next release's
+prepare names itself as the last release of the period. The removal waits
+for both tags (its board task's start condition).
+
 ## Toolchain
 
 aimem needs Go 1.26 (`go 1.26.0` in `go.mod`). The floor moved from 1.25 for the standard library's `crypto/hpke`, which enrollment delivery (D1) will use.
