@@ -32,6 +32,9 @@ import (
 var teamReadTools = map[string]bool{
 	"list_tasks": true, "search_tasks": true, "get_task": true, "get_task_history": true, "list_task_comments": true,
 	"get_task_comment": true, "list_epics": true, "get_epic": true,
+	// A goal's features, served under the profile's grant like the epic
+	// reads (DESIGN-feature-record §6).
+	"list_features": true,
 	// The project's repository under the profile's grant (DESIGN-AIFORGE-PILOT-1 §1).
 	"project_repository": true,
 }

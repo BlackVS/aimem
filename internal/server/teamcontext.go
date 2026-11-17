@@ -67,6 +67,7 @@ var teamRoutes = append(append([]string{
 	"GET /v1/tasks/{id}/comments/{c}",
 	"GET /v1/projects/{p}/epics",
 	"GET /v1/projects/{p}/epics/{e}",
+	"GET /v1/projects/{p}/epics/{e}/features",
 	// The project's repository under the profile's grant (DESIGN-AIFORGE-PILOT-1 §1),
 	// and the process reference and stored set under the same rule
 	// (DESIGN-portable-team-context 1d; the reference for `aimem process pin`).

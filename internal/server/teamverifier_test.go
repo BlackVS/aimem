@@ -63,6 +63,8 @@ func newTeamRig(t *testing.T) *teamRig {
 	g.betaTk = g.create(t, "POST", "/v1/projects/beta/tasks", `{"title":"beta task"}`)
 	g.comment = g.create(t, "POST", "/v1/tasks/"+g.alphaTask+"/comments", `{"body":"first"}`)
 	g.epic = g.create(t, "POST", "/v1/projects/alpha/epics", `{"title":"alpha epic"}`)
+	// One feature of the epic, so the goal's features read has a row.
+	g.create(t, "POST", "/v1/projects/alpha/tasks", `{"title":"alpha feature","epic":"`+g.epic+`","feature":{"goal":"`+g.epic+`","position":1,"mark":"optional"}}`)
 	g.answerActive(nil)
 	return g
 }
@@ -104,19 +106,20 @@ func (g *teamRig) team(t *testing.T, method, path string) identityResp {
 	return g.call(t, g.tls, method, path, g.alice, teamHeader(h), "", true)
 }
 
-// readPaths are the seven task and epic read routes, in alpha (granted) or
+// readPaths are the task, epic and goal-features read routes, in alpha (granted) or
 // beta (not granted), plus the context report.
 func (g *teamRig) readPaths(granted bool) []string {
 	if granted {
 		return []string{
 			"/v1/projects/alpha/tasks", "/v1/projects/alpha/tasks/counts", "/v1/tasks/" + g.alphaTask, "/v1/tasks/" + g.alphaTask + "/history",
 			"/v1/tasks/" + g.alphaTask + "/comments", "/v1/tasks/" + g.alphaTask + "/comments/" + g.comment,
-			"/v1/projects/alpha/epics", "/v1/projects/alpha/epics/" + g.epic,
+			"/v1/projects/alpha/epics", "/v1/projects/alpha/epics/" + g.epic, "/v1/projects/alpha/epics/" + g.epic + "/features",
 		}
 	}
 	return []string{
 		"/v1/projects/beta/tasks", "/v1/projects/beta/tasks/counts", "/v1/tasks/" + g.betaTk, "/v1/tasks/" + g.betaTk + "/history",
 		"/v1/tasks/" + g.betaTk + "/comments", "/v1/projects/beta/epics", "/v1/projects/beta/epics/missing",
+		"/v1/projects/beta/epics/missing/features",
 	}
 }
 
@@ -150,6 +153,8 @@ func TestTeamRoutesAreTheApprovedMatrix(t *testing.T) {
 		"GET /v1/projects/{p}/tasks/counts",
 		"GET /v1/tasks/{id}", "GET /v1/tasks/{id}/history",
 		"GET /v1/tasks/{id}/comments", "GET /v1/tasks/{id}/comments/{c}", "GET /v1/projects/{p}/epics", "GET /v1/projects/{p}/epics/{e}",
+		// A goal's features, a read like the epic's (DESIGN-feature-record §6).
+		"GET /v1/projects/{p}/epics/{e}/features",
 		// The project's repository under the profile's grant (DESIGN-AIFORGE-PILOT-1 §1),
 		// and the stored process set under the same rule (DESIGN-portable-team-context 1d).
 		"GET /v1/projects/{p}/repository",

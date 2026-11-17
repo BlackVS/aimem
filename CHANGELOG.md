@@ -74,6 +74,23 @@ currently 26); a binary refuses a database newer than it understands.
   it is turned back, and nothing in between. Lists and counts show tasks
   by default, a search finds any record, and both take a kind and a
   feature filter.
+- **Features of a goal over the hub and MCP** (docs/FEATURES.md, the
+  second half of docs/DESIGN-feature-record.md). Three new routes, each an
+  MCP tool: `set_feature` (`PUT /v1/tasks/{id}/feature`) turns a task into
+  a feature, changes its link, or with `remove` turns it back;
+  `confirm_feature_task` (`POST /v1/tasks/{id}/feature/tasks`) adds a task
+  to a feature's confirmed tasks or takes it out, refusing a feature of
+  any project and a task the caller cannot read; `list_features`
+  (`GET /v1/projects/{p}/epics/{e}/features`) gives the goal's features in
+  position order, marking a shared position. `create_task` takes an
+  optional `feature` link, and `list_tasks`, `search_tasks` and the counts
+  take `kind` and `feature`. They work with one ordinary task token and no
+  team; in team mode `list_features` is a read under the profile's grant,
+  and the two writes are not served. A member's read of a task's text for
+  an offer answers a feature as not found. On a hub one release older, the
+  feature tools say to upgrade the hub, and a create with a link is
+  refused there, never stored as work. docs/FEATURES.md also holds the
+  carry-over procedure for a goal's trial records.
 
 ## [0.10.27] — 2026-11-16
 

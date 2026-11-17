@@ -68,10 +68,13 @@ var taskRoutes = map[string]bool{
 	"GET /v1/tasks/{id}/comments":                                          true,
 	"POST /v1/tasks/{id}/comments":                                         true,
 	"GET /v1/tasks/{id}/comments/{c}":                                      true,
+	"PUT /v1/tasks/{id}/feature":                                           true,
+	"POST /v1/tasks/{id}/feature/tasks":                                    true,
 	"GET /v1/projects/{p}/epics":                                           true,
 	"POST /v1/projects/{p}/epics":                                          true,
 	"GET /v1/projects/{p}/epics/{e}":                                       true,
 	"PUT /v1/projects/{p}/epics/{e}":                                       true,
+	"GET /v1/projects/{p}/epics/{e}/features":                              true,
 	// The member reservation routes (C6a): the C5 authorizer derives the
 	// actor from the individual credential and refuses every other kind.
 	"POST /v1/projects/{p}/tasks/{task_id}/reservation/claim":                             true,
@@ -641,6 +644,7 @@ func (s *Server) listTasks(w http.ResponseWriter, r *http.Request) {
 	if db == nil {
 		return
 	}
+	var ok bool
 	q := r.URL.Query()
 	limit, err := queryInt(r, "limit")
 	if err != nil {
@@ -665,6 +669,9 @@ func (s *Server) listTasks(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	f.Epic = q.Get("epic")
+	if f.Kind, f.Feature, ok = s.kindFilters(w, r, db); !ok {
+		return
+	}
 	page, err := db.ListTasks(f)
 	if err != nil {
 		s.taskError(w, err)
@@ -692,7 +699,11 @@ func (s *Server) countTasks(w http.ResponseWriter, r *http.Request) {
 		s.fail(w, http.StatusBadRequest, err)
 		return
 	}
-	counts, err := db.CountTasks(store.TaskFilter{Assignee: assignee, Epic: q.Get("epic")})
+	kind, feature, ok := s.kindFilters(w, r, db)
+	if !ok {
+		return
+	}
+	counts, err := db.CountTasks(store.TaskFilter{Assignee: assignee, Epic: q.Get("epic"), Kind: kind, Feature: feature})
 	if err != nil {
 		s.taskError(w, err)
 		return
@@ -701,6 +712,34 @@ func (s *Server) countTasks(w http.ResponseWriter, r *http.Request) {
 		Project string `json:"project"`
 		store.TaskCounts
 	}{project, counts})
+}
+
+// kindFilters reads the kind and feature query parameters. The feature is
+// a feature of this project, named by its id or a unique prefix of it.
+func (s *Server) kindFilters(w http.ResponseWriter, r *http.Request, db *store.DB) (kind, feature string, ok bool) {
+	q := r.URL.Query()
+	kind = q.Get("kind")
+	switch kind {
+	case "", store.TaskKindTask, store.TaskKindFeature, store.TaskKindAny:
+	default:
+		s.fail(w, http.StatusBadRequest, errors.New("kind must be task, feature or any"))
+		return "", "", false
+	}
+	feature = q.Get("feature")
+	if feature == "" {
+		return kind, "", true
+	}
+	id, err := db.ResolveProjectTaskID(feature)
+	var amb *store.AmbiguousIDError
+	switch {
+	case errors.As(err, &amb):
+		s.taskIDError(w, r, err, false)
+		return "", "", false
+	case err != nil:
+		s.fail(w, http.StatusBadRequest, errors.New("the feature filter names no feature of this project"))
+		return "", "", false
+	}
+	return kind, id, true
 }
 
 // assigneeFilter reads the assignee query parameter, kind/id.
@@ -728,19 +767,40 @@ func (s *Server) createTask(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	var content store.TaskContent
-	if !s.decodeTaskBody(w, r, &content) || !s.assigneeExists(w, content.Assignee) {
+	var body struct {
+		store.TaskContent
+		// Feature creates the record as a feature in one write
+		// (docs/DESIGN-feature-record.md, section 6).
+		Feature *store.FeatureLink `json:"feature"`
+	}
+	if !s.decodeTaskBody(w, r, &body) || !s.assigneeExists(w, body.Assignee) {
 		return
 	}
-	// A retry of a stored create returns its receipt unchecked: the text
-	// was accepted when it was first written.
-	if !db.CreateReplays(content, taskActor(r), key) {
-		if ref := s.checkTaskFields(r.Context(), content, nil); ref != nil {
+	content := body.TaskContent
+	// A retry of a stored create returns its receipt unchecked: the text was
+	// accepted when it was first written. The two creates keep their own
+	// receipts, so each asks its own.
+	replays := db.CreateReplays(content, taskActor(r), key)
+	if body.Feature != nil {
+		replays = db.CreateFeatureReplays(content, *body.Feature, taskActor(r), key)
+	}
+	if !replays {
+		ref := s.checkTaskFields(r.Context(), content, nil)
+		if ref == nil && body.Feature != nil {
+			ref = s.checkFeatureText(r.Context(), *body.Feature, nil)
+		}
+		if ref != nil {
 			s.refuseText(w, ref)
 			return
 		}
 	}
-	task, err := db.CreateTask(content, taskActor(r), key)
+	var task store.Task
+	var err error
+	if body.Feature != nil {
+		task, err = db.CreateFeature(content, *body.Feature, taskActor(r), key)
+	} else {
+		task, err = db.CreateTask(content, taskActor(r), key)
+	}
 	if err != nil {
 		s.taskError(w, err)
 		return

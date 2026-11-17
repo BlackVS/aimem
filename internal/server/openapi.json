@@ -830,7 +830,7 @@
       "get": {
         "x-team-mode": "Team mode: with the optional header X-Aimem-Team-Context (an aimem-scoped acs1_ handle from aicrew) and a user-scoped individual bearer, over TLS terminated by the hub only (otherwise tls_required, 403, whatever forwarded headers claim), the hub verifies the session online through aicrew introspection on every request, matches it to the authenticated user and token, and serves the read only under the linked team access profile's live grant, never the caller's personal grants. Refusals use the envelope with active_mode team: context_unavailable (503, retryable), context_stale, identity_mismatch, grant_denied, role_forbidden (403).",
         "summary": "List task summaries of a project",
-        "description": "Archived tasks are excluded unless include_archived=true. order is id (the default: creation order), updated_desc, updated_asc, title (case-insensitive) or state (lifecycle order, newest updated first within a state); every order breaks ties by id. q searches instead (at most 256 bytes; every whitespace-separated term must appear, literally, in the task's title, objective, acceptance criteria or non-goals or in one of its comments): it takes no order, ranks the matches best first and adds matched (task or comment, where the best hit was) and snippet (the hit in [brackets]) to each row; the other filters still apply. updated_since (RFC 3339) keeps only the tasks updated at or after that time, with any order or a search; a malformed time is a 400. Pages default 20, max 100; pass next_cursor as after with the same order: under id it is the last task id, under the other orders an opaque token valid only for the order that issued it. Managed rows include a read-only coordination object with team_id and optional active attempt_id/state; standalone clients must skip them. Ordinary user tokens may call this route; writes are authorized per attempt against the task's owning project (user-scoped token or token issued for that project instance, plus a current grant), legacy writer tokens read only, admin tokens do everything.",
+        "description": "Archived tasks are excluded unless include_archived=true. order is id (the default: creation order), updated_desc, updated_asc, title (case-insensitive) or state (lifecycle order, newest updated first within a state); every order breaks ties by id. q searches instead (at most 256 bytes; every whitespace-separated term must appear, literally, in the task's title, objective, acceptance criteria or non-goals or in one of its comments): it takes no order, ranks the matches best first and adds matched (task or comment, where the best hit was) and snippet (the hit in [brackets]) to each row; the other filters still apply. updated_since (RFC 3339) keeps only the tasks updated at or after that time, with any order or a search; a malformed time is a 400. Pages default 20, max 100; pass next_cursor as after with the same order: under id it is the last task id, under the other orders an opaque token valid only for the order that issued it. Managed rows include a read-only coordination object with team_id and optional active attempt_id/state; standalone clients must skip them. Ordinary user tokens may call this route; writes are authorized per attempt against the task's owning project (user-scoped token or token issued for that project instance, plus a current grant), legacy writer tokens read only, admin tokens do everything. kind selects task (the default for a list), feature or any (the default for a search); a feature's row carries kind: feature. feature lists only the tasks of this project that the feature confirms; a value that names no feature of this project is a 400.",
         "x-role": "writer",
         "parameters": [
           {
@@ -864,6 +864,29 @@
             "schema": {
               "type": "string"
             }
+          },
+          {
+            "name": "kind",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "task",
+                "feature",
+                "any"
+              ]
+            },
+            "description": "which records: task (the default for a list and the counts), feature, or any (the default for a search with q)"
+          },
+          {
+            "name": "feature",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "only the tasks of this project that this feature confirms (its dependencies); a feature of this project, by id or unique prefix"
           },
           {
             "name": "include_archived",
@@ -940,7 +963,7 @@
       },
       "post": {
         "summary": "Create a task in an existing ordinary project",
-        "description": "Body is the editable content (title required; state defaults to BACKLOG; candidate_refs and evidence_refs are typed references {kind, ref, note?, scope?} with kind one of task, doc, record, commit, pr, ci, url, text — a bare string is refused with 400 since schema 13). required_capability is optional: \"<kind>: <name>\" (a lowercase kind of at most 32 characters, one colon and one space, then a name of printable characters with no surrounding space; at most 256 bytes), such as \"ops: network-x\"; empty means the project's own capability, and a malformed value is refused with 400. Never creates a project. Ordinary user tokens may call this route; writes are authorized per attempt against the task's owning project (user-scoped token or token issued for that project instance, plus a current grant), legacy writer tokens read only, admin tokens do everything. Retry keys travel in the Idempotency-Key header.",
+        "description": "Body is the editable content (title required; state defaults to BACKLOG; candidate_refs and evidence_refs are typed references {kind, ref, note?, scope?} with kind one of task, doc, record, commit, pr, ci, url, text — a bare string is refused with 400 since schema 13). required_capability is optional: \"<kind>: <name>\" (a lowercase kind of at most 32 characters, one colon and one space, then a name of printable characters with no surrounding space; at most 256 bytes), such as \"ops: network-x\"; empty means the project's own capability, and a malformed value is refused with 400. An optional feature object (goal, position, mark, ground, ground_note, alternative, as PUT /v1/tasks/{id}/feature takes them) creates the record as a feature in one write: it never enters the board feed. Never creates a project. Ordinary user tokens may call this route; writes are authorized per attempt against the task's owning project (user-scoped token or token issued for that project instance, plus a current grant), legacy writer tokens read only, admin tokens do everything. Retry keys travel in the Idempotency-Key header.",
         "x-role": "writer",
         "parameters": [
           {
@@ -1001,7 +1024,7 @@
     "/v1/projects/{p}/tasks/counts": {
       "get": {
         "summary": "Count the tasks of a project per state",
-        "description": "The board's shape in one call: counts holds the active (unarchived) tasks per state, every state present (BACKLOG, READY, IN_PROGRESS, REVIEW, BLOCKED, DONE, CANCELLED; zero included); archived is the number of archived tasks and total both together. assignee (kind/id) and epic narrow all three, as on the list; the list's other filters do not apply. Ordinary user tokens may call this route; it reads what the list reads.",
+        "description": "The board's shape in one call: counts holds the active (unarchived) tasks per state, every state present (BACKLOG, READY, IN_PROGRESS, REVIEW, BLOCKED, DONE, CANCELLED; zero included); archived is the number of archived tasks and total both together. assignee (kind/id), epic, kind (default task, so features are not counted as work) and feature narrow all three, as on the list; the list's other filters do not apply. Ordinary user tokens may call this route; it reads what the list reads.",
         "x-role": "writer",
         "x-team-mode": "Team mode: with the optional header X-Aimem-Team-Context (an aimem-scoped acs1_ handle from aicrew) and a user-scoped individual bearer, over TLS terminated by the hub only (otherwise tls_required, 403, whatever forwarded headers claim), the hub verifies the session online through aicrew introspection on every request, matches it to the authenticated user and token, and serves the read only under the linked team access profile's live grant, never the caller's personal grants. Refusals use the envelope with active_mode team: context_unavailable (503, retryable), context_stale, identity_mismatch, grant_denied, role_forbidden (403).",
         "parameters": [
@@ -1028,6 +1051,29 @@
             "schema": {
               "type": "string"
             }
+          },
+          {
+            "name": "kind",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "task",
+                "feature",
+                "any"
+              ]
+            },
+            "description": "which records: task (the default for a list and the counts), feature, or any (the default for a search with q)"
+          },
+          {
+            "name": "feature",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "only the tasks of this project that this feature confirms (its dependencies); a feature of this project, by id or unique prefix"
           }
         ],
         "responses": {
@@ -1050,7 +1096,7 @@
       "get": {
         "x-team-mode": "Team mode: with the optional header X-Aimem-Team-Context (an aimem-scoped acs1_ handle from aicrew) and a user-scoped individual bearer, over TLS terminated by the hub only (otherwise tls_required, 403, whatever forwarded headers claim), the hub verifies the session online through aicrew introspection on every request, matches it to the authenticated user and token, and serves the read only under the linked team access profile's live grant, never the caller's personal grants. Refusals use the envelope with active_mode team: context_unavailable (503, retryable), context_stale, identity_mismatch, grant_denied, role_forbidden (403).",
         "summary": "Read one task",
-        "description": "Current content, revision, owning project (resolved at read time, so a rename is reflected) and origin-relative links. An optional read-only coordination object contains team_id and, when reserved, attempt_id/state; standalone clients must skip managed tasks even between attempts. Ordinary user tokens may call this route; writes are authorized per attempt against the task's owning project (user-scoped token or token issued for that project instance, plus a current grant), legacy writer tokens read only, admin tokens do everything.",
+        "description": "Current content, revision, owning project (resolved at read time, so a rename is reflected) and origin-relative links. An optional read-only coordination object contains team_id and, when reserved, attempt_id/state; standalone clients must skip managed tasks even between attempts. Ordinary user tokens may call this route; writes are authorized per attempt against the task's owning project (user-scoped token or token issued for that project instance, plus a current grant), legacy writer tokens read only, admin tokens do everything. A feature's record carries kind: feature and its feature link; a task's carries neither.",
         "x-role": "writer",
         "parameters": [
           {
@@ -1080,7 +1126,7 @@
       },
       "put": {
         "summary": "Replace a task's editable fields under expected-revision CAS",
-        "description": "Body is the full editable content plus expected_revision; omitted optional fields clear (candidate_refs and evidence_refs are typed references {kind, ref, note?, scope?} — a bare string is refused with 400 since schema 13). required_capability is optional: \"<kind>: <name>\" (a lowercase kind of at most 32 characters, one colon and one space, then a name of printable characters with no surrounding space; at most 256 bytes), such as \"ops: network-x\"; empty means the project's own capability, and a malformed value is refused with 400. A stale revision answers 409 with the current task. Ordinary user tokens may call this route; writes are authorized per attempt against the task's owning project (user-scoped token or token issued for that project instance, plus a current grant), legacy writer tokens read only, admin tokens may update unmanaged tasks. Retry keys travel in the Idempotency-Key header. Managed tasks refuse generic update/archive with 409 managed_task, including admins and old update receipts. Tasks with an active reservation also refuse generic update/archive with 409, including admins and old update receipts; the response does not disclose the holder. Reservation transitions are not exposed through this route. The coordination projection is not editable content.",
+        "description": "Body is the full editable content plus expected_revision; omitted optional fields clear (candidate_refs and evidence_refs are typed references {kind, ref, note?, scope?} — a bare string is refused with 400 since schema 13). required_capability is optional: \"<kind>: <name>\" (a lowercase kind of at most 32 characters, one colon and one space, then a name of printable characters with no surrounding space; at most 256 bytes), such as \"ops: network-x\"; empty means the project's own capability, and a malformed value is refused with 400. A stale revision answers 409 with the current task. Ordinary user tokens may call this route; writes are authorized per attempt against the task's owning project (user-scoped token or token issued for that project instance, plus a current grant), legacy writer tokens read only, admin tokens may update unmanaged tasks. Retry keys travel in the Idempotency-Key header. Managed tasks refuse generic update/archive with 409 managed_task, including admins and old update receipts. Tasks with an active reservation also refuse generic update/archive with 409, including admins and old update receipts; the response does not disclose the holder. Reservation transitions are not exposed through this route. The coordination projection is not editable content. On a feature the write keeps the kind and the link, and a move to DONE needs at least one evidence reference. No dependency may name a feature of the same project.",
         "x-role": "writer",
         "parameters": [
           {
@@ -1952,7 +1998,7 @@
     "/v1/identity/peers/{service_id}/board-changes": {
       "get": {
         "summary": "identity.v1 board.read: the task state changes of the calling peer's teams' granted projects",
-        "description": "identity.v1 board.read (aicrew's control-plane design, A0): only an aimem_peer_ credential issued for board.read, for the path's service, may call this; every other credential is refused with peer_forbidden. Returns {changes, cursor, more}: each change is {project, task_id, revision, from, to, at, required_capability}, the state a revision set and the state before it (\"\" for a creation) and the task's required capability at that revision (\"\" for the project's own), across every project granted to the calling peer's enabled team profiles. No task content. The cursor is opaque and bound to the peer; the same cursor reads the same page while nothing new is written, and reading on from the returned cursor never skips or repeats a change. A malformed or foreign cursor is invalid_cursor; a cursor past a project's last change is cursor_ahead. limit is 1 to 500 (default 100). Audited as board.read. Requires TLS terminated by this hub (plain HTTP, a TLS-terminating proxy and the unix socket are refused with tls_required) and X-Aimem-Identity-Version: 1. Bounded with the read scope at 60 calls per minute per credential (rate_limited). Not exposed as an MCP tool.",
+        "description": "identity.v1 board.read (aicrew's control-plane design, A0): only an aimem_peer_ credential issued for board.read, for the path's service, may call this; every other credential is refused with peer_forbidden. Returns {changes, cursor, more}: each change is {project, task_id, revision, from, to, at, required_capability}, the state a revision set and the state before it (\"\" for a creation) and the task's required capability at that revision (\"\" for the project's own), across every project granted to the calling peer's enabled team profiles. No task content. A to of FEATURE (and nothing after it) means the record became a feature and is no longer work: a consumer drops it. A from of FEATURE means it was turned back into a task and is work again from that revision. The cursor is opaque and bound to the peer; the same cursor reads the same page while nothing new is written, and reading on from the returned cursor never skips or repeats a change. A malformed or foreign cursor is invalid_cursor; a cursor past a project's last change is cursor_ahead. limit is 1 to 500 (default 100). Audited as board.read. Requires TLS terminated by this hub (plain HTTP, a TLS-terminating proxy and the unix socket are refused with tls_required) and X-Aimem-Identity-Version: 1. Bounded with the read scope at 60 calls per minute per credential (rate_limited). Not exposed as an MCP tool.",
         "x-role": "writer",
         "x-identity-auth": "peer",
         "x-requires-tls": true,
@@ -10274,6 +10320,241 @@
                 "type": "object"
               }
             }
+          }
+        }
+      }
+    },
+    "/v1/tasks/{id}/feature": {
+      "put": {
+        "summary": "Set a record's feature link: turn a task into a feature, change the link, or turn a feature back into a task",
+        "description": "docs/DESIGN-feature-record.md, section 6. Body: the link (goal, position, mark, ground, ground_note, alternative) and expected_revision, or remove: true and expected_revision with no link field. On a task it turns the task into a feature and appends the board feed's closing entry (to FEATURE) in the same write; it is refused while the task is reserved or team-managed (409) or while a task of its own project depends on it (400, naming those tasks). On a feature it changes the link. With remove it turns the feature back into a task and appends the entry that reopens it (from FEATURE to its state); refused while the feature has confirmed tasks. Returns the record, with kind and feature for a feature. A stale revision is 409 with the current record; a repeated Idempotency-Key with the same input returns the first answer. ground_note and alternative are checked as readable prose when the write changes them. Ordinary user tokens may call this route under the ordinary task-write check (user-scoped token or token issued for that project instance, plus a current grant); legacy writer tokens read only, admin tokens do everything. Not served in team mode.",
+        "x-role": "writer",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "the task id: the full id, or a unique prefix of at least 13 characters (01a17718-4ca9) that starts one task on the hub"
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "expected_revision"
+                ],
+                "properties": {
+                  "goal": {
+                    "type": "string",
+                    "description": "the goal: an epic id, equal to the record's epic"
+                  },
+                  "position": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 10000,
+                    "description": "its place in the goal's order of delivery"
+                  },
+                  "mark": {
+                    "type": "string",
+                    "enum": [
+                      "mandatory",
+                      "optional"
+                    ]
+                  },
+                  "ground": {
+                    "type": "string",
+                    "enum": [
+                      "check",
+                      "owner_condition"
+                    ],
+                    "description": "why mandatory; required for a mandatory feature, empty for an optional one"
+                  },
+                  "ground_note": {
+                    "type": "string",
+                    "maxLength": 2048,
+                    "description": "the condition's words and date, or why the check needs it"
+                  },
+                  "alternative": {
+                    "type": "string",
+                    "maxLength": 2048,
+                    "description": "the cheaper way, if one exists"
+                  },
+                  "remove": {
+                    "type": "boolean"
+                  },
+                  "expected_revision": {
+                    "type": "integer",
+                    "minimum": 1
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK: the record"
+          },
+          "400": {
+            "description": "Validation failure: the link (goal not the record's epic, position, mark, ground), remove with link fields, a dependent task, confirmed tasks on a removal, missing Idempotency-Key"
+          },
+          "409": {
+            "description": "Revision conflict (body carries current), idempotency key reused with different input, a reserved or team-managed record"
+          },
+          "422": {
+            "description": "Unreadable text (code unreadable_text) in ground_note or alternative, as for a task write"
+          },
+          "401": {
+            "description": "Invalid, expired, revoked or disabled credential"
+          },
+          "403": {
+            "description": "Credential may not write tasks in this project"
+          },
+          "404": {
+            "description": "Unknown task, or a task in a project the caller holds no grant on (one answer)"
+          },
+          "413": {
+            "description": "Request body larger than 256 KiB"
+          }
+        }
+      }
+    },
+    "/v1/tasks/{id}/feature/tasks": {
+      "post": {
+        "summary": "Confirm a task on a feature, or take it out",
+        "description": "docs/DESIGN-feature-record.md, section 5. Adds one task to the feature's dependencies (its confirmed tasks), or with remove takes it out, under the feature's expected_revision; nothing else changes. task is a task id or a unique prefix, in this project or another; it must exist, the caller must be able to read it, and it must not be a feature of any project (400, one answer for a task that does not exist and one the caller cannot read). Taking out a full id needs only the feature's list. Confirming a task already confirmed returns the record unchanged. A stale revision is 409 with the current record; a repeated Idempotency-Key with the same input returns the first answer. Ordinary user tokens may call this route under the ordinary task-write check (user-scoped token or token issued for that project instance, plus a current grant); legacy writer tokens read only, admin tokens do everything. Not served in team mode.",
+        "x-role": "writer",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "the feature's id, or a unique prefix of at least 13 characters"
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "task",
+                  "expected_revision"
+                ],
+                "properties": {
+                  "task": {
+                    "type": "string"
+                  },
+                  "remove": {
+                    "type": "boolean"
+                  },
+                  "expected_revision": {
+                    "type": "integer",
+                    "minimum": 1
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK: the feature record"
+          },
+          "400": {
+            "description": "Validation failure: the record is not a feature, the task is unknown or unreadable, the task is a feature, a removal of a task not confirmed, missing Idempotency-Key"
+          },
+          "409": {
+            "description": "Revision conflict (body carries current), idempotency key reused with different input, ambiguous task prefix"
+          },
+          "401": {
+            "description": "Invalid, expired, revoked or disabled credential"
+          },
+          "403": {
+            "description": "Credential may not write tasks in this project"
+          },
+          "404": {
+            "description": "Unknown task, or a task in a project the caller holds no grant on (one answer)"
+          },
+          "413": {
+            "description": "Request body larger than 256 KiB"
+          }
+        }
+      }
+    },
+    "/v1/projects/{p}/epics/{e}/features": {
+      "get": {
+        "x-team-mode": "Team mode: with the optional header X-Aimem-Team-Context (an aimem-scoped acs1_ handle from aicrew) and a user-scoped individual bearer, over TLS terminated by the hub only (otherwise tls_required, 403, whatever forwarded headers claim), the hub verifies the session online through aicrew introspection on every request, matches it to the authenticated user and token, and serves the read only under the linked team access profile's live grant, never the caller's personal grants. Refusals use the envelope with active_mode team: context_unavailable (503, retryable), context_stale, identity_mismatch, grant_denied, role_forbidden (403).",
+        "summary": "The features of a goal in position order",
+        "description": "docs/DESIGN-feature-record.md, section 6. The goal is the epic. Each row: id, title, state, assignee, archived, revision, feature (the link), confirmed_tasks (the number of confirmed tasks) and links.self. Rows are in position order, then id order; the hub does not renumber, and rows sharing a position carry tie: true. No paging: the list is capped at 100 features, and truncated: true says more exist. Archived features are left out unless include_archived=true. Ordinary user tokens may call this route under a grant on the project; a project without one answers as unknown.",
+        "x-role": "writer",
+        "parameters": [
+          {
+            "name": "p",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "e",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "the goal's epic id"
+          },
+          {
+            "name": "include_archived",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          },
+          "400": {
+            "description": "Validation failure (include_archived; a reserved project)"
+          },
+          "401": {
+            "description": "Invalid, expired, revoked or disabled credential"
+          },
+          "404": {
+            "description": "Unknown project or epic"
           }
         }
       }

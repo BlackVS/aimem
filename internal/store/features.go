@@ -133,6 +133,26 @@ func checkFeatureRules(tx *sql.Tx, t Task, from, priorDeps string, create bool) 
 	return invalid(featureDependencyError(errors.New("refused"), t.ID, feature))
 }
 
+// createFeatureRetry shares the task create's operation: one route and one
+// key, so a key used for one kind of creation answers the other with
+// ErrTaskRetryConflict. The input carries the link, so the plain create's
+// digest (its content alone) is unchanged.
+func createFeatureRetry(content TaskContent, link FeatureLink) retry {
+	if content.State == "" {
+		content.State = "BACKLOG"
+	}
+	return retry{"create", "", struct {
+		Content TaskContent `json:"content"`
+		Feature FeatureLink `json:"feature"`
+	}{content, link}}
+}
+
+// CreateFeatureReplays reports whether CreateFeature with these arguments
+// would return a stored receipt rather than create a feature.
+func (d *DB) CreateFeatureReplays(content TaskContent, link FeatureLink, actor TaskActor, key string) bool {
+	return d.replays(actor, key, createFeatureRetry(content, link))
+}
+
 // CreateFeature stores a new record as a feature in one write, so it never
 // appears in the board feed as work.
 func (d *DB) CreateFeature(content TaskContent, link FeatureLink, actor TaskActor, key string) (Task, error) {
@@ -145,11 +165,8 @@ func (d *DB) CreateFeature(content TaskContent, link FeatureLink, actor TaskActo
 	if err := link.validate(content.Epic); err != nil {
 		return Task{}, invalid(err)
 	}
-	input := struct {
-		Content TaskContent `json:"content"`
-		Feature FeatureLink `json:"feature"`
-	}{content, link}
-	t, err := taskMutation(d, actor, "create_feature", "", key, input, func(tx *sql.Tx) (Task, error) {
+	r := createFeatureRetry(content, link)
+	t, err := taskMutation(d, actor, r.op, r.scope, key, r.input, func(tx *sql.Tx) (Task, error) {
 		if err := checkEpicAssignable(tx, content.Epic, ""); err != nil {
 			return Task{}, err
 		}
@@ -161,6 +178,20 @@ func (d *DB) CreateFeature(content TaskContent, link FeatureLink, actor TaskActo
 		d.hints.put(t.ID, d.projectID)
 	}
 	return t, err
+}
+
+func setFeatureRetry(id string, link *FeatureLink, remove bool, expected int64) retry {
+	return retry{"set_feature", id, struct {
+		Feature  *FeatureLink `json:"feature,omitempty"`
+		Remove   bool         `json:"remove,omitempty"`
+		Expected int64        `json:"expected"`
+	}{link, remove, expected}}
+}
+
+// SetFeatureReplays reports whether SetFeature with these arguments would
+// return a stored receipt rather than change the record.
+func (d *DB) SetFeatureReplays(id string, link *FeatureLink, remove bool, expected int64, actor TaskActor, key string) bool {
+	return d.replays(actor, key, setFeatureRetry(id, link, remove, expected))
 }
 
 // SetFeature turns a task into a feature, changes a feature's link, or,
@@ -179,11 +210,7 @@ func (d *DB) SetFeature(id string, link *FeatureLink, remove bool, expected int6
 	if remove == (link != nil) {
 		return Task{}, invalid(errors.New("give either the feature's link or remove"))
 	}
-	input := struct {
-		Feature  *FeatureLink `json:"feature,omitempty"`
-		Remove   bool         `json:"remove,omitempty"`
-		Expected int64        `json:"expected"`
-	}{link, remove, expected}
+	r := setFeatureRetry(id, link, remove, expected)
 	check := func(tx *sql.Tx) error {
 		var managed bool
 		if err := tx.QueryRow(`SELECT EXISTS(SELECT 1 FROM team_managed_tasks WHERE task_id=? AND managed=1)`, id).Scan(&managed); err != nil {
@@ -194,7 +221,7 @@ func (d *DB) SetFeature(id string, link *FeatureLink, remove bool, expected int6
 		}
 		return rejectActiveReservation(tx, id)
 	}
-	return checkedTaskMutation(d, actor, "set_feature", id, key, input, check, func(tx *sql.Tx) (Task, error) {
+	return checkedTaskMutation(d, actor, r.op, r.scope, key, r.input, check, func(tx *sql.Tx) (Task, error) {
 		t, err := readTask(tx, id)
 		if err != nil {
 			return Task{}, err
@@ -263,6 +290,20 @@ func rejectFeatureDependents(tx *sql.Tx, id string) error {
 	return nil
 }
 
+func confirmFeatureTaskRetry(featureID, taskID string, remove bool, expected int64) retry {
+	return retry{"confirm_feature_task", featureID, struct {
+		Task     string `json:"task"`
+		Remove   bool   `json:"remove,omitempty"`
+		Expected int64  `json:"expected"`
+	}{taskID, remove, expected}}
+}
+
+// ConfirmFeatureTaskReplays reports whether ConfirmFeatureTask with these
+// arguments would return a stored receipt rather than change the feature.
+func (d *DB) ConfirmFeatureTaskReplays(featureID, taskID string, remove bool, expected int64, actor TaskActor, key string) bool {
+	return d.replays(actor, key, confirmFeatureTaskRetry(featureID, taskID, remove, expected))
+}
+
 // ConfirmFeatureTask adds one task to a feature's dependencies, or with
 // remove takes it out, under the feature's revision. The store refuses a
 // task that is a feature of this project; that the task exists and that the
@@ -277,12 +318,8 @@ func (d *DB) ConfirmFeatureTask(featureID, taskID string, remove bool, expected 
 	if expected < 1 {
 		return Task{}, invalid(errors.New("expected_revision must be a positive revision"))
 	}
-	input := struct {
-		Task     string `json:"task"`
-		Remove   bool   `json:"remove,omitempty"`
-		Expected int64  `json:"expected"`
-	}{taskID, remove, expected}
-	return taskMutation(d, actor, "confirm_feature_task", featureID, key, input, func(tx *sql.Tx) (Task, error) {
+	r := confirmFeatureTaskRetry(featureID, taskID, remove, expected)
+	return taskMutation(d, actor, r.op, r.scope, key, r.input, func(tx *sql.Tx) (Task, error) {
 		t, err := readTask(tx, featureID)
 		if err != nil {
 			return Task{}, err

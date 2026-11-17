@@ -7,6 +7,11 @@ package server
 // carries the position reached in each project, so a page never skips or
 // repeats a change, and the same cursor reads the same page again while
 // nothing new is written. Entries carry no task content.
+//
+// A change to FEATURE means the record became a feature and is no longer
+// work: a consumer drops it, and nothing more about it follows. A change
+// from FEATURE means it was turned back into a task and is work again
+// (docs/DESIGN-feature-record.md, section 9).
 
 import (
 	"encoding/base64"

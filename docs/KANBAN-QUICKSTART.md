@@ -382,6 +382,8 @@ direct grant removes that grant, but a group grant may still allow writes.
 | Process context unavailable | Selected manifest/commit, the member's grant on the project (denied) and hub reachability, required files and bootstrap budget; a hub that stores no set for the selection needs `aimem process refresh` on the hub host |
 | CLI cannot reach service | Run as the configured service user; export `XDG_RUNTIME_DIR="/run/user/$(id -u)"` and check `aimem health`. If that runtime directory/socket is absent too, inspect `systemctl --user status aimem` |
 
+To plan a goal as features with confirmed tasks, see [Features of a goal](FEATURES.md).
+
 For deployment and API details, see [the administrator manual](ADMIN-MANUAL.md)
 and [the access model](DESIGN-access-control.md). Operators upgrading from
 v0.5.0 should follow the [token-model rollout checklist](archive/TOKEN-MODEL-ROLLOUT.md)
