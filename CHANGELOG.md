@@ -13,6 +13,67 @@ currently 26); a binary refuses a database newer than it understands.
 
 ## [Unreleased]
 
+## [0.11.0] — 2026-11-17
+
+Features of a goal. A goal (an epic) can now hold its features: records of
+kind `feature`, each with its place in the goal's order, whether it is
+mandatory or optional, the ground of a mandatory one, and a cheaper
+alternative. A feature is kept out of work, and the tasks it needs are
+confirmed on it. Three new routes and MCP tools serve this: `set_feature`,
+`confirm_feature_task` and `list_features` (docs/FEATURES.md). The hub
+also refuses a shared document that holds a likely secret, as the client
+already did, and every such message names the project. Project schema 26
+is one-way, and the board feed gains a closing value, `FEATURE`; read the
+upgrade notes before upgrading a hub. Also: neutral example names in
+fixtures and documents (#378) and a development process proposal (#380).
+Includes PR #378 to #383.
+
+### Upgrade notes
+
+- **Hubs first, then workstations.** The feature routes are the hub's: a
+  0.10.27 hub does not serve them, and a 0.11.0 client's feature tools
+  tell the user to upgrade the hub. A `create_task` with a `feature` link
+  is refused there by the hub's strict decoder, so nothing is stored as
+  work. An older client against a 0.11.0 hub lists work only, reads a
+  feature by its id, and its full update of a feature keeps the kind and
+  the link.
+- **Schema 26, and the way back.** The first 0.11.0 open of a project
+  store adds the task table's `kind` column, `task` for every existing
+  row. An older binary refuses the migrated store ("database schema v26 is
+  newer than this binary (v25)"). The way back is the state copy the hub
+  one-liner makes before it swaps the binary,
+  `<state root>.backup-<UTC time>`, whose path it prints; the one-liner
+  keeps the newest two. If the new release does not come up healthy, the
+  one-liner puts the previous binary and that copy back itself. To go
+  back later, stop the hub, put the 0.10.27 binary back and replace the
+  state root with the copy; writes made since the upgrade are not in it.
+  The client one-liners make no such copy of a workstation's state. The
+  access schema stays at 10.
+- **The document secret policy changes what a hub accepts.** A document
+  body that a 0.10.27 hub and client accepted may now be refused: a bearer
+  token's value of 16 or more characters, or a credential assignment
+  (`api_key = …`, `password: …`) whose value is 20 characters or more and
+  mixes letters and digits. The writer sees a refusal that names the
+  project, the document and the rule, never the matched text: from the
+  hub as a 400, from a 0.11.0 client before any hub call. To go on,
+  replace the value with a placeholder such as `<token>` or `${NAME}`;
+  there is no override. A document already on the hub is not rescanned,
+  but its next edit meets the policy, so an operator who keeps example
+  credentials in shared documents checks them before or right after the
+  upgrade.
+- **A consumer of the board feed** (`board.read`) meets a new closing
+  value: a task that becomes a feature gets one entry `to: "FEATURE"`,
+  and one that is turned back gets an entry that reopens it. A consumer
+  that treats an unknown closing value as an error is updated first.
+  aicrewd needs no change, checked against aicrew v0.11.0: it accepts
+  any upper-case state name in `from` and `to`, `FEATURE` included, and
+  its default board wake announces a change only when it is to READY or
+  touches a task the team has an attempt for. Upgrading the hub does not
+  force an aicrew upgrade.
+- **No setting changes.** No new environment setting, and the existing
+  routes and tools keep their defaults: lists and counts show tasks only
+  unless `kind` is given.
+
 ### Security
 
 - **A shared document that holds a likely secret is refused, on the hub
