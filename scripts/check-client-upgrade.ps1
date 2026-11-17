@@ -47,28 +47,38 @@ $SumsFrom = @{}
 foreach ($l in Get-Content $f) { $p = $l -split '\s+'; if ($p.Count -ge 2) { $SumsFrom[$p[1].TrimStart('*')] = $p[0].ToLower() } }
 
 # Runs an executable with its output in files; returns @{Out; Err; Code}.
-# Start-Process, not &: PowerShell 5.1 would wrap the command's stderr
-# lines in error records. Vars names environment variables set for this
-# command only; In is a file for its standard input; Dir its working
-# directory. Start-Process joins the arguments with spaces and quotes none,
-# so an argument with whitespace is quoted here.
+# Not &: PowerShell 5.1 would wrap the command's stderr lines in error
+# records. Not Start-Process -PassThru either: it hands back a process
+# object it opened after the start, and a command that exits first, such
+# as a quick `aimem health`, can leave its ExitCode empty. So cmd.exe runs
+# the command with its output in files (files, not pipes: a service the
+# command starts may hold them open), started by Process.Start, which owns
+# the process handle from the start; cmd /c exits with the command's code.
+# Vars names environment variables for this command only; In is a file
+# for its standard input; Dir its working directory. An argument with
+# whitespace or a cmd metacharacter is quoted; one with % or a double
+# quote, which cmd would still change, is refused.
 function Invoke-Exe($exe, [string[]]$a, $Vars = @{}, $In = $null, $Dir = $W) {
+  foreach ($x in @($exe) + $a) { if ($x -match '[%"]') { Fail "Invoke-Exe cannot pass an argument with % or a double quote through cmd: $x" } }
   $log = Join-Path $W ('run-' + [guid]::NewGuid().ToString('N').Substring(0, 8))
-  $q = @($a | ForEach-Object { if ($_ -match '\s') { '"' + $_ + '"' } else { $_ } })
-  $saved = @{}
-  foreach ($k in $Vars.Keys) { $saved[$k] = [Environment]::GetEnvironmentVariable($k); [Environment]::SetEnvironmentVariable($k, $Vars[$k]) }
-  try {
-    $sp = @{ FilePath = $exe; ArgumentList = $q; NoNewWindow = $true; PassThru = $true; WorkingDirectory = $Dir
-      RedirectStandardOutput = "$log.out"; RedirectStandardError = "$log.err" }
-    if ($In) { $sp.RedirectStandardInput = $In }
-    $p = Start-Process @sp
-    $null = $p.Handle # keeps the exit code readable after the exit
-    $p.WaitForExit()
-  } finally {
-    foreach ($k in $saved.Keys) { [Environment]::SetEnvironmentVariable($k, $saved[$k]) }
-  }
-  @{ Out = [IO.File]::ReadAllText("$log.out"); Err = [IO.File]::ReadAllText("$log.err"); Code = $p.ExitCode }
+  $q = @($a | ForEach-Object { if ($_ -match '[\s&|<>^()]') { '"' + $_ + '"' } else { $_ } })
+  $line = '"' + $exe + '" ' + ($q -join ' ') + ' > "' + $log + '.out" 2> "' + $log + '.err"'
+  if ($In) { $line += ' < "' + $In + '"' }
+  $psi = New-Object Diagnostics.ProcessStartInfo
+  $psi.FileName = Join-Path $env:SystemRoot 'System32\cmd.exe'
+  $psi.Arguments = '/d /s /c "' + $line + '"'
+  $psi.UseShellExecute = $false
+  $psi.WorkingDirectory = $Dir
+  foreach ($k in $Vars.Keys) { $psi.EnvironmentVariables[$k] = $Vars[$k] }
+  $p = [Diagnostics.Process]::Start($psi)
+  $p.WaitForExit()
+  $code = $p.ExitCode
+  $p.Dispose()
+  $read = { param($f) if (Test-Path -LiteralPath $f) { [IO.File]::ReadAllText($f) } else { '' } }
+  @{ Out = (& $read "$log.out"); Err = (& $read "$log.err"); Code = $code }
 }
+# The exit code with its type, for a failure message.
+function Show-Code($c) { if ($null -eq $c) { '(none)' } else { "$c ($($c.GetType().Name))" } }
 # Runs the installed aimem with its output in a log, shown; returns its exit code.
 function Invoke-Logged($log, [string[]]$a, $Vars = @{}) {
   $r = Invoke-Exe $Bin $a -Vars $Vars
@@ -152,7 +162,7 @@ try {
 try {
   function Hub([string[]]$a) {
     $r = Invoke-Exe $HubExe $a -Vars $HubEnv
-    if ($r.Code -ne 0) { $r.Err; Fail "aimem $($a[0..1] -join ' ') on the throwaway hub exited $($r.Code)" }
+    if ($r.Code -ne 0) { Fail "aimem $($a[0..1] -join ' ') on the throwaway hub exited $(Show-Code $r.Code); its error output: $($r.Err.Trim())" }
     $r
   }
   for ($i = 0; $i -lt 50; $i++) { if ((Invoke-Exe $HubExe @('health') -Vars $HubEnv).Code -eq 0) { break }; Start-Sleep -Milliseconds 200 }
@@ -170,13 +180,13 @@ try {
   $null = Hub @('teams', 'provision', 'create', 'upgrade-scenario', '--team', 'Pilot', '--coordinator', 'upgrade-member',
     '--create-user', '--label', 'upgrade-member', '--expiry', $Expiry, '--output', $WorkerToken)
   $r = Invoke-Exe $Bin @('hub', 'add', 'upgrade', "https://127.0.0.1:$Port", '--token-file', $WsToken, '--ca-file', (Join-Path $H 'tls\cert.pem'))
-  if ($r.Code -ne 0) { $r.Err; Fail "$From's hub add exited $($r.Code)" }
+  if ($r.Code -ne 0) { $r.Err; Fail "$From's hub add exited $(Show-Code $r.Code)" }
   $Co = Join-Path $W 'alone'; New-Item -ItemType Directory -Path $Co | Out-Null
   & git -C $Co init -q
   $r = Invoke-Exe $Bin @('wire', '--project', 'upgrade-scenario', '--hub', 'upgrade') -Dir $Co
-  if ($r.Code -ne 0) { $r.Err; Fail "$From's aimem wire exited $($r.Code)" }
+  if ($r.Code -ne 0) { $r.Err; Fail "$From's aimem wire exited $(Show-Code $r.Code)" }
   $r = Invoke-Exe $Bin @('task-token', 'set') -In $WorkerToken -Dir $Co
-  if ($r.Code -ne 0) { $r.Err; Fail "$From's task-token set exited $($r.Code)" }
+  if ($r.Code -ne 0) { $r.Err; Fail "$From's task-token set exited $(Show-Code $r.Code)" }
 
   # The names the checkout's MCP server lists, from a session started now.
   $McpIn = Join-Path $W 'mcp.in'

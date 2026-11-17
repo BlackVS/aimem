@@ -29,6 +29,12 @@ currently 26); a binary refuses a database newer than it understands.
   "not found" for a tag's checksums moves to the tag before it; any other
   answer, or a failed request, is asked once more and then stops the run
   with its reason.
+- **The Windows client upgrade check reads every exit code.** It started
+  each command with `Start-Process -PassThru`, whose process object can
+  lose the exit code of a command that exits at once; the checks from
+  v0.11.1 stopped on a quick `aimem health` with no code. Each command now
+  runs under a process started by .NET, with its output in files, and a
+  failure prints the code with its type and the command's error output.
 
 ## [0.11.1] — 2026-11-17
 
