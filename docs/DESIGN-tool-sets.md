@@ -372,9 +372,10 @@ depends on the announcement.
 
 ### 4.2 The teams setting
 
-A per-checkout setting: it is on exactly when the checkout holds a team
-record (`internal/teamstate`), which every join path writes and leaving
-clears, so it adds no state and a checkout that joined before it existed
+A per-checkout setting: it is on exactly when the checkout holds the
+record of a confirmed join (`internal/teamstate`, a record with a session
+id), which every join path writes once the hub confirms the join and
+leaving clears, so it adds no state and a checkout that joined before it existed
 is on. `aimem wire --check` prints it. The checkout's MCP server reads it on
 every list, so a join turns it on in the running session. (Corrected
 2026-11-17 in the implementation: the first text named `aimem project show`,
@@ -382,7 +383,11 @@ which is the hub administrator's command for a hub project, not a
 checkout's; and it said the session reads the setting at start.) A
 membership that ended on the hub keeps its record, and so the setting, until
 the next join or the record's removal; `team_continue` reports it ended and
-the hub refuses its team calls. It is per checkout because a team is
+the hub refuses its team calls. A join the hub has not confirmed (its
+record holds only the retry key) leaves the setting off, and a new join
+that is not confirmed turns it off; the changed list is announced in either
+direction. (Corrected 2026-11-17 after the reviews of #386, which found the
+setting on for a join that was never confirmed.) It is per checkout because a team is
 joined from one checkout, and a standalone session elsewhere should not pay
 for it. `aimem wire` does not set it: it installs the entry points in every
 wired checkout (`internal/wiring/project.go:77`, `Commands: true`), and a

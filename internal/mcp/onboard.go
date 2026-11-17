@@ -110,12 +110,18 @@ func (s *srv) onboardTool(name string, raw json.RawMessage) (string, []string, e
 	if err != nil {
 		return "", nil, err
 	}
-	if !before && s.teamsOn() {
-		// The join turned the checkout's teams setting on: the list grew.
-		// The step goes into next, not a block of its own, since every
-		// delivered block ends with its terminator line.
+	// A change of the checkout's teams setting changes the list, in either
+	// direction: on when the join was confirmed, off when a new join that
+	// was not confirmed replaced a confirmed record. The step goes into
+	// next, not a block of its own, since every delivered block ends with
+	// its terminator line.
+	switch after := s.teamsOn(); {
+	case !before && after:
 		s.listChanged = true
 		rep.Next = append(rep.Next, teamsArrivedNotice)
+	case before && !after:
+		s.listChanged = true
+		rep.Next = append(rep.Next, teamsWithdrawnNotice)
 	}
 	var blocks []string
 	for _, d := range rep.Delivered {

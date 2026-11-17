@@ -7,6 +7,7 @@ package mcp
 import (
 	"bytes"
 	"encoding/json"
+	"os"
 	"strings"
 	"testing"
 
@@ -187,11 +188,11 @@ func TestCallByNameOutsideTheSetCarriesTheNotice(t *testing.T) {
 		return ""
 	}
 	never := &srv{project: "alpha", local: &localCheckout{dir: t.TempDir(), root: t.TempDir()}}
-	if n := notice(never, "team_inbox"); !strings.Contains(n, "has not joined a team") || !strings.Contains(n, "two releases") {
+	if n := notice(never, "team_inbox"); !strings.Contains(n, "has not joined a team") || !strings.Contains(n, servedByNamePeriod) {
 		t.Fatalf("team_inbox by name, never joined: %q", n)
 	}
 	for _, name := range []string{"task_reservation_claim", "task_reservation_release"} {
-		if n := notice(never, name); n != reservationNotice {
+		if n := notice(never, name); n != never.reservationNotice() || !strings.Contains(n, "`aimem reservation release`") {
 			t.Fatalf("%s by name, standalone: %q", name, n)
 		}
 	}
@@ -213,8 +214,16 @@ func TestCallByNameOutsideTheSetCarriesTheNotice(t *testing.T) {
 	if n := notice(hub, "task_reservation_status"); n != "" {
 		t.Fatalf("a holder's tool on tasks-only carries a notice: %q", n)
 	}
-	if n := notice(hub, "task_reservation_claim"); n != reservationNotice {
-		t.Fatalf("task_reservation_claim on tasks-only: %q", n)
+	// The hub's endpoint names the holder's three listed tools, never the
+	// command a client without a checkout cannot run.
+	n := notice(hub, "task_reservation_claim")
+	for _, want := range []string{"task_reservation_status", "task_reservation_release", "task_reservation_finalize"} {
+		if !strings.Contains(n, want) {
+			t.Fatalf("task_reservation_claim on tasks-only does not name %s: %q", want, n)
+		}
+	}
+	if strings.Contains(n, "aimem reservation") || strings.Contains(n, "in the checkout") {
+		t.Fatalf("task_reservation_claim on tasks-only names the command: %q", n)
 	}
 	if n := (&srv{team: &teamMode{}}).noticeFor("task_reservation_claim"); n != "" {
 		t.Fatalf("a member's reservation call carries a notice: %q", n)
@@ -247,5 +256,144 @@ func TestReservedHintPerFacade(t *testing.T) {
 	other := &apiError{msg: "revision conflict"}
 	if got := (&srv{}).reservedHint("update_task", other); got != error(other) {
 		t.Fatalf("another refusal changed: %v", got)
+	}
+}
+
+// serveLines runs the stdio loop over the messages and returns its output
+// lines: each reply, and any announcement after it.
+func serveLines(t *testing.T, s *srv, msgs ...map[string]any) []string {
+	t.Helper()
+	var in strings.Builder
+	for i, m := range msgs {
+		m["jsonrpc"], m["id"] = "2.0", i+1
+		raw, _ := json.Marshal(m)
+		in.Write(append(raw, '\n'))
+	}
+	var out bytes.Buffer
+	if err := s.serve(strings.NewReader(in.String()), &out); err != nil {
+		t.Fatal(err)
+	}
+	return strings.Split(strings.TrimSpace(out.String()), "\n")
+}
+
+func setupCall() map[string]any {
+	return map[string]any{"method": "tools/call", "params": map[string]any{"name": "team_setup",
+		"arguments": map[string]any{"team": "Pilot", "role": "worker", "profile": workerProfile}}}
+}
+
+// setupReport decodes team_setup's answer line into its report text.
+func setupReport(t *testing.T, line string) string {
+	t.Helper()
+	var resp struct {
+		Result map[string]any `json:"result"`
+	}
+	json.Unmarshal([]byte(line), &resp)
+	text, isErr := toolText(resp.Result)
+	if isErr {
+		t.Fatalf("team_setup failed as a tool: %s", text)
+	}
+	return text
+}
+
+// dropEveryJoin keeps every join of a run unconfirmed, however often the
+// HTTP client replays it.
+const dropEveryJoin = 1 << 20
+
+const listChangedLine = `{"jsonrpc":"2.0","method":"notifications/tools/list_changed"}`
+
+// A join the hub never received leaves the record with its retry key and no
+// session id: the setting stays off, the report does not say the checkout
+// joined, nothing is announced and the list stays standalone. The retry
+// that succeeds turns it on, with the step and the announcement once.
+func TestUnconfirmedJoinLeavesTheSettingOff(t *testing.T) {
+	h, ts := teamsetuptest.New(t)
+	repo, root := teamsetuptest.Checkout(t, h, ts)
+	s := stdioFor(repo, root)
+	h.JoinDrop = dropEveryJoin
+	lines := serveLines(t, s, setupCall(), map[string]any{"method": "tools/list"})
+	if len(lines) != 2 {
+		t.Fatalf("%d lines, want the answer and the list, no announcement:\n%s", len(lines), strings.Join(lines, "\n"))
+	}
+	report := setupReport(t, lines[0])
+	if !strings.Contains(report, "join not confirmed") || strings.Contains(report, teamsArrivedNotice) {
+		t.Fatalf("the unconfirmed join's report: %.600s", report)
+	}
+	if got := TeamsSetting(repo, root); !strings.HasPrefix(got, "off: ") {
+		t.Fatalf("teams setting after an unconfirmed join: %s", got)
+	}
+	checkStandalone(t, "after an unconfirmed join", toolSet(t, s))
+
+	h.JoinDrop = 0
+	lines = serveLines(t, s, setupCall(), setupCall())
+	if len(lines) != 3 || lines[1] != listChangedLine {
+		t.Fatalf("the retry: want the answer, one announcement, the second answer:\n%s", strings.Join(lines, "\n"))
+	}
+	if r := setupReport(t, lines[0]); !strings.Contains(r, `"status": "joined"`) || !strings.Contains(r, teamsArrivedNotice) {
+		t.Fatalf("the retry's report: %.600s", r)
+	}
+	if r := setupReport(t, lines[2]); strings.Contains(r, teamsArrivedNotice) {
+		t.Fatal("a second team_setup said the tools arrive again")
+	}
+}
+
+// A checkout that is on, whose membership ended on the hub, still lists the
+// teams set. A new join (new_session) that is not confirmed replaces its record with a
+// pending one: the setting goes off within the call, the answer says the
+// work tools are withdrawn, and the server announces the changed list, so
+// the client's list and the served list do not part.
+func TestUnconfirmedRejoinTurnsTheSettingOffAndAnnouncesIt(t *testing.T) {
+	h, ts := teamsetuptest.New(t)
+	repo, root := teamsetuptest.Checkout(t, h, ts)
+	s := stdioFor(repo, root)
+	if lines := serveLines(t, s, setupCall()); len(lines) != 2 || lines[1] != listChangedLine {
+		t.Fatalf("the first join: %s", strings.Join(lines, "\n"))
+	}
+	for _, sess := range h.Sessions {
+		sess.State = "left" // the membership ended on the hub
+	}
+	set := toolSet(t, s)
+	for _, n := range teamWorkToolNames() {
+		if !set[n] {
+			t.Fatalf("an ended membership's checkout no longer lists %s", n)
+		}
+	}
+	// The way back in after an ended membership: a join with new_session,
+	// which drops the saved handle and saves a pending record.
+	rejoin := setupCall()
+	rejoin["params"].(map[string]any)["arguments"].(map[string]any)["new_session"] = true
+	h.JoinDrop = dropEveryJoin
+	lines := serveLines(t, s, rejoin, map[string]any{"method": "tools/list"})
+	if len(lines) != 3 || lines[1] != listChangedLine {
+		t.Fatalf("want the answer, the announcement, the list:\n%s", strings.Join(lines, "\n"))
+	}
+	if r := setupReport(t, lines[0]); !strings.Contains(r, "join not confirmed") || !strings.Contains(r, teamsWithdrawnNotice) || strings.Contains(r, teamsArrivedNotice) {
+		t.Fatalf("the unconfirmed rejoin's report: %.600s", r)
+	}
+	if strings.Contains(lines[2], `"team_inbox"`) || !strings.Contains(lines[2], `"team_setup"`) {
+		t.Fatalf("the list after the unconfirmed rejoin is not standalone: %.300s", lines[2])
+	}
+}
+
+// The setting's report is written from one read: a pending join's record,
+// an unreadable record and no record all read as off, never a failure.
+func TestTeamsSettingFromOneRead(t *testing.T) {
+	dir, root := t.TempDir(), t.TempDir()
+	if got := TeamsSetting(dir, root); !strings.HasPrefix(got, "off: this checkout holds no record") {
+		t.Fatalf("no record: %s", got)
+	}
+	repo, _ := teamstate.Canonical(dir)
+	project, _ := ident.ProjectID(dir)
+	path := teamstate.Path(root, repo)
+	if err := teamstate.Save(path, &teamstate.State{Version: 1, Repo: repo, Project: project, Team: "Pilot", Role: "worker", JoinKey: "k"}); err != nil {
+		t.Fatal(err)
+	}
+	if got := TeamsSetting(dir, root); !strings.HasPrefix(got, "off: this checkout holds no record") {
+		t.Fatalf("a pending join: %s", got)
+	}
+	if err := os.WriteFile(path, []byte("not a record"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if got := TeamsSetting(dir, root); !strings.HasPrefix(got, "off: this checkout's team record cannot be read") {
+		t.Fatalf("an unreadable record: %s", got)
 	}
 }
