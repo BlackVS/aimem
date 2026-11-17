@@ -4,12 +4,23 @@
 # scripts/check-client-upgrade.ps1. Nothing names them by hand:
 #
 # FROM is the previous release: the newest vX.Y.Z tag reachable from HEAD,
-#   HEAD's own tag excluded, whose release publishes a SHA256SUMS. With
-#   none the script fails and says why.
+#   HEAD's own tag excluded, whose release publishes a SHA256SUMS. Only a
+#   "not found" (404) for that file moves to the tag before it, as a tag
+#   gives between its push and its publication. Any other answer, or a
+#   request that fails, is asked once more and then ends the run with the
+#   tag and the answer: a rate limit or an outage must not quietly pick an
+#   older release. With no published tag the script fails and says why.
 # TO is the label the tree under test is built with, standing for the
 #   release that does not exist yet: HEAD's own vX.Y.Z tag at a tag; the
 #   version in the branch name on a release/vX.Y.Z branch; otherwise FROM's
 #   next patch. It must be later than FROM.
+#
+# AIMEM_UPGRADE_FROM=vX.Y.Z, set only by a manual run of the hub's
+# upgrade check (ci.yml's `from` input), replaces the derived FROM with a
+# named earlier release that is published; TO stays the derived one. It
+# exists to run the scenario's migration branch from a release with an
+# older schema. It does not make an upgrade that skips a release a
+# supported path, and the output says the release was named by hand.
 #
 # It reads the tags of the checkout, so CI checks out the full history
 # (fetch-depth: 0), and the releases from GitHub.
@@ -29,11 +40,22 @@ head=$(git rev-parse --short HEAD)
   fail "the checkout is shallow, so the tags before $head cannot be read; check out the full history (fetch-depth: 0)"
 own=$(git tag --points-at HEAD | grep -Ex "$semver" | sort -V | tail -n 1 || true)
 
+# published tag: the HTTP status of the tag's SHA256SUMS after redirects,
+# 000 when the request itself failed.
+published() {
+  curl -sSIL -o /dev/null -w '%{http_code}' --max-time 30 "$dl/$1/SHA256SUMS" 2>/dev/null || true
+}
+
 FROM=
 for t in $(git tag --merged HEAD --list 'v*' --sort=-v:refname | grep -Ex "$semver"); do
   [ "$t" = "$own" ] && continue
-  if curl -fsSIL -o /dev/null "$dl/$t/SHA256SUMS"; then FROM=$t; break; fi
-  echo "upgrade-versions: $t has no published SHA256SUMS; trying the tag before it" >&2
+  status=$(published "$t")
+  case "$status" in 200 | 404) ;; *) sleep 5; status=$(published "$t") ;; esac
+  case "$status" in
+    200) FROM=$t; break ;;
+    404) echo "upgrade-versions: $t has no published SHA256SUMS; trying the tag before it" >&2 ;;
+    *) fail "asking whether $t is published ($dl/$t/SHA256SUMS) answered HTTP ${status:-000} twice (000: the request failed); not falling back to an older tag" ;;
+  esac
 done
 [ -n "$FROM" ] || fail "no vX.Y.Z tag reachable from $head${own:+ other than its own $own} has a published release (its SHA256SUMS), so there is no previous release to upgrade from"
 
@@ -47,6 +69,16 @@ else
 ${FROM#v}
 EOF
   TO=v$ma.$mi.$((pa + 1))
+fi
+if [ -n "${AIMEM_UPGRADE_FROM:-}" ]; then
+  named=$AIMEM_UPGRADE_FROM
+  echo "$named" | grep -Eqx "$semver" || fail "AIMEM_UPGRADE_FROM is '$named', not a vX.Y.Z release"
+  git tag --merged HEAD --list "$named" | grep -qx "$named" || fail "$named is not a tag reachable from $head"
+  later "$TO" "$named" || fail "the tree's version $TO is not later than the named release $named"
+  status=$(published "$named")
+  [ "$status" = 200 ] || fail "the named release $named is not published (its SHA256SUMS answered HTTP ${status:-000})"
+  echo "upgrade-versions: the previous release was named by hand: $named instead of the derived $FROM (a manual run; an upgrade that skips a release is not a supported path)" >&2
+  FROM=$named
 fi
 later "$TO" "$FROM" || fail "the tree's version $TO is not later than the previous release $FROM"
 echo "FROM=$FROM"

@@ -7,6 +7,14 @@ on:
   schedule:
     - cron: '17 3 * * *'
   workflow_dispatch:
+    inputs:
+      from:
+        description: >-
+          hub-upgrade only: the release to upgrade from instead of the
+          derived previous one (vX.Y.Z, published), to run the scenario's
+          migration branch; not a supported skip-release path
+        required: false
+        default: ''
 
 # A pull request runs the fast set: lint, build, the Linux tests and
 # scenarios, the installer container. The Windows legs and the race runs,
@@ -290,6 +298,39 @@ jobs:
       - if: runner.os == 'Windows'
         shell: powershell
         run: powershell -NoProfile -ExecutionPolicy Bypass -File scripts/check-client-upgrade.ps1
+
+  # A hub's upgrade from the previous release to this tree
+  # (scripts/check-hub-upgrade.sh), in the pinned container the hub
+  # installer's check uses: the previous release's own install-hub.sh
+  # installs its hub, that hub writes a task, a comment, a memory and a
+  # team, the tree's install-hub.sh upgrades it, and the tree reads it all
+  # back; the state copy is the previous state and each journal is at the
+  # tree's schema. It runs where client-upgrade runs; a manual run may name
+  # the release to start from (the `from` input), and only a manual run.
+  hub-upgrade:
+    if: >-
+      github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' ||
+      (github.event_name == 'pull_request' && startsWith(github.head_ref, 'release/') &&
+      github.event.pull_request.head.repo.full_name == github.repository)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version: '1.26'
+          check-latest: true
+          cache: true
+      - name: toolchain is the runner's Go 1.26
+        run: |
+          test "$(go env GOTOOLCHAIN)" = local
+          go version | grep -q ' go1\.26'
+      - env:
+          AIMEM_UPGRADE_FROM: ${{ github.event_name == 'workflow_dispatch' && inputs.from || '' }}
+        run: bash scripts/check-hub-upgrade.sh
 
   build:
     runs-on: ubuntu-latest
