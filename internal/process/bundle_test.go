@@ -256,3 +256,30 @@ func TestBundleFromDirMatchesTheArchive(t *testing.T) {
 		t.Fatalf("bundle from the fetch: %v", err)
 	}
 }
+
+// An archive entry whose cleaned name leaves the archive refuses the whole
+// archive, even where the manifest never names it (audit T-1). A leading
+// slash is dropped after cleaning, so a rooted spelling stays inside and is
+// not among these; nor is "./", which the tar reader returns as a directory.
+// A bare ".." passes this branch and the manifest's path check alike; that
+// gap is reported on the audit task, not pinned here.
+func TestReadArchiveRefusesAnEntryThatLeavesIt(t *testing.T) {
+	b := fixtureBundle()
+	for _, name := range []string{"../evil.md", "./../evil.md", "a/../../evil.md", "process/../../evil.md", "."} {
+		var buf bytes.Buffer
+		gz := gzip.NewWriter(&buf)
+		tw := tar.NewWriter(gz)
+		for p, body := range b.Files {
+			tw.WriteHeader(&tar.Header{Typeflag: tar.TypeReg, Name: p, Mode: 0o644, Size: int64(len(body))})
+			tw.Write(body)
+		}
+		tw.WriteHeader(&tar.Header{Typeflag: tar.TypeReg, Name: name, Mode: 0o644, Size: 4})
+		tw.Write([]byte("evil"))
+		tw.Close()
+		gz.Close()
+		_, err := ReadArchive(bytes.NewReader(buf.Bytes()), b.Manifest)
+		if err == nil || !strings.Contains(err.Error(), "leaves the archive") {
+			t.Errorf("entry %q: want the archive refused as leaving it, got %v", name, err)
+		}
+	}
+}
