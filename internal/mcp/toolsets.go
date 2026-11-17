@@ -159,9 +159,12 @@ func (s *srv) noticeFor(name string) string {
 
 // reservedHint completes the hub's refusal of a generic write on a task
 // under an active reservation with the way its holder finishes it, as this
-// facade offers it. The HTTP API's own text is unchanged.
+// facade offers it. The HTTP API's own text is unchanged. A team tool's
+// refusal is left alone: a team's reserved attempt is finished through the
+// team protocol, not by its holder's reservation command.
 func (s *srv) reservedHint(name string, err error) error {
-	if err == nil || s.team != nil || reservationTools[name] || !strings.Contains(err.Error(), store.ErrTaskReserved.Error()) {
+	if err == nil || s.team != nil || reservationTools[name] || strings.HasPrefix(name, "team_") ||
+		!strings.Contains(err.Error(), store.ErrTaskReserved.Error()) {
 		return err
 	}
 	if s.tasksOnly {

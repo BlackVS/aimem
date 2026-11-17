@@ -241,6 +241,9 @@ func TestReservedHintPerFacade(t *testing.T) {
 			t.Fatalf("%s changed: %v", name, got)
 		}
 	}
+	if got := (&srv{}).reservedHint("team_edit", refusal); got != error(refusal) {
+		t.Fatalf("a team tool's refusal changed: %v", got)
+	}
 	other := &apiError{msg: "revision conflict"}
 	if got := (&srv{}).reservedHint("update_task", other); got != error(other) {
 		t.Fatalf("another refusal changed: %v", got)
