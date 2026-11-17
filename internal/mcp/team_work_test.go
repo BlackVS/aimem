@@ -271,8 +271,9 @@ func TestTeamWorkThroughRealHub(t *testing.T) {
 	if edited["title"] != "re-scoped change" || edited["state"] != "READY" || edited["coordination"] == nil {
 		t.Fatal(edited)
 	}
-	// The tool list exposes exactly the bridged operations to the ordinary token.
-	names := toolNames(f.rpc(t, f.alice, "tools/list", nil))
+	// The tool list exposes exactly the bridged operations to the ordinary
+	// token that connected with the team protocol's tools.
+	names := toolNames(f.rpcAt(t, "/mcp?tools=teams", f.alice, "tools/list", nil))
 	for _, tool := range teamWorkTools {
 		found := false
 		for _, n := range names {

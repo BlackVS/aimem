@@ -105,9 +105,17 @@ func isOnboardTool(name string) bool { return onboardToolNames[name] }
 // blocked report is a result, not a tool error: the checks say why and what
 // to do.
 func (s *srv) onboardTool(name string, raw json.RawMessage) (string, []string, error) {
+	before := s.teamsOn()
 	rep, err := s.onboardReport(name, raw)
 	if err != nil {
 		return "", nil, err
+	}
+	if !before && s.teamsOn() {
+		// The join turned the checkout's teams setting on: the list grew.
+		// The step goes into next, not a block of its own, since every
+		// delivered block ends with its terminator line.
+		s.listChanged = true
+		rep.Next = append(rep.Next, teamsArrivedNotice)
 	}
 	var blocks []string
 	for _, d := range rep.Delivered {

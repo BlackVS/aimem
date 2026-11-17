@@ -10,6 +10,7 @@ package mcp
 import (
 	"encoding/json"
 	"fmt"
+	"maps"
 	"os"
 	"slices"
 	"strings"
@@ -55,13 +56,61 @@ type inventoryConfig struct {
 }
 
 var inventoryConfigs = []inventoryConfig{
-	{"personal, checkout-bound", func(t *testing.T) *srv {
+	{"standalone", func(t *testing.T) *srv {
 		return &srv{taskState: taskStateEnabled, local: &localCheckout{dir: t.TempDir(), root: t.TempDir()}}
+	}},
+	{"teams", func(t *testing.T) *srv {
+		dir, root := joinedCheckout(t)
+		return &srv{taskState: taskStateEnabled, local: &localCheckout{dir: dir, root: root}}
 	}},
 	{"personal, no checkout", func(*testing.T) *srv { return &srv{taskState: taskStateEnabled} }},
 	{"personal, tasks disabled", func(*testing.T) *srv { return &srv{taskState: taskStateDisabled} }},
 	{"tasks-only", func(*testing.T) *srv { return &srv{tasksOnly: true} }},
+	{"tasks-only, tools=teams", func(*testing.T) *srv { return &srv{tasksOnly: true, teamsByURL: true} }},
 	{"team member", func(*testing.T) *srv { return &srv{team: &teamMode{}} }},
+}
+
+// standaloneByteLimit is half of what a personal, checkout-bound session
+// listed when the design measured it (97,069 bytes): the design's first test.
+const standaloneByteLimit = 48534
+
+// wantSets are the sets of docs/DESIGN-tool-sets.md §4 by name, built from
+// the groups and the named tools, so a tool added to a group joins its set.
+func wantSets() map[string]map[string]bool {
+	set := func(groups []string, names ...string) map[string]bool {
+		out := map[string]bool{}
+		for _, n := range ToolNames() {
+			if slices.Contains(groups, toolGroup(n)) {
+				out[n] = true
+			}
+		}
+		for _, n := range names {
+			out[n] = true
+		}
+		return out
+	}
+	with := func(base map[string]bool, names ...string) map[string]bool {
+		out := maps.Clone(base)
+		for _, n := range names {
+			out[n] = true
+		}
+		return out
+	}
+	entry := []string{"team_setup", "team_continue", "team_context", "team_list"}
+	standalone := set([]string{"knowledge", "tasks"}, append(entry, "writing_rule", "process_context")...)
+	tasksOnly := set([]string{"tasks"}, "recall_memory", "list_docs", "read_doc", "writing_rule", "team_context", "team_list",
+		"task_reservation_status", "task_reservation_release", "task_reservation_finalize")
+	work := teamWorkToolNames()
+	return map[string]map[string]bool{
+		"standalone":              standalone,
+		"teams":                   with(standalone, work...),
+		"tasks-only":              tasksOnly,
+		"tasks-only, tools=teams": with(tasksOnly, work...),
+		"team member": {"list_tasks": true, "search_tasks": true, "get_task": true, "get_task_history": true, "list_task_comments": true,
+			"get_task_comment": true, "add_task_comment": true, "triage_task": true, "project_repository": true, "list_epics": true,
+			"get_epic": true, "list_features": true, "recall_memory": true, "list_docs": true, "read_doc": true,
+			"writing_rule": true, "session_context": true, "write_report": true},
+	}
 }
 
 // listedTools is a configuration's tools/list answer: each definition as
@@ -87,9 +136,11 @@ func TestToolInventory(t *testing.T) {
 	}
 	tools := map[string]*tool{}
 	var summary []string
+	want := wantSets()
 	for _, c := range inventoryConfigs {
 		defs := listedTools(t, c.srv(t))
 		total := 0
+		got := map[string]bool{}
 		for _, raw := range defs {
 			var d struct {
 				Name string `json:"name"`
@@ -112,11 +163,29 @@ func TestToolInventory(t *testing.T) {
 			}
 			tools[d.Name].configs = append(tools[d.Name].configs, listed)
 			total += len(raw)
+			got[d.Name] = true
+		}
+		if w, ok := want[c.name]; ok && !maps.Equal(got, w) {
+			for n := range w {
+				if !got[n] {
+					t.Errorf("%s: %s missing from the list", c.name, n)
+				}
+			}
+			for n := range got {
+				if !w[n] {
+					t.Errorf("%s: %s listed, not in the set", c.name, n)
+				}
+			}
+		}
+		if c.name == "standalone" && total > standaloneByteLimit {
+			t.Errorf("standalone lists %d bytes, more than %d", total, standaloneByteLimit)
 		}
 		summary = append(summary, fmt.Sprintf("| %s | %d | %d |", c.name, len(defs), total))
 	}
+	// A tool no configuration lists is a reservation tool, served by name
+	// only (§5.2); any other is listed somewhere.
 	for _, n := range ToolNames() {
-		if tools[n] == nil {
+		if tools[n] == nil && !reservationTools[n] {
 			t.Errorf("%s: in ToolNames but listed by no configuration of the inventory", n)
 		}
 	}

@@ -41,6 +41,11 @@ func TestWireCmdFlagsAroundTheDirectoryAndCheck(t *testing.T) {
 	if err := wireCmd([]string{dir, "--check", "-p", "demo"}, &out); err != nil {
 		t.Fatalf("--check after wiring: %v\n%s", err, out.String())
 	}
+	// Wiring installs the entry points but never turns the team setting on:
+	// only a join does (docs/DESIGN-tool-sets.md §4.2).
+	if !strings.Contains(out.String(), "  info  teams: off: ") {
+		t.Fatalf("--check does not report the team setting off:\n%s", out.String())
+	}
 	if err := wireCmd([]string{dir, dir}, &out); err == nil || !strings.Contains(err.Error(), "usage") {
 		t.Fatalf("two directories = %v, want usage", err)
 	}

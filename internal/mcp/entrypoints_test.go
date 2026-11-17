@@ -24,8 +24,11 @@ var entryPointFiles = []string{
 	filepath.Join("..", "..", ".claude", "skills", "resume_team", "SKILL.md"),
 }
 
-// Every tool an entry point names or pre-approves is one the checkout-bound
-// local server lists, so step 0's check can pass on a current server.
+// Every tool an entry point names is one the checkout-bound local server
+// lists in a checkout that never joined (the standalone set), so step 0's
+// check passes there; or one of the teams set, named only after the step
+// that calls team_setup or team_continue, whose answer turns the setting on
+// (docs/DESIGN-tool-sets.md §5.3). A pre-approved tool is a standalone one.
 func TestEntryPointsNameOnlyToolsTheLocalServerLists(t *testing.T) {
 	var listed struct {
 		Result struct {
@@ -34,32 +37,54 @@ func TestEntryPointsNameOnlyToolsTheLocalServerLists(t *testing.T) {
 	}
 	s := stdioFor(t.TempDir(), t.TempDir())
 	json.Unmarshal(s.handle(context.Background(), []byte(`{"jsonrpc":"2.0","id":1,"method":"tools/list"}`)), &listed)
-	tools := map[string]bool{}
+	standalone := map[string]bool{}
 	for _, d := range listed.Result.Tools {
-		tools[d["name"].(string)] = true
+		standalone[d["name"].(string)] = true
+	}
+	teams := map[string]bool{}
+	for _, d := range taskSetDefs(true, nil) {
+		if n := d["name"].(string); isTeamWorkTool(n) {
+			teams[n] = true
+		}
+	}
+	if len(teams) != 26 || standalone["team_inbox"] || !standalone["team_setup"] || !standalone["team_continue"] {
+		t.Fatalf("sets: %d teams tools; standalone %v", len(teams), standalone)
 	}
 	named := regexp.MustCompile("`(team_[a-z_]+|process_context)`")
 	approved := regexp.MustCompile(`mcp__aimem__([a-z_]+)`)
+	callStep := regexp.MustCompile("Call `team_(setup|continue)`")
 	for _, f := range entryPointFiles {
 		raw, err := os.ReadFile(f)
 		if err != nil {
 			t.Fatal(err)
 		}
-		seen := map[string]bool{}
-		for _, m := range named.FindAllStringSubmatch(string(raw), -1) {
-			seen[m[1]] = true
+		text := string(raw)
+		call := callStep.FindStringIndex(text)
+		if call == nil {
+			t.Fatalf("%s has no step that calls team_setup or team_continue", f)
 		}
-		for _, m := range approved.FindAllStringSubmatch(string(raw), -1) {
+		seen := map[string]bool{}
+		for _, m := range named.FindAllStringSubmatchIndex(text, -1) {
+			name := text[m[2]:m[3]]
+			seen[name] = true
+			switch {
+			case standalone[name]:
+			case teams[name] && m[0] > call[0]:
+			case teams[name]:
+				t.Errorf("%s names %s before the step that joins: a checkout that never joined does not list it", f, name)
+			default:
+				t.Errorf("%s names %s, which the local server does not serve", f, name)
+			}
+		}
+		for _, m := range approved.FindAllStringSubmatch(text, -1) {
 			seen[m[1]] = true
+			if !standalone[m[1]] {
+				t.Errorf("%s pre-approves %s, which a checkout that never joined does not list", f, m[1])
+			}
 		}
 		for _, want := range []string{"team_context", "process_context"} {
 			if !seen[want] {
 				t.Errorf("%s does not name %s", f, want)
-			}
-		}
-		for name := range seen {
-			if !tools[name] {
-				t.Errorf("%s names %s, which the local server does not list", f, name)
 			}
 		}
 	}

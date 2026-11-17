@@ -176,7 +176,12 @@ func TestTeamModeToolListMatchesHubTeamRoutes(t *testing.T) {
 	localOnly := []string{writingTool}
 	want := append([]string{}, localOnly...)
 	for n := range toolRoute {
-		want = append(want, n)
+		// The member set leaves the reservation tools out of the list
+		// (docs/DESIGN-tool-sets.md §4); they are served by name, so their
+		// routes stay below.
+		if !reservationTools[n] {
+			want = append(want, n)
+		}
 	}
 	sort.Strings(want)
 	if strings.Join(names, ",") != strings.Join(want, ",") {

@@ -180,6 +180,47 @@ func TestReservationCLIPersonal(t *testing.T) {
 	if out, code = run(update); code != ExitCommitted {
 		t.Fatalf("the same key after an unknown outcome: %d %s", code, out)
 	}
+	var updated struct {
+		TaskRevision int64 `json:"task_revision"`
+	}
+	if json.Unmarshal([]byte(out), &updated) != nil || updated.TaskRevision == 0 {
+		t.Fatalf("update outcome: %s", out)
+	}
+	// A standalone session lists no reservation tool: its generic write on
+	// the held task is refused with the command that finishes the
+	// reservation (docs/DESIGN-tool-sets.md §5.2), the holder releases with
+	// it under the personal credential, and the write then goes through.
+	generic := func(key string) (string, bool) {
+		return callTool(t, s, "update_task", map[string]any{
+			"project": "alpha", "id": task.ID, "title": "cli work", "state": "IN_PROGRESS", "expected_revision": updated.TaskRevision, "idempotency_key": key})
+	}
+	if text, isErr := generic("cli-generic"); !isErr || !strings.Contains(text, "active reservation") ||
+		!strings.Contains(text, "`aimem reservation release`") || strings.Contains(text, "task_reservation_release") {
+		t.Fatalf("a generic write on the held task: %v %s", isErr, text)
+	}
+	// The holder reads its status for the current fence and revision, as
+	// the command's own next action says, then releases.
+	out, code = run(ReservationRequest{Command: "status", TaskID: task.ID})
+	var st struct {
+		TaskRevision int64  `json:"task_revision"`
+		ID           string `json:"reservation_id"`
+		Fence        string `json:"fence"`
+	}
+	if code != ExitCommitted || json.Unmarshal([]byte(out), &st) != nil || st.Fence == "" {
+		t.Fatalf("status before the release: %d %s", code, out)
+	}
+	release := ReservationRequest{Command: "release", TaskID: task.ID, Key: "cli-release", Body: cliBody(map[string]any{
+		"expected_revision": st.TaskRevision, "reservation_id": st.ID, "fence": st.Fence, "reason": "finished in the checkout",
+		"content": map[string]any{"title": "cli work", "state": "READY"}})}
+	if out, code = run(release); code != ExitCommitted {
+		t.Fatalf("release by the holder: %d %s", code, out)
+	}
+	if json.Unmarshal([]byte(out), &updated) != nil {
+		t.Fatalf("release outcome: %s", out)
+	}
+	if text, isErr := generic("cli-generic-after"); isErr {
+		t.Fatalf("the generic write after the release: %s", text)
+	}
 }
 
 // In team mode the CLI is that team conversation: every call carries the

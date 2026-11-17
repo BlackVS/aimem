@@ -274,6 +274,14 @@ upgraded binary: an older one does not list `team_setup`, and the entry
 point stops with an upgrade-and-restart message instead of falling back
 to a shell command.
 
+A checkout lists the team protocol's tools only once it has joined: the
+join writes its team record, which turns the checkout's team setting on,
+and the server announces the changed list. A client that does not act on
+the announcement shows the tools after a restart, and the entry point
+says so with its own restart message, distinct from the upgrade message.
+`aimem wire --check` in the checkout prints the setting, and `aimem teams
+leave` turns it off.
+
 The reported model is a declaration, never an inference. The entry point
 passes what the runtime reports about the running model as
 `runtime_reported`; a model you configure for the agent is
@@ -308,6 +316,7 @@ run coordination against the original member context.
 | Not enrolled or not coordinator-eligible | Run the operator provisioning command printed by setup on the hub. A project grant alone is not team enrollment. |
 | Join/resume command missing | Run `aimem teams commands .`, then restart the agent. Verify the client's invocation spelling in the table. |
 | MCP team tools missing | Check the setup integration report and client MCP configuration; restart after repairing it. |
+| `team_inbox` and the other team tools not listed right after a successful join | The client did not act on the changed-list announcement: restart it and run the resume command. `aimem wire --check` shows whether the checkout's team setting is on. |
 | `team_setup`, `team_continue`, `team_context` or `process_context` not listed by the aimem MCP server | The running `aimem mcp` process predates these tools: upgrade aimem on that machine and restart the client so the process restarts. Do not run the CLI command from a sandboxed shell instead. |
 | Joined, but `ready_for_work` is false | Read the not-ready part and its `fix`. `project_process: not_selected` means no process is selected for the project (step 1). On the hub, `aimem project show -p PROJECT` prints the command that selects one: `aimem process select <repo> <tag> [<manifest>] -p PROJECT`, with the values of the processes the hub already uses for other projects, or, when it uses none, an example of each value (the process repository's git URL, a release tag or a full 40-hex commit, and optionally the manifest's path in that repository). `aimem tasks on` prints the same when tasks are turned on. `denied` or `unavailable` names the credential, Git or hub problem. Fix it and resume; the worker stays unavailable until then. |
 | After an upgrade, a running attempt is blocked: its process version was not recorded | Expected for an attempt accepted before the upgrade or elsewhere (step 7); no version is assumed for it. The coordinator decides how to settle it; an attempt accepted after the upgrade records the version current then. |

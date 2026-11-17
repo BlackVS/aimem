@@ -8,6 +8,7 @@ import (
 	"os"
 	"strings"
 
+	"aimem/internal/mcp"
 	"aimem/internal/wiring"
 )
 
@@ -69,6 +70,8 @@ func wireCmd(args []string, w io.Writer) error {
 		failed = failed || f.Level == "fail"
 		missing = missing || strings.Contains(f.Fix, "aimem wire")
 	}
+	// Read, never set: only joining a team turns the setting on.
+	fmt.Fprintf(w, "  %-5s teams: %s\n", "info", mcp.TeamsSetting(dir, stateRoot()))
 	switch {
 	case failed:
 		return errors.New("the project is not fully wired; see the failures above")
