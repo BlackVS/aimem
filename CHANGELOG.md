@@ -13,6 +13,29 @@ currently 26); a binary refuses a database newer than it understands.
 
 ## [Unreleased]
 
+### Changed
+
+- **A hub's upgrade is tested before the tag as well.** A new check,
+  `hub-upgrade`, installs the previous release's hub with that release's
+  own `install-hub.sh` (in a container, install-only), writes a task with
+  a comment, a memory and a team with a member through it, and upgrades it
+  with the tree's `install-hub.sh`. The tree's hub must read all of it
+  back, the installer's state copy must be the previous state, and each
+  project's journal must be at the tree's schema, through a real migration
+  when the schema is newer. It runs where the client's check runs, on
+  Linux; a manual run may name the release to start from, to run the
+  migration branch early.
+- **The previous release is never picked by accident.** Deriving it, only a
+  "not found" for a tag's checksums moves to the tag before it; any other
+  answer, or a failed request, is asked once more and then stops the run
+  with its reason.
+- **The Windows client upgrade check reads every exit code.** It started
+  each command with `Start-Process -PassThru`, whose process object can
+  lose the exit code of a command that exits at once; the checks from
+  v0.11.1 stopped on a quick `aimem health` with no code. Each command now
+  runs under a process started by .NET, with its output in files, and a
+  failure prints the code with its type and the command's error output.
+
 ## [0.11.1] — 2026-11-17
 
 Tool sets per mode. The MCP server lists the tools a session's mode needs:

@@ -83,7 +83,12 @@ both versions, so no file moves after a release: the previous release
 tag excluded, whose release publishes a `SHA256SUMS`; the tree is built
 as TO, the head's own tag at a tag, the version in a `release/vX.Y.Z`
 branch's name, or otherwise FROM's next patch. With no previous release,
-or a shallow checkout, the run fails and says why.
+or a shallow checkout, the run fails and says why. Only a "not found"
+for a tag's `SHA256SUMS` (a tag between its push and its publication)
+moves the derivation to the tag before it; any other answer, or a request
+that fails, is asked once more and then ends the run with the tag and the
+answer, so a rate limit or an outage never quietly picks an older
+release.
 
 `scripts/check-client-upgrade.sh` (and `.ps1` on Windows) installs FROM
 with its published one-liner. FROM's binary then serves a throwaway hub
@@ -112,6 +117,33 @@ account. The release workflow's `macos-client-upgrade` job runs it again
 at the tag; the release does not wait for that one, and a failure there
 is filed as a task.
 
+The hub upgrade check is the hub's half of the same upgrade.
+`scripts/check-hub-upgrade.sh` runs in the pinned Debian container the
+hub installer's container check uses, as root and without systemd, in
+the installer's install-only mode (`AIMEM_NO_SERVICE=1`). FROM's own
+`install-hub.sh`, fetched from its tag as the published one-liner does,
+installs FROM's published binary, and the hub starts from the line the
+installer prints. That hub writes a project with tasks on, a task with a
+comment, a memory, and a team with a member. The hub is stopped, as an
+operator without a service manager would, and the tree's
+`install-hub.sh` upgrades it from an export of the tree built as TO.
+The tree's hub must read back everything FROM wrote. The installer keeps
+one state copy (`<state root>.backup-<UTC time>`), which must hold FROM's
+databases at FROM's schema and nothing written after the upgrade. Each
+project's journal must then be at the tree's schema: when the tree's
+schema is newer this is a real migration, and the run prints `migration:
+schema N -> M`; when it is the same, it prints `no schema step`. The
+service manager's part of an upgrade stays with `install-hub-container`.
+
+It runs in CI's `hub-upgrade` job, where `client-upgrade` runs, on Linux
+only (the hub installer is Linux-only). A manual run may name the release
+to start from with the workflow's `from` input
+(`AIMEM_UPGRADE_FROM`), and only a manual run: a release prepare pull
+request and the nightly run always derive it. The run's output says when
+the release was named by hand. The input exists to run the migration
+branch from a release with an older schema before a release needs it; it
+does not make an upgrade that skips a release a supported path.
+
 A change whose risk is on Windows or macOS is tested there before the
 push; a Windows change can also get a manual run of the workflow on its
 branch.
@@ -126,8 +158,9 @@ success or skipped. That includes the `scenario` job on Linux and
 Windows, which runs the release-gate cards, among them the new-project
 path of the quickstart, so every released quickstart has run against the
 release candidate; and the `client-upgrade` job on Linux, Windows and
-macOS, so the release's own upgrade path, from the previous release to
-this tree, has run before the tag. Making these jobs required checks, so
+macOS, and the `hub-upgrade` job on Linux, so the release's own upgrade
+path, from the previous release to this tree, has run before the tag for
+a client and for a hub. Making these jobs required checks, so
 that the merge button enforces this as well, is a repository setting and
 the owner's; until it is set, the person who marks the pull request ready
 checks the head's runs.
