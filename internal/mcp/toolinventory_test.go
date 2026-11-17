@@ -104,7 +104,13 @@ func TestToolInventory(t *testing.T) {
 			if tools[d.Name] == nil {
 				tools[d.Name] = &tool{group: g, bytes: len(raw)}
 			}
-			tools[d.Name].configs = append(tools[d.Name].configs, c.name)
+			// A facade may serve its own variant of a tool (the scoped
+			// knowledge reads): its size is named beside the configuration.
+			listed := c.name
+			if len(raw) != tools[d.Name].bytes {
+				listed = fmt.Sprintf("%s (%d)", c.name, len(raw))
+			}
+			tools[d.Name].configs = append(tools[d.Name].configs, listed)
 			total += len(raw)
 		}
 		summary = append(summary, fmt.Sprintf("| %s | %d | %d |", c.name, len(defs), total))

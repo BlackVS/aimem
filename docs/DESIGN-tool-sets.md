@@ -13,8 +13,8 @@ checkout is offered 70 tools in 97,069 bytes of definitions, about 24
 thousand tokens per request. One provider's API is widely reported to cap a
 request at 128 tools across all connected servers, and some clients cap
 lower. Most of these bytes describe work the session never does: 30 of the
-70 tools, 48,810 bytes, belong to aimem's own team protocol, which no team
-has run since the pilot was paused.
+70 tools, 48,810 bytes, belong to aimem's own team protocol, which aicrew
+does not use and whose removal is on hold (3.1).
 
 The design's first test: **a standalone session's set is at most half of
 today's bytes**, that is at most 48,534 bytes. The set proposed in
@@ -62,7 +62,11 @@ aicrew's code (v0.11.0, read through the forge's API), the skills set
 (aiskills v1.43.0, the same way), and aimem's own documents (outside the
 archive and the fixtures). aicrew reaches the reservation tools through a
 CLI command (3.2), so its code does not name them. "Set" is section 4's
-proposal.
+proposal. "bytes" is the personal facade's definition; the member and
+tasks-only facades serve their own variants of `recall_memory` (886),
+`list_docs` (407) and `read_doc` (496), and the inventory test names those
+sizes beside their configuration. Section 4's totals use each
+configuration's own sizes.
 
 | tool | group | bytes | named by | set |
 | --- | --- | ---: | --- | --- |
@@ -167,14 +171,14 @@ Two of these need care:
 
 - An accepted reservation writes no log line (`reservationOK`,
   `internal/server/reservation_routes.go:361`); only refusals do (`:163`,
-  `:177`). The 68 refusals say nothing about how many were accepted.
+  `:177`). Accepted ones exist (3.2), but the log cannot say how many.
 - Zero team writes means that no team was running: the pilot was paused on
   2026-10-15 and the members' services were removed on 2026-10-29. It is
   not evidence that the team tools are unneeded.
 
 So no tool can be retired on the evidence that nothing calls it: every one
 of the 72 names appears in some aimem document, and reads are not counted
-anywhere. Section 5.4 proposes the smallest counter.
+anywhere. Section 5.5 proposes the smallest counter.
 
 ## 3. Findings
 
@@ -207,22 +211,59 @@ sequence") holds the removal of the legacy team until aicrew is
 functional. This design moves them out of the default set instead
 (section 4), which costs nothing if they are later removed.
 
-### 3.2 The reservation tools are listed to models but called by a program
+### 3.2 The reservation tools: a program's path, and a model's detour
 
 The seven `task_reservation_*` tools are 12,232 bytes and are listed to
 every personal, tasks-only and member session. Five of them carry the same
-thirteen parameters (2,141 to 2,196 bytes each). Their one caller is aicrew,
-and it calls them as a program, not through a model:
+thirteen parameters (2,141 to 2,196 bytes each). They have two kinds of
+caller.
 
-- aicrew's member steps run `aimem reservation OP` under the team session
-  file (aicrew `internal/agent/aimem.go:216-221`, `internal/agent/steps.go:32`).
-- That command calls the tool's handler directly
-  (`internal/mcp/reservation_cli.go:68-80`, `s.taskTool`), not through
-  `tools/list`.
+- **aicrew, as a program.** aicrew's member steps run `aimem reservation OP`
+  under the team session file (aicrew `internal/agent/aimem.go:216-221`,
+  `internal/agent/steps.go:32`). That command calls the tool's handler
+  directly (`internal/mcp/reservation_cli.go:68-80`, `s.taskTool`), not
+  through `tools/list`.
+- **Standalone sessions, as a model.** The primary hub refused reservation
+  requests on 13 of the 14 days from 2026-11-03 to 2026-11-16, 1 to 10 a
+  day, while no team and no member ran. By detail: 16 a commit reference
+  that is not an http(s) URL, 15 an invalid task state, 12 a task not
+  READY, 4 dependency evidence not readable and done, 2 a stale expected
+  revision, 2 a holder that belongs to a claim or transfer, 1 a release that
+  must leave the task READY or BLOCKED, 1 a task not held by this holder.
+  These are claims, updates with evidence, releases and finalizations, made
+  with a model's mistakes. The generic task routes also answered 409 "task
+  has an active reservation" twice in the last three days, so some of these
+  calls were accepted and held tasks.
 
-So no model needs them in its list. They are not merged either: their wire
-is frozen by `docs/DESIGN-AIFORGE-RESERVATION-WIRE.md`, with fixtures in
-both repositories, and a merge would change it for no gain once they are
+A standalone session is meant to claim and record its task with
+`update_task` (the process handbook's "Claiming" section), so this use is
+a detour from the documented path. It fails often, and while it holds a
+task, it blocks that task's generic writes. The reservation tools leave
+the standalone and member sets; tasks-only keeps the holder's three
+(section 4), with the deprecation of 5.2.
+
+**What arbitrates a standalone session against a team on one board.**
+aicrew's crew contract says a person or standalone agent outside aicrew
+"is arbitrated by the aimem reservation alone" (aicrew
+`docs/CREW-CONTRACT.md:885-886`, and the independent worker's row at
+`:101`). After this change a standalone session claims with `update_task`,
+and two rules of the store arbitrate:
+
+- every generic task write refuses a task under an active reservation
+  (`rejectActiveReservation`, `internal/store/tasks.go:560`, with the error
+  `ErrTaskReserved`, `internal/store/task_reservations.go:34`), so a
+  standalone session cannot take or change a task a team member holds;
+- a reservation claim refuses a task that is not READY
+  (`ErrTaskNotReady`, `task_reservations.go:38`), so a member cannot claim
+  a task a standalone session has moved to IN_PROGRESS.
+
+Between two standalone sessions, `update_task`'s `expected_revision`
+decides: the second write on a stale revision is refused. The contract's
+sentence changes accordingly (section 7, the aicrew item).
+
+They are not merged: their wire is frozen by
+`docs/DESIGN-AIFORGE-RESERVATION-WIRE.md`, with fixtures in both
+repositories, and a merge would change it for no gain once they are
 unlisted.
 
 ### 3.3 aicrew allows two tools its members are never offered
@@ -270,8 +311,8 @@ memory. No pair differs only in a parameter.
 | --- | --- | ---: | ---: |
 | standalone | a session on a project, personal or tasks-enabled | 33 | 36,027 |
 | teams | added to standalone by a setting (4.2) | +30 | +48,810 |
-| member | a team member's session (team-mode facade) | 18 | 15,138 |
-| tasks-only | the hub's MCP under a project credential | 22 | 26,630 |
+| member | a team member's session (team-mode facade) | 18 | 15,173 |
+| tasks-only | the hub's MCP under a project credential | 25 | 31,527 |
 
 - **standalone:** the 13 knowledge tools, the 18 task, epic and feature
   tools, `writing_rule` and `process_context`. With tasks disabled the task
@@ -283,11 +324,29 @@ memory. No pair differs only in a parameter.
   `add_task_comment`, `recall_memory`, `list_docs`, `read_doc`,
   `write_report`, `session_context` and `writing_rule`.
 - **tasks-only:** the 18 task tools, the three knowledge reads it already
-  serves (`recall_memory`, `list_docs`, `read_doc`) and `writing_rule`. Its
-  team tools follow the teams setting; for the hub's MCP the setting is a
-  parameter of the MCP URL (open question 1).
-- **No set** lists the reservation tools. They stay served by name in every
-  facade that serves them today, and through `aimem reservation`.
+  serves (`recall_memory`, `list_docs`, `read_doc`), `writing_rule`, and the
+  reservation holder's three: `task_reservation_status`,
+  `task_reservation_release` and `task_reservation_finalize` (4,862 bytes).
+  Its team tools follow the teams setting; for the hub's MCP the setting is
+  a parameter of the MCP URL (open question 1).
+- **The reservation tools, per set.**
+  - standalone: none listed. Listing all seven would cost 12,232 bytes and
+    leave the set 275 bytes under its test, so the next tool of any later
+    feature would break it. A holder releases or finalizes with
+    `aimem reservation release|finalize`, which runs with the checkout's
+    personal credential (`internal/mcp/reservation_cli.go:44-49`).
+  - member: none listed. aicrew's members reach them through that command
+    under their team session file (3.2). The feature's check says a session
+    that works in a team gets the reservation tools as well; this design
+    restates that part of the check: a member gets them through aicrew's
+    command, not through its list.
+  - tasks-only: the holder's three stay listed, because a client of the
+    hub's MCP may have no shell for the command. The claim, transfer,
+    update and receipt tools are not listed, so no new reservation starts
+    there.
+  - An opt-in setting like teams is rejected: the teams setting exists
+    because a documented path (`join_team`) needs it, and no documented
+    path needs reservations in a standalone session.
 
 ### 4.1 What selects a mode
 
@@ -302,10 +361,19 @@ would itself be one more definition in every list.
 ### 4.2 The teams setting
 
 A per-checkout setting, written by the commands that join a team
-(`aimem team ...` and the `join_team` entry point's install) and readable
-with `aimem project show`. A session reads it at start, like the task
-state. It is per checkout because a team is joined from one checkout, and a
+(`aimem teams setup TEAM worker|coordinator`, `cmd/aimem/team_setup.go`,
+and the `join_team` entry point's install) and readable with
+`aimem project show`. A session reads it at start, like the task state. It
+is per checkout because a team is joined from one checkout, and a
 standalone session elsewhere should not pay for it.
+
+The first time: today a person says "set up a team" and the model calls
+`team_setup`, which is listed. After the change it is not listed until the
+setting is on. The person, or the model through its shell, runs
+`aimem teams setup TEAM worker|coordinator` in the checkout; it turns the
+setting on. The session's list changes only at its next start, so the
+command's output says to restart the session. No scenario card touches
+this: the cards in `docs/scenarios/` name no team or reservation tool.
 
 ## 5. The reorganisation
 
@@ -314,20 +382,34 @@ standalone session elsewhere should not pay for it.
 | change | tools |
 | --- | --- |
 | moved out of the default set, into teams | 27 team tools, `team_setup`, `team_continue`, `team_context` |
-| unlisted, served by name and by CLI | 7 reservation tools |
+| unlisted in standalone and member, served by name with a deprecation notice, and by CLI | 7 reservation tools; tasks-only keeps `task_reservation_status`, `_release` and `_finalize` |
 | moved out of the member set | 7 reservation tools |
 | merged, split, renamed | none |
 | retired | none (3.1: on hold by the operator's decision) |
 
 ### 5.2 How older clients and documented calls keep working
 
-- **A tool outside the session's set stays served by name.** A client one
-  release older may hold a cached list, and a documented call may name a
-  team tool directly. The call succeeds; for a teams tool called while the
-  setting is off, the answer carries one line saying how to turn the
-  setting on. This holds for two releases after the change, then the team
+- **A tool outside the session's set stays served by name.** This reaches
+  programs, the CLI, and a session that kept its tool list across an
+  upgrade (a client of the hub's MCP connected while the hub was upgraded,
+  or a client one release older); a model in a session started after the
+  change cannot call what its list does not hold. The call succeeds; for
+  a teams tool called while the setting is off, the answer carries one
+  line saying how to turn the setting on. This holds for two releases after the change, then the team
   tools are refused by name like any other unlisted tool, with the same
   line, until the operator decides their removal.
+- **The reservation tools.** A call by name answers as today, plus one
+  line: claim and record a task with `update_task` (the process handbook's
+  "Claiming"); a task already held by a reservation is finished with
+  `aimem reservation release|finalize`. Unlike the team tools, these stay
+  served by name after the two releases too: a holder must always be able
+  to release or finalize, because the generic writes refuse a task under
+  an active reservation. A session started after the change meets the
+  reservation first in that refusal, so the 409 of the generic writes
+  ("task has an active reservation; generic task writes are unavailable")
+  gains the same hint: the command, or in a tasks-only session the
+  holder's three listed tools (section 7, task 1). The counter
+  of 5.5 shows when no session calls them any more.
 - **The team entry points.** `join_team` and `resume_team` check in their
   step 0 that the tools they name are listed
   (`TestEntryPointsNameOnlyToolsTheLocalServerLists`,
@@ -338,7 +420,32 @@ standalone session elsewhere should not pay for it.
   reservation calls go through the CLI (3.2), and its reads stay listed.
 - **The skills set** names only `writing_rule`, which every set keeps.
 
-### 5.3 What the documentation check must accept
+### 5.3 Every documented path, before and after
+
+Each path a document walks a reader through, the mode it runs in, the
+tools it names, and whether each is listed in that mode after the change.
+The product callers are in 3.2 and 3.3; the skills set names only
+`writing_rule`.
+
+| path | mode | tools it names | listed after |
+| --- | --- | --- | --- |
+| `README.md`, `docs/QUICKSTART.md`, `docs/QUICKSTART-NEW-PROJECT.md`, `templates/AGENTS.md` | standalone | `recall_memory`, `remember`, `writing_rule` | all |
+| `docs/AI-MANUAL.md`, `docs/USER-MANUAL.md` | standalone | the 13 knowledge tools | all |
+| `docs/KANBAN-QUICKSTART.md`, `docs/INSTALL-CLIENT.md` | standalone, tasks enabled | `create_task`, `get_task`, `list_tasks`, `search_tasks`, `update_task` | all |
+| `docs/TASK-CREDENTIALS.md` | standalone or tasks-only | `triage_task` | all |
+| `docs/FEATURES.md` (the feature procedure) | standalone or tasks-only | `set_feature`, `confirm_feature_task`, `list_features`, `create_task`, `get_task`, `list_tasks`, `search_tasks`, `triage_task`, `update_task` | all |
+| `aimem_analyze` command (`internal/wiring/assets/aimem_analyze.md`) | standalone | `get_design_doc`, `recall_memory`, `remember` | all |
+| `docs/TEAM-QUICKSTART.md`, `docs/TEAM-SETUP.md` | standalone with teams | `process_context`, `team_context`, `team_continue`, `team_leave`, `team_list`, `team_profile`, `team_setup` | all, once the setting is on (4.2) |
+| `docs/TEAM-AGENT-QUICKSTART.md` | standalone with teams | `process_context`, `writing_rule` and all 30 tools of the teams set | all, once the setting is on |
+| `join_team` and `resume_team` entry points (`internal/wiring/assets/`) | standalone with teams | `process_context`, `remember`, `team_context`, `team_setup`, `team_continue` and seven team tools | all: their install turns the setting on (5.2) |
+| the hub's MCP under a project credential | tasks-only | no user document walks a reader through it; the designs (`docs/DESIGN-access-control.md`, `docs/DESIGN-AIFORGE-CONTEXT.md`) describe it | the tasks-only set |
+
+Nothing a documented path names leaves its mode's list without the
+setting the path itself turns on. The process handbook's "Claiming" path
+(`update_task`) is served from the project's process set, not this
+repository, and stays listed.
+
+### 5.4 What the documentation check must accept
 
 `docs/examples_test.go` compares the tool names in the documents with
 `mcp.ToolNames()` (`internal/mcp/toolnames.go`), the union of every name
@@ -346,13 +453,18 @@ any facade can serve. That union does not change, so the check needs no
 change. The inventory test gains one assertion per set: its names, and for
 standalone a byte total of at most half of 97,069.
 
-### 5.4 The smallest usage counter
+### 5.5 The smallest usage counter
 
 The stdio facade already calls the hub's HTTP API for every hub-backed
 tool. It adds the tool's name as one request header on those calls; the hub
 counts (tool, UTC day) in memory and writes the counts to one small table
 once a minute; an admin reads them per day as names and counts. Nothing
-about the call's content is stored. Tools answered locally
+about the call's content is stored. The header is supplied by the client,
+so the hub counts only names it knows (`mcp.ToolNames()`): a credentialed
+client cannot grow the table with arbitrary values, and the figures are
+indicative, not proof of who called. The hub's own MCP (tasks-only) runs
+the tool in the hub's process and counts its calls directly, without the
+header. Tools answered locally
 (`writing_rule`, `team_context`, `process_context` on a checkout) never
 reach the hub and are not counted; the document that adds the counter says
 so in its output.
@@ -373,13 +485,16 @@ so in its output.
 
 1. **The sets in the facade** (M, sensitive: the tool list is every
    client's wire contract): the four sets, the teams setting and the
-   commands that write it, served-by-name with the notice line, the entry
-   points' test, the inventory test's per-set assertions, and the team
-   guides updated.
+   commands that write it, served-by-name with the notice line, the hint
+   in the 409 of the generic writes (5.2), the entry points' test, the
+   inventory test's per-set assertions, and the team guides updated.
 2. **The usage counter** (M, sensitive: the HTTP API and a store
-   migration): 5.4, with the admin read.
+   migration): 5.5, with the admin read.
 3. **In aicrew** (on aicrew's board): drop `get_design_doc` and
-   `process_context` from `aimemReadTools`, or ask aimem for them (3.3).
+   `process_context` from `aimemReadTools`, or ask aimem for them (3.3);
+   and restate `docs/CREW-CONTRACT.md:101` and `:885-886`: a standalone
+   session claims with `update_task`, arbitrated by the store's two rules
+   of 3.2, not by a reservation.
 
 The text trims of 3.4 and 3.5 are follow-ups, measured by the inventory
 test. The removal of the team protocol is the operator's decision once
