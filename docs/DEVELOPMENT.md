@@ -65,7 +65,8 @@ since the full Windows leg runs there. A Windows failure outside its
 packages (`cmd/aimem` and the rest of the suite, the Windows scenarios)
 therefore still surfaces on master.
 
-macOS runs only in the release workflow, at the tag: the `macos` job
+The macOS tests run only in the release workflow, at the tag (the
+client upgrade check below also runs on macOS before it): the `macos` job
 runs `go vet`, `go test ./...`, a native build and the launchd install
 check (`scripts/check-launchd-install.sh`) on `macos-latest`, and the
 job that publishes the release waits for it. GitHub's macOS
@@ -75,27 +76,41 @@ release, never a merge. When the job fails on a real Mac problem, the
 fix goes through a pull request and the release takes the next
 version; when the runner never started, re-run the job.
 
-The client upgrade check runs a real client upgrade between two
-published releases, named in `scripts/client-upgrade.env`.
+The client upgrade check runs a real client upgrade from the previous
+release to the tree under test. `scripts/upgrade-versions.sh` derives
+both versions, so no file moves after a release: the previous release
+(FROM) is the newest `vX.Y.Z` tag reachable from the head, the head's own
+tag excluded, whose release publishes a `SHA256SUMS`; the tree is built
+as TO, the head's own tag at a tag, the version in a `release/vX.Y.Z`
+branch's name, or otherwise FROM's next patch. With no previous release,
+or a shallow checkout, the run fails and says why.
+
 `scripts/check-client-upgrade.sh` (and `.ps1` on Windows) installs FROM
-with the one-liner. It first upgrades to TO with TO's real installer and
-a stand-in binary that never serves, and checks that the upgrade fails,
-says ROLLED BACK and leaves FROM serving. Then it runs `aimem upgrade
---release TO` and checks that the binary and the OpenCode plugin are
-TO's published files, that the Claude Code hooks are still wired and
-that the service answers health at TO. It never downgrades, so it does
-not depend on a downgrade working: an older binary refuses a database
-newer than it understands, and a later release may give the client such
-a database. The user-level installers
+with its published one-liner. FROM's binary then serves a throwaway hub
+on the runner, and FROM wires two checkouts to it and joins a team in
+one of them (the join only on Linux and macOS, where the team path's
+shell runs). The upgrade itself is FROM's own `aimem upgrade --release
+TO` against an export of the tree (`AIMEM_BASE`): the tree's installers,
+OpenCode plugin and build. So only the first install is a published
+installer; the upgrade runs the installers the next release will ship.
+It first upgrades with a stand-in binary that never serves, and checks
+that the upgrade fails, says ROLLED BACK and leaves FROM serving. Then
+the real upgrade: the binary and the plugin must be the tree's, the
+Claude Code hooks still wired, and the service healthy at TO. Last, the
+tree's MCP server is started in each checkout, as a client's next session
+starts it: the joined checkout must list the team work tools, from the
+record FROM wrote, and the other the standalone set. It never
+downgrades, so it does not depend on a downgrade working: an older binary
+refuses a database newer than it understands. The user-level installers
 install no skills, so there are none to check.
 
-It runs on Linux and Windows in CI's `client-upgrade` job, nightly and
-on a manual run, never on a pull request or a push. It runs on macOS at
-each tag, in the release workflow's `macos-client-upgrade` job, which the
-release does not wait for. The check proves released versions, not the
-commit it runs beside, so a failure on any of them is a finding about
-released versions: it is filed as a task, and it is never a reason to
-hold a release.
+It runs in CI's `client-upgrade` job on a release prepare pull request
+from this repository's `release/` branches (Linux, Windows and macOS),
+nightly (Linux and Windows) and on a manual run (all three); never on
+another pull request or a push, since it installs into the runner's
+account. The release workflow's `macos-client-upgrade` job runs it again
+at the tag; the release does not wait for that one, and a failure there
+is filed as a task.
 
 A change whose risk is on Windows or macOS is tested there before the
 push; a Windows change can also get a manual run of the workflow on its
@@ -106,20 +121,23 @@ branch.
 A release's prepare pull request (the one that rolls the CHANGELOG's
 `[Unreleased]` section into the version), on a branch named
 `release/v<version>` so CI runs the full set, is marked ready only when
-CI is green on its head, including the `scenario` job on Linux and
-Windows.
-That job runs the release-gate cards, among them the new-project path of
-the quickstart, so every released quickstart has run against the release
-candidate. When the repository marks the job as a required check, the
-merge button enforces this as well.
+CI is green on its head: no check run at the head may be other than
+success or skipped. That includes the `scenario` job on Linux and
+Windows, which runs the release-gate cards, among them the new-project
+path of the quickstart, so every released quickstart has run against the
+release candidate; and the `client-upgrade` job on Linux, Windows and
+macOS, so the release's own upgrade path, from the previous release to
+this tree, has run before the tag. Making these jobs required checks, so
+that the merge button enforces this as well, is a repository setting and
+the owner's; until it is set, the person who marks the pull request ready
+checks the head's runs.
 
 At the release, the worker reads the result of the release run's
-`macos-client-upgrade` job and records it on the release task. After a
-release, the first pull request moves `scripts/client-upgrade.env`
-forward: FROM becomes the previous TO, and TO the release just published.
-`ROLLBACK_LINE_SINCE` in the same file names the first release whose
-`aimem upgrade` ends a failed run with the rollback line; the release
-that first carries the line sets it to its own version if it differs.
+`macos-client-upgrade` job and records it on the release task.
+`ROLLBACK_LINE_SINCE` in `scripts/client-upgrade.env` names the first
+release whose `aimem upgrade` ends a failed run with the rollback line;
+the release that first carries the line sets it to its own version if it
+differs. Nothing else in that file moves after a release.
 
 While the CHANGELOG's entry on the tool sets states the served-by-name
 period of the team tools by position ("in this release and in the release

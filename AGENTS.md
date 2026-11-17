@@ -154,9 +154,9 @@ These rules keep that cost in proportion to the change.
   evidence, when the CI run on the merge commit is green.
 
 CI on a pull request runs the fast set; the slow checks run on master,
-and macOS runs only in the release workflow (docs/DEVELOPMENT.md, "Which
-checks run where"). A change that only a Windows or macOS leg would test
-is tested on that platform before the push.
+and the macOS tests run only in the release workflow (docs/DEVELOPMENT.md,
+"Which checks run where"). A change that only a Windows or macOS leg
+would test is tested on that platform before the push.
 
 ## Working in this repo
 
