@@ -18,7 +18,7 @@ does not use and whose removal is on hold (3.1).
 
 The design's first test: **a standalone session's set is at most half of
 today's bytes**, that is at most 48,534 bytes. The set proposed in
-section 4 is 33 tools and 36,027 bytes (37%).
+section 4 is 37 tools and 43,199 bytes (45%).
 
 ## 2. The inventory
 
@@ -70,7 +70,7 @@ configuration's own sizes.
 
 | tool | group | bytes | named by | set |
 | --- | --- | ---: | --- | --- |
-| `team_context` | guidance | 1,101 | 6 docs | teams |
+| `team_context` | guidance | 1,101 | 6 docs | standalone |
 | `writing_rule` | guidance | 542 | aicrew, aiskills, 2 docs | standalone, member, tasks-only |
 | `confirm_memory` | knowledge | 619 | 3 docs | standalone |
 | `forget_memory` | knowledge | 468 | 2 docs | standalone |
@@ -85,14 +85,14 @@ configuration's own sizes.
 | `review_memories` | knowledge | 804 | 4 docs | standalone |
 | `search_journal` | knowledge | 613 | 4 docs | standalone |
 | `update_doc` | knowledge | 1,015 | 6 docs | standalone |
-| `team_continue` | onboarding | 2,012 | 6 docs | teams |
-| `team_setup` | onboarding | 3,658 | 7 docs | teams |
+| `team_continue` | onboarding | 2,012 | 6 docs | standalone (checkout-bound) |
+| `team_setup` | onboarding | 3,658 | 7 docs | standalone (checkout-bound) |
 | `process_context` | process | 1,753 | aicrew, 6 docs | standalone |
 | `task_reservation_claim` | reservation | 2,196 | - | none (by name, CLI) |
-| `task_reservation_finalize` | reservation | 2,155 | - | none (by name, CLI) |
+| `task_reservation_finalize` | reservation | 2,155 | - | tasks-only; elsewhere by name, CLI |
 | `task_reservation_receipt` | reservation | 854 | 1 doc | none (by name, CLI) |
-| `task_reservation_release` | reservation | 2,149 | - | none (by name, CLI) |
-| `task_reservation_status` | reservation | 558 | 1 doc | none (by name, CLI) |
+| `task_reservation_release` | reservation | 2,149 | - | tasks-only; elsewhere by name, CLI |
+| `task_reservation_status` | reservation | 558 | 1 doc | tasks-only; elsewhere by name, CLI |
 | `task_reservation_transfer` | reservation | 2,179 | - | none (by name, CLI) |
 | `task_reservation_update` | reservation | 2,141 | - | none (by name, CLI) |
 | `add_task_comment` | tasks | 720 | aicrew, 3 docs | standalone, member, tasks-only |
@@ -127,7 +127,7 @@ configuration's own sizes.
 | `team_inbox` | team | 1,463 | 3 docs | teams |
 | `team_join` | team | 2,149 | 2 docs | teams |
 | `team_leave` | team | 1,253 | 4 docs | teams |
-| `team_list` | team | 401 | 2 docs | teams |
+| `team_list` | team | 401 | 2 docs | standalone |
 | `team_members` | team | 1,268 | 2 docs | teams |
 | `team_messages` | team | 1,343 | 1 doc | teams |
 | `team_offer` | team | 2,057 | 2 docs | teams |
@@ -208,8 +208,10 @@ aicrew now owns teams, membership, attempts and delivery, so all thirty are
 superseded once aicrew is functional. They are not retired here: the
 operator's decision of 2026-09-25 (`docs/ROADMAP.md`, "Next delivery
 sequence") holds the removal of the legacy team until aicrew is
-functional. This design moves them out of the default set instead
-(section 4), which costs nothing if they are later removed.
+functional. This design moves 26 of them out of the default set instead
+(section 4), which costs nothing if they are later removed. The four a
+person needs to join a team stay in it: `team_setup`, `team_continue`,
+`team_context` and `team_list` (4.2).
 
 ### 3.2 The reservation tools: a program's path, and a model's detour
 
@@ -309,16 +311,19 @@ memory. No pair differs only in a parameter.
 
 | set | for | tools | bytes |
 | --- | --- | ---: | ---: |
-| standalone | a session on a project, personal or tasks-enabled | 33 | 36,027 |
-| teams | added to standalone by a setting (4.2) | +30 | +48,810 |
+| standalone | a session on a project, personal or tasks-enabled | 37 | 43,199 |
+| teams | added to standalone by a setting (4.2) | +26 | +41,638 |
 | member | a team member's session (team-mode facade) | 18 | 15,173 |
 | tasks-only | the hub's MCP under a project credential | 25 | 31,527 |
 
 - **standalone:** the 13 knowledge tools, the 18 task, epic and feature
-  tools, `writing_rule` and `process_context`. With tasks disabled the task
-  tools and `process_context` leave it, as today.
-- **teams:** the 27 team tools, `team_setup`, `team_continue` and
-  `team_context`.
+  tools, `writing_rule`, `process_context`, and the four entry tools of a
+  team: `team_setup`, `team_continue`, `team_context` and `team_list`
+  (7,172 bytes). With tasks disabled the task tools, `process_context`,
+  `team_setup`, `team_continue` and `team_list` leave it and `team_context`
+  stays, as today; `team_setup` and `team_continue` are listed only in a
+  checkout-bound session, as today.
+- **teams:** the other 26 team tools.
 - **member:** today's team-mode list without the reservation tools: the 12
   task, epic and feature reads with the coordinator's `triage_task` and
   `add_task_comment`, `recall_memory`, `list_docs`, `read_doc`,
@@ -330,9 +335,8 @@ memory. No pair differs only in a parameter.
   Its team tools follow the teams setting; for the hub's MCP the setting is
   a parameter of the MCP URL (open question 1).
 - **The reservation tools, per set.**
-  - standalone: none listed. Listing all seven would cost 12,232 bytes and
-    leave the set 275 bytes under its test, so the next tool of any later
-    feature would break it. A holder releases or finalizes with
+  - standalone: none listed. Listing all seven would cost 12,232 bytes
+    and take the set to 55,431, over its test. A holder releases or finalizes with
     `aimem reservation release|finalize`, which runs with the checkout's
     personal credential (`internal/mcp/reservation_cli.go:44-49`).
   - member: none listed. aicrew's members reach them through that command
@@ -353,27 +357,48 @@ memory. No pair differs only in a parameter.
 Mostly what the session is bound to at start, which the facade already
 reads: a team session file selects member (`mcp.go:40`), a tasks-only
 credential selects tasks-only (`mcp.go:807`), anything else is standalone.
-One setting adds the teams set. A tool that widens the set during a session
-is rejected: it needs the client to honour a changed tool list
-(`notifications/tools/list_changed`), which clients do unevenly, and it
-would itself be one more definition in every list.
+One setting adds the teams set. No new tool widens the set during a
+session: it would itself be one more definition in every list. The
+existing `team_setup` and `team_continue` turn the setting on (4.2), and
+the server then announces the changed list: it declares
+`tools.listChanged` in `initialize` (today it declares no such capability)
+and sends `notifications/tools/list_changed`. A client that honours it gets
+the teams set at once; one that does not gets it at its next start. Nothing
+depends on the announcement.
 
 ### 4.2 The teams setting
 
-A per-checkout setting, written by the commands that join a team
-(`aimem teams setup TEAM worker|coordinator`, `cmd/aimem/team_setup.go`,
-and the `join_team` entry point's install) and readable with
-`aimem project show`. A session reads it at start, like the task state. It
-is per checkout because a team is joined from one checkout, and a
-standalone session elsewhere should not pay for it.
+A per-checkout setting, readable with `aimem project show`. A session reads
+it at start, like the task state. It is per checkout because a team is
+joined from one checkout, and a standalone session elsewhere should not pay
+for it. `aimem wire` does not set it: it installs the entry points in every
+wired checkout (`internal/wiring/project.go:77`, `Commands: true`), and a
+setting it turned on would make every wired checkout list the teams set.
 
-The first time: today a person says "set up a team" and the model calls
-`team_setup`, which is listed. After the change it is not listed until the
-setting is on. The person, or the model through its shell, runs
-`aimem teams setup TEAM worker|coordinator` in the checkout; it turns the
-setting on. The session's list changes only at its next start, so the
-command's output says to restart the session. No scenario card touches
-this: the cards in `docs/scenarios/` name no team or reservation tool.
+What turns it on is joining a team, by either path:
+
+- the `team_setup` and `team_continue` tools, which the entry points call
+  through the checkout's MCP server, so a sandboxed shell that cannot read
+  the credential is not needed (`docs/TEAM-QUICKSTART.md:3-9`);
+- `aimem teams setup TEAM worker|coordinator` (`cmd/aimem/team_setup.go`),
+  for a person in the shell.
+
+The first time, following `docs/TEAM-QUICKSTART.md` step 4: the person runs
+`/join_team TEAM ROLE` in a wired checkout. Step 0 of `join_team.md` finds
+`team_setup`, `team_context` and `process_context` listed, because they are
+in the standalone set, so it passes as today. `team_setup` joins and turns
+the setting on. The work tools the later steps name (`team_inbox`,
+`team_heartbeat`, `team_ack` and the others) arrive with the changed-list
+announcement where the client honours it. Otherwise `team_setup`'s answer
+says the team's tools arrive at the next start: restart the client, then
+`/resume_team`. That one restart, on the first join of a checkout, is the
+stated change to the path. A step that finds a work tool unlisted says so
+with that instruction; it is a different message from step 0's "the
+running `aimem mcp` predates this release", which still applies when
+`team_setup` itself is missing.
+
+No scenario card touches this: the cards in `docs/scenarios/` name no team
+or reservation tool.
 
 ## 5. The reorganisation
 
@@ -381,7 +406,7 @@ this: the cards in `docs/scenarios/` name no team or reservation tool.
 
 | change | tools |
 | --- | --- |
-| moved out of the default set, into teams | 27 team tools, `team_setup`, `team_continue`, `team_context` |
+| moved out of the default set, into teams | 26 team tools (all but `team_list`) |
 | unlisted in standalone and member, served by name with a deprecation notice, and by CLI | 7 reservation tools; tasks-only keeps `task_reservation_status`, `_release` and `_finalize` |
 | moved out of the member set | 7 reservation tools |
 | merged, split, renamed | none |
@@ -411,11 +436,15 @@ this: the cards in `docs/scenarios/` name no team or reservation tool.
   holder's three listed tools (section 7, task 1). The counter
   of 5.5 shows when no session calls them any more.
 - **The team entry points.** `join_team` and `resume_team` check in their
-  step 0 that the tools they name are listed
+  step 0 that `team_setup` (or `team_continue`), `team_context` and
+  `process_context` are listed, and they stay listed (4.2). Their later
+  steps name work tools of the teams set, which a first join gets at once
+  where the client honours the changed list, and otherwise after one
+  restart (4.2). The test that pins them
   (`TestEntryPointsNameOnlyToolsTheLocalServerLists`,
-  `internal/mcp/entrypoints_test.go:29`). The command that installs them
-  sets the teams setting, and the test changes to: every tool an entry point
-  names is in the standalone set or the teams set.
+  `internal/mcp/entrypoints_test.go:29`) changes to: every tool an entry
+  point names is in the standalone set, or in the teams set and named only
+  after `team_setup` or `team_continue` has answered.
 - **aicrew** is unaffected: its members use the team-mode facade, whose
   reservation calls go through the CLI (3.2), and its reads stay listed.
 - **The skills set** names only `writing_rule`, which every set keeps.
@@ -435,9 +464,10 @@ The product callers are in 3.2 and 3.3; the skills set names only
 | `docs/TASK-CREDENTIALS.md` | standalone or tasks-only | `triage_task` | all |
 | `docs/FEATURES.md` (the feature procedure) | standalone or tasks-only | `set_feature`, `confirm_feature_task`, `list_features`, `create_task`, `get_task`, `list_tasks`, `search_tasks`, `triage_task`, `update_task` | all |
 | `aimem_analyze` command (`internal/wiring/assets/aimem_analyze.md`) | standalone | `get_design_doc`, `recall_memory`, `remember` | all |
-| `docs/TEAM-QUICKSTART.md`, `docs/TEAM-SETUP.md` | standalone with teams | `process_context`, `team_context`, `team_continue`, `team_leave`, `team_list`, `team_profile`, `team_setup` | all, once the setting is on (4.2) |
-| `docs/TEAM-AGENT-QUICKSTART.md` | standalone with teams | `process_context`, `writing_rule` and all 30 tools of the teams set | all, once the setting is on |
-| `join_team` and `resume_team` entry points (`internal/wiring/assets/`) | standalone with teams | `process_context`, `remember`, `team_context`, `team_setup`, `team_continue` and seven team tools | all: their install turns the setting on (5.2) |
+| `docs/TEAM-QUICKSTART.md`, `docs/TEAM-SETUP.md` | standalone, then with teams after joining | `process_context`, `team_context`, `team_continue`, `team_list`, `team_setup`; `team_leave`, `team_profile` | the first five always; the last two once the join has turned the setting on (4.2) |
+| `docs/TEAM-AGENT-QUICKSTART.md` | standalone, then with teams after joining | `process_context`, `writing_rule`, the four entry tools and the 26 of the teams set | the entry tools always; the 26 after the join (4.2) |
+| `join_team` and `resume_team` entry points (`internal/wiring/assets/`) | standalone, then with teams after joining | `process_context`, `remember`, `team_context`, `team_setup`, `team_continue`, `team_list` and six work tools | step 0's tools always; the work tools after the join, at once or after one restart (4.2) |
+| `docs/TEAM-PLAYBOOKS.md:26` (a reader of the playbooks without this repository) | standalone | `team_context` | yes |
 | the hub's MCP under a project credential | tasks-only | no user document walks a reader through it; the designs (`docs/DESIGN-access-control.md`, `docs/DESIGN-AIFORGE-CONTEXT.md`) describe it | the tasks-only set |
 
 Nothing a documented path names leaves its mode's list without the
@@ -485,9 +515,14 @@ so in its output.
 
 1. **The sets in the facade** (M, sensitive: the tool list is every
    client's wire contract): the four sets, the teams setting and the
-   commands that write it, served-by-name with the notice line, the hint
-   in the 409 of the generic writes (5.2), the entry points' test, the
-   inventory test's per-set assertions, and the team guides updated.
+   tools and command that write it (`team_setup`, `team_continue`,
+   `aimem teams setup`), the `tools.listChanged` capability and its
+   notification, served-by-name with the notice line, the hint in the 409
+   of the generic writes (5.2), the entry points' test, and the inventory
+   test's per-set assertions. The documents it changes:
+   `internal/wiring/assets/join_team.md` and `resume_team.md` (the
+   unlisted-work-tool message and the one restart), `docs/TEAM-QUICKSTART.md`
+   and `docs/TEAM-AGENT-QUICKSTART.md`.
 2. **The usage counter** (M, sensitive: the HTTP API and a store
    migration): 5.5, with the admin read.
 3. **In aicrew** (on aicrew's board): drop `get_design_doc` and
