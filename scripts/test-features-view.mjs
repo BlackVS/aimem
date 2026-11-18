@@ -59,6 +59,8 @@ context.fakeApi = async path => {
   const u = new URL(path, 'http://hub');
   let m;
   if (u.pathname === '/v1/access/identity') return {name: 'reader', role: 'user', tasks_enabled: true, task_write: false};
+  if (u.pathname === '/v1/projects/q/epics') return {epics: [{id: 'gq', title: 'Goal of q', state: 'OPEN'}]};
+  if (/^\/v1\/tasks\/[^/]+\/(history|comments)$/.test(u.pathname)) return {revisions: [], comments: [], next_cursor: ''};
   if ((m = u.pathname.match(/^\/v1\/projects\/p\/epics\/([^/]+)\/features$/))) {
     if (!hub.featuresRoute) throw notFound();
     return {project: 'p', goal: m[1], features: hub.features[m[1]] || []};
@@ -209,6 +211,32 @@ assert.equal(pushed.at(-1), '/tasks?project=p&view=features&goal=empty', 'the go
 run(`setProject('other'); setView('features')`);
 assert.equal(pushed.at(-1), '/tasks?project=other&view=features', 'a goal belongs to its project');
 run(`setProject('p')`);
+
+// A confirmed task of another project, opened from a feature: the task page
+// moves to its project, so its way back drops this project's goal and feature.
+await open('?project=p&view=features&goal=g&feature=f1');
+await open('?task=t-other');
+assert.equal(run('PROJ'), 'q');
+assert.equal(run('listURL()'), '/tasks?project=q&view=features', 'a foreign task leaves the goal and the feature behind');
+await open(run('listURL()').slice('/tasks'.length));
+assert.equal(run('GOAL'), '');
+assert.match(body(), /Choose a goal to see its features\./, "the way back asks for a goal of the task's project");
+assert.equal(element('epicDetails').hidden, true, 'no goal panel on the way back');
+// The browser's back button from that task returns to the address it came
+// from: the first project with its goal and feature.
+await open('?project=p&view=features&goal=g&feature=f1');
+await open('?task=t-other');
+await open('?project=p&view=features&goal=g&feature=f1');
+assert.equal(run('PROJ'), 'p');
+assert.equal(run('GOAL'), 'g');
+assert.equal(run('FEATURE'), 'f1');
+assert.match(body(), /<h2>confirmed tasks<\/h2>/, 'back restores the feature');
+// A task of the same project keeps them for the way back.
+await open('?project=p&view=features&goal=g&feature=f1');
+hub.records['t-open'] = {id: 't-open', title: 'Open work', state: 'BLOCKED', project: 'p'};
+await open('?task=t-open');
+assert.equal(run('listURL()'), '/tasks?project=p&view=features&goal=g&feature=f1', 'a task of the same project keeps the way back');
+delete hub.records['t-open'];
 
 // A plain click on a link of the view navigates in the page; a modified
 // click is left to the browser.

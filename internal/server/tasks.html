@@ -347,13 +347,20 @@ window.addEventListener("popstate", route);
 function route(){
   const q = new URLSearchParams(location.search);
   if(q.get("task")){ showTask(q.get("task"), q.get("comment")||""); return; }
-  if(q.get("project")){ if(q.get("project")!==PROJ) GOAL = ""; PROJ = q.get("project"); localStorage.setItem("aimem_task_project", PROJ); }
+  if(q.get("project")) useProject(q.get("project"));
   // The URL is the state: a project link without ?view=board is the list;
   // only a bare /tasks falls back to the view this browser remembers.
   if(q.has("project") || q.has("view")){ VIEW = VIEWS.includes(q.get("view")) ? q.get("view") : "list"; localStorage.setItem("aimem_task_view", VIEW); }
   // The goal belongs to the project; a task view keeps it for the way back.
   if(VIEW==="features"){ GOAL = q.get("goal")||""; FEATURE = q.get("feature")||""; } else FEATURE = "";
   showList();
+}
+// useProject is the one place the page changes its project. A goal and a
+// feature belong to their project, so a change drops them; the address or
+// the features view sets them again.
+function useProject(p){
+  if(p!==PROJ){ GOAL = ""; FEATURE = ""; }
+  PROJ = p; localStorage.setItem("aimem_task_project", PROJ);
 }
 function setView(v){ VIEW = v; localStorage.setItem("aimem_task_view", v); go(listURL()); }
 function setGoal(id){ GOAL = id; FEATURE = ""; go(listURL()); }
@@ -827,7 +834,7 @@ async function showTask(id, commentID){
   }catch(e){ if(e.auth) return boot(); if(my===NAV) $("task").innerHTML = `<div class="card bad">${esc(e.message)}</div>`; return; }
   if(my!==NAV) return;
   CUR = task;
-  PROJ = CUR.project; localStorage.setItem("aimem_task_project", PROJ);
+  useProject(CUR.project);
   loadEpics(CUR.project); // labels and the edit form's options; the form keeps the current epic regardless
   document.title = CUR.title+" · aimem tasks";
   $("taskCrumb").textContent = " · "+CUR.project+" · "+short(CUR.id);
