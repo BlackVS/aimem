@@ -578,11 +578,20 @@ cat > "$HOME_DIR/.local/sbin/curate-all.sh" <<'EOS'
 set -uo pipefail
 export PATH="$HOME/.local/bin:$PATH"
 BACKEND=${AIMEM_CURATE_BACKEND:-openai}
-aimem curate --backend "$BACKEND" --all
-[ -n "${AIMEM_EMBED_MODEL:-}" ] && aimem embed --all
+# A step that exits 6 met a provider that refuses the account (no
+# credit, or a refused key). Every later step would meet it too, so the
+# run stops there and the service ends as failed. Any other failure is
+# logged and the run goes on.
+step() {
+  "$@"
+  local rc=$?
+  [ "$rc" -ne 6 ] || exit 6
+}
+step aimem curate --backend "$BACKEND" --all
+if [ -n "${AIMEM_EMBED_MODEL:-}" ]; then step aimem embed --all; fi
 if [ "$(date -u +%H)" = "04" ]; then
-  [ -n "${AIMEM_EMBED_MODEL:-}" ] && aimem dedup --all
-  aimem doc --all --backend "$BACKEND"
+  if [ -n "${AIMEM_EMBED_MODEL:-}" ]; then step aimem dedup --all; fi
+  step aimem doc --all --backend "$BACKEND"
 fi
 exit 0
 EOS

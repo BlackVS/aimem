@@ -175,6 +175,10 @@ func main() {
 		usage()
 		os.Exit(2)
 	}
+	if r, refused := llmrate.AsRefusal(err); refused {
+		fmt.Fprintln(os.Stderr, r.Line())
+		os.Exit(llmrate.ExitRefused)
+	}
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "aimem:", err)
 		os.Exit(1)
@@ -1161,7 +1165,7 @@ func docCmd(args []string) error {
 		}
 		rep, err := curate.GenerateDoc(db, strings.TrimPrefix(id, "group-"), syn, *force)
 		if err != nil {
-			if !*all {
+			if _, refused := llmrate.AsRefusal(err); refused || !*all {
 				return fmt.Errorf("doc %s: %w", id, err)
 			}
 			fmt.Fprintf(os.Stderr, "aimem: doc %s: %v\n", id, err)
@@ -2234,7 +2238,9 @@ func curateCmd(args []string) error {
 				curate.RunOpts{DryRun: *dry, MaxFacts: *maxFacts, MaxEvents: *maxEvents, Model: runModel, Force: *force,
 					Embedder: embedder, EmbedModel: embedModel, DedupSim: dedupSim})
 			if err != nil {
-				if !*all {
+				// A refusal of the provider account would refuse every
+				// further store too: stop the run at the first one.
+				if _, refused := llmrate.AsRefusal(err); refused || !*all {
 					return err
 				}
 				fmt.Fprintf(os.Stderr, "aimem: curate %s: %v\n", proj, err)

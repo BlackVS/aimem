@@ -13,6 +13,32 @@ currently 26); a binary refuses a database newer than it understands.
 
 ## [Unreleased]
 
+### Fixed
+
+- **A provider that refuses the account stops curation at once, and the
+  hub's curation service shows it.** An answer that waiting cannot cure is
+  no longer read as a rate block. Such answers are:
+  - a JSON error whose type or code begins `insufficient` (OpenAI's
+    `insufficient_quota`) or whose message names `insufficient_quota`, at
+    any status, 429 included;
+  - HTTP 402;
+  - HTTP 401, or 403 with a JSON error;
+  - from the claude CLI, "credit balance is too low" or "invalid api key".
+
+  Such a call is asked once, is not retried and leaves the call spacing as
+  it was. `aimem curate`, `embed` and `doc` stop at the first one, `--all`
+  included, print one line with the provider's message, saying that the
+  administrator must restore the account's credit or key, and exit with
+  status 6. The hub's `curate-all.sh`, which `install-hub.sh` writes, stops
+  at a step that exits 6 and exits 6 itself, so `aimem-curate.service`
+  ends as failed; other failures go on as before. `aimem health` shows the
+  newest refusal as `llm_pace.last_refusal` (its time and the provider's
+  clipped message) until a call succeeds, and the TUI's Hub tab shows it
+  under the pace line. A plain 429, a 5xx and a block page keep their
+  retries. Before, a hub whose provider account had run out of credit
+  retried every store through the whole ladder each hour, and the service
+  ended as a success.
+
 ## [0.11.3] — 2026-11-18
 
 The features view of the board's page after the owner's first look: the

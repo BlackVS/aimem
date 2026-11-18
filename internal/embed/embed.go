@@ -130,6 +130,10 @@ func (c *Client) Embed(texts []string) ([][]float32, int64, error) {
 		status = resp.StatusCode
 		out.Data, out.Error = nil, nil
 		jsonErr := json.Unmarshal(raw, &out)
+		if r := llmrate.Refused(status, raw); r != nil {
+			llmrate.Refuse(r)
+			return nil, 0, r
+		}
 		reason := ""
 		if llmrate.Blocked(status, string(raw), jsonErr == nil) {
 			reason = fmt.Sprintf("embeddings HTTP %d", status)
@@ -142,7 +146,7 @@ func (c *Client) Embed(texts []string) ([][]float32, int64, error) {
 				d := llmrate.RetryDelay(attempt)
 				fmt.Fprintf(os.Stderr, "aimem llmrate: retrying embeddings in %s (attempt %d/%d)\n",
 					d.Round(time.Second), attempt+1, llmrate.Retries())
-				time.Sleep(d)
+				llmrate.SleepRetry(d)
 				continue
 			}
 			return nil, 0, fmt.Errorf("embeddings blocked upstream after %d attempts (HTTP %d): %s",

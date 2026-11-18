@@ -33,6 +33,8 @@ var (
 	blocks  int           // rate-blocks seen (persisted, for stats)
 	lastHit string        // RFC3339 of the newest block
 
+	lastRefusal *refusalRecord // the newest Refusal, until a clean success
+
 	stateDir string // "" = process-local only (tests)
 
 	confOnce sync.Once
@@ -51,10 +53,11 @@ func SetStateDir(dir string) {
 }
 
 type state struct {
-	PenaltyMS int64  `json:"penalty_ms"`
-	Blocks    int    `json:"blocks"`
-	LastBlock string `json:"last_block,omitempty"`
-	Updated   string `json:"updated"`
+	PenaltyMS int64          `json:"penalty_ms"`
+	Blocks    int            `json:"blocks"`
+	LastBlock string         `json:"last_block,omitempty"`
+	Refusal   *refusalRecord `json:"last_refusal,omitempty"`
+	Updated   string         `json:"updated"`
 }
 
 func loadLocked() {
@@ -70,6 +73,7 @@ func loadLocked() {
 		return
 	}
 	penalty, blocks, lastHit = time.Duration(s.PenaltyMS)*time.Millisecond, s.Blocks, s.LastBlock
+	lastRefusal = s.Refusal
 }
 
 func saveLocked() {
@@ -77,7 +81,7 @@ func saveLocked() {
 		return
 	}
 	raw, _ := json.Marshal(state{PenaltyMS: penalty.Milliseconds(), Blocks: blocks,
-		LastBlock: lastHit, Updated: time.Now().UTC().Format(time.RFC3339)})
+		LastBlock: lastHit, Refusal: lastRefusal, Updated: time.Now().UTC().Format(time.RFC3339)})
 	os.WriteFile(filepath.Join(stateDir, "llmrate.json"), raw, 0o600)
 }
 
@@ -97,6 +101,9 @@ func Status() map[string]any {
 	}
 	if lastHit != "" {
 		out["last_block"] = lastHit
+	}
+	if lastRefusal != nil {
+		out["last_refusal"] = map[string]string{"at": lastRefusal.At, "message": lastRefusal.Message}
 	}
 	return out
 }
@@ -233,6 +240,10 @@ func Recover() {
 	iv, _ := conf()
 	mu.Lock()
 	defer mu.Unlock()
+	if lastRefusal != nil {
+		lastRefusal = nil
+		saveLocked()
+	}
 	if penalty == 0 {
 		return
 	}
@@ -242,6 +253,29 @@ func Recover() {
 		fmt.Fprintf(os.Stderr, "aimem llmrate: upstream healthy again — call spacing back to base %s\n", iv)
 	}
 	saveLocked()
+}
+
+// retrySleep waits out a backoff; tests in other packages replace it,
+// and the retry count, with SetLadderForTest.
+var retrySleep = time.Sleep
+
+// SleepRetry waits the backoff d before a retry.
+func SleepRetry(d time.Duration) { retrySleep(d) }
+
+// SetLadderForTest sets the retry count and the backoff sleep for a test,
+// with no base spacing between calls, and returns the function that
+// restores all three. Not for production use.
+func SetLadderForTest(n int, sleep func(time.Duration)) (restore func()) {
+	conf()
+	mu.Lock()
+	oldN, oldSleep, oldIv := retries, retrySleep, interval
+	retries, retrySleep, interval = n, sleep, 0
+	mu.Unlock()
+	return func() {
+		mu.Lock()
+		retries, retrySleep, interval = oldN, oldSleep, oldIv
+		mu.Unlock()
+	}
 }
 
 // RetryDelay is the backoff before retry attempt n (0-based):

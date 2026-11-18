@@ -229,6 +229,10 @@ func (j *Judge) Readable(ctx context.Context, span, around string) (bool, error)
 		} `json:"choices"`
 	}
 	decodeErr := json.Unmarshal(raw, &out)
+	if r := llmrate.Refused(resp.StatusCode, raw); r != nil {
+		llmrate.Refuse(r)
+		return false, r
+	}
 	if llmrate.Blocked(resp.StatusCode, string(raw), decodeErr == nil) {
 		llmrate.Penalize(fmt.Sprintf("text check HTTP %d", resp.StatusCode))
 		return false, fmt.Errorf("the model's endpoint answered HTTP %d", resp.StatusCode)
