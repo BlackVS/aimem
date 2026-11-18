@@ -86,6 +86,12 @@ jobs:
       # exits non-zero and fails the job.
       - name: tasks console harness
         run: node scripts/test-epic-details.mjs
+      # node --check on every console page's script. The test skips where
+      # node is missing; here it must run, so a missing node fails it.
+      - name: console page scripts parse
+        env:
+          AIMEM_TEST_REQUIRE_NODE: "1"
+        run: go test -count=1 -run '^TestConsoleScriptsSyntax$' ./internal/server/
       # Both tools are tool directives in go.mod: the versions go.sum pins,
       # built on the runner's Go 1.26 like everything else.
       - name: staticcheck
