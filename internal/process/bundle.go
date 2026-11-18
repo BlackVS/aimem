@@ -36,6 +36,16 @@ const MaxSetBytes = 4 << 20
 // MaxSetFiles bounds how many files a manifest may name.
 const MaxSetFiles = 64
 
+// MaxArchiveEntries and MaxArchiveNameBytes bound what ReadArchive holds of
+// an archive besides its data: the regular files it reads and the bytes of
+// their names. A forge tarball of a whole repository is read, not only the
+// set; the reference set's own repository held 708 files and 55 KB of names
+// in November 2026, so the caps leave it more than ten times the room.
+const (
+	MaxArchiveEntries   = 10000
+	MaxArchiveNameBytes = 1 << 20
+)
+
 var digestRE = regexp.MustCompile(`^[0-9a-f]{64}$`)
 
 // Bundle is one process set's content. Files is keyed by the repository
@@ -319,7 +329,7 @@ func ReadArchive(r io.Reader, manifestPath string) (*Bundle, error) {
 	defer gz.Close()
 	tr := tar.NewReader(gz)
 	all := map[string][]byte{}
-	total := 0
+	total, entries, nameBytes := 0, 0, 0
 	for {
 		hdr, err := tr.Next()
 		if errors.Is(err, io.EOF) {
@@ -332,8 +342,16 @@ func ReadArchive(r io.Reader, manifestPath string) (*Bundle, error) {
 			continue
 		}
 		name := strings.TrimPrefix(path.Clean(strings.TrimPrefix(hdr.Name, "./")), "/")
-		if name == "." || strings.HasPrefix(name, "../") || strings.Contains(name, "/../") {
+		if name == "." || name == ".." || strings.HasPrefix(name, "../") || strings.Contains(name, "/../") {
 			return nil, fmt.Errorf("archive: entry %q leaves the archive", hdr.Name)
+		}
+		entries++
+		nameBytes += len(name)
+		if entries > MaxArchiveEntries {
+			return nil, fmt.Errorf("archive: more than %d files", MaxArchiveEntries)
+		}
+		if nameBytes > MaxArchiveNameBytes {
+			return nil, fmt.Errorf("archive: more than %d bytes of file names", MaxArchiveNameBytes)
 		}
 		if hdr.Size > MaxFileBytes {
 			// Only files the manifest names must fit, but one this large is
