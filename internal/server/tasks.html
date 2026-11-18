@@ -195,8 +195,10 @@
       <select id="epicSel" onchange="FILTER.epic=this.value;renderEpicDetails();refreshView()"><option value="">all epics</option></select>
     </div>
     </div>
+    <div class="epic-filter" id="goalFilter" hidden><label for="goalSel" class="dim">goal</label>
+      <select id="goalSel" onchange="setGoal(this.value)"><option value="">— choose a goal —</option></select></div>
     <details id="epicDetails" class="card" hidden>
-      <summary>View epic</summary>
+      <summary id="epicSummary">View epic</summary>
       <div id="epicContent" class="prose"></div>
     </details>
     <div id="newForm" class="card" hidden></div>
@@ -207,8 +209,6 @@
     <div id="board" class="board" hidden></div>
     <div id="boardNote" class="dim" hidden></div>
     <div id="features" hidden onclick="featClick(event)">
-      <div class="epic-filter"><label for="goalSel" class="dim">goal</label>
-        <select id="goalSel" onchange="setGoal(this.value)"><option value="">— choose a goal —</option></select></div>
       <div id="featBody"></div>
     </div>
   </section>
@@ -430,22 +430,33 @@ async function loadEpics(project, force){
   if(reload){
     const was = FILTER.epic, wasOpen = $("epicDetails").open;
     if(was && !EPICS[was]){ FILTER.epic = ""; dropped = true; toast("the selected epic no longer exists; showing all epics"); }
-    renderEpicDetails();
-    if(FILTER.epic) $("epicDetails").open = wasOpen;
+    if(VIEW!=="features"){ renderEpicDetails(); if(FILTER.epic) $("epicDetails").open = wasOpen; }
   }
   $("epicSel").innerHTML = '<option value="">all epics</option>' + Object.values(EPICS).map(e => `<option value="${esc(e.id)}"${e.id===FILTER.epic?' selected':''}>${esc(e.title)}${e.state==="RETIRED"?" (retired)":""}</option>`).join("");
   return dropped;
 }
 function epicLabel(id){ const e = EPICS[id]; return e ? e.title : short(id); }
-function renderEpicDetails(){
-  const e = EPICS[FILTER.epic];
+// The epic panel: the task views show the epic of their filter; the
+// features view shows its goal (renderGoalDetails), with its own note.
+const EPIC_NOTE = "Tasks below belong to this epic; the current state and archive filters still apply.";
+let PANEL_GOAL = "";      // the goal the panel shows for the features view, "" while it serves the task views
+function renderEpicDetails(e = EPICS[FILTER.epic], note = EPIC_NOTE, summary = "View epic"){
   const panel = $("epicDetails");
   panel.open = false;
   panel.hidden = !e;
+  $("epicSummary").textContent = summary;
   $("epicContent").innerHTML = e ? `<h2>${esc(e.title)}</h2>
     <div class="meta">${esc(e.state)}${e.target?' · Target: '+esc(e.target):''}</div>
     ${e.objective?md2html(e.objective):'<p class="dim">No objective provided.</p>'}
-    <p class="dim">Tasks below belong to this epic; the current state and archive filters still apply.</p>` : "";
+    <p class="dim">${esc(note)}</p>` : "";
+}
+// The features view's goal opens with the view, and keeps a reader's open
+// or closed choice while the same goal stays shown.
+function renderGoalDetails(goal){
+  const same = !!goal && PANEL_GOAL===goal.id, wasOpen = $("epicDetails").open;
+  renderEpicDetails(goal || null, "The features below belong to this goal; its tasks are in the list and the board under the epic filter.", "View goal");
+  PANEL_GOAL = goal ? goal.id : "";
+  $("epicDetails").open = goal ? (same ? wasOpen : true) : false;
 }
 function refreshView(){ return VIEW==="board" ? loadBoard() : VIEW==="features" ? loadFeatures() : listTasks(true); }
 // The refresh button and a tab that comes back reload the epics first and
@@ -536,8 +547,10 @@ function showList(){
   if(PROJ) loadEpics(PROJ); // clears the epic filter synchronously on a project change
   const board = VIEW==="board", feat = VIEW==="features", list = !board && !feat;
   $("vwList").classList.toggle("on", list); $("vwBoard").classList.toggle("on", board); $("vwFeat").classList.toggle("on", feat);
-  $("listOnly").hidden = !list; $("archLbl").hidden = !list; $("epicFilter").hidden = feat;
-  $("epicDetails").hidden = feat || !EPICS[FILTER.epic]; // the epic panel belongs to the task views
+  $("listOnly").hidden = !list; $("archLbl").hidden = !list; $("epicFilter").hidden = feat; $("goalFilter").hidden = !feat;
+  if(feat) $("epicDetails").hidden = true;                 // loadFeatures shows its goal
+  else if(PANEL_GOAL){ PANEL_GOAL = ""; renderEpicDetails(); } // the panel held the goal: back to the filter's epic
+  else $("epicDetails").hidden = !EPICS[FILTER.epic];
   $("list").hidden = !list; $("listMore").hidden = !list; $("board").hidden = !board; $("boardNote").hidden = !board; $("features").hidden = !feat;
   if(!PROJ){ $("list").innerHTML = '<div class="dim">Pick or enter a project.</div>'; $("boardNote").textContent = "Pick or enter a project."; $("featBody").innerHTML = '<div class="dim">Pick or enter a project.</div>'; $("moreBtn").hidden = true; $("board").innerHTML = ""; return; }
   if(board) loadBoard(); else if(feat) loadFeatures(); else listTasks(true);
@@ -623,6 +636,7 @@ async function loadFeatures(){
     if(stale()) return;
     const goals = r.epics||[];
     $("goalSel").innerHTML = '<option value="">— choose a goal —</option>' + goals.map(e => `<option value="${esc(e.id)}"${e.id===GOAL?' selected':''}>${esc(e.title)}${e.state==="RETIRED"?" (retired)":""}</option>`).join("");
+    renderGoalDetails(goals.find(e => e.id===GOAL));
     if(!goals.length){ body.innerHTML = '<div class="dim">This project has no goals, so it has no features.</div>'; markLoaded(); return; }
     if(!GOAL){ body.innerHTML = '<div class="dim">Choose a goal to see its features.</div>'; markLoaded(); return; }
     if(!goals.some(e => e.id===GOAL)){ body.innerHTML = '<div class="bad">This project has no such goal.</div>'; markLoaded(); return; }

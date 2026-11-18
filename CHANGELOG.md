@@ -16,7 +16,9 @@ currently 26); a binary refuses a database newer than it understands.
 ### Added
 
 - **The board's page shows a goal's features.** A third view, "features",
-  beside the list and the board: choose a goal and its features are shown
+  beside the list and the board: choose a goal and its details (the whole
+  title, wrapped, its state and its description, in the panel the task
+  views use for an epic) open above its features, which are shown
   in position order, apart from the tasks and in a colour of their own,
   each with its mark, its state, the number of its confirmed tasks and a
   tie where two share a position. Under each feature is what it waits on:

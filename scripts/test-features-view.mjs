@@ -31,7 +31,9 @@ const run = code => vm.runInContext(code, context);
 // may not read, which the hub answers as "not found".
 const notFound = () => Object.assign(new Error('not found'), {status: 404});
 const hub = {
-  epics: [{id: 'g', title: 'Goal <one>', state: 'OPEN'}, {id: 'empty', title: 'Empty goal', state: 'OPEN'}],
+  epics: [{id: 'g', title: 'Goal <one>, ' + 'with a title long enough to wrap over more than one line of the page; '.repeat(3), state: 'OPEN',
+    objective: ['First paragraph of the goal.', 'Second paragraph with <script>x</script> in it.', 'The check: **every** feature is DONE.'].join('\n\n')},
+    {id: 'empty', title: 'Empty goal', state: 'OPEN'}],
   features: {
     g: [
       {id: 'f1', title: 'First <b>feature</b>', state: 'IN_PROGRESS', archived: false, feature: {goal: 'g', position: 1, mark: 'mandatory'}, confirmed_tasks: 4},
@@ -79,7 +81,19 @@ assert.equal(element('features').hidden, false, 'the features view is shown');
 assert.equal(element('list').hidden, true, 'apart from the tasks');
 assert.equal(element('board').hidden, true);
 assert.equal(element('epicFilter').hidden, true, 'the epic filter belongs to the task views');
-assert.equal(element('epicDetails').hidden, true, 'and so does the epic panel');
+assert.equal(element('goalFilter').hidden, false, 'the goal chooser is shown');
+// The chosen goal in the task views' panel: its title in full, its state and
+// its description rendered, open with the view.
+const panel = element('epicDetails'), goalText = () => element('epicContent').innerHTML;
+assert.equal(panel.hidden, false, "the goal's details are shown");
+assert.equal(panel.open, true, 'and open');
+assert.equal(element('epicSummary').textContent, 'View goal');
+assert.match(goalText(), new RegExp('<h2>Goal &lt;one&gt;, ' + '(with a title long enough to wrap over more than one line of the page; ){3}</h2>'), 'the whole title');
+assert.match(goalText(), /<div class="meta">OPEN<\/div>/);
+assert.equal((goalText().match(/<p>/g) || []).length, 3, 'each paragraph of the description');
+assert.match(goalText(), /&lt;script&gt;/, 'the description is escaped');
+assert.match(goalText(), /<b>every<\/b>/, 'and rendered as in the task views');
+assert.match(goalText(), /The features below belong to this goal/);
 assert.match(element('goalSel').innerHTML, /value="g" selected>Goal &lt;one&gt;/);
 const order = [...body().matchAll(/class="ftitle" data-go href="([^"]+)">([^<]*(?:<(?!\/a>)[^<]*)*)<\/a>/g)].map(m => m[1]);
 assert.deepEqual(order, ['f1', 'f2', 'f3'].map(id => `/tasks?project=p&view=features&goal=g&feature=${id}`), 'features in position order, each linked');
@@ -101,6 +115,19 @@ assert.ok(!calls.some(p => p.includes('/v1/tasks/f3') || p.includes('feature=f3'
 assert.ok(!calls.some(p => p === '/v1/tasks/t-open'), "this project's tasks come from the list, not one read each");
 assert.match(element('loadedAt').textContent, /^loaded /);
 
+// A reader who closed the panel keeps it closed while the goal stays.
+panel.open = false;
+await open('?project=p&view=features&goal=g&feature=f1');
+assert.equal(panel.open, false, 'closed by the reader, closed on the same goal');
+await open('?project=p&view=features&goal=g');
+// The task views get their own panel back: no epic filter, no panel.
+await open('?project=p');
+assert.equal(panel.hidden, true, 'the goal does not follow into the list');
+assert.equal(element('epicSummary').textContent, 'View epic');
+assert.equal(element('goalFilter').hidden, true);
+await open('?project=p&view=features&goal=g');
+assert.equal(panel.open, true, 'a goal shown anew opens again');
+
 // One feature opened: its confirmed tasks with state and project.
 await open('?project=p&view=features&goal=g&feature=f1');
 assert.equal(run('FEATURE'), 'f1');
@@ -120,6 +147,12 @@ await open('?project=p&view=features&goal=empty');
 assert.match(body(), /This goal has no features/);
 await open('?project=p&view=features');
 assert.match(body(), /Choose a goal to see its features/);
+assert.equal(panel.hidden, true, 'no goal chosen, no goal panel');
+// Not even with an epic chosen in the task views' filter.
+run(`EPICS = {g: {id: 'g', title: 'An epic', state: 'OPEN'}}; FILTER.epic = 'g'`);
+await open('?project=p&view=features');
+assert.equal(panel.hidden, true, "the filter's epic is not shown as the goal");
+run(`FILTER.epic = ''`);
 await open('?project=p&view=features&goal=gone');
 assert.match(body(), /This project has no such goal/);
 hub.epics = [];
@@ -164,4 +197,4 @@ assert.equal(pushed[0], '/tasks?project=p&view=features&goal=g&feature=f2');
 click({ctrlKey: true});
 assert.equal(prevented, 1, 'a ctrl-click opens a tab as usual');
 
-console.log('PASS features view: order and tie, waits-on, another project and an unreadable task, empty views, missing route, the address');
+console.log('PASS features view: the goal details, order and tie, waits-on, another project and an unreadable task, empty views, missing route, the address');
