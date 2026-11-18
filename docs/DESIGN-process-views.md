@@ -115,7 +115,9 @@ history then decides whether DONE fell inside the window.
   state READY and the revision before it had another state. It was taken when
   such a revision has state IN_PROGRESS. A revision that keeps the state, such
   as an edit of the title of a READY task, is not a promotion. A task promoted
-  again after it left READY (for a block, say) is counted again.
+  again after it left READY (for a block, say) is counted again. A task's
+  first revision counts as entering its state: a task created READY in the
+  window was promoted in it, and one created IN_PROGRESS was taken.
 
 **The tier of a task,** for a goal:
 1. **Urgent** if its title's bracket starts with `P0`.
@@ -130,10 +132,11 @@ The tier comes first and the position second. A task on the way of a
 mandatory feature is path wherever the optional features that also wait for
 it stand, because the proposal puts every mandatory feature's work on the
 path ([section 4.1](DEVELOPMENT-PROCESS-PROPOSAL.md#41-three-tiers)).
-Within its tier, the earliest feature by position is named. Dependencies are read from each record
-(`GET /v1/tasks/{id}`); a dependency in another project is followed if the
-caller may read it. One the hub answers "not found" for is reported as such
-and not followed.
+Within its tier, the earliest feature by position is named.
+
+Dependencies are read from each record (`GET /v1/tasks/{id}`); a dependency
+in another project is followed if the caller may read it. One the hub
+answers "not found" for is reported as such and not followed.
 
 **Priority** is read from the title's bracket (`[P1/M, surface]`), because the
 board has no priority field. A title without one has no priority, and the
