@@ -483,7 +483,23 @@ every client first.
   `CLAUDE_CONFIG_DIR` and `CLAUDE_CODE_GIT_BASH_PATH` pass too. No `AIMEM_*` variable reaches the
   CLI, so the admin token and the provider keys stay with the hub.
 - Check runs: `journalctl --user -u aimem-curate.service`; per-project
-  reports include token usage. Since v0.1.85 the headless `claude`
+  reports include token usage. A run that ends as **failed**, with status
+  6 in `systemctl --user status aimem-curate.service`, met a provider that
+  refuses the account. Its journal carries one line, `aimem: provider
+  refused the account (HTTP 429, insufficient_quota): <the provider's
+  message>. Waiting will not cure this: ...`. The provider has no credit
+  or quota left for the account, or refuses its key. Waiting does not cure
+  it. The refused command stops at its first store, so that kind of call
+  does nothing until the account is restored at the provider; the run's
+  other steps still run (embeddings may come from an account that works),
+  and the next hourly run goes on by itself. `aimem health` lists the
+  newest refusal of each kind of call (`completions`, `embeddings`,
+  `text_check`, `claude_cli`) in `llm_pace.last_refusal`, and the TUI's
+  Hub tab shows each, until a call of that kind succeeds again. A refused
+  key is listed with its status and kind only; the provider's message,
+  which can quote part of the key, stays in the journal line. A real rate
+  block (a plain 429, a 5xx, a block page) is still retried and widens the
+  spacing instead. Since v0.1.85 the headless `claude`
   backend counts its cached prompt tokens too (they are most of the
   run), so token totals are comparable across backends — with one
   caveat: cache-read tokens are much cheaper per token, so raw counts

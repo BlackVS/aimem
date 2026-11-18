@@ -1112,6 +1112,16 @@ func (m model) renderHubOne(b *strings.Builder, h hubLine) {
 			line = dimSt.Render(line)
 		}
 		fmt.Fprintln(b, line)
+		// A refusal of the provider account stops curation until the
+		// administrator acts; it stays here until a call succeeds.
+		rs, _ := p["last_refusal"].([]any)
+		for _, x := range rs {
+			r, _ := x.(map[string]any)
+			kind, _ := r["kind"].(string)
+			msg, _ := r["message"].(string)
+			at, _ := r["at"].(string)
+			fmt.Fprintln(b, warnSt.Render(fmt.Sprintf("  llm refused (%s): %s, %s; the provider account needs the administrator", kind, msg, ago(at))))
+		}
 	}
 	if r := h.Res; r != nil {
 		memPct, diskPct := asInt(r["mem_used_pct"]), asInt(r["disk_used_pct"])
