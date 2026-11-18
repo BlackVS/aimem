@@ -111,17 +111,75 @@ func RefusedCLI(diag string) *Refusal {
 
 func oneLine(s string) string { return strings.Join(strings.Fields(s), " ") }
 
-// Refuse records the refusal for health: its time and the provider's
-// clipped message, nothing of the request. The call spacing is left as
-// it is. The next clean success (Recover) clears it.
-func Refuse(r *Refusal) {
+// The kinds of call a refusal is recorded for. Each kind keeps its own
+// record, because one provider account can refuse completions and still
+// serve embeddings: a success of one kind never clears another's.
+const (
+	CallCompletions = "completions"
+	CallEmbeddings  = "embeddings"
+	CallTextCheck   = "text_check"
+	CallClaudeCLI   = "claude_cli"
+)
+
+// keyRefused reports a refusal of the key itself. A provider's message
+// for it can quote part of the key, so the record keeps only the status
+// and the kind; the journal line keeps the provider's text.
+func (r *Refusal) keyRefused() bool {
+	return r.Kind == "key refused" || r.Kind == "invalid api key"
+}
+
+// summary is what the record for health says: the status, the kind and,
+// unless the key was refused, the provider's clipped message.
+func (r *Refusal) summary() string {
+	if !r.keyRefused() {
+		return r.Error()
+	}
+	where := "claude CLI"
+	if r.Status != 0 {
+		where = fmt.Sprintf("HTTP %d", r.Status)
+	}
+	return fmt.Sprintf("provider refused the account (%s, %s)", where, r.Kind)
+}
+
+// Refuse records the refusal for health under its kind of call: its time
+// and summary, nothing of the request. The call spacing is left as it
+// is. The next call of the same kind that succeeds clears it.
+func Refuse(call string, r *Refusal) {
 	mu.Lock()
 	defer mu.Unlock()
-	lastRefusal = &refusalRecord{At: time.Now().UTC().Format(time.RFC3339), Message: r.Error()}
+	if refusals == nil {
+		refusals = map[string]*refusalRecord{}
+	}
+	refusals[call] = &refusalRecord{At: time.Now().UTC().Format(time.RFC3339), Message: r.summary()}
 	saveLocked()
+}
+
+// Succeeded clears the refusal recorded for a kind of call. A client
+// calls it only once a call has returned its answer: an error object, an
+// empty answer or a failed decode is no success, even when it is not a
+// rate block.
+func Succeeded(call string) {
+	mu.Lock()
+	defer mu.Unlock()
+	if _, ok := refusals[call]; ok {
+		delete(refusals, call)
+		saveLocked()
+	}
 }
 
 type refusalRecord struct {
 	At      string `json:"at"`
 	Message string `json:"message"`
+}
+
+// refusalStatus lists the records for health, one per kind, in a fixed
+// order. The caller holds mu.
+func refusalStatus() []map[string]string {
+	var out []map[string]string
+	for _, k := range []string{CallCompletions, CallEmbeddings, CallTextCheck, CallClaudeCLI} {
+		if r := refusals[k]; r != nil {
+			out = append(out, map[string]string{"kind": k, "at": r.At, "message": r.Message})
+		}
+	}
+	return out
 }

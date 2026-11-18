@@ -131,7 +131,7 @@ func (c *Client) Embed(texts []string) ([][]float32, int64, error) {
 		out.Data, out.Error = nil, nil
 		jsonErr := json.Unmarshal(raw, &out)
 		if r := llmrate.Refused(status, raw); r != nil {
-			llmrate.Refuse(r)
+			llmrate.Refuse(llmrate.CallEmbeddings, r)
 			return nil, 0, r
 		}
 		reason := ""
@@ -182,6 +182,7 @@ func (c *Client) Embed(texts []string) ([][]float32, int64, error) {
 		}
 		vecs[d.Index] = d.Embedding
 	}
+	llmrate.Succeeded(llmrate.CallEmbeddings)
 	return vecs, tokens, nil
 }
 

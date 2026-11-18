@@ -579,13 +579,15 @@ set -uo pipefail
 export PATH="$HOME/.local/bin:$PATH"
 BACKEND=${AIMEM_CURATE_BACKEND:-openai}
 # A step that exits 6 met a provider that refuses the account (no
-# credit, or a refused key). Every later step would meet it too, so the
-# run stops there and the service ends as failed. Any other failure is
-# logged and the run goes on.
+# credit, or a refused key): the command stopped at its first refusal.
+# The later steps still run, since another kind of call (embeddings, say)
+# may be served by an account that works, and the script then exits 6,
+# so the service ends as failed. Any other failure is logged and the run
+# goes on, as before.
+REFUSED=0
 step() {
   "$@"
-  local rc=$?
-  [ "$rc" -ne 6 ] || exit 6
+  [ "$?" -ne 6 ] || REFUSED=1
 }
 step aimem curate --backend "$BACKEND" --all
 if [ -n "${AIMEM_EMBED_MODEL:-}" ]; then step aimem embed --all; fi
@@ -593,6 +595,7 @@ if [ "$(date -u +%H)" = "04" ]; then
   if [ -n "${AIMEM_EMBED_MODEL:-}" ]; then step aimem dedup --all; fi
   step aimem doc --all --backend "$BACKEND"
 fi
+[ "$REFUSED" -eq 0 ] || exit 6
 exit 0
 EOS
 chmod 755 "$HOME_DIR/.local/sbin/curate-all.sh"

@@ -1,6 +1,8 @@
 package llmrate
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -75,36 +77,75 @@ func TestRefusalLine(t *testing.T) {
 	}
 }
 
-// A refusal is recorded for health with its time and message, leaves the
-// spacing and the block count alone, survives into the next process, and
-// is cleared by the next clean success.
-func TestRefuseIsShownUntilASuccess(t *testing.T) {
+// refusalsByKind reads health's records as kind -> message.
+func refusalsByKind(t *testing.T) map[string]string {
+	t.Helper()
+	out := map[string]string{}
+	rs, _ := Status()["last_refusal"].([]map[string]string)
+	for _, r := range rs {
+		if len(r) != 3 || r["at"] == "" {
+			t.Fatalf("a record carries more or less than its kind, time and message: %#v", r)
+		}
+		out[r["kind"]] = r["message"]
+	}
+	return out
+}
+
+// A refusal is recorded for health under its kind of call, with its time
+// and message; it leaves the spacing and the block count alone, survives
+// into the next process, and is cleared only by a success of the same
+// kind: neither the pacing recovery, which also follows a decoded error
+// answer, nor a success of another kind clears it.
+func TestRefuseIsShownUntilASuccessOfItsKind(t *testing.T) {
 	dir := t.TempDir()
 	SetStateDir(dir)
 	t.Cleanup(func() { SetStateDir("") })
 	before := Status()
-	Refuse(Refused(429, []byte(`{"error":{"message":"no credits","type":"insufficient_quota"}}`)))
+	Refuse(CallCompletions, Refused(429, []byte(`{"error":{"message":"no credits","type":"insufficient_quota"}}`)))
 	st := Status()
 	if st["penalty_s"] != before["penalty_s"] || st["blocks"] != before["blocks"] {
 		t.Fatalf("a refusal changed the pacing: %v -> %v", before, st)
 	}
-	lr, ok := st["last_refusal"].(map[string]string)
-	if !ok || lr["at"] == "" || lr["message"] != "provider refused the account (HTTP 429, insufficient_quota): no credits" {
-		t.Fatalf("last_refusal = %#v", st["last_refusal"])
-	}
-	if len(lr) != 2 {
-		t.Fatalf("last_refusal carries more than its time and message: %#v", lr)
+	if got := refusalsByKind(t); len(got) != 1 || got[CallCompletions] != "provider refused the account (HTTP 429, insufficient_quota): no credits" {
+		t.Fatalf("records = %#v", got)
 	}
 	// Another process reads it from the state file.
 	mu.Lock()
-	lastRefusal = nil
+	refusals = nil
 	mu.Unlock()
 	SetStateDir(dir)
-	if _, ok := Status()["last_refusal"]; !ok {
+	if _, ok := refusalsByKind(t)[CallCompletions]; !ok {
 		t.Fatal("the refusal was not persisted")
 	}
 	Recover()
-	if _, ok := Status()["last_refusal"]; ok {
-		t.Fatal("a clean success did not clear the refusal")
+	Succeeded(CallEmbeddings)
+	if _, ok := refusalsByKind(t)[CallCompletions]; !ok {
+		t.Fatal("the pacing recovery or a success of another kind cleared the refusal")
+	}
+	Succeeded(CallCompletions)
+	if got := refusalsByKind(t); len(got) != 0 {
+		t.Fatalf("a success of its kind did not clear the refusal: %#v", got)
+	}
+}
+
+// A refused key keeps only its status and kind in the record: the
+// provider's message can quote part of the key. The line printed to the
+// journal keeps the provider's text.
+func TestAKeyRefusalRecordsNoProviderText(t *testing.T) {
+	SetStateDir(t.TempDir())
+	t.Cleanup(func() { SetStateDir(""); Succeeded(CallEmbeddings); Succeeded(CallClaudeCLI) })
+	r := Refused(401, []byte(`{"error":{"message":"Incorrect API key provided: sk-proj-****9XYZ.","code":"invalid_api_key"}}`))
+	Refuse(CallEmbeddings, r)
+	Refuse(CallClaudeCLI, RefusedCLI("Invalid API key sk-ant-****1234 · Please run /login"))
+	got := refusalsByKind(t)
+	if got[CallEmbeddings] != "provider refused the account (HTTP 401, key refused)" ||
+		got[CallClaudeCLI] != "provider refused the account (claude CLI, invalid api key)" {
+		t.Fatalf("records = %#v", got)
+	}
+	if raw, _ := os.ReadFile(filepath.Join(stateDir, "llmrate.json")); strings.Contains(string(raw), "9XYZ") || strings.Contains(string(raw), "1234") {
+		t.Fatalf("the state file carries the key's text: %s", raw)
+	}
+	if !strings.Contains(r.Line(), "sk-proj-****9XYZ") {
+		t.Fatalf("the journal line lost the provider's text: %s", r.Line())
 	}
 }

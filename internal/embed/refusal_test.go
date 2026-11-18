@@ -60,3 +60,34 @@ func TestEmbedStopsAtARefusal(t *testing.T) {
 		})
 	}
 }
+
+// A refusal stays recorded through a later failed call, even one whose
+// error body decodes, and is cleared by the next embedding call that
+// returns its vectors.
+func TestEmbedClearsTheRefusalOnlyOnSuccess(t *testing.T) {
+	t.Cleanup(llmrate.SetLadderForTest(0, func(time.Duration) {}))
+	answers := []struct {
+		status int
+		body   string
+	}{
+		{429, `{"error":{"message":"no credits","type":"insufficient_quota"}}`},
+		{400, `{"error":{"message":"invalid model","type":"invalid_request_error"}}`},
+		{200, `{"error":{"message":"proxy says no"}}`},
+		{200, `{"data":[{"index":0,"embedding":[1,0]}]}`},
+	}
+	var n atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		a := answers[n.Add(1)-1]
+		w.WriteHeader(a.status)
+		w.Write([]byte(a.body))
+	}))
+	defer srv.Close()
+	c := &Client{BaseURL: srv.URL, Model: "m"}
+	for i, wantKept := range []bool{true, true, true, false} {
+		_, _, err := c.Embed([]string{"a"})
+		_, kept := llmrate.Status()["last_refusal"]
+		if kept != wantKept || (i < 3) != (err != nil) {
+			t.Fatalf("answer %d: err %v, refusal kept %v, want %v", i, err, kept, wantKept)
+		}
+	}
+}

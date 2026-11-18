@@ -27,17 +27,22 @@ currently 26); a binary refuses a database newer than it understands.
 
   Such a call is asked once, is not retried and leaves the call spacing as
   it was. `aimem curate`, `embed` and `doc` stop at the first one, `--all`
-  included, print one line with the provider's message, saying that the
-  administrator must restore the account's credit or key, and exit with
-  status 6. The hub's `curate-all.sh`, which `install-hub.sh` writes, stops
-  at a step that exits 6 and exits 6 itself, so `aimem-curate.service`
-  ends as failed; other failures go on as before. `aimem health` shows the
-  newest refusal as `llm_pace.last_refusal` (its time and the provider's
-  clipped message) until a call succeeds, and the TUI's Hub tab shows it
-  under the pace line. A plain 429, a 5xx and a block page keep their
-  retries. Before, a hub whose provider account had run out of credit
-  retried every store through the whole ladder each hour, and the service
-  ended as a success.
+  included (a refused embedding for curation's dedup too), print one line
+  with the provider's message, saying that the administrator must restore
+  the account's credit or key, and exit with status 6. The hub's
+  `curate-all.sh`, which `install-hub.sh` writes, still runs its later
+  steps, because one account can refuse completions and serve embeddings,
+  and then exits 6, so `aimem-curate.service` ends as failed; other
+  failures go on as before. `aimem health` shows the newest refusal of
+  each kind of call (completions, embeddings, the text check, the claude
+  CLI) in `llm_pace.last_refusal`, with its time and the provider's
+  clipped message, until a call of the same kind succeeds; a refused key
+  is recorded with its status and kind only, since the provider's message
+  can quote part of the key. The TUI's Hub tab shows each under the pace
+  line. A plain 429, a 5xx and a block page keep their retries. Before, a
+  hub whose provider account had run out of credit retried every store
+  through the whole ladder each hour, and the service ended as a
+  success.
 
 ## [0.11.3] — 2026-11-18
 

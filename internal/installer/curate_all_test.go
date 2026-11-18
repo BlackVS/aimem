@@ -1,8 +1,9 @@
 package installer
 
-// The hub's hourly curation script, written by install-hub.sh, stops at
-// the first step that exits 6 (the provider refused the account) and
-// fails the service; any other failure is logged and the run goes on.
+// The hub's hourly curation script, written by install-hub.sh, runs every
+// step even after one exits 6 (the provider refused the account for that
+// kind of call), and then exits 6 so the service ends as failed; any other
+// failure is logged and the run goes on to exit 0.
 
 import (
 	"errors"
@@ -30,7 +31,7 @@ func curateAllScript(t *testing.T) string {
 	return body[:j+1]
 }
 
-func TestCurateAllStopsAtARefusal(t *testing.T) {
+func TestCurateAllFailsAfterARefusal(t *testing.T) {
 	shellOnly(t)
 	bash, _ := exec.LookPath("bash")
 	script := filepath.Join(t.TempDir(), "curate-all.sh")
@@ -44,8 +45,8 @@ func TestCurateAllStopsAtARefusal(t *testing.T) {
 		want     string // the subcommands run, in order
 		wantExit int
 	}{
-		{"curate refused", "curate", "6", "curate", 6},
-		{"embed refused", "embed", "6", "curate embed", 6},
+		{"curate refused", "curate", "6", "curate embed dedup doc", 6},
+		{"embed refused", "embed", "6", "curate embed dedup doc", 6},
 		{"doc refused", "doc", "6", "curate embed dedup doc", 6},
 		{"curate fails otherwise", "curate", "1", "curate embed dedup doc", 0},
 		{"all succeed", "", "", "curate embed dedup doc", 0},

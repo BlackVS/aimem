@@ -33,7 +33,7 @@ var (
 	blocks  int           // rate-blocks seen (persisted, for stats)
 	lastHit string        // RFC3339 of the newest block
 
-	lastRefusal *refusalRecord // the newest Refusal, until a clean success
+	refusals map[string]*refusalRecord // the newest Refusal per kind of call, until one of that kind succeeds
 
 	stateDir string // "" = process-local only (tests)
 
@@ -53,11 +53,11 @@ func SetStateDir(dir string) {
 }
 
 type state struct {
-	PenaltyMS int64          `json:"penalty_ms"`
-	Blocks    int            `json:"blocks"`
-	LastBlock string         `json:"last_block,omitempty"`
-	Refusal   *refusalRecord `json:"last_refusal,omitempty"`
-	Updated   string         `json:"updated"`
+	PenaltyMS int64                     `json:"penalty_ms"`
+	Blocks    int                       `json:"blocks"`
+	LastBlock string                    `json:"last_block,omitempty"`
+	Refusals  map[string]*refusalRecord `json:"last_refusal,omitempty"`
+	Updated   string                    `json:"updated"`
 }
 
 func loadLocked() {
@@ -73,7 +73,7 @@ func loadLocked() {
 		return
 	}
 	penalty, blocks, lastHit = time.Duration(s.PenaltyMS)*time.Millisecond, s.Blocks, s.LastBlock
-	lastRefusal = s.Refusal
+	refusals = s.Refusals
 }
 
 func saveLocked() {
@@ -81,7 +81,7 @@ func saveLocked() {
 		return
 	}
 	raw, _ := json.Marshal(state{PenaltyMS: penalty.Milliseconds(), Blocks: blocks,
-		LastBlock: lastHit, Refusal: lastRefusal, Updated: time.Now().UTC().Format(time.RFC3339)})
+		LastBlock: lastHit, Refusals: refusals, Updated: time.Now().UTC().Format(time.RFC3339)})
 	os.WriteFile(filepath.Join(stateDir, "llmrate.json"), raw, 0o600)
 }
 
@@ -102,8 +102,8 @@ func Status() map[string]any {
 	if lastHit != "" {
 		out["last_block"] = lastHit
 	}
-	if lastRefusal != nil {
-		out["last_refusal"] = map[string]string{"at": lastRefusal.At, "message": lastRefusal.Message}
+	if rs := refusalStatus(); len(rs) > 0 {
+		out["last_refusal"] = rs
 	}
 	return out
 }
@@ -240,10 +240,6 @@ func Recover() {
 	iv, _ := conf()
 	mu.Lock()
 	defer mu.Unlock()
-	if lastRefusal != nil {
-		lastRefusal = nil
-		saveLocked()
-	}
 	if penalty == 0 {
 		return
 	}

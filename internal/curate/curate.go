@@ -283,6 +283,9 @@ func Run(reg *store.Registry, root, projectID string, ex Extractor, opts RunOpts
 		}
 		v, used, verr := opts.Embedder.Embed(texts)
 		rep.EmbedTokens += used
+		if _, refused := llmrate.AsRefusal(verr); refused {
+			return nil, verr
+		}
 		if verr == nil && len(v) == len(proposals) {
 			vecs = v
 		}
@@ -725,7 +728,7 @@ func (c *ClaudeExtractor) Complete(prompt string) (string, Usage, error) {
 		}
 		if diag != "" {
 			if r := llmrate.RefusedCLI(diag); r != nil {
-				llmrate.Refuse(r)
+				llmrate.Refuse(llmrate.CallClaudeCLI, r)
 				return "", u, r
 			}
 			if claudeBlocked(diag) {
@@ -745,13 +748,14 @@ func (c *ClaudeExtractor) finish(out []byte) (string, Usage, error) {
 	res, u, err := parseClaudeResult(out)
 	if err != nil {
 		if r := llmrate.RefusedCLI(err.Error()); r != nil {
-			llmrate.Refuse(r)
+			llmrate.Refuse(llmrate.CallClaudeCLI, r)
 			return res, u, r
 		}
 	}
 	switch {
 	case err == nil:
 		llmrate.Recover()
+		llmrate.Succeeded(llmrate.CallClaudeCLI)
 	case claudeBlocked(err.Error()):
 		llmrate.Penalize("claude CLI: " + llmrate.Clip(err.Error(), 200))
 	}
@@ -875,7 +879,7 @@ func (o *OpenAIExtractor) Complete(prompt string) (string, Usage, error) {
 		}
 		resp.Body.Close()
 		if r := llmrate.Refused(status, raw); r != nil {
-			llmrate.Refuse(r)
+			llmrate.Refuse(llmrate.CallCompletions, r)
 			return "", u, r
 		}
 		reason := ""
@@ -908,6 +912,7 @@ func (o *OpenAIExtractor) Complete(prompt string) (string, Usage, error) {
 	if len(out.Choices) == 0 {
 		return "", u, fmt.Errorf("completions returned no choices (HTTP %d)", status)
 	}
+	llmrate.Succeeded(llmrate.CallCompletions)
 	return out.Choices[0].Message.Content, u, nil
 }
 

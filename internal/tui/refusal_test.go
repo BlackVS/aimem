@@ -6,26 +6,33 @@ import (
 	"testing"
 )
 
-// The hub panel shows a refusal of the provider account under the pace
-// line, as health reports it, and shows nothing when there is none.
+// The hub panel shows each refusal of the provider account under the pace
+// line, with its kind of call, as health reports them, and shows nothing
+// when there is none.
 func TestHubPanelShowsTheLastRefusal(t *testing.T) {
-	for _, c := range []struct {
-		pace string
-		want bool
-	}{
-		{`{"interval_s":2,"penalty_s":0,"spacing_s":2,"blocks":0,"last_refusal":{"at":"2026-11-18T10:00:00Z","message":"provider refused the account (HTTP 429, insufficient_quota): no credits"}}`, true},
-		{`{"interval_s":2,"penalty_s":0,"spacing_s":2,"blocks":0}`, false},
+	var pace map[string]any
+	if err := json.Unmarshal([]byte(`{"interval_s":2,"penalty_s":0,"spacing_s":2,"blocks":0,"last_refusal":[
+		{"kind":"completions","at":"2026-11-18T10:00:00Z","message":"provider refused the account (HTTP 429, insufficient_quota): no credits"},
+		{"kind":"embeddings","at":"2026-11-18T10:00:00Z","message":"provider refused the account (HTTP 401, key refused)"}]}`), &pace); err != nil {
+		t.Fatal(err)
+	}
+	var b strings.Builder
+	model{}.renderHubOne(&b, hubLine{Name: "hub", OK: true, Pace: pace})
+	for _, want := range []string{
+		"llm refused (completions): provider refused the account (HTTP 429, insufficient_quota): no credits",
+		"llm refused (embeddings): provider refused the account (HTTP 401, key refused)",
 	} {
-		var pace map[string]any
-		if err := json.Unmarshal([]byte(c.pace), &pace); err != nil {
-			t.Fatal(err)
+		if !strings.Contains(b.String(), want) {
+			t.Fatalf("missing %q:\n%s", want, b.String())
 		}
-		var b strings.Builder
-		model{}.renderHubOne(&b, hubLine{Name: "hub", OK: true, Pace: pace})
-		got := strings.Contains(b.String(), "llm refused: provider refused the account (HTTP 429, insufficient_quota): no credits") &&
-			strings.Contains(b.String(), "the provider account needs the administrator")
-		if got != c.want {
-			t.Fatalf("refusal shown %v, want %v:\n%s", got, c.want, b.String())
-		}
+	}
+	if strings.Count(b.String(), "the provider account needs the administrator") != 2 {
+		t.Fatalf("not one line per refusal:\n%s", b.String())
+	}
+
+	b.Reset()
+	model{}.renderHubOne(&b, hubLine{Name: "hub", OK: true, Pace: map[string]any{"interval_s": 2.0, "spacing_s": 2.0}})
+	if strings.Contains(b.String(), "llm refused") {
+		t.Fatalf("a refusal shown without one:\n%s", b.String())
 	}
 }
