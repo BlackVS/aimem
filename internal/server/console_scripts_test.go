@@ -254,29 +254,34 @@ var urlAttrs = set("href", "src", "action", "formaction", "xlink:href")
 // contextOf says which context text ends in: an inline event handler
 // attribute, where the browser decodes HTML entities before the script
 // runs, so esc is not the escape; an address attribute, where esc does not
-// stop a javascript: address; or HTML.
+// stop a javascript: address; or HTML. It reads the attributes in order and
+// skips each value that has ended, so text inside a value that is still
+// open (a handler's own "var u = 1") is never taken for an attribute.
 func contextOf(text string) string {
-	m := attrRE.FindAllStringSubmatchIndex(text, -1)
-	if len(m) == 0 {
-		return ctxHTML
-	}
-	last := m[len(m)-1]
-	rest := text[last[1]:]
-	if quote := text[last[4]:last[5]]; quote != "" {
-		if strings.Contains(rest, quote) {
+	for pos := 0; ; {
+		m := attrRE.FindStringSubmatchIndex(text[pos:])
+		if m == nil {
 			return ctxHTML
 		}
-	} else if strings.ContainsAny(rest, " \t\r\n>") {
-		return ctxHTML
+		value := pos + m[1]
+		var end int
+		if quote := text[pos+m[4] : pos+m[5]]; quote != "" {
+			end = strings.Index(text[value:], quote)
+		} else {
+			end = strings.IndexAny(text[value:], " \t\r\n>")
+		}
+		if end < 0 {
+			name := strings.ToLower(text[pos+m[2] : pos+m[3]])
+			switch {
+			case strings.HasPrefix(name, "on"):
+				return ctxInline
+			case urlAttrs[name]:
+				return ctxURL
+			}
+			return ctxHTML
+		}
+		pos = value + end + 1
 	}
-	name := strings.ToLower(text[last[2]:last[3]])
-	switch {
-	case strings.HasPrefix(name, "on"):
-		return ctxInline
-	case urlAttrs[name]:
-		return ctxURL
-	}
-	return ctxHTML
 }
 
 const (
@@ -795,6 +800,10 @@ func TestConsoleHoleRule(t *testing.T) {
 		{"after a closed address", "x = `<a href=\"/x\" title=\"${esc(t.title)}\">x</a>`", nil},
 		{"handler in capitals", "x = `<a ONCLICK=\"go('${esc(t.title)}')\">x</a>`", []string{"inline esc(t.title)"}},
 		{"unquoted handler", "x = `<a onclick=go('${esc(t.title)}')>x</a>`", []string{"inline esc(t.title)"}},
+		// A statement inside a handler is not an attribute (delta review of #395).
+		{"assignment in a handler", "x = `<a onclick=\"var u = 1; go('${esc(t.title)}')\">x</a>`", []string{"inline esc(t.title)"}},
+		{"assignment after a call in a handler", "x = `<a onclick=\"render(); sel = '${esc(t.title)}'\">x</a>`", []string{"inline esc(t.title)"}},
+		{"comparison in a closed handler", "x = `<a onclick=\"if(a == 1) go()\" title=\"${esc(t.title)}\">x</a>`", nil},
 	}
 	for _, tc := range cases {
 		r := checkPage(page, tc.script)
