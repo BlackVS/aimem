@@ -343,6 +343,7 @@ var pageHelpers = map[string]map[string]string{
 		"stateChipsHTML": "the page's own templates",
 		"taskRef":        "the page's own templates with esc, stChip and taskURL",
 		"waitsHTML":      "fixed text, or the page's own template of taskRef",
+		"goalOption":     "the page's own template with esc; its count is a number the page counted",
 		"featHead":       "the page's own template with esc, stChip and featURL",
 	},
 }

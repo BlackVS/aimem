@@ -458,13 +458,13 @@ function renderEpicDetails(e = EPICS[FILTER.epic], note = EPIC_NOTE, summary = "
     ${e.objective?md2html(e.objective):'<p class="dim">No objective provided.</p>'}
     <p class="dim">${esc(note)}</p>` : "";
 }
-// The features view's goal opens with the view, and keeps a reader's open
-// or closed choice while the same goal stays shown.
+// The features view's goal starts closed, so its features are on the first
+// screen, and keeps a reader's open or closed choice while it stays shown.
 function renderGoalDetails(goal){
   const same = !!goal && PANEL_GOAL===goal.id, wasOpen = $("epicDetails").open;
   renderEpicDetails(goal || null, "The features below belong to this goal; its tasks are in the list and the board under the epic filter.", "View goal");
   PANEL_FEAT = true; PANEL_GOAL = goal ? goal.id : "";
-  $("epicDetails").open = goal ? (same ? wasOpen : true) : false;
+  $("epicDetails").open = same && wasOpen;
 }
 function refreshView(){ return VIEW==="board" ? loadBoard() : VIEW==="features" ? loadFeatures() : listTasks(true); }
 // The refresh button and a tab that comes back reload the epics first and
@@ -625,10 +625,13 @@ function taskRef(t, all){
 }
 // What a feature waits on: its confirmed tasks that are not DONE, a task
 // that cannot be read included (nothing says it is done).
-function waitsHTML(tasks){
+// A feature that is not DONE is never shown as finished, even when every
+// task it confirms is.
+function waitsHTML(tasks, f){
   if(!tasks.length) return 'no confirmed tasks';
   const open = tasks.filter(t => t.unreadable || t.error || t.state!=="DONE");
-  if(!open.length) return 'waits on nothing: every confirmed task is DONE';
+  if(!open.length) return f.state==="DONE" ? 'waits on nothing: every confirmed task is DONE'
+    : `no confirmed task is open: ${tasks.length===1 ? 'its one confirmed task is' : 'all '+tasks.length+' are'} DONE, and the feature is still ${esc(f.state)}`;
   return `waits on:<ul>${open.map(t => "<li>"+taskRef(t)+"</li>").join("")}</ul>`;
 }
 function featHead(f){
@@ -637,15 +640,45 @@ function featHead(f){
     <span class="chip mark-${esc(f.feature.mark)}">${esc(f.feature.mark)}</span>${stChip(f.state)}
     <span class="dim">${f.confirmed_tasks} confirmed</span></div>`;
 }
+// How many features each goal has ({goal: {count}}), from the project's
+// feature records, archived ones included as the view lists them. The
+// list's rows carry kind and epic, which is the goal; a hub that does not
+// know kind lists no row of kind feature. null when the read fails: the
+// selector then lists the epics as they are.
+async function featureCounts(){
+  const n = {}; let after = "";
+  try{
+    do{
+      const q = new URLSearchParams({kind:"feature", include_archived:"true", limit:"100"}); if(after) q.set("after", after);
+      const page = await api("/v1/projects/"+encodeURIComponent(PROJ)+"/tasks?"+q);
+      for(const t of page.tasks||[]) if(t.kind==="feature" && t.epic) (n[t.epic] ||= {count: 0}).count++;
+      after = page.next_cursor||"";
+    }while(after);
+  }catch(e){ if(e.auth) throw e; return null; }
+  return n;
+}
+// One entry of the goal selector; c is the goal's {count}, if it has features.
+function goalOption(e, c){
+  return `<option value="${esc(e.id)}"${e.id===GOAL?' selected':''}>${esc(e.title)}${c?` (${c.count} feature${c.count===1?'':'s'})`:''}${e.state==="RETIRED"?" (retired)":""}</option>`;
+}
+// The goals with features first, each with its number; the epics without
+// after them, still to be chosen.
+function goalOptions(goals, counts){
+  const head = '<option value="">— choose a goal —</option>';
+  if(!counts) return head + goals.map(e => goalOption(e)).join("");
+  const none = goals.filter(e => !counts[e.id]);
+  return head + goals.filter(e => counts[e.id]).map(e => goalOption(e, counts[e.id])).join("")
+    + (none.length ? `<optgroup label="no features yet">${none.map(e => goalOption(e)).join("")}</optgroup>` : "");
+}
 async function loadFeatures(){
   const my = NAV, seq = ++SEQ.feat, body = $("featBody");
   const stale = () => my!==NAV || seq!==SEQ.feat;
   body.innerHTML = '<div class="dim">loading…</div>';
   try{
-    const r = await api("/v1/projects/"+encodeURIComponent(PROJ)+"/epics?include_retired=true");
+    const [r, counts] = await Promise.all([api("/v1/projects/"+encodeURIComponent(PROJ)+"/epics?include_retired=true"), featureCounts()]);
     if(stale()) return;
     const goals = r.epics||[];
-    $("goalSel").innerHTML = '<option value="">— choose a goal —</option>' + goals.map(e => `<option value="${esc(e.id)}"${e.id===GOAL?' selected':''}>${esc(e.title)}${e.state==="RETIRED"?" (retired)":""}</option>`).join("");
+    $("goalSel").innerHTML = goalOptions(goals, counts);
     renderGoalDetails(goals.find(e => e.id===GOAL));
     if(!goals.length){ body.innerHTML = '<div class="dim">This project has no goals, so it has no features.</div>'; markLoaded(); return; }
     if(!GOAL){ body.innerHTML = '<div class="dim">Choose a goal to see its features.</div>'; markLoaded(); return; }
@@ -661,15 +694,15 @@ async function loadFeatures(){
       const tasks = await confirmedTasks(f);
       if(stale()) return;
       body.innerHTML = `<div class="row"><a data-go href="${featURL('')}" class="dim">← the goal's features</a></div>
-        <div class="frow${f.archived?' archived':''}">${featHead(f)}<div class="waits">${waitsHTML(tasks)}</div></div>
+        <div class="frow${f.archived?' archived':''}">${featHead(f)}<div class="waits">${waitsHTML(tasks, f)}</div></div>
         <h2>confirmed tasks</h2>
         ${tasks.length ? tasks.map(t => '<div class="ftask">'+taskRef(t, true)+'</div>').join("") : '<div class="dim">This feature has no confirmed tasks.</div>'}`;
       markLoaded(); return;
     }
-    if(!feats.length){ body.innerHTML = '<div class="dim">This goal has no features.</div>'; markLoaded(); return; }
+    if(!feats.length){ body.innerHTML = '<div class="dim">This epic has no feature records.' + (!counts ? '' : Object.keys(counts).length ? ' The goals that have them come first in the goal selector, each with its number of features in brackets.' : ' No epic of this project has any yet.') + '</div>'; markLoaded(); return; }
     const all = await Promise.all(feats.map(confirmedTasks));
     if(stale()) return;
-    body.innerHTML = feats.map((f, i) => `<div class="frow${f.archived?' archived':''}">${featHead(f)}<div class="waits">${waitsHTML(all[i])}</div></div>`).join("")
+    body.innerHTML = feats.map((f, i) => `<div class="frow${f.archived?' archived':''}">${featHead(f)}<div class="waits">${waitsHTML(all[i], f)}</div></div>`).join("")
       + (page.truncated ? '<div class="dim">showing the first 100 features of this goal</div>' : '');
     markLoaded();
   }catch(e){ if(e.auth) return boot(); if(!stale()) body.innerHTML = `<div class="bad">${esc(e.message)}</div>`; }
