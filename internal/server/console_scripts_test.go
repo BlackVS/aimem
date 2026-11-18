@@ -264,11 +264,15 @@ func contextOf(text string) string {
 			return ctxHTML
 		}
 		value := pos + m[1]
-		var end int
+		// next is where reading goes on: past a closing quote, but at the
+		// space ending an unquoted value, since the next name needs it.
+		var end, next int
 		if quote := text[pos+m[4] : pos+m[5]]; quote != "" {
 			end = strings.Index(text[value:], quote)
+			next = end + 1
 		} else {
 			end = strings.IndexAny(text[value:], " \t\r\n>")
+			next = end
 		}
 		if end < 0 {
 			name := strings.ToLower(text[pos+m[2] : pos+m[3]])
@@ -280,7 +284,7 @@ func contextOf(text string) string {
 			}
 			return ctxHTML
 		}
-		pos = value + end + 1
+		pos = value + next
 	}
 }
 
@@ -800,10 +804,23 @@ func TestConsoleHoleRule(t *testing.T) {
 		{"after a closed address", "x = `<a href=\"/x\" title=\"${esc(t.title)}\">x</a>`", nil},
 		{"handler in capitals", "x = `<a ONCLICK=\"go('${esc(t.title)}')\">x</a>`", []string{"inline esc(t.title)"}},
 		{"unquoted handler", "x = `<a onclick=go('${esc(t.title)}')>x</a>`", []string{"inline esc(t.title)"}},
-		// A statement inside a handler is not an attribute (delta review of #395).
+		// The attribute reader, from the reviews of #395: a statement inside a
+		// value is not an attribute, and an unquoted value does not hide the
+		// attribute after it.
 		{"assignment in a handler", "x = `<a onclick=\"var u = 1; go('${esc(t.title)}')\">x</a>`", []string{"inline esc(t.title)"}},
 		{"assignment after a call in a handler", "x = `<a onclick=\"render(); sel = '${esc(t.title)}'\">x</a>`", []string{"inline esc(t.title)"}},
+		{"assignment in a single-quoted handler", "x = `<a onclick='u = \"a\"; go(\"${esc(t.title)}\")'>x</a>`", []string{"inline esc(t.title)"}},
+		{"equals in a title before a handler", "x = `<a title=\"a = b\" onclick=\"go('${esc(t.title)}')\">x</a>`", []string{"inline esc(t.title)"}},
+		{"other quote in a title before a handler", "x = `<a title='it = \"x\"' onclick=\"go('${esc(t.title)}')\">x</a>`", []string{"inline esc(t.title)"}},
+		{"address then handler", "x = `<a href=\"${taskURL(t.id)}\" onclick=\"var q = 1; return go('${esc(t.title)}')\">x</a>`", []string{"inline esc(t.title)"}},
+		{"assignment in a closed handler", "x = `<a onclick=\"a = 1\" title=\"${esc(t.title)}\">x</a>`", nil},
 		{"comparison in a closed handler", "x = `<a onclick=\"if(a == 1) go()\" title=\"${esc(t.title)}\">x</a>`", nil},
+		{"closed handler then address", "x = `<a onclick=\"go()\" href=\"${esc(r.ref)}\">x</a>`", []string{"url esc(r.ref)"}},
+		{"unquoted value before a handler", "x = `<input type=checkbox onchange=\"tog('${esc(t.title)}')\">`", []string{"inline esc(t.title)"}},
+		{"unquoted value before a handler with a statement", "x = `<a class=x onclick=\"u = 2; go('${esc(t.title)}')\">x</a>`", []string{"inline esc(t.title)"}},
+		{"unquoted value before an address", "x = `<a tabindex=0 href=\"${esc(r.ref)}\">x</a>`", []string{"url esc(r.ref)"}},
+		{"unquoted value ending its tag", "x = `<b class=x><a onclick=\"go('${esc(t.title)}')\">x</a></b>`", []string{"inline esc(t.title)"}},
+		{"newline between attributes", "x = `<a class=x\n  onclick=\"go('${esc(t.title)}')\">x</a>`", []string{"inline esc(t.title)"}},
 	}
 	for _, tc := range cases {
 		r := checkPage(page, tc.script)
