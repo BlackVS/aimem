@@ -439,7 +439,8 @@ function epicLabel(id){ const e = EPICS[id]; return e ? e.title : short(id); }
 // The epic panel: the task views show the epic of their filter; the
 // features view shows its goal (renderGoalDetails), with its own note.
 const EPIC_NOTE = "Tasks below belong to this epic; the current state and archive filters still apply.";
-let PANEL_GOAL = "";      // the goal the panel shows for the features view, "" while it serves the task views
+let PANEL_FEAT = false;   // the features view wrote the panel; the task views render their epic again
+let PANEL_GOAL = "";      // the goal the panel shows for the features view ("" for none)
 function renderEpicDetails(e = EPICS[FILTER.epic], note = EPIC_NOTE, summary = "View epic"){
   const panel = $("epicDetails");
   panel.open = false;
@@ -455,7 +456,7 @@ function renderEpicDetails(e = EPICS[FILTER.epic], note = EPIC_NOTE, summary = "
 function renderGoalDetails(goal){
   const same = !!goal && PANEL_GOAL===goal.id, wasOpen = $("epicDetails").open;
   renderEpicDetails(goal || null, "The features below belong to this goal; its tasks are in the list and the board under the epic filter.", "View goal");
-  PANEL_GOAL = goal ? goal.id : "";
+  PANEL_FEAT = true; PANEL_GOAL = goal ? goal.id : "";
   $("epicDetails").open = goal ? (same ? wasOpen : true) : false;
 }
 function refreshView(){ return VIEW==="board" ? loadBoard() : VIEW==="features" ? loadFeatures() : listTasks(true); }
@@ -548,8 +549,10 @@ function showList(){
   const board = VIEW==="board", feat = VIEW==="features", list = !board && !feat;
   $("vwList").classList.toggle("on", list); $("vwBoard").classList.toggle("on", board); $("vwFeat").classList.toggle("on", feat);
   $("listOnly").hidden = !list; $("archLbl").hidden = !list; $("epicFilter").hidden = feat; $("goalFilter").hidden = !feat;
-  if(feat) $("epicDetails").hidden = true;                 // loadFeatures shows its goal
-  else if(PANEL_GOAL){ PANEL_GOAL = ""; renderEpicDetails(); } // the panel held the goal: back to the filter's epic
+  // The features view keeps its goal's panel while the address names that
+  // goal (no jump while the view reloads); loadFeatures renders it.
+  if(feat){ if(!(PANEL_FEAT && GOAL && PANEL_GOAL===GOAL)) $("epicDetails").hidden = true; }
+  else if(PANEL_FEAT){ PANEL_FEAT = false; PANEL_GOAL = ""; renderEpicDetails(); } // back to the filter's epic
   else $("epicDetails").hidden = !EPICS[FILTER.epic];
   $("list").hidden = !list; $("listMore").hidden = !list; $("board").hidden = !board; $("boardNote").hidden = !board; $("features").hidden = !feat;
   if(!PROJ){ $("list").innerHTML = '<div class="dim">Pick or enter a project.</div>'; $("boardNote").textContent = "Pick or enter a project."; $("featBody").innerHTML = '<div class="dim">Pick or enter a project.</div>'; $("moreBtn").hidden = true; $("board").innerHTML = ""; return; }

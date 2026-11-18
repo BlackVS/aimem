@@ -152,7 +152,32 @@ assert.equal(panel.hidden, true, 'no goal chosen, no goal panel');
 run(`EPICS = {g: {id: 'g', title: 'An epic', state: 'OPEN'}}; FILTER.epic = 'g'`);
 await open('?project=p&view=features');
 assert.equal(panel.hidden, true, "the filter's epic is not shown as the goal");
+// And back in the list, the filter's epic is in its panel again, whatever
+// the features view showed: no goal, a goal then none, an unknown goal.
+const epicBack = async why => {
+  await open('?project=p');
+  assert.equal(panel.hidden, false, why + ': the epic panel is back');
+  assert.equal(element('epicSummary').textContent, 'View epic', why);
+  assert.match(goalText(), /<h2>An epic<\/h2>[\s\S]*Tasks below belong to this epic/, why);
+};
+await epicBack('after no goal');
+await open('?project=p&view=features&goal=g');
+assert.equal(element('epicSummary').textContent, 'View goal');
+run(`setGoal('')`); for (let i = 0; i < 5; i++) await settle();
+await epicBack('after a goal, then none');
+await open('?project=p&view=features&goal=gone');
+await epicBack('after an unknown goal');
 run(`FILTER.epic = ''`);
+// Inside the view, the goal's panel stays while the address names its goal:
+// it is not hidden while the view reloads, only when the goal changes.
+await open('?project=p&view=features&goal=g');
+location.search = '?project=p&view=features&goal=g&feature=f1'; run('route()');
+assert.equal(panel.hidden, false, 'the same goal: the panel stays while the feature loads');
+for (let i = 0; i < 5; i++) await settle();
+assert.equal(panel.hidden, false);
+location.search = '?project=p&view=features&goal=empty'; run('route()');
+assert.equal(panel.hidden, true, 'another goal: hidden until it is rendered');
+for (let i = 0; i < 5; i++) await settle();
 await open('?project=p&view=features&goal=gone');
 assert.match(body(), /This project has no such goal/);
 hub.epics = [];
