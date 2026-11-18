@@ -13,6 +13,22 @@ currently 26); a binary refuses a database newer than it understands.
 
 ## [Unreleased]
 
+### Changed
+
+- **The goal selector of the board's features view, after the owner's
+  second look.**
+  - The "no features yet" label is gone: the goals with features come
+    first and the epics without follow, with nothing between them.
+  - A goal's number of features stands in front of its title in brackets,
+    as in "(5) Release 1.0", and a retired epic's mark stands in the same
+    place, as in "(2, retired)". So a long title can no longer hide them.
+  - A title longer than 60 characters is cut with an ellipsis in the
+    selector. Its tooltip and the goal panel show it whole.
+  - The feature guide and the description of a title in `create_epic` and
+    `update_epic` recommend a goal title of at most about 60 characters,
+    like a heading, with what the goal is about in its objective. Nothing
+    refuses or shortens a longer title.
+
 ### Fixed
 
 - **A provider that refuses the account stops curation at once, and the

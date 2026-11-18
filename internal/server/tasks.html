@@ -72,6 +72,7 @@
   .row{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin:6px 0}
   .epic-filter{display:flex;gap:10px;align-items:center;margin:6px 0}
   #epicSel{width:32rem;max-width:100%;min-width:0;flex-shrink:1}
+  #goalSel{max-width:100%;min-width:0;flex-shrink:1}
   .grow{flex:1;min-width:120px}
   label.f{display:block;margin:8px 0 2px;color:var(--dim);font-size:12px;text-transform:uppercase;letter-spacing:.08em}
   #gate{position:fixed;inset:0;background:var(--ink);display:flex;align-items:center;justify-content:center;flex-direction:column;gap:12px;z-index:9}
@@ -657,18 +658,29 @@ async function featureCounts(){
   }catch(e){ if(e.auth) throw e; return null; }
   return n;
 }
-// One entry of the goal selector; c is the goal's {count}, if it has features.
+// A goal's title is meant to be a short name, but nothing bounds it: the
+// selector cuts a longer one with an ellipsis, and the option's tooltip
+// and the goal panel keep it whole.
+const GOAL_TITLE_MAX = 60;
+function goalTitle(t){
+  const cs = Array.from(String(t||""));
+  return cs.length > GOAL_TITLE_MAX ? cs.slice(0, GOAL_TITLE_MAX-1).join("") + "…" : cs.join("");
+}
+// One entry of the goal selector; c is the goal's {count}, if it has
+// features. The count and the retired mark stand in front of the title,
+// in one bracket, so a cut title never takes them with it.
 function goalOption(e, c){
-  return `<option value="${esc(e.id)}"${e.id===GOAL?' selected':''}>${esc(e.title)}${c?` (${c.count} feature${c.count===1?'':'s'})`:''}${e.state==="RETIRED"?" (retired)":""}</option>`;
+  const marks = [c ? String(c.count) : "", e.state==="RETIRED" ? "retired" : ""].filter(Boolean).join(", ");
+  const label = (marks ? "(" + marks + ") " : "") + goalTitle(e.title);
+  return `<option value="${esc(e.id)}" title="${esc(e.title)}"${e.id===GOAL?' selected':''}>${esc(label)}</option>`;
 }
 // The goals with features first, each with its number; the epics without
-// after them, still to be chosen.
+// after them, with nothing between the two.
 function goalOptions(goals, counts){
   const head = '<option value="">— choose a goal —</option>';
   if(!counts) return head + goals.map(e => goalOption(e)).join("");
-  const none = goals.filter(e => !counts[e.id]);
   return head + goals.filter(e => counts[e.id]).map(e => goalOption(e, counts[e.id])).join("")
-    + (none.length ? `<optgroup label="no features yet">${none.map(e => goalOption(e)).join("")}</optgroup>` : "");
+    + goals.filter(e => !counts[e.id]).map(e => goalOption(e)).join("");
 }
 async function loadFeatures(){
   const my = NAV, seq = ++SEQ.feat, body = $("featBody");

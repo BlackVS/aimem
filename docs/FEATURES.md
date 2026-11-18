@@ -1,10 +1,13 @@
 # Features of a goal
 
 A goal is an epic: a release or milestone with a check that says when it is
-reached. A **feature** is a record on the task board that names one thing
-the goal needs, such as "the members' hosts exist". It is not work. Nobody
-claims a feature or is offered one; the work that delivers it is ordinary
-tasks, and the feature lists those tasks as its **confirmed tasks**.
+reached. Its title is best a short name, like a heading, of at most about 60
+characters, the length the board page's goal selector shows whole; what the
+goal is about goes into its objective. A **feature** is a record on the task
+board that names one thing the goal needs, such as "the members' hosts
+exist". It is not work. Nobody claims a feature or is offered one; the work
+that delivers it is ordinary tasks, and the feature lists those tasks as its
+**confirmed tasks**.
 
 This page is for a session that plans and tracks a goal: an architect, an
 operator, or one agent working alone. Everything here works with one

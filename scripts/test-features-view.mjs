@@ -114,13 +114,32 @@ assert.equal((goalText().match(/<p>/g) || []).length, 3, 'each paragraph of the 
 assert.match(goalText(), /&lt;script&gt;/, 'the description is escaped');
 assert.match(goalText(), /<b>every<\/b>/, 'and rendered as in the task views');
 assert.match(goalText(), /The features below belong to this goal/);
-assert.match(element('goalSel').innerHTML, /value="g" selected>Goal &lt;one&gt;[^<]*line of the page;  \(3 features\)<\/option>/);
-// The selector: the goals with features first, each with its number
-// (archived features included, as the view lists them), retired marked;
-// the epics without features after them, still to be chosen.
-const options = [...element('goalSel').innerHTML.matchAll(/<option value="([^"]*)"[^>]*>([^<]*)<\/option>/g)].map(m => [m[1], m[2].replace(/^Goal &lt;one&gt;.*(?= \(3)/, 'Goal')]);
-assert.deepEqual(options, [['', '— choose a goal —'], ['g', 'Goal (3 features)'], ['r', 'Retired goal (1 feature) (retired)'], ['old', 'Older epic'], ['empty', 'Empty goal']]);
-assert.match(element('goalSel').innerHTML, /<optgroup label="no features yet"><option value="old">Older epic<\/option><option value="empty">Empty goal<\/option><\/optgroup>$/, 'the epics without features are grouped after the goals');
+// The selector: the goals with features first, each with its number in
+// front of its title (archived features included, as the view lists
+// them), the retired mark in the same bracket; the epics without features
+// after them, with no label or separator between. A long title is cut,
+// and the option's tooltip keeps it whole.
+const escText = t => t.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+const gTitle = hub.epics.find(e => e.id === 'g').title;
+const gShown = '(3) ' + escText(Array.from(gTitle).slice(0, 59).join('') + '…');
+const options = [...element('goalSel').innerHTML.matchAll(/<option value="([^"]*)"[^>]*>([^<]*)<\/option>/g)].map(m => [m[1], m[2]]);
+assert.deepEqual(options, [['', '— choose a goal —'], ['g', gShown], ['r', '(1, retired) Retired goal'], ['old', 'Older epic'], ['empty', 'Empty goal']]);
+assert.ok(element('goalSel').innerHTML.includes(`<option value="g" title="${escText(gTitle).replace(/"/g, '&quot;')}" selected>`), 'the whole title is the tooltip');
+assert.doesNotMatch(element('goalSel').innerHTML, /optgroup|no features yet/, 'no group label');
+assert.ok(goalText().includes(escText(gTitle).trim()), 'the goal panel shows the whole title');
+// A title of 120 characters: cut to GOAL_TITLE_MAX with an ellipsis, the
+// count still in front; a retired epic with and without features.
+const long = 'A goal whose title is a whole sentence about what the goal is for, written where its objective should have said it whole';
+assert.equal(long.length, 120);
+const opts = html => [...html.matchAll(/<option value="([^"]*)" title="([^"]*)"[^>]*>([^<]*)<\/option>/g)].map(m => [m[1], m[2], m[3]]);
+assert.deepEqual(opts(run(`goalOptions(${JSON.stringify([{id: 'x', title: long, state: 'OPEN'}, {id: 'y', title: 'Old', state: 'RETIRED'}, {id: 'z', title: 'Gone', state: 'RETIRED'}])}, {x: {count: 5}, z: {count: 1}})`)), [
+  ['x', long, '(5) ' + long.slice(0, 59) + '…'],
+  ['z', 'Gone', '(1, retired) Gone'],
+  ['y', 'Old', '(retired) Old'],
+]);
+assert.equal(run('GOAL_TITLE_MAX'), 60);
+assert.equal(Array.from(run(`goalTitle(${JSON.stringify(long)})`)).length, 60, 'the cut title, ellipsis included, is GOAL_TITLE_MAX long');
+assert.equal(run('goalTitle("A title of exactly sixty characters, which is not cut at all")'), 'A title of exactly sixty characters, which is not cut at all');
 const order = [...body().matchAll(/class="ftitle" data-go href="([^"]+)">([^<]*(?:<(?!\/a>)[^<]*)*)<\/a>/g)].map(m => m[1]);
 assert.deepEqual(order, ['f1', 'f2', 'f3'].map(id => `/tasks?project=p&view=features&goal=g&feature=${id}`), 'features in position order, each linked');
 assert.match(body(), /First &lt;b&gt;feature&lt;\/b&gt;/, 'titles are escaped');
@@ -204,7 +223,8 @@ assert.deepEqual(calls.filter(c => c.startsWith('/v1/projects/')), ['/v1/project
 hub.kindFeature = false;
 await open('?project=p&view=features&goal=g');
 assert.deepEqual([...element('goalSel').innerHTML.matchAll(/<option value="([^"]*)"/g)].map(m => m[1]), ['', 'old', 'g', 'empty', 'r'], 'the order of creation, no counts');
-assert.doesNotMatch(element('goalSel').innerHTML, /optgroup|feature/);
+assert.doesNotMatch(element('goalSel').innerHTML, /optgroup|feature|\(\d/);
+assert.match(element('goalSel').innerHTML, />\(retired\) Retired goal<\/option>/, 'the plain selector marks a retired epic in front too');
 assert.equal((body().match(/class="frow/g) || []).length, 3);
 await open('?project=p&view=features&goal=empty');
 assert.equal(body(), '<div class="dim">This epic has no feature records.</div>', 'without counts, no pointer to them');
@@ -219,7 +239,7 @@ hub.features = saved;
 // A hub that ignores kind lists tasks: none of them is counted as a feature.
 hub.ignoresKind = true;
 await open('?project=p&view=features&goal=g');
-assert.doesNotMatch(element('goalSel').innerHTML, /\(\d+ features?\)/, 'a task is not a feature');
+assert.doesNotMatch(element('goalSel').innerHTML, />\(\d+[,)]/, 'a task is not a feature');
 hub.ignoresKind = false;
 await open('?project=p&view=features');
 assert.equal(panel.hidden, true, 'no goal chosen, no goal panel');

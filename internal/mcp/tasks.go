@@ -184,7 +184,7 @@ var taskToolDefs = append([]map[string]any{
 			"retrying with the same key and content returns the epic created the first time.",
 		"inputSchema": objSchema(map[string]any{
 			"project":         prop("string", "project id (defaults to the current project)"),
-			"title":           prop("string", "short title (at most 256 bytes)"),
+			"title":           prop("string", epicTitleDescription),
 			"objective":       prop("string", "what the epic delivers"),
 			"target":          prop("string", "the release or milestone it maps to"),
 			"idempotency_key": prop("string", "your unique key for this create (retry-safe)"),
@@ -197,7 +197,7 @@ var taskToolDefs = append([]map[string]any{
 		"inputSchema": objSchema(map[string]any{
 			"project":           prop("string", "project id (defaults to the current project)"),
 			"id":                prop("string", "epic id"),
-			"title":             prop("string", "short title (at most 256 bytes)"),
+			"title":             prop("string", epicTitleDescription),
 			"objective":         prop("string", "what the epic delivers"),
 			"state":             propEnum("OPEN or RETIRED", "OPEN", "RETIRED"),
 			"target":            prop("string", "the release or milestone it maps to"),
@@ -326,6 +326,11 @@ func featureLinkProp() map[string]any {
 	return map[string]any{"type": "object", "description": "optional: create the record as a feature with this link to its goal",
 		"properties": featureLinkProps(nil), "required": []string{"goal", "position", "mark"}}
 }
+
+// epicTitleDescription recommends a short name for a goal; nothing
+// enforces it beyond the store's 256-byte bound.
+const epicTitleDescription = "short title (at most 256 bytes); best a short name, like a heading, of at most about 60 characters, " +
+	"the length the board page's goal selector shows whole, with what the epic is about in its objective"
 
 // featureGuidePointer ends the three feature tools' descriptions. A team
 // member's conversation lists list_features but not team_context, so the
