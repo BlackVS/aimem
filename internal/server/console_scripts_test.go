@@ -244,20 +244,37 @@ var htmlSinkRE = regexp.MustCompile(`<|="`)
 // even without markup of its own.
 var assignedHTMLRE = regexp.MustCompile(`(innerHTML|outerHTML)\s*\+?=\s*$|insertAdjacentHTML\([^,]*,\s*$`)
 
-// inlineAttrRE finds an inline event handler attribute that is still open.
-var inlineAttrRE = regexp.MustCompile(`\son[a-z]+\s*=\s*(["'])`)
+// attrRE finds an attribute whose value starts: quoted or not, any case.
+var attrRE = regexp.MustCompile(`\s([A-Za-z][\w:-]*)\s*=\s*(["']?)`)
 
-// contextOf says whether text ends inside an inline handler attribute, where
-// the browser decodes HTML entities before the script runs, so esc is not
-// the escape.
+// urlAttrs are the attributes whose value the browser follows as an
+// address, where an escaped javascript: address still runs.
+var urlAttrs = set("href", "src", "action", "formaction", "xlink:href")
+
+// contextOf says which context text ends in: an inline event handler
+// attribute, where the browser decodes HTML entities before the script
+// runs, so esc is not the escape; an address attribute, where esc does not
+// stop a javascript: address; or HTML.
 func contextOf(text string) string {
-	m := inlineAttrRE.FindAllStringSubmatchIndex(text, -1)
-	if len(m) > 0 {
-		last := m[len(m)-1]
-		quote := text[last[2]:last[3]]
-		if !strings.Contains(text[last[1]:], quote) {
-			return ctxInline
+	m := attrRE.FindAllStringSubmatchIndex(text, -1)
+	if len(m) == 0 {
+		return ctxHTML
+	}
+	last := m[len(m)-1]
+	rest := text[last[1]:]
+	if quote := text[last[4]:last[5]]; quote != "" {
+		if strings.Contains(rest, quote) {
+			return ctxHTML
 		}
+	} else if strings.ContainsAny(rest, " \t\r\n>") {
+		return ctxHTML
+	}
+	name := strings.ToLower(text[last[2]:last[3]])
+	switch {
+	case strings.HasPrefix(name, "on"):
+		return ctxInline
+	case urlAttrs[name]:
+		return ctxURL
 	}
 	return ctxHTML
 }
@@ -265,7 +282,14 @@ func contextOf(text string) string {
 const (
 	ctxHTML   = "html"
 	ctxInline = "inline"
+	ctxURL    = "url"
 )
+
+// urlHelpers are the functions whose result may stand in an address
+// attribute: each builds an address of the page's own with a fixed start.
+var urlHelpers = map[string]map[string]string{
+	"tasks.html": {"taskURL": `"/tasks?task=" and encodeURIComponent`},
+}
 
 // pageHelpers are the functions of a page whose result may stand in HTML
 // as it is. Each was read: it escapes what it puts into its result, or
@@ -328,7 +352,9 @@ var numberNames = set("rev", "revision", "sequence", "length", "size", "count", 
 	"unfiled", "considered")
 
 func isNumberPath(e string) bool {
-	if !numberRE.MatchString(e) {
+	// A bare local is a variable of the page, not a field the hub filled:
+	// it goes to the list.
+	if !numberRE.MatchString(e) || !strings.ContainsAny(e, ".[") {
 		return false
 	}
 	last := e
@@ -415,6 +441,7 @@ type ruleChecker struct {
 	page string
 }
 
+var mathRE = regexp.MustCompile(`^Math\.\w+\(`)
 var toFixedRE = regexp.MustCompile(`\.toFixed\(\d\)$`)
 var callRE = regexp.MustCompile(`^([A-Za-z_$][\w$]*)\(`)
 var mapJoinRE = regexp.MustCompile(`\.map\(([\s\S]*)\)\.join\(('[^'\\]*'|"[^"\\]*")\)$`)
@@ -434,7 +461,13 @@ func (c ruleChecker) check(e string, at int, ctx string) []holeFault {
 	if literalRE.MatchString(e) || isNumberPath(e) {
 		return nil
 	}
-	if e[0] == '`' && closes("("+e+")", 0) && len(scanTemplates(e)) > 0 {
+	// A comma expression prints its last part; the rule does not take one.
+	comma := false
+	topLevel(e, func(i int) bool { comma = e[i] == ','; return !comma })
+	if comma {
+		return c.fault(e, at, ctx)
+	}
+	if e[0] == '`' && (&jsLexer{s: e}).template(0) == len(e) {
 		return c.template(e, at, ctx)
 	}
 	// cond ? a : b
@@ -475,7 +508,15 @@ func (c ruleChecker) check(e string, at int, ctx string) []holeFault {
 			return out
 		}
 	}
-	// Unary plus and minus, and binary - * %, give a number.
+	// A sum is split first: a - b + s is (a - b) + s, which prints s.
+	if parts, offs := splitTop(e, "+"); len(parts) > 1 {
+		var out []holeFault
+		for k, p := range parts {
+			out = append(out, c.check(p, at+offs[k], ctx)...)
+		}
+		return out
+	}
+	// With no + left at the top, a sign or a binary - * % gives a number.
 	if (e[0] == '+' || e[0] == '-') && !strings.HasPrefix(e, "++") && !strings.HasPrefix(e, "--") {
 		return nil
 	}
@@ -483,13 +524,6 @@ func (c ruleChecker) check(e string, at int, ctx string) []holeFault {
 		if parts, _ := splitTop(e, op); len(parts) > 1 {
 			return nil
 		}
-	}
-	if parts, offs := splitTop(e, "+"); len(parts) > 1 {
-		var out []holeFault
-		for k, p := range parts {
-			out = append(out, c.check(p, at+offs[k], ctx)...)
-		}
-		return out
 	}
 	// list.map(x => template).join('')
 	if m := mapJoinRE.FindStringSubmatchIndex(e); m != nil && matchClose(e, m[2]-1) == m[3] {
@@ -505,13 +539,21 @@ func (c ruleChecker) check(e string, at int, ctx string) []holeFault {
 		if _, ok := pageHelpers[c.page][m[1]]; ok && ctx == ctxHTML {
 			return nil
 		}
-		if m[1] == "Math" {
+		if _, ok := urlHelpers[c.page][m[1]]; ok && ctx == ctxURL {
 			return nil
 		}
 	}
-	if strings.HasSuffix(e, ".length") || strings.HasPrefix(e, "Math.") || toFixedRE.MatchString(e) {
+	// Math.f(…) closing the expression, a length, a fixed-point number.
+	if m := mathRE.FindStringSubmatch(e); m != nil && closes(e, len(m[0])-1) {
 		return nil
 	}
+	if strings.HasSuffix(e, ".length") || toFixedRE.MatchString(e) {
+		return nil
+	}
+	return c.fault(e, at, ctx)
+}
+
+func (c ruleChecker) fault(e string, at int, ctx string) []holeFault {
 	return []holeFault{{expr: strings.Join(strings.Fields(e), " "), ctx: ctx, at: at}}
 }
 
@@ -632,6 +674,7 @@ var inlineGrounds = set(
 	"fixed enum",      // a value from the page's own constant list
 	"json literal",    // JSON.stringify of the user's own unsaved edit
 	"page constant",   // a value the page's code sets, never from the hub
+	"scheme gate",     // the page uses the address only after testing it for http(s)://
 )
 
 func entryKey(page, ctx, expr string) string { return page + "\x00" + ctx + "\x00" + expr }
@@ -653,8 +696,8 @@ func compareWithList(page string, faults []holeFault, script string, scriptLine 
 		if _, dup := want[k]; dup {
 			problems = append(problems, fmt.Sprintf("%s: the list has %q (%s) twice", page, e.expr, e.ctx))
 		}
-		if e.ctx == ctxInline && !inlineGrounds[e.ground] {
-			problems = append(problems, fmt.Sprintf("%s: inline entry %q has no ground from the fixed set", page, e.expr))
+		if e.ctx != ctxHTML && !inlineGrounds[e.ground] {
+			problems = append(problems, fmt.Sprintf("%s: %s entry %q has no ground from the fixed set", page, e.ctx, e.expr))
 		}
 		if strings.TrimSpace(e.why) == "" {
 			problems = append(problems, fmt.Sprintf("%s: entry %q has no reason", page, e.expr))
@@ -734,6 +777,24 @@ func TestConsoleHoleRule(t *testing.T) {
 		{"inline inherited by a nested template", "x = `<a onclick=\"${c ? `go('${esc(t.id)}')` : ''}\">x</a>`", []string{"inline esc(t.id)"}},
 		{"helper of another page", "x = `<p>${bar(t.title)}</p>`", []string{"html bar(t.title)"}},
 		{"helper with more after it", "x = `<p>${esc(a)}${esc(a).b}</p>`", []string{"html esc(a).b"}},
+		// Text added to a number is still text (review of #395).
+		{"difference plus text", "x = `<p>${xs.length - shown + ' more: ' + t.title}</p>`", []string{"html t.title"}},
+		{"number minus one plus text", "x = `<p>${t.n - 1 + t.title}</p>`", []string{"html t.title"}},
+		{"sign plus text", "x = `<p>${-t.n + t.title}</p>`", []string{"html t.title"}},
+		{"product plus text", "x = `<p>${t.i * 2 + t.title}</p>`", []string{"html t.title"}},
+		{"literal product plus text", "x = `<b>${1 * 2 + t.title}</b>`", []string{"html t.title"}},
+		{"unary plus plus text", "x = `<b>${+1 + t.title}</b>`", []string{"html t.title"}},
+		{"difference", "x = `<p>${t.total - t.done}</p>`", nil},
+		{"template then text", "x = `<p>${`<i>${esc(a)}</i>` + t.title}</p>`", []string{"html t.title"}},
+		{"comma", "x = `<p>${Math.max(1,2), t.title}</p>`", []string{"html Math.max(1,2), t.title"}},
+		{"Math with more after it", "x = `<p>${Math.max(1,2).x}</p>`", []string{"html Math.max(1,2).x"}},
+		{"Math", "x = `<p>${Math.min(100,t.pct||0)}</p>`", nil},
+		{"bare local named like a number", "x = `<p>${count}${t.count}</p>`", []string{"html count"}},
+		{"esc in an address", "x = `<a href=\"${esc(r.ref)}\">x</a>`", []string{"url esc(r.ref)"}},
+		{"taskURL in an address", "x = `<a href=\"${taskURL(t.id)}\">x</a>`", nil},
+		{"after a closed address", "x = `<a href=\"/x\" title=\"${esc(t.title)}\">x</a>`", nil},
+		{"handler in capitals", "x = `<a ONCLICK=\"go('${esc(t.title)}')\">x</a>`", []string{"inline esc(t.title)"}},
+		{"unquoted handler", "x = `<a onclick=go('${esc(t.title)}')>x</a>`", []string{"inline esc(t.title)"}},
 	}
 	for _, tc := range cases {
 		r := checkPage(page, tc.script)
@@ -755,11 +816,12 @@ func TestReviewedListRefusesDeadAndCountedEntries(t *testing.T) {
 		t.Fatalf("a matching list: %q", p)
 	}
 	for name, list := range map[string][]holeEntry{
-		"count":   {{page: "p.html", ctx: ctxHTML, expr: "kind", n: 1, why: "x"}},
-		"dead":    append(ok[:1:1], holeEntry{page: "p.html", ctx: ctxHTML, expr: "gone", n: 1, why: "x"}),
-		"missing": nil,
-		"reason":  {{page: "p.html", ctx: ctxHTML, expr: "kind", n: 2}},
-		"ground":  {{page: "p.html", ctx: ctxHTML, expr: "kind", n: 2, why: "x"}, {page: "p.html", ctx: ctxInline, expr: "s", n: 1, why: "x"}},
+		"count":      {{page: "p.html", ctx: ctxHTML, expr: "kind", n: 1, why: "x"}},
+		"dead":       append(ok[:1:1], holeEntry{page: "p.html", ctx: ctxHTML, expr: "gone", n: 1, why: "x"}),
+		"missing":    nil,
+		"reason":     {{page: "p.html", ctx: ctxHTML, expr: "kind", n: 2}},
+		"ground":     {{page: "p.html", ctx: ctxHTML, expr: "kind", n: 2, why: "x"}, {page: "p.html", ctx: ctxInline, expr: "s", n: 1, why: "x"}},
+		"url ground": {{page: "p.html", ctx: ctxHTML, expr: "kind", n: 2, why: "x"}, {page: "p.html", ctx: ctxURL, expr: "u", n: 1, why: "x"}},
 	} {
 		if p := compareWithList("p.html", faults, script, 1, list); len(p) == 0 {
 			t.Errorf("%s: the list was accepted", name)

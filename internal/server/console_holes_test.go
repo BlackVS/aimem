@@ -9,11 +9,15 @@ package server
 //
 // An inline entry stands inside an inline event handler, where the browser
 // decodes HTML entities before the handler runs, so esc is no escape
-// there. Its ground says why the value cannot break out of the handler's
-// string (task 01a1cf05, comment seq 582).
+// there; a url entry stands in an address attribute, where esc does not
+// stop a javascript: address. Its ground says why the value is safe there
+// (task 01a1cf05, comment seq 582).
 var reviewedHoles = []holeEntry{
 	// admin.html
 	{page: "admin.html", ctx: ctxHTML, expr: `e`, n: 1, why: "acts: an event name, a key of the object literal each caller writes"},
+	{page: "admin.html", ctx: ctxHTML, expr: `count`, n: 1, why: "treeEntry: the page's template of g.stats.memories a few lines above, or \"\""},
+	{page: "admin.html", ctx: ctxHTML, expr: `total`, n: 1, why: "renderFacts: ms.length"},
+	{page: "admin.html", ctx: ctxHTML, expr: `rev`, n: 3, why: "recEditor: each caller passes a record's revision from the hub, or 0"},
 	{page: "admin.html", ctx: ctxHTML, expr: `kebab`, n: 1, why: "treeEntry: the page's template a few lines above, or \"\""},
 	{page: "admin.html", ctx: ctxHTML, expr: `SPINES[i%SPINES.length]`, n: 1, why: "a colour from the page's constant list"},
 	{page: "admin.html", ctx: ctxHTML, expr: `chapKebab`, n: 1, why: "treeEntry: the page's template a line above, or \"\""},
@@ -55,6 +59,7 @@ var reviewedHoles = []holeEntry{
 	{page: "tasks.html", ctx: ctxHTML, expr: `prefix`, n: 14, why: "contentForm: each caller passes \"new\" or \"ed\""},
 	{page: "tasks.html", ctx: ctxHTML, expr: `label`, n: 2, why: "fieldHTML and refsHTML: each caller passes a literal"},
 	{page: "tasks.html", ctx: ctxInline, expr: `taskURL(ref)`, n: 1, ground: "gated ref", why: "refHTML links a ref only when it matches /^[0-9a-f-]{36}$/"},
+	{page: "tasks.html", ctx: ctxURL, expr: `esc(ref)`, n: 1, ground: "scheme gate", why: "refHTML links a ref only when it starts with http:// or https://"},
 	{page: "tasks.html", ctx: ctxHTML, expr: `body`, n: 1, why: "refHTML: the page's template with esc and taskURL, or esc(ref)"},
 	{page: "tasks.html", ctx: ctxHTML, expr: `kind`, n: 1, why: "refHTML: esc(r.kind) a few lines above"},
 	{page: "tasks.html", ctx: ctxHTML, expr: `note`, n: 1, why: "refHTML: the page's template with esc(r.note), or \"\""},
