@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -473,5 +474,31 @@ func TestSSHDefaultYieldsToConfiguredCommand(t *testing.T) {
 	os.WriteFile(cfg, []byte("[core]\n\tsshCommand = ssh -i /keys/id\n"), 0o600)
 	if !sshCommandConfigured(ctx, dir) {
 		t.Fatal("core.sshCommand in the global config must be honoured")
+	}
+}
+
+// A set file larger than MaxFileBytes is refused by its size, asked of Git
+// before the blob is read (audit A-16); the fetch is unavailable and caches
+// nothing.
+func TestFetchRefusesASetFileLargerThanTheLimit(t *testing.T) {
+	files := fixtureFiles()
+	files["process/HANDBOOK.md"] = strings.Repeat("x", MaxFileBytes+1)
+	repo, sha := makeRepo(t, files)
+	root := t.TempDir()
+	ref := Ref{Repo: "file://" + filepath.ToSlash(repo), Commit: sha, Manifest: "process/manifest.json", Ref: "main"}
+	res := fetchNoValidate(context.Background(), root, ref)
+	if res.Status != StatusUnavailable || res.Set != nil || res.Err == nil ||
+		!strings.Contains(res.Err.Error(), fmt.Sprintf("process/HANDBOOK.md at %s: larger than %d bytes", sha[:12], MaxFileBytes)) {
+		t.Fatalf("an oversized handbook: %s %v", res.Status, res.Err)
+	}
+	if _, err := os.Stat(filepath.Join(CacheDir(root, ref), completeMarker)); err == nil {
+		t.Fatal("an oversized set was cached")
+	}
+	// At the limit it is read.
+	files["process/HANDBOOK.md"] = strings.Repeat("x", MaxFileBytes)
+	repo, sha = makeRepo(t, files)
+	ref.Repo, ref.Commit = "file://"+filepath.ToSlash(repo), sha
+	if res := fetchNoValidate(context.Background(), t.TempDir(), ref); res.Status != StatusFetched {
+		t.Fatalf("a handbook at the limit: %s %v", res.Status, res.Err)
 	}
 }

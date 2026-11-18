@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"compress/gzip"
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -257,29 +258,138 @@ func TestBundleFromDirMatchesTheArchive(t *testing.T) {
 	}
 }
 
+// tarOf writes a tar.gz of the given headers, each regular file with its
+// body.
+func tarOf(t *testing.T, entries []tarEntry) []byte {
+	t.Helper()
+	var buf bytes.Buffer
+	gz := gzip.NewWriter(&buf)
+	tw := tar.NewWriter(gz)
+	for _, e := range entries {
+		hdr := e.hdr
+		if hdr.Typeflag == tar.TypeReg {
+			hdr.Size = int64(len(e.body))
+		}
+		if hdr.Mode == 0 {
+			hdr.Mode = 0o644
+		}
+		if err := tw.WriteHeader(&hdr); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := tw.Write(e.body); err != nil {
+			t.Fatal(err)
+		}
+	}
+	tw.Close()
+	gz.Close()
+	return buf.Bytes()
+}
+
+type tarEntry struct {
+	hdr  tar.Header
+	body []byte
+}
+
+// setEntries is the fixture set as archive entries, plus extra.
+func setEntries(b *Bundle, extra ...tarEntry) []tarEntry {
+	var out []tarEntry
+	for p, body := range b.Files {
+		out = append(out, tarEntry{tar.Header{Typeflag: tar.TypeReg, Name: p}, body})
+	}
+	return append(out, extra...)
+}
+
 // An archive entry whose cleaned name leaves the archive refuses the whole
 // archive, even where the manifest never names it (audit T-1). A leading
 // slash is dropped after cleaning, so a rooted spelling stays inside and is
 // not among these; nor is "./", which the tar reader returns as a directory.
-// A bare ".." passes this branch and the manifest's path check alike; that
-// gap is reported on the audit task, not pinned here.
+// A set file named ".." is refused by the path check itself, so by the
+// manifest, the bundle and the archive reader alike.
 func TestReadArchiveRefusesAnEntryThatLeavesIt(t *testing.T) {
 	b := fixtureBundle()
-	for _, name := range []string{"../evil.md", "./../evil.md", "a/../../evil.md", "process/../../evil.md", "."} {
-		var buf bytes.Buffer
-		gz := gzip.NewWriter(&buf)
-		tw := tar.NewWriter(gz)
-		for p, body := range b.Files {
-			tw.WriteHeader(&tar.Header{Typeflag: tar.TypeReg, Name: p, Mode: 0o644, Size: int64(len(body))})
-			tw.Write(body)
-		}
-		tw.WriteHeader(&tar.Header{Typeflag: tar.TypeReg, Name: name, Mode: 0o644, Size: 4})
-		tw.Write([]byte("evil"))
-		tw.Close()
-		gz.Close()
-		_, err := ReadArchive(bytes.NewReader(buf.Bytes()), b.Manifest)
+	for _, name := range []string{"../evil.md", "./../evil.md", "a/../../evil.md", "process/../../evil.md", ".", ".."} {
+		data := tarOf(t, setEntries(b, tarEntry{tar.Header{Typeflag: tar.TypeReg, Name: name}, []byte("evil")}))
+		_, err := ReadArchive(bytes.NewReader(data), b.Manifest)
 		if err == nil || !strings.Contains(err.Error(), "leaves the archive") {
 			t.Errorf("entry %q: want the archive refused as leaving it, got %v", name, err)
 		}
+	}
+
+	// ".." as a set file: the path check, the manifest, the bundle.
+	if err := checkRepoPath(".."); err == nil || !strings.Contains(err.Error(), "inside the repository") {
+		t.Errorf("checkRepoPath(\"..\"): %v", err)
+	}
+	dotdot := []byte(`{"version":1,"handbook":".."}`)
+	if _, err := ParseManifest(dotdot); err == nil {
+		t.Error(`a manifest whose handbook is ".." was parsed`)
+	}
+	bad := &Bundle{Version: 1, Manifest: "m.json", Files: map[string][]byte{"m.json": dotdot, "..": []byte("x")}}
+	if err := bad.Validate(); err == nil {
+		t.Error(`a bundle with a file ".." validated`)
+	}
+
+	// A symlink entry is never kept, so it cannot stand in for a set file:
+	// an archive whose handbook is only a link has no handbook.
+	var linked []tarEntry
+	for _, e := range setEntries(b) {
+		if e.hdr.Name == "process/HANDBOOK.md" {
+			e = tarEntry{tar.Header{Typeflag: tar.TypeSymlink, Name: e.hdr.Name, Linkname: "../../../etc/passwd"}, nil}
+		}
+		linked = append(linked, e)
+	}
+	_, err := ReadArchive(bytes.NewReader(tarOf(t, linked)), b.Manifest)
+	if err == nil || !strings.Contains(err.Error(), "the manifest names process/HANDBOOK.md, which is not in it") {
+		t.Errorf("a symlinked handbook: %v", err)
+	}
+}
+
+// ReadArchive bounds the files it reads and the bytes of their names,
+// besides their data (audit A-16): an archive at each cap is read, one
+// past it is refused with a message that names the cap.
+func TestReadArchiveBoundsItsFilesAndNames(t *testing.T) {
+	b := fixtureBundle()
+	set := setEntries(b)
+	setNames := 0
+	for _, e := range set {
+		setNames += len(e.hdr.Name)
+	}
+	filler := func(n, nameLen int) []tarEntry {
+		var out []tarEntry
+		for i := 0; i < n; i++ {
+			name := fmt.Sprintf("f/%06d", i)
+			name += strings.Repeat("x", nameLen-len(name))
+			out = append(out, tarEntry{tar.Header{Typeflag: tar.TypeReg, Name: name}, nil})
+		}
+		return out
+	}
+	read := func(entries []tarEntry) error {
+		_, err := ReadArchive(bytes.NewReader(tarOf(t, entries)), b.Manifest)
+		return err
+	}
+
+	// Files: at the cap, and one past it.
+	atCap := append(append([]tarEntry{}, set...), filler(MaxArchiveEntries-len(set), 8)...)
+	if err := read(atCap); err != nil {
+		t.Fatalf("%d files: %v", MaxArchiveEntries, err)
+	}
+	over := append(atCap, filler(1, 8)[0])
+	over[len(over)-1].hdr.Name = "f/one-more"
+	if err := read(over); err == nil || !strings.Contains(err.Error(), fmt.Sprintf("more than %d files", MaxArchiveEntries)) {
+		t.Fatalf("%d files: %v", MaxArchiveEntries+1, err)
+	}
+
+	// Name bytes: 1024 names of 1024 bytes fill the cap with the set's
+	// names; the last filler is shortened to land on it exactly.
+	names := filler(MaxArchiveNameBytes/1024, 1024)
+	last := &names[len(names)-1]
+	last.hdr.Name = last.hdr.Name[:1024-setNames]
+	exact := append(append([]tarEntry{}, set...), names...)
+	if err := read(exact); err != nil {
+		t.Fatalf("%d bytes of names: %v", MaxArchiveNameBytes, err)
+	}
+	last.hdr.Name += "y"
+	if err := read(append(append([]tarEntry{}, set...), names...)); err == nil ||
+		!strings.Contains(err.Error(), fmt.Sprintf("more than %d bytes of file names", MaxArchiveNameBytes)) {
+		t.Fatalf("%d bytes of names: %v", MaxArchiveNameBytes+1, err)
 	}
 }

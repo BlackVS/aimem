@@ -25,6 +25,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -117,7 +118,7 @@ func checkRepoPath(p string) error {
 	if p == "" || len(p) > 256 || strings.HasPrefix(p, "/") || strings.Contains(p, "\\") || strings.ContainsAny(p, " \t\r\n") {
 		return errors.New("must be a relative slash path (at most 256 bytes)")
 	}
-	if path.Clean(p) != p || p == "." || strings.HasPrefix(p, "../") || strings.Contains(p, "/../") {
+	if path.Clean(p) != p || p == "." || p == ".." || strings.HasPrefix(p, "../") || strings.Contains(p, "/../") {
 		return errors.New("must be a clean relative path inside the repository")
 	}
 	return nil
@@ -630,13 +631,24 @@ func runBounded(cmd *exec.Cmd) ([]byte, error) {
 	return cmd.CombinedOutput()
 }
 
+// show reads one set file at a commit. Its size is asked first, so a blob
+// larger than MaxFileBytes is refused before anything reads it into memory.
 func show(ctx context.Context, repoDir, commit, p string) ([]byte, error) {
-	out, err := git(ctx, repoDir, "show", commit+":"+p)
+	obj := commit + ":" + p
+	out, err := git(ctx, repoDir, "cat-file", "-s", obj)
 	if err != nil {
 		return nil, fmt.Errorf("%s at %s: %s", p, commit[:12], firstLine(out, err))
 	}
-	if len(out) > MaxFileBytes {
+	size, err := strconv.ParseInt(strings.TrimSpace(string(out)), 10, 64)
+	if err != nil {
+		return nil, fmt.Errorf("%s at %s: git cat-file -s answered %q", p, commit[:12], strings.TrimSpace(string(out)))
+	}
+	if size > MaxFileBytes {
 		return nil, fmt.Errorf("%s at %s: larger than %d bytes", p, commit[:12], MaxFileBytes)
+	}
+	out, err = git(ctx, repoDir, "show", obj)
+	if err != nil {
+		return nil, fmt.Errorf("%s at %s: %s", p, commit[:12], firstLine(out, err))
 	}
 	return out, nil
 }

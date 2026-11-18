@@ -36,6 +36,16 @@ currently 26); a binary refuses a database newer than it understands.
   runs under a process started by .NET, with its output in files, and a
   failure prints the code with its type and the command's error output.
 
+### Fixed
+
+- **A process set import is bounded before it is read.** The archive reader
+  refuses an archive with more than 10,000 files or more than 1 MiB of file
+  names, besides its data limits; reading a set from Git asks a file's size
+  first and refuses one over the 1 MiB file limit without reading it. A
+  set file named `..` is refused by the path check, so by the manifest,
+  the bundle and the archive reader alike; before, it was accepted and the
+  set failed only when stored.
+
 ## [0.11.1] — 2026-11-17
 
 Tool sets per mode. The MCP server lists the tools a session's mode needs:
