@@ -72,12 +72,14 @@ today. Nothing on the hub changes: no route, no store field, no schema step.
 | The goal's features | `GET /v1/projects/{p}/epics/{e}/features?include_archived=true` | `list_features` | each feature's id, title, state, position, mark, ground, `confirmed_tasks`, `tie` |
 | A record | `GET /v1/tasks/{id}` | `get_task` | its `dependencies` (a feature's confirmed tasks), `next_action`, `blocker`, `created_at`, `updated_at`, `project` |
 | A record's revisions | `GET /v1/tasks/{id}/history` | `get_task_history` | every accepted revision in order, each with its `state` and `updated_at` |
-| A project's tasks | `GET /v1/projects/{p}/tasks?updated_since=T&include_archived=true` (also `state`, `epic`, `feature`, `assignee`, `q`) | `list_tasks` | the summaries changed since T, and the counts per state |
+| A project's tasks | `GET /v1/projects/{p}/tasks?updated_since=T&include_archived=true` (also `state`, `epic`, `feature`, `assignee`, `q`) | `list_tasks` | the summaries changed since T: id, kind, title, state, assignee, epic, archived, revision, `updated_at` |
+| A project's counts | `GET /v1/projects/{p}/tasks/counts` (also `epic`, `assignee`, `kind`) | the first page of `list_tasks` | the active tasks per state, the archived and the total |
 
 **Calls.** For one goal and one day:
 - the goal and its features: 2 calls;
 - one record per feature with confirmed tasks;
 - one or two pages of the project's tasks changed since T;
+- one call for the counts per state;
 - one history per task whose state changed in the window.
 
 The creation time of a filed task costs no call (section 4).
@@ -187,7 +189,7 @@ After the six lines come:
   Fault or tidying is a gap per task.
 - **Dated tasks due within three days of T1,** and any overdue dated task
   that is not DONE, first.
-- **Open tasks by state:** the counts the list returns.
+- **Open tasks by state:** the counts route's answer, as at the run.
 - **The plan's findings** from section 5, if there are any.
 
 **Output.** Markdown on standard output, ready to paste as the log's comment
