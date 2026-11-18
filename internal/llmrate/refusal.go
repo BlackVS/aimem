@@ -147,6 +147,7 @@ func (r *Refusal) summary() string {
 func Refuse(call string, r *Refusal) {
 	mu.Lock()
 	defer mu.Unlock()
+	loadLocked()
 	if refusals == nil {
 		refusals = map[string]*refusalRecord{}
 	}
@@ -161,6 +162,7 @@ func Refuse(call string, r *Refusal) {
 func Succeeded(call string) {
 	mu.Lock()
 	defer mu.Unlock()
+	loadLocked()
 	if _, ok := refusals[call]; ok {
 		delete(refusals, call)
 		saveLocked()

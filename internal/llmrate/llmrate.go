@@ -76,6 +76,9 @@ func loadLocked() {
 	refusals = s.Refusals
 }
 
+// saveLocked writes the state. Every caller has re-read the file under
+// the same lock first (loadLocked), so a save carries what other
+// processes recorded since and never brings back what they cleared.
 func saveLocked() {
 	if stateDir == "" {
 		return
@@ -218,6 +221,7 @@ func Penalize(reason string) {
 	iv, _ := conf()
 	mu.Lock()
 	defer mu.Unlock()
+	loadLocked()
 	if penalty < penaltyStep {
 		penalty = penaltyStep
 	} else {
@@ -240,6 +244,7 @@ func Recover() {
 	iv, _ := conf()
 	mu.Lock()
 	defer mu.Unlock()
+	loadLocked()
 	if penalty == 0 {
 		return
 	}

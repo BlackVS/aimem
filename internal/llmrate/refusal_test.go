@@ -1,6 +1,7 @@
 package llmrate
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
@@ -147,5 +148,60 @@ func TestAKeyRefusalRecordsNoProviderText(t *testing.T) {
 	}
 	if !strings.Contains(r.Line(), "sk-proj-****9XYZ") {
 		t.Fatalf("the journal line lost the provider's text: %s", r.Line())
+	}
+}
+
+// otherProcess writes the state file as another aimem process would: it
+// changes the file without touching this process's memory.
+func otherProcess(t *testing.T, change func(*state)) {
+	t.Helper()
+	path := filepath.Join(stateDir, "llmrate.json")
+	var s state
+	if raw, err := os.ReadFile(path); err == nil {
+		if err := json.Unmarshal(raw, &s); err != nil {
+			t.Fatal(err)
+		}
+	}
+	change(&s)
+	raw, _ := json.Marshal(s)
+	if err := os.WriteFile(path, raw, 0o600); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// A save by one process never drops a record another process wrote to
+// the shared state file since, and never brings back one it cleared.
+// Each of the four savers is checked against both cases.
+func TestASaveKeepsWhatAnotherProcessChanged(t *testing.T) {
+	saves := map[string]func(){
+		"Penalize":            func() { Penalize("test") },
+		"Recover":             func() { Penalize("test"); Recover() },
+		"Refuse another kind": func() { Refuse(CallTextCheck, Refused(402, nil)) },
+		"Succeeded another":   func() { Refuse(CallTextCheck, Refused(402, nil)); Succeeded(CallTextCheck) },
+	}
+	for name, save := range saves {
+		t.Run(name, func(t *testing.T) {
+			SetStateDir(t.TempDir())
+			t.Cleanup(func() {
+				SetStateDir("")
+				mu.Lock()
+				refusals, penalty = nil, 0
+				mu.Unlock()
+			})
+			// The other process records a refusal after this one read the file.
+			otherProcess(t, func(s *state) {
+				s.Refusals = map[string]*refusalRecord{CallCompletions: {At: "2026-11-18T10:00:00Z", Message: "refused"}}
+			})
+			save()
+			if _, ok := refusalsByKind(t)[CallCompletions]; !ok {
+				t.Fatal("the save dropped the other process's record")
+			}
+			// The mirror case: the other process clears it, this one saves again.
+			otherProcess(t, func(s *state) { delete(s.Refusals, CallCompletions) })
+			save()
+			if _, ok := refusalsByKind(t)[CallCompletions]; ok {
+				t.Fatal("the save brought back the record the other process cleared")
+			}
+		})
 	}
 }
