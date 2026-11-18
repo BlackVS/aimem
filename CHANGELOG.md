@@ -13,6 +13,14 @@ currently 26); a binary refuses a database newer than it understands.
 
 ## [Unreleased]
 
+## [0.11.3] — 2026-11-18
+
+The features view of the board's page after the owner's first look: the
+goal panel starts closed, so a goal's features are on the first screen; the
+goal selector lists the goals with features first, each with its number in
+brackets; and a feature that is not DONE no longer reads as finished. No
+schema step. Includes PR #399.
+
 ### Changed
 
 - **The features view of the board's page, after the owner's first look.**
