@@ -31,9 +31,9 @@ const run = code => vm.runInContext(code, context);
 // may not read, which the hub answers as "not found".
 const notFound = () => Object.assign(new Error('not found'), {status: 404});
 const hub = {
-  epics: [{id: 'g', title: 'Goal <one>, ' + 'with a title long enough to wrap over more than one line of the page; '.repeat(3), state: 'OPEN',
+  epics: [{id: 'old', title: 'Older epic', state: 'OPEN'}, {id: 'g', title: 'Goal <one>, ' + 'with a title long enough to wrap over more than one line of the page; '.repeat(3), state: 'OPEN',
     objective: ['First paragraph of the goal.', 'Second paragraph with <script>x</script> in it.', 'The check: **every** feature is DONE.'].join('\n\n')},
-    {id: 'empty', title: 'Empty goal', state: 'OPEN'}],
+    {id: 'empty', title: 'Empty goal', state: 'OPEN'}, {id: 'r', title: 'Retired goal', state: 'RETIRED'}],
   features: {
     g: [
       {id: 'f1', title: 'First <b>feature</b>', state: 'IN_PROGRESS', archived: false, feature: {goal: 'g', position: 1, mark: 'mandatory'}, confirmed_tasks: 4},
@@ -41,6 +41,7 @@ const hub = {
       {id: 'f3', title: 'Third', state: 'BACKLOG', archived: false, feature: {goal: 'g', position: 2, mark: 'optional'}, confirmed_tasks: 0, tie: true},
     ],
     empty: [],
+    r: [{id: 'fr', title: 'Archived', state: 'CANCELLED', archived: true, feature: {goal: 'r', position: 1, mark: 'optional'}, confirmed_tasks: 0}],
   },
   records: {
     f1: {id: 'f1', dependencies: ['t-done', 't-open', 't-other', 't-hidden']},
@@ -52,6 +53,16 @@ const hub = {
     f2: [{id: 't-done', title: 'Done work', state: 'DONE'}],
   },
   featuresRoute: true,
+  kindFeature: true,
+};
+// The project's feature records as the task list serves them with
+// kind=feature: summary rows with kind and epic and no feature link (as
+// the hub serves them), two to a page, so the page follows the cursor; the
+// last page has no next_cursor.
+const featurePage = after => {
+  const all = Object.values(hub.features).flat().map(f => ({id: f.id, title: f.title, state: f.state, archived: f.archived, kind: 'feature', epic: f.feature.goal}));
+  const i = after ? Number(after) : 0;
+  return i + 2 < all.length ? {tasks: all.slice(i, i + 2), next_cursor: String(i + 2)} : {tasks: all.slice(i)};
 };
 let calls = [];
 context.fakeApi = async path => {
@@ -66,6 +77,12 @@ context.fakeApi = async path => {
     return {project: 'p', goal: m[1], features: hub.features[m[1]] || []};
   }
   if (u.pathname === '/v1/projects/p/epics') return {epics: hub.epics};
+  if (u.pathname === '/v1/projects/p/tasks' && u.searchParams.get('kind') === 'feature') {
+    if (!hub.kindFeature) throw Object.assign(new Error('bad kind'), {status: 400});
+    if (hub.ignoresKind) return {tasks: [{id: 't-plain', title: 'A task', state: 'READY', epic: 'old'}]};
+    assert.equal(u.searchParams.get('include_archived'), 'true');
+    return featurePage(u.searchParams.get('after'));
+  }
   if (u.pathname === '/v1/projects/p/tasks') return {tasks: hub.local[u.searchParams.get('feature')] || [], next_cursor: ''};
   if ((m = u.pathname.match(/^\/v1\/tasks\/([^/]+)$/))) { if (hub.records[m[1]]) return hub.records[m[1]]; throw notFound(); }
   throw new Error('unexpected call ' + path);
@@ -85,10 +102,11 @@ assert.equal(element('board').hidden, true);
 assert.equal(element('epicFilter').hidden, true, 'the epic filter belongs to the task views');
 assert.equal(element('goalFilter').hidden, false, 'the goal chooser is shown');
 // The chosen goal in the task views' panel: its title in full, its state and
-// its description rendered, open with the view.
+// its description rendered, closed so that the features are on the first
+// screen, also when the address names the goal.
 const panel = element('epicDetails'), goalText = () => element('epicContent').innerHTML;
 assert.equal(panel.hidden, false, "the goal's details are shown");
-assert.equal(panel.open, true, 'and open');
+assert.equal(panel.open, false, 'and closed');
 assert.equal(element('epicSummary').textContent, 'View goal');
 assert.match(goalText(), new RegExp('<h2>Goal &lt;one&gt;, ' + '(with a title long enough to wrap over more than one line of the page; ){3}</h2>'), 'the whole title');
 assert.match(goalText(), /<div class="meta">OPEN<\/div>/);
@@ -96,7 +114,13 @@ assert.equal((goalText().match(/<p>/g) || []).length, 3, 'each paragraph of the 
 assert.match(goalText(), /&lt;script&gt;/, 'the description is escaped');
 assert.match(goalText(), /<b>every<\/b>/, 'and rendered as in the task views');
 assert.match(goalText(), /The features below belong to this goal/);
-assert.match(element('goalSel').innerHTML, /value="g" selected>Goal &lt;one&gt;/);
+assert.match(element('goalSel').innerHTML, /value="g" selected>Goal &lt;one&gt;[^<]*line of the page;  \(3 features\)<\/option>/);
+// The selector: the goals with features first, each with its number
+// (archived features included, as the view lists them), retired marked;
+// the epics without features after them, still to be chosen.
+const options = [...element('goalSel').innerHTML.matchAll(/<option value="([^"]*)"[^>]*>([^<]*)<\/option>/g)].map(m => [m[1], m[2].replace(/^Goal &lt;one&gt;.*(?= \(3)/, 'Goal')]);
+assert.deepEqual(options, [['', '— choose a goal —'], ['g', 'Goal (3 features)'], ['r', 'Retired goal (1 feature) (retired)'], ['old', 'Older epic'], ['empty', 'Empty goal']]);
+assert.match(element('goalSel').innerHTML, /<optgroup label="no features yet"><option value="old">Older epic<\/option><option value="empty">Empty goal<\/option><\/optgroup>$/, 'the epics without features are grouped after the goals');
 const order = [...body().matchAll(/class="ftitle" data-go href="([^"]+)">([^<]*(?:<(?!\/a>)[^<]*)*)<\/a>/g)].map(m => m[1]);
 assert.deepEqual(order, ['f1', 'f2', 'f3'].map(id => `/tasks?project=p&view=features&goal=g&feature=${id}`), 'features in position order, each linked');
 assert.match(body(), /First &lt;b&gt;feature&lt;\/b&gt;/, 'titles are escaped');
@@ -111,16 +135,39 @@ assert.doesNotMatch(f1, /Done work/, 'a DONE task is not waited on');
 assert.match(f1, /Open work<\/a> <span class="chip st st-BLOCKED">/);
 assert.match(f1, /Work in &lt;q&gt;<\/a> <span class="chip st st-REVIEW">REVIEW<\/span> <span class="dim">q<\/span>/, 'a task of another project, with its project');
 assert.match(f1, /not readable or not found<\/span> <code>t-hidden<\/code>/, 'an unreadable task is shown, not left out');
-assert.match(body().split('class="frow')[2], /waits on nothing: every confirmed task is DONE/);
+assert.match(body().split('class="frow')[2], /no confirmed task is open: its one confirmed task is DONE, and the feature is still READY/, 'an open feature is not shown as finished');
+assert.doesNotMatch(body(), /waits on nothing/);
 assert.match(body().split('class="frow')[3], /no confirmed tasks/);
 assert.ok(!calls.some(p => p.includes('/v1/tasks/f3') || p.includes('feature=f3')), 'a feature without confirmed tasks costs no call');
 assert.ok(!calls.some(p => p === '/v1/tasks/t-open'), "this project's tasks come from the list, not one read each");
 assert.match(element('loadedAt').textContent, /^loaded /);
 
-// A reader who closed the panel keeps it closed while the goal stays.
-panel.open = false;
+// A reader who opened the panel keeps it open while the goal stays: a visit
+// to a feature and back, and a reload of the features.
+panel.open = true;
 await open('?project=p&view=features&goal=g&feature=f1');
-assert.equal(panel.open, false, 'closed by the reader, closed on the same goal');
+assert.equal(panel.open, true, 'opened by the reader, open on the same goal');
+await open('?project=p&view=features&goal=g');
+assert.equal(panel.open, true, 'and on the way back');
+run('refreshView()'); for (let i = 0; i < 5; i++) await settle();
+assert.equal(panel.open, true, 'and across a reload');
+// Another goal starts closed, and so does the first one chosen again.
+run(`setGoal('empty')`); for (let i = 0; i < 5; i++) await settle();
+assert.equal(panel.open, false, 'another goal is closed');
+panel.open = true;
+run(`setGoal('g')`); for (let i = 0; i < 5; i++) await settle();
+assert.equal(panel.open, false, 'a goal chosen again is closed');
+// A DONE feature whose confirmed tasks are DONE keeps the line it had.
+hub.features.g[1].state = 'DONE';
+await open('?project=p&view=features&goal=g');
+assert.match(body().split('class="frow')[2], /waits on nothing: every confirmed task is DONE/);
+hub.features.g[1].state = 'READY';
+// Two confirmed tasks, both DONE, on an open feature.
+hub.records.f2.dependencies = ['t-done', 't-done2'];
+hub.local.f2 = [{id: 't-done', title: 'Done work', state: 'DONE'}, {id: 't-done2', title: 'More done work', state: 'DONE'}];
+await open('?project=p&view=features&goal=g&feature=f2');
+assert.match(body(), /no confirmed task is open: all 2 are DONE, and the feature is still READY/);
+hub.records.f2.dependencies = ['t-done']; hub.local.f2 = [{id: 't-done', title: 'Done work', state: 'DONE'}];
 await open('?project=p&view=features&goal=g');
 // The task views get their own panel back: no epic filter, no panel.
 await open('?project=p');
@@ -128,7 +175,7 @@ assert.equal(panel.hidden, true, 'the goal does not follow into the list');
 assert.equal(element('epicSummary').textContent, 'View epic');
 assert.equal(element('goalFilter').hidden, true);
 await open('?project=p&view=features&goal=g');
-assert.equal(panel.open, true, 'a goal shown anew opens again');
+assert.equal(panel.open, false, 'a goal shown anew starts closed');
 
 // One feature opened: its confirmed tasks with state and project.
 await open('?project=p&view=features&goal=g&feature=f1');
@@ -146,9 +193,35 @@ assert.match(body(), /This goal has no such feature/);
 
 // Empty views say so.
 await open('?project=p&view=features&goal=empty');
-assert.match(body(), /This goal has no features/);
+assert.equal(body(), '<div class="dim">This epic has no feature records. The goals that have them come first in the goal selector, each with its number of features in brackets.</div>');
 await open('?project=p&view=features');
 assert.match(body(), /Choose a goal to see its features/);
+assert.deepEqual(calls.filter(c => c.startsWith('/v1/projects/')), ['/v1/projects/p/epics?include_retired=true',
+  '/v1/projects/p/tasks?kind=feature&include_archived=true&limit=100',
+  '/v1/projects/p/tasks?kind=feature&include_archived=true&limit=100&after=2'], 'opening the view: the epics and the feature records, page by page');
+// A hub that does not list feature records: the selector lists the epics
+// as before, and the view still works.
+hub.kindFeature = false;
+await open('?project=p&view=features&goal=g');
+assert.deepEqual([...element('goalSel').innerHTML.matchAll(/<option value="([^"]*)"/g)].map(m => m[1]), ['', 'old', 'g', 'empty', 'r'], 'the order of creation, no counts');
+assert.doesNotMatch(element('goalSel').innerHTML, /optgroup|feature/);
+assert.equal((body().match(/class="frow/g) || []).length, 3);
+await open('?project=p&view=features&goal=empty');
+assert.equal(body(), '<div class="dim">This epic has no feature records.</div>', 'without counts, no pointer to them');
+hub.kindFeature = true;
+// A project where no epic has features: the text does not point to goals
+// that are not there.
+const saved = hub.features;
+hub.features = {};
+await open('?project=p&view=features&goal=empty');
+assert.equal(body(), '<div class="dim">This epic has no feature records. No epic of this project has any yet.</div>');
+hub.features = saved;
+// A hub that ignores kind lists tasks: none of them is counted as a feature.
+hub.ignoresKind = true;
+await open('?project=p&view=features&goal=g');
+assert.doesNotMatch(element('goalSel').innerHTML, /\(\d+ features?\)/, 'a task is not a feature');
+hub.ignoresKind = false;
+await open('?project=p&view=features');
 assert.equal(panel.hidden, true, 'no goal chosen, no goal panel');
 // Not even with an epic chosen in the task views' filter.
 run(`EPICS = {g: {id: 'g', title: 'An epic', state: 'OPEN'}}; FILTER.epic = 'g'`);
@@ -250,4 +323,4 @@ assert.equal(pushed[0], '/tasks?project=p&view=features&goal=g&feature=f2');
 click({ctrlKey: true});
 assert.equal(prevented, 1, 'a ctrl-click opens a tab as usual');
 
-console.log('PASS features view: the goal details, order and tie, waits-on, another project and an unreadable task, empty views, missing route, the address');
+console.log('PASS features view: the goal details closed by default, the selector with counts, the waits line of an open feature, order and tie, waits-on, another project and an unreadable task, empty views, missing route, the address');

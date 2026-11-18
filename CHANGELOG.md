@@ -13,6 +13,24 @@ currently 26); a binary refuses a database newer than it understands.
 
 ## [Unreleased]
 
+### Changed
+
+- **The features view of the board's page, after the owner's first look.**
+  - The goal panel starts closed, so a goal's features are on the first
+    screen; a reader who opens it keeps it open while the same goal is
+    shown.
+  - The goal selector lists the goals with features first, each with its
+    number of features in brackets, and groups the epics without features
+    after them under "no features yet". The counts come from the project's
+    feature records, one paged read of the task list, archived features
+    included as the view lists them; a hub that does not list them gets the
+    plain selector.
+  - An epic without features says that it has no feature records and where
+    the goals with them are.
+  - A feature that is not DONE, whose confirmed tasks are all DONE, no
+    longer reads "waits on nothing": the line says no confirmed task is
+    open and the feature is still in its state.
+
 ## [0.11.2] — 2026-11-18
 
 The board's page shows a goal's features: a third view beside the list and
