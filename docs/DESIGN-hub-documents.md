@@ -179,9 +179,10 @@ an edit is what the process set in git already provides (section 10).
 fixed when it is created:
 
 - **Reference:** what the tools do and how to use them, such as the feature
-  guide. It has no project versions: every project reads the hub's, which
-  follows the hub and its release. A project version of a reference would
-  describe the tools wrongly after the next upgrade.
+  guide. It has no project versions: every project reads the hub's, as far
+  as the hub's text matches the client's release (section 9). A project
+  version of a reference would describe the tools wrongly after the next
+  upgrade.
 - **Template:** a text a project may make its own, such as a process's
   rules (section 10). It may have project versions.
 
@@ -260,9 +261,10 @@ fixed when it is created:
   that the seed changed. The console marks the document "the release's
   text has changed since your edit" and offers the three-way merge: the
   seed his edit was based on, the new seed, and his version.
-- A session reading a reference that is out of date with its release gets
-  a header that says so, so that a session can tell when the guide may
-  describe older tools.
+- With every revision the hub keeps the release and the digest of the seed
+  it was based on. A session whose client's seed differs gets its own
+  built-in text, with a header that names the hub's revision (section 9,
+  "A client and a hub of different releases").
 
 **Rejected:**
 
@@ -300,6 +302,56 @@ fixed when it is created:
   bytes, while `team_context` and `read_doc` already carry the reads.
 - *A copy in each project's documents made by hand.* It differs from the
   hub's and the release's, which task 01a1ed23 ruled out.
+
+### A client and a hub of different releases
+
+The tools a session has are those of the client binary it runs: the local
+facade lists and describes them. A hub and its clients are not upgraded
+together, in either direction; the feature tools already carry a rule for
+a client or a hub one release older (`docs/FEATURES.md`, "A hub or a
+client one release older"). So with the hub as the place of record, a
+client of one release can read a reference seeded, or edited, for
+another, and describe tools it does not have or miss tools it has.
+
+The client knows its own build version and the digest of its own seed. The
+hub keeps, with each revision of a reference, the release and the digest
+of the seed it was based on (sections 3 and 8). The read compares the two
+digests, not the versions, so a release that did not change a text does
+not count as a mismatch.
+
+**Proposal for references:**
+
+- **The hub's text answers when its revision is based on the client's own
+  seed:** the seed itself, or the operator's edit of that seed. The header
+  says "source: hub, revision N, based on the seed of vX.Y.Z".
+- **Otherwise the client's built-in text answers.** The header says
+  "source: built in, vA.B.C; the hub holds revision N, based on the seed of
+  vX.Y.Z, which differs". A session gets the text that matches its tools,
+  and learns that the hub's differs.
+- **The operator's edit reaches clients of another release** only after it
+  is merged into that release's seed (section 8). The hub does not record
+  client versions today. The read would send the client's version and
+  seed digest, so the hub could record them, and the console could show
+  per reference which client releases it reaches.
+
+**Rejected: the hub's text always, with a line naming the mismatch.** The
+session is then told the text may be wrong, but not what is wrong. It
+cannot correct a guide that describes another release's tools, and would
+follow it.
+
+**What this costs the hub as the place of record.** For a reference, the
+binary's copy is not only a seed: it is the only text certain to match the
+tools the session has. A hub-held reference answers only where it matches
+the client's seed, which holds when the hub and its clients run the same
+release, and fails, back to the built-in text, during every rolling
+upgrade. That is a real cost of making the hub the place of record for
+references. **A variant for the owner's first two decisions** (section 12):
+the binary stays the place of record for references, which the console
+shows read-only, and the hub is the place of record only for templates
+and for hub documents without a seed. It gives up the operator's
+correction of a reference without a release. In return a session never
+reads a reference of another release, and the store has nothing to merge
+when a release changes a reference.
 
 **The built-in feature guide just merged** (task 01a1ed23) stays as the
 seed and as the fallback when the hub cannot answer.
@@ -374,9 +426,13 @@ every edit.
 ## 12. What the owner decides
 
 1. **The place of record:** the hub's database, with the binary's text as
-   the seed (sections 3 and 4).
-2. **The two kinds:** references follow the hub and have no project
-   versions; templates may have them (section 5).
+   the seed (sections 3 and 4). The variant: the hub for templates only,
+   and the binary for references (section 9, "A client and a hub of
+   different releases").
+2. **The two kinds:** references follow the hub when the hub's text is
+   based on the client's own seed, and have no project versions;
+   templates may have them (sections 5 and 9). With the variant of
+   decision 1, references are read-only on the hub.
 3. **A template's copy:** at the first edit, not at the project's creation
    (section 6).
 4. **Who edits a project's version:** a token with the documents right,
@@ -398,7 +454,7 @@ authentication, the store's schemas and migrations, and the tool sets.
 | The read rule: every authenticated token reads the hub scope; the administrator writes it | S | authentication, sensitive |
 | The documents right on a token, issued and revoked in the console; the refusal code | M | authentication and access schema, sensitive |
 | Project versions of templates: the copy at the first edit, the based-on revision, the merge | M | HTTP API, sensitive |
-| The reads: `team_context` and `read_doc` answer by the order of section 9, with the header and the fallback; descriptions | M | tool sets and the local facade's network, sensitive |
+| The reads: `team_context` and `read_doc` answer by the order of section 9, with the header, the fallback and the comparison of the client's seed digest with the hub's; descriptions | M | tool sets and the local facade's network, sensitive |
 | The console's "Documents" view: kinds, sources, out-of-date marks, project versions, merge, history | M | product, ordinary |
 | A release's newer seed: written when unchanged, marked and merged when edited | S | store, sensitive |
 | Export and import of documents between hubs | S | HTTP API, sensitive; optional |
