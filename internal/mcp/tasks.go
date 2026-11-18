@@ -211,7 +211,7 @@ var taskToolDefs = append([]map[string]any{
 			"The goal is the record's epic; position is its place in the goal's order; a mandatory feature needs a ground " +
 			"(check or owner_condition), an optional one has none and may name its cheaper alternative. Refused while the task is " +
 			"reserved, team-managed or depended on by a task of its project (named); remove is refused while the feature has confirmed tasks. " +
-			"Send the expected_revision you read; a stale revision returns the current record.",
+			"Send the expected_revision you read; a stale revision returns the current record." + featureGuidePointer,
 		"inputSchema": objSchema(featureLinkProps(map[string]any{
 			"id":                prop("string", taskIDArg),
 			"remove":            prop("boolean", "turn the feature back into a task (no link fields with it)"),
@@ -223,7 +223,7 @@ var taskToolDefs = append([]map[string]any{
 		"name": "confirm_feature_task",
 		"description": "Confirm a task on a feature (add it to the feature's confirmed tasks, its dependencies), or with `remove` take it out; " +
 			"nothing else changes. The task may be in another project you can read; it may not be a feature. " +
-			"Send the feature's expected_revision; a stale revision returns the current record.",
+			"Send the feature's expected_revision; a stale revision returns the current record." + featureGuidePointer,
 		"inputSchema": objSchema(map[string]any{
 			"id":                prop("string", "the feature: "+taskIDArg),
 			"task":              prop("string", "the task to confirm: "+taskIDArg),
@@ -235,7 +235,7 @@ var taskToolDefs = append([]map[string]any{
 	{
 		"name": "list_features",
 		"description": "The features of a goal (an epic) in position order: id, title, state, assignee, revision, the link and the number of " +
-			"confirmed tasks; tie marks a position two features share. At most 100, no paging. Read a feature's tasks with list_tasks and `feature`." + taskReadScope,
+			"confirmed tasks; tie marks a position two features share. At most 100, no paging. Read a feature's tasks with list_tasks and `feature`." + taskReadScope + featureGuidePointer,
 		"inputSchema": objSchema(map[string]any{
 			"project":          prop("string", "project id (defaults to the current project; it selects what to read, it is not a limit)"),
 			"epic":             prop("string", "the goal's epic id"),
@@ -326,6 +326,11 @@ func featureLinkProp() map[string]any {
 	return map[string]any{"type": "object", "description": "optional: create the record as a feature with this link to its goal",
 		"properties": featureLinkProps(nil), "required": []string{"goal", "position", "mark"}}
 }
+
+// featureGuidePointer ends the three feature tools' descriptions. A team
+// member's conversation lists list_features but not team_context, so the
+// pointer says the read is there only where it is listed.
+const featureGuidePointer = " Guide to features: team_context section=features, where listed."
 
 // featureTools are the tools of the feature routes, which a hub one
 // release older does not serve.

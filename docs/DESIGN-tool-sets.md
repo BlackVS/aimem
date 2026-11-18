@@ -316,6 +316,11 @@ memory. No pair differs only in a parameter.
 | member | a team member's session (team-mode facade) | 18 | 15,173 |
 | tasks-only | the hub's MCP under a project credential | 27 | 33,029 |
 
+The bytes were measured at v0.11.1. A later change of a description moves
+them without changing a set: the pointers to the feature guide
+(`team_context` with `section=features`) add 270 bytes to standalone,
+teams and tasks-only, and 64 to member.
+
 - **standalone:** the 13 knowledge tools, the 18 task, epic and feature
   tools, `writing_rule`, `process_context`, and the four entry tools of a
   team: `team_setup`, `team_continue`, `team_context` and `team_list`

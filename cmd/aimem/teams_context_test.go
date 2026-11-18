@@ -11,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	"aimem/internal/builtintext"
 	"aimem/internal/teamguide"
 )
 
@@ -188,5 +189,23 @@ func TestTeamsContextCLI(t *testing.T) {
 	}
 	if got := entries(t, dir); len(got) != 0 {
 		t.Errorf("the working directory gained %v", got)
+	}
+}
+
+// `aimem teams context --section features` prints the feature guide, the
+// same text team_context returns.
+func TestTeamsContextPrintsTheFeatureGuide(t *testing.T) {
+	var out strings.Builder
+	if err := teamContextCmd([]string{"--section", builtintext.FeatureGuideSection}, &out); err != nil {
+		t.Fatal(err)
+	}
+	want, _, err := builtintext.Section(builtintext.FeatureGuideSection, version)
+	if err != nil || out.String() != want {
+		t.Fatalf("teams context --section features: %v %.300s", err, out.String())
+	}
+	// A team section is still the team unit's.
+	out.Reset()
+	if err := teamContextCmd([]string{"--section", "worker"}, &out); err != nil || !strings.Contains(out.String(), "aimem-team-guidance") {
+		t.Fatalf("teams context --section worker: %v %.200s", err, out.String())
 	}
 }
