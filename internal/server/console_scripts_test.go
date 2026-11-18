@@ -297,7 +297,10 @@ const (
 // urlHelpers are the functions whose result may stand in an address
 // attribute: each builds an address of the page's own with a fixed start.
 var urlHelpers = map[string]map[string]string{
-	"tasks.html": {"taskURL": `"/tasks?task=" and encodeURIComponent`},
+	"tasks.html": {
+		"taskURL": `"/tasks?task=" and encodeURIComponent`,
+		"featURL": `"/tasks?project=" and encodeURIComponent of every part`,
+	},
 }
 
 // pageHelpers are the functions of a page whose result may stand in HTML
@@ -338,6 +341,9 @@ var pageHelpers = map[string]map[string]string{
 		"v":              "esc of a form field",
 		"lines":          "esc of a form list",
 		"stateChipsHTML": "the page's own templates",
+		"taskRef":        "the page's own templates with esc, stChip and taskURL",
+		"waitsHTML":      "fixed text, or the page's own template of taskRef",
+		"featHead":       "the page's own template with esc, stChip and featURL",
 	},
 }
 
@@ -358,7 +364,9 @@ var numberNames = set("rev", "revision", "sequence", "length", "size", "count", 
 	"daily_calls_cap", "against_rev", "conflicts", "corroboration",
 	// a chapter proposal's counts (internal/curate/refile.go), in a meta
 	// key no client writes
-	"unfiled", "considered")
+	"unfiled", "considered",
+	// a goal's feature rows (featureRow and store.FeatureLink, both int)
+	"position", "confirmed_tasks")
 
 func isNumberPath(e string) bool {
 	// A bare local is a variable of the page, not a field the hub filled:

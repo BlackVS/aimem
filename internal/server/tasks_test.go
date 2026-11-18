@@ -910,6 +910,11 @@ func TestTasksPageIsPublicChrome(t *testing.T) {
 		`"/v1/tasks/"+encodeURIComponent(CUR.id)+"/comments?limit=20&after="+CMT.after`:      true,
 		`"/v1/tasks/"+encodeURIComponent(CUR.id)+"/comments/"+encodeURIComponent(commentID)`: true,
 		`"/v1/tasks/"+encodeURIComponent(id)+"/comments"`:                                    true,
+		// The features view: the goal's features, the goals for its chooser
+		// and a feature's own record (its confirmed ids). Reads only.
+		`"/v1/projects/"+encodeURIComponent(PROJ)+"/epics?include_retired=true"`:                                        true,
+		`"/v1/projects/"+encodeURIComponent(PROJ)+"/epics/"+encodeURIComponent(GOAL)+"/features?include_archived=true"`: true,
+		`"/v1/tasks/"+encodeURIComponent(f.id)`:                                                                         true,
 	}
 	got := map[string]bool{}
 	for _, expr := range apiCallSites(page) {
