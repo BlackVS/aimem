@@ -15,6 +15,19 @@ currently 26); a binary refuses a database newer than it understands.
 
 ### Added
 
+- **The board's page shows a goal's features.** A third view, "features",
+  beside the list and the board: choose a goal and its details (the whole
+  title, wrapped, its state and its description, in the panel the task
+  views use for an epic) open above its features, which are shown
+  in position order, apart from the tasks and in a colour of their own,
+  each with its mark, its state, the number of its confirmed tasks and a
+  tie where two share a position. Under each feature is what it waits on:
+  its confirmed tasks that are not DONE. A feature opens the list of its
+  confirmed tasks with their states and projects, tasks of other projects
+  the reader can read included; a task the hub will not show the reader
+  is listed as "not readable or not found" rather than left out. The goal
+  and the feature are in the page's address. The view reads the HTTP API
+  that exists; nothing on the hub changed.
 - **A session learns how to keep a goal's features from aimem itself.**
   `team_context` with `section=features` returns the feature guide
   (docs/FEATURES.md) built into the binary, with its own unit, version,

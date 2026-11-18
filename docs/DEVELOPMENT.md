@@ -12,10 +12,12 @@ sh scripts/check-process-stops.sh
 sh scripts/check-doc-versions.sh
 sh scripts/check-doc-examples.sh
 node scripts/test-epic-details.mjs
+node scripts/test-features-view.mjs
 ```
 
-The last line runs the tasks console's script (`internal/server/tasks.html`)
-against fake page and hub objects. It needs Node and no packages; where
+The last two lines run the tasks console's script (`internal/server/tasks.html`)
+against fake page and hub objects: the epic details and refresh, and the
+features view. It needs Node and no packages; where
 Node is absent, skip it locally and CI's lint job is its runner.
 
 The console pages' scripts are checked in `go test` as well

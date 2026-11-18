@@ -19,7 +19,7 @@
     --ink:#0e1210; --panel:#141a15; --well:#0a0e0b; --edge:#26332a;
     --bone:#d6ddd2; --dim:#8a9a8d;
     --moss:#4fb477; --moss-deep:#062012;
-    --amber:#d9a441; --rust:#c96f52; --tide:#5fb3b3; --iris:#9a86c8;
+    --amber:#d9a441; --rust:#c96f52; --tide:#5fb3b3; --iris:#9a86c8; --feat:#d488b8;
     --mono:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
     --text:system-ui,-apple-system,"Segoe UI",sans-serif;
     font-size:15px;
@@ -27,17 +27,17 @@
   :root[data-theme="slate"]{
     --ink:#0d1117; --panel:#161d26; --well:#090c10; --edge:#2b3646;
     --bone:#dfe7ef; --dim:#93a1b3; --moss:#6cb1f0; --moss-deep:#04101c;
-    --amber:#d9b23f; --rust:#d0705a; --tide:#5fb3b3; --iris:#a08fd0;
+    --amber:#d9b23f; --rust:#d0705a; --tide:#5fb3b3; --iris:#a08fd0; --feat:#de8fc4;
   }
   :root[data-theme="paper"]{
     --ink:#f2efe7; --panel:#faf8f2; --well:#e7e2d5; --edge:#c9c2af;
     --bone:#2e2b24; --dim:#6e6858; --moss:#33704e; --moss-deep:#f5f3ec;
-    --amber:#8a5f14; --rust:#9c4227; --tide:#1f6f6f; --iris:#5c4d96;
+    --amber:#8a5f14; --rust:#9c4227; --tide:#1f6f6f; --iris:#5c4d96; --feat:#8f3270;
   }
   :root[data-theme="contrast"]{
     --ink:#000000; --panel:#0d0d0d; --well:#000000; --edge:#4a4a4a;
     --bone:#f5f5f5; --dim:#c9c9c9; --moss:#ffd75f; --moss-deep:#000000;
-    --amber:#ffb86b; --rust:#ff8a70; --tide:#7fd8d8; --iris:#c7b3f2;
+    --amber:#ffb86b; --rust:#ff8a70; --tide:#7fd8d8; --iris:#c7b3f2; --feat:#ff9fd8;
   }
   *{box-sizing:border-box}
   body{margin:0;background:var(--ink);color:var(--bone);font:14px/1.5 var(--mono)}
@@ -131,6 +131,20 @@
   .tcard .meta{color:var(--dim);font-size:11px;margin-top:3px;display:flex;gap:6px;align-items:center;flex-wrap:wrap}
   .tcard select{width:auto;font-size:11px;padding:0 4px;margin-left:auto}
   .viewsw button{padding:2px 10px;font-size:12px}
+  /* Features: records of a goal, not work, so they wear a colour of their
+     own and never sit among the tasks. */
+  .frow{border-left:3px solid var(--feat);background:var(--panel);padding:8px 10px;margin:8px 0}
+  .frow.archived{opacity:.6}
+  .fhead{display:flex;gap:10px;align-items:baseline;flex-wrap:wrap}
+  .fhead .pos{color:var(--feat);font-weight:700;min-width:3ch}
+  .fhead .ftitle{color:var(--feat);font:600 15px/1.4 var(--text);text-decoration:none;flex:1;min-width:12ch}
+  .fhead .ftitle:hover{text-decoration:underline}
+  .chip.mark-mandatory{color:var(--feat);border-color:var(--feat)}
+  .waits{margin:4px 0 0 calc(3ch + 10px);font-size:13px;color:var(--dim)}
+  .waits ul{margin:2px 0 0 18px;padding:0}
+  .ftask{display:flex;gap:10px;align-items:baseline;flex-wrap:wrap;padding:6px 4px;border-bottom:1px solid var(--edge)}
+  .waits a,.ftask a{color:var(--bone);text-decoration:none;font-family:var(--text)}
+  .waits a:hover,.ftask a:hover{color:var(--moss)}
   @media (max-width:700px){ .trow{flex-wrap:wrap} .trow .meta{width:100%} }
 </style>
 </head>
@@ -165,7 +179,7 @@
     </div>
     <div id="filters" hidden>
     <div class="row">
-      <span class="viewsw"><button type="button" class="act" id="vwList" onclick="setView('list')">list</button><button type="button" class="act" id="vwBoard" onclick="setView('board')">board</button></span>
+      <span class="viewsw"><button type="button" class="act" id="vwList" onclick="setView('list')">list</button><button type="button" class="act" id="vwBoard" onclick="setView('board')">board</button><button type="button" class="act" id="vwFeat" onclick="setView('features')">features</button></span>
       <button type="button" class="act" id="refreshBtn" onclick="refreshAll()" title="reload this view and the epics from the hub">↻ refresh</button><span id="loadedAt" class="dim"></span>
       <span id="listOnly"><input id="searchIn" type="search" class="inline" placeholder="search" title="find tasks by words in their title, objective, criteria, non-goals or comments (Enter)" style="width:14em;margin-left:8px"
           onkeydown="if(event.key==='Enter')setSearch(this.value)" onsearch="setSearch(this.value)">
@@ -176,13 +190,15 @@
         <span class="dim" style="margin-left:8px">state</span><span id="stateChips"></span></span>
       <label class="dim" style="margin-left:auto" id="archLbl"><input type="checkbox" id="archChk" style="width:auto" onchange="listTasks(true)"> archived</label>
     </div>
-    <div class="epic-filter">
+    <div class="epic-filter" id="epicFilter">
       <label for="epicSel" class="dim">epic</label>
       <select id="epicSel" onchange="FILTER.epic=this.value;renderEpicDetails();refreshView()"><option value="">all epics</option></select>
     </div>
     </div>
+    <div class="epic-filter" id="goalFilter" hidden><label for="goalSel" class="dim">goal</label>
+      <select id="goalSel" onchange="setGoal(this.value)"><option value="">— choose a goal —</option></select></div>
     <details id="epicDetails" class="card" hidden>
-      <summary>View epic</summary>
+      <summary id="epicSummary">View epic</summary>
       <div id="epicContent" class="prose"></div>
     </details>
     <div id="newForm" class="card" hidden></div>
@@ -192,6 +208,9 @@
       <span id="listNote" class="dim"></span></div>
     <div id="board" class="board" hidden></div>
     <div id="boardNote" class="dim" hidden></div>
+    <div id="features" hidden onclick="featClick(event)">
+      <div id="featBody"></div>
+    </div>
   </section>
   <section id="v-task" hidden>
     <div class="row"><a href="/tasks" class="dim" onclick="return go(listURL())">← tasks</a><span id="taskCrumb" class="dim"></span></div>
@@ -240,8 +259,11 @@ let CAN_WRITE = false;              // for CUR's project, this credential, this 
 let HIST = {after:0}, CMT = {after:0};
 let KEYS = {};                      // idempotency keys per open form: retry-safe until success
 let NAV = 0;                        // navigation epoch: a load that outlives its view must not render
-let SEQ = {list:0, hist:0, cmt:0, board:0, counts:0}; // per-loader request sequence: only the latest request renders
-let VIEW = localStorage.getItem("aimem_task_view")==="board" ? "board" : "list";
+let SEQ = {list:0, hist:0, cmt:0, board:0, counts:0, feat:0}; // per-loader request sequence: only the latest request renders
+const VIEWS = ["list","board","features"];
+let VIEW = VIEWS.includes(localStorage.getItem("aimem_task_view")) ? localStorage.getItem("aimem_task_view") : "list";
+// The features view: the goal chosen and the feature opened, both in the URL.
+let GOAL = "", FEATURE = "";
 // The list's order, kept per browser; newest updated first by default, so
 // a task created or changed a minute ago is on the first page. The hub
 // sorts and pages (the cursor belongs to the order); nothing sorts here.
@@ -315,20 +337,40 @@ const stChip = s => `<span class="chip st st-${esc(s)}">${esc(s)}</span>`;
 const short = id => id.slice(0,8);
 
 /* ---------- Routing: the URL is the state, so links are copyable. ---------- */
-function listURL(){ return "/tasks"+(PROJ?"?project="+encodeURIComponent(PROJ)+(VIEW==="board"?"&view=board":""):""); }
+function listURL(){ return VIEW==="features" && PROJ ? featURL(FEATURE) : "/tasks"+(PROJ?"?project="+encodeURIComponent(PROJ)+(VIEW==="board"?"&view=board":""):""); }
+// featURL is the features view of the current project and goal, with one
+// feature opened when id is given.
+function featURL(id){ return "/tasks?project="+encodeURIComponent(PROJ)+"&view=features"+(GOAL?"&goal="+encodeURIComponent(GOAL):"")+(id?"&feature="+encodeURIComponent(id):""); }
 function taskURL(id, c){ return "/tasks?task="+encodeURIComponent(id)+(c?"&comment="+encodeURIComponent(c):""); }
 function go(url){ history.pushState(null,"",url); route(); return false; }
 window.addEventListener("popstate", route);
 function route(){
   const q = new URLSearchParams(location.search);
   if(q.get("task")){ showTask(q.get("task"), q.get("comment")||""); return; }
-  if(q.get("project")){ PROJ = q.get("project"); localStorage.setItem("aimem_task_project", PROJ); }
+  if(q.get("project")) useProject(q.get("project"));
   // The URL is the state: a project link without ?view=board is the list;
   // only a bare /tasks falls back to the view this browser remembers.
-  if(q.has("project") || q.has("view")){ VIEW = q.get("view")==="board" ? "board" : "list"; localStorage.setItem("aimem_task_view", VIEW); }
+  if(q.has("project") || q.has("view")){ VIEW = VIEWS.includes(q.get("view")) ? q.get("view") : "list"; localStorage.setItem("aimem_task_view", VIEW); }
+  // The goal belongs to the project; a task view keeps it for the way back.
+  if(VIEW==="features"){ GOAL = q.get("goal")||""; FEATURE = q.get("feature")||""; } else FEATURE = "";
   showList();
 }
+// useProject is the one place the page changes its project. A goal and a
+// feature belong to their project, so a change drops them; the address or
+// the features view sets them again.
+function useProject(p){
+  if(p!==PROJ){ GOAL = ""; FEATURE = ""; }
+  PROJ = p; localStorage.setItem("aimem_task_project", PROJ);
+}
 function setView(v){ VIEW = v; localStorage.setItem("aimem_task_view", v); go(listURL()); }
+function setGoal(id){ GOAL = id; FEATURE = ""; go(listURL()); }
+// The features view's links are plain hrefs; one listener on the view turns
+// a plain click into an in-page navigation (a modified click opens a tab).
+function featClick(ev){
+  const a = ev.target.closest && ev.target.closest("a[data-go]");
+  if(!a || ev.button || ev.ctrlKey || ev.metaKey || ev.shiftKey || ev.altKey) return;
+  ev.preventDefault(); go(a.getAttribute("href"));
+}
 // The clipboard API exists only in secure contexts; a plain-HTTP hub gets
 // the legacy copy command, and if that is refused too the link is shown
 // selected so it can be copied by hand. Never a modal dialog.
@@ -395,24 +437,36 @@ async function loadEpics(project, force){
   if(reload){
     const was = FILTER.epic, wasOpen = $("epicDetails").open;
     if(was && !EPICS[was]){ FILTER.epic = ""; dropped = true; toast("the selected epic no longer exists; showing all epics"); }
-    renderEpicDetails();
-    if(FILTER.epic) $("epicDetails").open = wasOpen;
+    if(VIEW!=="features"){ renderEpicDetails(); if(FILTER.epic) $("epicDetails").open = wasOpen; }
   }
   $("epicSel").innerHTML = '<option value="">all epics</option>' + Object.values(EPICS).map(e => `<option value="${esc(e.id)}"${e.id===FILTER.epic?' selected':''}>${esc(e.title)}${e.state==="RETIRED"?" (retired)":""}</option>`).join("");
   return dropped;
 }
 function epicLabel(id){ const e = EPICS[id]; return e ? e.title : short(id); }
-function renderEpicDetails(){
-  const e = EPICS[FILTER.epic];
+// The epic panel: the task views show the epic of their filter; the
+// features view shows its goal (renderGoalDetails), with its own note.
+const EPIC_NOTE = "Tasks below belong to this epic; the current state and archive filters still apply.";
+let PANEL_FEAT = false;   // the features view wrote the panel; the task views render their epic again
+let PANEL_GOAL = "";      // the goal the panel shows for the features view ("" for none)
+function renderEpicDetails(e = EPICS[FILTER.epic], note = EPIC_NOTE, summary = "View epic"){
   const panel = $("epicDetails");
   panel.open = false;
   panel.hidden = !e;
+  $("epicSummary").textContent = summary;
   $("epicContent").innerHTML = e ? `<h2>${esc(e.title)}</h2>
     <div class="meta">${esc(e.state)}${e.target?' · Target: '+esc(e.target):''}</div>
     ${e.objective?md2html(e.objective):'<p class="dim">No objective provided.</p>'}
-    <p class="dim">Tasks below belong to this epic; the current state and archive filters still apply.</p>` : "";
+    <p class="dim">${esc(note)}</p>` : "";
 }
-function refreshView(){ return VIEW==="board" ? loadBoard() : listTasks(true); }
+// The features view's goal opens with the view, and keeps a reader's open
+// or closed choice while the same goal stays shown.
+function renderGoalDetails(goal){
+  const same = !!goal && PANEL_GOAL===goal.id, wasOpen = $("epicDetails").open;
+  renderEpicDetails(goal || null, "The features below belong to this goal; its tasks are in the list and the board under the epic filter.", "View goal");
+  PANEL_FEAT = true; PANEL_GOAL = goal ? goal.id : "";
+  $("epicDetails").open = goal ? (same ? wasOpen : true) : false;
+}
+function refreshView(){ return VIEW==="board" ? loadBoard() : VIEW==="features" ? loadFeatures() : listTasks(true); }
 // The refresh button and a tab that comes back reload the epics first and
 // the view after them, so the view is never queried for an epic that is
 // gone. LOAD_AT is when a view last started or finished loading; a tab
@@ -499,12 +553,17 @@ function showList(){
   $("orderSel").value = ORDER; $("orderSel").disabled = !!SEARCH; $("searchIn").value = SEARCH; $("loadedAt").textContent = ""; LOAD_AT = Date.now();
   $("archChk").checked = FILTER.archived;
   if(PROJ) loadEpics(PROJ); // clears the epic filter synchronously on a project change
-  const board = VIEW==="board";
-  $("vwList").classList.toggle("on", !board); $("vwBoard").classList.toggle("on", board);
-  $("listOnly").hidden = board; $("archLbl").hidden = board;
-  $("list").hidden = board; $("listMore").hidden = board; $("board").hidden = !board; $("boardNote").hidden = !board;
-  if(!PROJ){ $("list").innerHTML = '<div class="dim">Pick or enter a project.</div>'; $("boardNote").textContent = "Pick or enter a project."; $("moreBtn").hidden = true; $("board").innerHTML = ""; return; }
-  if(board) loadBoard(); else listTasks(true);
+  const board = VIEW==="board", feat = VIEW==="features", list = !board && !feat;
+  $("vwList").classList.toggle("on", list); $("vwBoard").classList.toggle("on", board); $("vwFeat").classList.toggle("on", feat);
+  $("listOnly").hidden = !list; $("archLbl").hidden = !list; $("epicFilter").hidden = feat; $("goalFilter").hidden = !feat;
+  // The features view keeps its goal's panel while the address names that
+  // goal (no jump while the view reloads); loadFeatures renders it.
+  if(feat){ if(!(PANEL_FEAT && GOAL && PANEL_GOAL===GOAL)) $("epicDetails").hidden = true; }
+  else if(PANEL_FEAT){ PANEL_FEAT = false; PANEL_GOAL = ""; renderEpicDetails(); } // back to the filter's epic
+  else $("epicDetails").hidden = !EPICS[FILTER.epic];
+  $("list").hidden = !list; $("listMore").hidden = !list; $("board").hidden = !board; $("boardNote").hidden = !board; $("features").hidden = !feat;
+  if(!PROJ){ $("list").innerHTML = '<div class="dim">Pick or enter a project.</div>'; $("boardNote").textContent = "Pick or enter a project."; $("featBody").innerHTML = '<div class="dim">Pick or enter a project.</div>'; $("moreBtn").hidden = true; $("board").innerHTML = ""; return; }
+  if(board) loadBoard(); else if(feat) loadFeatures(); else listTasks(true);
 }
 // Loaders never lock: every call issues its request, and only the latest
 // request for a pager (and the view it was made for) renders, so a
@@ -535,6 +594,85 @@ async function listTasks(reset){
     $("stateChips").innerHTML = stateChipsHTML();
   }catch(e){ if(e.auth) return boot(); if(my!==NAV || seq!==SEQ.list) return; $("listNote").textContent = e.message; if(reset) $("list").innerHTML = ""; }
   finally{ if(seq===SEQ.list) $("moreBtn").disabled = false; }
+}
+
+/* ---------- Features: a goal's features, apart from its tasks. ---------- */
+// The view reads what the HTTP API has: the goal's features, then for each
+// feature with confirmed tasks its record (the confirmed ids), the list's
+// feature filter (this project's confirmed tasks, one call) and each
+// confirmed task of another project by its id. The hub answers "not found"
+// for a task the reader may not read and for one that is gone alike, so
+// such a task says exactly that, and is never left out.
+async function confirmedTasks(f){
+  if(!f.confirmed_tasks) return [];
+  const q = new URLSearchParams({feature:f.id, include_archived:"true", limit:"100"});
+  const [rec, local] = await Promise.all([
+    api("/v1/tasks/"+encodeURIComponent(f.id)),
+    api("/v1/projects/"+encodeURIComponent(PROJ)+"/tasks?"+q)]);
+  const here = {}; for(const t of local.tasks||[]) here[t.id] = Object.assign({project:PROJ}, t);
+  return Promise.all((rec.dependencies||[]).map(async id => {
+    if(here[id]) return here[id];
+    try{ return await api("/v1/tasks/"+encodeURIComponent(id)); }
+    catch(e){ if(e.auth) throw e; return e.status===404 ? {id, unreadable:true} : {id, error:e.message}; }
+  }));
+}
+// taskRef is one confirmed task: its title as a link, its state, and its
+// project when that is another one (or always, with all).
+function taskRef(t, all){
+  if(t.unreadable) return `<span class="bad">not readable or not found</span> <code>${esc(short(t.id))}</code>`;
+  if(t.error) return `<span class="bad">${esc(t.error)}</span> <code>${esc(short(t.id))}</code>`;
+  return `<a data-go href="${taskURL(t.id)}">${esc(t.title)}</a> ${stChip(t.state)}${all||t.project!==PROJ ? ' <span class="dim">'+esc(t.project)+'</span>' : ''}`;
+}
+// What a feature waits on: its confirmed tasks that are not DONE, a task
+// that cannot be read included (nothing says it is done).
+function waitsHTML(tasks){
+  if(!tasks.length) return 'no confirmed tasks';
+  const open = tasks.filter(t => t.unreadable || t.error || t.state!=="DONE");
+  if(!open.length) return 'waits on nothing: every confirmed task is DONE';
+  return `waits on:<ul>${open.map(t => "<li>"+taskRef(t)+"</li>").join("")}</ul>`;
+}
+function featHead(f){
+  return `<div class="fhead"><span class="pos" title="position in the goal">${f.feature.position}</span>${f.tie?'<span class="chip warn" title="another feature holds the same position">tie</span>':''}
+    <a class="ftitle" data-go href="${featURL(f.id)}">${esc(f.title)}</a>
+    <span class="chip mark-${esc(f.feature.mark)}">${esc(f.feature.mark)}</span>${stChip(f.state)}
+    <span class="dim">${f.confirmed_tasks} confirmed</span></div>`;
+}
+async function loadFeatures(){
+  const my = NAV, seq = ++SEQ.feat, body = $("featBody");
+  const stale = () => my!==NAV || seq!==SEQ.feat;
+  body.innerHTML = '<div class="dim">loading…</div>';
+  try{
+    const r = await api("/v1/projects/"+encodeURIComponent(PROJ)+"/epics?include_retired=true");
+    if(stale()) return;
+    const goals = r.epics||[];
+    $("goalSel").innerHTML = '<option value="">— choose a goal —</option>' + goals.map(e => `<option value="${esc(e.id)}"${e.id===GOAL?' selected':''}>${esc(e.title)}${e.state==="RETIRED"?" (retired)":""}</option>`).join("");
+    renderGoalDetails(goals.find(e => e.id===GOAL));
+    if(!goals.length){ body.innerHTML = '<div class="dim">This project has no goals, so it has no features.</div>'; markLoaded(); return; }
+    if(!GOAL){ body.innerHTML = '<div class="dim">Choose a goal to see its features.</div>'; markLoaded(); return; }
+    if(!goals.some(e => e.id===GOAL)){ body.innerHTML = '<div class="bad">This project has no such goal.</div>'; markLoaded(); return; }
+    let page;
+    try{ page = await api("/v1/projects/"+encodeURIComponent(PROJ)+"/epics/"+encodeURIComponent(GOAL)+"/features?include_archived=true"); }
+    catch(e){ if(e.auth || e.status!==404) throw e; if(!stale()) body.innerHTML = '<div class="warn">Features are not available on this hub.</div>'; return; }
+    if(stale()) return;
+    const feats = page.features||[];
+    if(FEATURE){
+      const f = feats.find(x => x.id===FEATURE);
+      if(!f){ body.innerHTML = `<div class="row"><a data-go href="${featURL('')}" class="dim">← the goal's features</a></div><div class="bad">This goal has no such feature.</div>`; markLoaded(); return; }
+      const tasks = await confirmedTasks(f);
+      if(stale()) return;
+      body.innerHTML = `<div class="row"><a data-go href="${featURL('')}" class="dim">← the goal's features</a></div>
+        <div class="frow${f.archived?' archived':''}">${featHead(f)}<div class="waits">${waitsHTML(tasks)}</div></div>
+        <h2>confirmed tasks</h2>
+        ${tasks.length ? tasks.map(t => '<div class="ftask">'+taskRef(t, true)+'</div>').join("") : '<div class="dim">This feature has no confirmed tasks.</div>'}`;
+      markLoaded(); return;
+    }
+    if(!feats.length){ body.innerHTML = '<div class="dim">This goal has no features.</div>'; markLoaded(); return; }
+    const all = await Promise.all(feats.map(confirmedTasks));
+    if(stale()) return;
+    body.innerHTML = feats.map((f, i) => `<div class="frow${f.archived?' archived':''}">${featHead(f)}<div class="waits">${waitsHTML(all[i])}</div></div>`).join("")
+      + (page.truncated ? '<div class="dim">showing the first 100 features of this goal</div>' : '');
+    markLoaded();
+  }catch(e){ if(e.auth) return boot(); if(!stale()) body.innerHTML = `<div class="bad">${esc(e.message)}</div>`; }
 }
 
 /* ---------- Board: the active tasks as one column per state. ---------- */
@@ -696,7 +834,7 @@ async function showTask(id, commentID){
   }catch(e){ if(e.auth) return boot(); if(my===NAV) $("task").innerHTML = `<div class="card bad">${esc(e.message)}</div>`; return; }
   if(my!==NAV) return;
   CUR = task;
-  PROJ = CUR.project; localStorage.setItem("aimem_task_project", PROJ);
+  useProject(CUR.project);
   loadEpics(CUR.project); // labels and the edit form's options; the form keeps the current epic regardless
   document.title = CUR.title+" · aimem tasks";
   $("taskCrumb").textContent = " · "+CUR.project+" · "+short(CUR.id);
