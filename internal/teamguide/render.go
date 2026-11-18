@@ -105,7 +105,7 @@ func (u *Unit) Index(version string) (string, error) {
 		Digest  string   `json:"digest"`
 		Usage   string   `json:"usage"`
 		Content Manifest `json:"manifest"`
-	}{UnitID, orDev(version), u.Digest, "team_context role=<worker|coordinator> returns that role's complete required set; section=<id> returns one section", u.Manifest}, "", "  ")
+	}{UnitID, orDev(version), u.Digest, "team_context role=<worker|coordinator> returns that role's complete required set; section=<id> returns one section; section=features returns the guide to a goal's features, a text of its own outside this unit", u.Manifest}, "", "  ")
 	if err != nil {
 		return "", err
 	}

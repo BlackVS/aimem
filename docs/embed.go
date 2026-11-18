@@ -22,3 +22,11 @@ const WritingRuleFile = "WRITING-PERSISTED-TEXT.md"
 //
 //go:embed WRITING-PERSISTED-TEXT.md
 var WritingRule []byte
+
+// FeatureGuideFile is the guide to a goal's features, as committed.
+const FeatureGuideFile = "FEATURES.md"
+
+// FeatureGuide is that file's content.
+//
+//go:embed FEATURES.md
+var FeatureGuide []byte

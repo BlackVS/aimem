@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 
+	"aimem/internal/builtintext"
 	"aimem/internal/teamguide"
 )
 
@@ -37,7 +38,10 @@ func teamContextCmd(args []string, stdout io.Writer) error {
 	case *role != "":
 		out, err = u.Role(*role, version)
 	case *section != "":
-		out, err = u.SectionText(*section, version)
+		var ok bool
+		if out, ok, err = builtintext.Section(*section, version); !ok {
+			out, err = u.SectionText(*section, version)
+		}
 	default:
 		out, err = u.Index(version)
 	}

@@ -9,8 +9,12 @@ tasks, and the feature lists those tasks as its **confirmed tasks**.
 This page is for a session that plans and tracks a goal: an architect, an
 operator, or one agent working alone. Everything here works with one
 ordinary task token that holds a grant on the project. It needs no team, no
-aicrew, no coordinator and no member's launcher. The design is
-[DESIGN-feature-record.md](DESIGN-feature-record.md).
+aicrew, no coordinator and no member's launcher. A session with the aimem
+MCP server reads this guide, as built into the aimem it talks to, with
+`team_context` and `section=features`. The design is
+`docs/DESIGN-feature-record.md` in the aimem repository on GitHub,
+<https://github.com/BlackVS/aimem/blob/master/docs/DESIGN-feature-record.md>;
+the text that matches your aimem is at its release tag.
 
 ## What a feature carries
 
@@ -128,4 +132,4 @@ procedure.
 
 The procedure is tried in the test suite on the aicrew goal's eleven records
 as the design's section 10 shows them
-(`internal/server/features_carryover_test.go`).
+(`internal/server/features_carryover_test.go` in the same repository).

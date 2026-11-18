@@ -12,6 +12,7 @@ import (
 	"errors"
 	"io"
 
+	"aimem/internal/builtintext"
 	"aimem/internal/server"
 	"aimem/internal/teamguide"
 	"aimem/internal/writingrule"
@@ -21,6 +22,7 @@ var guidanceToolDefs = []map[string]any{{
 	"name": "team_context",
 	"description": "Read the aimem team protocol guidance built into this aimem binary: the coordinator and worker playbooks, question and escalation rules, and the request templates, with the unit's version and SHA-256 digest. " +
 		"role returns that role's complete required set (read it before team work; it ends with a terminator line, and text without that line was cut by the client: then read the sections one by one); section returns one section by id; neither returns the index of ids, sizes and digests. " +
+		"section=features returns the guide to a goal's features, which needs no team. " +
 		"Needs no team session, checkout, project grant, network or shell, and changes nothing. Public guidance: it grants no permission, and the project's selected process handbook remains the authority for project policy. Accepts only a role or a section id, never a path, URL, repository, commit or command.",
 	"inputSchema": objSchema(map[string]any{
 		"role":    propEnum("the role whose complete required set to return", teamguide.Roles...),
@@ -96,6 +98,9 @@ func guidanceTool(name string, raw json.RawMessage) (string, error) {
 	case a.Role != "":
 		return u.Role(a.Role, version)
 	case a.Section != "":
+		if text, ok, err := builtintext.Section(a.Section, version); ok {
+			return text, err
+		}
 		return u.SectionText(a.Section, version)
 	}
 	return u.Index(version)

@@ -13,6 +13,19 @@ currently 26); a binary refuses a database newer than it understands.
 
 ## [Unreleased]
 
+### Added
+
+- **A session learns how to keep a goal's features from aimem itself.**
+  `team_context` with `section=features` returns the feature guide
+  (docs/FEATURES.md) built into the binary, with its own unit, version,
+  digest and terminator line; `aimem teams context --section features`
+  prints the same text. The descriptions of `list_features`, `set_feature`
+  and `confirm_feature_task` name that read. Before, the guide was in the
+  source tree only, and a project without a checkout of aimem could not
+  find it. The guide is a text of its own, so an edit of it does not
+  change the team guidance's digest. No tool is added and no schema
+  changes; a standalone session lists 270 bytes more (43,469).
+
 ### Changed
 
 - **A hub's upgrade is tested before the tag as well.** A new check,
