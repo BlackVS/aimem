@@ -74,12 +74,15 @@ today. Nothing on the hub changes: no route, no store field, no schema step.
 | A record's revisions | `GET /v1/tasks/{id}/history` | `get_task_history` | every accepted revision in order, each with its `state` and `updated_at` |
 | A project's tasks | `GET /v1/projects/{p}/tasks?updated_since=T&include_archived=true` (also `state`, `epic`, `feature`, `assignee`, `q`) | `list_tasks` | the summaries changed since T: id, kind, title, state, assignee, epic, archived, revision, `updated_at` |
 | A project's counts | `GET /v1/projects/{p}/tasks/counts` (also `epic`, `assignee`, `kind`) | the first page of `list_tasks` | the active tasks per state, the archived and the total |
+| The goal log's comments | `GET /v1/tasks/{log}/comments?order=desc` | `list_task_comments` | the newest comments first, each with its `created_at`, for the window's start (section 3) |
 
 **Calls.** For one goal and one day:
 - the goal and its features: 2 calls;
 - one record per feature with confirmed tasks;
 - one or two pages of the project's tasks changed since T;
 - one call for the counts per state;
+- with `--log` and without `--since`, one page of the log's comments, newest
+  first;
 - one history per task whose state changed in the window.
 
 The creation time of a filed task costs no call (section 4).
@@ -107,8 +110,12 @@ its history whose state is DONE. The summary's `updated_at` is not used:
 any later edit moves it. A task whose summary says DONE is a candidate only
 if `updated_at >= T0`, which the list's `updated_since` filter gives. Its
 history then decides whether DONE fell inside the window.
-- The same rule gives **promoted** (the first READY revision in the window)
-  and **taken** (the first IN_PROGRESS revision in the window).
+- **Promoted** and **taken** are changes of state, not states. A task was
+  promoted in the window when a revision with `updated_at` in the window has
+  state READY and the revision before it had another state. It was taken when
+  such a revision has state IN_PROGRESS. A revision that keeps the state, such
+  as an edit of the title of a READY task, is not a promotion. A task promoted
+  again after it left READY (for a block, say) is counted again.
 
 **The tier of a task,** for a goal:
 1. **Urgent** if its title's bracket starts with `P0`.
@@ -119,8 +126,11 @@ history then decides whether DONE fell inside the window.
 3. **Next**: the same for an optional feature.
 4. **Support**: otherwise.
 
-Where a task is on the way of several features, the earliest by position
-gives its tier and is named. Dependencies are read from each record
+The tier comes first and the position second. A task on the way of a
+mandatory feature is path wherever the optional features that also wait for
+it stand, because the proposal puts every mandatory feature's work on the
+path ([section 4.1](DEVELOPMENT-PROCESS-PROPOSAL.md#41-three-tiers)).
+Within its tier, the earliest feature by position is named. Dependencies are read from each record
 (`GET /v1/tasks/{id}`); a dependency in another project is followed if the
 caller may read it. One the hub answers "not found" for is reported as such
 and not followed.
