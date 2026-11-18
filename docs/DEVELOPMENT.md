@@ -18,6 +18,31 @@ The last line runs the tasks console's script (`internal/server/tasks.html`)
 against fake page and hub objects. It needs Node and no packages; where
 Node is absent, skip it locally and CI's lint job is its runner.
 
+The console pages' scripts are checked in `go test` as well
+(`internal/server/console_scripts_test.go`):
+
+- `TestConsoleScriptsSyntax` runs `node --check` on the inline script of
+  each page (`admin.html`, `tasks.html`, `status.html`). It skips where
+  Node is absent; CI's lint job runs it with `AIMEM_TEST_REQUIRE_NODE=1`,
+  where it must run.
+- `TestConsoleTemplateHoles` reads every `${…}` hole of a template that
+  builds HTML. A hole passes when it is a call of one of the page's
+  escaping helpers (`pageHelpers`), a number the hub assigns, a literal,
+  or a branch, sum or `.map(…).join(…)` whose parts pass the same way.
+  A number is a field the hub fills, read as a property (`t.revision`),
+  never a bare local. A sum is split first, so text added to a number is
+  read. Inside an inline event handler `esc` is no escape, because the
+  browser decodes the entity before the handler runs, so a hole there
+  passes only as a number or a literal. In an address attribute (`href`,
+  `src`, `action`, `formaction`) `esc` does not stop a `javascript:`
+  address, so only the page's own address helper (`taskURL`), a number or
+  a literal passes. Every other hole is on the reviewed list
+  (`console_holes_test.go`), one entry per distinct expression with the
+  number of places it occurs and the reason it is safe; an inline or
+  address entry also names its ground. When the check fails on a page change, escape
+  the new hole with a helper. If it is safe as it is, read it and add or
+  update its entry. An entry that matches nothing fails too: remove it.
+
 The documented usage scenarios run separately, under a build tag, against
 the real binary started as a hub and as a workstation:
 `go test -tags scenario -count=1 ./internal/scenario/...`. The suite is
@@ -31,7 +56,8 @@ convention and lists the cards.
 A pull request runs the fast set, so a PR's CI takes about two minutes:
 
 - `lint` (gofmt, the `scripts/check-*.sh` checks, the tasks console
-  harness, staticcheck, govulncheck) and `build`;
+  harness, `node --check` of the console pages' scripts, staticcheck,
+  govulncheck) and `build`;
 - `test (ubuntu-latest)`: `go vet` and `go test ./...` on Linux;
 - `test-windows-pr`: `go vet` and `go test` on Windows for the packages
   whose behaviour depends on the operating system: `internal/wiring`,
