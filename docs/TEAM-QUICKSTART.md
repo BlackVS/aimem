@@ -61,7 +61,10 @@ on the hub host (`aimem skills import --from-archive aiskills-X.Y.Z.tar.gz`,
 member joins: with tasks on and no process selected, no member is ready
 for work, workers are announced unavailable and the coordinator is told to
 issue no offers. Each member then installs the required skills from the
-hub with `aimem skills install` in the checkout.
+hub with `aimem skills install`. A member installs them inside its team
+conversation (`AIMEM_TEAM_SESSION` set), under the team's grant, with no
+personal grant on the project
+([pilot hub runbook](PILOT-HUB-RUNBOOK.md#7-linking-each-member-through-an-identity-proof)).
 
 On Debian, from a root shell, switch with a login shell:
 

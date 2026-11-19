@@ -49,7 +49,12 @@ Planned cards, one task each, in this order:
 2. 04, process re-select by tag with `--expect`, and the hub default.
 3. 05, token lifecycle as seen from the workstation: expiry, revocation
    and the replacement.
-4. TEAM-QUICKSTART with aicrew, in the aicrew repository.
+4. TEAM-QUICKSTART with aicrew, in the aicrew repository. Its path
+   includes a member without a personal grant installing the skills with
+   `aimem skills install` inside the team conversation that
+   `aicrew-agent join` opens. aicrew task 01a1f3a6-77d3-7000-829e-3844db120d37
+   runs it end to end. The suite here has no aicrew peer, no per-step
+   environment and no standard input, so no card in this repository runs it.
 5. 06, a second hub as a peer.
 6. 07, a closed-network install from the release archive.
 

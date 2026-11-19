@@ -13,6 +13,28 @@ currently 26); a binary refuses a database newer than it understands.
 
 ## [Unreleased]
 
+### Fixed
+
+- **`aimem skills install` works for a team member.** A member's user
+  holds no personal grant on the team's project, and needs none (in team
+  mode only the profile's grant counts). Yet the command asked the hub
+  with the checkout's own credential, so it was refused, with "the hub
+  knows no project ..., or this checkout's credential may not read it".
+  This happened on the first team's bring-up.
+  - **With `AIMEM_TEAM_SESSION` set**, `aimem skills install` and `aimem
+    skills list` read as that team conversation, under the team's grant.
+    They read the process selection, its stored set and the skills, with
+    the conversation's handle and the installation's individual credential
+    on every request, as `aimem process pin` already did. They never fall
+    back to the checkout's credential.
+  - **Refusals:** a project outside the team's grant, a conversation the
+    hub does not verify, and an unreadable session file each fail with
+    exit 1 and a message that names the conversation. The unreadable file
+    sends nothing.
+  - **Without the variable** nothing changes.
+  - **Upgrade:** the hub is unchanged, and hubs of 0.11.4 serve it; only
+    the members' clients are upgraded.
+
 ## [0.11.4] — 2026-11-18
 
 A hub's curation now fails visibly when the model provider refuses the
