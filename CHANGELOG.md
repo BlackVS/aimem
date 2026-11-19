@@ -13,6 +13,19 @@ currently 26); a binary refuses a database newer than it understands.
 
 ## [Unreleased]
 
+## [0.11.5] — 2026-11-19
+
+A team member can install the skills its team's process pins. Inside its
+team conversation (`AIMEM_TEAM_SESSION` set), `aimem skills install` and
+`aimem skills list` now read the hub as that conversation, under the
+team's grant, so a member whose user holds no personal grant on the
+project gets its skills. Before, the command asked with the checkout's
+own credential and the hub refused it.
+
+**A client release only.** The hub is unchanged: hubs stay at v0.11.4,
+which already serves every route this reads to a team conversation.
+Upgrade the members' clients. No schema step. Includes PR #404.
+
 ### Fixed
 
 - **`aimem skills install` works for a team member.** A member's user
@@ -22,11 +35,13 @@ currently 26); a binary refuses a database newer than it understands.
   knows no project ..., or this checkout's credential may not read it".
   This happened on the first team's bring-up.
   - **With `AIMEM_TEAM_SESSION` set**, `aimem skills install` and `aimem
-    skills list` read as that team conversation, under the team's grant.
-    They read the process selection, its stored set and the skills, with
-    the conversation's handle and the installation's individual credential
-    on every request, as `aimem process pin` already did. They never fall
-    back to the checkout's credential.
+    skills list` read as that team conversation, under the team's grant,
+    with the conversation's handle and the installation's individual
+    credential on every request, as `aimem process pin` already did.
+    `install` reads the process selection and its stored set to pick the
+    skills the process pins (`--all` skips it), then the skills index and
+    the sets; `list` reads the skills index only. They never fall back to
+    the checkout's credential.
   - **Refusals:** a project outside the team's grant, a conversation the
     hub does not verify, and an unreadable session file each fail with
     exit 1 and a message that names the conversation. The unreadable file
