@@ -13,6 +13,33 @@ currently 26); a binary refuses a database newer than it understands.
 
 ## [Unreleased]
 
+## [0.11.4] — 2026-11-18
+
+A hub's curation now fails visibly when the model provider refuses the
+account, and the goal selector of the board's features view is changed
+after the owner's second look. What an administrator sees change after the
+upgrade:
+
+- On a hub whose provider refuses the account (no credit or quota left, or
+  a refused key), `aimem-curate.service` ends as **failed, with status 6**,
+  from the first hourly run after the upgrade. Before, it ended as a
+  success while every call was refused. The journal line names the
+  provider's answer; the cure is on the provider's account.
+- A refused embedding now **stops a store's curation**. Before, curation
+  went on without the duplicate check.
+
+No schema step. Includes PR #401 and #402.
+
+### Upgrade notes
+
+- **The curation service can turn failed on upgrade.** The upgrade rewrites
+  `curate-all.sh`. If the hub's provider account is refused at that time,
+  the next hourly run ends as failed with status 6; `systemctl --user
+  status aimem-curate.service` and `aimem health` (`llm_pace.last_refusal`)
+  show the provider's answer. Restore the account's credit or key: the
+  next run then ends as a success, and a call of the same kind that
+  succeeds clears the health record. Nothing in the store changes.
+
 ### Changed
 
 - **The goal selector of the board's features view, after the owner's
