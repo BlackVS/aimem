@@ -208,11 +208,13 @@ type skillsConn struct {
 	set    *process.Set // the project's process, when asked for
 	// grant is the next step when the hub refuses a skills read.
 	grant string
+	// who names the team conversation a refusal came in; "" in personal mode.
+	who string
 }
 
 const (
 	personalSkillsGrant = "check the checkout's credential and its grant on the project"
-	teamSkillsGrant     = "the team's access profile needs a grant on the project (on the hub host: aimem identity team grant); no personal credential was used"
+	teamSkillsGrant     = processctx.TeamGrantFix
 )
 
 // skillsConnect connects for the project in dir (or projectID); with
@@ -220,11 +222,11 @@ const (
 // the skills.
 func skillsConnect(dir, projectID string, withProcess bool) (*skillsConn, error) {
 	if path := os.Getenv(teamsession.EnvVar); path != "" {
-		set, c, err := processctx.TeamSkills(path, dir, stateRoot(), projectID, withProcess)
+		set, c, who, err := processctx.TeamSkills(path, dir, stateRoot(), projectID, withProcess)
 		if err != nil {
 			return nil, err
 		}
-		return &skillsConn{client: c, set: set, grant: teamSkillsGrant}, nil
+		return &skillsConn{client: c, set: set, grant: teamSkillsGrant, who: who + ": "}, nil
 	}
 	conn := &skillsConn{grant: personalSkillsGrant}
 	if withProcess {
@@ -250,7 +252,7 @@ func (conn *skillsConn) index() (*skills.IndexAnswer, error) {
 	ix, outcome, err := c.Index(ctx)
 	switch outcome {
 	case skills.OutcomeDenied:
-		return nil, fmt.Errorf("the hub refused the skills read for project %s: %v; %s (a hub from before hub-served skills refuses this route the same way: compare the hub's version)", c.Project, err, conn.grant)
+		return nil, fmt.Errorf("%sthe hub refused the skills read for project %s: %v; %s (a hub from before hub-served skills refuses this route the same way: compare the hub's version)", conn.who, c.Project, err, conn.grant)
 	case skills.OutcomeUnsupported:
 		return nil, fmt.Errorf("this hub does not serve skills (%v): upgrade the hub, or install the skills with the installers for now", err)
 	case skills.OutcomeFailed:
@@ -350,7 +352,7 @@ func skillsInstall(dir, projectID string, user bool, tool string, all bool) erro
 		files, outcome, err := c.Fetch(ctx, cache, p.Digest)
 		switch outcome {
 		case skills.OutcomeDenied:
-			return fmt.Errorf("the hub refused the skills set read: %v; %s", err, conn.grant)
+			return fmt.Errorf("%sthe hub refused the skills set read: %v; %s", conn.who, err, conn.grant)
 		case skills.OutcomeUnsupported, skills.OutcomeFailed:
 			return fmt.Errorf("set %s: %v", p.Digest[:12], err)
 		}

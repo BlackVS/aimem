@@ -23,6 +23,12 @@ import (
 // teamRestart is the next step when the session itself cannot be used.
 const teamRestart = "restart the conversation through aicrew"
 
+// TeamGrantFix is the skills commands' next step when the hub refuses a
+// team conversation's read for lack of the team's grant. Every request
+// still carries the installation's individual credential with the
+// conversation's handle; what never happens is a read in personal mode.
+const TeamGrantFix = "the team's access profile needs a grant on the project (on the hub host: aimem identity team grant); nothing was read outside the team conversation"
+
 // teamConn is one verified team conversation's connection to its hub.
 type teamConn struct {
 	hub     *adapter.HubConfig // the session's URL and the individual credential
@@ -87,32 +93,32 @@ func teamConnect(path, dir, root, projectID string) (*teamConn, error) {
 
 // TeamSkills reads, as the team conversation the session file at path
 // names, what `aimem skills install` and `list` need: the skills client
-// for the project's routes and, with process set, the project's selected
+// for the project's routes and, with withProcess, the project's selected
 // process from the hub's stored set, verified against the selection's
-// digest and cached by it in root. Every error names the conversation; a
-// refusal says that no personal credential was used.
-func TeamSkills(path, dir, root, projectID string, withProcess bool) (*process.Set, *skills.Client, error) {
-	fail := func(err error) (*process.Set, *skills.Client, error) {
-		return nil, nil, fmt.Errorf("%s: %w", teamName(path), err)
+// digest and cached by it in root; name names the conversation, for the
+// caller's own messages. Every error names the conversation.
+func TeamSkills(path, dir, root, projectID string, withProcess bool) (set *process.Set, c *skills.Client, name string, err error) {
+	name = teamName(path)
+	fail := func(err error) (*process.Set, *skills.Client, string, error) {
+		return nil, nil, name, fmt.Errorf("%s: %w", name, err)
 	}
 	tc, err := teamConnect(path, dir, root, projectID)
 	if err != nil {
-		return fail(fmt.Errorf("%w; no personal credential was used", err))
+		return fail(fmt.Errorf("%w; nothing was read outside the team conversation", err))
 	}
-	c := &skills.Client{BaseURL: tc.hub.URL, Token: tc.hub.Token, HTTP: tc.client, Project: tc.project}
+	c = &skills.Client{BaseURL: tc.hub.URL, Token: tc.hub.Token, HTTP: tc.client, Project: tc.project}
 	if !withProcess {
-		return nil, c, nil
+		return nil, c, name, nil
 	}
-	ref, bundle, err := readSelectedSet(tc.hub, tc.client, tc.project, teamPinFix)
+	ref, bundle, err := readSelectedSet(tc.hub, tc.client, tc.project, TeamGrantFix)
 	if err != nil {
 		return fail(err)
 	}
 	if _, err := process.StoreSet(root, bundle, ref.Digest); err != nil {
 		return fail(fmt.Errorf("project %s's process set does not validate: %w", tc.project, err))
 	}
-	set, err := process.CachedSet(root, *ref)
-	if err != nil {
+	if set, err = process.CachedSet(root, *ref); err != nil {
 		return fail(fmt.Errorf("project %s's process set cannot be read back: %w", tc.project, err))
 	}
-	return set, c, nil
+	return set, c, name, nil
 }

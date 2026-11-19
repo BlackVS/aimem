@@ -132,10 +132,24 @@ func TestSkillsInstallInATeamConversation(t *testing.T) {
 	from = g.count()
 	err = skillsInstall(dir, "beta", false, "claude", false)
 	if err == nil || !strings.Contains(err.Error(), "team conversation sess-A of team team-1") || !strings.Contains(err.Error(), "grant_denied") ||
-		!strings.Contains(err.Error(), "aimem identity team grant") || !strings.Contains(err.Error(), "no personal credential") {
+		!strings.Contains(err.Error(), "aimem identity team grant") || !strings.Contains(err.Error(), "nothing was read outside the team conversation") {
 		t.Fatalf("ungranted project: %v", err)
 	}
 	onlyTeam("ungranted project", from)
+	// The index read refuses it the same way, for list and install --all,
+	// which read no process first.
+	from = g.count()
+	for name, run := range map[string]func() error{
+		"list":          func() error { return skillsList(dir, "beta") },
+		"install --all": func() error { return skillsInstall(dir, "beta", false, "claude", true) },
+	} {
+		err := run()
+		if err == nil || !strings.Contains(err.Error(), "team conversation sess-A of team team-1: the hub refused the skills read for project beta") ||
+			!strings.Contains(err.Error(), "aimem identity team grant") || !strings.Contains(err.Error(), "nothing was read outside the team conversation") {
+			t.Fatalf("ungranted project, %s: %v", name, err)
+		}
+	}
+	onlyTeam("ungranted project, index", from)
 
 	// A conversation aicrew has ended: the hub does not verify it, the
 	// command fails naming it, and nothing falls back.
@@ -145,7 +159,7 @@ func TestSkillsInstallInATeamConversation(t *testing.T) {
 	from = g.count()
 	err = skillsInstall(dir, "alpha", false, "claude", false)
 	if err == nil || !strings.Contains(err.Error(), "team conversation sess-A of team team-1: the team context is not verified") ||
-		!strings.Contains(err.Error(), "restart the conversation through aicrew") || !strings.Contains(err.Error(), "no personal credential was used") {
+		!strings.Contains(err.Error(), "restart the conversation through aicrew") || !strings.Contains(err.Error(), "nothing was read outside the team conversation") {
 		t.Fatalf("ended conversation: %v", err)
 	}
 	onlyTeam("ended conversation", from)
@@ -157,7 +171,7 @@ func TestSkillsInstallInATeamConversation(t *testing.T) {
 	t.Setenv(teamsession.EnvVar, filepath.Join(t.TempDir(), "missing.json"))
 	from = g.count()
 	err = skillsInstall(dir, "alpha", false, "claude", true)
-	if err == nil || !strings.Contains(err.Error(), "the team session file cannot be used") || !strings.Contains(err.Error(), "no personal credential was used") {
+	if err == nil || !strings.Contains(err.Error(), "the team session file cannot be used") || !strings.Contains(err.Error(), "nothing was read outside the team conversation") {
 		t.Fatalf("unusable session file: %v", err)
 	}
 	if n := len(g.requestsSince(from)); n != 0 {
