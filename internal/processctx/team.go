@@ -106,7 +106,7 @@ func TeamSkills(path, dir, root, projectID string, withProcess bool) (set *proce
 	if err != nil {
 		return fail(fmt.Errorf("%w; nothing was read outside the team conversation", err))
 	}
-	c = &skills.Client{BaseURL: tc.hub.URL, Token: tc.hub.Token, HTTP: tc.client, Project: tc.project}
+	c = &skills.Client{BaseURL: tc.hub.URL, Token: tc.hub.Token, HTTP: tc.client, Project: tc.project, ErrorText: hubErrorText}
 	if !withProcess {
 		return nil, c, name, nil
 	}

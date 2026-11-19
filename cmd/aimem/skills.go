@@ -254,9 +254,9 @@ func (conn *skillsConn) index() (*skills.IndexAnswer, error) {
 	case skills.OutcomeDenied:
 		return nil, fmt.Errorf("%sthe hub refused the skills read for project %s: %v; %s (a hub from before hub-served skills refuses this route the same way: compare the hub's version)", conn.who, c.Project, err, conn.grant)
 	case skills.OutcomeUnsupported:
-		return nil, fmt.Errorf("this hub does not serve skills (%v): upgrade the hub, or install the skills with the installers for now", err)
+		return nil, fmt.Errorf("%sthis hub does not serve skills (%v): upgrade the hub, or install the skills with the installers for now", conn.who, err)
 	case skills.OutcomeFailed:
-		return nil, err
+		return nil, fmt.Errorf("%s%w", conn.who, err)
 	}
 	return ix, nil
 }
@@ -354,7 +354,7 @@ func skillsInstall(dir, projectID string, user bool, tool string, all bool) erro
 		case skills.OutcomeDenied:
 			return fmt.Errorf("%sthe hub refused the skills set read: %v; %s", conn.who, err, conn.grant)
 		case skills.OutcomeUnsupported, skills.OutcomeFailed:
-			return fmt.Errorf("set %s: %v", p.Digest[:12], err)
+			return fmt.Errorf("%sset %s: %v", conn.who, p.Digest[:12], err)
 		}
 		fetched[p.Digest] = files
 	}

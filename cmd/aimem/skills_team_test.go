@@ -144,7 +144,7 @@ func TestSkillsInstallInATeamConversation(t *testing.T) {
 		"install --all": func() error { return skillsInstall(dir, "beta", false, "claude", true) },
 	} {
 		err := run()
-		if err == nil || !strings.Contains(err.Error(), "team conversation sess-A of team team-1: the hub refused the skills read for project beta") ||
+		if err == nil || !strings.Contains(err.Error(), "team conversation sess-A of team team-1: the hub refused the skills read for project beta: grant_denied") ||
 			!strings.Contains(err.Error(), "aimem identity team grant") || !strings.Contains(err.Error(), "nothing was read outside the team conversation") {
 			t.Fatalf("ungranted project, %s: %v", name, err)
 		}
