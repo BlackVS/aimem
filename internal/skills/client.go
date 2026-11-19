@@ -43,6 +43,10 @@ type Client struct {
 	Token   string
 	HTTP    *http.Client
 	Project string
+	// ErrorText, when set, words a non-200 answer; a team conversation's
+	// client sets it to read the team refusal envelope, whose code
+	// (grant_denied, ...) the default reading of "error" would lose.
+	ErrorText func(raw []byte, status int) string
 }
 
 // IndexAnswer is the hub's index for a project: the current import per
@@ -78,8 +82,11 @@ func (c *Client) get(ctx context.Context, path string) (int, []byte, error) {
 	return resp.StatusCode, raw, nil
 }
 
-func classify(status int, raw []byte) (Outcome, error) {
+func (c *Client) classify(status int, raw []byte) (Outcome, error) {
 	msg := func() string {
+		if c.ErrorText != nil {
+			return c.ErrorText(raw, status)
+		}
 		var e struct {
 			Error string `json:"error"`
 		}
@@ -106,7 +113,7 @@ func (c *Client) Index(ctx context.Context) (*IndexAnswer, Outcome, error) {
 	if err != nil {
 		return nil, OutcomeFailed, err
 	}
-	if out, err := classify(status, raw); out != OutcomeOK {
+	if out, err := c.classify(status, raw); out != OutcomeOK {
 		return nil, out, err
 	}
 	var ix IndexAnswer
@@ -137,7 +144,7 @@ func (c *Client) Fetch(ctx context.Context, cache *Store, digest string) (map[st
 	if err != nil {
 		return nil, OutcomeFailed, err
 	}
-	if out, err := classify(status, raw); out != OutcomeOK {
+	if out, err := c.classify(status, raw); out != OutcomeOK {
 		return nil, out, err
 	}
 	var body struct {

@@ -1201,6 +1201,18 @@ show` warn `the hub lacks required skills of the project's process`, and
 `aimem project list` marks the project not ready for work.
 `aimem skills list` shows the effective set and what the machine has.
 
+A team member installs the skills inside its team conversation. With
+`AIMEM_TEAM_SESSION` naming the session file aicrew opened, `aimem skills
+install` and `aimem skills list` read the process and the skills as that
+conversation, under the team profile's grant. The member's user needs no
+personal grant on the project. Every request carries the conversation's
+handle and the installation's individual credential, and nothing falls
+back to the checkout's credential. A project outside the team's grant, a
+conversation the hub does not verify, and an unreadable session file are
+each refused, naming the conversation. `aimem skills import` and `aimem
+skills export`, and `aimem skills list --hub`, are the hub host's admin
+commands over the local socket. They have no team form.
+
 The skills store is hub state: `skills/index.json` and `skills/sets/` under
 the state root travel with a backup or a migration of the state root
 (section 7). `aimem health` reports it under `skills`: `none` before any

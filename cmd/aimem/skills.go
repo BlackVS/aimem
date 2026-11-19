@@ -7,8 +7,10 @@ package main
 // digest; `aimem skills export` writes that archive pair back from the
 // hub. `aimem skills install` runs on a member machine, in a project
 // checkout: it reads the skills the project's process requires, at the
-// pinned versions, from the hub under the checkout's own credential and
-// writes them where the agent clients on this machine read skills. It
+// pinned versions, from the hub under the checkout's own credential (in a
+// team conversation, AIMEM_TEAM_SESSION, as that conversation under the
+// team's grant) and writes them where the agent clients on this machine
+// read skills. It
 // reads nothing from the internet. `aimem skills list` prints the hub's
 // effective set (instance over release by name) with each skill's source.
 
@@ -29,6 +31,7 @@ import (
 	"aimem/internal/process"
 	"aimem/internal/processctx"
 	"aimem/internal/skills"
+	"aimem/internal/teamsession"
 	"aimem/internal/wiring"
 )
 
@@ -51,7 +54,9 @@ install writes the skills the project's process requires, at the pinned
 versions, into the skills directories of the agent clients found on this
 machine (--tool names them; --user installs for the user instead of the
 checkout; --all installs every effective skill) and records each one's
-version and source beside them.`
+version and source beside them. With AIMEM_TEAM_SESSION set, list and
+install read the hub as that team conversation, under the team's grant,
+and never with the checkout's credential.`
 
 func skillsCmd(args []string) error {
 	if len(args) == 0 {
@@ -194,31 +199,76 @@ func writeSkillsExport(set *skills.Set, out string) (archivePath, sumsPath strin
 	return archivePath, sumsPath, nil
 }
 
-// skillsIndex reads the project's index with the checkout's credential and
-// turns a refusal into words.
-func skillsIndex(dir, projectID string) (*skills.Client, *skills.IndexAnswer, error) {
+// skillsConn is where the skills commands read the hub: as the team
+// conversation AIMEM_TEAM_SESSION names, under the team's grant, or with
+// the checkout's own credential. In a team conversation nothing falls back
+// to the checkout's credential.
+type skillsConn struct {
+	client *skills.Client
+	set    *process.Set // the project's process, when asked for
+	// grant is the next step when the hub refuses a skills read.
+	grant string
+	// who names the team conversation a refusal came in; "" in personal mode.
+	who string
+}
+
+const (
+	personalSkillsGrant = "check the checkout's credential and its grant on the project"
+	teamSkillsGrant     = processctx.TeamGrantFix
+)
+
+// skillsConnect connects for the project in dir (or projectID); with
+// withProcess it also reads the project's process, whose manifest pins
+// the skills.
+func skillsConnect(dir, projectID string, withProcess bool) (*skillsConn, error) {
+	if path := os.Getenv(teamsession.EnvVar); path != "" {
+		set, c, who, err := processctx.TeamSkills(path, dir, stateRoot(), projectID, withProcess)
+		if err != nil {
+			return nil, err
+		}
+		return &skillsConn{client: c, set: set, grant: teamSkillsGrant, who: who + ": "}, nil
+	}
+	conn := &skillsConn{grant: personalSkillsGrant}
+	if withProcess {
+		r := processctx.Load(dir, stateRoot(), projectID)
+		if r.Set == nil {
+			return nil, fmt.Errorf("the project's process is not available (%s): %s; %s", r.State, r.Detail, r.Fix)
+		}
+		conn.set = r.Set
+	}
 	c, r := processctx.SkillsClient(dir, stateRoot(), projectID)
 	if c == nil {
-		return nil, nil, fmt.Errorf("%s: %s (%s)", r.State, r.Detail, r.Fix)
+		return nil, fmt.Errorf("%s: %s (%s)", r.State, r.Detail, r.Fix)
 	}
+	conn.client = c
+	return conn, nil
+}
+
+// index reads the project's skills index and turns a refusal into words.
+func (conn *skillsConn) index() (*skills.IndexAnswer, error) {
+	c := conn.client
 	ctx, cancel := skills.Deadline()
 	defer cancel()
 	ix, outcome, err := c.Index(ctx)
 	switch outcome {
 	case skills.OutcomeDenied:
-		return nil, nil, fmt.Errorf("the hub refused the skills read for project %s: %v; check the checkout's credential and its grant on the project (a hub from before hub-served skills refuses this route the same way: compare the hub's version)", c.Project, err)
+		return nil, fmt.Errorf("%sthe hub refused the skills read for project %s: %v; %s (a hub from before hub-served skills refuses this route the same way: compare the hub's version)", conn.who, c.Project, err, conn.grant)
 	case skills.OutcomeUnsupported:
-		return nil, nil, fmt.Errorf("this hub does not serve skills (%v): upgrade the hub, or install the skills with the installers for now", err)
+		return nil, fmt.Errorf("%sthis hub does not serve skills (%v): upgrade the hub, or install the skills with the installers for now", conn.who, err)
 	case skills.OutcomeFailed:
-		return nil, nil, err
+		return nil, fmt.Errorf("%s%w", conn.who, err)
 	}
-	return c, ix, nil
+	return ix, nil
 }
 
 // skillsList prints the effective set with each skill's version, source
 // and what this machine has of it.
 func skillsList(dir, projectID string) error {
-	_, ix, err := skillsIndex(dir, projectID)
+	conn, err := skillsConnect(dir, projectID, false)
+	if err != nil {
+		return err
+	}
+	ix, err := conn.index()
 	if err != nil {
 		return err
 	}
@@ -255,19 +305,20 @@ func skillsList(dir, projectID string) error {
 // skillsInstall installs the required (or every effective) skill from the
 // hub into the clients' skills directories.
 func skillsInstall(dir, projectID string, user bool, tool string, all bool) error {
+	conn, err := skillsConnect(dir, projectID, !all)
+	if err != nil {
+		return err
+	}
 	var pins []process.SkillPin
 	if !all {
-		r := processctx.Load(dir, stateRoot(), projectID)
-		if r.Set == nil {
-			return fmt.Errorf("the project's process is not available (%s): %s; %s", r.State, r.Detail, r.Fix)
-		}
-		pins = r.Set.Manifest.Skills
+		pins = conn.set.Manifest.Skills
 		if len(pins) == 0 {
 			fmt.Println("the selected process requires no skills; nothing to install (--all installs every effective skill)")
 			return nil
 		}
 	}
-	c, ix, err := skillsIndex(dir, projectID)
+	c := conn.client
+	ix, err := conn.index()
 	if err != nil {
 		return err
 	}
@@ -301,9 +352,9 @@ func skillsInstall(dir, projectID string, user bool, tool string, all bool) erro
 		files, outcome, err := c.Fetch(ctx, cache, p.Digest)
 		switch outcome {
 		case skills.OutcomeDenied:
-			return fmt.Errorf("the hub refused the skills set read: %v; check the checkout's credential and its grant on the project", err)
+			return fmt.Errorf("%sthe hub refused the skills set read: %v; %s", conn.who, err, conn.grant)
 		case skills.OutcomeUnsupported, skills.OutcomeFailed:
-			return fmt.Errorf("set %s: %v", p.Digest[:12], err)
+			return fmt.Errorf("%sset %s: %v", conn.who, p.Digest[:12], err)
 		}
 		fetched[p.Digest] = files
 	}

@@ -381,6 +381,19 @@ The operator never sees a receipt. `HUB_ID` is the hub ID from `aimem identity p
 
 **Verify from the hub side,** after a member has started a team session. The hub's access audit records `team.verified` for each verified team request. A refusal is recorded as `team.refused.<code>` with a correlation ID matching the one the member saw. On the hub host, `aimem access audit` prints them, newest first; `--action team.verified`, `--actor` and `--since 1d` narrow it. The setup above is there too: `identity_peer.register`, `identity_peer.credential.issue.<operation>`, `team.register.created` (by `peer:aicrew-example`), `team_grant.true`, `user.create` and `token.issue`. Each `team.read` of aicrewd is recorded as `team.read`.
 
+**The member's skills come from the hub inside a team conversation.** The process the pilot project selects pins the skills its members need, and the hub serves them from the release imported in step 2. A member installs them as the team conversation, under the team's grant, with no personal grant on the project. In the member's home, with the home's `AIMEM_STATE_DIR` and `AIMEM_SOCKET`, and with `AIMEM_TEAM_SESSION` naming the session file aicrew opened for the conversation:
+
+```sh
+aimem skills install -p pilot --tool claude
+```
+
+Every request of the command carries the conversation's handle and the member's individual credential. The hub answers it under the profile's grant from step 5. With `AIMEM_TEAM_SESSION` set, the command never falls back to a personal credential:
+- A project outside the team's grant is refused with `grant_denied` and the team's next step (`aimem identity team grant`).
+- A conversation that aicrew ended is refused as not verified.
+- A session file that cannot be read sends nothing.
+
+Each refusal names the conversation and exits 1. Run without `AIMEM_TEAM_SESSION`, the same command asks with the member's own credential. A member without a personal grant is then refused: "the hub knows no project pilot, or this checkout's credential may not read it". That is expected, and a personal grant is not the fix. `aimem skills list` reads the same way. This needs an aimem client of 0.11.5 or later; the hub is unchanged.
+
 ## Checklist
 
 | Step | Verified by |
@@ -395,5 +408,6 @@ The operator never sees a receipt. `HUB_ID` is the hub ID from `aimem identity p
 | Member homes, before the first proof | with each home's `AIMEM_STATE_DIR` and `AIMEM_SOCKET`, `aimem hub credential pilot-hub` answers `set, active, scope user`; `~/.config/aimem/env` sets neither variable |
 | Hub token | `grep -c $'\r'` prints `0` for every file the hub service's environment comes from |
 | Members linked | a member's session start is audited as `team.verified` |
+| Member skills | inside a team conversation, `aimem skills install -p pilot --tool claude` installs the pinned skills; no personal grant is given |
 
 Secrets never belong in a command line, a shell history, a log, a chat or a task comment. Every secret in this runbook travels in a file only its owner can read.
