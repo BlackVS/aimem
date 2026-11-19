@@ -13,6 +13,19 @@ currently 26); a binary refuses a database newer than it understands.
 
 ## [Unreleased]
 
+## [0.11.5] — 2026-11-19
+
+A team member can install the skills its team's process pins. Inside its
+team conversation (`AIMEM_TEAM_SESSION` set), `aimem skills install` and
+`aimem skills list` now read the process and the skills as that
+conversation, under the team's grant, so a member whose user holds no
+personal grant on the project gets its skills. Before, the command asked
+with the checkout's own credential and the hub refused it.
+
+**A client release only.** The hub is unchanged: hubs stay at v0.11.4,
+which already serves every route this reads to a team conversation.
+Upgrade the members' clients. No schema step. Includes PR #404.
+
 ### Fixed
 
 - **`aimem skills install` works for a team member.** A member's user
