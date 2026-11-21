@@ -40,7 +40,9 @@ func readConsolePage(t *testing.T, name string) (script string, line int) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	script, line, err = pageScript(string(b))
+	// .gitattributes leaves *.html to the checkout, so the Windows runner
+	// reads the pages with CRLF; every check here sees LF.
+	script, line, err = pageScript(strings.ReplaceAll(string(b), "\r\n", "\n"))
 	if err != nil {
 		t.Fatalf("%s: %v", name, err)
 	}

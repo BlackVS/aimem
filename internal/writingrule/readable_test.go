@@ -139,7 +139,9 @@ func TestRepositoryTitlesPass(t *testing.T) {
 		t.Fatal(err)
 	}
 	titles := 0
-	for title := range strings.SplitSeq(strings.TrimSpace(string(raw)), "\n") {
+	// testdata/*.txt checks out with CRLF on Windows: split on LF alone.
+	text := strings.ReplaceAll(string(raw), "\r\n", "\n")
+	for title := range strings.SplitSeq(strings.TrimSpace(text), "\n") {
 		titles++
 		if fd := Unreadable(title); fd != nil {
 			t.Errorf("flagged %q (%s) in the title %q", fd.Span, fd.Reason, title)
