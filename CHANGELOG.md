@@ -15,6 +15,13 @@ currently 26); a binary refuses a database newer than it understands.
 
 ### Changed
 
+- **A pull request tests every package on Windows.** `test-windows-pr`
+  now runs `go vet ./...` and `go test ./...`, as master's Windows leg
+  does, instead of a list of packages, and the Windows scenarios run on
+  a pull request too. A Windows-only failure reached master three times
+  with the list, most recently the console coverage test of #406, which
+  cut `admin.html` at an LF while the runner checks the page out with
+  CRLF; the console tests now read the pages with LF on any checkout.
 - **Changing the embedding model is a supported step.** The new section
   "Changing the embedding model" in docs/ADMIN-MANUAL.md gives the order
   without a dip: fill the new key with `AIMEM_EMBED_MODEL=<new> aimem

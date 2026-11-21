@@ -190,9 +190,12 @@ func TestSetupCoverageIsUnavailableWithAnUnreadableProject(t *testing.T) {
 	}
 	script, _ := readConsolePage(t, "admin.html")
 	i := strings.Index(script, "function embCoverage(")
+	if i < 0 {
+		t.Fatal("admin.html: function embCoverage( not found")
+	}
 	j := strings.Index(script[i:], "\n}\n")
-	if i < 0 || j < 0 {
-		t.Fatal("embCoverage not found in admin.html")
+	if j < 0 {
+		t.Fatal("admin.html: embCoverage has no closing line")
 	}
 	rows, _ := json.Marshal(ov.Projects)
 	js := "const esc=x=>x;\n" + script[i:i+j+2] + "\nconsole.log(embCoverage(\"old-embed\", " + string(rows) + "));\n"

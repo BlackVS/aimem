@@ -25,7 +25,9 @@ func pageSource(t *testing.T, name string) string {
 	if err != nil {
 		t.Fatal(err)
 	}
-	return string(b)
+	// .gitattributes leaves *.html to the checkout, so the Windows runner
+	// reads the pages with CRLF; every check here sees LF.
+	return strings.ReplaceAll(string(b), "\r\n", "\n")
 }
 
 func TestPagesEscapeTheApostrophe(t *testing.T) {
@@ -83,7 +85,11 @@ func TestAdminConsoleHandlerNamesMatchTheAllowlist(t *testing.T) {
 		t.Fatal("admin.html has no ACT allowlist")
 	}
 	body := page[start:]
-	body = body[:strings.Index(body, "\n};")]
+	end := strings.Index(body, "\n};")
+	if end < 0 {
+		t.Fatal("admin.html: the ACT allowlist has no closing line")
+	}
+	body = body[:end]
 	allowed := map[string]bool{}
 	for _, m := range regexp.MustCompile(`(?m)^  (\w+):`).FindAllStringSubmatch(body, -1) {
 		allowed[m[1]] = true

@@ -153,10 +153,10 @@ These rules keep that cost in proportion to the change.
   merge. It records the delivered task DONE, with verify-delivery's
   evidence, when the CI run on the merge commit is green.
 
-CI on a pull request runs the fast set; the slow checks run on master,
-and the macOS tests run only in the release workflow (docs/DEVELOPMENT.md,
-"Which checks run where"). A change that only a Windows or macOS leg
-would test is tested on that platform before the push.
+CI on a pull request tests every package on Linux and on Windows; the
+race runs run on master, and the macOS tests run only in the release
+workflow (docs/DEVELOPMENT.md, "Which checks run where"). A change that
+only a macOS leg would test is tested on that platform before the push.
 
 ## Working in this repo
 

@@ -55,43 +55,39 @@ convention and lists the cards.
 
 ## Which checks run where
 
-A pull request runs the fast set, so a PR's CI takes about two minutes:
+A pull request runs the tests of every package on Linux and on
+Windows, so a PR's CI takes about ten minutes, the time of its Windows
+leg, which runs beside the reviews:
 
 - `lint` (gofmt, the `scripts/check-*.sh` checks, the tasks console
   harness, `node --check` of the console pages' scripts, staticcheck,
   govulncheck) and `build`;
 - `test (ubuntu-latest)`: `go vet` and `go test ./...` on Linux;
-- `test-windows-pr`: `go vet` and `go test` on Windows for the packages
-  whose behaviour depends on the operating system: `internal/wiring`,
-  `internal/process`, `internal/processctx`, `internal/childenv`,
-  `internal/filelock`, `internal/privatefile`, `internal/taskcred`,
-  `internal/upgrade` and `internal/adapter` (paths and 8.3 short names,
-  git and its environment, file locks and permissions, hooks, the
-  binary swap), and the tests that run boot.ps1 itself from
-  `internal/installer` (`go test -run '^TestBootPs1'`). A pull request
-  that touches the installer surface (`boot.sh`, `boot.ps1`,
-  `install.sh`, `install.ps1`, `install-hub.sh`, the OpenCode plugin,
-  `.github/workflows/release.yml` or `internal/installer`) runs the
-  whole `internal/installer` package there instead, with master's
-  20-minute timeout. Otherwise the rest of the package, about 8 minutes
-  on the runner, runs on master;
-- `scenario (ubuntu-latest)` and `install-hub-container`.
+- `test-windows-pr`: `go vet ./...` and `go test -timeout 20m ./...` on
+  Windows, the same leg master runs as `test (windows-latest)`;
+- `scenario (ubuntu-latest)`, `scenario (windows-latest)` and
+  `install-hub-container`.
+
+Windows is tested in full before the merge because a Windows-only
+failure found on master costs more than the longer job: the runner
+checks text files out with CRLF and uses 8.3 short paths, which a
+Linux run and a workstation's own checkout may not show. Such failures
+reached master three times while a pull request tested only part of
+the suite on Windows (#333 and #336 on 2026-10-30, #406 on 2026-11-21).
 
 The slow checks run on every push to master, nightly, on a manual run
 of the CI workflow (`workflow_dispatch`, for any branch), and on a
 release prepare PR, whose branch is named `release/v<version>`:
 
 - `test (windows-latest)`;
-- `scenario (windows-latest)`;
 - the identity test's 50 runs under the race detector on Linux.
 
-On an ordinary pull request those legs keep their names and pass after
-one step that says where they run, because the master ruleset requires
-every check by name. `test-windows-pr` runs only on an ordinary pull
-request; on master, nightly and a release/ pull request it is skipped,
-since the full Windows leg runs there. A Windows failure outside its
-packages (`cmd/aimem` and the rest of the suite, the Windows scenarios)
-therefore still surfaces on master.
+On an ordinary pull request `test (windows-latest)` keeps its name and
+passes after one step that says where its tests run, because the
+master ruleset requires every check by name: `test-windows-pr` runs
+them there. `test-windows-pr` runs only on an ordinary pull request;
+on master, nightly and a release/ pull request it is skipped, since
+`test (windows-latest)` runs there.
 
 The macOS tests run only in the release workflow, at the tag (the
 client upgrade check below also runs on macOS before it): the `macos` job
