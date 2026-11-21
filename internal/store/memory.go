@@ -563,6 +563,15 @@ type RecallOpts struct {
 	// Callers embed the query themselves (the store makes no network calls).
 	QueryVec   []float32
 	EmbedModel string // embeddings to score against (rows for other models are ignored)
+	// Mismatch, when set, receives what the vector leg met: the rows of
+	// EmbedModel it read and how many of them had another length than
+	// QueryVec (which cosine scores 0). It costs no query of its own.
+	Mismatch *VectorMismatch
+}
+
+// VectorMismatch is what recall's vector leg found about lengths.
+type VectorMismatch struct {
+	Rows, Other, StoredDim int
 }
 
 // EmbedTarget is a memory awaiting an embedding.
@@ -592,12 +601,157 @@ ORDER BY m.id LIMIT ?`, model, limit)
 	return out, rows.Err()
 }
 
-// SetEmbedding stores (or replaces) one memory's vector for a model.
+// ErrEmbedDim is a vector whose length differs from the stored vectors
+// of its key: two spaces under one name, which cosine cannot compare.
+var ErrEmbedDim = errors.New("embedding dimension differs from the stored vectors of this key")
+
+// ProjectID is the project (or group, or user scope) this database holds.
+func (d *DB) ProjectID() string { return d.projectID }
+
+// EmbedDim is the vector length stored under model, 0 when the key has
+// no vectors here. It reads the table every time: another process may
+// have dropped the key since (a long-running reader must not keep a
+// length that is gone). A key holding vectors of several lengths (a
+// model change under one name before the length check existed) is
+// ErrEmbedDim: no single length describes it, and it must be rebuilt.
+func (d *DB) EmbedDim(model string) (int, error) {
+	return storedEmbedDim(d.sql, model)
+}
+
+// queryRower is what storedEmbedDim needs of a handle or a transaction.
+type queryRower interface {
+	QueryRow(query string, args ...any) *sql.Row
+}
+
+func storedEmbedDim(q queryRower, model string) (int, error) {
+	// A full pass over the key's rows (no index on model): about 60 ms at
+	// 20,000 vectors of 1,536 floats, so it runs once per backfill call
+	// and target, not per batch.
+	var lo, hi sql.NullInt64
+	if err := q.QueryRow(`SELECT MIN(dim), MAX(dim) FROM memory_embeddings WHERE model = ?`, model).Scan(&lo, &hi); err != nil {
+		return 0, err
+	}
+	if !lo.Valid {
+		return 0, nil
+	}
+	if lo.Int64 != hi.Int64 {
+		return 0, fmt.Errorf("%w: key %q holds vectors of %d and %d dimensions here; rebuild the key (see \"Changing the embedding model\" in docs/ADMIN-MANUAL.md)",
+			ErrEmbedDim, model, lo.Int64, hi.Int64)
+	}
+	return int(lo.Int64), nil
+}
+
+// EmbedVec is one memory's vector for SetEmbeddings.
+type EmbedVec struct {
+	MemoryID string
+	Vec      []float32
+}
+
+// SetEmbedding stores (or replaces) one memory's vector for a model; see
+// SetEmbeddings.
 func (d *DB) SetEmbedding(memoryID, model string, dim int, vec []byte) error {
-	_, err := d.sql.Exec(`INSERT INTO memory_embeddings(memory_id, model, dim, vec)
+	v := embed.Decode(vec)
+	if len(v) != dim {
+		return fmt.Errorf("embedding for %s: %d values, declared %d", memoryID, len(v), dim)
+	}
+	return d.SetEmbeddings(model, []EmbedVec{{memoryID, v}})
+}
+
+// SetEmbeddings stores (or replaces) a batch of vectors under model. It
+// refuses the whole batch, with ErrEmbedDim, when a vector's length
+// differs from the key's stored vectors or from the batch's own first
+// one. The stored length is read inside the same write transaction as
+// the inserts (every transaction here takes the write lock first), so
+// two writers of different lengths, or one whose key another process
+// dropped and refilled, cannot both pass. Every writer goes through here.
+func (d *DB) SetEmbeddings(model string, batch []EmbedVec) error {
+	if len(batch) == 0 {
+		return nil
+	}
+	tx, err := d.sql.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	// One row's length, read in this transaction: the key's newest row,
+	// so the scan stops after the rows other keys wrote since this key's
+	// last write (about 1 ms per batch at 20,000 vectors). A key that
+	// already holds several lengths is found by EmbedDim, which the
+	// backfill and curation's readiness run once per call and target.
+	var have int
+	err = tx.QueryRow(`SELECT dim FROM memory_embeddings WHERE model = ? ORDER BY rowid DESC LIMIT 1`, model).Scan(&have)
+	if err != nil && !errors.Is(err, sql.ErrNoRows) {
+		return err
+	}
+	if have == 0 {
+		have = len(batch[0].Vec)
+	}
+	for _, e := range batch {
+		if len(e.Vec) != have {
+			return fmt.Errorf("%w: key %q holds %d-dimensional vectors here, this one has %d; a different model answers under that name (see \"Changing the embedding model\" in docs/ADMIN-MANUAL.md)",
+				ErrEmbedDim, model, have, len(e.Vec))
+		}
+		if _, err := tx.Exec(`INSERT INTO memory_embeddings(memory_id, model, dim, vec)
 VALUES(?,?,?,?) ON CONFLICT(memory_id, model) DO UPDATE SET dim=excluded.dim, vec=excluded.vec`,
-		memoryID, model, dim, vec)
-	return err
+			e.MemoryID, model, len(e.Vec), embed.Encode(e.Vec)); err != nil {
+			return err
+		}
+	}
+	return tx.Commit()
+}
+
+// EmbedKeyUsage is what one embedding key holds in this database: in
+// EmbedKeys one row per key and vector length, so a key holding two
+// lengths (a provider change under one name, before this check existed)
+// shows as two rows; DropEmbeddings totals the key.
+type EmbedKeyUsage struct {
+	Model string `json:"model"`
+	Dim   int    `json:"dim,omitempty"`
+	Rows  int    `json:"rows"`
+	Bytes int64  `json:"bytes"`
+}
+
+// EmbedKeys lists every embedding key stored here, per vector length,
+// with its rows and the size of their vectors.
+func (d *DB) EmbedKeys() ([]EmbedKeyUsage, error) {
+	rows, err := d.sql.Query(`SELECT model, dim, COUNT(*), COALESCE(SUM(LENGTH(vec)),0)
+FROM memory_embeddings GROUP BY model, dim ORDER BY model, dim`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []EmbedKeyUsage
+	for rows.Next() {
+		var u EmbedKeyUsage
+		if err := rows.Scan(&u.Model, &u.Dim, &u.Rows, &u.Bytes); err != nil {
+			return nil, err
+		}
+		out = append(out, u)
+	}
+	return out, rows.Err()
+}
+
+// DropEmbeddings deletes every vector stored under model and returns
+// what it removed. The caller decides which key may go; the texts stay,
+// so a later backfill under that key rebuilds it exactly.
+func (d *DB) DropEmbeddings(model string) (EmbedKeyUsage, error) {
+	u := EmbedKeyUsage{Model: model}
+	tx, err := d.sql.Begin()
+	if err != nil {
+		return u, err
+	}
+	defer tx.Rollback()
+	if err := tx.QueryRow(`SELECT COUNT(*), COALESCE(SUM(LENGTH(vec)),0) FROM memory_embeddings WHERE model = ?`,
+		model).Scan(&u.Rows, &u.Bytes); err != nil {
+		return u, err
+	}
+	if _, err := tx.Exec(`DELETE FROM memory_embeddings WHERE model = ?`, model); err != nil {
+		return u, err
+	}
+	if err := tx.Commit(); err != nil {
+		return u, err
+	}
+	return u, nil
 }
 
 // Recall searches active memories and returns results trimmed to a token
@@ -728,7 +882,15 @@ WHERE e.model = ? AND m.expired_at IS NULL AND m.superseded_by IS NULL`
 		if err := rows.Scan(&id, &blob); err != nil {
 			return nil, err
 		}
-		if sim := embed.Cosine(opts.QueryVec, embed.Decode(blob)); sim > 0 {
+		v := embed.Decode(blob)
+		if opts.Mismatch != nil {
+			opts.Mismatch.Rows++
+			if len(v) != len(opts.QueryVec) {
+				opts.Mismatch.Other++
+				opts.Mismatch.StoredDim = len(v)
+			}
+		}
+		if sim := embed.Cosine(opts.QueryVec, v); sim > 0 {
 			cands = append(cands, scored{id, sim})
 		}
 	}

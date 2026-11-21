@@ -64,7 +64,11 @@ func ForRoot(root string) *Client {
 // is unset, or its endpoint cannot serve (provider.Lookup's reason).
 // "" when embeddings are on.
 func Why(root string) string {
-	model := os.Getenv("AIMEM_EMBED_MODEL")
+	return WhyModel(root, os.Getenv("AIMEM_EMBED_MODEL"))
+}
+
+// WhyModel is Why for a named model instead of the environment's.
+func WhyModel(root, model string) string {
 	if model == "" {
 		return "AIMEM_EMBED_MODEL is unset"
 	}
@@ -75,6 +79,14 @@ func Why(root string) string {
 // or the env pair for an unbound name) into a client; nil when no
 // OpenAI-compatible endpoint serves it — Why has the reason.
 func ForModel(root, model string) *Client {
+	dim, _ := strconv.Atoi(os.Getenv("AIMEM_EMBED_DIM"))
+	return ForModelDim(root, model, dim)
+}
+
+// ForModelDim is ForModel with the dimension setting given rather than
+// read from this process's environment: for a key another process (the
+// hub's timer, under the env file) resolves.
+func ForModelDim(root, model string, dim int) *Client {
 	if model == "" {
 		return nil
 	}
@@ -82,7 +94,6 @@ func ForModel(root, model string) *Client {
 	if why != "" {
 		return nil
 	}
-	dim, _ := strconv.Atoi(os.Getenv("AIMEM_EMBED_DIM"))
 	// ep.Model is the payload name (an alias binding's upstream); vectors
 	// are keyed by it too, consistently on the write and query paths.
 	return &Client{BaseURL: ep.BaseURL, APIKey: ep.Token, Model: ep.Model, Dim: dim}

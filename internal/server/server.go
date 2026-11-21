@@ -18,6 +18,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"aimem/internal/access"
@@ -46,8 +47,16 @@ type Server struct {
 	redeemLimits redeemLimits
 	reg          *store.Registry
 	log          *slog.Logger
-	emb          *embed.Client // nil = semantic recall off (BM25 only)
-	ring         *LogRing      // nil = no admin Log tab data
+	// emb is the embedding client queries are embedded with; nil means
+	// semantic recall is off (BM25 only). The models PUT swaps it, so
+	// every reader loads it through embedder().
+	emb      atomic.Pointer[embed.Client]
+	embModel atomic.Pointer[string] // the configured model name behind emb, for the reason it is off
+	// modelsMu serializes the models PUT (env file rewrite and client
+	// swap as one step) with the embeddings drop, so a save can neither
+	// interleave with another save nor make a key live mid-drop.
+	modelsMu     sync.Mutex
+	ring         *LogRing // nil = no admin Log tab data
 	accessMu     sync.Mutex
 	accessDB     *access.Store
 	accessClosed bool
@@ -70,12 +79,23 @@ type Server struct {
 	textOff      bool   // AIMEM_TEXT_CHECK=off: task text is stored unchecked
 }
 
+// embedder is the embedding client in effect now; nil when semantic
+// recall is off.
+func (s *Server) embedder() *embed.Client { return s.emb.Load() }
+
+// setEmbedModel resolves model and makes it the client queries use.
+func (s *Server) setEmbedModel(model string) {
+	s.embModel.Store(&model)
+	s.emb.Store(embed.ForModel(s.reg.Root(), model))
+}
+
 func New(reg *store.Registry, log *slog.Logger) *Server {
-	s := &Server{reg: reg, log: log, emb: embed.ForRoot(reg.Root()), introspect: newIntrospectionClient()}
+	s := &Server{reg: reg, log: log, introspect: newIntrospectionClient()}
+	s.setEmbedModel(os.Getenv("AIMEM_EMBED_MODEL"))
 	// Semantic recall degrading to BM25 must never be silent: an
 	// embedding model that is configured but cannot resolve is a
 	// misconfiguration, and this line is the only place it would show.
-	if s.emb == nil && os.Getenv("AIMEM_EMBED_MODEL") != "" {
+	if s.embedder() == nil && os.Getenv("AIMEM_EMBED_MODEL") != "" {
 		log.Warn("semantic recall off", "why", embed.Why(reg.Root()))
 	}
 	s.setupTextCheck()
@@ -315,6 +335,7 @@ func (s *Server) Routes() []Route {
 		{"POST", "/v1/sync/group-config", s.syncConfigIn, false},
 		{"GET", "/v1/config/models", s.getModels, true},
 		{"PUT", "/v1/config/models", s.putModels, true},
+		{"POST", "/v1/config/embeddings/drop", s.dropEmbeddings, true},
 		{"GET", "/v1/config/providers", s.getProviders, true},
 		{"PUT", "/v1/config/providers", s.putProviders, true},
 		{"POST", "/v1/config/providers/test", s.testProvider, true},
@@ -413,14 +434,22 @@ func (s *Server) recall(w http.ResponseWriter, r *http.Request) {
 		}
 		// Semantic leg is best-effort: an embedding failure (proxy down,
 		// egress blocked) degrades silently to BM25-only.
-		if s.emb != nil {
-			if vecs, _, err := s.emb.Embed([]string{q}); err == nil {
-				opts.QueryVec, opts.EmbedModel = vecs[0], s.emb.Key()
+		var mm store.VectorMismatch
+		if c := s.embedder(); c != nil {
+			if vecs, _, err := c.Embed([]string{q}); err == nil {
+				opts.QueryVec, opts.EmbedModel, opts.Mismatch = vecs[0], c.Key(), &mm
 			} else {
 				s.log.Warn("query embedding failed; BM25-only recall", "err", err)
 			}
 		}
 		mems, err := db.Recall(q, opts)
+		// Another model answering under the same name gives a query vector
+		// of another length, which scores 0 against those rows: they were
+		// ranked by their words alone, and the log says how many.
+		if mm.Other > 0 {
+			s.log.Warn("query embedding has another dimension than stored vectors of its key; those rows were not scored",
+				"key", opts.EmbedModel, "stored", mm.StoredDim, "query", len(opts.QueryVec), "rows", mm.Rows, "other_length", mm.Other)
+		}
 		if err != nil {
 			s.fail(w, http.StatusBadRequest, err)
 			return

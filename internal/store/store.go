@@ -95,6 +95,39 @@ func (r *Registry) Projects() ([]string, error) {
 	return ids, nil
 }
 
+// HasJournal reports whether a project's database file exists, without
+// opening (and so creating or migrating) it.
+func (r *Registry) HasJournal(projectID string) (bool, error) {
+	_, err := os.Stat(filepath.Join(r.root, "projects", projectID, "journal.db"))
+	if os.IsNotExist(err) {
+		return false, nil
+	}
+	return err == nil, err
+}
+
+// EmbedKeyRows counts the vectors and bytes stored under model in one
+// project, read-only: a missing database is 0, and the file is opened
+// read-only, so nothing is created or migrated. A database older than
+// the embeddings table holds none.
+func (r *Registry) EmbedKeyRows(projectID, model string) (EmbedKeyUsage, error) {
+	u := EmbedKeyUsage{Model: model}
+	path := filepath.Join(r.root, "projects", projectID, "journal.db")
+	if _, err := os.Stat(path); os.IsNotExist(err) {
+		return u, nil
+	}
+	sdb, err := sql.Open("sqlite", "file:"+path+"?mode=ro&_pragma=busy_timeout(5000)")
+	if err != nil {
+		return u, err
+	}
+	defer sdb.Close()
+	var tables int
+	if err := sdb.QueryRow(`SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='memory_embeddings'`).Scan(&tables); err != nil || tables == 0 {
+		return u, err
+	}
+	err = sdb.QueryRow(`SELECT COUNT(*), COALESCE(SUM(LENGTH(vec)),0) FROM memory_embeddings WHERE model = ?`, model).Scan(&u.Rows, &u.Bytes)
+	return u, err
+}
+
 // Open returns the store for one project, creating it if needed.
 func (r *Registry) Open(projectID string) (*DB, error) {
 	if !schema.ValidProjectID(projectID) {
@@ -560,13 +593,19 @@ type ProjectStats struct {
 	LastClient  string `json:"last_client"`
 	Memories    int    `json:"memories"` // live only
 	Pinned      int    `json:"pinned"`
-	Embedded    int    `json:"embedded"` // live memories with any embedding
-	Docs        int    `json:"docs"`     // live shared documents
-	Records     int    `json:"records"`  // live wiki/collection records
+	// Embedded counts live memories with a vector under EmbedModel, the
+	// embedding key the reader queries with; vectors of any other key
+	// are not coverage. Both are empty when no key is given.
+	Embedded   int    `json:"embedded"`
+	EmbedModel string `json:"embed_model,omitempty"`
+	Docs       int    `json:"docs"`    // live shared documents
+	Records    int    `json:"records"` // live wiki/collection records
 }
 
-func (d *DB) Stats() (ProjectStats, error) {
-	var s ProjectStats
+// Stats snapshots the project. embedModel is the embedding key that
+// recall queries with (embed.Client.Key()); "" counts no coverage.
+func (d *DB) Stats(embedModel string) (ProjectStats, error) {
+	s := ProjectStats{EmbedModel: embedModel}
 	if err := d.sql.QueryRow(`SELECT COUNT(*), COUNT(DISTINCT session_id),
 			COALESCE(MAX(ts),'') FROM events`).Scan(&s.Events, &s.Sessions, &s.LastEventTS); err != nil {
 		return s, err
@@ -576,9 +615,12 @@ func (d *DB) Stats() (ProjectStats, error) {
 			WHERE expired_at IS NULL`).Scan(&s.Memories, &s.Pinned); err != nil {
 		return s, err
 	}
-	if err := d.sql.QueryRow(`SELECT COUNT(DISTINCT e.memory_id) FROM memory_embeddings e
-			JOIN memories m ON m.id = e.memory_id WHERE m.expired_at IS NULL`).Scan(&s.Embedded); err != nil {
-		return s, err
+	if embedModel != "" {
+		if err := d.sql.QueryRow(`SELECT COUNT(*) FROM memory_embeddings e
+			JOIN memories m ON m.id = e.memory_id WHERE m.expired_at IS NULL AND e.model = ?`,
+			embedModel).Scan(&s.Embedded); err != nil {
+			return s, err
+		}
 	}
 	// Docs and wiki records ride the same one-shot stats so consumers
 	// (the console's content-aware dropdowns, the TUI) never need an

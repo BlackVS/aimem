@@ -6,6 +6,7 @@ package server
 // API with it, so serving the page unauthenticated leaks nothing.
 
 import (
+	"aimem/internal/embed"
 	"aimem/internal/process"
 	"aimem/internal/store"
 	"aimem/internal/textcheck"
@@ -177,7 +178,9 @@ func parseEnvValue(line, key string) (string, bool) {
 	if !ok {
 		return "", false
 	}
-	return strings.Trim(rest, `"`), true
+	// Quotes as the CLI's env loader and systemd's EnvironmentFile read
+	// them: either kind, so the service and the timer see one value.
+	return strings.Trim(rest, `"'`), true
 }
 
 // getModels reads the model keys from the env file; an empty text check
@@ -185,7 +188,8 @@ func parseEnvValue(line, key string) (string, bool) {
 // resolved at start.
 func (s *Server) getModels(w http.ResponseWriter, _ *http.Request) {
 	out := map[string]any{"curate_model": "", "embed_model": "", "text_check_model": "",
-		"text_check_daily_calls": "", "text_check": textcheck.Describe(s.textCheck, s.textCheckWhy)}
+		"text_check_daily_calls": "", "text_check": textcheck.Describe(s.textCheck, s.textCheckWhy),
+		"embed": s.embedState()}
 	if raw, err := os.ReadFile(envFilePath()); err == nil {
 		for line := range strings.SplitSeq(string(raw), "\n") {
 			for k, field := range map[string]string{"AIMEM_CURATE_MODEL": "curate_model", "AIMEM_EMBED_MODEL": "embed_model",
@@ -197,6 +201,45 @@ func (s *Server) getModels(w http.ResponseWriter, _ *http.Request) {
 		}
 	}
 	s.ok(w, out)
+}
+
+// embedState is what the running service embeds queries with: its key,
+// or "" with the reason semantic recall is off.
+func (s *Server) embedState() map[string]string {
+	if c := s.embedder(); c != nil {
+		return map[string]string{"key": c.Key()}
+	}
+	model := ""
+	if m := s.embModel.Load(); m != nil {
+		model = *m
+	}
+	return map[string]string{"key": "", "why": embed.WhyModel(s.reg.Root(), model)}
+}
+
+// projectsMissingVectors counts the projects with a live fact that has
+// no vector under key, and those it could not check (a store it cannot
+// open, a failed query; unchecked is -1 when the projects cannot be
+// listed), so a failed check never reads as full coverage.
+func (s *Server) projectsMissingVectors(key string) (missing, unchecked int) {
+	ids, err := s.reg.Projects()
+	if err != nil {
+		return 0, -1
+	}
+	for _, id := range ids {
+		db, err := s.reg.Open(id)
+		if err != nil {
+			unchecked++
+			continue
+		}
+		t, err := db.NeedingEmbedding(key, 1)
+		switch {
+		case err != nil:
+			unchecked++
+		case len(t) > 0:
+			missing++
+		}
+	}
+	return missing, unchecked
 }
 
 // putModels rewrites the model lines. The text check's two keys are
@@ -218,8 +261,11 @@ func (s *Server) putModels(w http.ResponseWriter, r *http.Request) {
 		"AIMEM_EMBED_MODEL":  strings.TrimSpace(req.EmbedModel),
 	}
 	for k, v := range want {
-		if v == "" || strings.ContainsAny(v, "\n\"$`\\") {
-			s.fail(w, http.StatusBadRequest, fmt.Errorf("%s: model name must be non-empty without quotes/newlines", k))
+		// An empty embed model switches embeddings off (semantic recall
+		// BM25-only, the timer skips its embedding steps); the curate
+		// model is required.
+		if (v == "" && k != "AIMEM_EMBED_MODEL") || strings.ContainsAny(v, "\n\"$`\\") {
+			s.fail(w, http.StatusBadRequest, fmt.Errorf("%s: model name must be without quotes/newlines (the curate model non-empty; an empty embed model switches embeddings off)", k))
 			return
 		}
 	}
@@ -239,6 +285,11 @@ func (s *Server) putModels(w http.ResponseWriter, r *http.Request) {
 		}
 		want[textcheck.CapKey] = v
 	}
+	// The file rewrite and the client swap are one step: two saves in
+	// flight must not leave the file on one model and live recall on
+	// the other.
+	s.modelsMu.Lock()
+	defer s.modelsMu.Unlock()
 	path := envFilePath()
 	raw, err := os.ReadFile(path)
 	if err != nil {
@@ -276,10 +327,35 @@ func (s *Server) putModels(w http.ResponseWriter, r *http.Request) {
 		s.fail(w, http.StatusInternalServerError, err)
 		return
 	}
-	s.log.Warn("admin models updated", "curate", want["AIMEM_CURATE_MODEL"], "embed", want["AIMEM_EMBED_MODEL"])
-	out := map[string]string{
+	// Live recall follows the written embed model at once: the timer's
+	// next run already writes vectors under the new key, and a service
+	// still querying with the old one would miss every fact written
+	// after the change. A model that cannot be served turns semantic
+	// recall off here, as a restart would.
+	prev := s.embedder().Key()
+	s.setEmbedModel(want["AIMEM_EMBED_MODEL"])
+	emb := s.embedState()
+	s.log.Warn("admin models updated", "curate", want["AIMEM_CURATE_MODEL"], "embed", want["AIMEM_EMBED_MODEL"],
+		"embed_key", emb["key"], "previous_embed_key", prev)
+	note := "the curate model takes effect on the next curation run; live recall now embeds queries with the embed model; restart aimem.service to apply the text check model to task writes"
+	if emb["key"] == "" {
+		note = "the curate model takes effect on the next curation run; semantic recall is OFF from now on (" + emb["why"] + "), recall ranks by keywords only; restart aimem.service to apply the text check model to task writes"
+	} else if emb["key"] != prev {
+		missing, unchecked := s.projectsMissingVectors(emb["key"])
+		switch {
+		case unchecked < 0:
+			note += fmt.Sprintf("; coverage under %s is unknown: the projects could not be listed", emb["key"])
+		case unchecked > 0:
+			note += fmt.Sprintf("; coverage under %s is unknown: %d project(s) could not be checked, %d lack vectors", emb["key"], unchecked, missing)
+		case missing > 0:
+			note += fmt.Sprintf("; facts in %d project(s) have no vector under %s yet and are found by keyword only until `aimem embed --all` has run", missing, emb["key"])
+		default:
+			note += "; every live fact already has a vector under " + emb["key"]
+		}
+	}
+	out := map[string]any{
 		"curate_model": want["AIMEM_CURATE_MODEL"], "embed_model": want["AIMEM_EMBED_MODEL"],
-		"note": "takes effect on the next curation run; restart aimem.service to apply the embed model to live recall and the text check model to task writes",
+		"embed": emb, "note": note,
 	}
 	if v, set := want[textcheck.ModelKey]; set {
 		out["text_check_model"] = v
@@ -454,6 +530,10 @@ func (s *Server) overview(w http.ResponseWriter, r *http.Request) {
 		Chapters json.RawMessage `json:"chapters,omitempty"`
 		Features json.RawMessage `json:"features,omitempty"`
 		DocTS    string          `json:"doc_ts,omitempty"` // design_doc_ts when a doc exists
+		// Error says the project's store or its counts could not be read:
+		// its stats are zero, not a measurement, so a sum over the rows
+		// is incomplete (the console's coverage says so).
+		Error string `json:"error,omitempty"`
 	}
 	cutoffs := make([]string, len(reviewWindows))
 	now := time.Now().UTC()
@@ -464,10 +544,16 @@ func (s *Server) overview(w http.ResponseWriter, r *http.Request) {
 	for _, id := range ids {
 		db, err := s.reg.Open(id)
 		if err != nil {
+			s.log.Warn("overview: project store cannot be opened", "project", id, "err", err)
+			out = append(out, row{ID: id, Stats: store.ProjectStats{}, Error: err.Error()})
 			continue
 		}
 		rw := row{ID: id}
-		rw.Stats, _ = db.Stats()
+		st, err := db.Stats(s.embedder().Key())
+		rw.Stats = st
+		if err != nil {
+			rw.Error = err.Error()
+		}
 		if counts, err := db.ReviewCounts(cutoffs, -1); err == nil {
 			rw.Review = map[string]int{}
 			for i, d := range reviewWindows {

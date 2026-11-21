@@ -27,6 +27,7 @@ import (
 
 	"aimem/internal/adapter"
 	"aimem/internal/curate"
+	"aimem/internal/embed"
 	"aimem/internal/ident"
 	"aimem/internal/store"
 )
@@ -86,6 +87,7 @@ type snapshot struct {
 	GroupChaps  map[string][]chapterCount // group id -> declared chapters with fact counts
 	CurateModel string
 	EmbedModel  string
+	EmbedKey    string              // the key EmbedModel's vectors are stored under; the embed columns count only it
 	Hub         string              // default hub URL or "" (summary strip)
 	HubRes      map[string]any      // default hub /v1/health resources (best-effort)
 	HubProjects int                 // project count reported by default hub health
@@ -460,8 +462,9 @@ func (m model) renderGroups(b *strings.Builder, w int) {
 // over time (today / 7 days / 30 days, tokens in+out).
 func (m model) renderAI(b *strings.Builder, w int) {
 	s := m.snap
-	fmt.Fprintf(b, "\n  curate model: %s   embed model: %s\n",
-		orDim(s.CurateModel, "not configured"), orDim(s.EmbedModel, "not configured"))
+	fmt.Fprintf(b, "\n  curate model: %s   embed model: %s   embed column counts key: %s\n",
+		orDim(s.CurateModel, "not configured"), orDim(s.EmbedModel, "not configured"),
+		orDim(s.EmbedKey, "none (semantic recall off)"))
 	compact := w < 80
 	aw := max(30, w-40) // wide column absorbs spare width
 	if compact {
@@ -692,6 +695,7 @@ func collect(root string, selected int) snapshot {
 		GroupAbout: map[string]string{}, GroupPolicy: map[string]string{},
 		GroupChaps: map[string][]chapterCount{}, Models: map[string]*modelUsage{}}
 	s.CurateModel, s.EmbedModel = modelConfig()
+	s.EmbedKey = embed.ForModel(root, s.EmbedModel).Key()
 	reg, err := store.NewRegistry(root)
 	if err != nil {
 		s.Err = err
@@ -711,7 +715,7 @@ func collect(root string, selected int) snapshot {
 			continue
 		}
 		row := projectRow{ID: id}
-		row.Stats, _ = db.Stats()
+		row.Stats, _ = db.Stats(s.EmbedKey)
 		row.Hub, _ = db.GetMeta("hub")
 		// Pending doc-merge previews (DESIGN-doc-collab): local files, so
 		// this costs no network — exactly the "this machine needs a human"

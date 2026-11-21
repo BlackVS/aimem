@@ -244,6 +244,8 @@
         <select id="mCurate" class="grow"></select></div>
       <div class="row"><span class="dim" style="width:110px">embed model</span>
         <select id="mEmbed" class="grow"></select></div>
+      <div class="row"><span style="width:110px"></span>
+        <span id="mEmbState" class="dim"></span></div>
       <div class="row"><span class="dim" style="width:110px">text check model</span>
         <select id="mText" class="grow"></select></div>
       <div class="row"><span class="dim" style="width:110px">text check cap</span>
@@ -254,6 +256,10 @@
       <div class="row"><span style="width:110px"></span>
         <button class="act" onclick="saveModels()">save models</button>
         <span id="mNote" class="dim"></span></div>
+      <div class="dim" style="font-size:12px;margin-top:6px">A saved embed model serves live recall at
+        once. A model the service cannot serve, or "(off)", turns semantic recall off at once: recall
+        then ranks by keywords only. To change the model without a dip, fill its key first: see
+        "Changing the embedding model" in the admin manual.</div>
     </div>
     <div class="card">
       <h2 style="margin-top:0">providers</h2>
@@ -282,7 +288,7 @@
       <div class="dim" style="font-size:12px;margin-top:6px">Unbound models fall back to the
         host env (AIMEM_OPENAI_*). Tokens stay on the hub — this page only ever sees a mask.
         “test” makes one minimal live call and shows the provider's answer. Curation picks
-        changes up on its next run; live recall embedding needs a service restart.</div>
+        changes up on its next run; a saved embed model serves live recall at once.</div>
     </div>
   </section>
   <section id="t-usage" hidden>
@@ -1227,6 +1233,13 @@ async function loadModels(){
     const m = await api("/v1/config/models");
     cur = m.curate_model||""; emb = m.embed_model||""; txt = m.text_check_model||"";
     $("mTextCap").value = m.text_check_daily_calls||"";
+    const ek = (m.embed||{}).key||"";
+    // Coverage is read fresh each time: a boot-time snapshot would
+    // count the key some other save replaced, or miss a backfill since.
+    let rows = null;
+    try{ rows = (await api("/v1/overview")).projects||[]; OV = rows; }catch(e){}
+    $("mEmbState").textContent = ek ? `running: ${ek}; ${embCoverage(ek, rows)}`
+      : `running: off (${(m.embed||{}).why||"no model"}); recall ranks by keywords only`;
     const tc = m.text_check||{};
     $("mTextState").textContent = tc.state==="on"
       ? `running: ${tc.model}, ${tc.calls_today}/${tc.daily_calls_cap} calls today`
@@ -1237,7 +1250,7 @@ async function loadModels(){
   // would silently degrade recall to BM25-only, so keep it out of that
   // picker entirely.
   const embeddable = bound.filter(m=>(PROV.providers[PROV.models[m].provider]||{}).kind!=="claude");
-  for(const [id,val] of [["mCurate",cur],["mEmbed",emb]]){
+  for(const [id,val] of [["mCurate",cur]]){
     const opts=[...new Set([val,...(id==="mEmbed"?embeddable:bound)])].filter(Boolean);
     // An unset value gets an explicit placeholder: without it the select
     // silently DISPLAYS the first bound model while the server value is
@@ -1246,10 +1259,34 @@ async function loadModels(){
       ? opts.map(o=>`<option${o===val?" selected":""}>${esc(o)}</option>`).join("")
       : (val?"":'<option value="" disabled>(bind a model first)</option>'));
   }
+  // "(off)" saves an empty embed model: embeddings off, recall BM25 only.
+  const eopts=[...new Set([emb,...embeddable])].filter(Boolean);
+  $("mEmbed").innerHTML = `<option value=""${emb?"":" selected"}>(off)</option>`+
+    eopts.map(o=>`<option${o===emb?" selected":""}>${esc(o)}</option>`).join("");
   // The text check needs an OpenAI-compatible endpoint, like embeddings.
   const topts=[...new Set([txt,...embeddable])].filter(Boolean);
   $("mText").innerHTML = `<option value=""${txt?"":" selected"}>(off)</option>`+
     topts.map(o=>`<option${o===txt?" selected":""}>${esc(o)}</option>`).join("");
+}
+// embCoverage sums the overview's live facts with a vector under key.
+// Vectors of any other key are not coverage: the semantic leg reads
+// only the key recall queries with.
+function embCoverage(key, rows){
+  if(!rows) return "coverage unavailable (the overview could not be read)";
+  let have=0, all=0; const short=[];
+  const broken=rows.filter(p=>p.error).map(p=>p.id);
+  if(broken.length) return `coverage unavailable: ${broken.length} project(s) could not be read (${broken.slice(0,3).join(", ")}${broken.length>3?", ...":""})`;
+  for(const p of rows){
+    const st=p.stats||{};
+    // A row counted under another key means the models changed between
+    // the two reads: say so rather than add up the wrong space.
+    if((st.memories||0)>0 && st.embed_model!==key) return "coverage unavailable (the models changed while it was read; reopen this tab)";
+    if(st.embed_model!==key) continue;
+    have+=st.embedded||0; all+=st.memories||0;
+    if((st.embedded||0)<(st.memories||0)) short.push(p.id);
+  }
+  return `${have} of ${all} live facts have a vector under this key`+
+    (short.length?` (missing in ${short.slice(0,5).join(", ")}${short.length>5?" and "+(short.length-5)+" more":""}: run aimem embed --all)`:"");
 }
 async function saveModels(){
   try{
@@ -1259,6 +1296,7 @@ async function saveModels(){
     const r = await api("/v1/config/models",{method:"PUT",body:JSON.stringify(body)});
     $("mNote").textContent = r.note||"saved";
     toast("models saved");
+    loadModels();
   }catch(e){ $("mNote").textContent = String(e); }
 }
 
