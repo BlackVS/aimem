@@ -215,21 +215,29 @@ func (s *Server) embedState() map[string]string {
 }
 
 // projectsMissingVectors counts the projects with a live fact that has
-// no vector under key: one indexed probe per project.
-func (s *Server) projectsMissingVectors(key string) int {
+// no vector under key, and those it could not check (a store it cannot
+// open, a failed query; unchecked is -1 when the projects cannot be
+// listed), so a failed check never reads as full coverage.
+func (s *Server) projectsMissingVectors(key string) (missing, unchecked int) {
 	ids, err := s.reg.Projects()
 	if err != nil {
-		return 0
+		return 0, -1
 	}
-	n := 0
 	for _, id := range ids {
-		if db, err := s.reg.Open(id); err == nil {
-			if t, err := db.NeedingEmbedding(key, 1); err == nil && len(t) > 0 {
-				n++
-			}
+		db, err := s.reg.Open(id)
+		if err != nil {
+			unchecked++
+			continue
+		}
+		t, err := db.NeedingEmbedding(key, 1)
+		switch {
+		case err != nil:
+			unchecked++
+		case len(t) > 0:
+			missing++
 		}
 	}
-	return n
+	return missing, unchecked
 }
 
 // putModels rewrites the model lines. The text check's two keys are
@@ -251,8 +259,11 @@ func (s *Server) putModels(w http.ResponseWriter, r *http.Request) {
 		"AIMEM_EMBED_MODEL":  strings.TrimSpace(req.EmbedModel),
 	}
 	for k, v := range want {
-		if v == "" || strings.ContainsAny(v, "\n\"$`\\") {
-			s.fail(w, http.StatusBadRequest, fmt.Errorf("%s: model name must be non-empty without quotes/newlines", k))
+		// An empty embed model switches embeddings off (semantic recall
+		// BM25-only, the timer skips its embedding steps); the curate
+		// model is required.
+		if (v == "" && k != "AIMEM_EMBED_MODEL") || strings.ContainsAny(v, "\n\"$`\\") {
+			s.fail(w, http.StatusBadRequest, fmt.Errorf("%s: model name must be without quotes/newlines (the curate model non-empty; an empty embed model switches embeddings off)", k))
 			return
 		}
 	}
@@ -272,6 +283,11 @@ func (s *Server) putModels(w http.ResponseWriter, r *http.Request) {
 		}
 		want[textcheck.CapKey] = v
 	}
+	// The file rewrite and the client swap are one step: two saves in
+	// flight must not leave the file on one model and live recall on
+	// the other.
+	s.modelsMu.Lock()
+	defer s.modelsMu.Unlock()
 	path := envFilePath()
 	raw, err := os.ReadFile(path)
 	if err != nil {
@@ -321,11 +337,15 @@ func (s *Server) putModels(w http.ResponseWriter, r *http.Request) {
 		"embed_key", emb["key"], "previous_embed_key", prev)
 	note := "the curate model takes effect on the next curation run; live recall now embeds queries with the embed model; restart aimem.service to apply the text check model to task writes"
 	if emb["key"] == "" {
-		note = "the curate model takes effect on the next curation run; semantic recall is OFF: " + emb["why"] + "; restart aimem.service to apply the text check model to task writes"
+		note = "the curate model takes effect on the next curation run; semantic recall is OFF from now on (" + emb["why"] + "), recall ranks by keywords only; restart aimem.service to apply the text check model to task writes"
 	} else if emb["key"] != prev {
-		if n := s.projectsMissingVectors(emb["key"]); n > 0 {
-			note += fmt.Sprintf("; facts in %d project(s) have no vector under %s yet and are found by keyword only until `aimem embed --all` has run", n, emb["key"])
-		} else {
+		missing, unchecked := s.projectsMissingVectors(emb["key"])
+		switch {
+		case unchecked > 0:
+			note += fmt.Sprintf("; coverage under %s is unknown: %d project(s) could not be checked, %d lack vectors", emb["key"], unchecked, missing)
+		case missing > 0:
+			note += fmt.Sprintf("; facts in %d project(s) have no vector under %s yet and are found by keyword only until `aimem embed --all` has run", missing, emb["key"])
+		default:
 			note += "; every live fact already has a vector under " + emb["key"]
 		}
 	}

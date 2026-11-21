@@ -124,27 +124,45 @@ func doReq(h http.Handler, method, path, body string) *httptest.ResponseRecorder
 	return w
 }
 
-// --drop refuses the key this command resolves to and the key the
-// running service queries with, and refuses when the service cannot say
-// which key that is. A dry run counts and removes nothing.
+// via sends a drop to the service's handler, as the socket would.
+func via(h http.Handler) func([]byte) (int, []byte, error) {
+	return func(b []byte) (int, []byte, error) {
+		w := doReq(h, "POST", "/v1/config/embeddings/drop", string(b))
+		return w.Code, w.Body.Bytes(), nil
+	}
+}
+
+func serviceRig(t *testing.T, reg *store.Registry, model string) http.Handler {
+	t.Helper()
+	envFile := os.Getenv("AIMEM_ENV_FILE")
+	os.MkdirAll(filepath.Dir(envFile), 0o700)
+	os.WriteFile(envFile, []byte("AIMEM_CURATE_MODEL=c\nAIMEM_EMBED_MODEL="+model+"\n"), 0o600)
+	srv := server.New(reg, slog.New(slog.NewTextHandler(new(strings.Builder), nil)))
+	t.Cleanup(func() { srv.Close() })
+	return srv.Handler()
+}
+
+// --drop refuses its own key first, then the service refuses the key it
+// queries with; a service that cannot be asked, or one without the route
+// (an older release), is a refusal. A dry run counts and removes nothing.
 func TestEmbedDropRefusesTheKeysInUse(t *testing.T) {
 	_, reg, _ := embedChangeRig(t)
 	db, _ := reg.Open("proj-ec")
-	live := func(key string, known bool, err error) func() (string, bool, error) {
-		return func() (string, bool, error) { return key, known, err }
-	}
+	h := serviceRig(t, reg, "old-embed")
+	old := func(b []byte) (int, []byte, error) { return 404, []byte("404 page not found\n"), nil }
+	down := func(b []byte) (int, []byte, error) { return 0, nil, errors.New("dial: refused") }
 	for name, tc := range map[string]struct {
-		key, own string
-		svc      func() (string, bool, error)
-		want     string
+		own  string
+		send func([]byte) (int, []byte, error)
+		want string
 	}{
-		"own key":             {"old-embed", "old-embed", live("other", true, nil), "is the current embedding key here"},
-		"service key":         {"old-embed", "new-embed", live("old-embed", true, nil), "is the key the running service queries with"},
-		"service unknown":     {"old-embed", "new-embed", live("", false, nil), "does not report its embedding key"},
-		"service unreachable": {"old-embed", "new-embed", live("", false, errors.New("dial: refused")), "could not be asked"},
+		"own key":             {"old-embed", via(h), "is the current embedding key here"},
+		"service key":         {"new-embed", via(h), "is the key the running service queries with"},
+		"older service":       {"new-embed", old, "has no embeddings drop (a release before this one)"},
+		"service unreachable": {"new-embed", down, "could not be asked"},
 	} {
 		t.Run(name, func(t *testing.T) {
-			err := embedDrop(reg, []string{"proj-ec"}, tc.key, false, tc.own, tc.svc)
+			err := embedDrop([]string{"proj-ec"}, false, "old-embed", false, tc.own, tc.send)
 			if err == nil || !strings.Contains(err.Error(), tc.want) {
 				t.Fatalf("err = %v, want %q", err, tc.want)
 			}
@@ -153,16 +171,61 @@ func TestEmbedDropRefusesTheKeysInUse(t *testing.T) {
 			}
 		})
 	}
-	if err := embedDrop(reg, []string{"proj-ec"}, "old-embed", true, "new-embed", live("new-embed", true, nil)); err != nil {
+	// The service moves to new-embed; old-embed may go now.
+	if w := doReq(h, "PUT", "/v1/config/models", `{"curate_model":"c","embed_model":"new-embed"}`); w.Code != 200 {
+		t.Fatalf("PUT: %d %s", w.Code, w.Body)
+	}
+	if err := embedDrop(nil, true, "old-embed", true, "new-embed", via(h)); err != nil {
 		t.Fatal(err)
 	}
 	if s, _ := db.Stats("old-embed"); s.Embedded != 2 {
 		t.Fatalf("a dry run removed vectors: %d left", s.Embedded)
 	}
-	if err := embedDrop(reg, []string{"proj-ec"}, "old-embed", false, "new-embed", live("new-embed", true, nil)); err != nil {
+	if err := embedDrop(nil, true, "old-embed", false, "new-embed", via(h)); err != nil {
+		t.Fatal(err)
+	}
+	if s, _ := db.Stats("old-embed"); s.Embedded != 0 {
+		t.Fatalf("vectors left after the drop: %d", s.Embedded)
+	}
+}
+
+// The manual's rebuild for a key whose vectors came from another model
+// under the same name, with one embedding model only: save embeddings
+// off, drop the key, save the model again, backfill. Each step works with
+// the commands as they are, and the key ends with vectors of the model
+// that serves it now.
+func TestRebuildAKeyWithEmbeddingsOffInTheMiddle(t *testing.T) {
+	_, reg, _ := embedChangeRig(t)
+	db, _ := reg.Open("proj-ec")
+	// The stored old-embed vectors are 2 long; the provider now serves
+	// another model under the name, 3 long, so every write is refused.
+	db2, _ := reg.Open("proj-ec")
+	if err := db2.SetEmbedding("x", "old-embed", 3, embed.Encode([]float32{1, 0, 0})); !errors.Is(err, store.ErrEmbedDim) {
+		t.Fatalf("a vector of another length was not refused: %v", err)
+	}
+	h := serviceRig(t, reg, "old-embed")
+	// 1. Save embeddings off.
+	if w := doReq(h, "PUT", "/v1/config/models", `{"curate_model":"c","embed_model":""}`); w.Code != 200 ||
+		!strings.Contains(w.Body.String(), "semantic recall is OFF from now on") {
+		t.Fatalf("save off: %d %s", w.Code, w.Body)
+	}
+	// 2. Drop the key: neither the service nor the file names it now.
+	t.Setenv("AIMEM_EMBED_MODEL", "")
+	if err := embedDrop(nil, true, "old-embed", false, embed.ForModel(reg.Root(), "").Key(), via(h)); err != nil {
 		t.Fatal(err)
 	}
 	if ks, _ := db.EmbedKeys(); len(ks) != 0 {
 		t.Fatalf("keys left after the drop: %+v", ks)
+	}
+	// 3. Save the model again; 4. backfill.
+	if w := doReq(h, "PUT", "/v1/config/models", `{"curate_model":"c","embed_model":"old-embed"}`); w.Code != 200 {
+		t.Fatalf("save again: %d %s", w.Code, w.Body)
+	}
+	t.Setenv("AIMEM_EMBED_MODEL", "old-embed")
+	if err := embedCmd([]string{"--all"}); err != nil {
+		t.Fatal(err)
+	}
+	if s, _ := db.Stats("old-embed"); s.Embedded != 2 {
+		t.Fatalf("coverage after the rebuild: %d of 2", s.Embedded)
 	}
 }

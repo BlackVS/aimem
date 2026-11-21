@@ -284,17 +284,26 @@ func Run(reg *store.Registry, root, projectID string, ex Extractor, opts RunOpts
 	// Batch-embed proposal texts for semantic dedup (best-effort: an
 	// embedding outage must not block curation, it just skips dedup).
 	var vecs [][]float32
-	if opts.Embedder != nil && opts.EmbedModel != "" && opts.DedupSim > 0 && len(proposals) > 0 {
+	dedupOn := opts.Embedder != nil && opts.EmbedModel != "" && opts.DedupSim > 0 && len(proposals) > 0
+	embedFail := ""         // why the proposals have no vectors, when the dedup was on
+	dedupTokens := int64(0) // the proposals' embedding; each backfill meters its own spend
+	if dedupOn {
 		texts := make([]string, len(proposals))
 		for i, p := range proposals {
 			texts[i] = p.Text
 		}
 		v, used, verr := opts.Embedder.Embed(texts)
 		rep.EmbedTokens += used
+		dedupTokens += used
 		if _, refused := llmrate.AsRefusal(verr); refused {
 			return nil, verr
 		}
-		if verr == nil && len(v) == len(proposals) {
+		switch {
+		case verr != nil:
+			embedFail = "embedding the proposals failed: " + verr.Error()
+		case len(v) != len(proposals):
+			embedFail = fmt.Sprintf("embedding the proposals returned %d vectors for %d texts", len(v), len(proposals))
+		default:
 			vecs = v
 		}
 	}
@@ -305,8 +314,44 @@ func Run(reg *store.Registry, root, projectID string, ex Extractor, opts RunOpts
 	// backfilled first; a target that cannot be completed (an outage, the
 	// budget, a different dimension under the same key) gets no dedup in
 	// this run, and the report names it.
+	// readyFor decides it once per target, on first use. The ids below
+	// are only the targets known before the writes, warmed up front so a
+	// provider refusal stops the run before anything is written; any
+	// other target the write path reaches is decided where it is used,
+	// so no target can skip the dedup without a line in the report.
 	ready := map[string]bool{}
-	if vecs != nil {
+	var refusal error
+	readyFor := func(tdb *store.DB) bool {
+		id := tdb.ProjectID()
+		if r, ok := ready[id]; ok {
+			return r
+		}
+		if embedFail != "" {
+			ready[id] = false
+			rep.DedupSkipped = append(rep.DedupSkipped, id+": "+embedFail)
+			return false
+		}
+		why := ""
+		n, used, berr := Backfill(reg, tdb, opts.Embedder, opts.EmbedModel, opts.EmbedModel, 64)
+		rep.EmbedTokens += used
+		rep.Backfilled += n
+		if _, refused := llmrate.AsRefusal(berr); refused && refusal == nil {
+			refusal = berr
+		}
+		if berr != nil {
+			why = "backfill under " + opts.EmbedModel + " incomplete: " + berr.Error()
+		} else if have, derr := tdb.EmbedDim(opts.EmbedModel); derr != nil {
+			why = derr.Error()
+		} else if have != 0 && have != len(vecs[0]) {
+			why = fmt.Sprintf("%v: key %q holds %d-dimensional vectors, the proposals have %d", store.ErrEmbedDim, opts.EmbedModel, have, len(vecs[0]))
+		}
+		ready[id] = why == ""
+		if why != "" {
+			rep.DedupSkipped = append(rep.DedupSkipped, id+": "+why)
+		}
+		return why == ""
+	}
+	if dedupOn {
 		ids := []string{projectID}
 		for _, p := range proposals {
 			switch {
@@ -323,27 +368,14 @@ func Run(reg *store.Registry, root, projectID string, ex Extractor, opts RunOpts
 		}
 		slices.Sort(ids)
 		for _, id := range slices.Compact(ids) {
-			why := ""
 			if tdb, oerr := reg.Open(id); oerr != nil {
-				why = oerr.Error()
+				ready[id] = false
+				rep.DedupSkipped = append(rep.DedupSkipped, id+": "+oerr.Error())
 			} else {
-				n, used, berr := Backfill(reg, tdb, opts.Embedder, opts.EmbedModel, 64)
-				rep.EmbedTokens += used
-				rep.Backfilled += n
-				if _, refused := llmrate.AsRefusal(berr); refused {
-					return nil, berr
-				}
-				if berr != nil {
-					why = "backfill under " + opts.EmbedModel + " incomplete: " + berr.Error()
-				} else if have, derr := tdb.EmbedDim(opts.EmbedModel); derr != nil {
-					why = derr.Error()
-				} else if have != 0 && have != len(vecs[0]) {
-					why = fmt.Sprintf("%v: key %q holds %d-dimensional vectors, the proposals have %d", store.ErrEmbedDim, opts.EmbedModel, have, len(vecs[0]))
-				}
+				readyFor(tdb)
 			}
-			ready[id] = why == ""
-			if why != "" {
-				rep.DedupSkipped = append(rep.DedupSkipped, id+": "+why)
+			if refusal != nil {
+				return nil, refusal
 			}
 		}
 	}
@@ -352,7 +384,7 @@ func Run(reg *store.Registry, root, projectID string, ex Extractor, opts RunOpts
 	// merge — including retroactive chapter filing) instead of inserting
 	// a rephrased twin; fresh inserts store their vector right away.
 	remember := func(target *store.DB, i int, text, kind string, tags, sources []string) (reasserted bool, err error) {
-		if vecs != nil && ready[target.ProjectID()] {
+		if dedupOn && readyFor(target) {
 			nid, ntext, sim, nerr := target.Nearest(opts.EmbedModel, vecs[i])
 			// Same neighborhood, DIFFERENT words: either a rephrasing or an
 			// update of the same fact — cosine cannot tell them apart. The
@@ -466,10 +498,10 @@ func Run(reg *store.Registry, root, projectID string, ex Extractor, opts RunOpts
 	})
 	// Dedup embedding spend is metered under the embed model, matching
 	// how the embed backfill records its usage.
-	if rep.EmbedTokens > 0 {
+	if dedupTokens > 0 {
 		_ = db.AddCurateRun(&store.CurateRun{
 			TS: time.Now().UTC().Format(time.RFC3339), Host: host,
-			Model: opts.EmbedModel, InputTokens: rep.EmbedTokens,
+			Model: opts.EmbedModel, InputTokens: dedupTokens,
 		})
 	}
 	return rep, nil

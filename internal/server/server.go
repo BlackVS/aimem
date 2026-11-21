@@ -50,9 +50,13 @@ type Server struct {
 	// emb is the embedding client queries are embedded with; nil means
 	// semantic recall is off (BM25 only). The models PUT swaps it, so
 	// every reader loads it through embedder().
-	emb          atomic.Pointer[embed.Client]
-	embModel     atomic.Pointer[string] // the configured model name behind emb, for the reason it is off
-	ring         *LogRing               // nil = no admin Log tab data
+	emb      atomic.Pointer[embed.Client]
+	embModel atomic.Pointer[string] // the configured model name behind emb, for the reason it is off
+	// modelsMu serializes the models PUT (env file rewrite and client
+	// swap as one step) with the embeddings drop, so a save can neither
+	// interleave with another save nor make a key live mid-drop.
+	modelsMu     sync.Mutex
+	ring         *LogRing // nil = no admin Log tab data
 	accessMu     sync.Mutex
 	accessDB     *access.Store
 	accessClosed bool
@@ -331,6 +335,7 @@ func (s *Server) Routes() []Route {
 		{"POST", "/v1/sync/group-config", s.syncConfigIn, false},
 		{"GET", "/v1/config/models", s.getModels, true},
 		{"PUT", "/v1/config/models", s.putModels, true},
+		{"POST", "/v1/config/embeddings/drop", s.dropEmbeddings, true},
 		{"GET", "/v1/config/providers", s.getProviders, true},
 		{"PUT", "/v1/config/providers", s.putProviders, true},
 		{"POST", "/v1/config/providers/test", s.testProvider, true},
@@ -429,20 +434,22 @@ func (s *Server) recall(w http.ResponseWriter, r *http.Request) {
 		}
 		// Semantic leg is best-effort: an embedding failure (proxy down,
 		// egress blocked) degrades silently to BM25-only.
+		var mm store.VectorMismatch
 		if c := s.embedder(); c != nil {
-			if vecs, _, err := c.Embed([]string{q}); err != nil {
-				s.log.Warn("query embedding failed; BM25-only recall", "err", err)
-			} else if have, _ := db.EmbedDim(c.Key()); have != 0 && have != len(vecs[0]) {
-				// Another model answers under the same name: its vector
-				// scores 0 against every stored one, so say so and rank
-				// by BM25 alone rather than pass an empty leg as a result.
-				s.log.Warn("query embedding has another dimension than the stored vectors of its key; BM25-only recall",
-					"key", c.Key(), "stored", have, "query", len(vecs[0]))
+			if vecs, _, err := c.Embed([]string{q}); err == nil {
+				opts.QueryVec, opts.EmbedModel, opts.Mismatch = vecs[0], c.Key(), &mm
 			} else {
-				opts.QueryVec, opts.EmbedModel = vecs[0], c.Key()
+				s.log.Warn("query embedding failed; BM25-only recall", "err", err)
 			}
 		}
 		mems, err := db.Recall(q, opts)
+		// Another model answering under the same name gives a query vector
+		// of another length, which scores 0 against those rows: they were
+		// ranked by their words alone, and the log says how many.
+		if mm.Other > 0 {
+			s.log.Warn("query embedding has another dimension than stored vectors of its key; those rows were not scored",
+				"key", opts.EmbedModel, "stored", mm.StoredDim, "query", len(opts.QueryVec), "rows", mm.Rows, "other_length", mm.Other)
+		}
 		if err != nil {
 			s.fail(w, http.StatusBadRequest, err)
 			return
@@ -871,10 +878,7 @@ func (s *Server) health(w http.ResponseWriter, _ *http.Request) {
 		s.fail(w, http.StatusInternalServerError, err)
 		return
 	}
-	body := map[string]any{"status": "ok", "projects": len(ids), "state_root": s.reg.Root(),
-		// The key recall queries with right now ("" = semantic recall
-		// off): `aimem embed --drop` reads it to refuse the live key.
-		"embed_model": s.embedder().Key()}
+	body := map[string]any{"status": "ok", "projects": len(ids), "state_root": s.reg.Root()}
 	if Version != "" {
 		body["version"] = Version
 	}

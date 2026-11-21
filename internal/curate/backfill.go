@@ -6,18 +6,29 @@ import (
 	"strconv"
 	"time"
 
-	"aimem/internal/embed"
 	"aimem/internal/store"
 )
 
 // Backfill embeds every live memory of db that has no vector under key,
 // batch texts per request, and returns how many it stored and the tokens
-// spent. Each batch passes the budget gate first, like any other spend.
-// It records no run history; the caller meters the spend.
-func Backfill(reg *store.Registry, db *store.DB, e Embedder, key string, batch int) (n int, tokens int64, err error) {
+// spent. Each batch passes db's budget gate with the tokens this call has
+// already spent added to its projection, so a long backfill cannot pass
+// the cap batch by batch. The spend is recorded once, as one row of db's
+// run history under meterModel, when the call ends, on an error too;
+// callers record none of it again.
+func Backfill(reg *store.Registry, db *store.DB, e Embedder, key, meterModel string, batch int) (n int, tokens int64, err error) {
 	if batch <= 0 {
 		batch = 64
 	}
+	host, _ := os.Hostname()
+	defer func() {
+		if tokens > 0 || n > 0 {
+			_ = db.AddCurateRun(&store.CurateRun{
+				TS: time.Now().UTC().Format(time.RFC3339), Host: host,
+				Model: meterModel, Written: n, InputTokens: tokens,
+			})
+		}
+	}()
 	for {
 		targets, err := db.NeedingEmbedding(key, batch)
 		if err != nil || len(targets) == 0 {
@@ -29,7 +40,7 @@ func Backfill(reg *store.Registry, db *store.DB, e Embedder, key string, batch i
 		if budget, owned, err := LoadBudget(reg, db); err != nil {
 			return n, tokens, err
 		} else if !budget.Empty() {
-			proj := Projection{In: int64(len(targets)) * 150}
+			proj := Projection{In: tokens + int64(len(targets))*150}
 			if pin, perr := strconv.ParseFloat(os.Getenv("AIMEM_PRICE_IN"), 64); perr == nil {
 				proj.USD, proj.Priced = float64(proj.In)/1e6*pin, true
 			}
@@ -46,15 +57,17 @@ func Backfill(reg *store.Registry, db *store.DB, e Embedder, key string, batch i
 		if err != nil {
 			return n, tokens, err
 		}
+		batchVecs := make([]store.EmbedVec, 0, len(targets))
 		for i, t := range targets {
 			if i >= len(vecs) {
 				break
 			}
-			if err := db.SetEmbedding(t.ID, key, len(vecs[i]), embed.Encode(vecs[i])); err != nil {
-				return n, tokens, err
-			}
-			n++
+			batchVecs = append(batchVecs, store.EmbedVec{MemoryID: t.ID, Vec: vecs[i]})
 		}
+		if err := db.SetEmbeddings(key, batchVecs); err != nil {
+			return n, tokens, err
+		}
+		n += len(batchVecs)
 		if len(vecs) < len(targets) {
 			return n, tokens, errShortEmbed
 		}

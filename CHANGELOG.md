@@ -26,27 +26,36 @@ currently 26); a binary refuses a database newer than it understands.
     new facts under the new key only, so those facts were invisible to
     the semantic leg. The answer gains `embed` (`key`, or `why` when the
     model cannot be served and semantic recall is off) and says how many
-    projects still lack vectors under the new key. The text check model
-    still needs a restart. `AIMEM_EMBED_DIM` is not part of the save.
+    projects still lack vectors under the new key, or that the coverage
+    is unknown when a project could not be checked. A model that cannot
+    be served, or an empty one (the console's new "(off)"), turns
+    semantic recall off at once. Saves are serialized. The text check
+    model still needs a restart. `AIMEM_EMBED_DIM` is not part of the
+    save.
   - **Curation backfills before its dedup.** Each run first embeds the
     live facts of every project it writes to that have no vector under
     the current key, so the first run after a change admits no rephrased
     twin. A project it cannot complete gets no dedup in that run, and
-    the report names it in `dedup_skipped`; `backfilled` counts the
-    vectors added.
+    the report names it in `dedup_skipped`, as it names every target
+    when the proposals themselves cannot be embedded; `backfilled`
+    counts the vectors added. Each backfill's budget check counts what
+    that backfill already spent, and it writes one run-history row.
   - **Coverage counts the current key only.** The stats' `embedded`
     counted facts with a vector of any key; it now counts those under
     the key recall queries with, named in the new `embed_model`. The
     console's setup tab shows it, and the TUI's embed column counts the
     same key.
   - **Old vectors can be removed.** `aimem embed --drop KEY [--dry-run]`
-    removes one key's vectors and refuses the key in use, here and in
-    the running service, which `/v1/health` now reports as
-    `embed_model`. `aimem embed --keys` lists the keys stored.
+    refuses its own key, then has the running service remove the key's
+    vectors through the new admin route `POST /v1/config/embeddings/drop`.
+    The service refuses the key it queries with and the key its env file
+    names, under the lock a models save takes, and reports a drop that
+    stopped partway per project. `aimem embed --keys` lists the keys
+    stored, per vector length.
   - **A dimension mismatch is refused.** A vector of another length than
-    the stored vectors of its key is refused by every writer, and a query
-    vector of another length makes recall rank by keywords alone and log
-    the mismatch. The embedding key stays the model's name: a provider
+    the stored vectors of its key is refused by every writer (checked in
+    the writing transaction), and recall logs the rows a query vector of
+    another length could not score. The embedding key stays the model's name: a provider
     change under one name must serve the same model.
 
 ## [0.11.5] — 2026-11-19

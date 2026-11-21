@@ -256,6 +256,10 @@
       <div class="row"><span style="width:110px"></span>
         <button class="act" onclick="saveModels()">save models</button>
         <span id="mNote" class="dim"></span></div>
+      <div class="dim" style="font-size:12px;margin-top:6px">A saved embed model serves live recall at
+        once. A model the service cannot serve, or "(off)", turns semantic recall off at once: recall
+        then ranks by keywords only. To change the model without a dip, fill its key first: see
+        "Changing the embedding model" in the admin manual.</div>
     </div>
     <div class="card">
       <h2 style="margin-top:0">providers</h2>
@@ -1230,8 +1234,12 @@ async function loadModels(){
     cur = m.curate_model||""; emb = m.embed_model||""; txt = m.text_check_model||"";
     $("mTextCap").value = m.text_check_daily_calls||"";
     const ek = (m.embed||{}).key||"";
-    $("mEmbState").textContent = ek ? `running: ${ek}; ${embCoverage(ek)}`
-      : `running: off (${(m.embed||{}).why||"no model"})`;
+    // Coverage is read fresh each time: a boot-time snapshot would
+    // count the key some other save replaced, or miss a backfill since.
+    let rows = null;
+    try{ rows = (await api("/v1/overview")).projects||[]; OV = rows; }catch(e){}
+    $("mEmbState").textContent = ek ? `running: ${ek}; ${embCoverage(ek, rows)}`
+      : `running: off (${(m.embed||{}).why||"no model"}); recall ranks by keywords only`;
     const tc = m.text_check||{};
     $("mTextState").textContent = tc.state==="on"
       ? `running: ${tc.model}, ${tc.calls_today}/${tc.daily_calls_cap} calls today`
@@ -1242,7 +1250,7 @@ async function loadModels(){
   // would silently degrade recall to BM25-only, so keep it out of that
   // picker entirely.
   const embeddable = bound.filter(m=>(PROV.providers[PROV.models[m].provider]||{}).kind!=="claude");
-  for(const [id,val] of [["mCurate",cur],["mEmbed",emb]]){
+  for(const [id,val] of [["mCurate",cur]]){
     const opts=[...new Set([val,...(id==="mEmbed"?embeddable:bound)])].filter(Boolean);
     // An unset value gets an explicit placeholder: without it the select
     // silently DISPLAYS the first bound model while the server value is
@@ -1251,6 +1259,10 @@ async function loadModels(){
       ? opts.map(o=>`<option${o===val?" selected":""}>${esc(o)}</option>`).join("")
       : (val?"":'<option value="" disabled>(bind a model first)</option>'));
   }
+  // "(off)" saves an empty embed model: embeddings off, recall BM25 only.
+  const eopts=[...new Set([emb,...embeddable])].filter(Boolean);
+  $("mEmbed").innerHTML = `<option value=""${emb?"":" selected"}>(off)</option>`+
+    eopts.map(o=>`<option${o===emb?" selected":""}>${esc(o)}</option>`).join("");
   // The text check needs an OpenAI-compatible endpoint, like embeddings.
   const topts=[...new Set([txt,...embeddable])].filter(Boolean);
   $("mText").innerHTML = `<option value=""${txt?"":" selected"}>(off)</option>`+
@@ -1259,11 +1271,14 @@ async function loadModels(){
 // embCoverage sums the overview's live facts with a vector under key.
 // Vectors of any other key are not coverage: the semantic leg reads
 // only the key recall queries with.
-function embCoverage(key){
-  if(!OV.length) return "coverage not loaded yet";
+function embCoverage(key, rows){
+  if(!rows) return "coverage unavailable (the overview could not be read)";
   let have=0, all=0; const short=[];
-  for(const p of OV){
+  for(const p of rows){
     const st=p.stats||{};
+    // A row counted under another key means the models changed between
+    // the two reads: say so rather than add up the wrong space.
+    if((st.memories||0)>0 && st.embed_model!==key) return "coverage unavailable (the models changed while it was read; reopen this tab)";
     if(st.embed_model!==key) continue;
     have+=st.embedded||0; all+=st.memories||0;
     if((st.embedded||0)<(st.memories||0)) short.push(p.id);
@@ -1279,7 +1294,6 @@ async function saveModels(){
     const r = await api("/v1/config/models",{method:"PUT",body:JSON.stringify(body)});
     $("mNote").textContent = r.note||"saved";
     toast("models saved");
-    try{ const o = await api("/v1/overview"); OV = o.projects||[]; }catch(e){}
     loadModels();
   }catch(e){ $("mNote").textContent = String(e); }
 }

@@ -7941,6 +7941,17 @@
         }
       }
     },
+    "/v1/config/embeddings/drop": {
+      "post": {
+        "summary": "Remove the vectors of one embedding key, project by project, under the lock the models PUT takes (refuses the key the service queries with and the key the env file names; dry_run counts and writes nothing; a failure stops the drop and names the project)",
+        "x-role": "admin",
+        "responses": {
+          "200": {
+            "description": "per-project rows and bytes, complete, stopped_at"
+          }
+        }
+      }
+    },
     "/v1/config/providers": {
       "get": {
         "summary": "Provider registry, tokens masked to last 4",

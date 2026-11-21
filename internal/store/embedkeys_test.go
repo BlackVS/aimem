@@ -112,3 +112,37 @@ func TestEmbedDimReadsAKeyRefilledElsewhere(t *testing.T) {
 		t.Fatalf("the reader kept a dropped length: dim %d, want 3", d)
 	}
 }
+
+// A writer whose handle saw one length refuses a vector of that length
+// once another handle dropped and refilled the key with another: the
+// check reads the stored length in the writing transaction.
+func TestSetEmbeddingChecksTheLengthStoredByAnotherHandle(t *testing.T) {
+	r := newTestRegistry(t)
+	db, _ := r.Open("proj-a")
+	a, _, _ := db.Remember("first fact", "test", RememberOpts{Kind: "fact"})
+	b, _, _ := db.Remember("second fact", "test", RememberOpts{Kind: "fact"})
+	if err := db.SetEmbedding(a, "m", 2, embed.Encode([]float32{1, 0})); err != nil {
+		t.Fatal(err)
+	}
+	other, err := NewRegistry(r.Root())
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(other.Close)
+	odb, _ := other.Open("proj-a")
+	if _, err := odb.DropEmbeddings("m"); err != nil {
+		t.Fatal(err)
+	}
+	if err := odb.SetEmbedding(a, "m", 3, embed.Encode([]float32{1, 0, 0})); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.SetEmbedding(b, "m", 2, embed.Encode([]float32{0, 1})); !errors.Is(err, ErrEmbedDim) {
+		t.Fatalf("the first handle wrote a 2-long vector under a 3-long key: %v", err)
+	}
+	if err := db.SetEmbeddings("m", []EmbedVec{{b, []float32{0, 1, 0}}, {a, []float32{1}}}); !errors.Is(err, ErrEmbedDim) {
+		t.Fatalf("a batch with one wrong length was accepted: %v", err)
+	}
+	if ks, _ := db.EmbedKeys(); len(ks) != 1 || ks[0].Rows != 1 || ks[0].Dim != 3 {
+		t.Fatalf("a refused batch wrote rows: %+v", ks)
+	}
+}

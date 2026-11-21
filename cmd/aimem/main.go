@@ -2316,7 +2316,7 @@ func embedCmd(args []string) error {
 		return embedKeys(reg, projects)
 	}
 	if *drop != "" {
-		return embedDrop(reg, projects, *drop, *dry, embed.ForRoot(root).Key(), serviceEmbedKey)
+		return embedDrop(projects, *all, *drop, *dry, embed.ForRoot(root).Key(), serviceDrop)
 	}
 	if *dry {
 		return errors.New("--dry-run goes with --drop")
@@ -2340,53 +2340,69 @@ func embedKeys(reg *store.Registry, projects []string) error {
 			return err
 		}
 		for _, k := range ks {
-			fmt.Printf("%s: key %q: %d vectors, %d bytes\n", proj, k.Model, k.Rows, k.Bytes)
+			fmt.Printf("%s: key %q: %d vectors of %d dimensions, %d bytes\n", proj, k.Model, k.Rows, k.Dim, k.Bytes)
 		}
 	}
 	return nil
 }
 
-// serviceEmbedKey asks the running service which key it embeds queries
-// with. known is false when the service answers without saying (a
-// release before the field); err when it cannot be asked at all.
-func serviceEmbedKey() (key string, known bool, err error) {
-	resp, err := client().Get("http://aimem/v1/health")
+// serviceDrop sends a drop to the running service over the local
+// socket. It answers the HTTP status and body.
+func serviceDrop(body []byte) (int, []byte, error) {
+	resp, err := client().Post("http://aimem/v1/config/embeddings/drop", "application/json", bytes.NewReader(body))
 	if err != nil {
-		return "", false, err
+		return 0, nil, err
 	}
 	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		return "", false, fmt.Errorf("health: %s", resp.Status)
-	}
-	var h map[string]any
-	if err := json.NewDecoder(resp.Body).Decode(&h); err != nil {
-		return "", false, err
-	}
-	v, ok := h["embed_model"].(string)
-	return v, ok, nil
+	b, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+	return resp.StatusCode, b, err
 }
 
 // embedDrop removes the vectors of one key. It refuses the key this
-// command's own configuration resolves to and the key the running
-// service queries with, which differ when the env file changed without
-// the service learning of it. A service that cannot be asked, or does
-// not say, is a refusal too: the key in use cannot be known.
-func embedDrop(reg *store.Registry, projects []string, key string, dry bool, own string,
-	service func() (string, bool, error)) error {
+// command's own configuration resolves to first; the service then does
+// the drop under the lock its models save takes, refusing the key it
+// queries with and the key its env file names, so no save can make the
+// key live while its vectors go. A service that cannot be asked, or an
+// older one without the route, is a refusal: the key in use could not
+// be checked.
+func embedDrop(projects []string, all bool, key string, dry bool, own string,
+	send func([]byte) (int, []byte, error)) error {
 	if key == own {
 		return fmt.Errorf("refused: %q is the current embedding key here (AIMEM_EMBED_MODEL); change the model first", key)
 	}
-	live, known, err := service()
-	switch {
-	case err != nil:
-		return fmt.Errorf("refused: the running service could not be asked which key it queries with (%v); start it, or check `aimem health`", err)
-	case !known:
-		return errors.New("refused: the running service does not report its embedding key (a release before this one); restart it on this release first")
-	case key == live:
-		return fmt.Errorf("refused: %q is the key the running service queries with", key)
+	req := map[string]any{"key": key, "dry_run": dry}
+	if !all {
+		req["projects"] = projects
 	}
-	if live != own {
-		fmt.Fprintf(os.Stderr, "aimem embed: note: the service queries with %q, this command's configuration resolves to %q; both are kept\n", live, own)
+	body, _ := json.Marshal(req)
+	status, raw, err := send(body)
+	if err != nil {
+		return fmt.Errorf("refused: the running service could not be asked to drop the key (%v); start it, or check `aimem health`", err)
+	}
+	var out struct {
+		Error     string `json:"error"`
+		LiveKey   string `json:"live_key"`
+		FileKey   string `json:"file_key"`
+		Complete  bool   `json:"complete"`
+		StoppedAt string `json:"stopped_at"`
+		Projects  []struct {
+			Project string `json:"project"`
+			Rows    int    `json:"rows"`
+			Bytes   int64  `json:"bytes"`
+			Error   string `json:"error"`
+		} `json:"projects"`
+	}
+	if jerr := json.Unmarshal(raw, &out); jerr != nil {
+		if status == http.StatusNotFound || status == http.StatusMethodNotAllowed {
+			return errors.New("refused: the running service has no embeddings drop (a release before this one); restart it on this release first")
+		}
+		return fmt.Errorf("refused: the service answered %d: %s", status, strings.TrimSpace(string(raw)))
+	}
+	if status != http.StatusOK {
+		return fmt.Errorf("refused by the service: %s", out.Error)
+	}
+	if out.LiveKey != own {
+		fmt.Fprintf(os.Stderr, "aimem embed: note: the service queries with %q, this command's configuration resolves to %q; both are kept\n", out.LiveKey, own)
 	}
 	verb := "removed"
 	if dry {
@@ -2394,30 +2410,19 @@ func embedDrop(reg *store.Registry, projects []string, key string, dry bool, own
 	}
 	var rows int
 	var size int64
-	for _, proj := range projects {
-		db, err := reg.Open(proj)
-		if err != nil {
-			return err
+	for _, p := range out.Projects {
+		if p.Error != "" {
+			fmt.Printf("%s: stopped here: %s\n", p.Project, p.Error)
+			continue
 		}
-		var u store.EmbedKeyUsage
-		if dry {
-			ks, err := db.EmbedKeys()
-			if err != nil {
-				return err
-			}
-			for _, k := range ks {
-				if k.Model == key {
-					u = k
-				}
-			}
-		} else if u, err = db.DropEmbeddings(key); err != nil {
-			return err
+		if p.Rows > 0 {
+			fmt.Printf("%s: %s %d vectors of key %q, %d bytes\n", p.Project, verb, p.Rows, key, p.Bytes)
 		}
-		if u.Rows > 0 {
-			fmt.Printf("%s: %s %d vectors of key %q, %d bytes\n", proj, verb, u.Rows, key, u.Bytes)
-		}
-		rows += u.Rows
-		size += u.Bytes
+		rows += p.Rows
+		size += p.Bytes
+	}
+	if !out.Complete {
+		return fmt.Errorf("the drop stopped at %s; the projects listed before it are done, the rest still hold key %q", out.StoppedAt, key)
 	}
 	fmt.Printf("total: %s %d vectors of key %q, %d bytes (the database files shrink on the next VACUUM)\n", verb, rows, key, size)
 	return nil
@@ -2425,22 +2430,15 @@ func embedDrop(reg *store.Registry, projects []string, key string, dry bool, own
 
 // embedProjects backfills pending memory embeddings for the given
 // projects; shared by `embed` and the post-sync backfill. Spend is
-// budget-gated per batch and recorded into the run history under the
-// embedding model's name.
+// budget-gated per batch and recorded into each project's run history
+// under the embedding model's name by curate.Backfill.
 func embedProjects(reg *store.Registry, c *embed.Client, projects []string, batch int) error {
-	host, _ := os.Hostname()
 	for _, proj := range projects {
 		db, err := reg.Open(proj)
 		if err != nil {
 			return err
 		}
-		total, tokens, err := curate.Backfill(reg, db, c, c.Key(), batch)
-		if total > 0 {
-			_ = db.AddCurateRun(&store.CurateRun{
-				TS: time.Now().UTC().Format(time.RFC3339), Host: host,
-				Model: c.Model, Written: total, InputTokens: tokens,
-			})
-		}
+		total, _, err := curate.Backfill(reg, db, c, c.Key(), c.Model, batch)
 		if err != nil {
 			return fmt.Errorf("embed %s: %w", proj, err)
 		}

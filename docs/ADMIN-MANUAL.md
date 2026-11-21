@@ -832,7 +832,9 @@ texts.
 AIMEM_EMBED_MODEL="<new model>" aimem embed --all
 # 2. Switch: the console's setup tab (save models), or
 #    PUT /v1/config/models. The running service embeds queries with
-#    the new model from that moment; no restart.
+#    the new model from that moment; no restart. A model the service
+#    cannot serve, or "(off)", turns semantic recall off at that
+#    moment just as well: recall then ranks by keywords only.
 # 3. Fill what the timer curated between step 1 and step 2 (a few
 #    facts, written under the old key only):
 aimem embed --all
@@ -861,9 +863,11 @@ dedup, and the run report names it in `dedup_skipped`. Run
 **Seeing the coverage.** The console's setup tab shows the key the
 service queries with and how many live facts have a vector under it,
 naming the projects that miss some. The TUI's embed column counts the
-same key, named on its AI line. `aimem health` reports the service's
-key as `embed_model` ("" when semantic recall is off). `aimem embed
---keys --all` lists every key stored, with its vectors and size.
+same key, named on its AI line. `GET /v1/config/models` reports the
+service's key as `embed.key` ("" when semantic recall is off, with the
+reason in `embed.why`). `aimem embed --keys --all` lists every key
+stored, with its vectors, their length and size; a key holding two
+lengths shows as two lines.
 
 **Rolling back.** Save the old model again. Its vectors are still there,
 so recall uses them at once; run `aimem embed --all` for the facts
@@ -877,24 +881,50 @@ aimem embed --drop "<old key>" --all
 ```
 
 Nothing is removed automatically. `--drop` refuses the key this
-command's configuration resolves to and the key the running service
-queries with, which it asks the service for. When the two differ, both
-are kept and the command says so. When the service cannot be asked, or
-is an older release that does not report its key, the command refuses:
-the key in use cannot be known. The database files shrink at the next
-`VACUUM`.
+command's configuration resolves to, then hands the drop to the
+running service (`POST /v1/config/embeddings/drop`, an admin route,
+over the local socket). The service refuses the key it queries with
+and the key its env file names at that moment, and holds the lock a
+models save takes for the whole drop, so no save can make the key
+live while its vectors go: a save in that time waits. The wait is
+short: one store of 20,000 vectors of 1,536 floats (about 120 MB of
+rows) drops in about 0.2 s on an SSD; a slower disk takes longer, and
+the drop handles one store after another. When a project fails, the drop
+stops there: the command lists what was removed in the projects before
+it and names the one it stopped at; run it again after fixing that
+store. When the service cannot be asked, or is an older release
+without the route, the command refuses. The database files shrink at
+the next `VACUUM`.
 
 **The same name through another provider.** The key is the model's
-name, not its provider, so moving a model between a proxy and its
-upstream keeps its vectors, as alias bindings of one model intend.
-Only do that when the new provider serves the same model under that
-name: if it serves a different model, its vectors would sit in the old
-model's space and nothing could tell them apart. Change the name
-instead (bind it under a new local name, or set `AIMEM_EMBED_DIM`).
-One case is caught: a vector of another dimension than the stored
-vectors of its key is refused by every writer (`aimem embed` stops
-with the reason, and curation skips its dedup and names the project),
-and recall then ranks by keywords alone and logs the mismatch.
+upstream name, not its provider or its local binding name: two
+bindings of one upstream model share one key, as aliases intend, so
+moving a model between a proxy and its upstream keeps its vectors.
+Check the key you get before you rely on it: the console's setup tab
+(or `embed.key` of `GET /v1/config/models`) names it after the save.
+Only keep one key when the new provider serves the same model under
+that name. If it serves a different model, its vectors would sit in
+the old model's space; a new local binding name does not help, since
+it resolves to the same upstream name. Either set `AIMEM_EMBED_DIM`,
+which makes the key `<model>@<dim>`, or rebuild the key:
+
+```sh
+# 1. Turn embeddings off: the console's setup tab, embed model "(off)",
+#    save. Recall ranks by keywords only from that moment.
+# 2. Remove the key's vectors (no save and no env file names it now):
+aimem embed --drop "<key>" --all
+# 3. Save the model again in the setup tab.
+# 4. Embed every live fact with the model the provider serves now:
+aimem embed --all
+```
+
+With a second embedding model at hand you can save that one in step
+1 instead of "(off)", so semantic recall goes on meanwhile.
+One case is caught on its own: a vector of another length than the
+stored vectors of its key is refused by every writer (`aimem embed`
+stops with the reason, and curation skips its dedup and names the
+project), and recall logs the mismatch and ranks those facts by their
+words alone.
 
 ### Enabling tasks for a project
 
