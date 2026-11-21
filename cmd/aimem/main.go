@@ -2349,14 +2349,28 @@ func embedKeys(reg *store.Registry, projects []string) error {
 // serviceDrop sends a drop to the running service over the local
 // socket. It answers the HTTP status and body.
 func serviceDrop(body []byte) (int, []byte, error) {
-	resp, err := client().Post("http://aimem/v1/config/embeddings/drop", "application/json", bytes.NewReader(body))
+	// The drop may wait for a models save and runs store after store; the
+	// service holds its answer for up to 10 minutes, so wait that long.
+	c := client()
+	c.Timeout = 11 * time.Minute
+	resp, err := c.Post("http://aimem/v1/config/embeddings/drop", "application/json", bytes.NewReader(body))
 	if err != nil {
+		var op *net.OpError
+		if errors.As(err, &op) && op.Op == "dial" {
+			return 0, nil, errDropNotSent{err}
+		}
 		return 0, nil, err
 	}
 	defer resp.Body.Close()
 	b, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
 	return resp.StatusCode, b, err
 }
+
+// errDropNotSent is a drop that never reached the service (the socket
+// could not be dialled): a refusal, unlike a lost answer.
+type errDropNotSent struct{ err error }
+
+func (e errDropNotSent) Error() string { return e.err.Error() }
 
 // embedDrop removes the vectors of one key. It refuses the key this
 // command's own configuration resolves to first; the service then does
@@ -2367,6 +2381,11 @@ func serviceDrop(body []byte) (int, []byte, error) {
 // be checked.
 func embedDrop(projects []string, all bool, key string, dry bool, own string,
 	send func([]byte) (int, []byte, error)) error {
+	// The service trims the key; compare and send the same form.
+	key = strings.TrimSpace(key)
+	if key == "" {
+		return errors.New("--drop needs a key")
+	}
 	if key == own {
 		return fmt.Errorf("refused: %q is the current embedding key here (AIMEM_EMBED_MODEL); change the model first", key)
 	}
@@ -2376,8 +2395,14 @@ func embedDrop(projects []string, all bool, key string, dry bool, own string,
 	}
 	body, _ := json.Marshal(req)
 	status, raw, err := send(body)
-	if err != nil {
-		return fmt.Errorf("refused: the running service could not be asked to drop the key (%v); start it, or check `aimem health`", err)
+	var notSent errDropNotSent
+	switch {
+	case errors.As(err, &notSent):
+		return fmt.Errorf("refused: the running service could not be reached (%v); start it, or check `aimem health`", notSent.err)
+	case err != nil:
+		// The request went out; its answer did not come back. The drop
+		// may have run in whole or in part.
+		return fmt.Errorf("outcome unknown: the drop was sent but its answer was lost (%v); check with `aimem embed --keys --all`", err)
 	}
 	var out struct {
 		Error     string `json:"error"`

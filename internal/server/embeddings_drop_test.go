@@ -1,8 +1,11 @@
 package server
 
 import (
+	"context"
 	"encoding/json"
+	"net/http/httptest"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -158,5 +161,133 @@ func TestEmbeddingsDropRefusesWhenTheEnvFileCannotBeRead(t *testing.T) {
 	}
 	if rowsOf(t, s.reg, "p1", "gone-embed") != 1 {
 		t.Fatal("vectors went although the env file could not be read")
+	}
+}
+
+// The console's coverage line over the overview the service serves: a
+// project whose store cannot be read makes it "coverage unavailable",
+// never a total over the projects that could be read. It runs the page's
+// own embCoverage under node (CI's lint job requires node).
+func TestSetupCoverageIsUnavailableWithAnUnreadableProject(t *testing.T) {
+	node, err := exec.LookPath("node")
+	if err != nil {
+		if os.Getenv("AIMEM_TEST_REQUIRE_NODE") != "" {
+			t.Fatal("node is required here and not on PATH")
+		}
+		t.Skip("node is not on PATH")
+	}
+	s, h, _ := modelsRig(t)
+	seedKey(t, s.reg, "p1", "old-embed")
+	bad := filepath.Join(s.reg.Root(), "projects", "p2")
+	os.MkdirAll(bad, 0o700)
+	os.WriteFile(filepath.Join(bad, "journal.db"), []byte("not a database, at some length to pass any header read"), 0o600)
+	w := req(t, h, "GET", "/v1/overview", "")
+	var ov struct {
+		Projects []map[string]any `json:"projects"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &ov); err != nil || len(ov.Projects) != 2 {
+		t.Fatalf("overview: %d %s", w.Code, w.Body)
+	}
+	script, _ := readConsolePage(t, "admin.html")
+	i := strings.Index(script, "function embCoverage(")
+	j := strings.Index(script[i:], "\n}\n")
+	if i < 0 || j < 0 {
+		t.Fatal("embCoverage not found in admin.html")
+	}
+	rows, _ := json.Marshal(ov.Projects)
+	js := "const esc=x=>x;\n" + script[i:i+j+2] + "\nconsole.log(embCoverage(\"old-embed\", " + string(rows) + "));\n"
+	f := filepath.Join(t.TempDir(), "cov.js")
+	os.WriteFile(f, []byte(js), 0o600)
+	out, err := exec.Command(node, f).CombinedOutput()
+	if err != nil {
+		t.Fatalf("node: %v\n%s", err, out)
+	}
+	if got := strings.TrimSpace(string(out)); !strings.HasPrefix(got, "coverage unavailable: 1 project(s) could not be read (p2)") {
+		t.Fatalf("Setup coverage with an unreadable project: %q", got)
+	}
+}
+
+// The env file's key is resolved with the file's own dimension setting,
+// in both directions of a dimension change: a prefilled M@256 that the
+// file names is kept although the service queries bare M, and once both
+// are on M@256 the retired bare M can go.
+func TestEmbeddingsDropResolvesTheFileKeyWithTheFileDimension(t *testing.T) {
+	s, h, envFile := modelsRig(t)
+	seedKey(t, s.reg, "p1", "old-embed")
+	seedKey(t, s.reg, "p1", "old-embed@256")
+	os.WriteFile(envFile, []byte("AIMEM_CURATE_MODEL=c\nAIMEM_EMBED_MODEL=old-embed\nAIMEM_EMBED_DIM=256\n"), 0o600)
+	w := req(t, h, "POST", "/v1/config/embeddings/drop", `{"key":"old-embed@256"}`)
+	if w.Code != 409 || !strings.Contains(w.Body.String(), "the env file names") || rowsOf(t, s.reg, "p1", "old-embed@256") != 1 {
+		t.Fatalf("drop of the file's M@256 while the service queries M: %d %s", w.Code, w.Body)
+	}
+	// The service moves to M@256 too (as a restart under the file would).
+	t.Setenv("AIMEM_EMBED_DIM", "256")
+	s.setEmbedModel("old-embed")
+	if got := s.embedder().Key(); got != "old-embed@256" {
+		t.Fatalf("live key %q", got)
+	}
+	w = req(t, h, "POST", "/v1/config/embeddings/drop", `{"key":"old-embed"}`)
+	if w.Code != 200 || rowsOf(t, s.reg, "p1", "old-embed") != 0 || rowsOf(t, s.reg, "p1", "old-embed@256") != 1 {
+		t.Fatalf("drop of the retired bare key: %d %s", w.Code, w.Body)
+	}
+}
+
+// A dry run over a project directory without a database file creates
+// nothing; nor does the real drop.
+func TestEmbeddingsDropCreatesNoStore(t *testing.T) {
+	s, h, _ := modelsRig(t)
+	seedKey(t, s.reg, "p1", "gone-embed")
+	empty := filepath.Join(s.reg.Root(), "projects", "p0")
+	os.MkdirAll(empty, 0o700)
+	for _, body := range []string{`{"key":"gone-embed","dry_run":true}`, `{"key":"gone-embed"}`} {
+		var a dropAnswer
+		w := req(t, h, "POST", "/v1/config/embeddings/drop", body)
+		json.Unmarshal(w.Body.Bytes(), &a)
+		if w.Code != 200 || !a.Complete {
+			t.Fatalf("%s: %d %s", body, w.Code, w.Body)
+		}
+		if ents, _ := os.ReadDir(empty); len(ents) != 0 {
+			t.Fatalf("%s created %v in a project without a store", body, ents)
+		}
+	}
+	if rowsOf(t, s.reg, "p1", "gone-embed") != 0 {
+		t.Fatal("the real drop did not remove p1's vectors")
+	}
+}
+
+// A drop whose request was cancelled while it waited for the lock
+// deletes nothing.
+func TestEmbeddingsDropCancelledWhileWaitingDeletesNothing(t *testing.T) {
+	s, h, _ := modelsRig(t)
+	seedKey(t, s.reg, "p1", "gone-embed")
+	s.modelsMu.Lock()
+	ctx, cancel := context.WithCancel(context.Background())
+	r := httptest.NewRequest("POST", "/v1/config/embeddings/drop", strings.NewReader(`{"key":"gone-embed"}`)).WithContext(ctx)
+	w := httptest.NewRecorder()
+	done := make(chan struct{})
+	go func() { h.ServeHTTP(w, r); close(done) }()
+	time.Sleep(100 * time.Millisecond)
+	cancel()
+	s.modelsMu.Unlock()
+	<-done
+	if w.Code == 200 || !strings.Contains(w.Body.String(), "cancelled before the drop began") || rowsOf(t, s.reg, "p1", "gone-embed") != 1 {
+		t.Fatalf("a cancelled drop: %d %s", w.Code, w.Body)
+	}
+}
+
+// The projects cannot be listed: the save says the coverage is unknown.
+func TestModelsPutSaysCoverageUnknownWhenProjectsCannotBeListed(t *testing.T) {
+	s, h, _ := modelsRig(t)
+	dir := filepath.Join(s.reg.Root(), "projects")
+	if err := os.RemoveAll(dir); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(dir, []byte("not a directory"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	w := req(t, h, "PUT", "/v1/config/models", `{"curate_model":"c","embed_model":"new-embed"}`)
+	if w.Code != 200 || !strings.Contains(w.Body.String(), "coverage under new-embed is unknown: the projects could not be listed") ||
+		strings.Contains(w.Body.String(), "every live fact") {
+		t.Fatalf("PUT: %d %s", w.Code, w.Body)
 	}
 }

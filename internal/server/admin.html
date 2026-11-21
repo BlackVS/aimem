@@ -1274,6 +1274,8 @@ async function loadModels(){
 function embCoverage(key, rows){
   if(!rows) return "coverage unavailable (the overview could not be read)";
   let have=0, all=0; const short=[];
+  const broken=rows.filter(p=>p.error).map(p=>p.id);
+  if(broken.length) return `coverage unavailable: ${broken.length} project(s) could not be read (${broken.slice(0,3).join(", ")}${broken.length>3?", ...":""})`;
   for(const p of rows){
     const st=p.stats||{};
     // A row counted under another key means the models changed between

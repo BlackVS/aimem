@@ -611,14 +611,34 @@ func (d *DB) ProjectID() string { return d.projectID }
 // EmbedDim is the vector length stored under model, 0 when the key has
 // no vectors here. It reads the table every time: another process may
 // have dropped the key since (a long-running reader must not keep a
-// length that is gone).
+// length that is gone). A key holding vectors of several lengths (a
+// model change under one name before the length check existed) is
+// ErrEmbedDim: no single length describes it, and it must be rebuilt.
 func (d *DB) EmbedDim(model string) (int, error) {
-	var dim int
-	err := d.sql.QueryRow(`SELECT dim FROM memory_embeddings WHERE model = ? LIMIT 1`, model).Scan(&dim)
-	if errors.Is(err, sql.ErrNoRows) {
+	return storedEmbedDim(d.sql, model)
+}
+
+// queryRower is what storedEmbedDim needs of a handle or a transaction.
+type queryRower interface {
+	QueryRow(query string, args ...any) *sql.Row
+}
+
+func storedEmbedDim(q queryRower, model string) (int, error) {
+	// A full pass over the key's rows (no index on model): about 60 ms at
+	// 20,000 vectors of 1,536 floats, so it runs once per backfill call
+	// and target, not per batch.
+	var lo, hi sql.NullInt64
+	if err := q.QueryRow(`SELECT MIN(dim), MAX(dim) FROM memory_embeddings WHERE model = ?`, model).Scan(&lo, &hi); err != nil {
+		return 0, err
+	}
+	if !lo.Valid {
 		return 0, nil
 	}
-	return dim, err
+	if lo.Int64 != hi.Int64 {
+		return 0, fmt.Errorf("%w: key %q holds vectors of %d and %d dimensions here; rebuild the key (see \"Changing the embedding model\" in docs/ADMIN-MANUAL.md)",
+			ErrEmbedDim, model, lo.Int64, hi.Int64)
+	}
+	return int(lo.Int64), nil
 }
 
 // EmbedVec is one memory's vector for SetEmbeddings.
@@ -653,8 +673,13 @@ func (d *DB) SetEmbeddings(model string, batch []EmbedVec) error {
 		return err
 	}
 	defer tx.Rollback()
+	// One row's length, read in this transaction: the key's newest row,
+	// so the scan stops after the rows other keys wrote since this key's
+	// last write (about 1 ms per batch at 20,000 vectors). A key that
+	// already holds several lengths is found by EmbedDim, which the
+	// backfill and curation's readiness run once per call and target.
 	var have int
-	err = tx.QueryRow(`SELECT dim FROM memory_embeddings WHERE model = ? LIMIT 1`, model).Scan(&have)
+	err = tx.QueryRow(`SELECT dim FROM memory_embeddings WHERE model = ? ORDER BY rowid DESC LIMIT 1`, model).Scan(&have)
 	if err != nil && !errors.Is(err, sql.ErrNoRows) {
 		return err
 	}

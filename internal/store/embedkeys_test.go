@@ -2,6 +2,7 @@ package store
 
 import (
 	"errors"
+	"strings"
 	"testing"
 
 	"aimem/internal/embed"
@@ -144,5 +145,28 @@ func TestSetEmbeddingChecksTheLengthStoredByAnotherHandle(t *testing.T) {
 	}
 	if ks, _ := db.EmbedKeys(); len(ks) != 1 || ks[0].Rows != 1 || ks[0].Dim != 3 {
 		t.Fatalf("a refused batch wrote rows: %+v", ks)
+	}
+}
+
+// A key that already holds vectors of two lengths (written before the
+// length check existed) is refused by EmbedDim with "rebuild the key":
+// no single length describes it.
+func TestEmbedDimRefusesAKeyOfSeveralLengths(t *testing.T) {
+	r := newTestRegistry(t)
+	db, _ := r.Open("proj-a")
+	a, _, _ := db.Remember("first fact", "test", RememberOpts{Kind: "fact"})
+	b, _, _ := db.Remember("second fact", "test", RememberOpts{Kind: "fact"})
+	if err := db.SetEmbedding(a, "m", 2, embed.Encode([]float32{1, 0})); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.sql.Exec(`INSERT INTO memory_embeddings(memory_id, model, dim, vec) VALUES(?,?,?,?)`,
+		b, "m", 3, embed.Encode([]float32{1, 0, 0})); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.EmbedDim("m"); !errors.Is(err, ErrEmbedDim) || !strings.Contains(err.Error(), "rebuild the key") {
+		t.Fatalf("a key of two lengths: %v", err)
+	}
+	if ks, _ := db.EmbedKeys(); len(ks) != 2 {
+		t.Fatalf("--keys does not show the two lengths: %+v", ks)
 	}
 }

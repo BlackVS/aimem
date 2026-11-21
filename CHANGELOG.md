@@ -49,13 +49,20 @@ currently 26); a binary refuses a database newer than it understands.
     refuses its own key, then has the running service remove the key's
     vectors through the new admin route `POST /v1/config/embeddings/drop`.
     The service refuses the key it queries with and the key its env file
-    names, under the lock a models save takes, and reports a drop that
-    stopped partway per project. `aimem embed --keys` lists the keys
+    names (resolved with the env file's own dimension setting), under the
+    lock a models save takes, and reports a drop that stopped partway per
+    project. Its dry run reads each store read-only. When the answer is
+    lost after the request went out, the command says the outcome is
+    unknown. `aimem embed --keys` lists the keys
     stored, per vector length.
   - **A dimension mismatch is refused.** A vector of another length than
     the stored vectors of its key is refused by every writer (checked in
-    the writing transaction), and recall logs the rows a query vector of
-    another length could not score. The embedding key stays the model's name: a provider
+    the writing transaction); a key that already holds vectors of two
+    lengths is refused with "rebuild the key", and the manual's rebuild
+    stops the hub's timer first. Recall logs the rows a query vector of
+    another length could not score. The console's coverage says
+    "unavailable" when a project's store cannot be read, which the
+    overview now lists with an `error`. The embedding key stays the model's name: a provider
     change under one name must serve the same model.
 
 ## [0.11.5] — 2026-11-19

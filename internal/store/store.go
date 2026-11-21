@@ -95,6 +95,39 @@ func (r *Registry) Projects() ([]string, error) {
 	return ids, nil
 }
 
+// HasJournal reports whether a project's database file exists, without
+// opening (and so creating or migrating) it.
+func (r *Registry) HasJournal(projectID string) (bool, error) {
+	_, err := os.Stat(filepath.Join(r.root, "projects", projectID, "journal.db"))
+	if os.IsNotExist(err) {
+		return false, nil
+	}
+	return err == nil, err
+}
+
+// EmbedKeyRows counts the vectors and bytes stored under model in one
+// project, read-only: a missing database is 0, and the file is opened
+// read-only, so nothing is created or migrated. A database older than
+// the embeddings table holds none.
+func (r *Registry) EmbedKeyRows(projectID, model string) (EmbedKeyUsage, error) {
+	u := EmbedKeyUsage{Model: model}
+	path := filepath.Join(r.root, "projects", projectID, "journal.db")
+	if _, err := os.Stat(path); os.IsNotExist(err) {
+		return u, nil
+	}
+	sdb, err := sql.Open("sqlite", "file:"+path+"?mode=ro&_pragma=busy_timeout(5000)")
+	if err != nil {
+		return u, err
+	}
+	defer sdb.Close()
+	var tables int
+	if err := sdb.QueryRow(`SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='memory_embeddings'`).Scan(&tables); err != nil || tables == 0 {
+		return u, err
+	}
+	err = sdb.QueryRow(`SELECT COUNT(*), COALESCE(SUM(LENGTH(vec)),0) FROM memory_embeddings WHERE model = ?`, model).Scan(&u.Rows, &u.Bytes)
+	return u, err
+}
+
 // Open returns the store for one project, creating it if needed.
 func (r *Registry) Open(projectID string) (*DB, error) {
 	if !schema.ValidProjectID(projectID) {

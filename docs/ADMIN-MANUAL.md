@@ -889,12 +889,19 @@ models save takes for the whole drop, so no save can make the key
 live while its vectors go: a save in that time waits. The wait is
 short: one store of 20,000 vectors of 1,536 floats (about 120 MB of
 rows) drops in about 0.2 s on an SSD; a slower disk takes longer, and
-the drop handles one store after another. When a project fails, the drop
-stops there: the command lists what was removed in the projects before
-it and names the one it stopped at; run it again after fixing that
-store. When the service cannot be asked, or is an older release
-without the route, the command refuses. The database files shrink at
-the next `VACUUM`.
+the drop handles one store after another. The service gives a drop up
+to 10 minutes. When a project fails, the drop stops there: the command
+lists what was removed in the projects before it and names the one it
+stopped at; run it again after fixing that store. The dry run reads
+each store read-only and changes nothing, not even an older store's
+schema; the real drop opens each store as every command does, which
+first brings an older store up to the current schema. A project
+directory without a database is skipped by both. When the service
+cannot be reached, or is an older release without the route, the
+command refuses. When the request went out but its answer was lost,
+the command says the outcome is unknown: check with
+`aimem embed --keys --all`. The database files shrink at the next
+`VACUUM`.
 
 **The same name through another provider.** The key is the model's
 upstream name, not its provider or its local binding name: two
@@ -909,6 +916,14 @@ it resolves to the same upstream name. Either set `AIMEM_EMBED_DIM`,
 which makes the key `<model>@<dim>`, or rebuild the key:
 
 ```sh
+# 0. Stop every writer of vectors, and let a running one finish: a run
+#    that fetched old-model vectors before the drop would store them
+#    under the emptied key afterwards. As the service user on the hub:
+systemctl --user stop aimem-curate.timer
+systemctl --user is-active aimem-curate.service
+#    Repeat the last line until it no longer says "active". Do not start
+#    `aimem embed`, `aimem curate` or `aimem sync` (which embeds what
+#    it pulls) meanwhile.
 # 1. Turn embeddings off: the console's setup tab, embed model "(off)",
 #    save. Recall ranks by keywords only from that moment.
 # 2. Remove the key's vectors (no save and no env file names it now):
@@ -916,10 +931,15 @@ aimem embed --drop "<key>" --all
 # 3. Save the model again in the setup tab.
 # 4. Embed every live fact with the model the provider serves now:
 aimem embed --all
+# 5. Start the writers again:
+systemctl --user start aimem-curate.timer
 ```
 
-With a second embedding model at hand you can save that one in step
-1 instead of "(off)", so semantic recall goes on meanwhile.
+On a hub where curation or `aimem sync` runs from another schedule (a
+Windows hub, or a schedule of your own), disable that task in step 0
+and enable it again in step 5. With a second embedding model at hand
+you can save that one in step 1 instead of "(off)", so semantic recall
+goes on meanwhile.
 One case is caught on its own: a vector of another length than the
 stored vectors of its key is refused by every writer (`aimem embed`
 stops with the reason, and curation skips its dedup and names the

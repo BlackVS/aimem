@@ -8,7 +8,9 @@ import (
 	"net/http"
 	"os"
 	"slices"
+	"strconv"
 	"strings"
+	"time"
 
 	"aimem/internal/embed"
 	"aimem/internal/store"
@@ -45,8 +47,16 @@ func (s *Server) dropEmbeddings(w http.ResponseWriter, r *http.Request) {
 		s.fail(w, http.StatusBadRequest, errors.New("key: the embedding key to drop is required"))
 		return
 	}
+	// The drop may wait for a save and then run store after store: its
+	// answer must outlive the listener's 30-second write deadline.
+	_ = http.NewResponseController(w).SetWriteDeadline(time.Now().Add(dropDeadline))
 	s.modelsMu.Lock()
 	defer s.modelsMu.Unlock()
+	// A request whose client gave up while it waited deletes nothing.
+	if err := r.Context().Err(); err != nil {
+		s.fail(w, http.StatusServiceUnavailable, fmt.Errorf("refused: the request was cancelled before the drop began: %w", err))
+		return
+	}
 	live := s.embedder().Key()
 	fileModel, fileKey, err := s.envFileEmbedKey()
 	if err != nil {
@@ -55,13 +65,17 @@ func (s *Server) dropEmbeddings(w http.ResponseWriter, r *http.Request) {
 		s.fail(w, http.StatusConflict, fmt.Errorf("refused: the env file could not be read: %w", err))
 		return
 	}
+	if fileModel != "" && fileKey == "" {
+		s.fail(w, http.StatusConflict, fmt.Errorf("refused: the env file names AIMEM_EMBED_MODEL=%q, which cannot be resolved here, so its key is unknown", fileModel))
+		return
+	}
 	// req.Key is not empty, so an empty live or file key (embeddings off)
 	// matches nothing.
 	switch req.Key {
 	case live:
 		s.fail(w, http.StatusConflict, fmt.Errorf("refused: %q is the key the running service queries with", req.Key))
 		return
-	case fileKey, fileModel:
+	case fileKey:
 		s.fail(w, http.StatusConflict, fmt.Errorf("refused: %q is the key the env file names (AIMEM_EMBED_MODEL=%q)", req.Key, fileModel))
 		return
 	}
@@ -85,7 +99,12 @@ func (s *Server) dropEmbeddings(w http.ResponseWriter, r *http.Request) {
 	complete := true
 	for _, id := range ids {
 		res := dropResult{Project: id}
-		u, err := s.dropOne(id, req.Key, req.DryRun)
+		u, err := store.EmbedKeyUsage{}, r.Context().Err()
+		if err != nil {
+			err = fmt.Errorf("the request was cancelled; this project and the ones after it were not touched: %w", err)
+		} else {
+			u, err = s.dropOne(id, req.Key, req.DryRun)
+		}
 		res.Rows, res.Bytes = u.Rows, u.Bytes
 		if err != nil {
 			res.Error = err.Error()
@@ -104,29 +123,35 @@ func (s *Server) dropEmbeddings(w http.ResponseWriter, r *http.Request) {
 	s.ok(w, out)
 }
 
+// dropDeadline bounds one drop's answer: at the measured 0.2 s per store
+// of 20,000 vectors of 1,536 floats it leaves room for far more stores
+// than a hub holds.
+const dropDeadline = 10 * time.Minute
+
+// dropOne removes, or on a dry run counts, one project's vectors of key.
+// A project with no database file holds none and is not created. The dry
+// run reads the file read-only, so it neither creates nor migrates it;
+// the real drop opens the store as every command does, which migrates a
+// store of an older schema first.
 func (s *Server) dropOne(id, key string, dry bool) (store.EmbedKeyUsage, error) {
+	if dry {
+		return s.reg.EmbedKeyRows(id, key)
+	}
+	if has, err := s.reg.HasJournal(id); err != nil || !has {
+		return store.EmbedKeyUsage{Model: key}, err
+	}
 	db, err := s.reg.Open(id)
 	if err != nil {
 		return store.EmbedKeyUsage{Model: key}, err
 	}
-	if !dry {
-		return db.DropEmbeddings(key)
-	}
-	ks, err := db.EmbedKeys()
-	u := store.EmbedKeyUsage{Model: key}
-	for _, k := range ks {
-		if k.Model == key {
-			u.Rows += k.Rows
-			u.Bytes += k.Bytes
-		}
-	}
-	return u, err
+	return db.DropEmbeddings(key)
 }
 
 // envFileEmbedKey reads the embed model the env file names now, and the
 // key it resolves to ("" when it cannot be served here). A missing file
 // names no model; any other read error is returned.
 func (s *Server) envFileEmbedKey() (model, key string, err error) {
+	var dim int
 	raw, err := os.ReadFile(envFilePath())
 	if errors.Is(err, fs.ErrNotExist) {
 		return "", "", nil
@@ -138,6 +163,11 @@ func (s *Server) envFileEmbedKey() (model, key string, err error) {
 		if v, ok := parseEnvValue(line, "AIMEM_EMBED_MODEL"); ok {
 			model = v
 		}
+		// The timer resolves the key with the file's dimension, not with
+		// whatever this process was started with.
+		if v, ok := parseEnvValue(line, "AIMEM_EMBED_DIM"); ok {
+			dim, _ = strconv.Atoi(v)
+		}
 	}
-	return model, embed.ForModel(s.reg.Root(), model).Key(), nil
+	return model, embed.ForModelDim(s.reg.Root(), model, dim).Key(), nil
 }

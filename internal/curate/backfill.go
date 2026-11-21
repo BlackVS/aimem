@@ -29,6 +29,12 @@ func Backfill(reg *store.Registry, db *store.DB, e Embedder, key, meterModel str
 			})
 		}
 	}()
+	// Once per call: a key already holding vectors of several lengths
+	// is refused before anything is spent (the per-batch check reads one
+	// row only).
+	if _, err := db.EmbedDim(key); err != nil {
+		return 0, 0, err
+	}
 	for {
 		targets, err := db.NeedingEmbedding(key, batch)
 		if err != nil || len(targets) == 0 {

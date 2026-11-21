@@ -1,7 +1,9 @@
 package curate
 
 import (
+	"database/sql"
 	"errors"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -222,5 +224,44 @@ func TestBackfillMetersOnceAndStopsAtTheCap(t *testing.T) {
 	}
 	if rows != 1 {
 		t.Fatalf("history rows for one backfill: %d, want 1", rows)
+	}
+}
+
+// A legacy key holding two lengths: the backfill refuses it before it
+// spends, and curation names the target instead of deduplicating against
+// a space whose rows its proposals cannot all score.
+func TestCurateNamesATargetWhoseKeyHoldsTwoLengths(t *testing.T) {
+	root := t.TempDir()
+	reg, _ := store.NewRegistry(root)
+	defer reg.Close()
+	seed(t, reg, "proj-mx", 2)
+	db, _ := reg.Open("proj-mx")
+	a, _, _ := db.Remember("sqlite is the chosen journal storage engine", "curator", store.RememberOpts{})
+	b, _, _ := db.Remember("the hub runs as a user service", "curator", store.RememberOpts{})
+	if err := db.SetEmbedding(a, "new-embed", 2, embed.Encode([]float32{1, 0})); err != nil {
+		t.Fatal(err)
+	}
+	raw, err := sql.Open("sqlite", filepath.Join(root, "projects", "proj-mx", "journal.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer raw.Close()
+	if _, err := raw.Exec(`INSERT INTO memory_embeddings(memory_id, model, dim, vec) VALUES(?,?,?,?)`,
+		b, "new-embed", 3, embed.Encode([]float32{0, 1, 0})); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := Backfill(reg, db, &fakeEmbedder{}, "new-embed", "new-embed", 64); !errors.Is(err, store.ErrEmbedDim) {
+		t.Fatalf("backfill of a key of two lengths: %v", err)
+	}
+	rep, err := Run(reg, root, "proj-mx", &fakeExtractor{}, RunOpts{Embedder: &fakeEmbedder{}, EmbedModel: "new-embed", DedupSim: 0.9})
+	if err != nil {
+		t.Fatal(err)
+	}
+	named := false
+	for _, s := range rep.DedupSkipped {
+		named = named || (strings.HasPrefix(s, "proj-mx: ") && strings.Contains(s, "rebuild the key"))
+	}
+	if !named {
+		t.Fatalf("dedup skipped %v; want proj-mx named with the rebuild reason", rep.DedupSkipped)
 	}
 }

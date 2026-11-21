@@ -341,6 +341,8 @@ func (s *Server) putModels(w http.ResponseWriter, r *http.Request) {
 	} else if emb["key"] != prev {
 		missing, unchecked := s.projectsMissingVectors(emb["key"])
 		switch {
+		case unchecked < 0:
+			note += fmt.Sprintf("; coverage under %s is unknown: the projects could not be listed", emb["key"])
 		case unchecked > 0:
 			note += fmt.Sprintf("; coverage under %s is unknown: %d project(s) could not be checked, %d lack vectors", emb["key"], unchecked, missing)
 		case missing > 0:
@@ -526,6 +528,10 @@ func (s *Server) overview(w http.ResponseWriter, r *http.Request) {
 		Chapters json.RawMessage `json:"chapters,omitempty"`
 		Features json.RawMessage `json:"features,omitempty"`
 		DocTS    string          `json:"doc_ts,omitempty"` // design_doc_ts when a doc exists
+		// Error says the project's store or its counts could not be read:
+		// its stats are zero, not a measurement, so a sum over the rows
+		// is incomplete (the console's coverage says so).
+		Error string `json:"error,omitempty"`
 	}
 	cutoffs := make([]string, len(reviewWindows))
 	now := time.Now().UTC()
@@ -536,10 +542,16 @@ func (s *Server) overview(w http.ResponseWriter, r *http.Request) {
 	for _, id := range ids {
 		db, err := s.reg.Open(id)
 		if err != nil {
+			s.log.Warn("overview: project store cannot be opened", "project", id, "err", err)
+			out = append(out, row{ID: id, Stats: store.ProjectStats{}, Error: err.Error()})
 			continue
 		}
 		rw := row{ID: id}
-		rw.Stats, _ = db.Stats(s.embedder().Key())
+		st, err := db.Stats(s.embedder().Key())
+		rw.Stats = st
+		if err != nil {
+			rw.Error = err.Error()
+		}
 		if counts, err := db.ReviewCounts(cutoffs, -1); err == nil {
 			rw.Review = map[string]int{}
 			for i, d := range reviewWindows {

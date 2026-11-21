@@ -150,7 +150,8 @@ func TestEmbedDropRefusesTheKeysInUse(t *testing.T) {
 	db, _ := reg.Open("proj-ec")
 	h := serviceRig(t, reg, "old-embed")
 	old := func(b []byte) (int, []byte, error) { return 404, []byte("404 page not found\n"), nil }
-	down := func(b []byte) (int, []byte, error) { return 0, nil, errors.New("dial: refused") }
+	down := func(b []byte) (int, []byte, error) { return 0, nil, errDropNotSent{errors.New("dial: refused")} }
+	lost := func(b []byte) (int, []byte, error) { return 0, nil, errors.New("timeout awaiting response headers") }
 	for name, tc := range map[string]struct {
 		own  string
 		send func([]byte) (int, []byte, error)
@@ -159,7 +160,8 @@ func TestEmbedDropRefusesTheKeysInUse(t *testing.T) {
 		"own key":             {"old-embed", via(h), "is the current embedding key here"},
 		"service key":         {"new-embed", via(h), "is the key the running service queries with"},
 		"older service":       {"new-embed", old, "has no embeddings drop (a release before this one)"},
-		"service unreachable": {"new-embed", down, "could not be asked"},
+		"service unreachable": {"new-embed", down, "refused: the running service could not be reached"},
+		"answer lost":         {"new-embed", lost, "outcome unknown: the drop was sent but its answer was lost"},
 	} {
 		t.Run(name, func(t *testing.T) {
 			err := embedDrop([]string{"proj-ec"}, false, "old-embed", false, tc.own, tc.send)
@@ -170,6 +172,12 @@ func TestEmbedDropRefusesTheKeysInUse(t *testing.T) {
 				t.Fatalf("a refused drop removed vectors: %d left", s.Embedded)
 			}
 		})
+	}
+	// Spaces around the key do not get past this command's own refusal
+	// (the service trims the key it is sent).
+	if err := embedDrop([]string{"proj-ec"}, false, " old-embed ", false, "old-embed", via(h)); err == nil ||
+		!strings.Contains(err.Error(), "is the current embedding key here") {
+		t.Fatalf("a padded own key: %v", err)
 	}
 	// The service moves to new-embed; old-embed may go now.
 	if w := doReq(h, "PUT", "/v1/config/models", `{"curate_model":"c","embed_model":"new-embed"}`); w.Code != 200 {
