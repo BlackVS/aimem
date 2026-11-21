@@ -2418,6 +2418,11 @@ func embedDrop(projects []string, all bool, key string, dry bool, own string,
 		} `json:"projects"`
 	}
 	if jerr := json.Unmarshal(raw, &out); jerr != nil {
+		// A 200 the command cannot read (cut at the read limit, say) is
+		// a drop that ran: its per-project account is what was lost.
+		if status == http.StatusOK {
+			return fmt.Errorf("outcome unknown: the service answered 200 but its answer could not be read (%v); check with `aimem embed --keys --all`", jerr)
+		}
 		if status == http.StatusNotFound || status == http.StatusMethodNotAllowed {
 			return errors.New("refused: the running service has no embeddings drop (a release before this one); restart it on this release first")
 		}

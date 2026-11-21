@@ -152,6 +152,10 @@ func TestEmbedDropRefusesTheKeysInUse(t *testing.T) {
 	old := func(b []byte) (int, []byte, error) { return 404, []byte("404 page not found\n"), nil }
 	down := func(b []byte) (int, []byte, error) { return 0, nil, errDropNotSent{errors.New("dial: refused")} }
 	lost := func(b []byte) (int, []byte, error) { return 0, nil, errors.New("timeout awaiting response headers") }
+	// A 200 cut at the read limit: valid JSON up to the cut.
+	cut := func(b []byte) (int, []byte, error) {
+		return 200, []byte(`{"complete":true,"projects":[{"project":"p1","rows":3,"bytes":24},{"proj`), nil
+	}
 	for name, tc := range map[string]struct {
 		own  string
 		send func([]byte) (int, []byte, error)
@@ -162,6 +166,7 @@ func TestEmbedDropRefusesTheKeysInUse(t *testing.T) {
 		"older service":       {"new-embed", old, "has no embeddings drop (a release before this one)"},
 		"service unreachable": {"new-embed", down, "refused: the running service could not be reached"},
 		"answer lost":         {"new-embed", lost, "outcome unknown: the drop was sent but its answer was lost"},
+		"answer cut short":    {"new-embed", cut, "outcome unknown: the service answered 200 but its answer could not be read"},
 	} {
 		t.Run(name, func(t *testing.T) {
 			err := embedDrop([]string{"proj-ec"}, false, "old-embed", false, tc.own, tc.send)

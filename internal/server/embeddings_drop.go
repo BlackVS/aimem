@@ -166,7 +166,12 @@ func (s *Server) envFileEmbedKey() (model, key string, err error) {
 		// The timer resolves the key with the file's dimension, not with
 		// whatever this process was started with.
 		if v, ok := parseEnvValue(line, "AIMEM_EMBED_DIM"); ok {
-			dim, _ = strconv.Atoi(v)
+			if v == "" {
+				dim = 0
+			} else if dim, err = strconv.Atoi(v); err != nil {
+				// A value this cannot read leaves the file's key unknown.
+				return model, "", fmt.Errorf("AIMEM_EMBED_DIM=%q in the env file is not a number", v)
+			}
 		}
 	}
 	return model, embed.ForModelDim(s.reg.Root(), model, dim).Key(), nil

@@ -178,7 +178,9 @@ func parseEnvValue(line, key string) (string, bool) {
 	if !ok {
 		return "", false
 	}
-	return strings.Trim(rest, `"`), true
+	// Quotes as the CLI's env loader and systemd's EnvironmentFile read
+	// them: either kind, so the service and the timer see one value.
+	return strings.Trim(rest, `"'`), true
 }
 
 // getModels reads the model keys from the env file; an empty text check

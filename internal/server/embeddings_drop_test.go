@@ -220,6 +220,20 @@ func TestEmbeddingsDropResolvesTheFileKeyWithTheFileDimension(t *testing.T) {
 	if w.Code != 409 || !strings.Contains(w.Body.String(), "the env file names") || rowsOf(t, s.reg, "p1", "old-embed@256") != 1 {
 		t.Fatalf("drop of the file's M@256 while the service queries M: %d %s", w.Code, w.Body)
 	}
+	// A single-quoted value is the same setting (the CLI's loader and
+	// systemd read it so); a value that is not a number is a refusal.
+	for _, line := range []string{"AIMEM_EMBED_DIM='256'", "AIMEM_EMBED_DIM=\"256\""} {
+		os.WriteFile(envFile, []byte("AIMEM_CURATE_MODEL=c\nAIMEM_EMBED_MODEL=old-embed\n"+line+"\n"), 0o600)
+		w := req(t, h, "POST", "/v1/config/embeddings/drop", `{"key":"old-embed@256"}`)
+		if w.Code != 409 || !strings.Contains(w.Body.String(), "is the key the env file names") || rowsOf(t, s.reg, "p1", "old-embed@256") != 1 {
+			t.Fatalf("%s: drop of the file's key: %d %s", line, w.Code, w.Body)
+		}
+	}
+	os.WriteFile(envFile, []byte("AIMEM_CURATE_MODEL=c\nAIMEM_EMBED_MODEL=old-embed\nAIMEM_EMBED_DIM=wide\n"), 0o600)
+	if w := req(t, h, "POST", "/v1/config/embeddings/drop", `{"key":"old-embed@256"}`); w.Code != 409 || !strings.Contains(w.Body.String(), "is not a number") {
+		t.Fatalf("an unreadable dimension: %d %s", w.Code, w.Body)
+	}
+	os.WriteFile(envFile, []byte("AIMEM_CURATE_MODEL=c\nAIMEM_EMBED_MODEL=old-embed\nAIMEM_EMBED_DIM=256\n"), 0o600)
 	// The service moves to M@256 too (as a restart under the file would).
 	t.Setenv("AIMEM_EMBED_DIM", "256")
 	s.setEmbedModel("old-embed")

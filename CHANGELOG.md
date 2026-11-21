@@ -58,8 +58,9 @@ currently 26); a binary refuses a database newer than it understands.
   - **A dimension mismatch is refused.** A vector of another length than
     the stored vectors of its key is refused by every writer (checked in
     the writing transaction); a key that already holds vectors of two
-    lengths is refused with "rebuild the key", and the manual's rebuild
-    stops the hub's timer first. Recall logs the rows a query vector of
+    lengths is refused with "rebuild the key" (curation then keeps its
+    new facts as text there), and the manual's rebuild stops the hub's
+    timer first. Recall logs the rows a query vector of
     another length could not score. The console's coverage says
     "unavailable" when a project's store cannot be read, which the
     overview now lists with an `error`. The embedding key stays the model's name: a provider

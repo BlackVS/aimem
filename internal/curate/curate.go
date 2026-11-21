@@ -320,6 +320,10 @@ func Run(reg *store.Registry, root, projectID string, ex Extractor, opts RunOpts
 	// other target the write path reaches is decided where it is used,
 	// so no target can skip the dedup without a line in the report.
 	ready := map[string]bool{}
+	// dimRefused marks targets whose key holds vectors of another length,
+	// or of several: their facts are kept as text, and no proposal vector
+	// is added to a key that must be rebuilt.
+	dimRefused := map[string]bool{}
 	var refusal error
 	readyFor := func(tdb *store.DB) bool {
 		id := tdb.ProjectID()
@@ -340,9 +344,12 @@ func Run(reg *store.Registry, root, projectID string, ex Extractor, opts RunOpts
 		}
 		if berr != nil {
 			why = "backfill under " + opts.EmbedModel + " incomplete: " + berr.Error()
+			dimRefused[id] = errors.Is(berr, store.ErrEmbedDim)
 		} else if have, derr := tdb.EmbedDim(opts.EmbedModel); derr != nil {
 			why = derr.Error()
+			dimRefused[id] = errors.Is(derr, store.ErrEmbedDim)
 		} else if have != 0 && have != len(vecs[0]) {
+			dimRefused[id] = true
 			why = fmt.Sprintf("%v: key %q holds %d-dimensional vectors, the proposals have %d", store.ErrEmbedDim, opts.EmbedModel, have, len(vecs[0]))
 		}
 		ready[id] = why == ""
@@ -423,7 +430,7 @@ func Run(reg *store.Registry, root, projectID string, ex Extractor, opts RunOpts
 		id, reasserted, err := target.Remember(text, "curator", store.RememberOpts{
 			Kind: kind, Tags: tags, Sources: sources,
 		})
-		if err == nil && !reasserted && vecs != nil {
+		if err == nil && !reasserted && vecs != nil && !dimRefused[target.ProjectID()] {
 			_ = target.SetEmbedding(id, opts.EmbedModel, len(vecs[i]), embed.Encode(vecs[i]))
 		}
 		return reasserted, err

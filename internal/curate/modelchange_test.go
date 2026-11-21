@@ -238,17 +238,21 @@ func TestCurateNamesATargetWhoseKeyHoldsTwoLengths(t *testing.T) {
 	db, _ := reg.Open("proj-mx")
 	a, _, _ := db.Remember("sqlite is the chosen journal storage engine", "curator", store.RememberOpts{})
 	b, _, _ := db.Remember("the hub runs as a user service", "curator", store.RememberOpts{})
-	if err := db.SetEmbedding(a, "new-embed", 2, embed.Encode([]float32{1, 0})); err != nil {
-		t.Fatal(err)
-	}
+	// The 3-long row first, the 2-long one newest: the per-batch check
+	// reads the newest row only and would let a 2-long vector through.
 	raw, err := sql.Open("sqlite", filepath.Join(root, "projects", "proj-mx", "journal.db"))
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer raw.Close()
-	if _, err := raw.Exec(`INSERT INTO memory_embeddings(memory_id, model, dim, vec) VALUES(?,?,?,?)`,
-		b, "new-embed", 3, embed.Encode([]float32{0, 1, 0})); err != nil {
-		t.Fatal(err)
+	for _, r := range []struct {
+		id  string
+		vec []float32
+	}{{a, []float32{1, 0, 0}}, {b, []float32{0, 1}}} {
+		if _, err := raw.Exec(`INSERT INTO memory_embeddings(memory_id, model, dim, vec) VALUES(?,?,?,?)`,
+			r.id, "new-embed", len(r.vec), embed.Encode(r.vec)); err != nil {
+			t.Fatal(err)
+		}
 	}
 	if _, _, err := Backfill(reg, db, &fakeEmbedder{}, "new-embed", "new-embed", 64); !errors.Is(err, store.ErrEmbedDim) {
 		t.Fatalf("backfill of a key of two lengths: %v", err)
@@ -263,5 +267,22 @@ func TestCurateNamesATargetWhoseKeyHoldsTwoLengths(t *testing.T) {
 	}
 	if !named {
 		t.Fatalf("dedup skipped %v; want proj-mx named with the rebuild reason", rep.DedupSkipped)
+	}
+	// The proposal is kept as text, and the key that must be rebuilt
+	// gets no vector of it.
+	live, _ := db.Memories(false)
+	kept := false
+	for _, m := range live {
+		kept = kept || m.Text == "team decided to use sqlite for journals"
+	}
+	ks, _ := db.EmbedKeys()
+	rows := 0
+	for _, k := range ks {
+		if k.Model == "new-embed" {
+			rows += k.Rows
+		}
+	}
+	if !kept || rows != 2 {
+		t.Fatalf("after the run: proposal kept %v, rows under the mixed key %d (want true, 2): %+v", kept, rows, ks)
 	}
 }

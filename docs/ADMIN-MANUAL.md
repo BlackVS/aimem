@@ -921,7 +921,9 @@ which makes the key `<model>@<dim>`, or rebuild the key:
 #    under the emptied key afterwards. As the service user on the hub:
 systemctl --user stop aimem-curate.timer
 systemctl --user is-active aimem-curate.service
-#    Repeat the last line until it no longer says "active". Do not start
+#    Repeat the last line until it prints "inactive" or "failed".
+#    "activating" means a curation pass is still running (the unit is
+#    a oneshot): never proceed on it. Do not start
 #    `aimem embed`, `aimem curate` or `aimem sync` (which embeds what
 #    it pulls) meanwhile.
 # 1. Turn embeddings off: the console's setup tab, embed model "(off)",
