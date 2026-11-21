@@ -361,7 +361,7 @@ func TestStatsCountsDocsAndRecords(t *testing.T) {
 	if _, err := db.PutRecord("api", "a/b", []byte(`{}`), "t", 0, false); err != nil {
 		t.Fatal(err)
 	}
-	s, err := db.Stats()
+	s, err := db.Stats("")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -373,7 +373,7 @@ func TestStatsCountsDocsAndRecords(t *testing.T) {
 		t.Fatalf("docs=%d records=%d, want 2/1 (tombstoned doc counted)", s.Docs, s.Records)
 	}
 	empty, _ := r.Open("proj-b")
-	es, _ := empty.Stats()
+	es, _ := empty.Stats("")
 	if es.Docs != 0 || es.Records != 0 {
 		t.Fatalf("empty project reports docs=%d records=%d", es.Docs, es.Records)
 	}

@@ -119,10 +119,18 @@ type Report struct {
 	Deduped     int            `json:"deduped,omitempty"`    // divergent proposals folded onto a PINNED existing memory
 	Superseded  int            `json:"superseded,omitempty"` // near-identical existing facts replaced by an updated wording
 	Conflicts   []ConflictPair `json:"conflicts,omitempty"`
-	EmbedTokens int64          `json:"embed_tokens,omitempty"` // dedup embedding spend (embed model)
-	DryRun      bool           `json:"dry_run"`
-	Usage       Usage          `json:"usage"`
-	NewCursor   string         `json:"new_cursor,omitempty"`
+	EmbedTokens int64          `json:"embed_tokens,omitempty"` // dedup embedding spend (embed model), the backfill included
+	// Backfilled counts the vectors this run added under the current key
+	// before its dedup, for facts that had none (after a change of the
+	// embedding model, or facts written since the last backfill).
+	Backfilled int `json:"backfilled,omitempty"`
+	// DedupSkipped names each target whose space could not be completed,
+	// with the reason: its proposals were written without the semantic
+	// dedup in this run.
+	DedupSkipped []string `json:"dedup_skipped,omitempty"`
+	DryRun       bool     `json:"dry_run"`
+	Usage        Usage    `json:"usage"`
+	NewCursor    string   `json:"new_cursor,omitempty"`
 	// The consumed journal window, recorded so a zero-yield run (events
 	// consumed, nothing landed — possibly a guardrail's clean []) stays
 	// auditable and re-curable.
@@ -290,12 +298,61 @@ func Run(reg *store.Registry, root, projectID string, ex Extractor, opts RunOpts
 			vecs = v
 		}
 	}
+	// The dedup compares against the target's vectors under the current
+	// key, so it is only sound when every live fact there has one. After
+	// a change of the embedding model none do: a dedup then admits every
+	// rephrased twin. So each target the proposals can reach is
+	// backfilled first; a target that cannot be completed (an outage, the
+	// budget, a different dimension under the same key) gets no dedup in
+	// this run, and the report names it.
+	ready := map[string]bool{}
+	if vecs != nil {
+		ids := []string{projectID}
+		for _, p := range proposals {
+			switch {
+			case p.Scope == "user":
+				ids = append(ids, store.UserScopeProject)
+			case strings.HasPrefix(p.Scope, "group:"):
+				if gid, gerr := ident.GroupProject(strings.TrimPrefix(p.Scope, "group:")); gerr == nil && slices.Contains(groupIDs, gid) {
+					ids = append(ids, gid)
+				}
+			}
+		}
+		for _, m := range mirrors {
+			ids = append(ids, m.db.ProjectID())
+		}
+		slices.Sort(ids)
+		for _, id := range slices.Compact(ids) {
+			why := ""
+			if tdb, oerr := reg.Open(id); oerr != nil {
+				why = oerr.Error()
+			} else {
+				n, used, berr := Backfill(reg, tdb, opts.Embedder, opts.EmbedModel, 64)
+				rep.EmbedTokens += used
+				rep.Backfilled += n
+				if _, refused := llmrate.AsRefusal(berr); refused {
+					return nil, berr
+				}
+				if berr != nil {
+					why = "backfill under " + opts.EmbedModel + " incomplete: " + berr.Error()
+				} else if have, derr := tdb.EmbedDim(opts.EmbedModel); derr != nil {
+					why = derr.Error()
+				} else if have != 0 && have != len(vecs[0]) {
+					why = fmt.Sprintf("%v: key %q holds %d-dimensional vectors, the proposals have %d", store.ErrEmbedDim, opts.EmbedModel, have, len(vecs[0]))
+				}
+			}
+			ready[id] = why == ""
+			if why != "" {
+				rep.DedupSkipped = append(rep.DedupSkipped, id+": "+why)
+			}
+		}
+	}
 	// remember writes one fact with dedup: at DedupSim or above to an
 	// existing memory, reassert THAT memory (confidence boost, tag/source
 	// merge — including retroactive chapter filing) instead of inserting
 	// a rephrased twin; fresh inserts store their vector right away.
 	remember := func(target *store.DB, i int, text, kind string, tags, sources []string) (reasserted bool, err error) {
-		if vecs != nil {
+		if vecs != nil && ready[target.ProjectID()] {
 			nid, ntext, sim, nerr := target.Nearest(opts.EmbedModel, vecs[i])
 			// Same neighborhood, DIFFERENT words: either a rephrasing or an
 			// update of the same fact — cosine cannot tell them apart. The

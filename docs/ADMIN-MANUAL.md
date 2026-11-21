@@ -811,6 +811,91 @@ manual step remains.
 Embed spend is metered into the run history and budget-gated.
 Unset env = BM25-only recall — everything still works.
 
+### Changing the embedding model
+
+You can change the embedding model, or the provider that serves it, at
+any time. The facts are kept as text, and a vector is a derived row
+stored under its *embedding key*: the model's upstream name, or
+`<model>@<dim>` when `AIMEM_EMBED_DIM` is set. Recall, curation's
+dedup and `aimem dedup` read only the vectors of the current key, so
+two models' spaces never mix. A change loses nothing: the old key's
+vectors stay until you remove them, and the new key is filled from the
+texts.
+
+**The order without a dip.** Fill the new key first, then switch:
+
+```sh
+# 1. On the hub host, as the service user: embed every live fact under
+#    the new model. The model named on the command line wins over the
+#    env file for this one command; the service and the timer go on
+#    with the old model meanwhile.
+AIMEM_EMBED_MODEL="<new model>" aimem embed --all
+# 2. Switch: the console's setup tab (save models), or
+#    PUT /v1/config/models. The running service embeds queries with
+#    the new model from that moment; no restart.
+# 3. Fill what the timer curated between step 1 and step 2 (a few
+#    facts, written under the old key only):
+aimem embed --all
+```
+
+On a Windows hub, step 1 is
+`$env:AIMEM_EMBED_MODEL = "<new model>"; aimem embed --all` in a new
+PowerShell window. The save changes the model only, not
+`AIMEM_EMBED_DIM`. When the new model needs another dimension setting,
+name it the same way for step 1 (`AIMEM_EMBED_DIM=<n>`, or `0` for the
+model's own size), then set both lines in the env file and restart the
+service in place of step 2.
+
+**Switching first.** If you save the new model before filling its key,
+nothing is lost, but for a while the semantic leg of recall sees only
+the facts already embedded under the new key. Recall still finds every
+fact by its words (BM25). The save's answer says how many projects
+still lack vectors. The hourly timer fills them: each curation run
+first embeds the facts of every project it writes to, before its
+dedup, so it never admits a rephrased twin against a half-filled
+space. A project it cannot complete in that run (an outage, the
+budget, a different dimension under the key) is written without the
+dedup, and the run report names it in `dedup_skipped`. Run
+`aimem embed --all` yourself to finish at once.
+
+**Seeing the coverage.** The console's setup tab shows the key the
+service queries with and how many live facts have a vector under it,
+naming the projects that miss some. The TUI's embed column counts the
+same key, named on its AI line. `aimem health` reports the service's
+key as `embed_model` ("" when semantic recall is off). `aimem embed
+--keys --all` lists every key stored, with its vectors and size.
+
+**Rolling back.** Save the old model again. Its vectors are still there,
+so recall uses them at once; run `aimem embed --all` for the facts
+written since the change.
+
+**Removing the old vectors**, once you no longer want the rollback:
+
+```sh
+aimem embed --drop "<old key>" --all --dry-run   # what would go: vectors and bytes
+aimem embed --drop "<old key>" --all
+```
+
+Nothing is removed automatically. `--drop` refuses the key this
+command's configuration resolves to and the key the running service
+queries with, which it asks the service for. When the two differ, both
+are kept and the command says so. When the service cannot be asked, or
+is an older release that does not report its key, the command refuses:
+the key in use cannot be known. The database files shrink at the next
+`VACUUM`.
+
+**The same name through another provider.** The key is the model's
+name, not its provider, so moving a model between a proxy and its
+upstream keeps its vectors, as alias bindings of one model intend.
+Only do that when the new provider serves the same model under that
+name: if it serves a different model, its vectors would sit in the old
+model's space and nothing could tell them apart. Change the name
+instead (bind it under a new local name, or set `AIMEM_EMBED_DIM`).
+One case is caught: a vector of another dimension than the stored
+vectors of its key is refused by every writer (`aimem embed` stops
+with the reason, and curation skips its dedup and names the project),
+and recall then ranks by keywords alone and logs the mismatch.
+
 ### Enabling tasks for a project
 
 For the complete enablement, user/grant/token and agent setup sequence,
@@ -1296,7 +1381,7 @@ request.
 | Duplicate journal events | hooks registered at both user and project level — remove project-level ones |
 | Curation produces nothing | hub → LiteLLM route (HTTP 200 from the hub?); key valid; cursor already past events |
 | `... command not found` sourcing env | unquoted value with spaces in `~/.config/aimem/env` |
-| Recall misses obvious semantic matches | embeddings backfilled for that DB? server restarted after env change? |
+| Recall misses obvious semantic matches | embeddings backfilled under the current key (console setup tab, `aimem embed --all`)? the env file changed by hand without a restart or a save in the console? |
 | A dropped project keeps reappearing on a hub | Some machine still holds a LOCAL database for that id. Memory sync is filtered by hub binding, so every sync re-pushes it and re-creates the project. Fix it at the source, in this order: drop it on BOTH hubs first, then `aimem drop-project -p <id> --yes` on the machine, then sync. Dropping locally while a hub still has it just lets the next pull restore it. |
 | ...and it reappears on the *other* hub than you expected | The local copy's binding decides the destination: `meta hub=<name>` sends it there, while an UNBOUND copy goes to that machine's default hub. Two stale copies with different bindings resurrect on two different hubs. Check with `aimem meta -p <id> hub`. |
 | Binary update doesn't take effect | service restart required; copy over a running binary via `cp new .new && mv` (text-busy) |

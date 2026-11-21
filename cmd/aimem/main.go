@@ -249,6 +249,10 @@ const mainUsage = `usage: aimem <command> [flags]
                              recall gains a semantic leg (BM25 + cosine,
                              RRF-merged); needs AIMEM_EMBED_MODEL +
                              AIMEM_OPENAI_API_KEY
+  embed --keys [-p|--all]    list the embedding keys stored, with their size
+  embed --drop KEY [-p|--all] [--dry-run]
+                             remove one old key's vectors (never the key in
+                             use; see "Changing the embedding model")
   project-id [dir]           compute stable project identity for a directory
   wire [DIR] [--project ID] [--hub NAME] [--groups a,b] [--check]
                              wire DIR (default .) as a project: handoff,
@@ -2276,18 +2280,18 @@ func curateCmd(args []string) error {
 }
 
 // embedCmd backfills memory embeddings — the async, egress-gated half of
-// semantic recall (the query is embedded at recall time by the server).
+// semantic recall (the query is embedded at recall time by the server) —
+// or, with --drop, removes the vectors of one key no longer in use.
 func embedCmd(args []string) error {
 	fs := flag.NewFlagSet("embed", flag.ExitOnError)
 	p := projectFlag(fs, "project id (default: current directory's project)")
 	all := fs.Bool("all", false, "embed every project, including user/group memory DBs")
 	batch := fs.Int("batch", 64, "texts per embeddings request")
+	drop := fs.String("drop", "", "remove every vector stored under this embedding key (never the current one)")
+	keys := fs.Bool("keys", false, "list the embedding keys stored, with their rows and size")
+	dry := fs.Bool("dry-run", false, "with --drop: print what would be removed and remove nothing")
 	fs.Parse(args)
 	root := stateRoot()
-	c := embed.ForRoot(root)
-	if c == nil {
-		return fmt.Errorf("embedding not configured: %s", embed.Why(root))
-	}
 	reg, err := store.NewRegistry(root)
 	if err != nil {
 		return err
@@ -2308,7 +2312,115 @@ func embedCmd(args []string) error {
 		}
 		projects = []string{id}
 	}
+	if *keys {
+		return embedKeys(reg, projects)
+	}
+	if *drop != "" {
+		return embedDrop(reg, projects, *drop, *dry, embed.ForRoot(root).Key(), serviceEmbedKey)
+	}
+	if *dry {
+		return errors.New("--dry-run goes with --drop")
+	}
+	c := embed.ForRoot(root)
+	if c == nil {
+		return fmt.Errorf("embedding not configured: %s", embed.Why(root))
+	}
 	return embedProjects(reg, c, projects, *batch)
+}
+
+// embedKeys prints each embedding key stored in the projects.
+func embedKeys(reg *store.Registry, projects []string) error {
+	for _, proj := range projects {
+		db, err := reg.Open(proj)
+		if err != nil {
+			return err
+		}
+		ks, err := db.EmbedKeys()
+		if err != nil {
+			return err
+		}
+		for _, k := range ks {
+			fmt.Printf("%s: key %q: %d vectors, %d bytes\n", proj, k.Model, k.Rows, k.Bytes)
+		}
+	}
+	return nil
+}
+
+// serviceEmbedKey asks the running service which key it embeds queries
+// with. known is false when the service answers without saying (a
+// release before the field); err when it cannot be asked at all.
+func serviceEmbedKey() (key string, known bool, err error) {
+	resp, err := client().Get("http://aimem/v1/health")
+	if err != nil {
+		return "", false, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return "", false, fmt.Errorf("health: %s", resp.Status)
+	}
+	var h map[string]any
+	if err := json.NewDecoder(resp.Body).Decode(&h); err != nil {
+		return "", false, err
+	}
+	v, ok := h["embed_model"].(string)
+	return v, ok, nil
+}
+
+// embedDrop removes the vectors of one key. It refuses the key this
+// command's own configuration resolves to and the key the running
+// service queries with, which differ when the env file changed without
+// the service learning of it. A service that cannot be asked, or does
+// not say, is a refusal too: the key in use cannot be known.
+func embedDrop(reg *store.Registry, projects []string, key string, dry bool, own string,
+	service func() (string, bool, error)) error {
+	if key == own {
+		return fmt.Errorf("refused: %q is the current embedding key here (AIMEM_EMBED_MODEL); change the model first", key)
+	}
+	live, known, err := service()
+	switch {
+	case err != nil:
+		return fmt.Errorf("refused: the running service could not be asked which key it queries with (%v); start it, or check `aimem health`", err)
+	case !known:
+		return errors.New("refused: the running service does not report its embedding key (a release before this one); restart it on this release first")
+	case key == live:
+		return fmt.Errorf("refused: %q is the key the running service queries with", key)
+	}
+	if live != own {
+		fmt.Fprintf(os.Stderr, "aimem embed: note: the service queries with %q, this command's configuration resolves to %q; both are kept\n", live, own)
+	}
+	verb := "removed"
+	if dry {
+		verb = "would remove"
+	}
+	var rows int
+	var size int64
+	for _, proj := range projects {
+		db, err := reg.Open(proj)
+		if err != nil {
+			return err
+		}
+		var u store.EmbedKeyUsage
+		if dry {
+			ks, err := db.EmbedKeys()
+			if err != nil {
+				return err
+			}
+			for _, k := range ks {
+				if k.Model == key {
+					u = k
+				}
+			}
+		} else if u, err = db.DropEmbeddings(key); err != nil {
+			return err
+		}
+		if u.Rows > 0 {
+			fmt.Printf("%s: %s %d vectors of key %q, %d bytes\n", proj, verb, u.Rows, key, u.Bytes)
+		}
+		rows += u.Rows
+		size += u.Bytes
+	}
+	fmt.Printf("total: %s %d vectors of key %q, %d bytes (the database files shrink on the next VACUUM)\n", verb, rows, key, size)
+	return nil
 }
 
 // embedProjects backfills pending memory embeddings for the given
@@ -2322,50 +2434,15 @@ func embedProjects(reg *store.Registry, c *embed.Client, projects []string, batc
 		if err != nil {
 			return err
 		}
-		total, tokens := 0, int64(0)
-		for {
-			targets, err := db.NeedingEmbedding(c.Key(), batch)
-			if err != nil {
-				return err
-			}
-			if len(targets) == 0 {
-				break
-			}
-			// Budget gate: worst-case ~150 tokens per fact sentence. USD
-			// caps charge these at AIMEM_PRICE_IN (chat input price) —
-			// above real embedding prices, so never an undercount.
-			if budget, owned, err := curate.LoadBudget(reg, db); err != nil {
-				return err
-			} else if !budget.Empty() {
-				proj := curate.Projection{In: int64(len(targets)) * 150}
-				if pin, perr := strconv.ParseFloat(os.Getenv("AIMEM_PRICE_IN"), 64); perr == nil {
-					proj.USD, proj.Priced = float64(proj.In)/1e6*pin, true
-				}
-				if err := curate.CheckBudget(reg, db, budget, !owned, proj, time.Now()); err != nil {
-					return err
-				}
-			}
-			texts := make([]string, len(targets))
-			for i, t := range targets {
-				texts[i] = t.Text
-			}
-			vecs, used, err := c.Embed(texts)
-			tokens += used
-			if err != nil {
-				return fmt.Errorf("embed %s: %w", proj, err)
-			}
-			for i, t := range targets {
-				if err := db.SetEmbedding(t.ID, c.Key(), len(vecs[i]), embed.Encode(vecs[i])); err != nil {
-					return err
-				}
-			}
-			total += len(targets)
-		}
+		total, tokens, err := curate.Backfill(reg, db, c, c.Key(), batch)
 		if total > 0 {
 			_ = db.AddCurateRun(&store.CurateRun{
 				TS: time.Now().UTC().Format(time.RFC3339), Host: host,
 				Model: c.Model, Written: total, InputTokens: tokens,
 			})
+		}
+		if err != nil {
+			return fmt.Errorf("embed %s: %w", proj, err)
 		}
 		fmt.Printf("%s: %d embedded (model %q)\n", proj, total, c.Key())
 	}

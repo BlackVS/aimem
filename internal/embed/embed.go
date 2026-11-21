@@ -64,7 +64,11 @@ func ForRoot(root string) *Client {
 // is unset, or its endpoint cannot serve (provider.Lookup's reason).
 // "" when embeddings are on.
 func Why(root string) string {
-	model := os.Getenv("AIMEM_EMBED_MODEL")
+	return WhyModel(root, os.Getenv("AIMEM_EMBED_MODEL"))
+}
+
+// WhyModel is Why for a named model instead of the environment's.
+func WhyModel(root, model string) string {
 	if model == "" {
 		return "AIMEM_EMBED_MODEL is unset"
 	}

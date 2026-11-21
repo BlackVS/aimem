@@ -244,6 +244,8 @@
         <select id="mCurate" class="grow"></select></div>
       <div class="row"><span class="dim" style="width:110px">embed model</span>
         <select id="mEmbed" class="grow"></select></div>
+      <div class="row"><span style="width:110px"></span>
+        <span id="mEmbState" class="dim"></span></div>
       <div class="row"><span class="dim" style="width:110px">text check model</span>
         <select id="mText" class="grow"></select></div>
       <div class="row"><span class="dim" style="width:110px">text check cap</span>
@@ -282,7 +284,7 @@
       <div class="dim" style="font-size:12px;margin-top:6px">Unbound models fall back to the
         host env (AIMEM_OPENAI_*). Tokens stay on the hub — this page only ever sees a mask.
         “test” makes one minimal live call and shows the provider's answer. Curation picks
-        changes up on its next run; live recall embedding needs a service restart.</div>
+        changes up on its next run; a saved embed model serves live recall at once.</div>
     </div>
   </section>
   <section id="t-usage" hidden>
@@ -1227,6 +1229,9 @@ async function loadModels(){
     const m = await api("/v1/config/models");
     cur = m.curate_model||""; emb = m.embed_model||""; txt = m.text_check_model||"";
     $("mTextCap").value = m.text_check_daily_calls||"";
+    const ek = (m.embed||{}).key||"";
+    $("mEmbState").textContent = ek ? `running: ${ek}; ${embCoverage(ek)}`
+      : `running: off (${(m.embed||{}).why||"no model"})`;
     const tc = m.text_check||{};
     $("mTextState").textContent = tc.state==="on"
       ? `running: ${tc.model}, ${tc.calls_today}/${tc.daily_calls_cap} calls today`
@@ -1251,6 +1256,21 @@ async function loadModels(){
   $("mText").innerHTML = `<option value=""${txt?"":" selected"}>(off)</option>`+
     topts.map(o=>`<option${o===txt?" selected":""}>${esc(o)}</option>`).join("");
 }
+// embCoverage sums the overview's live facts with a vector under key.
+// Vectors of any other key are not coverage: the semantic leg reads
+// only the key recall queries with.
+function embCoverage(key){
+  if(!OV.length) return "coverage not loaded yet";
+  let have=0, all=0; const short=[];
+  for(const p of OV){
+    const st=p.stats||{};
+    if(st.embed_model!==key) continue;
+    have+=st.embedded||0; all+=st.memories||0;
+    if((st.embedded||0)<(st.memories||0)) short.push(p.id);
+  }
+  return `${have} of ${all} live facts have a vector under this key`+
+    (short.length?` (missing in ${short.slice(0,5).join(", ")}${short.length>5?" and "+(short.length-5)+" more":""}: run aimem embed --all)`:"");
+}
 async function saveModels(){
   try{
     const body = {curate_model:$("mCurate").value, embed_model:$("mEmbed").value,
@@ -1259,6 +1279,8 @@ async function saveModels(){
     const r = await api("/v1/config/models",{method:"PUT",body:JSON.stringify(body)});
     $("mNote").textContent = r.note||"saved";
     toast("models saved");
+    try{ const o = await api("/v1/overview"); OV = o.projects||[]; }catch(e){}
+    loadModels();
   }catch(e){ $("mNote").textContent = String(e); }
 }
 

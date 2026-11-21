@@ -592,12 +592,103 @@ ORDER BY m.id LIMIT ?`, model, limit)
 	return out, rows.Err()
 }
 
-// SetEmbedding stores (or replaces) one memory's vector for a model.
+// ErrEmbedDim is a vector whose length differs from the stored vectors
+// of its key: two spaces under one name, which cosine cannot compare.
+var ErrEmbedDim = errors.New("embedding dimension differs from the stored vectors of this key")
+
+// ProjectID is the project (or group, or user scope) this database holds.
+func (d *DB) ProjectID() string { return d.projectID }
+
+// EmbedDim is the vector length stored under model, 0 when the key has
+// no vectors here.
+func (d *DB) EmbedDim(model string) (int, error) {
+	if v, ok := d.embedDims.Load(model); ok {
+		return v.(int), nil
+	}
+	var dim int
+	err := d.sql.QueryRow(`SELECT dim FROM memory_embeddings WHERE model = ? LIMIT 1`, model).Scan(&dim)
+	if errors.Is(err, sql.ErrNoRows) {
+		return 0, nil
+	}
+	if err != nil {
+		return 0, err
+	}
+	d.embedDims.Store(model, dim)
+	return dim, nil
+}
+
+// SetEmbedding stores (or replaces) one memory's vector for a model. It
+// refuses, with ErrEmbedDim, a vector whose length differs from the
+// key's stored vectors: every writer goes through here.
 func (d *DB) SetEmbedding(memoryID, model string, dim int, vec []byte) error {
-	_, err := d.sql.Exec(`INSERT INTO memory_embeddings(memory_id, model, dim, vec)
+	have, err := d.EmbedDim(model)
+	if err != nil {
+		return err
+	}
+	if have != 0 && have != dim {
+		return fmt.Errorf("%w: key %q holds %d-dimensional vectors here, this one has %d; a different model answers under that name (see \"Changing the embedding model\" in docs/ADMIN-MANUAL.md)",
+			ErrEmbedDim, model, have, dim)
+	}
+	if _, err := d.sql.Exec(`INSERT INTO memory_embeddings(memory_id, model, dim, vec)
 VALUES(?,?,?,?) ON CONFLICT(memory_id, model) DO UPDATE SET dim=excluded.dim, vec=excluded.vec`,
-		memoryID, model, dim, vec)
-	return err
+		memoryID, model, dim, vec); err != nil {
+		return err
+	}
+	if have == 0 {
+		d.embedDims.Store(model, dim)
+	}
+	return nil
+}
+
+// EmbedKeyUsage is what one embedding key holds in this database.
+type EmbedKeyUsage struct {
+	Model string `json:"model"`
+	Rows  int    `json:"rows"`
+	Bytes int64  `json:"bytes"`
+}
+
+// EmbedKeys lists every embedding key stored here with its rows and the
+// size of their vectors.
+func (d *DB) EmbedKeys() ([]EmbedKeyUsage, error) {
+	rows, err := d.sql.Query(`SELECT model, COUNT(*), COALESCE(SUM(LENGTH(vec)),0)
+FROM memory_embeddings GROUP BY model ORDER BY model`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []EmbedKeyUsage
+	for rows.Next() {
+		var u EmbedKeyUsage
+		if err := rows.Scan(&u.Model, &u.Rows, &u.Bytes); err != nil {
+			return nil, err
+		}
+		out = append(out, u)
+	}
+	return out, rows.Err()
+}
+
+// DropEmbeddings deletes every vector stored under model and returns
+// what it removed. The caller decides which key may go; the texts stay,
+// so a later backfill under that key rebuilds it exactly.
+func (d *DB) DropEmbeddings(model string) (EmbedKeyUsage, error) {
+	u := EmbedKeyUsage{Model: model}
+	tx, err := d.sql.Begin()
+	if err != nil {
+		return u, err
+	}
+	defer tx.Rollback()
+	if err := tx.QueryRow(`SELECT COUNT(*), COALESCE(SUM(LENGTH(vec)),0) FROM memory_embeddings WHERE model = ?`,
+		model).Scan(&u.Rows, &u.Bytes); err != nil {
+		return u, err
+	}
+	if _, err := tx.Exec(`DELETE FROM memory_embeddings WHERE model = ?`, model); err != nil {
+		return u, err
+	}
+	if err := tx.Commit(); err != nil {
+		return u, err
+	}
+	d.embedDims.Delete(model)
+	return u, nil
 }
 
 // Recall searches active memories and returns results trimmed to a token

@@ -6,6 +6,7 @@ package server
 // API with it, so serving the page unauthenticated leaks nothing.
 
 import (
+	"aimem/internal/embed"
 	"aimem/internal/process"
 	"aimem/internal/store"
 	"aimem/internal/textcheck"
@@ -185,7 +186,8 @@ func parseEnvValue(line, key string) (string, bool) {
 // resolved at start.
 func (s *Server) getModels(w http.ResponseWriter, _ *http.Request) {
 	out := map[string]any{"curate_model": "", "embed_model": "", "text_check_model": "",
-		"text_check_daily_calls": "", "text_check": textcheck.Describe(s.textCheck, s.textCheckWhy)}
+		"text_check_daily_calls": "", "text_check": textcheck.Describe(s.textCheck, s.textCheckWhy),
+		"embed": s.embedState()}
 	if raw, err := os.ReadFile(envFilePath()); err == nil {
 		for line := range strings.SplitSeq(string(raw), "\n") {
 			for k, field := range map[string]string{"AIMEM_CURATE_MODEL": "curate_model", "AIMEM_EMBED_MODEL": "embed_model",
@@ -197,6 +199,37 @@ func (s *Server) getModels(w http.ResponseWriter, _ *http.Request) {
 		}
 	}
 	s.ok(w, out)
+}
+
+// embedState is what the running service embeds queries with: its key,
+// or "" with the reason semantic recall is off.
+func (s *Server) embedState() map[string]string {
+	if c := s.embedder(); c != nil {
+		return map[string]string{"key": c.Key()}
+	}
+	model := ""
+	if m := s.embModel.Load(); m != nil {
+		model = *m
+	}
+	return map[string]string{"key": "", "why": embed.WhyModel(s.reg.Root(), model)}
+}
+
+// projectsMissingVectors counts the projects with a live fact that has
+// no vector under key: one indexed probe per project.
+func (s *Server) projectsMissingVectors(key string) int {
+	ids, err := s.reg.Projects()
+	if err != nil {
+		return 0
+	}
+	n := 0
+	for _, id := range ids {
+		if db, err := s.reg.Open(id); err == nil {
+			if t, err := db.NeedingEmbedding(key, 1); err == nil && len(t) > 0 {
+				n++
+			}
+		}
+	}
+	return n
 }
 
 // putModels rewrites the model lines. The text check's two keys are
@@ -276,10 +309,29 @@ func (s *Server) putModels(w http.ResponseWriter, r *http.Request) {
 		s.fail(w, http.StatusInternalServerError, err)
 		return
 	}
-	s.log.Warn("admin models updated", "curate", want["AIMEM_CURATE_MODEL"], "embed", want["AIMEM_EMBED_MODEL"])
-	out := map[string]string{
+	// Live recall follows the written embed model at once: the timer's
+	// next run already writes vectors under the new key, and a service
+	// still querying with the old one would miss every fact written
+	// after the change. A model that cannot be served turns semantic
+	// recall off here, as a restart would.
+	prev := s.embedder().Key()
+	s.setEmbedModel(want["AIMEM_EMBED_MODEL"])
+	emb := s.embedState()
+	s.log.Warn("admin models updated", "curate", want["AIMEM_CURATE_MODEL"], "embed", want["AIMEM_EMBED_MODEL"],
+		"embed_key", emb["key"], "previous_embed_key", prev)
+	note := "the curate model takes effect on the next curation run; live recall now embeds queries with the embed model; restart aimem.service to apply the text check model to task writes"
+	if emb["key"] == "" {
+		note = "the curate model takes effect on the next curation run; semantic recall is OFF: " + emb["why"] + "; restart aimem.service to apply the text check model to task writes"
+	} else if emb["key"] != prev {
+		if n := s.projectsMissingVectors(emb["key"]); n > 0 {
+			note += fmt.Sprintf("; facts in %d project(s) have no vector under %s yet and are found by keyword only until `aimem embed --all` has run", n, emb["key"])
+		} else {
+			note += "; every live fact already has a vector under " + emb["key"]
+		}
+	}
+	out := map[string]any{
 		"curate_model": want["AIMEM_CURATE_MODEL"], "embed_model": want["AIMEM_EMBED_MODEL"],
-		"note": "takes effect on the next curation run; restart aimem.service to apply the embed model to live recall and the text check model to task writes",
+		"embed": emb, "note": note,
 	}
 	if v, set := want[textcheck.ModelKey]; set {
 		out["text_check_model"] = v
@@ -467,7 +519,7 @@ func (s *Server) overview(w http.ResponseWriter, r *http.Request) {
 			continue
 		}
 		rw := row{ID: id}
-		rw.Stats, _ = db.Stats()
+		rw.Stats, _ = db.Stats(s.embedder().Key())
 		if counts, err := db.ReviewCounts(cutoffs, -1); err == nil {
 			rw.Review = map[string]int{}
 			for i, d := range reviewWindows {
