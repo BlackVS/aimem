@@ -600,28 +600,36 @@ var ErrEmbedDim = errors.New("embedding dimension differs from the stored vector
 func (d *DB) ProjectID() string { return d.projectID }
 
 // EmbedDim is the vector length stored under model, 0 when the key has
-// no vectors here.
+// no vectors here. It reads the table every time: another process may
+// have dropped the key since (a long-running reader must not keep a
+// length that is gone).
 func (d *DB) EmbedDim(model string) (int, error) {
-	if v, ok := d.embedDims.Load(model); ok {
-		return v.(int), nil
-	}
 	var dim int
 	err := d.sql.QueryRow(`SELECT dim FROM memory_embeddings WHERE model = ? LIMIT 1`, model).Scan(&dim)
 	if errors.Is(err, sql.ErrNoRows) {
 		return 0, nil
 	}
-	if err != nil {
-		return 0, err
+	return dim, err
+}
+
+// writerEmbedDim is EmbedDim cached for this handle's writes, so a
+// backfill pays one scan per key, not one per row.
+func (d *DB) writerEmbedDim(model string) (int, error) {
+	if v, ok := d.embedDims.Load(model); ok {
+		return v.(int), nil
 	}
-	d.embedDims.Store(model, dim)
-	return dim, nil
+	dim, err := d.EmbedDim(model)
+	if err == nil && dim != 0 {
+		d.embedDims.Store(model, dim)
+	}
+	return dim, err
 }
 
 // SetEmbedding stores (or replaces) one memory's vector for a model. It
 // refuses, with ErrEmbedDim, a vector whose length differs from the
 // key's stored vectors: every writer goes through here.
 func (d *DB) SetEmbedding(memoryID, model string, dim int, vec []byte) error {
-	have, err := d.EmbedDim(model)
+	have, err := d.writerEmbedDim(model)
 	if err != nil {
 		return err
 	}

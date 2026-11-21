@@ -52,9 +52,9 @@ type DB struct {
 	projectID string
 	path      string
 	hints     *taskHints // the registry's; a create records its task here
-	// embedDims caches each embedding key's stored vector length
-	// (key -> int), so the dimension check on every vector write costs
-	// one scan per key and process, not one per row.
+	// embedDims caches each embedding key's stored vector length for
+	// SetEmbedding (key -> int), so the dimension check on every vector
+	// write costs one scan per key and handle, not one per row.
 	embedDims sync.Map
 }
 

@@ -83,3 +83,32 @@ func TestSetEmbeddingRefusesAnotherDimensionUnderOneKey(t *testing.T) {
 		t.Fatalf("keys = %+v", ks)
 	}
 }
+
+// A long-running reader (the service's recall) must see a key another
+// process dropped and refilled at another length, not a cached one.
+func TestEmbedDimReadsAKeyRefilledElsewhere(t *testing.T) {
+	r := newTestRegistry(t)
+	db, _ := r.Open("proj-a")
+	a, _, _ := db.Remember("first fact", "test", RememberOpts{Kind: "fact"})
+	if err := db.SetEmbedding(a, "m", 2, embed.Encode([]float32{1, 0})); err != nil {
+		t.Fatal(err)
+	}
+	if d, _ := db.EmbedDim("m"); d != 2 {
+		t.Fatalf("dim %d, want 2", d)
+	}
+	other, err := NewRegistry(r.Root())
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(other.Close)
+	odb, _ := other.Open("proj-a")
+	if _, err := odb.DropEmbeddings("m"); err != nil {
+		t.Fatal(err)
+	}
+	if err := odb.SetEmbedding(a, "m", 3, embed.Encode([]float32{1, 0, 0})); err != nil {
+		t.Fatal(err)
+	}
+	if d, _ := db.EmbedDim("m"); d != 3 {
+		t.Fatalf("the reader kept a dropped length: dim %d, want 3", d)
+	}
+}
