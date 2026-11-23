@@ -447,7 +447,13 @@ upgrade_txn() { # new-binary
 AIMEM_BIN="$HOME_DIR/.local/bin/aimem"
 TXN_MANAGED=1
 svc_stop() { sysuser stop aimem-curate.timer aimem-curate.service aimem.service 2>/dev/null || true; }
+# svc_reset: as install.sh's. A start the installer makes on purpose is
+# not refused for the restarts of a crash loop before it; the start limit
+# still bounds a loop after it. A unit not loaded yet makes it fail; that
+# is dropped.
+svc_reset() { sysuser reset-failed aimem.service 2>/dev/null || true; }
 svc_start() {
+  svc_reset
   sysuser restart aimem.service || true
   sysuser start aimem-curate.timer || true
 }
@@ -662,6 +668,7 @@ if [ -e "$AIMEM_BIN" ]; then
 else
   mv "$AIMEM_BIN.new" "$AIMEM_BIN"
   if [ -z "$NO_SERVICE" ]; then
+    svc_reset
     sysuser restart aimem.service   # restart, not start: a stale binary may be running
     sysuser start aimem-curate.timer
   fi

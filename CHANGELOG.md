@@ -13,6 +13,27 @@ currently 26); a binary refuses a database newer than it understands.
 
 ## [Unreleased]
 
+### Fixed
+
+- **An upgrade, or its rollback, is no longer refused by systemd after a
+  crash loop.** The Linux service units restart a failing serve every 2 s,
+  and systemd counts those restarts against its start limit (5 starts in
+  10 s). An upgrade's own start, or its rollback's, that came right after
+  such a loop was refused as "attempted too often": the upgrade then rolled
+  back for that alone, and with a short `AIMEM_UPGRADE_WAIT` the rollback's
+  start could be refused too, leaving the service down until the window
+  passed. `install.sh` and `install-hub.sh` now clear the unit's failed
+  state and start counter (`systemctl --user reset-failed`) before each
+  start they make on purpose; the limit still bounds a crash loop after
+  that start. Seen four times in CI's Linux client upgrade check, two of
+  them on the v0.12.1 release prepare.
+- **CI runs the upgrade checks on any pull request that changes the
+  installers or the upgrade checks,** not only on a release prepare:
+  `client-upgrade` on Linux and Windows and `hub-upgrade`, decided by
+  `scripts/upgrade-scope.sh`, whose log says why they run or are skipped.
+  The Linux client check now also starts from a unit at its start limit,
+  and prints the unit's state and journal when it fails.
+
 ### Data integrity
 
 - **A hook's whole run fits its client's timeout, and a long session no
