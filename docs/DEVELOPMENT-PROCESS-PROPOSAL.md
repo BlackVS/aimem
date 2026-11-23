@@ -146,18 +146,20 @@ template, one line per part:
 > confirmed delivery).
 
 A worked example, the check of aimem's goal "The goal-driven process lives
-in the product":
+in the product" (the architect's wording, until the owner confirms it):
 
 > 1. The architect session, on the workstation, through the MCP tools
 >    alone, moves an unfinished feature of the reached goal to this goal
 >    with a new mark and position, marks that goal as reached, and reads
 >    from one call which features have every confirmed task done and are
->    still open. No record is created a second time by hand.
+>    still open, and how many tasks of a goal no feature confirms. No record
+>    is created a second time by hand.
 > 2. A fresh standalone session, started on the workstation in a project
 >    it has not worked in, with that project's ordinary credential and the
 >    MCP tools alone, reads the process from aimem, names the task the
->    tiers give, and writes the course check; its numbers are numbers a
->    tool call returned.
+>    tiers give, and writes the course check. The distance, the picks by
+>    tier and the support count in that check are numbers that a tool call
+>    returned.
 > 3. The architect session counts the same numbers by hand from the board
 >    on the same day, and the two counts are equal.
 
@@ -309,10 +311,12 @@ be written. Which goal is current is the owner's choice at any time, not
 only at the moment a goal is reached: the owner may switch the current
 goal, and the picks follow the goal the owner names.
 
-**A reached goal is closed.** Its unfinished features move to the named
-next goal with new marks, since a mark belongs to a goal, or are dropped
-with a line in the goal's log. Nothing stays in a reached goal (the rule
-of 2026-11-17).
+**A reached goal is closed.** Each of its unfinished features either moves
+to the named next goal with a new mark, since a mark belongs to a goal, or
+is dropped: cancelled, with a line in the goal's log that says why. Its DONE
+and CANCELLED features stay with it as the record of what reached it.
+Nothing unfinished stays in a reached goal (the owner's rule of
+2026-11-17).
 
 ### 4.3 The budget for support work
 
@@ -326,9 +330,13 @@ line. A support task taken while a pull request waits for reviewers counts
 against it like any other.
 
 Until the board computes it, it is counted by hand: list the project's
-tasks that moved to DONE since Monday, sort each into path, next, support
-or urgent by the feature that confirms it (support when none does), and
-compare the support count with a third of path and next together.
+tasks that moved to DONE since Monday and sort each into path, next,
+support or urgent by the tier its use gives it, not by its label: a task
+that is on the way only through another task's dependency counts in that
+task's tier. Set apart the support tasks that a worker with nothing of an
+upper tier took. Then compare the remaining support count with a third of
+path and next together; urgent tasks and the picks set apart are not
+compared.
 
 **A worker with nothing of an upper tier to take** takes the oldest held
 support task, and that pick is outside the budget. The course check names
@@ -647,7 +655,7 @@ every worker, the larger part of that day stays as it was.
 
 History, kept short. The first version of
 [section 6](#6-the-first-version-what-is-done-by-hand) was tried by hand
-in four projects, for three to six working days each, with
+in four projects, for three to six days each, with
 a goal's log per project and the measures this section named: the picks by
 tier, the picks out of order, the urgent tasks, the minutes per course
 check, the waits on a person, the open support tasks and the changes to the
