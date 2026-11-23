@@ -9,7 +9,6 @@ package adapter
 
 import (
 	"bytes"
-	"context"
 	"crypto/tls"
 	"encoding/json"
 	"errors"
@@ -380,14 +379,31 @@ func (c *Client) pushHub(hubName string, body []byte) {
 		return
 	}
 	spool := c.hubSpoolPathFor(name)
-	if err := c.spoolTo(spool, body); err != nil {
-		// No queue to fall back on: one direct attempt, as before the
-		// spool came first.
-		if err := c.hubPost(hub, body); err != nil {
-			c.note("aimem: hub unreachable and its spool cannot be written, checkpoint not queued for hub (%v)", err)
+	sweepPending(spool)
+	// Durable before the hub is asked, in a file no other run writes: a run
+	// killed at any later step leaves the record here, and a later run
+	// moves it into the spool.
+	pend, perr := writePending(spool, body)
+	if perr != nil {
+		c.note("aimem: cannot keep the checkpoint for hub while it is sent (%v); it is sent directly", perr)
+	}
+	// The record goes from memory. A hub that does not answer costs this
+	// one request and one append below, whatever the backlog's size.
+	if err := c.hubTry(hub, body); err != nil {
+		if aerr := c.spoolTo(spool, body); aerr != nil {
+			if pend != "" {
+				c.note("aimem: hub spool %s cannot be written (%v); the checkpoint stays in %s for a later run", filepath.Base(spool), aerr, filepath.Base(pend))
+			} else {
+				c.note("aimem: hub spool %s cannot be written (%v); checkpoint not queued for hub", filepath.Base(spool), aerr)
+			}
+			c.hubDown(hub, spool, err)
+			return
 		}
+		removePending(pend)
+		c.hubDown(hub, spool, err)
 		return
 	}
+	removePending(pend)
 	c.flushHubSpool(hub, spool)
 }
 
@@ -420,6 +436,119 @@ func (c *Client) hubPost(hub *HubConfig, body []byte) error {
 	return nil
 }
 
+// hubTry posts one record unless the run is out of time or the hub
+// already failed in it; a failure marks the hub failed for the run.
+func (c *Client) hubTry(hub *HubConfig, body []byte) error {
+	if c.left() < hubRequestMin {
+		return errShare
+	}
+	if c.hubFailed[hub.URL] {
+		return errHubFailed
+	}
+	err := c.hubPost(hub, body)
+	if err != nil && !c.outOfTime(err) {
+		c.markHubFailed(hub)
+	}
+	return err
+}
+
+// hubDown records a delivery that stopped at err in the run's line, and
+// says once how big the spool has grown.
+func (c *Client) hubDown(hub *HubConfig, spool string, err error) {
+	switch {
+	case errors.Is(err, errShare) || c.outOfTime(err):
+		c.deferred("the hub delivery (out of time)")
+	case errors.Is(err, errHubFailed):
+		c.deferred("the hub delivery (the hub failed earlier in this run)")
+	default:
+		c.deferred(fmt.Sprintf("the hub delivery (%v)", err))
+		c.note("aimem: hub unreachable, checkpoint queued for hub (%v)", err)
+		// A spool that keeps growing means the hub has been down — or
+		// the token rejected — for a long time; the per-checkpoint
+		// line above is easy to tune out, a size is not.
+		if fi, e := os.Stat(spool); e == nil && fi.Size() > hubSpoolWarnBytes {
+			c.note("aimem: hub spool %s holds %d MB of undelivered checkpoints — check the hub and its token",
+				filepath.Base(spool), fi.Size()>>20)
+		}
+	}
+}
+
+// pendingStale is the age past which a pending file is taken to be left
+// by a run that died. A live run keeps one for a single hub request
+// (PushTimeout at most, less inside a hook) and one append, so a minute
+// is far past any live run; a run stalled longer than that (a suspended
+// machine) and swept meanwhile delivers its record twice, which the hub
+// keeps as one event (idempotency key).
+var pendingStale = time.Minute
+
+// writePending keeps one record in a file of its own beside spool, named
+// so that no two runs share one. It returns the file's path.
+func writePending(spool string, body []byte) (string, error) {
+	if err := os.MkdirAll(filepath.Dir(spool), 0o700); err != nil {
+		return "", err
+	}
+	f, err := os.CreateTemp(filepath.Dir(spool), filepath.Base(spool)+".pending-*")
+	if err != nil {
+		return "", err
+	}
+	_, err = f.Write(append(append([]byte(nil), body...), '\n'))
+	if cerr := f.Close(); err == nil {
+		err = cerr
+	}
+	if err != nil {
+		os.Remove(f.Name())
+		return "", err
+	}
+	return f.Name(), nil
+}
+
+func removePending(path string) {
+	if path != "" {
+		os.Remove(path)
+	}
+}
+
+// sweepPending moves the pending files of runs that died into the spool.
+// A file is removed only after its record is in the spool. A record whose
+// run had already delivered it, or appended it, before dying is delivered
+// twice; the hub keeps one event per idempotency key.
+func sweepPending(spool string) {
+	files, _ := filepath.Glob(spool + ".pending-*")
+	for _, p := range files {
+		fi, err := os.Stat(p)
+		if err != nil || time.Since(fi.ModTime()) < pendingStale {
+			continue
+		}
+		data, err := os.ReadFile(p)
+		if err != nil {
+			continue
+		}
+		if line := bytes.TrimSpace(data); len(line) > 0 {
+			if appendLines(spool, line) != nil {
+				continue
+			}
+		}
+		os.Remove(p)
+	}
+}
+
+// appendLines appends records (newline-separated, without a final newline)
+// to the spool in one write.
+func appendLines(path string, lines []byte) error {
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		return err
+	}
+	f, err := os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600)
+	if err != nil {
+		return err
+	}
+	_, err = f.Write(append(append([]byte(nil), lines...), '\n'))
+	if cerr := f.Close(); err == nil {
+		err = cerr
+	}
+	return err
+}
+
 const (
 	// hubSpoolWarnBytes: past this, the queued-checkpoint stderr line
 	// gains the spool's size so long outages are hard to miss.
@@ -429,75 +558,64 @@ const (
 	hubFlushLimit = 100
 )
 
-// flushHubSpool delivers one hub's spool: the newest record first (the
-// checkpoint this run just queued), then the backlog in order, at most
-// hubFlushLimit records. It stops at the first failure, since every
-// further try would wait out the same unreachable hub inside a hook, and
-// at the run's deadline. What it does not deliver stays spooled.
+// flushHubSpool drains one hub's backlog after the hub has taken this
+// run's checkpoint, in order, at most hubFlushLimit records. It stops at
+// the first failure, since every further try would wait out the same hub
+// inside a hook, and at the run's deadline. The records it keeps back go
+// back to the spool in one write; if that write fails the claim is left
+// in place, and sweepOrphanedClaims returns it to the spool.
 func (c *Client) flushHubSpool(hub *HubConfig, spool string) {
 	sweepOrphanedClaims(spool)
 	claim := spool + fmt.Sprintf(".replay-%d", os.Getpid())
 	if err := os.Rename(spool, claim); err != nil {
 		return // nothing queued, or another run holds it and delivers it
 	}
-	defer os.Remove(claim)
 	data, err := os.ReadFile(claim)
 	if err != nil {
-		os.Rename(claim, spool) // keep it queued
-		return
+		return // the claim stays for sweepOrphanedClaims
 	}
-	var lines [][]byte
-	for line := range bytes.SplitSeq(data, []byte{'\n'}) {
-		if len(bytes.TrimSpace(line)) > 0 {
-			lines = append(lines, line)
-		}
-	}
-	if len(lines) == 0 {
-		return
-	}
-	order := append([][]byte{lines[len(lines)-1]}, lines[:len(lines)-1]...)
-	delivered, kept := 0, 0
+	var kept bytes.Buffer
+	delivered, attempts := 0, 0
 	var stop error
-	for i, line := range order {
-		if stop == nil && i >= hubFlushLimit {
+	for line := range bytes.SplitSeq(data, []byte{'\n'}) {
+		if len(bytes.TrimSpace(line)) == 0 {
+			continue
+		}
+		if stop == nil && attempts >= hubFlushLimit {
 			stop = errFlushLimit
 		}
-		if stop == nil && c.left() < hubRequestMin {
-			stop = errShare
-		}
 		if stop == nil {
-			if err := c.hubPost(hub, line); err != nil {
-				stop = err
-			} else {
+			attempts++
+			if stop = c.hubTry(hub, line); stop == nil {
 				delivered++
 				continue
 			}
 		}
-		c.spoolTo(spool, line)
-		kept++
+		if kept.Len() > 0 {
+			kept.WriteByte('\n')
+		}
+		kept.Write(line)
 	}
-	if stop != nil && stop != errFlushLimit && stop != errShare {
-		c.markHubFailed(hub)
-	}
-	if errors.Is(stop, errShare) || errors.Is(stop, context.DeadlineExceeded) {
-		c.deferred("the hub delivery")
-	} else if stop != nil && stop != errFlushLimit && delivered == 0 {
-		c.note("aimem: hub unreachable, checkpoint queued for hub (%v)", stop)
-		// A spool that keeps growing means the hub has been down — or
-		// the token rejected — for a long time; the per-checkpoint
-		// line above is easy to tune out, a size is not.
-		if fi, e := os.Stat(spool); e == nil && fi.Size() > hubSpoolWarnBytes {
-			c.note("aimem: hub spool %s holds %d MB of undelivered checkpoints — check the hub and its token",
-				filepath.Base(spool), fi.Size()>>20)
+	if kept.Len() > 0 {
+		if err := appendLines(spool, kept.Bytes()); err != nil {
+			c.note("aimem: hub spool %s cannot be written (%v); its records stay in %s for a later run", filepath.Base(spool), err, filepath.Base(claim))
+			return
 		}
 	}
-	if delivered > 1 {
-		c.note("aimem: delivered %d queued checkpoint(s) to hub", delivered-1)
+	os.Remove(claim)
+	if stop != nil && stop != errFlushLimit {
+		c.hubDown(hub, spool, stop)
 	}
-	if kept > 0 && delivered > 0 {
-		c.note("aimem: %d more remain spooled (bounded flush); they drain on coming checkpoints", kept)
+	if delivered > 0 {
+		c.note("aimem: delivered %d queued checkpoint(s) to hub", delivered)
+	}
+	if n := bytes.Count(kept.Bytes(), []byte{'\n'}) + 1; kept.Len() > 0 && delivered > 0 {
+		c.note("aimem: %d more remain spooled (bounded flush); they drain on coming checkpoints", n)
 	}
 }
+
+// errHubFailed stops a delivery to a hub that failed earlier in the run.
+var errHubFailed = errors.New("the hub failed earlier in this run")
 
 // markHubFailed records that hub failed a request in this run.
 func (c *Client) markHubFailed(hub *HubConfig) {

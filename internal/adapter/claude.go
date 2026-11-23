@@ -4,7 +4,6 @@
 package adapter
 
 import (
-	"bufio"
 	"bytes"
 	"encoding/json"
 	"errors"
@@ -170,8 +169,6 @@ func parseTranscript(path string, deadline time.Time) (userReq, reply string, to
 	if _, err := f.Seek(start, io.SeekStart); err != nil {
 		return "", "", nil, "", "", err
 	}
-	sc := bufio.NewScanner(f)
-	sc.Buffer(make([]byte, 1024*1024), maxLine) // transcript lines can be huge
 	type turnState struct {
 		user   string
 		reply  string
@@ -179,13 +176,10 @@ func parseTranscript(path string, deadline time.Time) (userReq, reply string, to
 		turnID string
 	}
 	var cur turnState
-	for n := 0; sc.Scan(); n++ {
-		if n%256 == 0 && time.Now().After(deadline) {
-			return "", "", nil, "", "", errShare
-		}
+	err = forwardLines(f, deadline, func(b []byte) {
 		var e transcriptEntry
-		if json.Unmarshal(sc.Bytes(), &e) != nil {
-			continue // tolerate unknown/corrupt lines
+		if json.Unmarshal(b, &e) != nil {
+			return // tolerate unknown/corrupt lines
 		}
 		switch e.Type {
 		case "user":
@@ -195,7 +189,7 @@ func parseTranscript(path string, deadline time.Time) (userReq, reply string, to
 		case "assistant":
 			var items []contentItem
 			if json.Unmarshal(e.Message.Content, &items) != nil {
-				continue
+				return
 			}
 			for _, it := range items {
 				switch it.Type {
@@ -214,8 +208,8 @@ func parseTranscript(path string, deadline time.Time) (userReq, reply string, to
 				lastAssistant = e.UUID
 			}
 		}
-	}
-	if err := sc.Err(); err != nil {
+	})
+	if err != nil {
 		return "", "", nil, "", "", err
 	}
 	return cur.user, cur.reply, cur.tools, cur.turnID, lastAssistant, nil

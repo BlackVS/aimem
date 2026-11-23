@@ -7,7 +7,6 @@
 package adapter
 
 import (
-	"bufio"
 	"bytes"
 	"encoding/json"
 	"errors"
@@ -202,23 +201,18 @@ func parseRollout(path, turnID string, deadline time.Time) (userReq, reply strin
 	if _, err := f.Seek(start, io.SeekStart); err != nil {
 		return "", "", nil, "", false, err
 	}
-	sc := bufio.NewScanner(f)
-	sc.Buffer(make([]byte, 1024*1024), maxLine) // rollout lines can be huge
-	inTurn := false                             // between the wanted turn's task_started and the next task_started
+	inTurn := false // between the wanted turn's task_started and the next task_started
 	var curTools []string
-	for n := 0; sc.Scan(); n++ {
-		if n%256 == 0 && time.Now().After(deadline) {
-			return "", "", nil, "", false, errShare
-		}
+	err = forwardLines(f, deadline, func(b []byte) {
 		var line rolloutLine
-		if json.Unmarshal(sc.Bytes(), &line) != nil {
-			continue // tolerate unknown/corrupt lines
+		if json.Unmarshal(b, &line) != nil {
+			return // tolerate unknown/corrupt lines
 		}
 		switch line.Type {
 		case "event_msg":
 			var ev rolloutEvent
 			if json.Unmarshal(line.Payload, &ev) != nil {
-				continue
+				return
 			}
 			switch ev.Type {
 			case "task_started":
@@ -232,7 +226,7 @@ func parseRollout(path, turnID string, deadline time.Time) (userReq, reply strin
 				inTurn = wanted
 			case "item_completed":
 				if turnID != "" && ev.TurnID != turnID {
-					continue
+					return
 				}
 				text := ""
 				for _, c := range ev.Item.Content {
@@ -264,11 +258,11 @@ func parseRollout(path, turnID string, deadline time.Time) (userReq, reply strin
 			}
 		case "response_item":
 			if !inTurn {
-				continue
+				return
 			}
 			var ri rolloutResponseItem
 			if json.Unmarshal(line.Payload, &ri) != nil {
-				continue
+				return
 			}
 			switch ri.Type {
 			case "function_call", "custom_tool_call", "local_shell_call", "web_search_call":
@@ -279,8 +273,8 @@ func parseRollout(path, turnID string, deadline time.Time) (userReq, reply strin
 				curTools = append(curTools, name)
 			}
 		}
-	}
-	if err := sc.Err(); err != nil {
+	})
+	if err != nil {
 		return "", "", nil, "", false, err
 	}
 	return userReq, reply, curTools, lastTurnID, turnDone, nil

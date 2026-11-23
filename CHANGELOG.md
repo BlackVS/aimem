@@ -28,11 +28,13 @@ currently 26); a binary refuses a database newer than it understands.
 
   Each hook command (`submit-codex`, `submit-claude`, `session-start`) now
   has one deadline for its whole run, 7 s from its start. A checkpoint is
-  queued for the hub before the hub is asked, and the queue is delivered
-  newest first. A hub that fails is not asked again in the same run, and a
+  kept on disk before the hub is asked, and a hub that does not take it
+  costs the run one request and one append to the hub's queue, whatever
+  the queue's size; before, every run against a silent hub waited for two
+  requests. A hub that fails is not asked again in the same run, and a
   bound document that could not be published is published by a later run.
-  A run that reaches its deadline leaves one line in `aimem logs` naming
-  what it left for later. Turns lost before this release can be submitted
+  A run that leaves work for later writes one line in `aimem logs` naming
+  the event and what was left. Turns lost before this release can be submitted
   again with `aimem submit-codex` and a Stop payload naming the session,
   the turn and the rollout. A turn already journaled is not changed by a
   second submission.

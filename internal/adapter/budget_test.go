@@ -7,9 +7,11 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"reflect"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -230,15 +232,15 @@ func hubRoot(t *testing.T, url string) (string, *Payload) {
 	return root, p
 }
 
-// The checkpoint is on disk, queued for the hub, before the hub is asked:
-// whatever moment a run is cut at, it is in the hub spool or on the hub.
-func TestCheckpointIsQueuedForTheHubBeforeTheFirstHubRequest(t *testing.T) {
+// The checkpoint is on disk, in a file of its own, before the hub is
+// asked; a delivered one leaves neither that file nor a spool line.
+func TestCheckpointIsKeptBeforeTheFirstHubRequest(t *testing.T) {
 	var seen atomic.Int32
 	var root string
 	hub := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		claims, _ := filepath.Glob(filepath.Join(root, "spool", "hub.jsonl*"))
-		for _, c := range claims {
-			if b, _ := os.ReadFile(c); bytes.Contains(b, []byte(`"codex:s1:t1"`)) {
+		files, _ := filepath.Glob(filepath.Join(root, "spool", "hub.jsonl*"))
+		for _, f := range files {
+			if b, _ := os.ReadFile(f); bytes.Contains(b, []byte(`"codex:s1:t1"`)) {
 				seen.Add(1)
 			}
 		}
@@ -251,17 +253,305 @@ func TestCheckpointIsQueuedForTheHubBeforeTheFirstHubRequest(t *testing.T) {
 	if seen.Load() != 1 {
 		t.Fatalf("at the hub request the checkpoint was on disk %d time(s), want 1", seen.Load())
 	}
-	if b, err := os.ReadFile(filepath.Join(root, "spool", "hub.jsonl")); err == nil && len(bytes.TrimSpace(b)) > 0 {
-		t.Fatalf("a delivered checkpoint stayed queued: %q", b)
+	if files, _ := filepath.Glob(filepath.Join(root, "spool", "hub.jsonl*")); len(files) != 0 {
+		t.Fatalf("a delivered checkpoint left %v", files)
 	}
 	if b, _ := os.ReadFile(filepath.Join(root, "spool", "pending.jsonl")); !bytes.Contains(b, []byte(`"codex:s1:t1"`)) {
 		t.Fatal("the local copy is neither posted nor spooled")
 	}
 }
 
+// keysHub is a hub that records every event's idempotency key and answers
+// with status() (200 when nil).
+func keysHub(t *testing.T, status func() int) (*httptest.Server, func() []string) {
+	t.Helper()
+	var mu sync.Mutex
+	var keys []string
+	hub := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var b struct {
+			K string `json:"k"`
+		}
+		json.NewDecoder(r.Body).Decode(&b)
+		mu.Lock()
+		keys = append(keys, b.K)
+		mu.Unlock()
+		if status != nil {
+			w.WriteHeader(status())
+		}
+	}))
+	t.Cleanup(hub.Close)
+	return hub, func() []string {
+		mu.Lock()
+		defer mu.Unlock()
+		return append([]string(nil), keys...)
+	}
+}
+
+func rec(k string) []byte { return []byte(`{"k":"` + k + `"}`) }
+
+// A run cut at any step of the hub delivery leaves the checkpoint for a
+// later run: the state each cut leaves is set up here, and the next run
+// delivers the record. A cut after the hub took the record, or after it
+// was appended to the spool, delivers it twice; the hub keeps one event
+// per idempotency key.
+func TestACutAtAnyStepLeavesTheCheckpointForALaterRun(t *testing.T) {
+	defer func(d time.Duration) { pendingStale = d }(pendingStale)
+	pendingStale = 0
+	for _, tc := range []struct {
+		name              string
+		onHub, inSpool    bool
+		wantTotalOnTheHub int
+	}{
+		{"after the pending write, during the post, or after a failed post before the append", false, false, 1},
+		{"after the hub took it, before the pending file is removed", true, false, 2},
+		{"after the append, before the pending file is removed", false, true, 2},
+	} {
+		hub, keys := keysHub(t, nil)
+		root, _ := hubRoot(t, hub.URL)
+		spool := filepath.Join(root, "spool", "hub.jsonl")
+		if _, err := writePending(spool, rec("cut")); err != nil {
+			t.Fatal(err)
+		}
+		if tc.inSpool {
+			appendLines(spool, rec("cut"))
+		}
+		before := 0
+		if tc.onHub {
+			before = 1
+		}
+		NewClient(root).WithDeadline(time.Now().Add(5*time.Second)).pushHub("", rec("next"))
+		n := before
+		for _, k := range keys() {
+			if k == "cut" {
+				n++
+			}
+		}
+		if n != tc.wantTotalOnTheHub {
+			t.Fatalf("%s: the hub got the record %d time(s), want %d (keys %v)", tc.name, n, tc.wantTotalOnTheHub, keys())
+		}
+		if left, _ := filepath.Glob(spool + "*"); len(left) != 0 {
+			t.Fatalf("%s: left behind %v", tc.name, left)
+		}
+	}
+	// A pending file younger than pendingStale belongs to a live run and
+	// is left to it.
+	pendingStale = time.Hour
+	hub, keys := keysHub(t, nil)
+	root, _ := hubRoot(t, hub.URL)
+	spool := filepath.Join(root, "spool", "hub.jsonl")
+	live, _ := writePending(spool, rec("live"))
+	NewClient(root).pushHub("", rec("next"))
+	if _, err := os.Stat(live); err != nil || strings.Join(keys(), ",") != "next" {
+		t.Fatalf("a live run's pending file was taken: %v, hub got %v", err, keys())
+	}
+}
+
+// A hub that does not take the newest record leaves the backlog as it
+// was, with the record appended in one write: the order on disk is the
+// order of queueing, and a later run delivers its own record first and
+// then the backlog in that order. A failing hub is asked once per run.
+func TestAFailedPostKeepsTheQueueOrderAndAsksTheHubOnce(t *testing.T) {
+	fail := false
+	hub, keys := keysHub(t, func() int {
+		if fail {
+			return 503
+		}
+		return 200
+	})
+	root, _ := hubRoot(t, hub.URL)
+	spool := filepath.Join(root, "spool", "hub.jsonl")
+	appendLines(spool, rec("A"))
+	fail = true
+	NewClient(root).pushHub("", rec("B"))
+	if got := strings.Join(keys(), ","); got != "B" {
+		t.Fatalf("the failing hub was asked %q, want only B", got)
+	}
+	if b, _ := os.ReadFile(spool); string(b) != string(rec("A"))+"\n"+string(rec("B"))+"\n" {
+		t.Fatalf("the spool after a failed post: %q", b)
+	}
+	fail = false
+	NewClient(root).pushHub("", rec("C"))
+	if got := strings.Join(keys(), ","); got != "B,C,A,B" {
+		t.Fatalf("delivery order %q, want B (refused), then C, A, B", got)
+	}
+	if left, _ := filepath.Glob(spool + "*"); len(left) != 0 {
+		t.Fatalf("left behind %v", left)
+	}
+}
+
+// Against a hub that does not answer, the run does no file work on the
+// backlog: it is neither read nor rewritten, whatever its size.
+func TestADownHubDoesNotTouchTheBacklog(t *testing.T) {
+	down := httptest.NewServer(http.NotFoundHandler())
+	url := down.URL
+	down.Close() // refused from now on
+	root, _ := hubRoot(t, url)
+	spool := filepath.Join(root, "spool", "hub.jsonl")
+	var backlog bytes.Buffer
+	for i := range 2000 {
+		if i > 0 {
+			backlog.WriteByte('\n')
+		}
+		backlog.Write(rec(fmt.Sprint(i)))
+	}
+	appendLines(spool, backlog.Bytes())
+	// A second name for the same file: an append shows through it, a
+	// claim by rename and a rewrite do not.
+	link := spool + "-link"
+	if err := os.Link(spool, link); err != nil {
+		t.Skip("no hard links here:", err)
+	}
+	NewClient(root).WithDeadline(time.Now().Add(5*time.Second)).pushHub("", rec("new"))
+	b, _ := os.ReadFile(spool)
+	want := backlog.String() + "\n" + string(rec("new")) + "\n"
+	if string(b) != want {
+		t.Fatalf("the backlog changed: %d bytes, want %d", len(b), len(want))
+	}
+	appendLines(link, rec("marker")) // one file under two names, or two files?
+	if b, _ := os.ReadFile(spool); !bytes.HasSuffix(b, append(rec("marker"), '\n')) {
+		t.Fatal("the spool was replaced, not appended to")
+	}
+}
+
+// TestHubPushHelperProcess is one hook run of
+// TestConcurrentRunsKeepEveryRecordOnce in a process of its own.
+func TestHubPushHelperProcess(t *testing.T) {
+	root := os.Getenv("AIMEM_TEST_PUSH_ROOT")
+	if root == "" {
+		t.Skip("helper process only")
+	}
+	NewClient(root).WithDeadline(time.Now().Add(5*time.Second)).pushHub("", rec(os.Getenv("AIMEM_TEST_PUSH_KEY")))
+}
+
+// Two runs at once against a failing hub, ten times over: every record,
+// the backlog's and each run's own, is queued exactly once.
+func TestConcurrentRunsKeepEveryRecordOnce(t *testing.T) {
+	down := httptest.NewServer(http.NotFoundHandler())
+	url := down.URL
+	down.Close()
+	root, _ := hubRoot(t, url)
+	spool := filepath.Join(root, "spool", "hub.jsonl")
+	want := map[string]bool{}
+	for i := range 200 {
+		appendLines(spool, rec(fmt.Sprint("b", i)))
+		want[fmt.Sprint("b", i)] = true
+	}
+	for round := range 10 {
+		var wg sync.WaitGroup
+		for j := range 2 {
+			key := fmt.Sprintf("r%d-%d", round, j)
+			want[key] = true
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				cmd := exec.Command(os.Args[0], "-test.run=^TestHubPushHelperProcess$")
+				cmd.Env = append(os.Environ(), "AIMEM_TEST_PUSH_ROOT="+root, "AIMEM_TEST_PUSH_KEY="+key)
+				if out, err := cmd.CombinedOutput(); err != nil {
+					t.Errorf("run %s: %v\n%s", key, err, out)
+				}
+			}()
+		}
+		wg.Wait()
+	}
+	got := map[string]int{}
+	b, _ := os.ReadFile(spool)
+	for line := range bytes.SplitSeq(b, []byte{'\n'}) {
+		var r struct {
+			K string `json:"k"`
+		}
+		if json.Unmarshal(line, &r) == nil {
+			got[r.K]++
+		}
+	}
+	for k := range want {
+		if got[k] != 1 {
+			t.Errorf("record %s is queued %d time(s), want 1", k, got[k])
+		}
+	}
+	if len(got) != len(want) {
+		t.Errorf("%d distinct records queued, want %d", len(got), len(want))
+	}
+	if left, _ := filepath.Glob(spool + ".*"); len(left) != 0 {
+		t.Errorf("left behind %v", left)
+	}
+}
+
+// projectWithTwoDocs is a project bound to proj-b with two changed bound
+// documents.
+func projectWithTwoDocs(t *testing.T) string {
+	t.Helper()
+	proj := t.TempDir()
+	os.MkdirAll(filepath.Join(proj, "docs"), 0o700)
+	os.WriteFile(filepath.Join(proj, ".aimem.json"), []byte(`{"project":"proj-b","docs":["docs/NOTES.md"]}`), 0o600)
+	os.WriteFile(filepath.Join(proj, "docs", "SESSION-STATE.md"), []byte("# state\n"), 0o600)
+	os.WriteFile(filepath.Join(proj, "docs", "NOTES.md"), []byte("# notes\n"), 0o600)
+	return proj
+}
+
+// A document PUT the hub fails with a server error stops the run's
+// requests to that hub: the second document is not sent, both keep their
+// old hashes, and the run's line names the one left.
+func TestAFailedDocumentPutAsksTheHubNothingMore(t *testing.T) {
+	var puts atomic.Int32
+	hub := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.Contains(r.URL.Path, "/docs/") {
+			puts.Add(1)
+			w.WriteHeader(503)
+		}
+	}))
+	defer hub.Close()
+	root, p := hubRoot(t, hub.URL)
+	p.ProjectDir = projectWithTwoDocs(t)
+	NewClient(root).WithDeadline(time.Now().Add(5 * time.Second)).Submit(p)
+	if puts.Load() != 1 {
+		t.Fatalf("the hub got %d document PUTs after a 503, want 1", puts.Load())
+	}
+	if st := loadDocSync(root, "proj-b"); len(st) != 0 {
+		t.Fatalf("an unpublished document's hash moved: %v", st)
+	}
+	notes, _ := os.ReadFile(filepath.Join(root, "adapter.log"))
+	if !bytes.Contains(notes, []byte("left work for a later run")) || !bytes.Contains(notes, []byte("the hub failed earlier in this run")) {
+		t.Fatalf("adapter.log does not name the document left:\n%s", notes)
+	}
+}
+
+// Outside a hook a timed-out PUT is the caller's error, and the document
+// after it is reported as not published: `aimem docs push` never says
+// "nothing to publish" for documents it could not send.
+func TestAStandaloneDocsPushReportsATimeout(t *testing.T) {
+	defer func(d time.Duration) { PushTimeout = d }(PushTimeout)
+	PushTimeout = 300 * time.Millisecond
+	release := make(chan struct{})
+	silent := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { <-release }))
+	defer silent.Close()
+	defer close(release)
+	root, _ := hubRoot(t, silent.URL)
+	res := NewClient(root).PublishDocs(projectWithTwoDocs(t), "proj-b", "", "test")
+	if len(res) != 2 || res[0].Err == nil || res[1].Err == nil {
+		t.Fatalf("results %+v, want an error for each document", res)
+	}
+}
+
+// A run whose hub refuses the checkpoint names it in the run's line, with
+// the event, the session and the turn, even when nothing ran out of time.
+func TestARefusedHubIsNamedInTheRunsLine(t *testing.T) {
+	down := httptest.NewServer(http.NotFoundHandler())
+	url := down.URL
+	down.Close()
+	root, p := hubRoot(t, url)
+	p.ProjectDir = projectWithTwoDocs(t)
+	NewClient(root).WithDeadline(time.Now().Add(5 * time.Second)).Submit(p)
+	notes, _ := os.ReadFile(filepath.Join(root, "adapter.log"))
+	for _, want := range []string{"turn event of session s1 turn t1 left work for a later run", "the hub delivery (", "publishing SESSION-STATE (the hub failed earlier in this run)"} {
+		if !bytes.Contains(notes, []byte(want)) {
+			t.Fatalf("adapter.log lacks %q:\n%s", want, notes)
+		}
+	}
+}
+
 // A hub that never answers costs the run no more than its deadline: the
 // checkpoint stays queued, a changed bound document stays unpublished
-// with its old hash, adapter.log says what was deferred, and the next run
+// with its old hash, adapter.log says what was left, and the next run
 // with the hub back delivers both.
 func TestASilentHubIsBoundedByTheRunAndALaterRunDelivers(t *testing.T) {
 	release := make(chan struct{})
@@ -287,8 +577,8 @@ func TestASilentHubIsBoundedByTheRunAndALaterRunDelivers(t *testing.T) {
 		t.Fatalf("the checkpoint is not queued for the hub: %q", b)
 	}
 	notes, _ := os.ReadFile(filepath.Join(root, "adapter.log"))
-	if !bytes.Contains(notes, []byte("ran short of time")) || !bytes.Contains(notes, []byte("the hub delivery")) {
-		t.Fatalf("adapter.log does not say what was deferred:\n%s", notes)
+	if !bytes.Contains(notes, []byte("left work for a later run")) || !bytes.Contains(notes, []byte("the hub delivery (out of time)")) {
+		t.Fatalf("adapter.log does not say what was left:\n%s", notes)
 	}
 	if bytes.Contains(notes, []byte("# state")) {
 		t.Fatal("adapter.log carries document content")
@@ -320,43 +610,98 @@ func TestASilentHubIsBoundedByTheRunAndALaterRunDelivers(t *testing.T) {
 	}
 }
 
-// The flush sends the newest checkpoint first and asks a failing hub only
-// once per run.
-func TestHubFlushNewestFirstAndOneFailurePerRun(t *testing.T) {
-	var order []string
-	fail := false
-	hub := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		var b struct {
-			N int `json:"n"`
+// An expired local replay writes what it did not reach back in one write,
+// in order, and removes its claim.
+func TestAnExpiredLocalReplayKeepsTheRestInOrder(t *testing.T) {
+	root := t.TempDir()
+	c := NewClient(root).WithDeadline(time.Now().Add(-time.Second))
+	for i := range 5 {
+		c.spool(rec(fmt.Sprint(i)))
+	}
+	before, _ := os.ReadFile(c.spoolPath())
+	n, kept, err := c.ReplaySpool()
+	if err != nil || n != 0 || kept != 5 {
+		t.Fatalf("replay: %d sent, %d kept, %v", n, kept, err)
+	}
+	after, _ := os.ReadFile(c.spoolPath())
+	if string(after) != string(before) {
+		t.Fatalf("the spool changed: %q", after)
+	}
+	if left, _ := filepath.Glob(c.spoolPath() + ".*"); len(left) != 0 {
+		t.Fatalf("left behind %v", left)
+	}
+}
+
+// An overlong line is skipped whole by both readers, wherever the chunks
+// of the backward read split it, and the forward read goes on after it.
+func TestAnOverlongLineIsSkippedAtAnyChunkBoundary(t *testing.T) {
+	defer func(m, c int) { maxLine, tailChunk = m, c }(maxLine, tailChunk)
+	maxLine, tailChunk = 100, 64
+	long := strings.Repeat("y", 101)
+	for pad := range 200 {
+		body := strings.Repeat("p", pad) + "\nfirst\n" + long + "\nlast\n"
+		p := filepath.Join(t.TempDir(), "r.jsonl")
+		os.WriteFile(p, []byte(body), 0o600)
+		f, _ := os.Open(p)
+		var back []string
+		err := scanBack(f, time.Now().Add(time.Minute), func(line []byte, _ int64) bool {
+			back = append(back, string(line))
+			return false
+		})
+		f.Close()
+		want := []string{"first", "last"}
+		if pad > 0 {
+			want = []string{strings.Repeat("p", pad), "first", "last"}
 		}
-		json.NewDecoder(r.Body).Decode(&b)
-		order = append(order, fmt.Sprint(b.N))
-		if fail {
-			w.WriteHeader(503)
+		if pad > maxLine {
+			want = want[1:]
 		}
-	}))
-	defer hub.Close()
-	root, _ := hubRoot(t, hub.URL)
-	spool := filepath.Join(root, "spool", "hub.jsonl")
-	c := NewClient(root)
-	for i := 1; i <= 3; i++ {
-		c.spoolTo(spool, []byte(fmt.Sprintf(`{"n":%d}`, i)))
+		if err != nil || !reflect.DeepEqual(back, reverse(want)) {
+			t.Fatalf("pad %d: backward %q, %v", pad, back, err)
+		}
+		var fwd []string
+		if err := forwardLines(strings.NewReader(body), time.Now().Add(time.Minute), func(line []byte) {
+			fwd = append(fwd, string(line))
+		}); err != nil || !reflect.DeepEqual(fwd, want) {
+			t.Fatalf("pad %d: forward %q, %v", pad, fwd, err)
+		}
 	}
-	c.pushHub("", []byte(`{"n":4}`))
-	if strings.Join(order, ",") != "4,1,2,3" {
-		t.Fatalf("delivery order %v", order)
+	// Past the forward reader's buffer, too.
+	maxLine = 2 << 20
+	body := "first\n" + strings.Repeat("z", 3<<20) + "\nlast\n"
+	var fwd []string
+	if err := forwardLines(strings.NewReader(body), time.Now().Add(time.Minute), func(line []byte) {
+		fwd = append(fwd, string(line))
+	}); err != nil || !reflect.DeepEqual(fwd, []string{"first", "last"}) {
+		t.Fatalf("forward past the buffer: %.40q, %v", fwd, err)
 	}
-	order, fail = nil, true
-	for i := 5; i <= 7; i++ {
-		c.spoolTo(spool, []byte(fmt.Sprintf(`{"n":%d}`, i)))
+	if err := forwardLines(strings.NewReader("a\nb\n"), time.Now().Add(-time.Second), func([]byte) {}); err != errShare {
+		t.Fatalf("a read past its share reports %v, want errShare", err)
 	}
-	c2 := NewClient(root)
-	c2.pushHub("", []byte(`{"n":8}`))
-	if len(order) != 1 {
-		t.Fatalf("a failing hub was asked %d times in one run", len(order))
+}
+
+func reverse(s []string) []string {
+	out := make([]string, len(s))
+	for i, v := range s {
+		out[len(s)-1-i] = v
 	}
-	b, _ := os.ReadFile(spool)
-	if n := bytes.Count(b, []byte("\n")); n != 4 {
-		t.Fatalf("%d records stayed queued, want 4", n)
+	return out
+}
+
+// An overlong line inside a Claude Code turn no longer ends the read: the
+// turn's prompt and reply are still found.
+func TestClaudeTurnWithAnOverlongLine(t *testing.T) {
+	defer func(m int) { maxLine = m }(maxLine)
+	maxLine = 4096
+	lines := []string{
+		`{"type":"user","message":{"content":"the prompt"}}`,
+		`{"type":"assistant","uuid":"a1","message":{"content":[{"type":"text","text":"` + strings.Repeat("x", 5000) + `"}]}}`,
+		`{"type":"assistant","uuid":"a2","message":{"content":[{"type":"text","text":"the reply"}]}}`,
+	}
+	p := filepath.Join(t.TempDir(), "t.jsonl")
+	os.WriteFile(p, []byte(strings.Join(lines, "\n")+"\n"), 0o600)
+	u, r, _, id, _, err := parseTranscript(p, time.Now().Add(time.Minute))
+	if err != nil || u != "the prompt" || r != "the reply" || id != "a2" {
+		t.Fatalf("got %q %q %q, %v", u, r, id, err)
 	}
 }

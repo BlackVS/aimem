@@ -10,6 +10,7 @@ package adapter
 // goes with a later run.
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"errors"
@@ -36,11 +37,11 @@ func HookDeadline() time.Time { return processStart.Add(HookBudget) }
 // errShare reports a transcript read cut by its time share.
 var errShare = errors.New("transcript read out of time")
 
-// maxLine bounds one transcript line, as the forward scanners do.
-const maxLine = 16 << 20
+// maxLine bounds one transcript line; a longer one is skipped.
+var maxLine = 16 << 20
 
 // tailChunk is how much a backward scan reads at a time.
-const tailChunk = 1 << 20
+var tailChunk = 1 << 20
 
 // scanBack reads f backwards, from its current size, and calls fn with
 // each complete line (no trailing newline) and the line's byte offset, the
@@ -82,7 +83,7 @@ func scanBack(f *os.File, deadline time.Time, fn func(line []byte, off int64) bo
 			line := chunk[i+1 : hi]
 			if skipping {
 				skipping = false
-			} else if len(line) > 0 && fn(line, start+int64(i)+1) {
+			} else if len(line) > 0 && len(line) <= maxLine && fn(line, start+int64(i)+1) {
 				return nil
 			}
 			hi = i
@@ -96,6 +97,48 @@ func scanBack(f *os.File, deadline time.Time, fn func(line []byte, off int64) bo
 	}
 	if !skipping && len(carry) > 0 {
 		fn(carry, 0)
+	}
+	return nil
+}
+
+// forwardLines calls fn with each line of r up to its end, without the
+// newline. A line longer than maxLine is skipped whole, as scanBack skips
+// it, and the read goes on after it. The deadline is checked before every
+// line and once more at the end, so a read that ran out of its share
+// never reports success. fn must not keep the slice.
+func forwardLines(r io.Reader, deadline time.Time, fn func(line []byte)) error {
+	br := bufio.NewReaderSize(r, 1<<20)
+	var long []byte
+	over := false
+	for {
+		if time.Now().After(deadline) {
+			return errShare
+		}
+		frag, err := br.ReadSlice('\n')
+		if errors.Is(err, bufio.ErrBufferFull) || (len(long) > 0 || over) {
+			if !over && len(long)+len(frag) <= maxLine {
+				long = append(long, frag...)
+			} else {
+				over, long = true, long[:0]
+			}
+			if errors.Is(err, bufio.ErrBufferFull) {
+				continue
+			}
+			frag = long
+		}
+		if line := bytes.TrimSuffix(frag, []byte{'\n'}); !over && len(line) > 0 && len(line) <= maxLine {
+			fn(line)
+		}
+		long, over = long[:0], false
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			return err
+		}
+	}
+	if time.Now().After(deadline) {
+		return errShare
 	}
 	return nil
 }
@@ -123,6 +166,13 @@ func (c *Client) left() time.Duration {
 func (c *Client) WithDeadline(t time.Time) *Client {
 	c.deadline = t
 	return c
+}
+
+// outOfTime reports an error caused by the end of the run itself, as
+// opposed to a request's own timeout: a hub or service that did not answer
+// within PushTimeout or localTimeout has failed, the run has not.
+func (c *Client) outOfTime(err error) bool {
+	return err != nil && !c.deadline.IsZero() && c.left() <= 0 && errors.Is(err, context.DeadlineExceeded)
 }
 
 // deferred records something the run left for a later run.
