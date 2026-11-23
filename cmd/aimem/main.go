@@ -36,6 +36,7 @@ import (
 	"aimem/internal/llmrate"
 	"aimem/internal/mcp"
 	"aimem/internal/process"
+	"aimem/internal/processctx"
 	"aimem/internal/provider"
 	"aimem/internal/schema"
 	"aimem/internal/server"
@@ -532,6 +533,10 @@ func projectID(args []string) error {
 // and Linux. A missing handoff contributes nothing and never breaks
 // session start.
 func sessionStartCmd(args []string) error {
+	// One deadline for the whole run (adapter.HookDeadline): the hub
+	// handoff check, the recalled facts and the process lookups share it.
+	hookDeadline = adapter.HookDeadline()
+	processctx.Deadline = hookDeadline
 	p := filepath.Join("docs", "SESSION-STATE.md")
 	if len(args) > 0 {
 		p = args[0]
@@ -1506,7 +1511,7 @@ func submitClaudeCmd() error {
 	if err != nil {
 		return err
 	}
-	_, err = adapter.NewClient(stateRoot()).Submit(p)
+	_, err = adapter.NewClient(stateRoot()).WithDeadline(adapter.HookDeadline()).Submit(p)
 	return err
 }
 
@@ -1523,7 +1528,7 @@ func submitCodexCmd() error {
 	if err != nil {
 		return err
 	}
-	_, err = adapter.NewClient(stateRoot()).Submit(p)
+	_, err = adapter.NewClient(stateRoot()).WithDeadline(adapter.HookDeadline()).Submit(p)
 	return err
 }
 

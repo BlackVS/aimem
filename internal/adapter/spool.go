@@ -9,11 +9,13 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net"
 	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
@@ -40,6 +42,10 @@ type Payload struct {
 	// keep each hub's data physically separate. nil = unknown.
 	Hub   *string      `json:"hub,omitempty"`
 	Event schema.Event `json:"event"`
+	// Degraded says why the event lacks what the transcript would have
+	// given (its time share ran out); never sent, it goes to the run's
+	// adapter.log line.
+	Degraded string `json:"-"`
 }
 
 // ResolveProjectID derives ProjectID from ProjectDir when unset, and
@@ -92,6 +98,13 @@ type Client struct {
 	http *http.Client
 	// pushOff notes, once per run, a hub that has no checkpoint token.
 	pushOff sync.Once
+	// deadline ends a hook run (WithDeadline); zero outside a hook.
+	deadline time.Time
+	// deferredList names what this run left for a later one.
+	deferredList []string
+	// hubFailed holds the hubs (by URL) that failed a request in this run;
+	// they are not asked again in it.
+	hubFailed map[string]bool
 }
 
 // localTimeout bounds each call to the local service: hooks must never
@@ -163,6 +176,10 @@ func (c *Client) submit(p *Payload, toHub bool) (spooled bool, err error) {
 	if p.Hub != nil {
 		hubName = *p.Hub
 	}
+	if p.Degraded != "" {
+		c.deferred(p.Degraded)
+	}
+	defer c.noteDeferred(p)
 	if err := c.post(body); err != nil {
 		// The service is UP and refused the record: spooling would replay
 		// the same rejection forever and "unreachable" would mislead —
@@ -173,7 +190,11 @@ func (c *Client) submit(p *Payload, toHub bool) (spooled bool, err error) {
 		if serr := c.spool(body); serr != nil {
 			return false, fmt.Errorf("submit failed (%v) and spool failed: %w", err, serr)
 		}
-		c.note("aimem: service unreachable, checkpoint spooled (%v)", err)
+		if errors.Is(err, context.DeadlineExceeded) {
+			c.deferred("the local post")
+		} else {
+			c.note("aimem: service unreachable, checkpoint spooled (%v)", err)
+		}
 		if toHub {
 			c.pushHub(hubName, body)
 			c.publishDocsQuiet(p)
@@ -191,7 +212,14 @@ func (c *Client) submit(p *Payload, toHub bool) (spooled bool, err error) {
 }
 
 func (c *Client) post(body []byte) error {
-	resp, err := c.http.Post("http://aimem/v1/events", "application/json", bytes.NewReader(body))
+	ctx, cancel := c.reqCtx()
+	defer cancel()
+	req, err := http.NewRequestWithContext(ctx, "POST", "http://aimem/v1/events", bytes.NewReader(body))
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := c.http.Do(req)
 	if err != nil {
 		return err
 	}
@@ -284,6 +312,13 @@ func (c *Client) ReplaySpool() (replayed, requeued int, err error) {
 		if len(bytes.TrimSpace(line)) == 0 {
 			continue
 		}
+		if c.left() <= 0 {
+			// The run is out of time: the rest stays spooled.
+			c.spool(line)
+			requeued++
+			c.deferred("the local spool replay")
+			continue
+		}
 		if err := c.post(line); err != nil {
 			if _, invalid := err.(*rejectError); invalid {
 				c.note("aimem: dropping invalid spooled record: %v", err)
@@ -296,6 +331,17 @@ func (c *Client) ReplaySpool() (replayed, requeued int, err error) {
 		replayed++
 	}
 	return replayed, requeued, nil
+}
+
+// noteDeferred leaves the one adapter.log line of a hook run that ran
+// out of its time: what it left for a later run, and which event. No
+// content of the turn goes into it.
+func (c *Client) noteDeferred(p *Payload) {
+	if len(c.deferredList) == 0 {
+		return
+	}
+	c.note("aimem: the hook for the %s event of session %s turn %s ran short of time: %s; anything not delivered stays queued for a later run",
+		p.Event.Kind, p.Event.SessionID, p.Event.TurnID, strings.Join(c.deferredList, ", "))
 }
 
 func (c *Client) replaySpool() {

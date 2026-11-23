@@ -9,6 +9,7 @@ package adapter
 
 import (
 	"bytes"
+	"context"
 	"crypto/tls"
 	"encoding/json"
 	"errors"
@@ -339,9 +340,14 @@ var insecureTransport = &http.Transport{
 	TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
 }
 
-// pushHub sends one already-redacted payload to the configured hub, spooling
-// on any failure. Never returns an error to the caller — hub delivery is
-// best-effort real-time; the periodic sync guarantees eventual delivery.
+// pushHub delivers one already-redacted payload to the configured hub.
+// It is written to the hub's spool first, before any hub request, so that
+// a run cut at any moment (a client's hook timeout, a kill) leaves it
+// queued; the spool is then flushed, newest first, within the run's
+// deadline. Never returns an error to the caller: hub delivery is
+// best-effort real-time, the spool and the periodic sync guarantee
+// eventual delivery, and a checkpoint delivered twice is one event on the
+// hub (idempotency key).
 func (c *Client) pushHub(hubName string, body []byte) {
 	name, hub := ResolveHub(c.root, hubName)
 	if hub == nil {
@@ -374,24 +380,25 @@ func (c *Client) pushHub(hubName string, body []byte) {
 		return
 	}
 	spool := c.hubSpoolPathFor(name)
-	if err := c.hubPost(hub, body); err != nil {
-		if serr := c.spoolTo(spool, body); serr == nil {
-			c.note("aimem: hub unreachable, checkpoint queued for hub (%v)", err)
-			// A spool that keeps growing means the hub has been down — or
-			// the token rejected — for a long time; the per-checkpoint
-			// line above is easy to tune out, a size is not.
-			if fi, e := os.Stat(spool); e == nil && fi.Size() > hubSpoolWarnBytes {
-				c.note("aimem: hub spool %s holds %d MB of undelivered checkpoints — check the hub and its token",
-					filepath.Base(spool), fi.Size()>>20)
-			}
+	if err := c.spoolTo(spool, body); err != nil {
+		// No queue to fall back on: one direct attempt, as before the
+		// spool came first.
+		if err := c.hubPost(hub, body); err != nil {
+			c.note("aimem: hub unreachable and its spool cannot be written, checkpoint not queued for hub (%v)", err)
 		}
 		return
 	}
 	c.flushHubSpool(hub, spool)
 }
 
+// hubRequestMin is the least time left in a run worth starting a hub
+// request with; below it the request is left to a later run.
+const hubRequestMin = 500 * time.Millisecond
+
 func (c *Client) hubPost(hub *HubConfig, body []byte) error {
-	req, err := http.NewRequest("POST", hub.URL+"/v1/events", bytes.NewReader(body))
+	ctx, cancel := c.reqCtx()
+	defer cancel()
+	req, err := http.NewRequestWithContext(ctx, "POST", hub.URL+"/v1/events", bytes.NewReader(body))
 	if err != nil {
 		return err
 	}
@@ -417,55 +424,91 @@ const (
 	// hubSpoolWarnBytes: past this, the queued-checkpoint stderr line
 	// gains the spool's size so long outages are hard to miss.
 	hubSpoolWarnBytes = 8 << 20
-	// hubFlushLimit bounds how much backlog one checkpoint drains
-	// inline: this runs inside the coding client's Stop hook, and a
-	// hub that fails mid-flush costs up to the client timeout PER LINE.
-	// The remainder stays spooled for the next checkpoint or sync.
+	// hubFlushLimit bounds how many records one run tries to deliver;
+	// the remainder stays spooled for the next checkpoint or sync.
 	hubFlushLimit = 100
 )
 
-// flushHubSpool drains one hub's spool after a successful contact, at
-// most hubFlushLimit records per call.
+// flushHubSpool delivers one hub's spool: the newest record first (the
+// checkpoint this run just queued), then the backlog in order, at most
+// hubFlushLimit records. It stops at the first failure, since every
+// further try would wait out the same unreachable hub inside a hook, and
+// at the run's deadline. What it does not deliver stays spooled.
 func (c *Client) flushHubSpool(hub *HubConfig, spool string) {
 	sweepOrphanedClaims(spool)
 	claim := spool + fmt.Sprintf(".replay-%d", os.Getpid())
 	if err := os.Rename(spool, claim); err != nil {
-		return
+		return // nothing queued, or another run holds it and delivers it
 	}
 	defer os.Remove(claim)
 	data, err := os.ReadFile(claim)
 	if err != nil {
+		os.Rename(claim, spool) // keep it queued
 		return
 	}
-	n, attempts, kept, consecFails := 0, 0, 0, 0
+	var lines [][]byte
 	for line := range bytes.SplitSeq(data, []byte{'\n'}) {
-		if len(bytes.TrimSpace(line)) == 0 {
-			continue
+		if len(bytes.TrimSpace(line)) > 0 {
+			lines = append(lines, line)
 		}
-		// Bound ATTEMPTS, not successes, and give up early on a hub that
-		// died mid-flush: every further try would burn a full client
-		// timeout inside the coding client's Stop hook.
-		if attempts >= hubFlushLimit || consecFails >= 3 {
-			c.spoolTo(spool, line)
-			kept++
-			continue
-		}
-		attempts++
-		if err := c.hubPost(hub, line); err != nil {
-			c.spoolTo(spool, line)
-			consecFails++
-			continue
-		}
-		consecFails = 0
-		n++
 	}
-	if n > 0 {
-		c.note("aimem: delivered %d queued checkpoint(s) to hub", n)
+	if len(lines) == 0 {
+		return
 	}
-	if kept > 0 {
+	order := append([][]byte{lines[len(lines)-1]}, lines[:len(lines)-1]...)
+	delivered, kept := 0, 0
+	var stop error
+	for i, line := range order {
+		if stop == nil && i >= hubFlushLimit {
+			stop = errFlushLimit
+		}
+		if stop == nil && c.left() < hubRequestMin {
+			stop = errShare
+		}
+		if stop == nil {
+			if err := c.hubPost(hub, line); err != nil {
+				stop = err
+			} else {
+				delivered++
+				continue
+			}
+		}
+		c.spoolTo(spool, line)
+		kept++
+	}
+	if stop != nil && stop != errFlushLimit && stop != errShare {
+		c.markHubFailed(hub)
+	}
+	if errors.Is(stop, errShare) || errors.Is(stop, context.DeadlineExceeded) {
+		c.deferred("the hub delivery")
+	} else if stop != nil && stop != errFlushLimit && delivered == 0 {
+		c.note("aimem: hub unreachable, checkpoint queued for hub (%v)", stop)
+		// A spool that keeps growing means the hub has been down — or
+		// the token rejected — for a long time; the per-checkpoint
+		// line above is easy to tune out, a size is not.
+		if fi, e := os.Stat(spool); e == nil && fi.Size() > hubSpoolWarnBytes {
+			c.note("aimem: hub spool %s holds %d MB of undelivered checkpoints — check the hub and its token",
+				filepath.Base(spool), fi.Size()>>20)
+		}
+	}
+	if delivered > 1 {
+		c.note("aimem: delivered %d queued checkpoint(s) to hub", delivered-1)
+	}
+	if kept > 0 && delivered > 0 {
 		c.note("aimem: %d more remain spooled (bounded flush); they drain on coming checkpoints", kept)
 	}
 }
+
+// markHubFailed records that hub failed a request in this run.
+func (c *Client) markHubFailed(hub *HubConfig) {
+	if c.hubFailed == nil {
+		c.hubFailed = map[string]bool{}
+	}
+	c.hubFailed[hub.URL] = true
+}
+
+// errFlushLimit stops a flush at hubFlushLimit records.
+var errFlushLimit = errors.New("flush limit reached")
 
 // spoolTo appends one record atomically to the named spool file.
 func (c *Client) spoolTo(path string, line []byte) error {

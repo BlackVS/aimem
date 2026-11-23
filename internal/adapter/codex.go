@@ -12,6 +12,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"strings"
 	"time"
@@ -85,18 +86,30 @@ func BuildCodexEvent(raw []byte) (*Payload, error) {
 	var tools []string
 	var lastTurnID string
 	var turnDone bool
+	var degraded string
+	deadline := time.Now().Add(TranscriptShare)
 	for attempt := 0; hp.TranscriptPath != "" && attempt < 6; attempt++ {
 		if attempt > 0 {
+			if time.Now().Add(250 * time.Millisecond).After(deadline) {
+				degraded = "the rollout did not show the turn complete within its time share"
+				break
+			}
 			time.Sleep(250 * time.Millisecond)
 		}
-		var perr error
-		userReq, reply, tools, lastTurnID, turnDone, perr = parseRollout(hp.TranscriptPath, hp.TurnID)
+		u, r, t, last, done, perr := parseRollout(hp.TranscriptPath, hp.TurnID, deadline)
+		if errors.Is(perr, errShare) {
+			// Keep what an earlier, whole read found; with none, the
+			// event is the payload's alone.
+			degraded = "the rollout read ran out of its time share"
+			break
+		}
 		if perr != nil {
 			fmt.Fprintf(os.Stderr, "aimem submit-codex: rollout %s: %v (journaling from hook payload only)\n",
 				hp.TranscriptPath, perr)
 			userReq, reply, tools, lastTurnID = "", "", nil, ""
 			break
 		}
+		userReq, reply, tools, lastTurnID, turnDone = u, r, t, last, done
 		if turnDone || hp.HookEventName != "Stop" {
 			break
 		}
@@ -145,6 +158,7 @@ func BuildCodexEvent(raw []byte) (*Payload, error) {
 	return &Payload{
 		ProjectID:  pid,
 		ProjectDir: dir,
+		Degraded:   degraded,
 		Event: schema.Event{
 			SchemaVersion:  schema.Version,
 			IdempotencyKey: "codex:" + hp.SessionID + ":" + turnID,
@@ -162,24 +176,40 @@ func BuildCodexEvent(raw []byte) (*Payload, error) {
 	}, nil
 }
 
-// parseRollout scans the rollout JSONL for the turn named by turnID (or,
-// with an empty turnID, the last turn present): the user prompt and agent
+// parseRollout reads the turn named by turnID (or, with an empty turnID,
+// the last turn present) from the rollout JSONL: the user prompt and agent
 // reply come from item_completed events, which carry the turn id; tool
 // names come from the response_item lines between that turn's
 // task_started and the next one, because response_item lines carry no
 // turn id of their own. turnDone reports whether the wanted turn's
 // task_complete was seen — the signal that its lines are fully flushed.
-func parseRollout(path, turnID string) (userReq, reply string, tools []string, lastTurnID string, turnDone bool, err error) {
+//
+// A rollout grows by the whole session, hundreds of megabytes for a long
+// one, while a turn is at its end. The read first finds the turn's start
+// from the end of the file (rolloutTurnStart), then parses forward from
+// there, so its cost follows the turn, not the session. Both halves stop
+// at the deadline with errShare.
+func parseRollout(path, turnID string, deadline time.Time) (userReq, reply string, tools []string, lastTurnID string, turnDone bool, err error) {
 	f, err := os.Open(path)
 	if err != nil {
 		return "", "", nil, "", false, err
 	}
 	defer f.Close()
+	start, err := rolloutTurnStart(f, turnID, deadline)
+	if err != nil {
+		return "", "", nil, "", false, err
+	}
+	if _, err := f.Seek(start, io.SeekStart); err != nil {
+		return "", "", nil, "", false, err
+	}
 	sc := bufio.NewScanner(f)
-	sc.Buffer(make([]byte, 1024*1024), 16*1024*1024) // rollout lines can be huge
-	inTurn := false                                  // between the wanted turn's task_started and the next task_started
+	sc.Buffer(make([]byte, 1024*1024), maxLine) // rollout lines can be huge
+	inTurn := false                             // between the wanted turn's task_started and the next task_started
 	var curTools []string
-	for sc.Scan() {
+	for n := 0; sc.Scan(); n++ {
+		if n%256 == 0 && time.Now().After(deadline) {
+			return "", "", nil, "", false, errShare
+		}
 		var line rolloutLine
 		if json.Unmarshal(sc.Bytes(), &line) != nil {
 			continue // tolerate unknown/corrupt lines
@@ -254,4 +284,49 @@ func parseRollout(path, turnID string) (userReq, reply string, tools []string, l
 		return "", "", nil, "", false, err
 	}
 	return userReq, reply, curTools, lastTurnID, turnDone, nil
+}
+
+// rolloutTurnStart returns the offset of the first task_started line of
+// the turn parseRollout reads: the turn named by turnID, or the last turn
+// with an empty one. It reads from the end and stops at the line before
+// that turn's run of lines (another turn's task_started or
+// task_complete), so a retried turn, which starts twice, is read from its
+// first start. A turn it does not find is read from the start of the
+// file, as before.
+func rolloutTurnStart(f *os.File, turnID string, deadline time.Time) (int64, error) {
+	want, start := turnID, int64(-1)
+	err := scanBack(f, deadline, func(b []byte, off int64) bool {
+		if !bytes.Contains(b, []byte(`"task_`)) {
+			return false
+		}
+		var line rolloutLine
+		var ev struct {
+			Type   string `json:"type"`
+			TurnID string `json:"turn_id"`
+		}
+		if json.Unmarshal(b, &line) != nil || line.Type != "event_msg" || json.Unmarshal(line.Payload, &ev) != nil {
+			return false
+		}
+		switch ev.Type {
+		case "task_started":
+			if start < 0 && want == "" {
+				want = ev.TurnID
+			}
+			if ev.TurnID == want {
+				start = off
+				return false
+			}
+			return start >= 0
+		case "task_complete":
+			return start >= 0 && ev.TurnID != want
+		}
+		return false
+	})
+	if err != nil {
+		return 0, err
+	}
+	if start < 0 {
+		return 0, nil
+	}
+	return start, nil
 }

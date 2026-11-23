@@ -10,6 +10,7 @@ package adapter
 
 import (
 	"bytes"
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -172,7 +173,20 @@ func (c *Client) PublishDocs(projectDir, projectID, hubName, by string) []DocPus
 		if st.Hash == h {
 			continue // unchanged since last publish: the normal, free case
 		}
+		if c.left() < hubRequestMin {
+			// The hook run is out of time; the hash stays old, so a
+			// later run publishes it.
+			c.deferred("publishing " + docName)
+			continue
+		}
+		if c.hubFailed[hub.URL] {
+			continue // the hub failed this run already; the hash stays old, a later run publishes it
+		}
 		doc, err := c.PutHubDoc(hub, projectID, docName, string(body), by, st.Rev)
+		if errors.Is(err, context.DeadlineExceeded) {
+			c.deferred("publishing " + docName)
+			continue
+		}
 		if err != nil {
 			out = append(out, DocPushResult{Name: docName, Err: err})
 			continue
@@ -285,7 +299,9 @@ func (c *Client) hubDocDo(hub *HubConfig, method, u string, body []byte, into an
 	if body != nil {
 		rd = bytes.NewReader(body)
 	}
-	req, err := http.NewRequest(method, u, rd)
+	ctx, cancel := c.reqCtx()
+	defer cancel()
+	req, err := http.NewRequestWithContext(ctx, method, u, rd)
 	if err != nil {
 		return err
 	}

@@ -8,7 +8,6 @@ package processctx
 // profile's grant. Nothing here falls back to the checkout's credential.
 
 import (
-	"context"
 	"fmt"
 	"net/http"
 	"strings"
@@ -67,7 +66,7 @@ func teamConnect(path, dir, root, projectID string) (*teamConn, error) {
 	if err != nil {
 		return nil, pinError(err.Error(), "")
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), hubLookupTimeout)
+	ctx, cancel := bounded(hubLookupTimeout)
 	rep, _, err := teamsession.Verify(ctx, client, f.URL, cred, f.Handle)
 	cancel()
 	switch {

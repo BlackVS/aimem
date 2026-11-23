@@ -12,9 +12,11 @@ package main
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/url"
 	"strings"
+	"time"
 
 	"aimem/internal/ident"
 	"aimem/internal/store"
@@ -120,7 +122,15 @@ func previousSessionQuery(id string) string {
 }
 
 func localGetJSON(path string, into any) error {
-	resp, err := client().Get("http://aimem" + path)
+	c := client()
+	if !hookDeadline.IsZero() {
+		left := time.Until(hookDeadline)
+		if left <= 0 {
+			return errors.New("the hook run is out of time")
+		}
+		c.Timeout = left
+	}
+	resp, err := c.Get("http://aimem" + path)
 	if err != nil {
 		return err
 	}
@@ -130,3 +140,7 @@ func localGetJSON(path string, into any) error {
 	}
 	return json.NewDecoder(resp.Body).Decode(into)
 }
+
+// hookDeadline ends a hook command's run where one sets it
+// (session-start); zero elsewhere.
+var hookDeadline time.Time

@@ -8,7 +8,6 @@ package processctx
 // sets. Git on the member is the path for every other selection.
 
 import (
-	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -71,7 +70,7 @@ func fetchHubSet(hub *adapter.HubConfig, client *http.Client, project string, re
 	fail := func(o hubSetOutcome, err error) (hubSetOutcome, *process.Bundle, string, error) {
 		return o, nil, "", err
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), setReadTimeout)
+	ctx, cancel := bounded(setReadTimeout)
 	defer cancel()
 	u := strings.TrimRight(hub.URL, "/") + "/v1/projects/" + url.PathEscape(project) + "/process/set"
 	if byVersion {
