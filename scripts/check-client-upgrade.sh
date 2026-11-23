@@ -55,7 +55,26 @@ tmp=$(mktemp -d)
 hubpid=
 trap '[ -z "$hubpid" ] || kill "$hubpid" 2>/dev/null || true' EXIT
 
-fail() { echo "FAIL: $*" >&2; exit 1; }
+# unit_state prints what systemd holds about the service: its restarts,
+# its result (start-limit-hit when it refused a start) and its journal.
+unit_state() {
+  [ "$asset" = aimem-linux-amd64 ] || return 0
+  echo "--- the aimem user unit at the failure" >&2
+  systemctl --user show aimem.service -p ActiveState -p Result -p NRestarts -p StartLimitBurst -p StartLimitIntervalUSec >&2 2>/dev/null || true
+  journalctl --user -u aimem.service --no-pager -n 40 >&2 2>/dev/null || true
+}
+fail() { echo "FAIL: $*" >&2; unit_state; exit 1; }
+# start_limit: restart the unit until systemd refuses a start, as a crash
+# loop leaves it, and check that it says so. The installers reset this
+# before a start of their own (svc_reset); without that, the upgrade's or
+# the rollback's start is refused here (task 01a208ef-65c1).
+start_limit() {
+  local i
+  for i in 1 2 3 4 5 6; do systemctl --user restart aimem.service 2>/dev/null || true; done
+  [ "$(systemctl --user show aimem.service -p Result --value)" = start-limit-hit ] ||
+    fail "six restarts did not bring the unit to its start limit"
+  echo "ok: the unit is at its start limit (Result=start-limit-hit)"
+}
 # at_least a b: release a is b or later.
 at_least() {
   awk -v a="${1#v}" -v b="${2#v}" 'BEGIN { split(a, x, "."); split(b, y, ".")
@@ -98,6 +117,14 @@ cat > "$tmp/stand-in" <<EOF
 exit 1
 EOF
 export_tree "$tmp/fail-export" "$tmp/stand-in"
+
+if [ "$asset" = aimem-linux-amd64 ]; then
+  echo "--- reset-failed on a unit that is not loaded yet: fails, and changes nothing"
+  rc=0
+  systemctl --user reset-failed aimem.service 2>&1 || rc=$?
+  [ "$rc" -ne 0 ] || fail "reset-failed on a unit not loaded exited 0; the installers' svc_reset drops this failure"
+  echo "ok: reset-failed exited $rc; svc_reset ends in || true"
+fi
 
 echo "--- one-liner install of $FROM"
 curl -fsSL "https://raw.githubusercontent.com/$repo/$FROM/boot.sh" | AIMEM_USER_ONLY=1 bash
@@ -148,6 +175,19 @@ tools() {
 }
 for c in joined alone; do echo "$FROM lists $(tools "$c" | wc -l | tr -d ' ') tools in the $c checkout"; done
 
+if [ "$asset" = aimem-linux-amd64 ]; then
+  echo "--- the unit at its start limit, then $TO with a binary that never answers health: the rollback must bring $FROM back"
+  start_limit
+  rc=0
+  AIMEM_BASE="$tmp/fail-export" AIMEM_UPGRADE_WAIT=2 "$bin" upgrade --release "$TO" > "$tmp/fail-limit.log" 2>&1 || rc=$?
+  cat "$tmp/fail-limit.log"
+  [ "$rc" -ne 0 ] || fail "the upgrade to a binary that never serves exited 0"
+  grep -qF "ROLLED BACK: aimem $FROM is running again" "$tmp/fail-limit.log" ||
+    fail "the rollback from a unit at its start limit did not bring $FROM back"
+  [ "$(sha "$bin")" = "$(sum_of "$asset")" ] || fail "the binary after the rollback is not $FROM's $asset"
+  serving "$FROM" "after the rollback from the start limit"
+fi
+
 echo "--- $TO with a binary that never answers health: the upgrade must roll back"
 rc=0
 AIMEM_BASE="$tmp/fail-export" AIMEM_UPGRADE_WAIT=10 "$bin" upgrade --release "$TO" > "$tmp/fail.log" 2>&1 || rc=$?
@@ -163,6 +203,10 @@ fi
 [ "$(sha "$bin")" = "$(sum_of "$asset")" ] || fail "the binary after the rollback is not $FROM's $asset"
 serving "$FROM" "after the rollback"
 
+if [ "$asset" = aimem-linux-amd64 ]; then
+  echo "--- the unit at its start limit before the upgrade"
+  start_limit
+fi
 echo "--- aimem upgrade --release $TO, from the tree's export"
 AIMEM_BASE="$tmp/export" "$bin" upgrade --release "$TO" 2>&1 | tee "$tmp/upgrade.log"
 grep -qF "upgraded aimem $FROM -> $TO; service healthy at $TO" "$tmp/upgrade.log" ||

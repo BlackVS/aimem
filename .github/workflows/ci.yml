@@ -223,24 +223,45 @@ jobs:
           cache: true
       - run: bash scripts/check-install-hub-container.sh
 
+  # Whether the upgrade checks below run (scripts/upgrade-scope.sh, which
+  # says why in its log): nightly, on a manual run, on a release prepare
+  # pull request from this repository's release/ branches, and on any other
+  # pull request from this repository that changes the installers or the
+  # upgrade checks. Never on a fork's pull request.
+  upgrade-scope:
+    runs-on: ubuntu-latest
+    outputs:
+      run: ${{ steps.scope.outputs.run }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - id: scope
+        env:
+          EVENT: ${{ github.event_name }}
+          HEAD_REF: ${{ github.head_ref }}
+          SAME_REPO: ${{ github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: bash scripts/upgrade-scope.sh
+
   # A real client upgrade from the previous release to this tree
   # (scripts/check-client-upgrade.sh): the previous release's one-liner
   # installs it, its own `aimem upgrade` installs an export of the tree, a
   # failed upgrade rolls back, and the lists a session sees after it are the
   # tree's. The previous release comes from the tags (full history). It
-  # installs into the runner's account, so it runs on a release prepare pull
-  # request from this repository's release/ branches, nightly and on a
-  # manual run, never on another pull request; macOS on a release prepare
-  # pull request and a manual run (docs/DEVELOPMENT.md, "Release gate").
+  # installs into the runner's account, so it runs only where upgrade-scope
+  # says; macOS on a release prepare pull request and a manual run only,
+  # since a starved macOS runner must not hold an ordinary pull request
+  # (docs/DEVELOPMENT.md, "Release gate").
   client-upgrade:
-    if: >-
-      github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' ||
-      (github.event_name == 'pull_request' && startsWith(github.head_ref, 'release/') &&
-      github.event.pull_request.head.repo.full_name == github.repository)
+    needs: upgrade-scope
+    if: needs.upgrade-scope.outputs.run == 'true'
     strategy:
       fail-fast: false
       matrix:
-        os: ${{ fromJSON(github.event_name == 'schedule' && '["ubuntu-latest","windows-latest"]' || '["ubuntu-latest","windows-latest","macos-latest"]') }}
+        os: ${{ fromJSON((github.event_name == 'schedule' || (github.event_name == 'pull_request' && !startsWith(github.head_ref, 'release/'))) && '["ubuntu-latest","windows-latest"]' || '["ubuntu-latest","windows-latest","macos-latest"]') }}
     runs-on: ${{ matrix.os }}
     timeout-minutes: 20
     steps:
@@ -272,13 +293,12 @@ jobs:
   # installs its hub, that hub writes a task, a comment, a memory and a
   # team, the tree's install-hub.sh upgrades it, and the tree reads it all
   # back; the state copy is the previous state and each journal is at the
-  # tree's schema. It runs where client-upgrade runs; a manual run may name
-  # the release to start from (the `from` input), and only a manual run.
+  # tree's schema. It runs where client-upgrade runs (upgrade-scope); a
+  # manual run may name the release to start from (the `from` input), and
+  # only a manual run.
   hub-upgrade:
-    if: >-
-      github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' ||
-      (github.event_name == 'pull_request' && startsWith(github.head_ref, 'release/') &&
-      github.event.pull_request.head.repo.full_name == github.repository)
+    needs: upgrade-scope
+    if: needs.upgrade-scope.outputs.run == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
