@@ -28,7 +28,7 @@ evidence. The link carries:
 
 | Field | Values | Meaning |
 | --- | --- | --- |
-| `goal` | an epic id | The goal. It must be the record's `epic`. |
+| `goal` | an epic id | The goal. It is the record's `epic`; giving another goal to `set_feature` moves the feature (below). |
 | `position` | 1 to 10000 | Its place in the goal's order of delivery. |
 | `mark` | `mandatory` or `optional` | Whether the goal needs it. |
 | `ground` | `check` or `owner_condition` | Why it is mandatory: the goal's check needs it, or the owner set it as a condition. Required for a mandatory feature; an optional one has none. |
@@ -48,7 +48,7 @@ feature never confirms a feature, and no task may depend on a feature.
 | MCP tool | HTTP | What it does |
 | --- | --- | --- |
 | `create_task` with `feature` | `POST /v1/projects/{p}/tasks` with a `feature` object | Creates the record as a feature in one write. Set its `epic` to the goal. |
-| `set_feature` | `PUT /v1/tasks/{id}/feature` | Turns a task into a feature, or changes a feature's link. With `remove: true`, turns a feature back into a task. |
+| `set_feature` | `PUT /v1/tasks/{id}/feature` | Turns a task into a feature, changes a feature's link, or moves a feature to another goal of its project. With `remove: true`, turns a feature back into a task. |
 | `confirm_feature_task` | `POST /v1/tasks/{id}/feature/tasks` | Adds one task to a feature's confirmed tasks, or with `remove: true` takes it out. Nothing else changes. |
 | `list_features` | `GET /v1/projects/{p}/epics/{e}/features` | The goal's features in position order, each with its link and the number of confirmed tasks. At most 100, no paging. |
 | `list_tasks` with `feature` | `GET /v1/projects/{p}/tasks?feature=<id>` | The tasks of this project that the feature confirms. Read a confirmed task of another project with `get_task`. |
@@ -61,6 +61,37 @@ same key returns the first answer.
 A feature changes state with `update_task` (or `triage_task` between
 BACKLOG and READY), as a task does. It moves to DONE only with at least one
 evidence reference: the record of the check that passed.
+
+## Moving a feature to the next goal
+
+A mark belongs to a goal. When a goal is reached and closed, its unfinished
+features move to the next goal, each with the mark it has there. Call
+`set_feature` on the feature with the next goal's epic id as `goal` and with
+the feature's whole link for that goal: `position`, `mark`, and for a
+mandatory mark its `ground`, plus `ground_note` and `alternative` if it has
+them. Nothing is taken from the link the feature had: every field is stated
+again, as on every `set_feature`.
+
+The move is one write. The record's `epic` and its link change together, and
+the feature keeps its id, its confirmed tasks, its comments and its history.
+The history entry of the move carries `moved_from`, the goal it left, beside
+the record with the goal it joined. The confirmed tasks are not written:
+each keeps its own epic. `list_tasks` with `feature` and the board's
+features view under the goal joined show them as before, while the list
+and the board filtered by the goal joined's epic do not.
+
+A move is refused when:
+
+- the feature is DONE or CANCELLED: a reached goal keeps the record of what
+  reached it, so move only an unfinished feature;
+- the goal joined is not an epic of the feature's project: a feature never
+  moves to another project;
+- the goal joined is RETIRED: move to an OPEN goal. The goal left may be
+  retired.
+
+`update_task` and `triage_task` never move a feature: a write of the
+content with another epic is refused, because it cannot state the mark for
+the new goal.
 
 ## Rules that refuse a write
 
@@ -88,7 +119,9 @@ a consumer drops it. A feature turned back into a task gets an entry from
 ## A hub or a client one release older
 
 A client one release older lists work only, reads a feature by its id, and
-its full update of a feature keeps the kind and the link. A client on a hub
+its full update of a feature keeps the kind and the link. A hub older than
+the move refuses `set_feature` with another goal, saying the goal must be the
+record's epic: upgrade the hub to move a feature. A client on a hub
 one release older is told to upgrade the hub when it calls a feature tool,
 and a `create_task` with a link is refused there, so a feature is never
 stored as work by mistake.

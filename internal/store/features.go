@@ -44,12 +44,13 @@ type FeatureLink struct {
 	Alternative string `json:"alternative,omitempty"`
 }
 
-func (l *FeatureLink) validate(epic string) error {
-	if epic == "" {
-		return errors.New("a feature belongs to a goal: set the record's epic first")
-	}
-	if l.Goal != epic {
-		return errors.New("the feature's goal must be the record's epic")
+// validate checks the link's own fields, which every write states: none is
+// taken from the link a feature had. Whether the goal may differ from the
+// record's epic is the caller's rule: a new feature and a conversion keep the
+// record's epic, and a feature's move changes it (SetFeature).
+func (l *FeatureLink) validate() error {
+	if l.Goal == "" {
+		return errors.New("goal is required: give the epic the feature belongs to")
 	}
 	if l.Position < 1 || l.Position > maxFeaturePosition {
 		return fmt.Errorf("position must be between 1 and %d", maxFeaturePosition)
@@ -109,7 +110,7 @@ func featureDependencyError(base error, task, feature string) error {
 // feature anyway (data no guard wrote) can still be released or finished.
 func checkFeatureRules(tx *sql.Tx, t Task, from, priorDeps string, create bool) error {
 	if t.isFeature() && t.Feature != nil && t.Epic != t.Feature.Goal {
-		return invalid(errors.New("a feature's epic is its goal: it cannot move to another epic"))
+		return invalid(errors.New("a feature changes its goal with set_feature: give the new goal with its mark and position"))
 	}
 	if t.isFeature() && t.State == "DONE" && (create || from != "DONE") && len(t.EvidenceRefs) == 0 {
 		return invalid(errors.New("a feature moves to DONE only with evidence that its check passes: add an evidence reference"))
@@ -162,7 +163,10 @@ func (d *DB) CreateFeature(content TaskContent, link FeatureLink, actor TaskActo
 	if err := content.validate(); err != nil {
 		return Task{}, invalid(err)
 	}
-	if err := link.validate(content.Epic); err != nil {
+	if err := link.validate(); err != nil {
+		return Task{}, invalid(err)
+	}
+	if err := ownEpicGoal(content.Epic, link.Goal, "a new feature's goal is its epic: give the epic as the goal"); err != nil {
 		return Task{}, invalid(err)
 	}
 	r := createFeatureRetry(content, link)
@@ -180,6 +184,18 @@ func (d *DB) CreateFeature(content TaskContent, link FeatureLink, actor TaskActo
 	return t, err
 }
 
+// ownEpicGoal is the rule for a record that becomes a feature: its goal is
+// the epic it already has. differs is the refusal when the two differ.
+func ownEpicGoal(epic, goal, differs string) error {
+	if epic == "" {
+		return errors.New("a feature belongs to a goal: set the record's epic first")
+	}
+	if goal != epic {
+		return errors.New(differs)
+	}
+	return nil
+}
+
 func setFeatureRetry(id string, link *FeatureLink, remove bool, expected int64) retry {
 	return retry{"set_feature", id, struct {
 		Feature  *FeatureLink `json:"feature,omitempty"`
@@ -195,7 +211,10 @@ func (d *DB) SetFeatureReplays(id string, link *FeatureLink, remove bool, expect
 }
 
 // SetFeature turns a task into a feature, changes a feature's link, or,
-// with remove, turns a feature back into a task. A conversion appends the
+// with remove, turns a feature back into a task. A link whose goal is
+// another epic of this project moves the feature: its epic and its link
+// change together in this write, and its confirmed tasks keep their own
+// epics. A conversion appends the
 // feed's closing entry and a removal the entry that reopens the record, in
 // the same transaction. A conversion is refused while the task is reserved
 // or team-managed, or while a task of this project depends on it; a removal
@@ -239,13 +258,22 @@ func (d *DB) SetFeature(id string, link *FeatureLink, remove bool, expected int6
 			}
 			t.Kind, t.Feature = "", nil
 		} else {
-			if err := link.validate(t.Epic); err != nil {
+			if err := link.validate(); err != nil {
 				return Task{}, invalid(err)
 			}
-			if !was {
+			switch {
+			case !was:
+				if err := ownEpicGoal(t.Epic, link.Goal, "a task becomes a feature of its own epic: give the task's epic as the goal, or set the epic with update_task first"); err != nil {
+					return Task{}, invalid(err)
+				}
 				if err := rejectFeatureDependents(tx, id); err != nil {
 					return Task{}, err
 				}
+			case link.Goal != t.Epic:
+				if err := checkFeatureMove(tx, t, link.Goal); err != nil {
+					return Task{}, err
+				}
+				t.Epic = link.Goal
 			}
 			t.Kind, t.Feature = KindFeature, link
 		}
@@ -262,6 +290,29 @@ func (d *DB) SetFeature(id string, link *FeatureLink, remove bool, expected int6
 		}
 		return t, err
 	})
+}
+
+// checkFeatureMove refuses a feature's move to goal: a finished feature stays
+// with the goal it reached, and the goal joined is an OPEN epic of this
+// project. The goal left may be retired.
+func checkFeatureMove(tx *sql.Tx, t Task, goal string) error {
+	switch t.State {
+	case "DONE":
+		return invalid(errors.New("a DONE feature stays with the goal it reached: move only an unfinished feature"))
+	case "CANCELLED":
+		return invalid(errors.New("a CANCELLED feature stays with its goal: reopen it with update_task before you move it"))
+	}
+	e, err := readEpic(tx, goal)
+	if errors.Is(err, ErrEpicNotFound) {
+		return invalid(errors.New("the goal is not an epic of this project: a feature moves only to another goal of its own project, so give an epic id that list_epics returns here"))
+	}
+	if err != nil {
+		return err
+	}
+	if e.State != "OPEN" {
+		return invalid(errors.New("the goal is retired and takes no new feature: move the feature to an OPEN goal of this project"))
+	}
+	return nil
 }
 
 // rejectFeatureDependents refuses a conversion that a task of this project

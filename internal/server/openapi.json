@@ -1265,7 +1265,7 @@
       "get": {
         "x-team-mode": "Team mode: with the optional header X-Aimem-Team-Context (an aimem-scoped acs1_ handle from aicrew) and a user-scoped individual bearer, over TLS terminated by the hub only (otherwise tls_required, 403, whatever forwarded headers claim), the hub verifies the session online through aicrew introspection on every request, matches it to the authenticated user and token, and serves the read only under the linked team access profile's live grant, never the caller's personal grants. Refusals use the envelope with active_mode team: context_unavailable (503, retryable), context_stale, identity_mismatch, grant_denied, role_forbidden (403).",
         "summary": "Accepted revisions in order",
-        "description": "Each entry is the complete snapshot plus the actor; after is the last revision seen. Ordinary user tokens may call this route; writes are authorized per attempt against the task's owning project (user-scoped token or token issued for that project instance, plus a current grant), legacy writer tokens read only, admin tokens do everything.",
+        "description": "Each entry is the complete snapshot plus the actor; the entry of a feature's move to another goal also carries moved_from, the goal it left. after is the last revision seen. Ordinary user tokens may call this route; writes are authorized per attempt against the task's owning project (user-scoped token or token issued for that project instance, plus a current grant), legacy writer tokens read only, admin tokens do everything.",
         "x-role": "writer",
         "parameters": [
           {
@@ -10337,8 +10337,8 @@
     },
     "/v1/tasks/{id}/feature": {
       "put": {
-        "summary": "Set a record's feature link: turn a task into a feature, change the link, or turn a feature back into a task",
-        "description": "docs/DESIGN-feature-record.md, section 6. Body: the link (goal, position, mark, ground, ground_note, alternative) and expected_revision, or remove: true and expected_revision with no link field. On a task it turns the task into a feature and appends the board feed's closing entry (to FEATURE) in the same write; it is refused while the task is reserved or team-managed (409) or while a task of its own project depends on it (400, naming those tasks). On a feature it changes the link. With remove it turns the feature back into a task and appends the entry that reopens it (from FEATURE to its state); refused while the feature has confirmed tasks. Returns the record, with kind and feature for a feature. A stale revision is 409 with the current record; a repeated Idempotency-Key with the same input returns the first answer. ground_note and alternative are checked as readable prose when the write changes them. Ordinary user tokens may call this route under the ordinary task-write check (user-scoped token or token issued for that project instance, plus a current grant); legacy writer tokens read only, admin tokens do everything. Not served in team mode.",
+        "summary": "Set a record's feature link: turn a task into a feature, change the link, move the feature to another goal, or turn a feature back into a task",
+        "description": "docs/DESIGN-feature-record.md, section 6. Body: the link (goal, position, mark, ground, ground_note, alternative) and expected_revision, or remove: true and expected_revision with no link field. On a task it turns the task into a feature and appends the board feed's closing entry (to FEATURE) in the same write; it is refused while the task is reserved or team-managed (409) or while a task of its own project depends on it (400, naming those tasks). On a feature it changes the link; a goal other than the record's epic moves the feature: the epic and the link change in one write, the link is stated whole for the goal joined, the confirmed tasks keep their own epics, and the history entry carries moved_from (the goal left). A move is refused (400) for a DONE or CANCELLED feature, for a goal that is not an epic of the record's project and for a RETIRED goal; the goal left may be retired. A task's full update never changes a feature's epic. With remove it turns the feature back into a task and appends the entry that reopens it (from FEATURE to its state); refused while the feature has confirmed tasks. Returns the record, with kind and feature for a feature. A stale revision is 409 with the current record; a repeated Idempotency-Key with the same input returns the first answer. ground_note and alternative are checked as readable prose when the write changes them. Ordinary user tokens may call this route under the ordinary task-write check (user-scoped token or token issued for that project instance, plus a current grant); legacy writer tokens read only, admin tokens do everything. Not served in team mode.",
         "x-role": "writer",
         "parameters": [
           {
@@ -10372,7 +10372,7 @@
                 "properties": {
                   "goal": {
                     "type": "string",
-                    "description": "the goal: an epic id, equal to the record's epic"
+                    "description": "the goal: an epic id, the record's epic; on a feature, another OPEN epic of the project moves the feature there"
                   },
                   "position": {
                     "type": "integer",

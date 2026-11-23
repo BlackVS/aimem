@@ -183,6 +183,18 @@ belongs to one goal. So the link is a single object on the feature, and its
 `goal` must equal the feature's `epic`; the task write refuses a change of
 `epic` on a feature while its link names another goal.
 
+**Correction of 2026-11-23: a feature moves to the next goal.** A reached
+goal is closed, and its unfinished features move to the named next goal with
+new marks (the owner's rule of 2026-11-17, made a feature of the next goal on
+2026-11-23). The link stays one object, and `set_feature` with another goal
+is the move: in one write it sets the record's `epic` and the link together,
+from a link stated whole for the goal joined. The goal joined is an OPEN
+epic of the same project; the goal left may be retired; a DONE or CANCELLED
+feature does not move. The history entry of the move carries `moved_from`,
+the goal left. The confirmed tasks keep their own epics. The task write
+still refuses a change of `epic` on a feature, because it cannot state the
+mark for the new goal.
+
 **What widening it later costs.** The link is already an object with its own
 `goal` field, and it is read and written only through the link routes. A
 second goal per feature turns that object into a list:

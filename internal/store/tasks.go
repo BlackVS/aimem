@@ -163,6 +163,9 @@ type Task struct {
 type TaskChange struct {
 	Task  Task      `json:"task"`
 	Actor TaskActor `json:"actor"`
+	// MovedFrom is the goal a feature left in this revision's write; the
+	// task carries the goal it joined. It is empty on every other write.
+	MovedFrom string `json:"moved_from,omitempty"`
 }
 
 // TaskComment is immutable discussion. Sequence is the database append
@@ -605,9 +608,9 @@ func writeTask(tx *sql.Tx, t Task, actor TaskActor, create bool) error {
 	if t.isFeature() {
 		kind = KindFeature
 	}
-	from, priorDeps := "", "[]"
+	from, priorDeps, priorEpic, priorKind := "", "[]", "", ""
 	if !create {
-		if err = tx.QueryRow(`SELECT state, COALESCE(json_extract(body,'$.dependencies'),'[]') FROM tasks WHERE id=?`, t.ID).Scan(&from, &priorDeps); err != nil {
+		if err = tx.QueryRow(`SELECT state, COALESCE(json_extract(body,'$.dependencies'),'[]'), epic, kind FROM tasks WHERE id=?`, t.ID).Scan(&from, &priorDeps, &priorEpic, &priorKind); err != nil {
 			return err
 		}
 	}
@@ -624,11 +627,15 @@ func writeTask(tx *sql.Tx, t Task, actor TaskActor, create bool) error {
 	if err != nil {
 		return err
 	}
-	change, err := json.Marshal(TaskChange{Task: t, Actor: actor})
+	change := TaskChange{Task: t, Actor: actor}
+	if priorKind == KindFeature && t.isFeature() && priorEpic != t.Epic {
+		change.MovedFrom = priorEpic
+	}
+	entry, err := json.Marshal(change)
 	if err != nil {
 		return err
 	}
-	if _, err = tx.Exec(`INSERT INTO task_history(task_id, revision, body) VALUES(?,?,?)`, t.ID, t.Revision, string(change)); err != nil {
+	if _, err = tx.Exec(`INSERT INTO task_history(task_id, revision, body) VALUES(?,?,?)`, t.ID, t.Revision, string(entry)); err != nil {
 		return err
 	}
 	return recordStateChange(tx, t, from, create)
