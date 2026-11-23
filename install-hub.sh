@@ -2,7 +2,7 @@
 # aimem hub installer: stand up a complete hub on a fresh Debian/Ubuntu
 # host (LXC or VM). Run AS ROOT on the hub host:
 #
-#   curl -fsSL https://raw.githubusercontent.com/BlackVS/aimem/v0.11.5/install-hub.sh | bash
+#   curl -fsSL https://raw.githubusercontent.com/BlackVS/aimem/v0.12.0/install-hub.sh | bash
 #
 # In a closed network, from an aiforge export (a local directory or an
 # internal https server holding the release files):
@@ -78,7 +78,7 @@ set -euo pipefail
 
 # The release this script installs. Bumped together with the CHANGELOG
 # when a release is cut (internal/installer checks they agree).
-RELEASE=v0.11.5
+RELEASE=v0.12.0
 
 # Everything below runs from main, called on the last line: piped to a
 # root shell, a download cut short at any line defines functions and
