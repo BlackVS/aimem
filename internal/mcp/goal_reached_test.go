@@ -2,6 +2,7 @@ package mcp
 
 import (
 	"encoding/json"
+	"fmt"
 	"strings"
 	"testing"
 )
@@ -35,17 +36,25 @@ func TestGoalReachedThroughTheTools(t *testing.T) {
 	if e["check"] != check || e["state"] != "OPEN" {
 		t.Fatalf("update_epic without check or state: %v", e)
 	}
+	// An explicit null keeps the check too: null is never read as "clear".
+	e = must("update_epic", map[string]any{"id": id, "title": "the goal, renamed", "check": nil, "expected_revision": 2, "idempotency_key": "null-check"})
+	if e["check"] != check {
+		t.Fatalf("update_epic with check null must keep it: %v", e)
+	}
 
 	// A feature has no check of its own: the task tools refuse the argument
-	// instead of dropping it.
-	for _, tool := range []map[string]any{
-		{"name": "create_task", "args": map[string]any{"title": "f", "epic": id, "check": "x", "idempotency_key": "chk-1",
-			"feature": map[string]any{"goal": id, "position": 1, "mark": "optional"}}},
-		{"name": "update_task", "args": map[string]any{"id": id, "title": "f", "check": "x", "expected_revision": 1, "idempotency_key": "chk-2"}},
-		{"name": "set_feature", "args": map[string]any{"id": id, "goal": id, "position": 1, "mark": "optional", "check": "x", "expected_revision": 1, "idempotency_key": "chk-3"}},
-	} {
-		if text, isErr := call(tool["name"].(string), tool["args"].(map[string]any)); !isErr || !strings.Contains(text, "check belongs to an epic") {
-			t.Fatalf("%s with a check must be refused: %s", tool["name"], text)
+	// in every form it can be sent (a value, empty, null) instead of
+	// dropping it.
+	for i, check := range []any{"x", "", nil} {
+		for _, tool := range []map[string]any{
+			{"name": "create_task", "args": map[string]any{"title": "f", "epic": id, "check": check, "idempotency_key": fmt.Sprintf("chk-c-%d", i),
+				"feature": map[string]any{"goal": id, "position": 1, "mark": "optional"}}},
+			{"name": "update_task", "args": map[string]any{"id": id, "title": "f", "check": check, "expected_revision": 1, "idempotency_key": fmt.Sprintf("chk-u-%d", i)}},
+			{"name": "set_feature", "args": map[string]any{"id": id, "goal": id, "position": 1, "mark": "optional", "check": check, "expected_revision": 1, "idempotency_key": fmt.Sprintf("chk-s-%d", i)}},
+		} {
+			if text, isErr := call(tool["name"].(string), tool["args"].(map[string]any)); !isErr || !strings.Contains(text, "check belongs to an epic") {
+				t.Fatalf("%s with check %#v must be refused: %s", tool["name"], check, text)
+			}
 		}
 	}
 	if rows, _ := must("list_tasks", map[string]any{"kind": "any"})["tasks"].([]any); len(rows) != 0 {
@@ -64,12 +73,12 @@ func TestGoalReachedThroughTheTools(t *testing.T) {
 		t.Fatalf("list_features: the mark and the count: %v", l)
 	}
 
-	if text, isErr := call("update_epic", map[string]any{"id": id, "title": "the goal", "state": "REACHED", "expected_revision": 2, "idempotency_key": "reach-1"}); !isErr || !strings.Contains(text, feature) {
+	if text, isErr := call("update_epic", map[string]any{"id": id, "title": "the goal", "state": "REACHED", "expected_revision": 3, "idempotency_key": "reach-1"}); !isErr || !strings.Contains(text, feature) {
 		t.Fatalf("REACHED with an open feature, named: %s", text)
 	}
 	must("update_task", map[string]any{"id": feature, "title": "the feature", "state": "DONE", "epic": id, "dependencies": []string{work},
 		"evidence_refs": []map[string]any{{"kind": "url", "ref": "https://example.com/ci/1"}}, "expected_revision": 2, "idempotency_key": "done"})
-	if e := must("update_epic", map[string]any{"id": id, "title": "the goal", "state": "REACHED", "expected_revision": 2, "idempotency_key": "reach-2"}); e["state"] != "REACHED" || e["check"] != check {
+	if e := must("update_epic", map[string]any{"id": id, "title": "the goal", "state": "REACHED", "expected_revision": 3, "idempotency_key": "reach-2"}); e["state"] != "REACHED" || e["check"] != check {
 		t.Fatalf("REACHED: %v", e)
 	}
 	if epics, _ := must("list_epics", map[string]any{})["epics"].([]any); len(epics) != 0 {
@@ -82,7 +91,7 @@ func TestGoalReachedThroughTheTools(t *testing.T) {
 		t.Fatalf("a new task in a reached goal: %s", text)
 	}
 	// An empty check clears it.
-	if e := must("update_epic", map[string]any{"id": id, "title": "the goal", "check": "", "expected_revision": 3, "idempotency_key": "clear"}); e["check"] != "" || e["state"] != "REACHED" {
+	if e := must("update_epic", map[string]any{"id": id, "title": "the goal", "check": "", "expected_revision": 4, "idempotency_key": "clear"}); e["check"] != "" || e["state"] != "REACHED" {
 		t.Fatalf("an empty check clears it, the state stays: %v", e)
 	}
 }

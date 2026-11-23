@@ -77,10 +77,32 @@ func TestGoalReachedAndCheckOverHTTP(t *testing.T) {
 	if e := g.epic(t, g.goal); e.Check != "a fresh session delivers one task" || e.State != "OPEN" || e.Title != "the goal, renamed" {
 		t.Fatalf("kept: %+v", e)
 	}
+	// An explicit null keeps the check and the state as an absent member
+	// does; an empty state keeps the state too.
+	for _, fields := range []string{`"title":"the goal","check":null`, `"title":"the goal","state":null`, `"title":"the goal","state":""`} {
+		if code, body := g.putEpic(t, g.goal, fields); code != 200 {
+			t.Fatalf("%s: %d %s", fields, code, body)
+		}
+		if e := g.epic(t, g.goal); e.Check != "a fresh session delivers one task" || e.State != "OPEN" {
+			t.Fatalf("%s must keep the check and the state: %+v", fields, e)
+		}
+	}
 	if code, body := g.putEpic(t, g.goal, `"title":"the goal","check":"a\u0000b"`); code != 400 || !strings.Contains(body, "check") {
 		t.Fatalf("the check is prose-checked: %d %s", code, body)
 	}
 
+	// A feature has no check of its own: a check in the link is refused in
+	// every form, nothing written.
+	for _, v := range []string{`"x"`, `""`, `null`} {
+		w := taskReq(t, g.h, "POST", "/v1/projects/alpha/tasks", g.alice, g.key(),
+			fmt.Sprintf(`{"title":"f","epic":%q,"feature":{"goal":%q,"position":1,"mark":"optional","check":%s}}`, g.goal, g.goal, v))
+		if w.Code != 400 {
+			t.Fatalf("a feature link with check %s: %d %s", v, w.Code, w.Body)
+		}
+	}
+	if w := taskReq(t, g.h, "GET", "/v1/projects/alpha/tasks?kind=any", g.alice, "", ""); len(listed(t, w)) != 0 {
+		t.Fatalf("a refused feature was written: %s", w.Body)
+	}
 	f := g.feature(t, "the feature", 1)
 	if code, body := g.putEpic(t, g.goal, `"title":"the goal","state":"REACHED"`); code != 400 || !strings.Contains(body, f) || !strings.Contains(body, "set_feature") {
 		t.Fatalf("REACHED with an open feature: %d %s", code, body)
@@ -110,6 +132,15 @@ func TestGoalReachedAndCheckOverHTTP(t *testing.T) {
 	}
 	if w := g.setFeature(t, g.alice, finished, g.key(), fmt.Sprintf(`{"goal":%q,"position":2,"mark":"optional","expected_revision":1}`, g.goal)); w.Code != 400 || !strings.Contains(w.Body.String(), "set the task's epic to an OPEN goal") {
 		t.Fatalf("a DONE task under a reached goal made a feature there: %d %s", w.Code, w.Body)
+	}
+	// A create with check or state null or empty is an OPEN epic without a
+	// check, as one without them.
+	for _, body := range []string{`{"title":"n","check":null,"state":null}`, `{"title":"e","check":"","state":""}`} {
+		w := taskReq(t, g.h, "POST", "/v1/projects/alpha/epics", g.alice, g.key(), body)
+		var e store.Epic
+		if w.Code != 201 || json.Unmarshal(w.Body.Bytes(), &e) != nil || e.State != "OPEN" || e.Check != "" {
+			t.Fatalf("create %s: %d %s", body, w.Code, w.Body)
+		}
 	}
 	if w := taskReq(t, g.h, "POST", "/v1/projects/alpha/epics", g.alice, g.key(), `{"title":"born reached","state":"REACHED"}`); w.Code != 400 {
 		t.Fatalf("a new epic is not REACHED: %d %s", w.Code, w.Body)

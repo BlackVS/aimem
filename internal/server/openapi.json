@@ -515,7 +515,7 @@
       },
       "put": {
         "summary": "Replace an epic's fields under expected_revision; state RETIRED retires it, REACHED closes a reached goal",
-        "description": "Authorized like a task write. A stale expected_revision returns 409 with the current epic. Retirement keeps existing task assignments and refuses new ones; ids are never reused. REACHED, from OPEN or RETIRED, closes the goal the same way, and is refused (400) while the epic holds a feature that is neither DONE nor CANCELLED, archived ones included, naming them; leaving REACHED is free. While the epic is REACHED, a feature in it stays DONE or CANCELLED: a write that would reopen one, or turn a task of the epic into a feature, is refused. Without state the epic keeps its state; without check it keeps its check, and an empty check clears it.",
+        "description": "Authorized like a task write. A stale expected_revision returns 409 with the current epic. Retirement keeps existing task assignments and refuses new ones; ids are never reused. REACHED, from OPEN or RETIRED, closes the goal the same way, and is refused (400) while the epic holds a feature that is neither DONE nor CANCELLED, archived ones included, naming them; leaving REACHED is free. While the epic is REACHED, a feature in it stays DONE or CANCELLED: a write that would reopen one, or turn a task of the epic into a feature, is refused. Without state the epic keeps its state; without check, or with check null, it keeps its check, and an empty check clears it.",
         "x-role": "writer",
         "parameters": [
           {
