@@ -45,15 +45,27 @@ func TestGoalReachedThroughTheTools(t *testing.T) {
 	// A feature has no check of its own: the task tools refuse the argument
 	// in every form it can be sent (a value, empty, null) instead of
 	// dropping it.
-	for i, check := range []any{"x", "", nil} {
+	// The decoder binds a member to a field under case folding, so another
+	// spelling of the key is refused too ("checK" ends in the Kelvin
+	// sign, which folds to k).
+	type form struct {
+		key   string
+		value any
+	}
+	for i, f := range []form{{"check", "x"}, {"check", ""}, {"check", nil}, {"Check", "x"}, {"CHECK", nil}, {"checK", "x"}} {
+		check := f.value
+		with := func(m map[string]any) map[string]any {
+			m[f.key] = check
+			return m
+		}
 		for _, tool := range []map[string]any{
-			{"name": "create_task", "args": map[string]any{"title": "f", "epic": id, "check": check, "idempotency_key": fmt.Sprintf("chk-c-%d", i),
-				"feature": map[string]any{"goal": id, "position": 1, "mark": "optional"}}},
-			{"name": "update_task", "args": map[string]any{"id": id, "title": "f", "check": check, "expected_revision": 1, "idempotency_key": fmt.Sprintf("chk-u-%d", i)}},
-			{"name": "set_feature", "args": map[string]any{"id": id, "goal": id, "position": 1, "mark": "optional", "check": check, "expected_revision": 1, "idempotency_key": fmt.Sprintf("chk-s-%d", i)}},
+			{"name": "create_task", "args": with(map[string]any{"title": "f", "epic": id, "idempotency_key": fmt.Sprintf("chk-c-%d", i),
+				"feature": map[string]any{"goal": id, "position": 1, "mark": "optional"}})},
+			{"name": "update_task", "args": with(map[string]any{"id": id, "title": "f", "expected_revision": 1, "idempotency_key": fmt.Sprintf("chk-u-%d", i)})},
+			{"name": "set_feature", "args": with(map[string]any{"id": id, "goal": id, "position": 1, "mark": "optional", "expected_revision": 1, "idempotency_key": fmt.Sprintf("chk-s-%d", i)})},
 		} {
 			if text, isErr := call(tool["name"].(string), tool["args"].(map[string]any)); !isErr || !strings.Contains(text, "check belongs to an epic") {
-				t.Fatalf("%s with check %#v must be refused: %s", tool["name"], check, text)
+				t.Fatalf("%s with %q: %#v must be refused: %s", tool["name"], f.key, check, text)
 			}
 		}
 	}
@@ -93,5 +105,26 @@ func TestGoalReachedThroughTheTools(t *testing.T) {
 	// An empty check clears it.
 	if e := must("update_epic", map[string]any{"id": id, "title": "the goal", "check": "", "expected_revision": 4, "idempotency_key": "clear"}); e["check"] != "" || e["state"] != "REACHED" {
 		t.Fatalf("an empty check clears it, the state stays: %v", e)
+	}
+}
+
+// The refusal of check matches the decoder's own matching: every spelling
+// the decoder binds to taskArgs.Check is present, null included, and a
+// member given twice (the decoder keeps the last, null) is present too.
+func TestCheckPresenceMatchesTheDecoder(t *testing.T) {
+	for _, raw := range []string{`{"check":"x"}`, `{"check":null}`, `{"Check":"x"}`, `{"CHECK":""}`, "{\"checK\":\"x\"}", `{"check":"x","check":null}`} {
+		a, err := decodeTaskArgs([]byte(raw))
+		if err != nil {
+			t.Fatalf("%s: %v", raw, err)
+		}
+		if !argPresent([]byte(raw), "check") {
+			t.Fatalf("%s: the check member is present", raw)
+		}
+		if a.Check == nil && raw != `{"check":null}` && raw != `{"check":"x","check":null}` {
+			t.Fatalf("%s: the decoder binds this spelling, so the test's premise holds", raw)
+		}
+	}
+	if argPresent([]byte(`{"title":"x","checks":"y"}`), "check") {
+		t.Fatal("another member is not check")
 	}
 }

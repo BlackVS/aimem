@@ -197,7 +197,7 @@ var taskToolDefs = append([]map[string]any{
 		"description": "Replace an epic's fields under the expected_revision you read; state RETIRED retires it " +
 			"(existing task assignments survive; new ones are refused). State REACHED closes a goal whose check passed, the same way, " +
 			"and is refused while the epic holds a feature that is neither DONE nor CANCELLED (named): move it with set_feature, " +
-			"or finish or cancel it. Without state the epic keeps its state, and without check (or with check null) it keeps its check. " +
+			"or finish or cancel it. Without state the epic keeps its state, and without check it keeps its check. " +
 			"A stale revision returns the current epic.",
 		"inputSchema": objSchema(map[string]any{
 			"project":           prop("string", "project id (defaults to the current project)"),
@@ -206,7 +206,7 @@ var taskToolDefs = append([]map[string]any{
 			"objective":         prop("string", "what the epic delivers"),
 			"state":             propEnum("OPEN, RETIRED or REACHED; omitted keeps the epic's state", "OPEN", "RETIRED", "REACHED"),
 			"target":            prop("string", "the release or milestone it maps to"),
-			"check":             prop("string", epicCheckDescription+"; omitted or null keeps the epic's check, empty clears it"),
+			"check":             prop("string", epicCheckDescription+"; omitted keeps the epic's check, empty clears it"),
 			"expected_revision": prop("integer", "the revision you read"),
 			"idempotency_key":   prop("string", "your unique key for this update (retry-safe)"),
 		}, "id", "title", "expected_revision", "idempotency_key"),
@@ -244,7 +244,7 @@ var taskToolDefs = append([]map[string]any{
 		"name": "list_features",
 		"description": "The features of a goal (an epic) in position order: id, title, state, assignee, revision, the link and the number of " +
 			"confirmed tasks; tie marks a position two features share; ready_to_close marks an open feature whose confirmed tasks " +
-			"are all DONE or CANCELLED (at least one, each one you can read). tasks_on_no_feature counts the goal's tasks, " +
+			"are all DONE or CANCELLED (at least one, each one you can read and still a task, not since made a feature). tasks_on_no_feature counts the goal's tasks, " +
 			"not archived, that no feature of the project confirms; the goal's log is one. At most 100, no paging. Read a feature's tasks with list_tasks and `feature`." + taskReadScope + featureGuidePointer,
 		"inputSchema": objSchema(map[string]any{
 			"project":          prop("string", "project id (defaults to the current project; it selects what to read, it is not a limit)"),
@@ -522,7 +522,7 @@ func (s *srv) taskTool(ctx context.Context, name string, raw json.RawMessage) (s
 	if err != nil {
 		return "", err
 	}
-	if name != "create_epic" && name != "update_epic" && argPresent(raw, "check") {
+	if name != "create_epic" && name != "update_epic" && (a.Check != nil || argPresent(raw, "check")) {
 		return "", errors.New("check belongs to an epic (create_epic, update_epic): a feature's check is its acceptance_criteria")
 	}
 	call := func(method, path string, body any, key string) (string, error) {
@@ -959,15 +959,21 @@ func argGiven(raw json.RawMessage, key string) bool {
 	return ok && string(v) != "null"
 }
 
-// argPresent reports whether the arguments carry key at all, null
-// included: a refusal of an argument must not be passed by sending null.
+// argPresent reports whether the arguments carry key at all, null included
+// and in any letter case the decoder would bind to it (encoding/json folds
+// names as strings.EqualFold does): a refusal of an argument must not be
+// passed by sending null or another spelling.
 func argPresent(raw json.RawMessage, key string) bool {
 	var args map[string]json.RawMessage
 	if json.Unmarshal(raw, &args) != nil {
 		return false
 	}
-	_, ok := args[key]
-	return ok
+	for k := range args {
+		if strings.EqualFold(k, key) {
+			return true
+		}
+	}
+	return false
 }
 
 func pageQuery(after int64, limit int) string {

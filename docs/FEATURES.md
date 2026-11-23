@@ -124,7 +124,8 @@ feature that is neither DONE nor CANCELLED, has at least one confirmed task,
 and whose confirmed tasks are all DONE or CANCELLED. The mark informs; a
 session decides, and moves the feature to DONE with its evidence. A
 confirmed task in a project you cannot read withholds the mark, as a task not
-done does, and the listing says nothing more about it. `confirmed_tasks`
+done does, and the listing says nothing more about it. So does a confirmed
+task that has since been made a feature in its own project. `confirmed_tasks`
 counts every id the feature confirms, readable or not, as the feature's own
 record lists them.
 
