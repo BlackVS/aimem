@@ -163,11 +163,12 @@ var taskToolDefs = append([]map[string]any{
 		}, "task_id", "comment_id"),
 	},
 	{
-		"name":        "list_epics",
-		"description": "Epics of a project: the grouping above tasks that a release or milestone maps to. OPEN ones unless include_retired." + taskReadScope,
+		"name": "list_epics",
+		"description": "Epics of a project: the grouping above tasks that a release or milestone maps to. OPEN ones unless include_retired, " +
+			"which adds the closed epics: RETIRED (given up or retired) and REACHED (a goal whose check passed)." + taskReadScope,
 		"inputSchema": objSchema(map[string]any{
 			"project":         prop("string", "project id (defaults to the current project; it selects what to read, it is not a limit)"),
-			"include_retired": prop("boolean", "include RETIRED epics"),
+			"include_retired": prop("boolean", "include the closed epics: RETIRED and REACHED"),
 		}),
 	},
 	{
@@ -187,20 +188,25 @@ var taskToolDefs = append([]map[string]any{
 			"title":           prop("string", epicTitleDescription),
 			"objective":       prop("string", "what the epic delivers"),
 			"target":          prop("string", "the release or milestone it maps to"),
+			"check":           prop("string", epicCheckDescription),
 			"idempotency_key": prop("string", "your unique key for this create (retry-safe)"),
 		}, "title", "idempotency_key"),
 	},
 	{
 		"name": "update_epic",
 		"description": "Replace an epic's fields under the expected_revision you read; state RETIRED retires it " +
-			"(existing task assignments survive; new ones are refused). A stale revision returns the current epic.",
+			"(existing task assignments survive; new ones are refused). State REACHED closes a goal whose check passed, the same way, " +
+			"and is refused while the epic holds a feature that is neither DONE nor CANCELLED (named): move it with set_feature, " +
+			"or finish or cancel it. Without state the epic keeps its state, and without check it keeps its check. " +
+			"A stale revision returns the current epic.",
 		"inputSchema": objSchema(map[string]any{
 			"project":           prop("string", "project id (defaults to the current project)"),
 			"id":                prop("string", "epic id"),
 			"title":             prop("string", epicTitleDescription),
 			"objective":         prop("string", "what the epic delivers"),
-			"state":             propEnum("OPEN or RETIRED", "OPEN", "RETIRED"),
+			"state":             propEnum("OPEN, RETIRED or REACHED; omitted keeps the epic's state", "OPEN", "RETIRED", "REACHED"),
 			"target":            prop("string", "the release or milestone it maps to"),
+			"check":             prop("string", epicCheckDescription+"; omitted keeps the epic's check, empty clears it"),
 			"expected_revision": prop("integer", "the revision you read"),
 			"idempotency_key":   prop("string", "your unique key for this update (retry-safe)"),
 		}, "id", "title", "expected_revision", "idempotency_key"),
@@ -237,7 +243,9 @@ var taskToolDefs = append([]map[string]any{
 	{
 		"name": "list_features",
 		"description": "The features of a goal (an epic) in position order: id, title, state, assignee, revision, the link and the number of " +
-			"confirmed tasks; tie marks a position two features share. At most 100, no paging. Read a feature's tasks with list_tasks and `feature`." + taskReadScope + featureGuidePointer,
+			"confirmed tasks; tie marks a position two features share; ready_to_close marks an open feature whose confirmed tasks " +
+			"are all DONE or CANCELLED (at least one, each one you can read and still a task, not since made a feature). tasks_on_no_feature counts the goal's tasks, " +
+			"not archived, that no feature of the project confirms; the goal's log is one. At most 100, no paging. Read a feature's tasks with list_tasks and `feature`." + taskReadScope + featureGuidePointer,
 		"inputSchema": objSchema(map[string]any{
 			"project":          prop("string", "project id (defaults to the current project; it selects what to read, it is not a limit)"),
 			"epic":             prop("string", "the goal's epic id"),
@@ -329,6 +337,9 @@ func featureLinkProp() map[string]any {
 		"properties": featureLinkProps(nil), "required": []string{"goal", "position", "mark"}}
 }
 
+// epicCheckDescription says what an epic's check holds.
+const epicCheckDescription = "the goal's check: what has to pass for the goal to count as reached"
+
 // epicTitleDescription recommends a short name for a goal; nothing
 // enforces it beyond the store's 256-byte bound.
 const epicTitleDescription = "short title (at most 256 bytes); best a short name, like a heading, of at most about 60 characters, " +
@@ -360,24 +371,27 @@ func isTaskTool(name string) bool { return taskToolNames[name] }
 // misspelled field must be an error, never a silent clear.
 type taskArgs struct {
 	store.TaskContent
-	Project          string          `json:"project"`
-	ID               string          `json:"id"`
-	TaskID           string          `json:"task_id"`
-	CommentID        string          `json:"comment_id"`
-	IdempotencyKey   string          `json:"idempotency_key"`
-	ExpectedRevision int64           `json:"expected_revision"`
-	IncludeArchived  bool            `json:"include_archived"`
-	IncludeRetired   bool            `json:"include_retired"`
-	Target           string          `json:"target"`
-	After            json.RawMessage `json:"after"` // list: task id; history/comments: integer
-	Limit            int             `json:"limit"`
-	Body             string          `json:"body"`
-	Query            string          `json:"query"`
-	Last             *int            `json:"last"` // a pointer: an explicit 0 is refused, not taken as absent
-	UpdatedSince     string          `json:"updated_since"`
-	Order            string          `json:"order"`
-	Mine             bool            `json:"mine"`
-	Kind             string          `json:"kind"`
+	Project          string `json:"project"`
+	ID               string `json:"id"`
+	TaskID           string `json:"task_id"`
+	CommentID        string `json:"comment_id"`
+	IdempotencyKey   string `json:"idempotency_key"`
+	ExpectedRevision int64  `json:"expected_revision"`
+	IncludeArchived  bool   `json:"include_archived"`
+	IncludeRetired   bool   `json:"include_retired"`
+	Target           string `json:"target"`
+	// Check is the epic's check: a pointer, so that update_epic sends it
+	// only when given and an absent one keeps the epic's check.
+	Check        *string         `json:"check"`
+	After        json.RawMessage `json:"after"` // list: task id; history/comments: integer
+	Limit        int             `json:"limit"`
+	Body         string          `json:"body"`
+	Query        string          `json:"query"`
+	Last         *int            `json:"last"` // a pointer: an explicit 0 is refused, not taken as absent
+	UpdatedSince string          `json:"updated_since"`
+	Order        string          `json:"order"`
+	Mine         bool            `json:"mine"`
+	Kind         string          `json:"kind"`
 	// Feature is the feature's id on a list or a search, and the link
 	// object on create_task.
 	Feature     json.RawMessage `json:"feature"`
@@ -389,6 +403,18 @@ type taskArgs struct {
 	Alternative string          `json:"alternative"`
 	Remove      bool            `json:"remove"`
 	Task        string          `json:"task"`
+}
+
+// epicBody is the epic tools' HTTP body: check only when given.
+func epicBody(a taskArgs, extra map[string]any) map[string]any {
+	m := map[string]any{"title": a.Title, "objective": a.Objective, "state": a.State, "target": a.Target}
+	if a.Check != nil {
+		m["check"] = *a.Check
+	}
+	for k, v := range extra {
+		m[k] = v
+	}
+	return m
 }
 
 func decodeTaskArgs(raw json.RawMessage) (taskArgs, error) {
@@ -495,6 +521,9 @@ func (s *srv) taskTool(ctx context.Context, name string, raw json.RawMessage) (s
 	a, err := decodeTaskArgs(raw)
 	if err != nil {
 		return "", err
+	}
+	if name != "create_epic" && name != "update_epic" && (a.Check != nil || argPresent(raw, "check")) {
+		return "", errors.New("check belongs to an epic (create_epic, update_epic): a feature's check is its acceptance_criteria")
 	}
 	call := func(method, path string, body any, key string) (string, error) {
 		var payload []byte
@@ -681,7 +710,7 @@ func (s *srv) taskTool(ctx context.Context, name string, raw json.RawMessage) (s
 		if err != nil {
 			return "", err
 		}
-		return call("POST", "/v1/projects/"+p+"/epics", map[string]any{"title": a.Title, "objective": a.Objective, "state": a.State, "target": a.Target}, k)
+		return call("POST", "/v1/projects/"+p+"/epics", epicBody(a, nil), k)
 	case "update_epic":
 		p, err := project()
 		if err != nil {
@@ -698,7 +727,7 @@ func (s *srv) taskTool(ctx context.Context, name string, raw json.RawMessage) (s
 		if a.ExpectedRevision < 1 {
 			return "", errors.New("expected_revision is required")
 		}
-		return call("PUT", "/v1/projects/"+p+"/epics/"+id, map[string]any{"title": a.Title, "objective": a.Objective, "state": a.State, "target": a.Target, "expected_revision": a.ExpectedRevision}, k)
+		return call("PUT", "/v1/projects/"+p+"/epics/"+id, epicBody(a, map[string]any{"expected_revision": a.ExpectedRevision}), k)
 	case "create_task":
 		p, err := project()
 		if err != nil {
@@ -928,6 +957,23 @@ func argGiven(raw json.RawMessage, key string) bool {
 	}
 	v, ok := args[key]
 	return ok && string(v) != "null"
+}
+
+// argPresent reports whether the arguments carry key at all, null included
+// and in any letter case the decoder would bind to it (encoding/json folds
+// names as strings.EqualFold does): a refusal of an argument must not be
+// passed by sending null or another spelling.
+func argPresent(raw json.RawMessage, key string) bool {
+	var args map[string]json.RawMessage
+	if json.Unmarshal(raw, &args) != nil {
+		return false
+	}
+	for k := range args {
+		if strings.EqualFold(k, key) {
+			return true
+		}
+	}
+	return false
 }
 
 func pageQuery(after int64, limit int) string {

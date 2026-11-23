@@ -15,6 +15,28 @@ currently 26); a binary refuses a database newer than it understands.
 
 ### Changed
 
+- **A goal is closed as REACHED, carries its check, and its features
+  listing reads its progress.** An epic has a third state, `REACHED`,
+  apart from `RETIRED`: it is set with `update_epic` from OPEN or
+  RETIRED, refused while the epic holds a feature that is neither DONE
+  nor CANCELLED (archived ones included; the refusal names them), and it
+  closes the epic as RETIRED does: no new task, feature or feature moved
+  in, and `list_epics` shows it only with `include_retired`. While the
+  goal is REACHED its features stay DONE or CANCELLED. An epic carries
+  its check in a new field, `check`, checked as readable prose like the
+  objective. `list_features` marks a feature `ready_to_close` when it is
+  open and every confirmed task, each one the caller can read, is DONE
+  or CANCELLED, and counts the goal's tasks on no feature,
+  `tasks_on_no_feature`. The board labels a reached goal "(reached)" and
+  shows the check under the objective. No migration: the schema stays
+  26. docs/FEATURES.md, "Closing a reached goal" and "Reading a goal's
+  progress".
+  - **Behaviour change: an epic update without a state keeps the
+    state.** Before, `update_epic` (and `PUT /v1/projects/{p}/epics/{e}`)
+    without `state` set the epic to OPEN, so a client that did not send
+    the state reopened a retired epic. Now it keeps the epic's state,
+    and only an explicit `state: "OPEN"` reopens one. Likewise an update
+    without `check` keeps the check. A create still defaults to OPEN.
 - **A feature moves to the next goal.** `set_feature` with another goal
   of the same project moves a feature there in one write: the record's
   epic and its link change together, the link is stated whole for the

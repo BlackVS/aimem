@@ -614,7 +614,7 @@ func writeTask(tx *sql.Tx, t Task, actor TaskActor, create bool) error {
 			return err
 		}
 	}
-	if err := checkFeatureRules(tx, t, from, priorDeps, create); err != nil {
+	if err := checkFeatureRules(tx, t, from, priorDeps, priorKind, create); err != nil {
 		return err
 	}
 	if create {

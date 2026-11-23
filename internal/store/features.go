@@ -106,14 +106,19 @@ func featureDependencyError(base error, task, feature string) error {
 // into DONE only with evidence, and no write adds a dependency on a
 // feature of this project. from and priorDeps (a JSON array) are the
 // stored state and dependencies before the write; create means there were
-// none. Only an added dependency is refused, so a record that names a
-// feature anyway (data no guard wrote) can still be released or finished.
-func checkFeatureRules(tx *sql.Tx, t Task, from, priorDeps string, create bool) error {
+// none, and priorKind the stored kind. Only an added dependency is refused,
+// so a record that names a feature anyway (data no guard wrote) can still
+// be released or finished. A feature in a reached goal stays DONE or
+// CANCELLED, so nothing unfinished enters a reached goal by any write.
+func checkFeatureRules(tx *sql.Tx, t Task, from, priorDeps, priorKind string, create bool) error {
 	if t.isFeature() && t.Feature != nil && t.Epic != t.Feature.Goal {
 		return invalid(errors.New("a feature changes its goal with set_feature: give the new goal with its mark and position"))
 	}
 	if t.isFeature() && t.State == "DONE" && (create || from != "DONE") && len(t.EvidenceRefs) == 0 {
 		return invalid(errors.New("a feature moves to DONE only with evidence that its check passes: add an evidence reference"))
+	}
+	if err := checkReachedGoalFeature(tx, t, from, priorKind, create); err != nil {
+		return err
 	}
 	if len(t.Dependencies) == 0 {
 		return nil
@@ -132,6 +137,35 @@ func checkFeatureRules(tx *sql.Tx, t Task, from, priorDeps string, create bool) 
 		return err
 	}
 	return invalid(featureDependencyError(errors.New("refused"), t.ID, feature))
+}
+
+// checkReachedGoalFeature refuses a write that leaves an unfinished feature
+// in a reached goal, and any new feature there, finished or not: a reached
+// goal takes no new feature. Each refusal names the way that exists for its case:
+// a finished feature does not move, so reopening one means reopening the
+// goal first; a task becomes a feature of an OPEN goal, so its epic changes
+// first; a feature already unfinished there (data no guard wrote) moves out.
+func checkReachedGoalFeature(tx *sql.Tx, t Task, from, priorKind string, create bool) error {
+	conversion := create || priorKind != KindFeature
+	if !t.isFeature() || t.Epic == "" || !conversion && (t.State == "DONE" || t.State == "CANCELLED") {
+		return nil
+	}
+	var state string
+	err := tx.QueryRow(`SELECT state FROM epics WHERE id=?`, t.Epic).Scan(&state)
+	if errors.Is(err, sql.ErrNoRows) || err == nil && state != EpicReached {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	switch {
+	case conversion:
+		return invalid(errors.New("the task's epic is a reached goal, which takes no new feature: set the task's epic to an OPEN goal with update_task, then make it a feature there"))
+	case from == "DONE" || from == "CANCELLED":
+		return invalid(errors.New("the feature's goal is reached, and a feature in a reached goal stays DONE or CANCELLED: reopen the goal with update_epic (state OPEN) before you reopen the feature"))
+	default:
+		return invalid(errors.New("the feature's goal is reached, and a feature in a reached goal is DONE or CANCELLED: move this feature to an OPEN goal with set_feature, finish it or cancel it"))
+	}
 }
 
 // createFeatureRetry shares the task create's operation: one route and one
@@ -309,8 +343,11 @@ func checkFeatureMove(tx *sql.Tx, t Task, goal string) error {
 	if err != nil {
 		return err
 	}
-	if e.State != "OPEN" {
+	switch e.State {
+	case EpicRetired:
 		return invalid(errors.New("the goal is retired and takes no new feature: move the feature to an OPEN goal of this project"))
+	case EpicReached:
+		return invalid(errors.New("the goal is reached and takes no new feature: move the feature to an OPEN goal of this project"))
 	}
 	return nil
 }

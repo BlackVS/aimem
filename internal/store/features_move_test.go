@@ -16,7 +16,7 @@ func retireEpic(t *testing.T, db *DB, id, key string) {
 	}
 	c := e.EpicContent
 	c.State = "RETIRED"
-	if _, err := db.UpdateEpic(id, c, e.Revision, aliceActor, key); err != nil {
+	if _, err := db.UpdateEpic(id, c, nil, e.Revision, aliceActor, key); err != nil {
 		t.Fatal(err)
 	}
 }

@@ -1,7 +1,8 @@
 # Features of a goal
 
 A goal is an epic: a release or milestone with a check that says when it is
-reached. Its title is best a short name, like a heading, of at most about 60
+reached. The check is the epic's `check` field, written with `create_epic`
+or `update_epic` beside the objective. Its title is best a short name, like a heading, of at most about 60
 characters, the length the board page's goal selector shows whole; what the
 goal is about goes into its objective. A **feature** is a record on the task
 board that names one thing the goal needs, such as "the members' hosts
@@ -24,7 +25,8 @@ the text that matches your aimem is at its release tag.
 A feature is a task record with `kind: "feature"` and a `feature` link to
 its goal. It keeps everything a task has: its id, title, acceptance criteria
 (the feature's check), assignee (its owner), state, history, comments and
-evidence. The link carries:
+evidence. A feature has no check field of its own: its check is its
+acceptance criteria. The link carries:
 
 | Field | Values | Meaning |
 | --- | --- | --- |
@@ -50,7 +52,7 @@ feature never confirms a feature, and no task may depend on a feature.
 | `create_task` with `feature` | `POST /v1/projects/{p}/tasks` with a `feature` object | Creates the record as a feature in one write. Set its `epic` to the goal. |
 | `set_feature` | `PUT /v1/tasks/{id}/feature` | Turns a task into a feature, changes a feature's link, or moves a feature to another goal of its project. With `remove: true`, turns a feature back into a task. |
 | `confirm_feature_task` | `POST /v1/tasks/{id}/feature/tasks` | Adds one task to a feature's confirmed tasks, or with `remove: true` takes it out. Nothing else changes. |
-| `list_features` | `GET /v1/projects/{p}/epics/{e}/features` | The goal's features in position order, each with its link and the number of confirmed tasks. At most 100, no paging. |
+| `list_features` | `GET /v1/projects/{p}/epics/{e}/features` | The goal's features in position order, each with its link, the number of confirmed tasks and the ready-to-close mark, and the count of the goal's tasks on no feature (below). At most 100, no paging. |
 | `list_tasks` with `feature` | `GET /v1/projects/{p}/tasks?feature=<id>` | The tasks of this project that the feature confirms. Read a confirmed task of another project with `get_task`. |
 | `list_tasks`, `search_tasks` with `kind` | `?kind=task`, `feature` or `any` | A list shows work only (`task`) unless asked; a search finds any record by its words. The counts follow the list's `kind`. |
 
@@ -87,12 +89,54 @@ A move is refused when:
   reached it, so move only an unfinished feature;
 - the goal joined is not an epic of the feature's project: a feature never
   moves to another project;
-- the goal joined is RETIRED: move to an OPEN goal. The goal left may be
-  retired.
+- the goal joined is RETIRED or REACHED: move to an OPEN goal. The goal
+  left may be closed.
 
 `update_task` and `triage_task` never move a feature: a write of the
 content with another epic is refused, because it cannot state the mark for
 the new goal.
+
+## Closing a reached goal
+
+When a goal's check passes, close the goal with `update_epic` and
+`state: "REACHED"`. The state is apart from RETIRED, which says a goal was
+given up or retired; both close the epic in the same way. A goal becomes
+REACHED from OPEN or from RETIRED, and only when every feature it holds is
+DONE or CANCELLED. Otherwise the write is refused
+and the refusal names each unfinished feature: move it to the next goal with
+`set_feature`, or finish or cancel it, first.
+
+A reached goal takes no new task, no new feature and no feature moved in,
+and `list_epics` leaves it out unless `include_retired` is true, as it does
+a retired one. What it already holds stays. While it is REACHED, its
+features stay DONE or CANCELLED: reopening one is refused until the goal is
+reopened with `update_epic` and `state: "OPEN"`, and a task under the goal
+cannot be made a feature there. The board page labels a reached goal
+"(reached)" and a retired one "(retired)".
+
+An `update_epic` without `state` keeps the epic's state, and one without
+`check` keeps its check; an empty `check` clears it.
+
+## Reading a goal's progress
+
+Each row of `list_features` carries `ready_to_close`. It is true for a
+feature that is neither DONE nor CANCELLED, has at least one confirmed task,
+and whose confirmed tasks are all DONE or CANCELLED. The mark informs; a
+session decides, and moves the feature to DONE with its evidence. A
+confirmed task in a project you cannot read withholds the mark, as a task not
+done does, and the listing says nothing more about it. So does a confirmed
+task that has since been made a feature in its own project. `confirmed_tasks`
+counts every id the feature confirms, readable or not, as the feature's own
+record lists them.
+
+The listing also carries `tasks_on_no_feature`: the goal's tasks, not
+archived, that no feature of this project confirms, whatever that feature's
+goal. The goal's log is such a task and is counted. A task that only a
+feature of another project confirms is counted too.
+
+The goal's project is read in one consistent read. A confirmed task of
+another project is read after it, so a change there made during the listing
+can show in the mark.
 
 ## Rules that refuse a write
 
@@ -126,6 +170,11 @@ record's epic: upgrade the hub to move a feature. A client on a hub
 one release older is told to upgrade the hub when it calls a feature tool,
 and a `create_task` with a link is refused there, so a feature is never
 stored as work by mistake.
+
+A hub older than the reached state refuses `REACHED` and an epic's `check`.
+That hub, after a downgrade, still reads a REACHED epic and lists it only on
+request, but takes new tasks into it, and its `update_epic` drops the check
+and turns an update without a state into OPEN.
 
 ## The carry-over of a goal's trial records
 

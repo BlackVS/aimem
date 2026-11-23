@@ -128,14 +128,17 @@ assert.ok(element('goalSel').innerHTML.includes(`<option value="g" title="${escT
 assert.doesNotMatch(element('goalSel').innerHTML, /optgroup|no features yet/, 'no group label');
 assert.ok(goalText().includes(escText(gTitle).trim()), 'the goal panel shows the whole title');
 // A title of 120 characters: cut to GOAL_TITLE_MAX with an ellipsis, the
-// count still in front; a retired epic with and without features.
+// count still in front; a retired and a reached epic, each with and without
+// features, marked apart.
 const long = 'A goal whose title is a whole sentence about what the goal is for, written where its objective should have said it whole';
 assert.equal(long.length, 120);
 const opts = html => [...html.matchAll(/<option value="([^"]*)" title="([^"]*)"[^>]*>([^<]*)<\/option>/g)].map(m => [m[1], m[2], m[3]]);
-assert.deepEqual(opts(run(`goalOptions(${JSON.stringify([{id: 'x', title: long, state: 'OPEN'}, {id: 'y', title: 'Old', state: 'RETIRED'}, {id: 'z', title: 'Gone', state: 'RETIRED'}])}, {x: {count: 5}, z: {count: 1}})`)), [
+assert.deepEqual(opts(run(`goalOptions(${JSON.stringify([{id: 'x', title: long, state: 'OPEN'}, {id: 'y', title: 'Old', state: 'RETIRED'}, {id: 'z', title: 'Gone', state: 'RETIRED'}, {id: 'd', title: 'Done', state: 'REACHED'}, {id: 'e', title: 'Met', state: 'REACHED'}])}, {x: {count: 5}, z: {count: 1}, d: {count: 2}})`)), [
   ['x', long, '(5) ' + long.slice(0, 59) + '…'],
   ['z', 'Gone', '(1, retired) Gone'],
+  ['d', 'Done', '(2, reached) Done'],
   ['y', 'Old', '(retired) Old'],
+  ['e', 'Met', '(reached) Met'],
 ]);
 assert.equal(run('GOAL_TITLE_MAX'), 60);
 assert.equal(Array.from(run(`goalTitle(${JSON.stringify(long)})`)).length, 60, 'the cut title, ellipsis included, is GOAL_TITLE_MAX long');
