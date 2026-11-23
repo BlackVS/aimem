@@ -525,20 +525,24 @@ func removePending(path string) {
 }
 
 // sweepPending moves the pending files of runs that died into the spool,
-// while the run has time for its hub request; the files it does not reach
-// wait for a later run. A file is removed only after its record is in the
-// spool. A record whose run had already delivered it, or appended it,
-// before dying is delivered twice; the hub keeps one event per idempotency
-// key.
+// while the run has time for its hub request: a run without it does not
+// list the directory, and one that runs out midway stops at the next
+// file; the files it does not reach wait for a later run. A file is
+// removed only after its record is in the spool. A record whose run had
+// already delivered it, or appended it, before dying is delivered twice;
+// the hub keeps one event per idempotency key.
 func (c *Client) sweepPending(spool string) {
-	for _, p := range spoolSiblings(spool, ".pending-") {
+	if c.left() < hubRequestMin {
+		return // nothing looked at, nothing to name
+	}
+	for _, p := range listSiblings(spool, ".pending-") {
+		if c.left() < hubRequestMin {
+			c.deferred("the pending files of interrupted runs, if any (out of time)")
+			return
+		}
 		fi, err := os.Stat(p)
 		if err != nil || time.Since(fi.ModTime()) < pendingStale {
 			continue
-		}
-		if c.left() < hubRequestMin {
-			c.deferred("the pending records of interrupted runs (out of time)")
-			return
 		}
 		data, err := os.ReadFile(p)
 		if err != nil {
@@ -552,6 +556,9 @@ func (c *Client) sweepPending(spool string) {
 		os.Remove(p)
 	}
 }
+
+// listSiblings is spoolSiblings; a test replaces it.
+var listSiblings = spoolSiblings
 
 // spoolSiblings lists the files beside spool whose names start with the
 // spool's name and infix (its pending files, its replay claims). The

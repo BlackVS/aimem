@@ -2,9 +2,11 @@ package adapter
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -1045,10 +1047,12 @@ func TestALostCheckpointIsNamedLost(t *testing.T) {
 	}
 }
 
-// A run without time for its hub request recovers no pending file of an
-// interrupted run: each stays for a later run, and the run's line says so.
+// A run without time for its hub request does not even list the spool's
+// directory; one that runs out midway stops at the next file and says so.
+// A later run with time recovers every pending file.
 func TestPendingRecoveryStopsAtTheDeadline(t *testing.T) {
 	defer func(d time.Duration) { pendingStale = d }(pendingStale)
+	defer func(f func(string, string) []string) { listSiblings = f }(listSiblings)
 	pendingStale = 0
 	root := t.TempDir()
 	spool := filepath.Join(root, "spool", "hub.jsonl")
@@ -1060,22 +1064,87 @@ func TestPendingRecoveryStopsAtTheDeadline(t *testing.T) {
 		}
 		pend = append(pend, f)
 	}
-	c := NewClient(root).WithDeadline(time.Now().Add(hubRequestMin / 2))
-	c.sweepPending(spool)
-	for _, f := range pend {
-		if _, err := os.Stat(f); err != nil {
-			t.Fatalf("a pending file was taken past the deadline: %v", err)
+	untouched := func(when string) {
+		t.Helper()
+		for _, f := range pend {
+			if _, err := os.Stat(f); err != nil {
+				t.Fatalf("%s: a pending file was taken: %v", when, err)
+			}
+		}
+		if _, err := os.Stat(spool); !os.IsNotExist(err) {
+			t.Fatalf("%s: the spool was written: %v", when, err)
 		}
 	}
-	if _, err := os.Stat(spool); !os.IsNotExist(err) {
-		t.Fatalf("the spool was written past the deadline: %v", err)
+
+	// Out of time: the directory is not listed, and nothing is named.
+	listed := 0
+	listSiblings = func(sp, infix string) []string { listed++; return spoolSiblings(sp, infix) }
+	c := NewClient(root).WithDeadline(time.Now().Add(hubRequestMin / 2))
+	c.sweepPending(spool)
+	c.sweepOrphanedClaims(spool, hubRequestMin) // the claim sweep alike
+	untouched("out of time")
+	if listed != 0 || len(c.deferredList) != 0 {
+		t.Fatalf("out of time: listed %d time(s), deferred %q", listed, c.deferredList)
 	}
-	if !slices.Contains(c.deferredList, "the pending records of interrupted runs (out of time)") {
+
+	// Out of time once the directory is listed: no file is looked at.
+	c = NewClient(root).WithDeadline(time.Now().Add(time.Minute))
+	listSiblings = func(sp, infix string) []string {
+		c.deadline = time.Now().Add(-time.Second)
+		return spoolSiblings(sp, infix)
+	}
+	c.sweepPending(spool)
+	untouched("out of time midway")
+	if !slices.Contains(c.deferredList, "the pending files of interrupted runs, if any (out of time)") {
 		t.Fatalf("deferred: %q", c.deferredList)
 	}
+
+	listSiblings = spoolSiblings
 	NewClient(root).sweepPending(spool) // a later run with time
 	if b, _ := os.ReadFile(spool); bytes.Count(b, []byte{'\n'}) != 3 {
 		t.Fatalf("the later run moved %q", b)
+	}
+}
+
+// A spool directory that cannot be listed gives the sweeps nothing to do:
+// no error and nothing named.
+func TestAnUnlistableSpoolDirectoryIsNoError(t *testing.T) {
+	root := t.TempDir()
+	os.WriteFile(filepath.Join(root, "spool"), []byte("not a directory"), 0o600)
+	spool := filepath.Join(root, "spool", "hub.jsonl")
+	c := NewClient(root).WithDeadline(time.Now().Add(time.Minute))
+	c.sweepPending(spool)
+	c.sweepOrphanedClaims(spool, 0)
+	if len(c.deferredList) != 0 {
+		t.Fatalf("deferred: %q", c.deferredList)
+	}
+}
+
+// A local replay whose record the service fails, with time left, names
+// itself in the run's line, though nothing else was left.
+func TestAReplayTheServiceFailedIsNamed(t *testing.T) {
+	var posts atomic.Int32
+	local := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if posts.Add(1) > 1 { // the run's own checkpoint is taken, the replay is not
+			w.WriteHeader(503)
+		}
+	}))
+	defer local.Close()
+	hub, _ := keysHub(t, nil)
+	root, p := hubRoot(t, hub.URL)
+	c := NewClient(root).WithDeadline(time.Now().Add(5 * time.Second))
+	c.http = &http.Client{Transport: &http.Transport{DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
+		var d net.Dialer
+		return d.DialContext(ctx, "tcp", local.Listener.Addr().String())
+	}}}
+	appendLines(c.spoolPath(), rec("queued"))
+	c.Submit(p)
+	notes, _ := os.ReadFile(filepath.Join(root, "adapter.log"))
+	if !bytes.Contains(notes, []byte("session s1 turn t1 left work for a later run: the local spool replay (service error HTTP 503; 1 record(s) kept)")) {
+		t.Fatalf("adapter.log:\n%s", notes)
+	}
+	if b, _ := os.ReadFile(c.spoolPath()); string(b) != string(rec("queued"))+"\n" {
+		t.Fatalf("the local spool after the replay: %q", b)
 	}
 }
 

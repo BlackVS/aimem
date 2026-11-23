@@ -272,9 +272,12 @@ var claimSweep = (*Client).sweepOrphanedClaims
 // deduplicates. A claim we cannot read (Windows keeps it locked while
 // its live owner reads it) is skipped and swept next time.
 func (c *Client) sweepOrphanedClaims(spool string, reserve time.Duration) {
-	for _, cl := range spoolSiblings(spool, ".replay-") {
+	if c.left() <= reserve {
+		return // nothing looked at, nothing to name
+	}
+	for _, cl := range listSiblings(spool, ".replay-") {
 		if c.left() <= reserve {
-			c.deferred("the claims of interrupted runs (out of time)")
+			c.deferred("the claims of interrupted runs, if any (out of time)")
 			return
 		}
 		data, err := os.ReadFile(cl)
@@ -328,6 +331,7 @@ func (c *Client) ReplaySpool() (replayed, requeued int, err error) {
 		return 0, 0, err // the claim stays for sweepOrphanedClaims
 	}
 	var kept bytes.Buffer
+	var failed error // the first post the service failed, not the run's end
 	rest := data
 	for len(rest) > 0 {
 		line, after, _ := bytes.Cut(rest, []byte{'\n'})
@@ -347,12 +351,18 @@ func (c *Client) ReplaySpool() (replayed, requeued int, err error) {
 				c.note("aimem: dropping invalid spooled record: %v", err)
 				continue
 			}
+			if failed == nil && !c.outOfTime(err) {
+				failed = err
+			}
 			kept.Write(line)
 			kept.WriteByte('\n') // each record whole, so the block goes back as it is
 			requeued++
 			continue
 		}
 		replayed++
+	}
+	if failed != nil {
+		c.deferred(fmt.Sprintf("the local spool replay (%v; %d record(s) kept)", failed, requeued))
 	}
 	if err := writeBack(c.spoolPath(), kept.Bytes(), rest); err != nil {
 		return replayed, requeued, err // the claim stays for sweepOrphanedClaims
