@@ -168,8 +168,9 @@ func TestCodexStopNeverLosesTheTurnToTheRollout(t *testing.T) {
 		t.Fatal("a turn read past its share is not marked")
 	}
 
-	// A read that cannot even start in time: the payload alone.
-	TranscriptShare = 0
+	// A read that cannot even start in time: the payload alone. The share
+	// is past already: a share of 0 can still read on a coarse clock.
+	TranscriptShare = -time.Second
 	p = buildCodex(t, map[string]any{"session_id": "s", "turn_id": "T", "transcript_path": tp, "cwd": t.TempDir(),
 		"hook_event_name": "Stop", "last_assistant_message": "only the payload"})
 	if p.Event.AssistantReply != "only the payload" || p.Event.UserRequest != "" || p.Degraded == "" {
@@ -677,7 +678,7 @@ func TestALocalReplayThatExpiresMidwayKeepsEverythingInOrder(t *testing.T) {
 	}
 	c.WithDeadline(time.Now().Add(20 * time.Millisecond))
 	_, kept, err := c.ReplaySpool()
-	if err != nil || kept != 20000 {
+	if err != nil || kept > 20000 { // the records kept back; the untouched rest is not counted
 		t.Fatalf("replay: %d kept, %v", kept, err)
 	}
 	if !slices.Contains(c.deferredList, "the local spool replay (out of time)") {
@@ -867,7 +868,12 @@ func TestARecordAtTheLineLimitIsKept(t *testing.T) {
 	maxLine = 2 << 20
 	at := strings.Repeat("a", maxLine)
 	past := strings.Repeat("b", maxLine+1)
-	for _, body := range []string{"first\n" + at + "\n" + past + "\nlast\n", "first\n" + past + "\n" + at} {
+	for _, body := range []string{
+		"first\n" + at + "\n" + past + "\nlast\n",
+		"first\n" + past + "\n" + at,
+		"first\r\n" + at + "\r\n" + past + "\r\nlast\r\n",
+		"first\r\n" + past + "\r\n" + at + "\r\n",
+	} {
 		var fwd []string
 		if err := forwardLines(strings.NewReader(body), time.Now().Add(time.Minute), func(line []byte) {
 			fwd = append(fwd, string(line[:1]))
@@ -960,5 +966,80 @@ func TestClaudeTurnWithAnOverlongLine(t *testing.T) {
 	u, r, _, id, _, err := parseTranscript(p, time.Now().Add(time.Minute))
 	if err != nil || u != "the prompt" || r != "the reply" || id != "a2" {
 		t.Fatalf("got %q %q %q, %v", u, r, id, err)
+	}
+}
+
+// The forward reader's 1 MiB buffer can split a CRLF: a record of
+// maxLine bytes from offset 0, with maxLine one byte under 2 MiB, puts its
+// CR as the last byte of the second buffer and its LF alone in the next.
+func TestARecordAtTheLimitWithASplitCRLFIsKept(t *testing.T) {
+	defer func(m int) { maxLine = m }(maxLine)
+	maxLine = 2<<20 - 1
+	body := strings.Repeat("a", maxLine) + "\r\nlast\r\n"
+	var fwd []string
+	if err := forwardLines(strings.NewReader(body), time.Now().Add(time.Minute), func(line []byte) {
+		fwd = append(fwd, string(line[:1]))
+	}); err != nil || !reflect.DeepEqual(fwd, []string{"a", "l"}) {
+		t.Fatalf("forward %q, %v", fwd, err)
+	}
+}
+
+// A flush that stops at its limit names it in the run's line, with the
+// event, the session and the turn.
+func TestAFlushStoppedAtItsLimitIsNamed(t *testing.T) {
+	hub, _ := keysHub(t, nil)
+	root, p := hubRoot(t, hub.URL)
+	spool := filepath.Join(root, "spool", "hub.jsonl")
+	for i := range hubFlushLimit + 1 {
+		appendLines(spool, rec(fmt.Sprint(i)))
+	}
+	NewClient(root).WithDeadline(time.Now().Add(5 * time.Second)).Submit(p)
+	notes, _ := os.ReadFile(filepath.Join(root, "adapter.log"))
+	want := "turn event of session s1 turn t1 left work for a later run: the local post ("
+	if !bytes.Contains(notes, []byte(want)) || !bytes.Contains(notes, []byte("the hub backlog past the flush limit")) {
+		t.Fatalf("adapter.log does not name the flush limit for the run:\n%s", notes)
+	}
+	if b, _ := os.ReadFile(spool); bytes.Count(b, []byte{'\n'}) != 1 {
+		t.Fatalf("after the limit %d record(s) stay queued, want 1", bytes.Count(b, []byte{'\n'}))
+	}
+}
+
+// One client submitting several events names in each run's line only what
+// that submission left.
+func TestOneClientsLinesDoNotCarryEarlierSubmissions(t *testing.T) {
+	root := t.TempDir()
+	c := NewClient(root)
+	p := &Payload{ProjectID: "proj-b"}
+	p.Event.Client, p.Event.SessionID, p.Event.Kind = "codex", "s1", "turn"
+	c.deferred("only the first submission's")
+	p.Event.TurnID, p.Event.IdempotencyKey = "t1", "codex:s1:t1"
+	c.SubmitLocal(p)
+	p.Event.TurnID, p.Event.IdempotencyKey = "t2", "codex:s1:t2"
+	c.SubmitLocal(p)
+	notes, _ := os.ReadFile(filepath.Join(root, "adapter.log"))
+	for line := range bytes.SplitSeq(notes, []byte{'\n'}) {
+		if bytes.Contains(line, []byte("turn t2 left work")) && bytes.Contains(line, []byte("only the first")) {
+			t.Fatalf("the second submission's line carries the first's: %s", line)
+		}
+	}
+	if !bytes.Contains(notes, []byte("turn t1 left work for a later run: only the first submission's")) {
+		t.Fatalf("the first submission's line is missing:\n%s", notes)
+	}
+}
+
+// When nothing can be written and the hub does not take the checkpoint,
+// the run says it is lost, and never that it is queued.
+func TestALostCheckpointIsNamedLost(t *testing.T) {
+	defer func(f func(string, []byte) (string, error)) { pendingWrite = f }(pendingWrite)
+	pendingWrite = func(string, []byte) (string, error) { return "", errors.New("no pending file") }
+	down := httptest.NewServer(http.NotFoundHandler())
+	url := down.URL
+	down.Close()
+	root, p := hubRoot(t, url)
+	os.MkdirAll(filepath.Join(root, "spool", "hub.jsonl"), 0o700)
+	NewClient(root).WithDeadline(time.Now().Add(5 * time.Second)).Submit(p)
+	notes, _ := os.ReadFile(filepath.Join(root, "adapter.log"))
+	if !bytes.Contains(notes, []byte("LOST")) || bytes.Contains(notes, []byte("checkpoint queued for hub")) {
+		t.Fatalf("adapter.log:\n%s", notes)
 	}
 }

@@ -379,7 +379,6 @@ func (c *Client) pushHub(hubName string, body []byte) {
 		return
 	}
 	spool := c.hubSpoolPathFor(name)
-	sweepPending(spool)
 	// Durable before the hub is asked, in a file no other run writes: a run
 	// killed at any later step leaves the record here, and a later run
 	// moves it into the spool.
@@ -396,6 +395,9 @@ func (c *Client) pushHub(hubName string, body []byte) {
 				perr, filepath.Base(spool), aerr)
 		}
 	}
+	// Recovery of runs that died comes only once this run's own record is
+	// kept.
+	sweepPending(spool)
 	// The record goes from memory. A hub that does not answer costs this
 	// one request and one append below, whatever the backlog's size.
 	if err := c.hubTry(hub, body); err != nil {
@@ -406,7 +408,9 @@ func (c *Client) pushHub(hubName string, body []byte) {
 				removePending(pend)
 			}
 		} else if !queued {
-			c.deferred("the hub delivery (the checkpoint is lost to the hub: nothing could be written)")
+			c.deferred("the checkpoint for the hub, LOST: nothing could be written and the hub did not take it")
+			c.note("aimem: hub unreachable and nothing could be written: the checkpoint is lost to the hub (%v); it stays in the local journal", err)
+			return
 		}
 		c.hubDown(hub, spool, err)
 		return
@@ -461,7 +465,8 @@ func (c *Client) hubTry(hub *HubConfig, body []byte) error {
 }
 
 // hubDown records a delivery that stopped at err in the run's line, and
-// says once how big the spool has grown.
+// says once how big the spool has grown. The record it stopped at is
+// queued: in the spool, its claim, or its pending file.
 func (c *Client) hubDown(hub *HubConfig, spool string, err error) {
 	switch {
 	case errors.Is(err, errShare) || c.outOfTime(err):
@@ -561,22 +566,35 @@ func spoolSiblings(spool, infix string) []string {
 	return out
 }
 
-// writeBack returns records to the spool in one append, in order: kept,
-// the lines a loop kept back, then rest, the untouched remainder of its
-// claim. Neither is walked line by line.
+// writeBack returns records to the spool, in order: kept, the lines a loop
+// kept back, then rest, the untouched remainder of its claim. Each goes in
+// one write as it is, ending in a newline, so neither is walked or copied
+// and another run's append can land only between whole lines; a block
+// that does not end in a newline is the one case copied to add it.
 func writeBack(spool string, kept, rest []byte) error {
-	var b bytes.Buffer
-	b.Write(bytes.Trim(kept, "\n"))
-	if r := bytes.Trim(rest, "\n"); len(r) > 0 {
-		if b.Len() > 0 {
-			b.WriteByte('\n')
-		}
-		b.Write(r)
-	}
-	if b.Len() == 0 {
+	kept, rest = bytes.TrimLeft(kept, "\n"), bytes.TrimLeft(rest, "\n")
+	if len(kept) == 0 && len(rest) == 0 {
 		return nil
 	}
-	return appendLines(spool, b.Bytes())
+	f, err := os.OpenFile(spool, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600)
+	if err != nil {
+		return err
+	}
+	for _, b := range [][]byte{kept, rest} {
+		if len(b) == 0 {
+			continue
+		}
+		if !bytes.HasSuffix(b, []byte{'\n'}) {
+			b = append(b[:len(b):len(b)], '\n')
+		}
+		if _, err = f.Write(b); err != nil {
+			break
+		}
+	}
+	if cerr := f.Close(); err == nil {
+		err = cerr
+	}
+	return err
 }
 
 // appendLines appends records (newline-separated, without a final newline)
@@ -653,14 +671,17 @@ func (c *Client) flushHubSpool(hub *HubConfig, spool string) {
 		return
 	}
 	os.Remove(claim)
-	if stop != nil && stop != errFlushLimit {
+	switch {
+	case stop == errFlushLimit:
+		c.deferred(fmt.Sprintf("the hub backlog past the flush limit of %d records", hubFlushLimit))
+	case stop != nil:
 		c.hubDown(hub, spool, stop)
 	}
 	if delivered > 0 {
 		c.note("aimem: delivered %d queued checkpoint(s) to hub", delivered)
 	}
 	if stop != nil && delivered > 0 {
-		c.note("aimem: %d more remain spooled (bounded flush); they drain on coming checkpoints", bytes.Count(bytes.Trim(rest, "\n"), []byte{'\n'})+1)
+		c.note("aimem: more remain spooled (bounded flush); they drain on coming checkpoints")
 	}
 }
 

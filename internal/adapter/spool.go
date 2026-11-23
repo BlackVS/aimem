@@ -292,7 +292,8 @@ func sweepOrphanedClaims(spool string) {
 // ReplaySpool drains the spool into the service. The file is claimed by
 // atomic rename first so concurrent adapters never double-replay; records
 // that still fail transport, and the untouched rest when the run runs
-// out of time, go back to the spool in one write, in order; invalid
+// out of time, go back to the spool, in order; requeued counts the
+// records kept back, not the untouched rest. Invalid
 // records are dropped with a warning (they would never succeed). A run
 // already out of time does not claim the spool. If the write fails, the
 // claim is left in place and sweepOrphanedClaims returns it to the spool.
@@ -324,8 +325,8 @@ func (c *Client) ReplaySpool() (replayed, requeued int, err error) {
 			continue
 		}
 		if c.left() <= 0 {
-			// Out of time: the rest goes back as it is, unwalked.
-			requeued += bytes.Count(bytes.Trim(rest, "\n"), []byte{'\n'}) + 1
+			// Out of time: the rest goes back as it is, neither walked
+			// nor counted.
 			c.deferred("the local spool replay (out of time)")
 			break
 		}
@@ -355,11 +356,13 @@ func (c *Client) ReplaySpool() (replayed, requeued int, err error) {
 // work for a later run: which event, what it left and why. No content of
 // the turn goes into it.
 func (c *Client) noteDeferred(p *Payload) {
-	if len(c.deferredList) == 0 {
+	list := c.deferredList
+	c.deferredList = nil // one client may submit many events (an import)
+	if len(list) == 0 {
 		return
 	}
-	c.note("aimem: the hook for the %s event of session %s turn %s left work for a later run: %s; anything not delivered stays queued",
-		p.Event.Kind, p.Event.SessionID, p.Event.TurnID, strings.Join(c.deferredList, ", "))
+	c.note("aimem: the hook for the %s event of session %s turn %s left work for a later run: %s; all of it stays queued unless named LOST",
+		p.Event.Kind, p.Event.SessionID, p.Event.TurnID, strings.Join(list, ", "))
 }
 
 func (c *Client) replaySpool() {

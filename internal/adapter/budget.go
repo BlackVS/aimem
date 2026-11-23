@@ -83,23 +83,26 @@ func scanBack(f *os.File, deadline time.Time, fn func(line []byte, off int64) bo
 			line := chunk[i+1 : hi]
 			if skipping {
 				skipping = false
-			} else if len(line) > 0 && len(line) <= maxLine && fn(line, start+int64(i)+1) {
+			} else if len(line) > 0 && lineLen(line) <= maxLine && fn(line, start+int64(i)+1) {
 				return nil
 			}
 			hi = i
 		}
-		if skipping || hi > maxLine {
+		if skipping || hi > maxLine+1 { // +1: a CR that may end it
 			skipping, carry = true, nil
 		} else {
 			carry = append([]byte(nil), chunk[:hi]...)
 		}
 		end = start
 	}
-	if !skipping && len(carry) > 0 {
+	if !skipping && len(carry) > 0 && lineLen(carry) <= maxLine {
 		fn(carry, 0)
 	}
 	return nil
 }
+
+// lineLen is a line's length without the CR of a CRLF ending.
+func lineLen(line []byte) int { return len(bytes.TrimSuffix(line, []byte{'\r'})) }
 
 // forwardLines calls fn with each line of r up to its end, without the
 // newline. A line longer than maxLine is skipped whole, as scanBack skips
@@ -116,8 +119,21 @@ func forwardLines(r io.Reader, deadline time.Time, fn func(line []byte)) error {
 		}
 		frag, err := br.ReadSlice('\n')
 		partial := errors.Is(err, bufio.ErrBufferFull)
-		// The newline ends the line and is not part of its length.
-		if len(long)+len(bytes.TrimSuffix(frag, []byte{'\n'})) > maxLine {
+		// The line end (LF or CRLF) is not part of its length.
+		n := len(long) + len(frag)
+		if !partial {
+			end := frag
+			if bytes.HasSuffix(end, []byte{'\n'}) {
+				n, end = n-1, end[:len(end)-1]
+			}
+			if len(end) == 0 {
+				end = long // the buffer split the CRLF
+			}
+			if bytes.HasSuffix(end, []byte{'\r'}) {
+				n--
+			}
+		}
+		if n > maxLine+1 || (!partial && n > maxLine) {
 			over, long = true, long[:0]
 		}
 		if partial {
