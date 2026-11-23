@@ -127,8 +127,8 @@ that the upgrade fails, says ROLLED BACK and leaves FROM serving. On
 Linux it does so twice: first from a unit that systemd has stopped at its
 start limit (six restarts in a row leave it `start-limit-hit`, as a crash
 loop does), with a short health wait, where the rollback must bring FROM
-back; the installers reset the unit's failed state and start counter
-before a start of their own (`svc_reset`), and without that systemd
+back; `install.sh` resets the unit's failed state and start counter
+before a start of its own (`svc_reset`), and without that systemd
 refuses the rollback's start. Before the real upgrade it puts the unit at
 its start limit again. On a failure it prints the unit's restarts, its
 result and its journal. Then the real upgrade: the binary and the plugin must be the tree's, the

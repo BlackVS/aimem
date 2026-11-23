@@ -65,8 +65,8 @@ unit_state() {
 }
 fail() { echo "FAIL: $*" >&2; unit_state; exit 1; }
 # start_limit: restart the unit until systemd refuses a start, as a crash
-# loop leaves it, and check that it says so. The installers reset this
-# before a start of their own (svc_reset); without that, the upgrade's or
+# loop leaves it, and check that it says so. install.sh resets this
+# before a start of its own (svc_reset); without that, the upgrade's or
 # the rollback's start is refused here (task 01a208ef-65c1).
 start_limit() {
   local i
@@ -122,7 +122,7 @@ if [ "$asset" = aimem-linux-amd64 ]; then
   echo "--- reset-failed on a unit that is not loaded yet: fails, and changes nothing"
   rc=0
   systemctl --user reset-failed aimem.service 2>&1 || rc=$?
-  [ "$rc" -ne 0 ] || fail "reset-failed on a unit not loaded exited 0; the installers' svc_reset drops this failure"
+  [ "$rc" -ne 0 ] || fail "reset-failed on a unit not loaded exited 0; install.sh's svc_reset drops this failure"
   echo "ok: reset-failed exited $rc; svc_reset ends in || true"
 fi
 
