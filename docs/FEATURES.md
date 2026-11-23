@@ -77,8 +77,9 @@ the feature keeps its id, its confirmed tasks, its comments and its history.
 The history entry of the move carries `moved_from`, the goal it left, beside
 the record with the goal it joined. The confirmed tasks are not written:
 each keeps its own epic. `list_tasks` with `feature` and the board's
-features view under the goal joined show them as before, while the list
-and the board filtered by the goal joined's epic do not.
+features view under the goal joined show them as before. In the list and
+the board filtered by an epic, each confirmed task stays under its own
+epic, which may be the goal left.
 
 A move is refused when:
 

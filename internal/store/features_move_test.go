@@ -52,6 +52,14 @@ func TestFeatureMovesToAnotherGoal(t *testing.T) {
 	joined := goalEpic(t, db, "joined")
 	f, tasks := featureWithTasks(t, db, left, "f")
 
+	before := map[string]int64{}
+	for _, id := range tasks {
+		task, err := db.GetTask(id)
+		if err != nil {
+			t.Fatal(err)
+		}
+		before[id] = task.Revision
+	}
 	link := FeatureLink{Goal: joined, Position: 3, Mark: "optional", Alternative: "done by hand"}
 	moved, err := db.SetFeature(f.ID, &link, false, f.Revision, aliceActor, "move")
 	if err != nil {
@@ -71,7 +79,7 @@ func TestFeatureMovesToAnotherGoal(t *testing.T) {
 	}
 	for _, id := range tasks {
 		task, err := db.GetTask(id)
-		if err != nil || task.Epic != left {
+		if err != nil || task.Epic != left || task.Revision != before[id] {
 			t.Fatalf("a confirmed task was written: %+v, %v", task, err)
 		}
 	}
