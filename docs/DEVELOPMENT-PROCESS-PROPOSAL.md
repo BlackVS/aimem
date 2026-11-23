@@ -1,20 +1,17 @@
-# Development process proposal: goal-driven planning
+# Development process: goal-driven planning
 
-Status: **proposal, not adopted.** Nothing in this document is a rule yet.
-It proposes a change to how work is chosen and how progress is seen in the
-development process that the aimem and aicrew projects follow
+Status: **in force since 2026-11-23,** by the owner's decision at the
+review of its trial. It sets how work is chosen and how progress is seen
+in the development process that the aimem and aicrew projects follow
 ([the process handbook](../processes/aimem/handbook.md) and the pickup
-policy in [the roadmap](ROADMAP.md)).
+policy in [the roadmap](ROADMAP.md)). The handbook and the pickup policy
+take its wording in a later change; until then this document is the rule
+where the two differ.
 
-The owner fixed the order in which it may become one (2026-11-16):
-
-1. This proposal is written, reviewed locally and externally, and corrected.
-2. Then the people and agents who develop these projects work by it
-   themselves, by hand, for about a week ([section 9](#9-the-trial)).
-3. Only if that week shows that it works is anything built into the
-   products ([section 10](#10-later-in-the-products)).
-
-No code, no board field and no handbook rule changes with this document.
+It was written as a proposal on 2026-11-16, tried by hand for about a week
+in four projects, and kept with the review's changes. The proposal's
+reasoning (sections 1, 7 and 8) and the trial's readings
+([section 9](#9-the-trial)) are kept as history.
 
 ## 1. The problem
 
@@ -94,9 +91,10 @@ A task's place then follows from what depends on it, and work is picked in
 three tiers: the path (everything a mandatory feature depends on), then
 what comes next (the same for optional features), then support work, the
 tasks nothing on the way depends on, which has a budget. A short course
-check, once a working day, says how far the goal is, what it waits on, and
-whether the picks followed the tiers. All of it is plain counting over the
-board, so it can later be automated; first it is done by hand.
+check, on each day that changes something, says how far the goal is, what
+it waits on, and whether the picks followed the tiers. All of it is plain
+counting over the board, so it can later be automated; first it is done by
+hand.
 
 This is the owner's graph of goal and tasks in its smallest form. The
 nodes are the goal, its features and their tasks. The edges are the
@@ -131,6 +129,39 @@ On the board a goal is an epic. An epic already has an objective and a
 target, and every task already names its epic. What the epic gains is the
 check, the criterion ([4.2](#42-the-criterion)) and the ordered list of
 its features.
+
+**A goal's check names who performs each part, through which channel and
+from where.** A check that names only an outcome leaves open who runs it,
+and the trial showed what that costs: a check that did not name the roles
+of a run let a cycle count that was not the test, and a check that did not
+name the direction of an access cost three releases in a day. The
+template, one line per part:
+
+> *Who* (a role: the architect session, a fresh session, a member of a
+> team, the owner), *through which channel* (the MCP tools alone, the
+> command line, the board's page, the HTTP API), *from where* (the host
+> and the credential: the workstation with the project's ordinary
+> credential, a member's host with its own), *does what*, and *what is
+> read as the result* (a number a tool call returned, a record, a
+> confirmed delivery).
+
+A worked example, the check of aimem's goal "The goal-driven process lives
+in the product" (the architect's wording, until the owner confirms it):
+
+> 1. The architect session, on the workstation, through the MCP tools
+>    alone, moves an unfinished feature of the reached goal to this goal
+>    with a new mark and position, marks that goal as reached, and reads
+>    from one call which features have every confirmed task done and are
+>    still open, and how many tasks of a goal no feature confirms. No record
+>    is created a second time by hand.
+> 2. A fresh standalone session, started on the workstation in a project
+>    it has not worked in, with that project's ordinary credential and the
+>    MCP tools alone, reads the process from aimem, names the task the
+>    tiers give, and writes the course check. The distance, the picks by
+>    tier and the support count in that check are numbers that a tool call
+>    returned.
+> 3. The architect session counts the same numbers by hand from the board
+>    on the same day, and the two counts are equal.
 
 ### 3.3 Features: records on the board, each with a check
 
@@ -184,6 +215,11 @@ already records: **what depends on it.**
   is what puts a defect or a fix first when later work rests on it: it is
   not an exception to the order, it is the order.
 - The same holds one tier lower for optional features.
+- **A task's tier follows what the task serves, not its label.** A task
+  that a path task depends on takes that feature's tier, whatever its
+  title says. So does the release that carries a feature, and a
+  prerequisite in another project takes the tier of the feature that
+  waits on it.
 
 So a task's importance for the goal follows from where it stands, not
 from a label chosen for it, and it changes by itself when a dependency is
@@ -269,19 +305,42 @@ This is deliberate. Under the minimal criterion a worker who has nothing
 on the path does not turn to support work; it starts on what the next goal
 will need.
 
+**The next goal is ready before the current one is reached,** with its
+check, criterion and features, so that the picks never wait for a goal to
+be written. Which goal is current is the owner's choice at any time, not
+only at the moment a goal is reached: the owner may switch the current
+goal, and the picks follow the goal the owner names.
+
+**A reached goal is closed.** Each of its unfinished features either moves
+to the named next goal with a new mark, since a mark belongs to a goal, or
+is dropped: cancelled, with a line in the goal's log that says why. Its DONE
+and CANCELLED features stay with it as the record of what reached it.
+Nothing unfinished stays in a reached goal (the owner's rule of
+2026-11-17).
+
 ### 4.3 The budget for support work
 
-Support work has a budget: **for every three tasks of tiers 1 and 2 that a
-worker delivers, it may deliver one support task**, counted over a
-calendar week. The figure is the owner's to set
-([section 12](#12-open-questions-for-the-owner)). The budget may be spent
-at any moment, also while path work is READY; it is a budget, not a place
-at the end of the line. A support task taken while a pull request waits
-for reviewers counts against it like any other.
+Support work has a budget: **one support task for every three tasks of
+tiers 1 and 2 delivered**, counted per project and calendar week. It is a
+number, not a stop. Work does not halt when the budget is spent; a breach
+goes to the owner in the sixth line of the course check
+([5.1](#51-the-course-check)). The budget may be spent at any moment, also
+while path work is READY; it is a budget, not a place at the end of the
+line. A support task taken while a pull request waits for reviewers counts
+against it like any other.
 
-A worker for whom no task of tier 1 or 2 exists at all is not bound by the
-budget, and that fact is itself reported in the course check, because it
-means the goal does not reach that worker
+Until the board computes it, it is counted by hand: list the project's
+tasks that moved to DONE since Monday and sort each into path, next,
+support or urgent by the tier its use gives it, not by its label: a task
+that is on the way only through another task's dependency counts in that
+task's tier. Set apart the support tasks that a worker with nothing of an
+upper tier took. Then compare the remaining support count with a third of
+path and next together; urgent tasks and the picks set apart are not
+compared.
+
+**A worker with nothing of an upper tier to take** takes the oldest held
+support task, and that pick is outside the budget. The course check names
+it, because it means the goal does not reach that worker
 ([7.5](#75-one-goal-several-projects-and-workers)).
 
 Most of what used to jump the queue needs no exception under
@@ -298,8 +357,7 @@ that cannot wait whatever the goal is: a defect that stops a user's work
 now and has no workaround, or a security finding that the project's own
 rules class as blocking. The one who assigns the queue sets P0 and records
 the ground on the task. Urgent tasks are counted and listed in every
-course check, so their number is seen. Anything else over the budget needs
-the owner's word.
+course check, so their number is seen.
 
 ## 5. Seeing progress
 
@@ -314,12 +372,14 @@ Six lines, counted from the board:
    holds it, and since when.
 4. **The picks:** tasks delivered since the last check in each of four
    groups: path, next, support within the budget, urgent; and separately
-   any support task over the budget, with whose word. A task that stood on
-   the path or next only through another task's dependency is counted
-   there and named, with the task that waited for it.
+   any support task over the budget, and any taken outside it by a worker
+   with nothing of an upper tier. A task that stood on the path or next
+   only through another task's dependency is counted there and named, with
+   the task that waited for it.
 5. **Out of order:** tasks taken while a task of a higher tier was READY
    for the same worker without a recorded reason. The aim is none.
-6. **The change proposed** to the features or the queue, or "none".
+6. **For the owner:** a breach of the support budget, and the change
+   proposed to the features or the queue; or "none".
 
 The distance is coarse on purpose: with six features of unequal size it
 moves rarely. Lines 3 and 5 are the ones that change from day to day.
@@ -328,8 +388,10 @@ moves rarely. Lines 3 and 5 are the ones that change from day to day.
 
 The check is a comment on one board task kept in the goal's epic for this
 purpose, the goal's log. So every session and the owner read one series,
-and its history is the board's. It is written once per working day by
-whoever assigns the queue, and after a release.
+and its history is the board's. Whoever assigns the queue writes it on a
+day when something was delivered or the wait changed, and at a release;
+not on a day when neither happened. Its numbers come from the board. A
+fact about one task is a comment on that task, not on the goal's log.
 
 A feature on the path that has waited on a person for three working days
 is put as the first line of the check until it moves.
@@ -388,12 +450,12 @@ added only if the manual version shows the need.
 
 **What it costs.** Setting a goal up is one epic text and about ten
 feature records, once. A course check lists the feature records of the
-epic and the week's deliveries: five to ten minutes. One per working day
-and one per release is about seven a week, so thirty-five to seventy
-minutes a week for the one who assigns the queue. Filing a task costs one
-more decision, and promoting one to READY one more confirmation and one
-edit of a feature's dependencies. Whether that is acceptable is for the
-owner to say, and the trial measures it.
+epic and the week's deliveries: five to ten minutes. One on each day that
+changes something and one per release was estimated at about seven a week,
+thirty-five to seventy minutes for the one who assigns the queue. Filing a
+task costs one more decision, and promoting one to READY one more
+confirmation and one edit of a feature's dependencies. Whether that is
+acceptable is for the owner to say, and the trial measures it.
 
 ## 7. Where the proposal is weak
 
@@ -423,9 +485,10 @@ mistake before its review ([section 8](#8-a-worked-example)).
 
 The budget can be spent while path work is READY, a fault that later
 work rests on is path work by its dependency, P0 covers what cannot wait,
-and a worker the goal does not reach is not bound at all. If the trial
-shows defects piling up, the owner raises the figure. The trial counts
-open support tasks at its start and its end for this reason.
+and a worker the goal does not reach takes the oldest held support task
+outside the budget. If the trial shows defects piling up, the owner raises
+the figure. The trial counts open support tasks at its start and its end
+for this reason.
 
 ### 7.4 Everything becomes a dependency, or urgent
 
@@ -590,39 +653,35 @@ every worker, the larger part of that day stays as it was.
 
 ## 9. The trial
 
-**What is done, for five working days:** the first version of
-[section 6](#6-the-first-version-what-is-done-by-hand) on the aicrew goal,
-starting from the features of [section 8](#8-a-worked-example) as its
-reviews leave them. aimem joins once the first open question is answered.
+History, kept short. The first version of
+[section 6](#6-the-first-version-what-is-done-by-hand) was tried by hand
+in four projects, for three to six days each, with
+a goal's log per project and the measures this section named: the picks by
+tier, the picks out of order, the urgent tasks, the minutes per course
+check, the waits on a person, the open support tasks and the changes to the
+features.
 
-**What is measured,** all from the goal's log and from the board:
+What the four logs read, per project:
 
-| Measure | Read as |
+| Reading | Range over the four projects |
 | --- | --- |
-| Out-of-order picks per day (line 5) | the rule's purpose; the day replayed in 8.1 had three |
-| Picks by group per day (line 4) | where the work went |
-| Urgent tasks and tasks on the way only through another task, against tasks confirmed on features | whether the links were used to go around the order |
-| Minutes to set the goal up, and to write each check | the cost |
-| Working days a path feature waited on a person | whether a person on the path became visible and was acted on |
-| Open support tasks at the start and at the end | whether support work was starved |
-| Changes to the features, with their reasons | whether the plan was changed on purpose |
+| Tasks delivered on features | 16 to 46 |
+| Support tasks delivered | 6 to 11 |
+| Releases | 3 to 7 |
+| Minutes of course checks over the trial | 7 to about 60 |
+| The budget of one support task for three | held in one, at the edge in one, over in two |
+| Pull requests the external reviewer returned with a blocker after a local READY review | 5 to at least 12 |
 
-**The owner judges the result,** on that record, against these readings:
-
-- **Stop** if the checks took more than ten minutes on three of the five
-  days, or if any of the last three days had three or more out-of-order
-  picks, as the replayed day did, or if urgent tasks and tasks on the way
-  only through another task together outnumbered the tasks confirmed on
-  features.
-- **Build** if it did not stop and the minutes went mostly into the same
-  mechanical steps: finding the tasks of a feature, reading their states,
-  sorting the week's deliveries into groups. Those steps are then what is
-  built first.
-- **Continue by hand** otherwise, for another stated period.
-
-A week in which the path waits on a person the whole time is a valid
-result, not a failed trial: line 3 then shows it every day, and the picks
-show what the workers did instead.
+All four found the trial worth it for the goal's check and the goal's log;
+the tiers and the budget decided little. On 2026-11-23 the owner kept the
+process, with the review's changes: the check's template
+([3.2](#32-goal-an-epic-with-a-check)), the tier by what a task serves
+([3.5](#35-a-tasks-place-comes-from-what-depends-on-it)), the next goal
+and the reached goal ([4.2](#42-the-criterion)), the budget as a number and
+the idle worker ([4.3](#43-the-budget-for-support-work)), and the course
+check's days ([5.2](#52-where-and-when)). The returned pull requests led to
+three rules for the way into a review, which belong to the shared review
+gates of the skill set, not to this document.
 
 ## 10. Later, in the products
 
@@ -713,6 +772,9 @@ the owner's word:
 
 ## 12. Open questions for the owner
 
+These were the questions before the trial; the trial and its review
+answered them ([section 9](#9-the-trial)). They are kept as history.
+
 1. **A worker the goal does not reach**
    ([7.5](#75-one-goal-several-projects-and-workers)). For the aimem
    worker today: goal work in another repository, a goal of aimem's own
@@ -735,9 +797,9 @@ the owner's word:
 
 ## Appendix: the wording this would become
 
-Not applied by this document. If the trial ends in "continue" or "build",
-the handbook's section "Scope, pickup and decomposition" and the roadmap's
-pickup policy would gain text of this kind:
+Not yet applied to the handbook. The next task of the feature that carries
+the process gives the handbook's section "Scope, pickup and decomposition"
+and the roadmap's pickup policy text of this kind:
 
 > A goal is an epic with a check, a criterion and an ordered list of
 > features. A feature is a record with its own check and owner, marked
@@ -745,13 +807,17 @@ pickup policy would gain text of this kind:
 > task claims a feature when it is filed, and the claim is confirmed, by
 > adding it to the feature's dependencies, when the task is promoted to
 > READY; a task that another task waits for stands where that task
-> stands; a task nothing on the way depends on is support work. Pick
-> eligible READY work in this order: what a mandatory feature depends on,
-> the earliest feature in the goal's order first; then the same for
-> optional features; then support work within the budget the owner set.
-> Before assigning support work, make the next task of the first two
-> kinds READY. A task of priority P0 passes ahead, with its ground
-> recorded by the assigner. Once per working day and after each release,
-> write the course check as a comment on the goal's log: the goal, the
-> distance, the wait, the picks, the picks out of order, and the change
-> proposed.
+> stands, and so does a release that carries a feature or a prerequisite
+> in another project; a task nothing on the way depends on is support
+> work. Pick eligible READY work in this order: what a mandatory feature
+> depends on, the earliest feature in the goal's order first; then the
+> same for optional features; then support work within the budget, one
+> for three per project and week, a number reported to the owner and not
+> a stop. A worker with nothing of the first two kinds takes the oldest
+> held support task, outside the budget. Before assigning support work,
+> make the next task of the first two kinds READY. A task of priority P0
+> passes ahead, with its ground recorded by the assigner. On a day when
+> something was delivered or the wait changed, and at a release, write
+> the course check as a comment on the goal's log: the goal, the
+> distance, the wait, the picks, the picks out of order, and for the
+> owner a budget breach and the change proposed.
