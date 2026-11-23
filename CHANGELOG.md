@@ -55,8 +55,10 @@ force, docs/DEVELOPMENT-PROCESS-PROPOSAL.md) and #411.
   An epic update without a state that a 0.11.5 hub committed, retried
   after the upgrade under the same idempotency key, answers an explicit
   retry conflict, because the older release recorded the state as OPEN.
-  Nothing is written twice; read the epic and send the update again with
-  a new key.
+  Nothing is written twice. Read the epic: when it already shows the
+  change, the update was committed and there is nothing to send again.
+  Send only a change it does not show, written into the epic as it reads
+  now, with its current revision and a new key.
 - **The way back.** No migration, so a 0.11.5 binary opens the stores as
   they are. After a downgrade, that hub still reads a REACHED epic and
   lists it only on request, but takes new tasks into it, and its
