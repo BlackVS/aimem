@@ -13,27 +13,46 @@ currently 26); a binary refuses a database newer than it understands.
 
 ## [Unreleased]
 
-### Fixed
+## [0.12.1] — 2026-11-23
 
-- **An upgrade, or its rollback, is no longer refused by systemd after a
-  crash loop.** The Linux client's service unit restarts a failing serve
-  every 2 s, and systemd counts those restarts against its start limit (5
-  starts in 10 s). An upgrade's own start, or its rollback's, that came right after
-  such a loop was refused as "attempted too often": the upgrade then rolled
-  back for that alone, and with a short `AIMEM_UPGRADE_WAIT` the rollback's
-  start could be refused too, leaving the service down until the window
-  passed. `install.sh` now clears the unit's failed state and start
-  counter (`systemctl --user reset-failed`) before each start it makes on
-  purpose; the limit still bounds a crash loop after that start. The hub
-  installer has the same sequence and is not changed yet: no CI job runs a
-  hub under systemd to test the line. Seen four times in CI's Linux client upgrade check, two of
-  them on the v0.12.1 release prepare.
-- **CI runs the upgrade checks on any pull request that changes the
-  installers or the upgrade checks,** not only on a release prepare:
-  `client-upgrade` on Linux and Windows and `hub-upgrade`, decided by
-  `scripts/upgrade-scope.sh`, whose log says why they run or are skipped.
-  The Linux client check now also starts from a unit at its start limit,
-  and prints the unit's state and journal when it fails.
+A fix for lost turns, for workstations. In a long Codex or Claude Code
+session, the Stop hook could run past the client's 10 s hook timeout and be
+killed before its turn reached the journal, silently. Every hook command now
+fits one 7 s deadline, reads only the last turn of the transcript, and names
+in `aimem logs` what a run left for a later one. No hub change and no schema
+step: the project schema stays 26. Includes PR #413.
+
+It also fixes an upgrade, or its rollback, that systemd refused after a
+crash loop of the Linux client's service.
+
+### Upgrade notes
+
+- **Workstations only.** Install the client on each workstation with the
+  one-line installer (docs/INSTALL-CLIENT.md). The fix is in the hook
+  commands the client runs, and the wire is unchanged, so hubs need no
+  upgrade for it.
+- **Turns lost before the upgrade are not recovered by it.** The upgrade
+  changes what later hook runs do. A turn whose hook was killed before it
+  is not in the journal, and stays out until it is submitted again.
+- **Finding and submitting a lost turn.** For the owner of a long Codex or
+  Claude Code session, in the project's directory: `aimem project-id`
+  prints the project, `aimem sessions -p <project>` lists its sessions with
+  their event counts, and `aimem timeline -p <project> -s <session>` lists
+  the turns the journal holds (`aimem latest` shows the last one). Compare
+  them with the client's turns: in a Codex rollout file, each finished turn
+  has a `task_complete` line carrying its `turn_id`. A Codex turn missing
+  from the journal is submitted with `aimem submit-codex`, a Stop payload on
+  standard input naming the session, the turn and the rollout; the event is
+  built from the rollout:
+
+  ```json
+  {"session_id": "<session>", "turn_id": "<turn>", "transcript_path": "<rollout file>", "cwd": "<project directory>", "hook_event_name": "Stop"}
+  ```
+
+  Submitting a turn the journal already holds adds no event. For Claude
+  Code, `aimem submit-claude` with a Stop payload submits only the
+  transcript's last turn, so an earlier lost Claude Code turn cannot be
+  submitted this way.
 
 ### Data integrity
 
@@ -56,10 +75,31 @@ currently 26); a binary refuses a database newer than it understands.
   requests. A hub that fails is not asked again in the same run, and a
   bound document that could not be published is published by a later run.
   A run that leaves work for later writes one line in `aimem logs` naming
-  the event and what was left. Turns lost before this release can be submitted
-  again with `aimem submit-codex` and a Stop payload naming the session,
-  the turn and the rollout. A turn already journaled is not changed by a
-  second submission.
+  the event and what was left. A lost turn is submitted again as the
+  upgrade notes say.
+
+### Fixed
+
+- **An upgrade, or its rollback, is no longer refused by systemd after a
+  crash loop.** The Linux client's service unit restarts a failing serve
+  every 2 s, and systemd counts those restarts against its start limit (5
+  starts in 10 s). An upgrade's own start, or its rollback's, that came
+  right after such a loop was refused as "attempted too often": the
+  upgrade then rolled back for that alone, and with a short
+  `AIMEM_UPGRADE_WAIT` the rollback's start could be refused too, leaving
+  the service down until the window passed. `install.sh` now clears the
+  unit's failed state and start counter (`systemctl --user reset-failed`)
+  before each start it makes on purpose; the limit still bounds a crash
+  loop after that start. The hub installer has the same sequence and is
+  not changed yet: no CI job runs a hub under systemd to test the line.
+  Seen four times in CI's Linux client upgrade check, two of them on this
+  release's prepare. Includes PR #415.
+- **CI runs the upgrade checks on any pull request that changes the
+  installers or the upgrade checks,** not only on a release prepare:
+  `client-upgrade` on Linux and Windows and `hub-upgrade`, decided by
+  `scripts/upgrade-scope.sh`, whose log says why they run or are skipped.
+  The Linux client check now also starts from a unit at its start limit,
+  and prints the unit's state and journal when it fails.
 
 ## [0.12.0] — 2026-11-23
 
