@@ -33,26 +33,34 @@ crash loop of the Linux client's service.
   upgrade for it.
 - **Turns lost before the upgrade are not recovered by it.** The upgrade
   changes what later hook runs do. A turn whose hook was killed before it
-  is not in the journal, and stays out until it is submitted again.
-- **Finding and submitting a lost turn.** For the owner of a long Codex or
-  Claude Code session, in the project's directory: `aimem project-id`
-  prints the project, `aimem sessions -p <project>` lists its sessions with
-  their event counts, and `aimem timeline -p <project> -s <session>` lists
-  the turns the journal holds (`aimem latest` shows the last one). Compare
-  them with the client's turns: in a Codex rollout file, each finished turn
-  has a `task_complete` line carrying its `turn_id`. A Codex turn missing
-  from the journal is submitted with `aimem submit-codex`, a Stop payload on
-  standard input naming the session, the turn and the rollout; the event is
-  built from the rollout:
+  is not in the journal, and the upgrade does not bring it back.
+- **Seeing whether a session lost turns.** In the project's directory,
+  `aimem project-id` prints the project and `aimem sessions -p <project>`
+  lists its sessions. `aimem export-events -p <project>` writes every event
+  the journal holds, one JSON line each, so the turns it holds for one
+  session are:
 
-  ```json
-  {"session_id": "<session>", "turn_id": "<turn>", "transcript_path": "<rollout file>", "cwd": "<project directory>", "hook_event_name": "Stop"}
+  ```sh
+  aimem export-events -p <project> | grep '"session_id":"<session>"' | grep -o '"turn_id":"[^"]*"'
   ```
 
-  Submitting a turn the journal already holds adds no event. For Claude
-  Code, `aimem submit-claude` with a Stop payload submits only the
-  transcript's last turn, so an earlier lost Claude Code turn cannot be
-  submitted this way.
+  ```powershell
+  aimem export-events -p <project> | ConvertFrom-Json | Where-Object { $_.event.session_id -eq '<session>' } | ForEach-Object { $_.event.turn_id }
+  ```
+
+  Compare them with the client's turns: in a Codex rollout file, each
+  finished turn has a `task_complete` line carrying its `turn_id`. A turn
+  the rollout finished and the journal does not hold was lost. `aimem
+  latest -p <project> -s <session>` shows only the last turn the journal
+  holds, and `aimem timeline` lists only a session's newest 200 events, so
+  neither shows whether an earlier turn is missing.
+- **Do not submit an old turn by hand from the session's full rollout.**
+  `aimem submit-codex` reads a turn from the rollout within a time share of
+  its run. If that read runs out of its share, the turn is recorded with no
+  request and no reply, and a turn recorded once is never corrected by a
+  second submission. A command that recovers lost turns safely is planned
+  and is not in this release. For Claude Code, `aimem submit-claude`
+  submits only the last turn of a transcript.
 
 ### Data integrity
 
@@ -75,8 +83,8 @@ crash loop of the Linux client's service.
   requests. A hub that fails is not asked again in the same run, and a
   bound document that could not be published is published by a later run.
   A run that leaves work for later writes one line in `aimem logs` naming
-  the event and what was left. A lost turn is submitted again as the
-  upgrade notes say.
+  the event and what was left. The upgrade notes say how to see whether a
+  session lost turns.
 
 ### Fixed
 
