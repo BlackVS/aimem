@@ -14,8 +14,11 @@
 #
 # It prints the reason, and writes run=true or run=false to $GITHUB_OUTPUT
 # (or to stdout without it). The changed files are those between the pull
-# request's base and head (git diff base...head, a full checkout);
-# UPGRADE_SCOPE_FILES, one path per line, replaces that list in a test.
+# request's base and head (git diff base...head, a full checkout), with
+# rename detection off, so an installer moved or deleted counts by its old
+# path. A diff that cannot be read fails the job rather than reading as a
+# skip. UPGRADE_SCOPE_FILES, one path per line, replaces that list in a
+# test.
 #
 # Inputs (environment): EVENT, HEAD_REF, SAME_REPO (true or false),
 # BASE_SHA, HEAD_SHA.
@@ -44,12 +47,7 @@ decide() {
       echo "run: a release prepare pull request ($HEAD_REF)"
       return 0 ;;
   esac
-  local files hits
-  if [ -n "${UPGRADE_SCOPE_FILES+set}" ]; then
-    files=$UPGRADE_SCOPE_FILES
-  else
-    files=$(git diff --name-only "${BASE_SHA:?}...${HEAD_SHA:?}")
-  fi
+  local hits
   hits=$(printf '%s\n' "$files" | grep -E "$installer_files" || true)
   if [ -n "$hits" ]; then
     echo "run: the pull request changes what the upgrade runs or checks:"
@@ -59,6 +57,17 @@ decide() {
   echo "skip: the pull request changes none of the installers or the upgrade checks"
   return 1
 }
+
+# The file list is read here, outside the `if decide` below, where a
+# failing command would not end the script.
+files=
+if [ "${EVENT:-}" = pull_request ] && [ "${SAME_REPO:-}" = true ] && [[ "${HEAD_REF:-}" != release/* ]]; then
+  if [ -n "${UPGRADE_SCOPE_FILES+set}" ]; then
+    files=$UPGRADE_SCOPE_FILES
+  else
+    files=$(git diff --no-renames --name-only "${BASE_SHA:?}...${HEAD_SHA:?}")
+  fi
+fi
 
 run=false
 if decide; then run=true; fi

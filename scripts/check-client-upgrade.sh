@@ -53,17 +53,27 @@ bin="$HOME/.local/bin/aimem"
 plugin="$HOME/.config/opencode/plugins/aimem.ts"
 tmp=$(mktemp -d)
 hubpid=
-trap '[ -z "$hubpid" ] || kill "$hubpid" 2>/dev/null || true' EXIT
+# on_exit: on any unsuccessful exit (a fail, or a command that stops the
+# script under set -e), print the unit's state; then stop the throwaway
+# hub, and keep the exit status.
+on_exit() {
+  local st=$?
+  [ "$st" -eq 0 ] || unit_state
+  [ -z "$hubpid" ] || kill "$hubpid" 2>/dev/null || true
+  exit "$st"
+}
+trap on_exit EXIT
 
 # unit_state prints what systemd holds about the service: its restarts,
 # its result (start-limit-hit when it refused a start) and its journal.
+# on_exit calls it on every unsuccessful exit.
 unit_state() {
   [ "$asset" = aimem-linux-amd64 ] || return 0
   echo "--- the aimem user unit at the failure" >&2
   systemctl --user show aimem.service -p ActiveState -p Result -p NRestarts -p StartLimitBurst -p StartLimitIntervalUSec >&2 2>/dev/null || true
   journalctl --user -u aimem.service --no-pager -n 40 >&2 2>/dev/null || true
 }
-fail() { echo "FAIL: $*" >&2; unit_state; exit 1; }
+fail() { echo "FAIL: $*" >&2; exit 1; }
 # start_limit: restart the unit until systemd refuses a start, as a crash
 # loop leaves it, and check that it says so. install.sh resets this
 # before a start of its own (svc_reset); without that, the upgrade's or
