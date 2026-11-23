@@ -13,6 +13,74 @@ currently 26); a binary refuses a database newer than it understands.
 
 ## [Unreleased]
 
+## [0.12.0] — 2026-11-23
+
+A goal can be closed as reached. An epic has a third state, `REACHED`, apart
+from `RETIRED`, refused while the goal holds an unfinished feature, and it
+carries its check in a new field, `check`. The features listing of a goal
+marks a feature that is ready to close and counts the goal's tasks that no
+feature confirms, and `set_feature` moves a feature to the next goal
+(docs/FEATURES.md). Changing the embedding model is a supported step: a
+saved model switches live recall at once, curation fills the new key before
+its dedup, and `aimem embed --drop` removes an old key's vectors
+(docs/ADMIN-MANUAL.md, "Changing the embedding model"). A pull request now
+tests every package on Windows. An epic update without a state now keeps
+the state; read the upgrade notes. No schema step: the project schema stays
+26. Includes PR #406, #407, #409, #410 (the development process is in
+force, docs/DEVELOPMENT-PROCESS-PROPOSAL.md) and #411.
+
+### Upgrade notes
+
+- **Hubs first, then workstations.** The reached state, the `check` field,
+  the listing's mark and count, a feature's move to another goal, the live
+  switch of a saved model and `POST /v1/config/embeddings/drop` are the
+  hub's. A hub of 0.11.5 refuses `REACHED` and an epic's `check`, and
+  refuses `set_feature` with another goal, saying the goal must be the
+  record's epic.
+- **Behaviour change: an epic update without a state keeps the state.**
+  Before, `update_epic` and `PUT /v1/projects/{p}/epics/{e}` without
+  `state` set the epic to OPEN, so a client that did not send the state,
+  for example to rename an epic, reopened a retired one. A client that
+  relied on that reopens an epic with an explicit `state: "OPEN"`.
+
+  | A RETIRED epic receives… | Before | After |
+  | --- | --- | --- |
+  | `update_epic` / `PUT` without `state` (e.g. a rename) | becomes **OPEN** (the empty state defaulted to OPEN) | stays **RETIRED** |
+  | `update_epic` / `PUT` with `state: "OPEN"` | OPEN | OPEN |
+  | `update_epic` / `PUT` with `state: "RETIRED"` | RETIRED | RETIRED |
+  | an update without `check` (any client) | (no field) | the check is kept |
+  | an update with `check: ""` | (no field) | the check is cleared |
+  | `create_epic` / `POST` without `state` | OPEN | OPEN |
+
+  An epic update without a state that a 0.11.5 hub committed, retried
+  after the upgrade under the same idempotency key, answers an explicit
+  retry conflict, because the older release recorded the state as OPEN.
+  Nothing is written twice; read the epic and send the update again with
+  a new key.
+- **The way back.** No migration, so a 0.11.5 binary opens the stores as
+  they are. After a downgrade, that hub still reads a REACHED epic and
+  lists it only on request, but takes new tasks into it, and its
+  `update_epic` drops the check and turns an update without a state into
+  OPEN. Reopen a reached goal with `state: "OPEN"`, or retire it, before
+  going back, if it must not take new tasks.
+- **Changing the embedding model, in this order.** The upgrade changes no
+  model. To change one afterwards without a dip in semantic recall, fill
+  the new key first, then switch, then fill the rest:
+  1. on the hub host, as the service user, `AIMEM_EMBED_MODEL="<new
+     model>" aimem embed --all`;
+  2. save the model in the console's setup tab (or `PUT
+     /v1/config/models`); the running service queries with it from that
+     moment, with no restart;
+  3. `aimem embed --all` once more, for what the timer curated in
+     between.
+
+  When the new model needs another `AIMEM_EMBED_DIM`, set both lines in
+  the env file and restart the service in place of step 2. The old key's
+  vectors stay until `aimem embed --drop "<old key>" --all` removes them.
+  docs/ADMIN-MANUAL.md, "Changing the embedding model".
+- **No setting changes.** No new environment setting; the access schema
+  stays at 10.
+
 ### Changed
 
 - **A goal is closed as REACHED, carries its check, and its features
@@ -85,7 +153,7 @@ currently 26); a binary refuses a database newer than it understands.
     the key recall queries with, named in the new `embed_model`. The
     console's setup tab shows it, and the TUI's embed column counts the
     same key.
-  - **Old vectors can be removed.** `aimem embed --drop KEY [--dry-run]`
+  - **Old vectors can be removed.** `aimem embed --drop KEY --all [--dry-run]`
     refuses its own key, then has the running service remove the key's
     vectors through the new admin route `POST /v1/config/embeddings/drop`.
     The service refuses the key it queries with and the key its env file
@@ -93,7 +161,7 @@ currently 26); a binary refuses a database newer than it understands.
     lock a models save takes, and reports a drop that stopped partway per
     project. Its dry run reads each store read-only. When the answer is
     lost after the request went out, the command says the outcome is
-    unknown. `aimem embed --keys` lists the keys
+    unknown. `aimem embed --keys --all` lists the keys
     stored, per vector length.
   - **A dimension mismatch is refused.** A vector of another length than
     the stored vectors of its key is refused by every writer (checked in
