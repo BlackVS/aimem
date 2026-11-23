@@ -3,6 +3,7 @@ package store
 import (
 	"database/sql"
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -190,6 +191,14 @@ func TestGoalReachedGuardsItsFeatures(t *testing.T) {
 	if !errors.Is(err, ErrTaskInvalid) || !strings.Contains(err.Error(), "set the task's epic to an OPEN goal") {
 		t.Fatalf("a task turned into a feature of a reached goal: %v", err)
 	}
+	// A finished task is no exception: a reached goal takes no new feature.
+	for _, state := range []string{"DONE", "CANCELLED"} {
+		finished := finish(t, db, task.ID, state, "task-"+state)
+		_, err = db.SetFeature(finished.ID, &link, false, finished.Revision, aliceActor, "to-feature-"+state)
+		if !errors.Is(err, ErrTaskInvalid) || !strings.Contains(err.Error(), "set the task's epic to an OPEN goal") {
+			t.Fatalf("a %s task turned into a feature of a reached goal: %v", state, err)
+		}
+	}
 	// A feature already unfinished there (data no guard wrote) is edited
 	// only out of the goal: the refusal says to move, finish or cancel it.
 	legacy := mustCreateFeature(t, db, goalEpic(t, db, "spare"), "legacy", "l")
@@ -243,6 +252,29 @@ func TestEpicCheckField(t *testing.T) {
 	}
 	if _, err := db.CreateEpic(EpicContent{Title: "big", Check: strings.Repeat("x", MaxEpicTextBytes+1)}, aliceActor, "big"); !errors.Is(err, ErrTaskInvalid) {
 		t.Fatalf("the check is bounded: %v", err)
+	}
+}
+
+// An update that keeps the check and one that clears it are different
+// requests: reusing one's key for the other conflicts, in either order.
+func TestEpicCheckGivenEmptyAndOmittedDoNotShareARetry(t *testing.T) {
+	_, db := taskDB(t)
+	empty := ""
+	for i, order := range [][2]*string{{nil, &empty}, {&empty, nil}} {
+		e, err := db.CreateEpic(EpicContent{Title: "a goal", Check: "the check"}, aliceActor, fmt.Sprintf("create-%d", i))
+		if err != nil {
+			t.Fatal(err)
+		}
+		key := fmt.Sprintf("update-%d", i)
+		if _, err := db.UpdateEpic(e.ID, e.EpicContent, order[0], e.Revision, aliceActor, key); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := db.UpdateEpic(e.ID, e.EpicContent, order[1], e.Revision, aliceActor, key); !errors.Is(err, ErrTaskRetryConflict) {
+			t.Fatalf("order %d: the other request under the same key must conflict: %v", i, err)
+		}
+		if _, err := db.UpdateEpic(e.ID, e.EpicContent, order[0], e.Revision, aliceActor, key); err != nil {
+			t.Fatalf("order %d: the same request replays: %v", i, err)
+		}
 	}
 }
 
@@ -322,7 +354,7 @@ func TestGoalViewCountAndStates(t *testing.T) {
 	if len(v.Features) != 1 || v.Features[0].ID != f.ID {
 		t.Fatalf("features without archived: %+v", v.Features)
 	}
-	if v.Local[tasks[0]] != "DONE" || v.Local[tasks[1]] != "BACKLOG" {
+	if v.Local[tasks[0]].State != "DONE" || v.Local[tasks[1]].State != "BACKLOG" {
 		t.Fatalf("confirmed states: %v", v.Local)
 	}
 	all, err := db.ReadGoalView(goal, true, 100)
@@ -375,11 +407,11 @@ func TestGoalViewReadsOneSnapshotWithoutWriterLock(t *testing.T) {
 	if took > time.Second {
 		t.Fatalf("the write waited %v", took)
 	}
-	if len(v.Features) != 1 || v.Features[0].ID != f.ID || v.Local[tasks[0]] != "BACKLOG" || v.Local[tasks[1]] != "BACKLOG" || v.Unconfirmed != 0 {
+	if len(v.Features) != 1 || v.Features[0].ID != f.ID || v.Local[tasks[0]].State != "BACKLOG" || v.Local[tasks[1]].State != "BACKLOG" || v.Unconfirmed != 0 {
 		t.Fatalf("the view must read the snapshot from before the write: %+v", v)
 	}
 	after, err := db.ReadGoalView(goal, false, 100)
-	if err != nil || after.Local[tasks[0]] != "DONE" || after.Unconfirmed != 1 {
+	if err != nil || after.Local[tasks[0]].State != "DONE" || after.Unconfirmed != 1 {
 		t.Fatalf("the next view reads the write: %+v %v", after, err)
 	}
 }

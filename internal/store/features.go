@@ -140,12 +140,14 @@ func checkFeatureRules(tx *sql.Tx, t Task, from, priorDeps, priorKind string, cr
 }
 
 // checkReachedGoalFeature refuses a write that leaves an unfinished feature
-// in a reached goal. Each refusal names the way that exists for its case:
+// in a reached goal, and any new feature there, finished or not: a reached
+// goal takes no new feature. Each refusal names the way that exists for its case:
 // a finished feature does not move, so reopening one means reopening the
 // goal first; a task becomes a feature of an OPEN goal, so its epic changes
 // first; a feature already unfinished there (data no guard wrote) moves out.
 func checkReachedGoalFeature(tx *sql.Tx, t Task, from, priorKind string, create bool) error {
-	if !t.isFeature() || t.Epic == "" || t.State == "DONE" || t.State == "CANCELLED" {
+	conversion := create || priorKind != KindFeature
+	if !t.isFeature() || t.Epic == "" || !conversion && (t.State == "DONE" || t.State == "CANCELLED") {
 		return nil
 	}
 	var state string
@@ -157,7 +159,7 @@ func checkReachedGoalFeature(tx *sql.Tx, t Task, from, priorKind string, create 
 		return err
 	}
 	switch {
-	case create || priorKind != KindFeature:
+	case conversion:
 		return invalid(errors.New("the task's epic is a reached goal, which takes no new feature: set the task's epic to an OPEN goal with update_task, then make it a feature there"))
 	case from == "DONE" || from == "CANCELLED":
 		return invalid(errors.New("the feature's goal is reached, and a feature in a reached goal stays DONE or CANCELLED: reopen the goal with update_epic (state OPEN) before you reopen the feature"))

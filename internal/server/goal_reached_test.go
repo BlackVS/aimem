@@ -86,6 +86,7 @@ func TestGoalReachedAndCheckOverHTTP(t *testing.T) {
 		t.Fatalf("REACHED with an open feature: %d %s", code, body)
 	}
 	g.setState(t, f, "CANCELLED")
+	finished := g.task(t, "finished work under the goal", "DONE")
 	if code, body := g.putEpic(t, g.goal, `"title":"the goal","state":"REACHED"`); code != 200 || !strings.Contains(body, `"state":"REACHED"`) {
 		t.Fatalf("REACHED: %d %s", code, body)
 	}
@@ -106,6 +107,9 @@ func TestGoalReachedAndCheckOverHTTP(t *testing.T) {
 	mover := g.created(t, "POST", "/v1/projects/alpha/tasks", fmt.Sprintf(`{"title":"mover","epic":%q,"feature":{"goal":%q,"position":1,"mark":"optional"}}`, other, other))
 	if w := g.setFeature(t, g.alice, mover, g.key(), fmt.Sprintf(`{"goal":%q,"position":1,"mark":"optional","expected_revision":1}`, g.goal)); w.Code != 400 || !strings.Contains(w.Body.String(), "the goal is reached") {
 		t.Fatalf("a move into a reached goal: %d %s", w.Code, w.Body)
+	}
+	if w := g.setFeature(t, g.alice, finished, g.key(), fmt.Sprintf(`{"goal":%q,"position":2,"mark":"optional","expected_revision":1}`, g.goal)); w.Code != 400 || !strings.Contains(w.Body.String(), "set the task's epic to an OPEN goal") {
+		t.Fatalf("a DONE task under a reached goal made a feature there: %d %s", w.Code, w.Body)
 	}
 	if w := taskReq(t, g.h, "POST", "/v1/projects/alpha/epics", g.alice, g.key(), `{"title":"born reached","state":"REACHED"}`); w.Code != 400 {
 		t.Fatalf("a new epic is not REACHED: %d %s", w.Code, w.Body)
@@ -203,5 +207,25 @@ func TestListFeaturesUnreadableConfirmedTask(t *testing.T) {
 	}
 	if l, body := g.goalListing(t, g.admin); !readyByID(l)[f] {
 		t.Fatalf("a caller who reads both projects gets the mark: %s", body)
+	}
+	// The beta task becomes a feature in its own project (conversion checks
+	// only its own project's dependents): a record that is now a feature
+	// withholds the mark, even for a caller who reads both projects.
+	actor := store.TaskActor{Kind: "admin", Name: "host-admin"}
+	betaGoal, err := betaDB.CreateEpic(store.EpicContent{Title: "beta goal"}, actor, "beta-goal")
+	if err != nil {
+		t.Fatal(err)
+	}
+	c := beta.TaskContent
+	c.Epic = betaGoal.ID
+	beta, err = betaDB.UpdateTask(beta.ID, c, beta.Revision, actor, "beta-epic")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := betaDB.SetFeature(beta.ID, &store.FeatureLink{Goal: betaGoal.ID, Position: 1, Mark: "optional"}, false, beta.Revision, actor, "beta-convert"); err != nil {
+		t.Fatalf("the conversion in its own project: %v", err)
+	}
+	if l, body := g.goalListing(t, g.admin); readyByID(l)[f] {
+		t.Fatalf("a confirmed record that became a feature must withhold the mark: %s", body)
 	}
 }

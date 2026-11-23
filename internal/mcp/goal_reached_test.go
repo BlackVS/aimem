@@ -36,6 +36,22 @@ func TestGoalReachedThroughTheTools(t *testing.T) {
 		t.Fatalf("update_epic without check or state: %v", e)
 	}
 
+	// A feature has no check of its own: the task tools refuse the argument
+	// instead of dropping it.
+	for _, tool := range []map[string]any{
+		{"name": "create_task", "args": map[string]any{"title": "f", "epic": id, "check": "x", "idempotency_key": "chk-1",
+			"feature": map[string]any{"goal": id, "position": 1, "mark": "optional"}}},
+		{"name": "update_task", "args": map[string]any{"id": id, "title": "f", "check": "x", "expected_revision": 1, "idempotency_key": "chk-2"}},
+		{"name": "set_feature", "args": map[string]any{"id": id, "goal": id, "position": 1, "mark": "optional", "check": "x", "expected_revision": 1, "idempotency_key": "chk-3"}},
+	} {
+		if text, isErr := call(tool["name"].(string), tool["args"].(map[string]any)); !isErr || !strings.Contains(text, "check belongs to an epic") {
+			t.Fatalf("%s with a check must be refused: %s", tool["name"], text)
+		}
+	}
+	if rows, _ := must("list_tasks", map[string]any{"kind": "any"})["tasks"].([]any); len(rows) != 0 {
+		t.Fatalf("a refused create_task stored nothing: %v", rows)
+	}
+
 	feature := must("create_task", map[string]any{"title": "the feature", "epic": id,
 		"feature": map[string]any{"goal": id, "position": 1, "mark": "optional"}, "idempotency_key": "feature"})["id"].(string)
 	work := must("create_task", map[string]any{"title": "the work", "state": "DONE", "epic": id, "idempotency_key": "work"})["id"].(string)

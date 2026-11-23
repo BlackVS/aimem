@@ -522,6 +522,9 @@ func (s *srv) taskTool(ctx context.Context, name string, raw json.RawMessage) (s
 	if err != nil {
 		return "", err
 	}
+	if a.Check != nil && name != "create_epic" && name != "update_epic" {
+		return "", errors.New("check belongs to an epic (create_epic, update_epic): a feature's check is its acceptance_criteria")
+	}
 	call := func(method, path string, body any, key string) (string, error) {
 		var payload []byte
 		if body != nil {

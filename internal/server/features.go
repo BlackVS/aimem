@@ -261,15 +261,18 @@ func readyToClose(t store.Task, finished func(id string) bool) bool {
 }
 
 // confirmedFinished answers readyToClose's question from the goal's view:
-// a task of the goal's project from its snapshot, which the caller may read
-// since it reads the listing; a task of another project read once per id
-// per listing, and only when the caller may read that project.
-func (s *Server) confirmedFinished(r *http.Request, local map[string]string) func(id string) bool {
+// a record of the goal's project from its snapshot, which the caller may
+// read since it reads the listing; a record of another project once per id
+// per listing, and only when the caller may read that project. Locating a
+// task reads it inside the server before the grant check, as on every route
+// that takes a task id; the state and kind used here come from one read made
+// after the grant. A record that is gone, unreadable or now a feature
+// withholds the mark exactly as an unfinished task does.
+func (s *Server) confirmedFinished(r *http.Request, local map[string]store.Confirmed) func(id string) bool {
 	seen := map[string]bool{}
-	done := func(state string) bool { return state == "DONE" || state == "CANCELLED" }
 	return func(id string) bool {
-		if state, ok := local[id]; ok {
-			return done(state)
+		if c, ok := local[id]; ok {
+			return c.Finished()
 		}
 		if v, ok := seen[id]; ok {
 			return v
@@ -278,7 +281,7 @@ func (s *Server) confirmedFinished(r *http.Request, local map[string]string) fun
 		if p, pdb, err := s.reg.LocateTask(id); err == nil {
 			if ok, err := s.canReadTasks(r, p); err == nil && ok {
 				if t, err := pdb.GetTask(id); err == nil {
-					v = done(t.State)
+					v = store.Confirmed{State: t.State, Kind: t.Kind}.Finished()
 				}
 			}
 		}

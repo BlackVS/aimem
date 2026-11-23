@@ -137,11 +137,13 @@ func (d *DB) UpdateEpic(id string, content EpicContent, check *string, expected 
 	if err := content.validate(false); err != nil {
 		return Epic{}, invalid(err)
 	}
+	// The receipt's canonical form drops empty values, so a check given
+	// empty would hash as a check not given: CheckGiven tells them apart.
 	input := struct {
-		Content  EpicContent `json:"content"`
-		Check    *string     `json:"check"`
-		Expected int64       `json:"expected"`
-	}{content, check, expected}
+		Content    EpicContent `json:"content"`
+		CheckGiven bool        `json:"check_given"`
+		Expected   int64       `json:"expected"`
+	}{content, check != nil, expected}
 	return taskMutation(d, actor, "epic-update", id, key, input, func(tx *sql.Tx) (Epic, error) {
 		e, err := readEpic(tx, id)
 		if err != nil {

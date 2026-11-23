@@ -16,13 +16,27 @@ type GoalView struct {
 	Features []Task
 	// Truncated reports that the goal has more features than the limit.
 	Truncated bool
-	// Local holds the state of each confirmed task found in this project,
-	// by id. A confirmed id missing here is of another project, or gone.
-	Local map[string]string
+	// Local holds each confirmed record found in this project, by id. A
+	// confirmed id missing here is of another project, or gone.
+	Local map[string]Confirmed
 	// Unconfirmed counts the records of kind task under the goal's epic,
 	// not archived, that no feature of this project confirms, whatever
 	// that feature's goal and archived or not.
 	Unconfirmed int
+}
+
+// Confirmed is what the listing needs of a confirmed record: its state and
+// its kind, since a record confirmed as a task may since have become a
+// feature.
+type Confirmed struct {
+	State string
+	Kind  string
+}
+
+// Finished reports a confirmed record that counts toward the mark: still a
+// task, and DONE or CANCELLED.
+func (c Confirmed) Finished() bool {
+	return c.Kind != KindFeature && (c.State == "DONE" || c.State == "CANCELLED")
 }
 
 // ReadGoalView reads a goal's features listing from one snapshot of the
@@ -51,7 +65,7 @@ var goalViewBetweenReads = func() {}
 
 // readGoalView is ReadGoalView's reads, in the transaction it is given.
 func readGoalView(tx *sql.Tx, goal string, includeArchived bool, limit int) (GoalView, error) {
-	v := GoalView{Features: []Task{}, Local: map[string]string{}}
+	v := GoalView{Features: []Task{}, Local: map[string]Confirmed{}}
 	e, err := readEpic(tx, goal)
 	if err != nil {
 		return GoalView{}, err
@@ -90,17 +104,18 @@ func readGoalView(tx *sql.Tx, goal string, includeArchived bool, limit int) (Goa
 		if err != nil {
 			return GoalView{}, err
 		}
-		rows, err := tx.Query(`SELECT id, state FROM tasks WHERE id IN (SELECT value FROM json_each(?))`, string(list))
+		rows, err := tx.Query(`SELECT id, state, kind FROM tasks WHERE id IN (SELECT value FROM json_each(?))`, string(list))
 		if err != nil {
 			return GoalView{}, err
 		}
 		for rows.Next() {
-			var id, state string
-			if err := rows.Scan(&id, &state); err != nil {
+			var id string
+			var c Confirmed
+			if err := rows.Scan(&id, &c.State, &c.Kind); err != nil {
 				rows.Close()
 				return GoalView{}, err
 			}
-			v.Local[id] = state
+			v.Local[id] = c
 		}
 		rows.Close()
 		if err := rows.Err(); err != nil {
