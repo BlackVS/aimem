@@ -15,6 +15,17 @@ currently 26); a binary refuses a database newer than it understands.
 
 ### Changed
 
+- **A feature moves to the next goal.** `set_feature` with another goal
+  of the same project moves a feature there in one write: the record's
+  epic and its link change together, the link is stated whole for the
+  goal joined (mark, ground, position, alternative), and the feature
+  keeps its id, confirmed tasks, comments and history. The history entry
+  of the move carries `moved_from`, the goal left. The goal joined must
+  be OPEN, the goal left may be retired, and a DONE or CANCELLED feature
+  does not move. The confirmed tasks keep their own epics. A task's full
+  update still never changes a feature's epic, and its refusal now says
+  to use `set_feature`. docs/FEATURES.md, "Moving a feature to the next
+  goal".
 - **A pull request tests every package on Windows.** `test-windows-pr`
   now runs `go vet ./...` and `go test ./...`, as master's Windows leg
   does, instead of a list of packages, and the Windows scenarios run on

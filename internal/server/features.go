@@ -222,6 +222,30 @@ type featureRow struct {
 	} `json:"links"`
 }
 
+// featureRows reads each listed feature of goal again and builds its row.
+// A record that changed between the list and its read is left out: one
+// dropped, one turned back into a task, and one moved to another goal, whose
+// link now names that goal.
+func featureRows(goal string, listed []store.TaskSummary, read func(id string) (store.Task, error)) ([]featureRow, error) {
+	rows := make([]featureRow, 0, len(listed))
+	for _, sum := range listed {
+		t, err := read(sum.ID)
+		if errors.Is(err, store.ErrTaskNotFound) {
+			continue
+		}
+		if err != nil {
+			return nil, err
+		}
+		if t.Feature == nil || t.Epic != goal {
+			continue
+		}
+		row := featureRow{ID: t.ID, Title: t.Title, State: t.State, Assignee: t.Assignee, Archived: t.Archived, Revision: t.Revision, Feature: t.Feature, Confirmed: len(t.Dependencies)}
+		row.Links.Self = "/v1/tasks/" + t.ID
+		rows = append(rows, row)
+	}
+	return rows, nil
+}
+
 // listFeatures is GET /v1/projects/{p}/epics/{e}/features: the goal's
 // features in position order, from the list's kind and epic filters and
 // one record read per row.
@@ -249,22 +273,10 @@ func (s *Server) listFeatures(w http.ResponseWriter, r *http.Request) {
 		s.taskError(w, err)
 		return
 	}
-	rows := make([]featureRow, 0, len(page.Tasks))
-	for _, sum := range page.Tasks {
-		t, err := db.GetTask(sum.ID)
-		if errors.Is(err, store.ErrTaskNotFound) {
-			continue // dropped between the list and the read
-		}
-		if err != nil {
-			s.taskError(w, err)
-			return
-		}
-		if t.Feature == nil {
-			continue // turned back into a task between the list and the read
-		}
-		row := featureRow{ID: t.ID, Title: t.Title, State: t.State, Assignee: t.Assignee, Archived: t.Archived, Revision: t.Revision, Feature: t.Feature, Confirmed: len(t.Dependencies)}
-		row.Links.Self = "/v1/tasks/" + t.ID
-		rows = append(rows, row)
+	rows, err := featureRows(epic.ID, page.Tasks, db.GetTask)
+	if err != nil {
+		s.taskError(w, err)
+		return
 	}
 	slices.SortStableFunc(rows, func(a, b featureRow) int {
 		return cmp.Or(cmp.Compare(a.Feature.Position, b.Feature.Position), cmp.Compare(a.ID, b.ID))

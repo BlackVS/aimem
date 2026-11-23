@@ -561,7 +561,7 @@ func TestFeatureLinkValidation(t *testing.T) {
 		{"mandatory with an unknown ground", "needs a ground", goal, FeatureLink{Goal: goal, Position: 1, Mark: "mandatory", Ground: "vibes"}},
 		{"optional with a ground", "has no ground", goal, FeatureLink{Goal: goal, Position: 1, Mark: "optional", Ground: "check"}},
 		{"unknown mark", "mark must be", goal, FeatureLink{Goal: goal, Position: 1, Mark: "nice"}},
-		{"goal differs from the epic", "must be the record's epic", goal, FeatureLink{Goal: other, Position: 1, Mark: "optional"}},
+		{"goal differs from the epic", "epic as the goal", goal, FeatureLink{Goal: other, Position: 1, Mark: "optional"}},
 		{"no epic", "set the record's epic first", "", FeatureLink{Goal: goal, Position: 1, Mark: "optional"}},
 		{"ground note with a control character", "ground_note", goal, FeatureLink{Goal: goal, Position: 1, Mark: "optional", GroundNote: "a\x00b"}},
 		{"alternative too long", "alternative", goal, FeatureLink{Goal: goal, Position: 1, Mark: "optional", Alternative: strings.Repeat("a", maxFeatureNoteBytes+1)}},

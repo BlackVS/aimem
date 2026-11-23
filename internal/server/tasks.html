@@ -463,7 +463,7 @@ function renderEpicDetails(e = EPICS[FILTER.epic], note = EPIC_NOTE, summary = "
 // screen, and keeps a reader's open or closed choice while it stays shown.
 function renderGoalDetails(goal){
   const same = !!goal && PANEL_GOAL===goal.id, wasOpen = $("epicDetails").open;
-  renderEpicDetails(goal || null, "The features below belong to this goal; its tasks are in the list and the board under the epic filter.", "View goal");
+  renderEpicDetails(goal || null, "The features below belong to this goal; each feature's confirmed tasks are under it. In the list and the board filtered by an epic, each confirmed task stays under its own epic, which may be the goal a feature moved from.", "View goal");
   PANEL_FEAT = true; PANEL_GOAL = goal ? goal.id : "";
   $("epicDetails").open = same && wasOpen;
 }

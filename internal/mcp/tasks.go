@@ -207,9 +207,11 @@ var taskToolDefs = append([]map[string]any{
 	},
 	{
 		"name": "set_feature",
-		"description": "Turn a task into a feature of its goal, change a feature's link, or with `remove` turn a feature back into a task. " +
+		"description": "Turn a task into a feature of its goal, change a feature's link or move it to another goal, or with `remove` turn a feature back into a task. " +
 			"The goal is the record's epic; position is its place in the goal's order; a mandatory feature needs a ground " +
-			"(check or owner_condition), an optional one has none and may name its cheaper alternative. Refused while the task is " +
+			"(check or owner_condition), an optional one has none and may name its cheaper alternative. " +
+			"A feature moves when goal is another OPEN epic of its project: give the mark and position for that goal; " +
+			"its epic changes with the link, its confirmed tasks stay, and a DONE or CANCELLED feature does not move. Refused while the task is " +
 			"reserved, team-managed or depended on by a task of its project (named); remove is refused while the feature has confirmed tasks. " +
 			"Send the expected_revision you read; a stale revision returns the current record." + featureGuidePointer,
 		"inputSchema": objSchema(featureLinkProps(map[string]any{
@@ -309,7 +311,7 @@ func taskContentProps(extra map[string]any) map[string]any {
 // featureLinkProps are the link's fields, as set_feature takes them flat.
 func featureLinkProps(extra map[string]any) map[string]any {
 	props := map[string]any{
-		"goal":        prop("string", "the goal: the record's epic id"),
+		"goal":        prop("string", "the goal: the record's epic id (on set_feature, another OPEN epic of the project moves the feature there)"),
 		"position":    prop("integer", "its place in the goal's order of delivery, from 1"),
 		"mark":        propEnum("for this goal", "mandatory", "optional"),
 		"ground":      propEnum("why mandatory (required for a mandatory feature, none for an optional one)", "check", "owner_condition"),
