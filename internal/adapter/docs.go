@@ -128,6 +128,12 @@ func (c *Client) PublishDocs(projectDir, projectID, hubName, by string) []DocPus
 	changed := false
 	seen := map[string]string{} // doc name -> first bound path
 	for _, rel := range paths {
+		if !c.deadline.IsZero() && c.left() < hubRequestMin {
+			// The rest is not even read: a changed one keeps its old
+			// hash, so a later run publishes it.
+			c.deferred("checking the shared documents (out of time)")
+			break
+		}
 		docName := ident.DocName(rel)
 		// Two bound files with one base name would publish as the same
 		// document and fight each other on every checkpoint — the first

@@ -11,6 +11,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"reflect"
+	"runtime"
 	"slices"
 	"strings"
 	"sync"
@@ -773,13 +774,13 @@ func TestAFailedPendingWriteStillKeepsTheRecordFirst(t *testing.T) {
 	}
 
 	// Nothing writable (the spool path is a directory): posted directly,
-	// and the run says the checkpoint is not kept on disk.
+	// and the run says nothing keeps it for the hub.
 	hub3, keys3 := keysHub(t, nil)
 	root3, _ := hubRoot(t, hub3.URL)
 	os.MkdirAll(filepath.Join(root3, "spool", "hub.jsonl"), 0o700)
 	NewClient(root3).pushHub("", rec("z"))
 	notes, _ := os.ReadFile(filepath.Join(root3, "adapter.log"))
-	if strings.Join(keys3(), ",") != "z" || !bytes.Contains(notes, []byte("not kept on disk")) {
+	if strings.Join(keys3(), ",") != "z" || !bytes.Contains(notes, []byte("nothing keeps the checkpoint for the hub")) {
 		t.Fatalf("the hub got %v; adapter.log:\n%s", keys3(), notes)
 	}
 }
@@ -1041,5 +1042,216 @@ func TestALostCheckpointIsNamedLost(t *testing.T) {
 	notes, _ := os.ReadFile(filepath.Join(root, "adapter.log"))
 	if !bytes.Contains(notes, []byte("LOST")) || bytes.Contains(notes, []byte("checkpoint queued for hub")) {
 		t.Fatalf("adapter.log:\n%s", notes)
+	}
+}
+
+// A run without time for its hub request recovers no pending file of an
+// interrupted run: each stays for a later run, and the run's line says so.
+func TestPendingRecoveryStopsAtTheDeadline(t *testing.T) {
+	defer func(d time.Duration) { pendingStale = d }(pendingStale)
+	pendingStale = 0
+	root := t.TempDir()
+	spool := filepath.Join(root, "spool", "hub.jsonl")
+	var pend []string
+	for i := range 3 {
+		f, err := writePending(spool, rec(fmt.Sprint(i)))
+		if err != nil {
+			t.Fatal(err)
+		}
+		pend = append(pend, f)
+	}
+	c := NewClient(root).WithDeadline(time.Now().Add(hubRequestMin / 2))
+	c.sweepPending(spool)
+	for _, f := range pend {
+		if _, err := os.Stat(f); err != nil {
+			t.Fatalf("a pending file was taken past the deadline: %v", err)
+		}
+	}
+	if _, err := os.Stat(spool); !os.IsNotExist(err) {
+		t.Fatalf("the spool was written past the deadline: %v", err)
+	}
+	if !slices.Contains(c.deferredList, "the pending records of interrupted runs (out of time)") {
+		t.Fatalf("deferred: %q", c.deferredList)
+	}
+	NewClient(root).sweepPending(spool) // a later run with time
+	if b, _ := os.ReadFile(spool); bytes.Count(b, []byte{'\n'}) != 3 {
+		t.Fatalf("the later run moved %q", b)
+	}
+}
+
+// A sweep of orphaned claims that uses up the run's time leaves the spool
+// unclaimed, in the local replay and in the hub flush, and says so.
+func TestNoClaimAfterASweepThatUsedTheTime(t *testing.T) {
+	defer func(f func(*Client, string, time.Duration)) { claimSweep = f }(claimSweep)
+	claimSweep = func(c *Client, spool string, reserve time.Duration) {
+		c.sweepOrphanedClaims(spool, reserve)
+		c.deadline = time.Now().Add(-time.Second)
+	}
+	hub, keys := keysHub(t, nil)
+	root, _ := hubRoot(t, hub.URL)
+	var same []func() bool
+	for _, spool := range []string{NewClient(root).spoolPath(), filepath.Join(root, "spool", "hub.jsonl")} {
+		appendLines(spool, rec("queued"))
+		same = append(same, spoolLink(t, spool))
+	}
+	c := NewClient(root).WithDeadline(time.Now().Add(time.Minute))
+	if n, _, err := c.ReplaySpool(); n != 0 || err != nil {
+		t.Fatalf("replay: %d, %v", n, err)
+	}
+	c.deadline = time.Now().Add(time.Minute)
+	_, h := ResolveHub(root, "")
+	c.flushHubSpool(h, filepath.Join(root, "spool", "hub.jsonl"))
+	for _, spool := range []string{c.spoolPath(), filepath.Join(root, "spool", "hub.jsonl")} {
+		if b, _ := os.ReadFile(spool); string(b) != string(rec("queued"))+"\n" {
+			t.Fatalf("%s after the sweep: %q", filepath.Base(spool), b)
+		}
+		if cl := spoolSiblings(spool, ".replay-"); len(cl) != 0 {
+			t.Fatalf("claimed after the sweep: %v", cl)
+		}
+	}
+	for i, sameFile := range same {
+		if !sameFile() {
+			t.Fatalf("spool %d was claimed and written back after the sweep", i)
+		}
+	}
+	if len(keys()) != 0 {
+		t.Fatalf("the hub was asked: %v", keys())
+	}
+	for _, want := range []string{"the local spool replay (out of time)", "the hub delivery (out of time)"} {
+		if !slices.Contains(c.deferredList, want) {
+			t.Fatalf("deferred %q, want %q", c.deferredList, want)
+		}
+	}
+}
+
+// A block written back goes as whole lines without a copy of the block:
+// only an unterminated last record is copied.
+func TestAWriteBackCopiesAtMostOneRecord(t *testing.T) {
+	block := bytes.Repeat([]byte(`{"k":"0123456789"}`+"\n"), 1<<19) // 9.5 MiB
+	for _, b := range [][]byte{block, append(block[:len(block):len(block)], `{"k":"open"}`...)} {
+		spool := filepath.Join(t.TempDir(), "hub.jsonl")
+		var before, after runtime.MemStats
+		runtime.GC()
+		runtime.ReadMemStats(&before)
+		if err := writeBack(spool, nil, b); err != nil {
+			t.Fatal(err)
+		}
+		runtime.ReadMemStats(&after)
+		if grown := after.TotalAlloc - before.TotalAlloc; grown > 1<<20 {
+			t.Fatalf("the write-back of %d bytes allocated %d", len(b), grown)
+		}
+		got, _ := os.ReadFile(spool)
+		if !bytes.HasPrefix(got, block) || !bytes.HasSuffix(got, []byte{'\n'}) || len(got) != len(b)+boolInt(!bytes.HasSuffix(b, []byte{'\n'})) {
+			t.Fatalf("the spool holds %d bytes for a block of %d", len(got), len(b))
+		}
+	}
+}
+
+func boolInt(b bool) int {
+	if b {
+		return 1
+	}
+	return 0
+}
+
+// A flush stopped at its limit whose write-back fails still names the
+// limit, and where its records stay, in the run's line.
+func TestAFlushLimitWithAFailedWriteBackIsNamed(t *testing.T) {
+	var root string
+	var posts atomic.Int32
+	hub, _ := keysHub(t, func() int {
+		if posts.Add(1) == 2 { // the first backlog record: the claim is taken
+			os.MkdirAll(filepath.Join(root, "spool", "hub.jsonl"), 0o700)
+		}
+		return 200
+	})
+	root, p := hubRoot(t, hub.URL)
+	spool := filepath.Join(root, "spool", "hub.jsonl")
+	for i := range hubFlushLimit + 1 {
+		appendLines(spool, rec(fmt.Sprint(i)))
+	}
+	NewClient(root).WithDeadline(time.Now().Add(5 * time.Second)).Submit(p)
+	notes, _ := os.ReadFile(filepath.Join(root, "adapter.log"))
+	var line []byte
+	for l := range bytes.SplitSeq(notes, []byte{'\n'}) {
+		if bytes.Contains(l, []byte("session s1 turn t1 left work for a later run")) {
+			line = l
+		}
+	}
+	for _, want := range []string{"the hub backlog past the flush limit", "its records stay in hub.jsonl.replay-"} {
+		if !bytes.Contains(line, []byte(want)) {
+			t.Fatalf("the run's line lacks %q:\n%s", want, notes)
+		}
+	}
+	if cl := spoolSiblings(spool, ".replay-"); len(cl) != 1 {
+		t.Fatalf("claims left: %v", cl)
+	}
+}
+
+// The run's line claims queued only for deliveries: a transcript read cut
+// short is said to be in the event as read.
+func TestTheRunLineSaysWhatIsQueued(t *testing.T) {
+	root := t.TempDir()
+	p := &Payload{ProjectID: "proj-b", Degraded: "the rollout read ran out of its time share"}
+	p.Event.Client, p.Event.SessionID, p.Event.TurnID, p.Event.Kind = "codex", "s1", "t1", "turn"
+	p.Event.IdempotencyKey = "codex:s1:t1"
+	NewClient(root).WithDeadline(time.Now().Add(5 * time.Second)).SubmitLocal(p)
+	notes, _ := os.ReadFile(filepath.Join(root, "adapter.log"))
+	for _, want := range []string{"the rollout read ran out of its time share: the event holds what was read", "the deliveries it names stay queued unless named LOST"} {
+		if !bytes.Contains(notes, []byte(want)) {
+			t.Fatalf("adapter.log lacks %q:\n%s", want, notes)
+		}
+	}
+}
+
+// A bare CR ends no line: on the file's unterminated last line it counts
+// toward the length, in both readers.
+func TestABareCRAtTheEndCountsTowardTheLimit(t *testing.T) {
+	defer func(m int) { maxLine = m }(maxLine)
+	maxLine = 2<<20 - 1
+	at, over := strings.Repeat("a", maxLine-1)+"\r", strings.Repeat("b", maxLine)+"\r"
+	for _, tc := range []struct {
+		last string
+		kept bool
+	}{{at, true}, {over, false}} {
+		body := "first\n" + tc.last
+		var fwd []string
+		if err := forwardLines(strings.NewReader(body), time.Now().Add(time.Minute), func(line []byte) {
+			fwd = append(fwd, string(line[:1]))
+		}); err != nil {
+			t.Fatal(err)
+		}
+		f, err := os.Create(filepath.Join(t.TempDir(), "t.jsonl"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		f.WriteString(body)
+		var back []string
+		scanBack(f, time.Now().Add(time.Minute), func(line []byte, _ int64) bool {
+			back = append(back, string(line[:1]))
+			return false
+		})
+		f.Close()
+		want, wantBack := []string{"f"}, []string{"f"}
+		if tc.kept {
+			want, wantBack = []string{"f", tc.last[:1]}, []string{tc.last[:1], "f"}
+		}
+		if !reflect.DeepEqual(fwd, want) || !reflect.DeepEqual(back, wantBack) {
+			t.Fatalf("last line of %d bytes: forward %q, backward %q", len(tc.last), fwd, back)
+		}
+	}
+}
+
+// A run without time for a hub request does not even read the bound
+// documents: it names the check as left, and a later run publishes them.
+func TestDocumentsAreNotReadPastTheDeadline(t *testing.T) {
+	hub, keys := keysHub(t, nil)
+	root, _ := hubRoot(t, hub.URL)
+	c := NewClient(root).WithDeadline(time.Now().Add(hubRequestMin / 2))
+	if res := c.PublishDocs(projectWithTwoDocs(t), "proj-b", "", "test"); len(res) != 0 {
+		t.Fatalf("results: %+v", res)
+	}
+	if !reflect.DeepEqual(c.deferredList, []string{"checking the shared documents (out of time)"}) || len(keys()) != 0 {
+		t.Fatalf("deferred %q, hub asked %v", c.deferredList, keys())
 	}
 }

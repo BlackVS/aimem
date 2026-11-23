@@ -176,7 +176,7 @@ func (c *Client) submit(p *Payload, toHub bool) (spooled bool, err error) {
 		hubName = *p.Hub
 	}
 	if p.Degraded != "" {
-		c.deferred(p.Degraded)
+		c.deferred(p.Degraded + ": the event holds what was read")
 	}
 	defer c.noteDeferred(p)
 	if err := c.post(body); err != nil {
@@ -187,6 +187,7 @@ func (c *Client) submit(p *Payload, toHub bool) (spooled bool, err error) {
 			return false, err
 		}
 		if serr := c.spool(body); serr != nil {
+			c.deferred("the checkpoint, LOST: the service did not take it and the local spool cannot be written")
 			return false, fmt.Errorf("submit failed (%v) and spool failed: %w", err, serr)
 		}
 		if c.outOfTime(err) {
@@ -257,7 +258,12 @@ func (c *Client) spool(line []byte) error {
 	return err
 }
 
-// sweepOrphanedClaims returns crash-orphaned replay claims to the spool.
+// claimSweep is (*Client).sweepOrphanedClaims; a test replaces it.
+var claimSweep = (*Client).sweepOrphanedClaims
+
+// sweepOrphanedClaims returns crash-orphaned replay claims to the spool,
+// while the run has more than reserve left; the claims it does not reach
+// wait for a later run.
 // A replay claims the spool by renaming it and removes the claim when
 // done — but a hard kill mid-replay leaves the claim file holding
 // records that nothing would ever re-scan: a silent drop. Events are
@@ -265,8 +271,12 @@ func (c *Client) spool(line []byte) error {
 // whose owner is still alive only causes a double-post the service
 // deduplicates. A claim we cannot read (Windows keeps it locked while
 // its live owner reads it) is skipped and swept next time.
-func sweepOrphanedClaims(spool string) {
+func (c *Client) sweepOrphanedClaims(spool string, reserve time.Duration) {
 	for _, cl := range spoolSiblings(spool, ".replay-") {
+		if c.left() <= reserve {
+			c.deferred("the claims of interrupted runs (out of time)")
+			return
+		}
 		data, err := os.ReadFile(cl)
 		if err != nil {
 			continue
@@ -276,14 +286,11 @@ func sweepOrphanedClaims(spool string) {
 			if err != nil {
 				continue
 			}
-			if !bytes.HasSuffix(data, []byte{'\n'}) {
-				data = append(data, '\n')
-			}
-			if _, err := f.Write(data); err != nil {
-				f.Close()
+			err = writeLines(f, data)
+			f.Close()
+			if err != nil {
 				continue
 			}
-			f.Close()
 		}
 		os.Remove(cl)
 	}
@@ -304,7 +311,11 @@ func (c *Client) ReplaySpool() (replayed, requeued int, err error) {
 		}
 		return 0, 0, nil
 	}
-	sweepOrphanedClaims(c.spoolPath())
+	claimSweep(c, c.spoolPath(), 0)
+	if c.left() <= 0 {
+		c.deferred("the local spool replay (out of time)")
+		return 0, 0, nil
+	}
 	claim := c.spoolPath() + fmt.Sprintf(".replay-%d", os.Getpid())
 	if err := os.Rename(c.spoolPath(), claim); err != nil {
 		if os.IsNotExist(err) {
@@ -336,10 +347,8 @@ func (c *Client) ReplaySpool() (replayed, requeued int, err error) {
 				c.note("aimem: dropping invalid spooled record: %v", err)
 				continue
 			}
-			if kept.Len() > 0 {
-				kept.WriteByte('\n')
-			}
 			kept.Write(line)
+			kept.WriteByte('\n') // each record whole, so the block goes back as it is
 			requeued++
 			continue
 		}
@@ -361,12 +370,16 @@ func (c *Client) noteDeferred(p *Payload) {
 	if len(list) == 0 {
 		return
 	}
-	c.note("aimem: the hook for the %s event of session %s turn %s left work for a later run: %s; all of it stays queued unless named LOST",
+	c.note("aimem: the hook for the %s event of session %s turn %s left work for a later run: %s; the deliveries it names stay queued unless named LOST",
 		p.Event.Kind, p.Event.SessionID, p.Event.TurnID, strings.Join(list, ", "))
 }
 
 func (c *Client) replaySpool() {
-	if n, _, err := c.ReplaySpool(); err == nil && n > 0 {
+	n, _, err := c.ReplaySpool()
+	if err != nil {
+		c.deferred(fmt.Sprintf("the local spool replay (%v)", err))
+	}
+	if n > 0 {
 		c.note("aimem: replayed %d spooled checkpoint(s)", n)
 	}
 }
