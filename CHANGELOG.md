@@ -32,18 +32,20 @@ crash loop of the Linux client's service.
   commands the client runs, and the wire is unchanged, so hubs need no
   upgrade for it.
 - **Lost turns.** Until this release, a hook could overrun its client's
-  timeout and be killed before its turn reached the local journal; such a
-  turn reached neither the journal nor the hub. Long sessions are the ones
-  affected.
+  timeout and be killed while reading the session's transcript, before it
+  submitted the turn; such a turn reached neither the local journal nor
+  the hub. Long sessions are the ones affected.
 - **Turns lost before the upgrade are not recovered by it.** The upgrade
   changes what later hook runs do, not what the journal already holds.
 - **A turn missing from the journal is not by itself proof that it was
-  lost.** A turn whose hook ran while the local service was down waits in
-  the local spool, and a later hook journals it.
+  lost.** A turn whose hook ran while the local service was down was
+  written to the local spool; a later hook journals it, and it may already
+  be on the hub.
 - **Do not submit an old turn by hand from the session's full rollout or
-  transcript.** If the read runs out of its time share, the turn is recorded
-  with no request, and with no reply unless the hook payload carries one; a
-  turn recorded once is never corrected by a second submission.
+  transcript.** If the read runs out of its time share, the turn can be
+  recorded with no request, and with no reply unless the hook payload
+  carries one; a turn recorded once is never corrected by a second
+  submission.
 - **A command that lists a session's missing turns and recovers them
   safely,** for Codex and Claude Code, is planned and is not in this
   release.
