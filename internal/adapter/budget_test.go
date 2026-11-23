@@ -1324,3 +1324,40 @@ func TestDocumentsAreNotReadPastTheDeadline(t *testing.T) {
 		t.Fatalf("deferred %q, hub asked %v", c.deferredList, keys())
 	}
 }
+
+// A local replay whose last post reaches the run's deadline names itself
+// in the run's line, and keeps the record.
+func TestAReplayCutByTheDeadlineIsNamed(t *testing.T) {
+	var posts atomic.Int32
+	local := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if posts.Add(1) > 1 { // the run's own checkpoint is taken, the replay stalls
+			select { // past the run's deadline either way
+			case <-r.Context().Done():
+			case <-time.After(3 * time.Second):
+			}
+		}
+	}))
+	defer local.Close()
+	hub, _ := keysHub(t, nil)
+	root, p := hubRoot(t, hub.URL)
+	c := NewClient(root).WithDeadline(time.Now().Add(time.Second))
+	c.http = &http.Client{Transport: &http.Transport{DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
+		var d net.Dialer
+		return d.DialContext(ctx, "tcp", local.Listener.Addr().String())
+	}}}
+	appendLines(c.spoolPath(), rec("queued"))
+	c.Submit(p)
+	notes, _ := os.ReadFile(filepath.Join(root, "adapter.log"))
+	var line []byte
+	for l := range bytes.SplitSeq(notes, []byte{'\n'}) {
+		if bytes.Contains(l, []byte("session s1 turn t1 left work for a later run")) {
+			line = l
+		}
+	}
+	if !bytes.Contains(line, []byte("the local spool replay (out of time)")) {
+		t.Fatalf("the run's line does not name the replay:\n%s", notes)
+	}
+	if b, _ := os.ReadFile(c.spoolPath()); string(b) != string(rec("queued"))+"\n" {
+		t.Fatalf("the local spool after the replay: %q", b)
+	}
+}

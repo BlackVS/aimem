@@ -351,7 +351,9 @@ func (c *Client) ReplaySpool() (replayed, requeued int, err error) {
 				c.note("aimem: dropping invalid spooled record: %v", err)
 				continue
 			}
-			if failed == nil && !c.outOfTime(err) {
+			if c.outOfTime(err) {
+				c.deferred("the local spool replay (out of time)")
+			} else if failed == nil {
 				failed = err
 			}
 			kept.Write(line)
