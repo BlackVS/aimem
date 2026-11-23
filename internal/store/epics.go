@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 
 	"aimem/internal/uuidv7"
@@ -18,9 +19,19 @@ import (
 // history (schema 12), written through the same receipt-backed mutation
 // as tasks. Retirement replaces deletion: existing task links and
 // history keep resolving, and a retired epic takes no new assignment.
+// A goal that was reached is closed the same way, in a state of its own:
+// REACHED, refused while the epic holds a feature that is neither DONE nor
+// CANCELLED, so nothing unfinished stays in a reached goal.
 
-// EpicStates are the two states an epic has.
-var EpicStates = []string{"OPEN", "RETIRED"}
+// The epic states: OPEN, and the two closed ones.
+const (
+	EpicOpen    = "OPEN"
+	EpicRetired = "RETIRED"
+	EpicReached = "REACHED"
+)
+
+// EpicStates are the states an epic has.
+var EpicStates = []string{EpicOpen, EpicRetired, EpicReached}
 
 // MaxEpicTextBytes bounds an epic's objective.
 const MaxEpicTextBytes = 8 * 1024
@@ -30,12 +41,17 @@ var (
 	ErrEpicNotFound = errors.New("epic not found")
 )
 
-// EpicContent is everything a writer may set; updates replace it whole.
+// EpicContent is everything a writer may set. An update replaces it whole,
+// except two fields a client may not know: an empty state keeps the
+// epic's state, and the check is kept unless the update gives one.
 type EpicContent struct {
 	Title     string `json:"title"`
 	Objective string `json:"objective"`
-	State     string `json:"state"`  // OPEN (default on create) or RETIRED
+	State     string `json:"state"`  // OPEN (default on create), RETIRED or REACHED
 	Target    string `json:"target"` // the release or milestone it maps to
+	// Check is the goal's check: what has to pass for the goal to count as
+	// reached, kept apart from the objective's prose.
+	Check string `json:"check"`
 }
 
 // Epic is the current row.
@@ -61,15 +77,20 @@ func (c *EpicConflict) Error() string {
 	return fmt.Sprintf("epic is at revision %d, not the expected one", c.Current.Revision)
 }
 
-func (c *EpicContent) validate() error {
+// validate checks the content. A create turns an empty state into OPEN; an
+// update leaves it empty, and the update keeps the epic's state.
+func (c *EpicContent) validate(create bool) error {
 	if err := taskText(c.Title, MaxTaskTitleBytes, true); err != nil {
 		return fmt.Errorf("title: %w", err)
 	}
-	if c.State == "" {
-		c.State = "OPEN"
+	if c.State == "" && create {
+		c.State = EpicOpen
 	}
-	if c.State != "OPEN" && c.State != "RETIRED" {
+	if c.State != "" && !slices.Contains(EpicStates, c.State) {
 		return fmt.Errorf("invalid epic state (want one of %s)", strings.Join(EpicStates, ", "))
+	}
+	if create && c.State == EpicReached {
+		return errors.New("a new epic is OPEN or RETIRED: mark a goal REACHED with update_epic once its features are done")
 	}
 	if err := taskText(c.Objective, MaxEpicTextBytes, false); err != nil {
 		return fmt.Errorf("objective: %w", err)
@@ -77,12 +98,15 @@ func (c *EpicContent) validate() error {
 	if err := taskText(c.Target, MaxTaskTitleBytes, false); err != nil {
 		return fmt.Errorf("target: %w", err)
 	}
+	if err := taskText(c.Check, MaxEpicTextBytes, false); err != nil {
+		return fmt.Errorf("check: %w", err)
+	}
 	return nil
 }
 
 // CreateEpic stores a new epic at revision 1 with its first history row.
 func (d *DB) CreateEpic(content EpicContent, actor TaskActor, key string) (Epic, error) {
-	if err := content.validate(); err != nil {
+	if err := content.validate(true); err != nil {
 		return Epic{}, invalid(err)
 	}
 	return taskMutation(d, actor, "epic-create", "", key, content, func(tx *sql.Tx) (Epic, error) {
@@ -94,21 +118,30 @@ func (d *DB) CreateEpic(content EpicContent, actor TaskActor, key string) (Epic,
 
 // UpdateEpic replaces the content under expected-revision CAS. Setting the
 // state to RETIRED is the retirement; it is an ordinary update, explicit,
-// never a roll-up of task states.
-func (d *DB) UpdateEpic(id string, content EpicContent, expected int64, actor TaskActor, key string) (Epic, error) {
+// never a roll-up of task states. Setting it to REACHED closes a reached
+// goal, from OPEN or RETIRED, and is refused while the epic holds a
+// feature that is neither DONE nor CANCELLED. An empty state keeps the
+// epic's state, and a nil check keeps its check: a client that does not
+// know a field never clears it. content.Check is not read; check is.
+func (d *DB) UpdateEpic(id string, content EpicContent, check *string, expected int64, actor TaskActor, key string) (Epic, error) {
 	if !taskIDRE.MatchString(id) {
 		return Epic{}, ErrEpicNotFound
 	}
 	if expected < 1 {
 		return Epic{}, invalid(errors.New("expected_revision must be a positive revision"))
 	}
-	if err := content.validate(); err != nil {
+	content.Check = ""
+	if check != nil {
+		content.Check = *check
+	}
+	if err := content.validate(false); err != nil {
 		return Epic{}, invalid(err)
 	}
 	input := struct {
 		Content  EpicContent `json:"content"`
+		Check    *string     `json:"check"`
 		Expected int64       `json:"expected"`
-	}{content, expected}
+	}{content, check, expected}
 	return taskMutation(d, actor, "epic-update", id, key, input, func(tx *sql.Tx) (Epic, error) {
 		e, err := readEpic(tx, id)
 		if err != nil {
@@ -117,11 +150,61 @@ func (d *DB) UpdateEpic(id string, content EpicContent, expected int64, actor Ta
 		if e.Revision != expected {
 			return Epic{}, &EpicConflict{Current: e}
 		}
-		e.EpicContent = content
+		next := content
+		if next.State == "" {
+			next.State = e.State
+		}
+		if check == nil {
+			next.Check = e.Check
+		}
+		if next.State == EpicReached && e.State != EpicReached {
+			if err := checkGoalFinished(tx, id); err != nil {
+				return Epic{}, err
+			}
+		}
+		e.EpicContent = next
 		e.Revision++
 		e.UpdatedAt = nowUTC()
 		return e, saveEpic(tx, e, actor, false)
 	})
+}
+
+// maxUnfinishedNamed bounds the features a refused REACHED names.
+const maxUnfinishedNamed = 5
+
+// checkGoalFinished refuses, inside the epic write's transaction, a goal
+// that still holds a feature neither DONE nor CANCELLED, archived ones
+// included: an archived feature still belongs to its goal.
+func checkGoalFinished(tx *sql.Tx, id string) error {
+	rows, err := tx.Query(`SELECT id, state, archived FROM tasks WHERE kind='feature' AND epic=?
+		AND state NOT IN ('DONE','CANCELLED') ORDER BY id LIMIT ?`, id, maxUnfinishedNamed+1)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+	var named []string
+	for rows.Next() {
+		var fid, state string
+		var archived int
+		if err := rows.Scan(&fid, &state, &archived); err != nil {
+			return err
+		}
+		what := fid + " (" + state
+		if archived != 0 {
+			what += ", archived"
+		}
+		named = append(named, what+")")
+	}
+	if err := rows.Err(); err != nil {
+		return err
+	}
+	if len(named) == 0 {
+		return nil
+	}
+	if len(named) > maxUnfinishedNamed {
+		named = append(named[:maxUnfinishedNamed], "and more")
+	}
+	return invalid(fmt.Errorf("the goal still holds unfinished features: %s: move each to an OPEN goal with set_feature, or finish or cancel it, before the goal is REACHED (an archived feature still belongs to its goal)", strings.Join(named, ", ")))
 }
 
 // GetEpic reads the current epic.
@@ -140,8 +223,8 @@ func (d *DB) GetEpic(id string) (Epic, error) {
 // outgrown the flat list.
 const MaxEpicsListed = 500
 
-// ListEpics returns the project's epics in id order, retired ones only on
-// request.
+// ListEpics returns the project's epics in id order, the closed ones
+// (RETIRED and REACHED) only on request.
 func (d *DB) ListEpics(includeRetired bool) ([]Epic, error) {
 	if err := d.taskScopeOK(); err != nil {
 		return nil, err
@@ -208,9 +291,9 @@ func readEpic(q rowQuerier, id string) (Epic, error) {
 }
 
 // checkEpicAssignable decides, inside the task's own transaction, whether
-// a task may carry epic: it must exist in this project, and a RETIRED
-// epic takes no new assignment — an assignment the task already had
-// survives retirement, so history keeps resolving.
+// a task may carry epic: it must exist in this project, and a closed epic
+// (RETIRED or REACHED) takes no new assignment — an assignment the task
+// already had survives the closing, so history keeps resolving.
 func checkEpicAssignable(tx *sql.Tx, epic, previous string) error {
 	if epic == "" {
 		return nil
@@ -222,8 +305,13 @@ func checkEpicAssignable(tx *sql.Tx, epic, previous string) error {
 	if err != nil {
 		return err
 	}
-	if e.State == "RETIRED" && epic != previous {
-		return invalid(errors.New("epic is retired and takes no new assignment"))
+	if epic != previous {
+		switch e.State {
+		case EpicRetired:
+			return invalid(errors.New("epic is retired and takes no new assignment"))
+		case EpicReached:
+			return invalid(errors.New("epic is a reached goal and takes no new assignment: give an OPEN epic"))
+		}
 	}
 	return nil
 }

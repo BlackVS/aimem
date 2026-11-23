@@ -93,9 +93,13 @@ func (s *Server) getEpic(w http.ResponseWriter, r *http.Request) {
 	s.ok(w, epicView(project, e))
 }
 
+// epicUpdateBody is the full update. Check shadows the content's field so
+// that an update without it is told apart from one that clears it: absent
+// keeps the goal's check, present (empty included) sets it.
 type epicUpdateBody struct {
 	store.EpicContent
-	ExpectedRevision int64 `json:"expected_revision"`
+	Check            *string `json:"check"`
+	ExpectedRevision int64   `json:"expected_revision"`
 }
 
 func (s *Server) updateEpic(w http.ResponseWriter, r *http.Request) {
@@ -114,7 +118,7 @@ func (s *Server) updateEpic(w http.ResponseWriter, r *http.Request) {
 	if !s.decodeTaskBody(w, r, &body) {
 		return
 	}
-	e, err := db.UpdateEpic(r.PathValue("e"), body.EpicContent, body.ExpectedRevision, taskActor(r), key)
+	e, err := db.UpdateEpic(r.PathValue("e"), body.EpicContent, body.Check, body.ExpectedRevision, taskActor(r), key)
 	if err != nil {
 		var conflict *store.EpicConflict
 		if errors.As(err, &conflict) {

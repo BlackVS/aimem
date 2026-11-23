@@ -1399,13 +1399,13 @@ func TestEpicsLifecycleAndTaskAssignment(t *testing.T) {
 		t.Fatalf("bad epic filter: %v", err)
 	}
 	// Update with a stale revision conflicts and carries the current epic.
-	_, err = db.UpdateEpic(e.ID, EpicContent{Title: "v0.5 renamed"}, 5, aliceActor, "e-2")
+	_, err = db.UpdateEpic(e.ID, EpicContent{Title: "v0.5 renamed"}, nil, 5, aliceActor, "e-2")
 	var conflict *EpicConflict
 	if !errors.As(err, &conflict) || conflict.Current.Revision != 1 {
 		t.Fatalf("stale update: %v", err)
 	}
 	// Retire: the existing assignment survives; a new one is refused.
-	retired, err := db.UpdateEpic(e.ID, EpicContent{Title: "v0.5", State: "RETIRED"}, 1, aliceActor, "e-3")
+	retired, err := db.UpdateEpic(e.ID, EpicContent{Title: "v0.5", State: "RETIRED"}, nil, 1, aliceActor, "e-3")
 	if err != nil || retired.Revision != 2 || retired.State != "RETIRED" {
 		t.Fatalf("retire: %+v %v", retired, err)
 	}

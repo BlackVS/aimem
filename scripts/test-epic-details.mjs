@@ -27,7 +27,8 @@ vm.runInContext(source, context); // Parse and execute the actual embedded page 
 const run = code => vm.runInContext(code, context);
 run(`EPICS = {
   open: {title:'Release <one>', state:'OPEN', target:'<img src=x>', objective:'**Goal**\\n<script>alert(1)</script>'},
-  retired: {title:'Old milestone', state:'RETIRED', target:'', objective:''}
+  retired: {title:'Old milestone', state:'RETIRED', target:'', objective:''},
+  reached: {title:'Met goal', state:'REACHED', target:'', objective:'what it was for', check:'a session <b>delivers</b> one task'}
 }; FILTER.epic = 'open'; renderEpicDetails();`);
 assert.equal(element('epicDetails').hidden, false);
 assert.equal(element('epicDetails').open, false);
@@ -43,6 +44,11 @@ assert.equal(element('epicDetails').open, false);
 assert.match(element('epicContent').innerHTML, /RETIRED/);
 assert.match(element('epicContent').innerHTML, /No objective provided/);
 assert.doesNotMatch(element('epicContent').innerHTML, /Release|Target:/);
+assert.doesNotMatch(element('epicContent').innerHTML, /Check/, 'no check, no check heading');
+run(`FILTER.epic = 'reached'; renderEpicDetails();`);
+assert.match(element('epicContent').innerHTML, /REACHED/);
+assert.match(element('epicContent').innerHTML, /<h3>Check<\/h3>/, 'the check reads apart from the objective');
+assert.match(element('epicContent').innerHTML, /a session &lt;b&gt;delivers&lt;\/b&gt; one task/, 'the check is escaped');
 run(`FILTER.epic = ''; renderEpicDetails();`);
 assert.equal(element('epicDetails').hidden, true);
 assert.equal(element('epicContent').innerHTML, '');
@@ -190,5 +196,5 @@ now += 60_000; calls = [];
 run(`VIEW = 'board'`); fire(); await settle();
 assert.equal(epicCalls().length, 1, 'the board reloads its epics too');
 assert.ok(calls.some(p => p.includes('/tasks?') && p.includes('order=updated_desc')), 'and its cards');
-console.log('PASS epic details: open/retired/empty, safe Markdown, selection and project reset');
+console.log('PASS epic details: open/retired/reached with its check/empty, safe Markdown, selection and project reset');
 console.log('PASS refresh: epics reload with the view, a vanished epic falls back, the tab coming back reloads once after 30 s');

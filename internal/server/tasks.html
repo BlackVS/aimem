@@ -406,8 +406,8 @@ async function canWrite(project){
     if(r.tasks_enabled===false) return false;
     return ME.role==="admin" || !!r.task_write; }catch(_){ return false; }
 }
-// Epics of the current project: loaded once per project (RETIRED included,
-// so a task under a retired epic still shows its name), never trusted
+// Epics of the current project: loaded once per project (closed ones
+// included, so a task under a retired or reached epic still shows its name), never trusted
 // over the hub — the filter and the labels are conveniences.
 // The epic filter belongs to the project the epics were loaded for, and
 // this loader is the one place a project change happens — from the list,
@@ -440,7 +440,7 @@ async function loadEpics(project, force){
     if(was && !EPICS[was]){ FILTER.epic = ""; dropped = true; toast("the selected epic no longer exists; showing all epics"); }
     if(VIEW!=="features"){ renderEpicDetails(); if(FILTER.epic) $("epicDetails").open = wasOpen; }
   }
-  $("epicSel").innerHTML = '<option value="">all epics</option>' + Object.values(EPICS).map(e => `<option value="${esc(e.id)}"${e.id===FILTER.epic?' selected':''}>${esc(e.title)}${e.state==="RETIRED"?" (retired)":""}</option>`).join("");
+  $("epicSel").innerHTML = '<option value="">all epics</option>' + Object.values(EPICS).map(e => `<option value="${esc(e.id)}"${e.id===FILTER.epic?' selected':''}>${esc(e.title)}${e.state==="RETIRED"?" (retired)":e.state==="REACHED"?" (reached)":""}</option>`).join("");
   return dropped;
 }
 function epicLabel(id){ const e = EPICS[id]; return e ? e.title : short(id); }
@@ -457,6 +457,7 @@ function renderEpicDetails(e = EPICS[FILTER.epic], note = EPIC_NOTE, summary = "
   $("epicContent").innerHTML = e ? `<h2>${esc(e.title)}</h2>
     <div class="meta">${esc(e.state)}${e.target?' · Target: '+esc(e.target):''}</div>
     ${e.objective?md2html(e.objective):'<p class="dim">No objective provided.</p>'}
+    ${e.check?'<h3>Check</h3>'+md2html(e.check):''}
     <p class="dim">${esc(note)}</p>` : "";
 }
 // The features view's goal starts closed, so its features are on the first
@@ -667,10 +668,10 @@ function goalTitle(t){
   return cs.length > GOAL_TITLE_MAX ? cs.slice(0, GOAL_TITLE_MAX-1).join("") + "…" : cs.join("");
 }
 // One entry of the goal selector; c is the goal's {count}, if it has
-// features. The count and the retired mark stand in front of the title,
+// features. The count and the closed mark (retired or reached) stand in front of the title,
 // in one bracket, so a cut title never takes them with it.
 function goalOption(e, c){
-  const marks = [c ? String(c.count) : "", e.state==="RETIRED" ? "retired" : ""].filter(Boolean).join(", ");
+  const marks = [c ? String(c.count) : "", e.state==="RETIRED" ? "retired" : e.state==="REACHED" ? "reached" : ""].filter(Boolean).join(", ");
   const label = (marks ? "(" + marks + ") " : "") + goalTitle(e.title);
   return `<option value="${esc(e.id)}" title="${esc(e.title)}"${e.id===GOAL?' selected':''}>${esc(label)}</option>`;
 }
@@ -821,7 +822,7 @@ function contentForm(t, prefix){
       <div class="row" style="margin:0"><select id="${prefix}-akind" class="inline"><option value="">none</option><option${a&&a.kind==='user'?' selected':''}>user</option><option${a&&a.kind==='group'?' selected':''}>group</option></select>
       <input id="${prefix}-aid" class="grow" placeholder="identity uuid" value="${a?esc(a.id):''}"></div></div>
       <div><label class="f">archived</label><input type="checkbox" id="${prefix}-arch" style="width:auto"${t&&t.archived?' checked':''}> <span class="dim">DONE/CANCELLED only</span></div></div>
-    <label class="f">epic</label><select id="${prefix}-epic"><option value="">none</option>${Object.values(EPICS).filter(e=>e.state==="OPEN"||(t&&t.epic===e.id)).map(e=>`<option value="${esc(e.id)}"${t&&t.epic===e.id?' selected':''}>${esc(e.title)}${e.state==="RETIRED"?" (retired)":""}</option>`).join("")}${t&&t.epic&&!EPICS[t.epic]?`<option value="${esc(t.epic)}" selected>${esc(short(t.epic))} (epic kept)</option>`:''}</select>
+    <label class="f">epic</label><select id="${prefix}-epic"><option value="">none</option>${Object.values(EPICS).filter(e=>e.state==="OPEN"||(t&&t.epic===e.id)).map(e=>`<option value="${esc(e.id)}"${t&&t.epic===e.id?' selected':''}>${esc(e.title)}${e.state==="RETIRED"?" (retired)":e.state==="REACHED"?" (reached)":""}</option>`).join("")}${t&&t.epic&&!EPICS[t.epic]?`<option value="${esc(t.epic)}" selected>${esc(short(t.epic))} (epic kept)</option>`:''}</select>
     <label class="f">objective</label><textarea id="${prefix}-objective" rows="3">${v('objective')}</textarea>
     <label class="f">acceptance criteria</label><textarea id="${prefix}-acceptance_criteria" rows="3">${v('acceptance_criteria')}</textarea>
     <label class="f">non-goals</label><textarea id="${prefix}-non_goals" rows="2">${v('non_goals')}</textarea>

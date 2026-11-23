@@ -83,26 +83,18 @@ func TestFeatureMoveOverHTTP(t *testing.T) {
 	}
 }
 
-// A feature that moved, was turned back into a task or was dropped between
-// the list and its read is left out of the goal's rows: the row would name
-// another goal's link, or no feature at all.
-func TestFeatureRowsSkipWhatChangedSinceTheList(t *testing.T) {
+// The rows keep only the goal's features: a record that names another goal,
+// or is no feature, is left out, as a guard against data no write produces.
+func TestFeatureRowsKeepOnlyTheGoalsFeatures(t *testing.T) {
 	const goal, next = "goal-a", "goal-b"
 	link := func(g string) *store.FeatureLink { return &store.FeatureLink{Goal: g, Position: 1, Mark: "optional"} }
-	records := map[string]store.Task{
-		"stays":   {ID: "stays", Kind: store.KindFeature, Feature: link(goal), TaskContent: store.TaskContent{Epic: goal}},
-		"moved":   {ID: "moved", Kind: store.KindFeature, Feature: link(next), TaskContent: store.TaskContent{Epic: next}},
-		"removed": {ID: "removed", TaskContent: store.TaskContent{Epic: goal}},
+	records := []store.Task{
+		{ID: "stays", Kind: store.KindFeature, Feature: link(goal), TaskContent: store.TaskContent{Epic: goal}},
+		{ID: "moved", Kind: store.KindFeature, Feature: link(next), TaskContent: store.TaskContent{Epic: next}},
+		{ID: "removed", TaskContent: store.TaskContent{Epic: goal}},
 	}
-	read := func(id string) (store.Task, error) {
-		if t, ok := records[id]; ok {
-			return t, nil
-		}
-		return store.Task{}, store.ErrTaskNotFound
-	}
-	listed := []store.TaskSummary{{ID: "stays"}, {ID: "moved"}, {ID: "removed"}, {ID: "dropped"}}
-	rows, err := featureRows(goal, listed, read)
-	if err != nil || len(rows) != 1 || rows[0].ID != "stays" || rows[0].Feature.Goal != goal {
-		t.Fatalf("rows: %+v, %v", rows, err)
+	rows := featureRows(goal, records, func(string) bool { return true })
+	if len(rows) != 1 || rows[0].ID != "stays" || rows[0].Feature.Goal != goal {
+		t.Fatalf("rows: %+v", rows)
 	}
 }

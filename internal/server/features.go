@@ -206,14 +206,18 @@ func (s *Server) confirmableTask(w http.ResponseWriter, r *http.Request, arg str
 
 // featureRow is one row of list_features.
 type featureRow struct {
-	ID        string              `json:"id"`
-	Title     string              `json:"title"`
-	State     string              `json:"state"`
-	Assignee  *store.TaskAssignee `json:"assignee,omitempty"`
-	Archived  bool                `json:"archived"`
-	Revision  int64               `json:"revision"`
-	Feature   *store.FeatureLink  `json:"feature"`
-	Confirmed int                 `json:"confirmed_tasks"`
+	ID       string              `json:"id"`
+	Title    string              `json:"title"`
+	State    string              `json:"state"`
+	Assignee *store.TaskAssignee `json:"assignee,omitempty"`
+	Archived bool                `json:"archived"`
+	Revision int64               `json:"revision"`
+	Feature  *store.FeatureLink  `json:"feature"`
+	// Confirmed counts the ids the feature confirms, of any project,
+	// readable or not: the feature's own record lists them.
+	Confirmed int `json:"confirmed_tasks"`
+	// Ready is the ready-to-close mark (readyToClose).
+	Ready bool `json:"ready_to_close"`
 	// Tie marks a position another feature of the goal also holds; the
 	// hub does not renumber, and the rows keep id order within it.
 	Tie   bool `json:"tie,omitempty"`
@@ -222,62 +226,93 @@ type featureRow struct {
 	} `json:"links"`
 }
 
-// featureRows reads each listed feature of goal again and builds its row.
-// A record that changed between the list and its read is left out: one
-// dropped, one turned back into a task, and one moved to another goal, whose
-// link now names that goal.
-func featureRows(goal string, listed []store.TaskSummary, read func(id string) (store.Task, error)) ([]featureRow, error) {
-	rows := make([]featureRow, 0, len(listed))
-	for _, sum := range listed {
-		t, err := read(sum.ID)
-		if errors.Is(err, store.ErrTaskNotFound) {
-			continue
-		}
-		if err != nil {
-			return nil, err
-		}
+// featureRows builds the goal's rows from the features of one read. A
+// record that is not a feature of goal is left out, as a guard against data
+// no write path produces. finished reports, for each confirmed task id,
+// whether the caller may read it and it is DONE or CANCELLED.
+func featureRows(goal string, features []store.Task, finished func(id string) bool) []featureRow {
+	rows := make([]featureRow, 0, len(features))
+	for _, t := range features {
 		if t.Feature == nil || t.Epic != goal {
 			continue
 		}
 		row := featureRow{ID: t.ID, Title: t.Title, State: t.State, Assignee: t.Assignee, Archived: t.Archived, Revision: t.Revision, Feature: t.Feature, Confirmed: len(t.Dependencies)}
+		row.Ready = readyToClose(t, finished)
 		row.Links.Self = "/v1/tasks/" + t.ID
 		rows = append(rows, row)
 	}
-	return rows, nil
+	return rows
+}
+
+// readyToClose is the mark: the feature is open, has at least one confirmed
+// task, and every confirmed task is one the caller may read that is DONE or
+// CANCELLED. A task the caller may not read, or that is gone, withholds the
+// mark exactly as an unfinished one does.
+func readyToClose(t store.Task, finished func(id string) bool) bool {
+	if t.State == "DONE" || t.State == "CANCELLED" || len(t.Dependencies) == 0 {
+		return false
+	}
+	for _, id := range t.Dependencies {
+		if !finished(id) {
+			return false
+		}
+	}
+	return true
+}
+
+// confirmedFinished answers readyToClose's question from the goal's view:
+// a task of the goal's project from its snapshot, which the caller may read
+// since it reads the listing; a task of another project read once per id
+// per listing, and only when the caller may read that project.
+func (s *Server) confirmedFinished(r *http.Request, local map[string]string) func(id string) bool {
+	seen := map[string]bool{}
+	done := func(state string) bool { return state == "DONE" || state == "CANCELLED" }
+	return func(id string) bool {
+		if state, ok := local[id]; ok {
+			return done(state)
+		}
+		if v, ok := seen[id]; ok {
+			return v
+		}
+		v := false
+		if p, pdb, err := s.reg.LocateTask(id); err == nil {
+			if ok, err := s.canReadTasks(r, p); err == nil && ok {
+				if t, err := pdb.GetTask(id); err == nil {
+					v = done(t.State)
+				}
+			}
+		}
+		seen[id] = v
+		return v
+	}
 }
 
 // listFeatures is GET /v1/projects/{p}/epics/{e}/features: the goal's
-// features in position order, from the list's kind and epic filters and
-// one record read per row.
+// features in position order, each with its ready-to-close mark, and the
+// count of the goal's tasks no feature of this project confirms. The goal's
+// project is read in one read-only transaction (store.ReadGoalView), so a
+// write between its reads changes none of the answer; only a confirmed task
+// of another project is read after it, from that project's current state.
 func (s *Server) listFeatures(w http.ResponseWriter, r *http.Request) {
 	project, db := s.taskReadProject(w, r)
 	if db == nil {
 		return
 	}
-	epic, err := db.GetEpic(r.PathValue("e"))
-	if err != nil {
-		s.taskError(w, err)
-		return
-	}
-	f := store.TaskFilter{Kind: store.TaskKindFeature, Epic: epic.ID, Limit: maxGoalFeatures}
+	includeArchived := false
 	switch r.URL.Query().Get("include_archived") {
 	case "", "false", "0":
 	case "true", "1":
-		f.IncludeArchived = true
+		includeArchived = true
 	default:
 		s.fail(w, http.StatusBadRequest, errors.New("include_archived must be true or false"))
 		return
 	}
-	page, err := db.ListTasks(f)
+	view, err := db.ReadGoalView(r.PathValue("e"), includeArchived, maxGoalFeatures)
 	if err != nil {
 		s.taskError(w, err)
 		return
 	}
-	rows, err := featureRows(epic.ID, page.Tasks, db.GetTask)
-	if err != nil {
-		s.taskError(w, err)
-		return
-	}
+	rows := featureRows(view.Goal.ID, view.Features, s.confirmedFinished(r, view.Local))
 	slices.SortStableFunc(rows, func(a, b featureRow) int {
 		return cmp.Or(cmp.Compare(a.Feature.Position, b.Feature.Position), cmp.Compare(a.ID, b.ID))
 	})
@@ -287,9 +322,10 @@ func (s *Server) listFeatures(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	s.ok(w, struct {
-		Project   string       `json:"project"`
-		Goal      string       `json:"goal"`
-		Features  []featureRow `json:"features"`
-		Truncated bool         `json:"truncated,omitempty"`
-	}{project, epic.ID, rows, page.Next != ""})
+		Project          string       `json:"project"`
+		Goal             string       `json:"goal"`
+		Features         []featureRow `json:"features"`
+		TasksOnNoFeature int          `json:"tasks_on_no_feature"`
+		Truncated        bool         `json:"truncated,omitempty"`
+	}{project, view.Goal.ID, rows, view.Unconfirmed, view.Truncated})
 }
