@@ -115,18 +115,22 @@ func forwardLines(r io.Reader, deadline time.Time, fn func(line []byte)) error {
 			return errShare
 		}
 		frag, err := br.ReadSlice('\n')
-		if errors.Is(err, bufio.ErrBufferFull) || (len(long) > 0 || over) {
-			if !over && len(long)+len(frag) <= maxLine {
-				long = append(long, frag...)
-			} else {
-				over, long = true, long[:0]
-			}
-			if errors.Is(err, bufio.ErrBufferFull) {
-				continue
-			}
-			frag = long
+		partial := errors.Is(err, bufio.ErrBufferFull)
+		// The newline ends the line and is not part of its length.
+		if len(long)+len(bytes.TrimSuffix(frag, []byte{'\n'})) > maxLine {
+			over, long = true, long[:0]
 		}
-		if line := bytes.TrimSuffix(frag, []byte{'\n'}); !over && len(line) > 0 && len(line) <= maxLine {
+		if partial {
+			if !over {
+				long = append(long, frag...)
+			}
+			continue
+		}
+		line := frag
+		if len(long) > 0 {
+			line = append(long, frag...)
+		}
+		if line = bytes.TrimSuffix(line, []byte{'\n'}); !over && len(line) > 0 {
 			fn(line)
 		}
 		long, over = long[:0], false

@@ -191,6 +191,9 @@ func (c *Client) PublishDocs(projectDir, projectID, hubName, by string) []DocPus
 			if errors.As(err, new(hubUnavailable)) {
 				c.markHubFailed(hub)
 			}
+			if !c.deadline.IsZero() {
+				c.deferred(fmt.Sprintf("publishing %s (%v)", docName, err))
+			}
 			out = append(out, DocPushResult{Name: docName, Err: err})
 			continue
 		}
@@ -342,7 +345,10 @@ func (c *Client) hubDocDo(hub *HubConfig, method, u string, body []byte, into an
 		return hubUnavailable{fmt.Errorf("hub unreachable: %w", err)}
 	}
 	defer resp.Body.Close()
-	raw, _ := io.ReadAll(io.LimitReader(resp.Body, store.MaxDocBytes*2))
+	raw, err := io.ReadAll(io.LimitReader(resp.Body, store.MaxDocBytes*2))
+	if err != nil {
+		return hubUnavailable{fmt.Errorf("hub response cut off: %w", err)}
+	}
 	if resp.StatusCode == http.StatusConflict {
 		var doc HubDoc
 		json.Unmarshal(raw, &doc)
