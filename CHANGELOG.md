@@ -61,8 +61,8 @@ force, docs/DEVELOPMENT-PROCESS-PROPOSAL.md) and #411.
   they are. After a downgrade, that hub still reads a REACHED epic and
   lists it only on request, but takes new tasks into it, and its
   `update_epic` drops the check and turns an update without a state into
-  OPEN. Reopen a reached goal with `state: "OPEN"`, or retire it, before
-  going back, if it must not take new tasks.
+  OPEN. The older hub refuses new tasks only in a RETIRED epic, so retire
+  a reached goal before going back if it must take no new task.
 - **Changing the embedding model, in this order.** The upgrade changes no
   model. To change one afterwards without a dip in semantic recall, fill
   the new key first, then switch, then fill the rest:
@@ -74,8 +74,9 @@ force, docs/DEVELOPMENT-PROCESS-PROPOSAL.md) and #411.
   3. `aimem embed --all` once more, for what the timer curated in
      between.
 
-  When the new model needs another `AIMEM_EMBED_DIM`, set both lines in
-  the env file and restart the service in place of step 2. The old key's
+  When the new model needs another `AIMEM_EMBED_DIM`, name it in step 1
+  as well, then set both lines in the env file and restart the service
+  in place of step 2. The old key's
   vectors stay until `aimem embed --drop "<old key>" --all` removes them.
   docs/ADMIN-MANUAL.md, "Changing the embedding model".
 - **No setting changes.** No new environment setting; the access schema
