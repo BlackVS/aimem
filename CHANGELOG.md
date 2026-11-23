@@ -13,6 +13,32 @@ currently 26); a binary refuses a database newer than it understands.
 
 ## [Unreleased]
 
+### Data integrity
+
+- **A hook's whole run fits its client's timeout, and a long session no
+  longer loses its turns.** Codex and Claude Code kill a hook after the 10 s
+  every installer registers. A Stop hook read the session's whole transcript
+  up to six times while it waited for the turn to be written. A session
+  whose rollout had grown to a few hundred megabytes therefore spent more
+  than 10 s there, and was killed before the turn reached the local journal.
+  Nothing in aimem said so: one Codex session went 15 days without a
+  journaled turn. The read now starts from the end of the file and goes back
+  only to the turn's start, inside a 2.5 s share. A read that runs out of it
+  journals what the hook payload carries.
+
+  Each hook command (`submit-codex`, `submit-claude`, `session-start`) now
+  has one deadline for its whole run, 7 s from its start. A checkpoint is
+  kept on disk before the hub is asked, and a hub that does not take it
+  costs the run one request and one append to the hub's queue, whatever
+  the queue's size; before, every run against a silent hub waited for two
+  requests. A hub that fails is not asked again in the same run, and a
+  bound document that could not be published is published by a later run.
+  A run that leaves work for later writes one line in `aimem logs` naming
+  the event and what was left. Turns lost before this release can be submitted
+  again with `aimem submit-codex` and a Stop payload naming the session,
+  the turn and the rollout. A turn already journaled is not changed by a
+  second submission.
+
 ## [0.12.0] — 2026-11-23
 
 A goal can be closed as reached. An epic has a third state, `REACHED`, apart

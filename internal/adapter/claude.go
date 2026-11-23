@@ -4,11 +4,11 @@
 package adapter
 
 import (
-	"bufio"
 	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"time"
 
@@ -58,15 +58,27 @@ func BuildClaudeEvent(raw []byte) (*Payload, error) {
 	var userReq, reply string
 	var tools []string
 	var turnID, lastAssistant string
-	var err error
+	var degraded string
+	deadline := time.Now().Add(TranscriptShare)
 	for attempt := range 6 {
 		if attempt > 0 {
+			if time.Now().Add(250 * time.Millisecond).After(deadline) {
+				degraded = "the transcript did not show the reply within its time share"
+				break
+			}
 			time.Sleep(250 * time.Millisecond)
 		}
-		userReq, reply, tools, turnID, lastAssistant, err = parseTranscript(hp.TranscriptPath)
+		u, r, t, id, last, err := parseTranscript(hp.TranscriptPath, deadline)
+		if errors.Is(err, errShare) {
+			// Keep what an earlier, whole read found; with none, the
+			// event carries what the payload has.
+			degraded = "the transcript read ran out of its time share"
+			break
+		}
 		if err != nil {
 			return nil, err
 		}
+		userReq, reply, tools, turnID, lastAssistant = u, r, t, id, last
 		if turnID != "" {
 			// On tool-using turns the tool_use entries provide turnID
 			// before the final text block is flushed; a Stop hook must
@@ -117,6 +129,7 @@ func BuildClaudeEvent(raw []byte) (*Payload, error) {
 	return &Payload{
 		ProjectID:  pid,
 		ProjectDir: dir,
+		Degraded:   degraded,
 		Event: schema.Event{
 			SchemaVersion:  schema.Version,
 			IdempotencyKey: "claude-code:" + hp.SessionID + ":" + turnID,
@@ -138,14 +151,24 @@ func BuildClaudeEvent(raw []byte) (*Payload, error) {
 // user prompt (string content or text items — tool_result carriers are not
 // prompts), the assistant text after it, and the tools used in between. The
 // last assistant entry's uuid becomes the stable turn id.
-func parseTranscript(path string) (userReq, reply string, tools []string, turnID, lastAssistant string, err error) {
+//
+// A transcript grows by the whole session while the turn is at its end:
+// the read first finds where the last turn starts from the end of the file
+// (transcriptTurnStart), then scans forward from there, so its cost
+// follows the turn. Both halves stop at the deadline with errShare.
+func parseTranscript(path string, deadline time.Time) (userReq, reply string, tools []string, turnID, lastAssistant string, err error) {
 	f, err := os.Open(path)
 	if err != nil {
 		return "", "", nil, "", "", err
 	}
 	defer f.Close()
-	sc := bufio.NewScanner(f)
-	sc.Buffer(make([]byte, 1024*1024), 16*1024*1024) // transcript lines can be huge
+	start, err := transcriptTurnStart(f, deadline)
+	if err != nil {
+		return "", "", nil, "", "", err
+	}
+	if _, err := f.Seek(start, io.SeekStart); err != nil {
+		return "", "", nil, "", "", err
+	}
 	type turnState struct {
 		user   string
 		reply  string
@@ -153,10 +176,10 @@ func parseTranscript(path string) (userReq, reply string, tools []string, turnID
 		turnID string
 	}
 	var cur turnState
-	for sc.Scan() {
+	err = forwardLines(f, deadline, func(b []byte) {
 		var e transcriptEntry
-		if json.Unmarshal(sc.Bytes(), &e) != nil {
-			continue // tolerate unknown/corrupt lines
+		if json.Unmarshal(b, &e) != nil {
+			return // tolerate unknown/corrupt lines
 		}
 		switch e.Type {
 		case "user":
@@ -166,7 +189,7 @@ func parseTranscript(path string) (userReq, reply string, tools []string, turnID
 		case "assistant":
 			var items []contentItem
 			if json.Unmarshal(e.Message.Content, &items) != nil {
-				continue
+				return
 			}
 			for _, it := range items {
 				switch it.Type {
@@ -185,8 +208,8 @@ func parseTranscript(path string) (userReq, reply string, tools []string, turnID
 				lastAssistant = e.UUID
 			}
 		}
-	}
-	if err := sc.Err(); err != nil {
+	})
+	if err != nil {
 		return "", "", nil, "", "", err
 	}
 	return cur.user, cur.reply, cur.tools, cur.turnID, lastAssistant, nil
@@ -216,4 +239,53 @@ func promptText(raw json.RawMessage) (string, bool) {
 		}
 	}
 	return text, text != ""
+}
+
+// transcriptTurnStart returns where parseTranscript starts reading: the
+// last real user prompt, or, when no assistant entry with a uuid follows
+// that prompt yet, the last such assistant entry before it, which
+// parseTranscript reports as lastAssistant. A transcript without a prompt
+// is read from its start, as before.
+func transcriptTurnStart(f *os.File, deadline time.Time) (int64, error) {
+	start, sawAssistant := int64(-1), false
+	err := scanBack(f, deadline, func(b []byte, off int64) bool {
+		var head struct {
+			Type string `json:"type"`
+			UUID string `json:"uuid"`
+		}
+		if json.Unmarshal(b, &head) != nil {
+			return false
+		}
+		switch head.Type {
+		case "assistant":
+			if head.UUID == "" {
+				return false
+			}
+			if start >= 0 {
+				start = off
+				return true
+			}
+			sawAssistant = true
+		case "user":
+			if start >= 0 {
+				return false
+			}
+			var e transcriptEntry
+			if json.Unmarshal(b, &e) != nil {
+				return false
+			}
+			if _, isPrompt := promptText(e.Message.Content); isPrompt {
+				start = off
+				return sawAssistant
+			}
+		}
+		return false
+	})
+	if err != nil {
+		return 0, err
+	}
+	if start < 0 {
+		return 0, nil
+	}
+	return start, nil
 }

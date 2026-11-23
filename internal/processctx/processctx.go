@@ -36,6 +36,21 @@ import (
 // cache miss. Tests raise it so a loaded machine never decides an outcome.
 var hubLookupTimeout = 1500 * time.Millisecond
 
+// Deadline, when set, ends every hub contact and fetch of this process:
+// the session-start hook sets it to the end of its run, so the lookups,
+// the set read and a Git fetch on a cache miss all fit the hook's budget.
+var Deadline time.Time
+
+// bounded is a context for one contact: at most d, and never past Deadline.
+func bounded(d time.Duration) (context.Context, context.CancelFunc) {
+	ctx, cancel := context.WithTimeout(context.Background(), d)
+	if Deadline.IsZero() {
+		return ctx, cancel
+	}
+	ctx2, cancel2 := context.WithDeadline(ctx, Deadline)
+	return ctx2, func() { cancel2(); cancel() }
+}
+
 // State is what Load could establish about the project's process context.
 type State string
 
@@ -349,7 +364,7 @@ func (r *Result) connect(dir, root string) (*adapter.HubConfig, *http.Client, bo
 		if err != nil {
 			return fail(Unavailable, err.Error(), "re-add the hub entry with an https URL and its pin or CA (aimem hub add NAME URL TOKEN --pin sha256-BASE64 or --ca-file PATH), or repair its unreadable ca_file; aimem hub list shows each entry's trust", "process context unavailable: "+err.Error())
 		}
-		ctx, cancel := context.WithTimeout(context.Background(), hubLookupTimeout)
+		ctx, cancel := bounded(hubLookupTimeout)
 		err = selected.Validate(ctx)
 		cancel()
 		if err != nil {
@@ -494,7 +509,7 @@ func (r *Result) content(root string) process.Result {
 		// Unsupported: the hub stores no set for this selection; Git as
 		// before, with the digest dropped so the cache entry is the commit's.
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), setFetchDeadline)
+	ctx, cancel := bounded(setFetchDeadline)
 	defer cancel()
 	ref := *r.Ref
 	ref.Digest = ""
@@ -606,7 +621,7 @@ func unreachable(err error) bool {
 // bounded identity/process read; both routes admit ordinary tokens. A
 // non-200 answer is a *hubRefusal carrying the status.
 func hubGetJSONClient(hub *adapter.HubConfig, client *http.Client, path string, into any) error {
-	ctx, cancel := context.WithTimeout(context.Background(), hubLookupTimeout)
+	ctx, cancel := bounded(hubLookupTimeout)
 	defer cancel()
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, strings.TrimRight(hub.URL, "/")+path, nil)
 	if err != nil {

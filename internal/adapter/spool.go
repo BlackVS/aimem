@@ -14,6 +14,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
@@ -40,6 +41,10 @@ type Payload struct {
 	// keep each hub's data physically separate. nil = unknown.
 	Hub   *string      `json:"hub,omitempty"`
 	Event schema.Event `json:"event"`
+	// Degraded says why the event lacks what the transcript would have
+	// given (its time share ran out); never sent, it goes to the run's
+	// adapter.log line.
+	Degraded string `json:"-"`
 }
 
 // ResolveProjectID derives ProjectID from ProjectDir when unset, and
@@ -92,6 +97,13 @@ type Client struct {
 	http *http.Client
 	// pushOff notes, once per run, a hub that has no checkpoint token.
 	pushOff sync.Once
+	// deadline ends a hook run (WithDeadline); zero outside a hook.
+	deadline time.Time
+	// deferredList names what this run left for a later one.
+	deferredList []string
+	// hubFailed holds the hubs (by URL) that failed a request in this run;
+	// they are not asked again in it.
+	hubFailed map[string]bool
 }
 
 // localTimeout bounds each call to the local service: hooks must never
@@ -163,6 +175,10 @@ func (c *Client) submit(p *Payload, toHub bool) (spooled bool, err error) {
 	if p.Hub != nil {
 		hubName = *p.Hub
 	}
+	if p.Degraded != "" {
+		c.deferred(p.Degraded + ": the event holds what was read")
+	}
+	defer c.noteDeferred(p)
 	if err := c.post(body); err != nil {
 		// The service is UP and refused the record: spooling would replay
 		// the same rejection forever and "unreachable" would mislead —
@@ -171,9 +187,15 @@ func (c *Client) submit(p *Payload, toHub bool) (spooled bool, err error) {
 			return false, err
 		}
 		if serr := c.spool(body); serr != nil {
+			c.deferred("the checkpoint, LOST: the service did not take it and the local spool cannot be written")
 			return false, fmt.Errorf("submit failed (%v) and spool failed: %w", err, serr)
 		}
-		c.note("aimem: service unreachable, checkpoint spooled (%v)", err)
+		if c.outOfTime(err) {
+			c.deferred("the local post (out of time)")
+		} else {
+			c.deferred(fmt.Sprintf("the local post (%v)", err))
+			c.note("aimem: service unreachable, checkpoint spooled (%v)", err)
+		}
 		if toHub {
 			c.pushHub(hubName, body)
 			c.publishDocsQuiet(p)
@@ -191,7 +213,14 @@ func (c *Client) submit(p *Payload, toHub bool) (spooled bool, err error) {
 }
 
 func (c *Client) post(body []byte) error {
-	resp, err := c.http.Post("http://aimem/v1/events", "application/json", bytes.NewReader(body))
+	ctx, cancel := c.reqCtx()
+	defer cancel()
+	req, err := http.NewRequestWithContext(ctx, "POST", "http://aimem/v1/events", bytes.NewReader(body))
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := c.http.Do(req)
 	if err != nil {
 		return err
 	}
@@ -229,7 +258,12 @@ func (c *Client) spool(line []byte) error {
 	return err
 }
 
-// sweepOrphanedClaims returns crash-orphaned replay claims to the spool.
+// claimSweep is (*Client).sweepOrphanedClaims; a test replaces it.
+var claimSweep = (*Client).sweepOrphanedClaims
+
+// sweepOrphanedClaims returns crash-orphaned replay claims to the spool,
+// while the run has more than reserve left; the claims it does not reach
+// wait for a later run.
 // A replay claims the spool by renaming it and removes the claim when
 // done — but a hard kill mid-replay leaves the claim file holding
 // records that nothing would ever re-scan: a silent drop. Events are
@@ -237,9 +271,15 @@ func (c *Client) spool(line []byte) error {
 // whose owner is still alive only causes a double-post the service
 // deduplicates. A claim we cannot read (Windows keeps it locked while
 // its live owner reads it) is skipped and swept next time.
-func sweepOrphanedClaims(spool string) {
-	claims, _ := filepath.Glob(spool + ".replay-*")
-	for _, cl := range claims {
+func (c *Client) sweepOrphanedClaims(spool string, reserve time.Duration) {
+	if c.left() <= reserve {
+		return // nothing looked at, nothing to name
+	}
+	for _, cl := range listSiblings(spool, ".replay-") {
+		if c.left() <= reserve {
+			c.deferred("the claims of interrupted runs, if any (out of time)")
+			return
+		}
 		data, err := os.ReadFile(cl)
 		if err != nil {
 			continue
@@ -249,14 +289,11 @@ func sweepOrphanedClaims(spool string) {
 			if err != nil {
 				continue
 			}
-			if !bytes.HasSuffix(data, []byte{'\n'}) {
-				data = append(data, '\n')
-			}
-			if _, err := f.Write(data); err != nil {
-				f.Close()
+			err = writeLines(f, data)
+			f.Close()
+			if err != nil {
 				continue
 			}
-			f.Close()
 		}
 		os.Remove(cl)
 	}
@@ -264,10 +301,24 @@ func sweepOrphanedClaims(spool string) {
 
 // ReplaySpool drains the spool into the service. The file is claimed by
 // atomic rename first so concurrent adapters never double-replay; records
-// that still fail transport are re-spooled, invalid records are dropped
-// with a warning (they would never succeed).
+// that still fail transport, and the untouched rest when the run runs
+// out of time, go back to the spool, in order; requeued counts the
+// records kept back, not the untouched rest. Invalid
+// records are dropped with a warning (they would never succeed). A run
+// already out of time does not claim the spool. If the write fails, the
+// claim is left in place and sweepOrphanedClaims returns it to the spool.
 func (c *Client) ReplaySpool() (replayed, requeued int, err error) {
-	sweepOrphanedClaims(c.spoolPath())
+	if c.left() <= 0 {
+		if fi, err := os.Stat(c.spoolPath()); err == nil && fi.Size() > 0 {
+			c.deferred("the local spool replay (out of time)")
+		}
+		return 0, 0, nil
+	}
+	claimSweep(c, c.spoolPath(), 0)
+	if c.left() <= 0 {
+		c.deferred("the local spool replay (out of time)")
+		return 0, 0, nil
+	}
 	claim := c.spoolPath() + fmt.Sprintf(".replay-%d", os.Getpid())
 	if err := os.Rename(c.spoolPath(), claim); err != nil {
 		if os.IsNotExist(err) {
@@ -275,31 +326,72 @@ func (c *Client) ReplaySpool() (replayed, requeued int, err error) {
 		}
 		return 0, 0, err
 	}
-	defer os.Remove(claim)
 	data, err := os.ReadFile(claim)
 	if err != nil {
-		return 0, 0, err
+		return 0, 0, err // the claim stays for sweepOrphanedClaims
 	}
-	for line := range bytes.SplitSeq(data, []byte{'\n'}) {
+	var kept bytes.Buffer
+	var failed error // the first post the service failed, not the run's end
+	rest := data
+	for len(rest) > 0 {
+		line, after, _ := bytes.Cut(rest, []byte{'\n'})
 		if len(bytes.TrimSpace(line)) == 0 {
+			rest = after
 			continue
 		}
+		if c.left() <= 0 {
+			// Out of time: the rest goes back as it is, neither walked
+			// nor counted.
+			c.deferred("the local spool replay (out of time)")
+			break
+		}
+		rest = after
 		if err := c.post(line); err != nil {
 			if _, invalid := err.(*rejectError); invalid {
 				c.note("aimem: dropping invalid spooled record: %v", err)
 				continue
 			}
-			c.spool(line)
+			if c.outOfTime(err) {
+				c.deferred("the local spool replay (out of time)")
+			} else if failed == nil {
+				failed = err
+			}
+			kept.Write(line)
+			kept.WriteByte('\n') // each record whole, so the block goes back as it is
 			requeued++
 			continue
 		}
 		replayed++
 	}
+	if failed != nil {
+		c.deferred(fmt.Sprintf("the local spool replay (%v; %d record(s) kept)", failed, requeued))
+	}
+	if err := writeBack(c.spoolPath(), kept.Bytes(), rest); err != nil {
+		return replayed, requeued, err // the claim stays for sweepOrphanedClaims
+	}
+	os.Remove(claim)
 	return replayed, requeued, nil
 }
 
+// noteDeferred leaves the one adapter.log line of a hook run that left
+// work for a later run: which event, what it left and why. No content of
+// the turn goes into it.
+func (c *Client) noteDeferred(p *Payload) {
+	list := c.deferredList
+	c.deferredList = nil // one client may submit many events (an import)
+	if len(list) == 0 {
+		return
+	}
+	c.note("aimem: the hook for the %s event of session %s turn %s left work for a later run: %s; the deliveries it names stay queued unless named LOST",
+		p.Event.Kind, p.Event.SessionID, p.Event.TurnID, strings.Join(list, ", "))
+}
+
 func (c *Client) replaySpool() {
-	if n, _, err := c.ReplaySpool(); err == nil && n > 0 {
+	n, _, err := c.ReplaySpool()
+	if err != nil {
+		c.deferred(fmt.Sprintf("the local spool replay (%v)", err))
+	}
+	if n > 0 {
 		c.note("aimem: replayed %d spooled checkpoint(s)", n)
 	}
 }

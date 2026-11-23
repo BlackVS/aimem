@@ -128,6 +128,12 @@ func (c *Client) PublishDocs(projectDir, projectID, hubName, by string) []DocPus
 	changed := false
 	seen := map[string]string{} // doc name -> first bound path
 	for _, rel := range paths {
+		if !c.deadline.IsZero() && c.left() < hubRequestMin {
+			// The rest is not even read: a changed one keeps its old
+			// hash, so a later run publishes it.
+			c.deferred("checking the shared documents (out of time)")
+			break
+		}
 		docName := ident.DocName(rel)
 		// Two bound files with one base name would publish as the same
 		// document and fight each other on every checkpoint — the first
@@ -172,8 +178,28 @@ func (c *Client) PublishDocs(projectDir, projectID, hubName, by string) []DocPus
 		if st.Hash == h {
 			continue // unchanged since last publish: the normal, free case
 		}
+		// A document left unpublished keeps its old hash, so a later run
+		// publishes it.
+		if c.left() < hubRequestMin {
+			out = c.leaveDoc(out, docName, "out of time")
+			continue
+		}
+		if c.hubFailed[hub.URL] {
+			out = c.leaveDoc(out, docName, "the hub failed earlier in this run")
+			continue
+		}
 		doc, err := c.PutHubDoc(hub, projectID, docName, string(body), by, st.Rev)
+		if c.outOfTime(err) {
+			out = c.leaveDoc(out, docName, "out of time")
+			continue
+		}
 		if err != nil {
+			if errors.As(err, new(hubUnavailable)) {
+				c.markHubFailed(hub)
+			}
+			if !c.deadline.IsZero() {
+				c.deferred(fmt.Sprintf("publishing %s (%v)", docName, err))
+			}
 			out = append(out, DocPushResult{Name: docName, Err: err})
 			continue
 		}
@@ -185,6 +211,31 @@ func (c *Client) PublishDocs(projectDir, projectID, hubName, by string) []DocPus
 		saveDocSync(c.root, projectID, state)
 	}
 	return out
+}
+
+// leaveDoc records a document this run does not publish: inside a hook
+// in the run's adapter.log line, otherwise as the caller's result.
+func (c *Client) leaveDoc(out []DocPushResult, name, why string) []DocPushResult {
+	if !c.deadline.IsZero() {
+		c.deferred("publishing " + name + " (" + why + ")")
+		return out
+	}
+	return append(out, DocPushResult{Name: name, Err: errors.New("not published: " + why)})
+}
+
+// hubUnavailable marks a document request that failed for the hub, not
+// for the document: no answer, or a server error. The run asks that hub
+// nothing more.
+type hubUnavailable struct{ error }
+
+func (e hubUnavailable) Unwrap() error { return e.error }
+
+// hubStatusErr marks a server error as the hub's, any other as the document's.
+func hubStatusErr(code int, err error) error {
+	if code >= 500 {
+		return hubUnavailable{err}
+	}
+	return err
 }
 
 // publishDocsQuiet is the checkpoint-path wrapper: outcomes go to stderr
@@ -285,7 +336,9 @@ func (c *Client) hubDocDo(hub *HubConfig, method, u string, body []byte, into an
 	if body != nil {
 		rd = bytes.NewReader(body)
 	}
-	req, err := http.NewRequest(method, u, rd)
+	ctx, cancel := c.reqCtx()
+	defer cancel()
+	req, err := http.NewRequestWithContext(ctx, method, u, rd)
 	if err != nil {
 		return err
 	}
@@ -295,10 +348,13 @@ func (c *Client) hubDocDo(hub *HubConfig, method, u string, body []byte, into an
 	}
 	resp, err := hub.HTTPClient().Do(req)
 	if err != nil {
-		return fmt.Errorf("hub unreachable: %w", err)
+		return hubUnavailable{fmt.Errorf("hub unreachable: %w", err)}
 	}
 	defer resp.Body.Close()
-	raw, _ := io.ReadAll(io.LimitReader(resp.Body, store.MaxDocBytes*2))
+	raw, err := io.ReadAll(io.LimitReader(resp.Body, store.MaxDocBytes*2))
+	if err != nil {
+		return hubUnavailable{fmt.Errorf("hub response cut off: %w", err)}
+	}
 	if resp.StatusCode == http.StatusConflict {
 		var doc HubDoc
 		json.Unmarshal(raw, &doc)
@@ -310,9 +366,9 @@ func (c *Client) hubDocDo(hub *HubConfig, method, u string, body []byte, into an
 		}
 		json.Unmarshal(raw, &e)
 		if e.Error != "" {
-			return fmt.Errorf("hub: %s", e.Error)
+			return hubStatusErr(resp.StatusCode, fmt.Errorf("hub: %s", e.Error))
 		}
-		return fmt.Errorf("hub returned HTTP %d", resp.StatusCode)
+		return hubStatusErr(resp.StatusCode, fmt.Errorf("hub returned HTTP %d", resp.StatusCode))
 	}
 	return json.Unmarshal(raw, into)
 }

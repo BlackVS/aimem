@@ -36,6 +36,7 @@ import (
 	"aimem/internal/llmrate"
 	"aimem/internal/mcp"
 	"aimem/internal/process"
+	"aimem/internal/processctx"
 	"aimem/internal/provider"
 	"aimem/internal/schema"
 	"aimem/internal/server"
@@ -532,6 +533,10 @@ func projectID(args []string) error {
 // and Linux. A missing handoff contributes nothing and never breaks
 // session start.
 func sessionStartCmd(args []string) error {
+	// One deadline for the whole run (adapter.HookDeadline): the hub
+	// handoff check, the recalled facts and the process lookups share it.
+	hookDeadline = adapter.HookDeadline()
+	processctx.Deadline = hookDeadline
 	p := filepath.Join("docs", "SESSION-STATE.md")
 	if len(args) > 0 {
 		p = args[0]
@@ -670,6 +675,12 @@ func hubHandoffNotice(localBody string) string {
 		return ""
 	}
 	c := adapter.NewClient(stateRoot())
+	wait := 1200 * time.Millisecond
+	if !hookDeadline.IsZero() {
+		// Inside session-start: the request and the wait end with the run.
+		c = c.WithDeadline(hookDeadline)
+		wait = max(0, min(wait, time.Until(hookDeadline)))
+	}
 	done := make(chan string, 1)
 	go func() {
 		doc, err := c.GetHubDoc(hub, id, "SESSION-STATE", 0)
@@ -692,7 +703,7 @@ func hubHandoffNotice(localBody string) string {
 	select {
 	case s := <-done:
 		return s
-	case <-time.After(1200 * time.Millisecond):
+	case <-time.After(wait):
 		return "" // an unreachable or slow hub degrades to local-only, silently
 	}
 }
@@ -1506,7 +1517,7 @@ func submitClaudeCmd() error {
 	if err != nil {
 		return err
 	}
-	_, err = adapter.NewClient(stateRoot()).Submit(p)
+	_, err = adapter.NewClient(stateRoot()).WithDeadline(adapter.HookDeadline()).Submit(p)
 	return err
 }
 
@@ -1523,7 +1534,7 @@ func submitCodexCmd() error {
 	if err != nil {
 		return err
 	}
-	_, err = adapter.NewClient(stateRoot()).Submit(p)
+	_, err = adapter.NewClient(stateRoot()).WithDeadline(adapter.HookDeadline()).Submit(p)
 	return err
 }
 
