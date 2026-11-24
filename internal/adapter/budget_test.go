@@ -1315,6 +1315,11 @@ func TestAReplayCutByTheDeadlineIsNamed(t *testing.T) {
 	}}}
 	appendLines(c.spoolPath(), rec("queued"))
 	c.Submit(p)
+	// The run's own checkpoint and the replay's post: without the second,
+	// the replay loop's own time check, not the stalled post, cut it.
+	if n := posts.Load(); n != 2 {
+		t.Fatalf("%d post(s) reached the local service, want the checkpoint and the replay's", n)
+	}
 	notes, _ := os.ReadFile(filepath.Join(root, "adapter.log"))
 	var line []byte
 	for l := range bytes.SplitSeq(notes, []byte{'\n'}) {
