@@ -105,6 +105,10 @@ func BuildCodexEvent(raw []byte) (*Payload, error) {
 		if perr != nil {
 			fmt.Fprintf(os.Stderr, "aimem submit-codex: rollout %s: %v (journaling from hook payload only)\n",
 				hp.TranscriptPath, perr)
+			// A thin event stays thin (the store keeps the first record of
+			// an idempotency key), so the run's line names it. The error is
+			// a file system one: a path and a cause, no turn content.
+			degraded = fmt.Sprintf("the rollout could not be read (%v)", perr)
 			userReq, reply, tools, lastTurnID = "", "", nil, ""
 			break
 		}

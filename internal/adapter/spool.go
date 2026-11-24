@@ -345,16 +345,18 @@ func (c *Client) ReplaySpool() (replayed, requeued int, err error) {
 // writes no event line, prints.
 func (c *Client) LeftForLater() []string { return slices.Clone(c.deferredList) }
 
-// noteDeferred leaves the one adapter.log line of a hook run that left
-// work for a later run: which event, what it left and why. No content of
-// the turn goes into it.
+// noteDeferred leaves the one adapter.log line of a run that left work
+// for a later run, or built its event from less than the transcript:
+// which event, what and why. The run may be a hook's or not (an import),
+// so the line names the run, not the hook. No content of the turn goes
+// into it.
 func (c *Client) noteDeferred(p *Payload) {
 	list := c.deferredList
 	c.deferredList = nil // one client may submit many events (an import)
 	if len(list) == 0 {
 		return
 	}
-	c.note("aimem: the hook for the %s event of session %s turn %s left work for a later run: %s; the deliveries it names stay queued unless named LOST",
+	c.note("aimem: the run for the %s event of session %s turn %s left work for a later run: %s; the deliveries it names stay queued unless named LOST",
 		p.Event.Kind, p.Event.SessionID, p.Event.TurnID, strings.Join(list, ", "))
 }
 

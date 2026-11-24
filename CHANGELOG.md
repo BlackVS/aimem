@@ -109,6 +109,17 @@ currently 26); a binary refuses a database newer than it understands.
   Retry-After is neither waited for nor kept between runs: a hook has
   seconds, and checkpoints already come at the user's pace. Every other 4xx
   but 401 and 403 still drops the record from the hub path.
+- **A Codex turn journaled from the hook payload alone is named in the
+  run's line.** When `submit-codex` could not read the session's rollout
+  (a reason other than running out of its time share), the event was built
+  from the payload alone and only stderr said so; `aimem logs` showed
+  nothing, and a thin event stays thin, since the store keeps the first
+  record of an idempotency key. The run's line in `adapter.log` now names
+  the read's error with the event, the session and the turn, and no content
+  of the turn.
+- **The run's line reads right outside a hook.** It began "the hook for
+  the ... event" also for an import; it now begins "the run for the ...
+  event".
 
 ## [0.12.1] — 2026-11-24
 
