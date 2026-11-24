@@ -160,7 +160,7 @@ func TestAnAppendMovedAwayTwiceKeepsTheRecord(t *testing.T) {
 	}
 }
 
-// A sweep never takes a pending file its writer has not finished: the
+// A sweep does not take a pending file whose writer holds the lock: the
 // writer holds the pending lock shared from before the file's creation to
 // after its close, and the sweep lists the files holding it exclusive. A
 // sweep in either window (the file empty, then written but open) leaves

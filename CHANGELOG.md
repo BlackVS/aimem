@@ -52,17 +52,23 @@ currently 26); a binary refuses a database newer than it understands.
   A run of this release holds a third lock, shared, from before it creates
   its pending file until it has written and closed it, and the run that
   moves pending files in lists them holding that lock exclusive, so it
-  never takes a file whose writer has not finished, however long that
+  does not take a file whose writer holds the lock, however long that
   writer stalls. A writer that cannot take the lock within 200 ms (two
   other runs stopped while holding the queue's locks) writes its file
   without it, and the sweep's one-minute age rule keeps it off that file.
   Pending files are created under names that carry the process id and a
-  nanosecond clock, never renamed, and a run removes only the file it
-  wrote, so one run's file never replaces or removes another's. Between
-  runs of this release no record is lost silently at any stall: a stall
-  past the one-minute age rule may deliver a record twice (the hub keeps
-  one event per idempotency key), and a record is named lost in the run's
-  line only where nothing could be written. On a filesystem that refuses
+  nanosecond clock and are not renamed, so one does not replace another,
+  and a hook run's cleanup removes only the file it wrote. Between runs of
+  this release no record is lost in silence, with one exception: with the
+  local service down, two runs stopped while holding the queue's locks, so
+  that a writer passes both lock waits and creates its pending file
+  without the lock; that writer stopped for more than a minute between
+  creating the file and writing it; and a sweep that read the stale file
+  empty stopped before removing it while the writer finished its write in
+  between: the sweep then removes the written file. Otherwise a stall past
+  the one-minute age rule may deliver a record twice (the hub keeps one
+  event per idempotency key), and a record is named lost in the run's line
+  only where nothing could be written. On a filesystem that refuses
   the locks (some network mounts), records are appended without them,
   nothing is delivered from the queue there, and the run says so once in
   its line; `aimem spool-flush` says what it left for a later run on

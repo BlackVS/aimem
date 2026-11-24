@@ -23,7 +23,8 @@ import (
 //     the one run moving pending files into it;
 //   - the pending lock is held shared by each run writing a pending file,
 //     from before its creation to after its close, and exclusive by the
-//     pending sweep while it lists the files: a listed file is whole.
+//     pending sweep while it lists the files: a listed file is whole,
+//     unless its writer wrote it past the lock's wait (writePendingFile).
 //
 // Appenders only ever add at the end. A flush reads a snapshot, delivers
 // it unlocked, then rewrites the spool without the part it walked. The

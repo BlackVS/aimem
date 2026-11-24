@@ -663,8 +663,11 @@ func removePending(p *pendingFile) {
 // only after its record is in the spool. A record whose run had already
 // delivered it, or appended it, before dying is delivered twice; the hub
 // keeps one event per idempotency key. An empty stale file is removed: a
-// writer of this release leaves one only when it died before its write,
-// and an older client's is a record it never wrote.
+// writer of this release leaves one when it died before its write, or
+// while it is stopped there after writing past the lock's wait (if it
+// then writes after this sweep's read, that record is lost: the stated
+// residual of this release), and an older client's is a record it never
+// wrote.
 func (c *Client) sweepPending(spool string) {
 	if c.left() < hubRequestMin {
 		return // nothing looked at, nothing to name
