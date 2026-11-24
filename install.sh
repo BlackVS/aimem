@@ -366,6 +366,14 @@ svc_stop() {
   if systemctl --user is-active --quiet aimem-sync.timer; then SYNC_WAS_ACTIVE=1; fi
   systemctl --user stop aimem-sync.timer aimem-sync.service aimem.service 2>/dev/null || true
 }
+# svc_reset clears the unit's failed state and its start rate-limit
+# counter before a start the installer makes on purpose. Restart=on-failure
+# counts a crash loop's restarts against systemd's start limit (5 in 10 s);
+# an upgrade's or a rollback's own start right after such a loop would be
+# refused as "attempted too often". The limit still bounds a crash loop
+# that follows this start. A unit not loaded yet makes it fail; that is
+# dropped.
+svc_reset() { systemctl --user reset-failed aimem.service 2>/dev/null || true; }
 svc_start() {
   [ "$TXN_MANAGED" = 1 ] || return 0
   if [ "$SERVICE_KIND" = launchd ]; then
@@ -373,6 +381,7 @@ svc_start() {
     launchd_start "$LAUNCHD_SYNC_LABEL" || true
     return 0
   fi
+  svc_reset
   systemctl --user restart aimem.service || true
   if [ "$SYNC_WAS_ACTIVE" = 1 ]; then systemctl --user start aimem-sync.timer || true; fi
 }
@@ -451,6 +460,7 @@ EOF
       AIMEM_UPGRADE_WAIT=${AIMEM_UPGRADE_WAIT:-10} txn_wait "" && say "service healthy" \
         || echo "warning: service not answering yet; check: launchctl print $(launchd_domain)/$LAUNCHD_LABEL" >&2
     elif [ "$TXN_MANAGED" = 1 ]; then
+      svc_reset
       systemctl --user restart aimem
       sleep 0.5
       "$BIN_DIR/aimem" health >/dev/null && say "service healthy" \

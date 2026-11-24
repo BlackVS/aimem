@@ -123,8 +123,15 @@ TO` against an export of the tree (`AIMEM_BASE`): the tree's installers,
 OpenCode plugin and build. So only the first install is a published
 installer; the upgrade runs the installers the next release will ship.
 It first upgrades with a stand-in binary that never serves, and checks
-that the upgrade fails, says ROLLED BACK and leaves FROM serving. Then
-the real upgrade: the binary and the plugin must be the tree's, the
+that the upgrade fails, says ROLLED BACK and leaves FROM serving. On
+Linux it does so twice: first from a unit that systemd has stopped at its
+start limit (six restarts in a row leave it `start-limit-hit`, as a crash
+loop does), with a short health wait, where the rollback must bring FROM
+back; `install.sh` resets the unit's failed state and start counter
+before a start of its own (`svc_reset`), and without that systemd
+refuses the rollback's start. Before the real upgrade it puts the unit at
+its start limit again. On a failure it prints the unit's restarts, its
+result and its journal. Then the real upgrade: the binary and the plugin must be the tree's, the
 Claude Code hooks still wired, and the service healthy at TO. Last, the
 tree's MCP server is started in each checkout, as a client's next session
 starts it: the joined checkout must list the team work tools, from the
@@ -135,9 +142,14 @@ install no skills, so there are none to check.
 
 It runs in CI's `client-upgrade` job on a release prepare pull request
 from this repository's `release/` branches (Linux, Windows and macOS),
-nightly (Linux and Windows) and on a manual run (all three); never on
-another pull request or a push, since it installs into the runner's
-account. The release workflow's `macos-client-upgrade` job runs it again
+on any other pull request from this repository that changes the
+installers or the upgrade checks (Linux and Windows), nightly (Linux and
+Windows) and on a manual run (all three); never on another pull request,
+a fork's or a push, since it installs into the runner's account. The
+`upgrade-scope` job decides, with `scripts/upgrade-scope.sh`, and says in
+its log why the checks run or are skipped. On a pull request that is not
+a release prepare, TO is FROM's next patch, and the pull request's own
+installers run the upgrade. The release workflow's `macos-client-upgrade` job runs it again
 at the tag; the release does not wait for that one, and a failure there
 is filed as a task.
 
@@ -159,8 +171,9 @@ schema is newer this is a real migration, and the run prints `migration:
 schema N -> M`; when it is the same, it prints `no schema step`. The
 service manager's part of an upgrade stays with `install-hub-container`.
 
-It runs in CI's `hub-upgrade` job, where `client-upgrade` runs, on Linux
-only (the hub installer is Linux-only). A manual run may name the release
+It runs in CI's `hub-upgrade` job, where `client-upgrade` runs (the
+`upgrade-scope` job decides), on Linux only (the hub installer is
+Linux-only). A manual run may name the release
 to start from with the workflow's `from` input
 (`AIMEM_UPGRADE_FROM`), and only a manual run: a release prepare pull
 request and the nightly run always derive it. The run's output says when

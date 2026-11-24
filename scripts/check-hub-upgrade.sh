@@ -90,13 +90,27 @@ serve() { # log: start the hub with the installer's last line
   for _ in $(seq 1 60); do [ "$(health)" = 200 ] && return 0; sleep 0.5; done
   cat /tmp/serve.log; fail "the printed command did not start a hub that answers /v1/health"
 }
+# stop_hub: stop the serve and wait until its process is gone, not only
+# until /health stops answering: a serve still closing its journals holds
+# their lock, and the next read of the state then finds it locked. A
+# zombie counts as gone (it holds no files).
 stop_hub() {
-  local p
+  local p pids= alive=
   for p in /proc/[0-9]*; do
-    tr '\0' ' ' < "$p/cmdline" 2>/dev/null | grep -q "^$BIN serve" && kill "${p#/proc/}" 2>/dev/null || true
+    tr '\0' ' ' < "$p/cmdline" 2>/dev/null | grep -q "^$BIN serve" || continue
+    pids="$pids ${p#/proc/}"
+    kill "${p#/proc/}" 2>/dev/null || true
   done
-  for _ in $(seq 1 40); do [ "$(health)" = 000 ] && return 0; sleep 0.5; done
-  fail "the hub did not stop"
+  [ -n "$pids" ] || fail "no serve process to stop"
+  for _ in $(seq 1 40); do
+    alive=
+    for p in $pids; do
+      [ -e "/proc/$p" ] && ! grep -q '^State:[[:space:]]*Z' "/proc/$p/status" 2>/dev/null && alive="$alive $p"
+    done
+    [ -n "$alive" ] || return 0
+    sleep 0.5
+  done
+  fail "the hub's serve process did not exit within 20 s (pid$alive)"
 }
 version() { cli version | awk '{print $2}'; }
 user_id() { api GET /v1/access | jq -r --arg n "$1" '.users[] | select(.name == $n) | .id'; }
