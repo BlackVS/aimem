@@ -13,6 +13,21 @@ currently 26); a binary refuses a database newer than it understands.
 
 ## [Unreleased]
 
+### Security
+
+- **A task route no longer tells a caller without a grant that a damaged
+  record exists.** Locating a task by its id read and decoded the whole
+  record before the caller's grant was checked. A record whose stored body
+  does not decode therefore made the lookup fail, and the task routes
+  answered 500 "task storage failure" to any caller, where an id that does
+  not exist gets 404. Locating a task now asks only whether a project holds
+  the id. Every route checks the caller's grant before it reads the record,
+  so a caller without a grant gets the unknown id's answer, and a caller
+  with one gets the read's failure. Two privileged reads now answer such a
+  record with the receipts they hold: the hub's recovery admin's receipts,
+  which answered "task not found", and the team service's receipt by key,
+  which refused as a request in progress.
+
 ## [0.12.1] — 2026-11-24
 
 A fix for lost turns, for workstations. In a long Codex or Claude Code

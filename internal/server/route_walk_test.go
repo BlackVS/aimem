@@ -53,11 +53,34 @@ func walkCall(f *taskFixture, method, path, token, key, body, name string) (int,
 
 func TestUngrantedAnswersAsUnknownOnEveryRoute(t *testing.T) {
 	f := newTaskFixture(t)
+	walkUngranted(t, f, walkTask(t, f))
+	// The identity route's ?project= is the one project-naming read
+	// without the project in the path.
+	ce, be := walkCall(f, "GET", "/v1/access/identity?project=alpha", f.stranger, "wi1", "", "alpha")
+	cu, bu := walkCall(f, "GET", "/v1/access/identity?project=nope", f.stranger, "wi2", "", "nope")
+	if ce != 404 || ce != cu || be != bu {
+		t.Errorf("identity ?project=: existing %d %s, unknown %d %s", ce, be, cu, bu)
+	}
+}
+
+// walkTask creates the task the walk reads in alpha, a project the
+// stranger holds no grant on.
+func walkTask(t *testing.T, f *taskFixture) string {
+	t.Helper()
 	w := taskReq(t, f.h, "POST", "/v1/projects/alpha/tasks", f.admin, "walk-1", taskBody)
 	var task struct{ ID string }
 	if json.Unmarshal(w.Body.Bytes(), &task); task.ID == "" {
 		t.Fatalf("create: %d %s", w.Code, w.Body)
 	}
+	return task.ID
+}
+
+// walkUngranted compares, on every ordinary route, the stranger's answer
+// for alpha and its task id against the answer for a project and an id
+// that do not exist.
+func walkUngranted(t *testing.T, f *taskFixture, taskID string) {
+	t.Helper()
+	task := struct{ ID string }{taskID}
 	var patterns []string
 	for p := range ordinaryRoutes {
 		patterns = append(patterns, p)
@@ -89,13 +112,6 @@ func TestUngrantedAnswersAsUnknownOnEveryRoute(t *testing.T) {
 	}
 	if walked < 40 {
 		t.Fatalf("walked %d routes; the table has %d", walked, len(ordinaryRoutes))
-	}
-	// The identity route's ?project= is the one project-naming read
-	// without the project in the path.
-	ce, be := walkCall(f, "GET", "/v1/access/identity?project=alpha", f.stranger, "wi1", "", "alpha")
-	cu, bu := walkCall(f, "GET", "/v1/access/identity?project=nope", f.stranger, "wi2", "", "nope")
-	if ce != 404 || ce != cu || be != bu {
-		t.Errorf("identity ?project=: existing %d %s, unknown %d %s", ce, be, cu, bu)
 	}
 }
 
