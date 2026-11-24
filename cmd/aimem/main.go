@@ -2797,11 +2797,21 @@ func hubProjects(reg *store.Registry, hubName, def string) ([]string, error) {
 }
 
 func spoolFlushCmd() error {
-	replayed, requeued, err := adapter.NewClient(stateRoot()).ReplaySpool()
+	return spoolFlush(adapter.NewClient(stateRoot()), os.Stdout, os.Stderr)
+}
+
+// spoolFlush replays the local spool. Its counts go to stdout as JSON;
+// what the run left for a later one (a held queue, a lockless filesystem)
+// goes to stderr as one line, which a person running the command reads.
+func spoolFlush(c *adapter.Client, stdout, stderr io.Writer) error {
+	replayed, requeued, err := c.ReplaySpool()
 	if err != nil {
 		return err
 	}
-	fmt.Printf(`{"replayed":%d,"requeued":%d}`+"\n", replayed, requeued)
+	fmt.Fprintf(stdout, `{"replayed":%d,"requeued":%d}`+"\n", replayed, requeued)
+	if left := c.LeftForLater(); len(left) > 0 {
+		fmt.Fprintf(stderr, "aimem: spool-flush left work for a later run: %s\n", strings.Join(left, ", "))
+	}
 	return nil
 }
 

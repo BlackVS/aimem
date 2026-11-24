@@ -32,6 +32,69 @@ currently 26); a binary refuses a database newer than it understands.
   the replay of a committed write. No new write is made for such a record:
   every write reads the record first.
 
+### Data integrity
+
+- **Two aimem runs that use one spool at once no longer lose records.** A
+  flush renamed the spool to a claim of its own, delivered it and wrote the
+  rest back; a record another run appended in that window could land in the
+  claim after it was read and go with the claim's removal. Two hook runs, or
+  a hook run and `aimem spool-flush`, could meet this way; on Windows, which
+  refused the rename while another run had the spool open, the run's line
+  reported that as a failure instead. Each spool,
+  the per-hub ones and the local service's, is now guarded by lock files
+  beside it that the operating system releases when a run exits, so a killed
+  run never holds up delivery: one run delivers at a time, and it removes
+  only what it delivered, under the lock appends take. A run that finds the
+  spool being delivered leaves it alone without a word, and a run that
+  cannot take the append lock within 200 ms keeps its record in a pending
+  file of its own, which a later run moves in, so a hook still ends inside
+  its budget. A record whose write was cut mid-line stays a line of its own.
+  A run of this release holds a third lock, shared, from before it creates
+  its pending file until it has written and closed it, and the run that
+  moves pending files in lists them holding that lock exclusive, so it
+  does not take a file whose writer holds the lock, however long that
+  writer stalls. A writer that cannot take the lock within 200 ms (two
+  other runs stopped while holding the queue's locks) writes its file
+  without it, and the sweep's one-minute age rule keeps it off that file.
+  Pending files are created under names that carry the process id and a
+  nanosecond clock and are not renamed, so one does not replace another,
+  and a hook run's cleanup removes only the file it wrote. Between runs of
+  this release no record is lost in silence, with one exception. A writer
+  that passes the pending lock's wait (a sweep stopped while listing)
+  creates its pending file without the lock, then stops for more than a
+  minute before writing it, while a sweep that read the stale file empty
+  stops before removing it, and the writer finishes its write in between:
+  the sweep removes the written file. On the local path, which writes a
+  pending file only when the spool is held too and the local service is
+  down, that record is lost. On the hub path the run goes on with the
+  record in memory, and the hub's copy is lost only if the run is then
+  killed before the hub or the spool took it, or if the hub fails and the
+  spool is held at that moment; the local copy stays. Otherwise a stall past
+  the one-minute age rule may deliver a record twice (the hub keeps one
+  event per idempotency key), and a record is named lost in the run's line
+  only where nothing could be written. On a filesystem that refuses
+  the locks (some network mounts), records are appended without them,
+  nothing is delivered from the queue there, and the run says so once in
+  its line; `aimem spool-flush` says what it left for a later run on
+  stderr, its output unchanged.
+  During an upgrade a run of this release and one of an older release can
+  still meet: this release returns the older release's claims to the spool
+  and checks its own appends and rewrites against them, at worst delivering
+  a record twice. An older client's sweep, which takes no lock, may remove
+  a pending file of this release while it is still empty; the writer sees
+  its file gone after writing and writes it once more. Three losses remain
+  in that window, each through a step of the older release that takes no
+  lock, and each ends with the last session of the old binary. On Linux
+  and macOS, where a file another process has open can be moved or
+  removed: an older run stalled between opening the spool and writing to
+  it loses its record when a flush moves the file aside, and an older run
+  stalled for more than a minute between creating its pending file and
+  writing to it loses its record when the sweep removes the empty file. On
+  every platform: an older client's sweep that read a pending file of this
+  release while it was still empty (its writer stalled for more than a
+  minute) and stalls before removing it, removes it after the writer wrote
+  it and was killed before asking the hub, and that record is lost.
+
 ### Fixed
 
 - **A hub that asks the client to come back later no longer loses the

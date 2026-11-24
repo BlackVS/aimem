@@ -89,7 +89,7 @@ them there. `test-windows-pr` runs only on an ordinary pull request;
 on master, nightly and a release/ pull request it is skipped, since
 `test (windows-latest)` runs there.
 
-The macOS tests run only in the release workflow, at the tag (the
+The macOS tests run in the release workflow, at the tag (the
 client upgrade check below also runs on macOS before it): the `macos` job
 runs `go vet`, `go test ./...`, a native build and the launchd install
 check (`scripts/check-launchd-install.sh`) on `macos-latest`, and the
@@ -99,6 +99,12 @@ merges until someone re-ran it, so a Mac-only break now stops a
 release, never a merge. When the job fails on a real Mac problem, the
 fix goes through a pull request and the release takes the next
 version; when the runner never started, re-run the job.
+
+Before a merge the owner may approve one macOS run of the tests: a manual
+run of the CI workflow on the branch with the `macos-tests` input set runs
+`test-macos` (`go vet` and `go test ./...` on `macos-latest`, as the
+release workflow's `macos` job), which never runs on a pull request, a
+push or the nightly run and is no required check.
 
 The client upgrade check runs a real client upgrade from the previous
 release to the tree under test. `scripts/upgrade-versions.sh` derives
