@@ -35,29 +35,33 @@ back in place. Includes PRs #416, #417, #418 and #419.
   routes, so it takes effect on a hub when that hub is upgraded
   (docs/INSTALL-HUB.md). The wire is unchanged, and hubs and workstations
   can be upgraded in either order.
-- **Running sessions need no restart; a project's own older aimem build
-  needs replacing.** Each hook of Claude Code and Codex runs `aimem` afresh,
-  by name, so a session that was open during the upgrade runs its next hook
-  with the new binary. No long-lived aimem process writes to a spool or
-  delivers from one: the local service and the MCP servers never touch one,
-  and the dashboard only reads it. A run of the old binary meets the new one
-  on a spool when it was already under way when the installer swapped the
-  binary: a Claude Code or Codex hook run, which the 10 s timeout the
-  installers register ends unless the machine sleeps or the process is
-  stopped in between; OpenCode's `aimem submit`, which its plugin starts
-  detached for every turn with no timeout; or a command such as `aimem
-  sync`, `aimem import-events` or `aimem spool-flush`. Each of these ends
-  with its own work. On Windows a sync started by the `aimem-sync` task
-  before the upgrade can go on after it, since stopping the task does not
-  stop its process. One case does not end by itself: OpenCode's plugin runs
-  the `aimem` (`aimem.exe` on Windows) in the project directory when there
-  is one, in preference to the installed binary, so a project directory that
-  holds its own older build (a development checkout) starts an old writer
-  for every turn after the upgrade. To see it, look for that file in the
-  project directory and run it with `version`; rebuild it from v0.12.2 or
-  remove it, and the window closes there. The three losses that Data
-  integrity names for an older release's steps can happen only while such a
-  run lives.
+- **Running sessions need no restart, except an OpenCode session in a
+  project with its own older aimem build.** Each hook of Claude Code and
+  Codex runs `aimem` afresh, by name, so a session that was open during the
+  upgrade runs its next hook with the new binary. No long-lived aimem
+  process writes to a spool or delivers from one: the local service and the
+  MCP servers never touch one, and the dashboard only reads it. A run of the
+  old binary meets the new one on a spool when it was already under way when
+  the installer swapped the binary: a Claude Code or Codex hook run, which
+  the 10 s timeout the installers register ends unless the machine sleeps or
+  the process is stopped in between; OpenCode's `aimem submit`, which its
+  plugin starts detached for every turn with no timeout; or a command such
+  as `aimem sync`, `aimem import-events` or `aimem spool-flush`. Each of
+  these ends with its own work. On Windows a sync started by the
+  `aimem-sync` task before the upgrade can go on after it, since stopping
+  the task does not stop its process. One case does not end by itself:
+  OpenCode's plugin runs the `aimem` (`aimem.exe` on Windows) in the project
+  directory when there is one, in preference to the installed binary, so a
+  project directory that holds its own older build (a development checkout)
+  starts an old writer for every turn after the upgrade. To see it, look for
+  that file in the project directory and run it with `version`. Rebuild it
+  from v0.12.2 at the same path, and the next turn of an open OpenCode
+  instance uses the new build. Or remove it, and then restart each OpenCode
+  instance open in that directory before its next turn: an open instance
+  keeps the path it chose when it started, and with the file gone it submits
+  nothing until it restarts. Submissions already started finish with their
+  own work. The three losses that Data integrity names for an older
+  release's steps can happen only while such a run lives.
 - **Three lock files per spool** appear in the state root's `spool/`
   directory, beside each spool (`pending.jsonl`, `hub.jsonl`,
   `hub-<name>.jsonl`): `.<spool>.append-lock`, `.<spool>.flush-lock` and
