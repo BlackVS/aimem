@@ -38,9 +38,8 @@ crash loop of the Linux client's service.
 - **Turns lost before the upgrade are not recovered by it.** The upgrade
   changes what later hook runs do, not what the journal already holds.
 - **A turn missing from the journal is not by itself proof that it was
-  lost.** A turn whose hook ran while the local service was down was
-  written to the local spool; a later hook journals it, and it may already
-  be on the hub.
+  lost.** If the hook spooled the turn during an outage, a later hook can
+  journal it, and it may already be on the hub.
 - **Do not submit an old turn by hand from the session's full rollout or
   transcript.** If the read runs out of its time share, the turn can be
   recorded with no request, and with no reply unless the hook payload
