@@ -20,34 +20,44 @@ that used one spool at once could lose a record, and a 408 or 429 from a
 proxy in front of the hub dropped a checkpoint from the hub's queue. On the
 hub, a task route no longer answers 500 to a caller without a grant for a
 record that does not decode. The run's line in `aimem logs` also names a
-Codex turn journaled from the hook payload alone. No schema step: the
-project schema stays 26, so an upgrade can be rolled back in place.
-Includes PRs #416, #417, #418 and #419.
+Codex turn journaled from the hook payload alone after a rollout read error.
+No schema step: the project schema stays 26, so an upgrade can be rolled
+back in place. Includes PRs #416, #417, #418 and #419.
 
 ### Upgrade notes
 
-- **Workstations: install the client** on each one with the one-line
-  installer (docs/INSTALL-CLIENT.md). The spool, the 408 and 429 answers
-  and the run's line are all in the hook commands the client runs.
+- **Workstations: upgrade the client** on each one with `aimem upgrade
+  --release v0.12.2` (docs/INSTALL-CLIENT.md, "Upgrading"); the one-line
+  installer is for a first install. The spool, the 408 and 429 answers and
+  the run's line are all in the hook commands the client runs.
 - **Hubs: upgrade for the task routes.** The fix of a task route's answer
   for a record that does not decode is in the server that answers the task
   routes, so it takes effect on a hub when that hub is upgraded
   (docs/INSTALL-HUB.md). The wire is unchanged, and hubs and workstations
   can be upgraded in either order.
-- **Running sessions need no restart.** Each hook runs `aimem` afresh, by
-  name, so a session that was open during the upgrade runs its next hook
+- **Running sessions need no restart; a project's own older aimem build
+  needs replacing.** Each hook of Claude Code and Codex runs `aimem` afresh,
+  by name, so a session that was open during the upgrade runs its next hook
   with the new binary. No long-lived aimem process writes to a spool or
   delivers from one: the local service and the MCP servers never touch one,
   and the dashboard only reads it. A run of the old binary meets the new one
-  on a spool only if it was already under way when the installer swapped the
-  binary. That is a hook run, which the 10 s timeout the installers register
-  ends unless the machine sleeps or the process is stopped in between, or a
-  command such as `aimem sync`, `aimem import-events` or `aimem
-  spool-flush`, which ends with its own work. On Windows a sync started by
-  the `aimem-sync` task before the upgrade can go on after it, since
-  stopping the task does not stop its process. The three losses that Data
-  integrity names for an older release's steps can happen only in that
-  window, and it closes when the last such run ends.
+  on a spool when it was already under way when the installer swapped the
+  binary: a Claude Code or Codex hook run, which the 10 s timeout the
+  installers register ends unless the machine sleeps or the process is
+  stopped in between; OpenCode's `aimem submit`, which its plugin starts
+  detached for every turn with no timeout; or a command such as `aimem
+  sync`, `aimem import-events` or `aimem spool-flush`. Each of these ends
+  with its own work. On Windows a sync started by the `aimem-sync` task
+  before the upgrade can go on after it, since stopping the task does not
+  stop its process. One case does not end by itself: OpenCode's plugin runs
+  the `aimem` (`aimem.exe` on Windows) in the project directory when there
+  is one, in preference to the installed binary, so a project directory that
+  holds its own older build (a development checkout) starts an old writer
+  for every turn after the upgrade. To see it, look for that file in the
+  project directory and run it with `version`; rebuild it from v0.12.2 or
+  remove it, and the window closes there. The three losses that Data
+  integrity names for an older release's steps can happen only while such a
+  run lives.
 - **Three lock files per spool** appear in the state root's `spool/`
   directory, beside each spool (`pending.jsonl`, `hub.jsonl`,
   `hub-<name>.jsonl`): `.<spool>.append-lock`, `.<spool>.flush-lock` and
@@ -86,83 +96,85 @@ Includes PRs #416, #417, #418 and #419.
   failure instead. Each spool, the per-hub ones and the local service's, is
   now guarded by lock files beside it that the operating system releases
   when a run exits, so a killed run never holds up delivery: one run
-  delivers at a time, and it removes only what it delivered, under the lock
-  appends take. A run that finds the spool being delivered leaves it alone
-  without a word, and a run that cannot take the append lock within 200 ms
-  keeps its record in a pending file of its own, which a later run moves in,
-  so a hook still ends inside its budget. A record whose write was cut
-  mid-line stays a line of its own. A run of this release holds a third
-  lock, shared, from before it creates its pending file until it has written
-  and closed it, and the run that moves pending files in lists them holding
-  that lock exclusive, so it does not take a file whose writer holds the
-  lock, however long that writer stalls. A writer that cannot take the lock
-  within 200 ms (two other runs stopped while holding the queue's locks)
-  writes its file without it, and the sweep's one-minute age rule keeps it
-  off that file. Pending files are created under names that carry the
-  process id and a nanosecond clock and are not renamed, so one does not
-  replace another, and a hook run's cleanup removes only the file it wrote.
-  Between runs of this release no record is lost in silence, with one
-  exception. A writer that passes the pending lock's wait (a sweep stopped
-  while listing) creates its pending file without the lock, then stops for
-  more than a minute before writing it, while a sweep that read the stale
-  file empty stops before removing it, and the writer finishes its write in
-  between: the sweep removes the written file. On the local path, which
-  writes a pending file only when the spool is held too and the local
-  service is down, that record is lost. On the hub path the hub's copy is
-  lost when neither the hub nor its spool took another copy: for a
-  configured hub, which goes on with the record in memory, when the run is
-  killed before the hub or the spool took it, or when the hub fails and the
-  append to its spool then fails too (held past its wait, or a write error);
-  for a quarantined hub, or a named hub with no configuration on the
-  machine, which queues the record without asking the hub, whenever its
-  queueing ended in the removed pending file. The local copy stays.
-  Otherwise a stall past the one-minute age rule may deliver a record twice
-  (the hub keeps one event per idempotency key), and a record is named lost
-  in the run's line only where nothing could be written. On a filesystem
-  that refuses the locks (some network mounts), records are appended without
-  them, nothing is delivered from the queue there, and the run says so once
-  in its line; `aimem spool-flush` says what it left for a later run on
-  stderr, its output unchanged. During an upgrade a run of this release and
-  one of an older release can still meet: this release returns the older
-  release's claims to the spool and checks its own appends and rewrites
-  against them, at worst delivering a record twice. An older client's sweep,
-  which takes no lock, may remove a pending file of this release while it is
-  still empty; the writer sees its file gone after writing and writes it
-  once more. Three losses remain in that window, each through a step of the
-  older release that takes no lock, and each ends when the last run of the
-  old binary has ended. On Linux and macOS, where a file another process has
-  open can be moved or removed: an older run stalled between opening the
-  spool and writing to it loses its record when a flush moves the file
-  aside, and an older run stalled for more than a minute between creating
-  its pending file and writing to it loses its record when the sweep removes
-  the empty file. On every platform: an older client's sweep that read a
-  pending file of this release while it was still empty (its writer stalled
-  for more than a minute) and stalls before removing it, removes it after
-  the writer wrote it and was killed before asking the hub, and that record
-  is lost.
+  delivers at a time, and it removes only the records it walked (delivered,
+  or dropped as invalid, as before), under the lock appends take, so a
+  record appended meanwhile stays. A run that finds the spool being
+  delivered leaves it alone without a word, and a run that cannot take the
+  append lock within 200 ms keeps its record in a pending file of its own,
+  which a later run moves in, so a hook still ends inside its budget. A
+  record whose write was cut mid-line stays a line of its own. A run of this
+  release holds a third lock, shared, from before it creates its pending
+  file until it has written and closed it, and the run that moves pending
+  files in lists them holding that lock exclusive, so it does not take a
+  file whose writer holds the lock, however long that writer stalls. A
+  writer that cannot take the lock within 200 ms (two other runs stopped
+  while holding the queue's locks) writes its file without it, and the
+  sweep's one-minute age rule keeps it off that file. Pending files are
+  created under names that carry the process id and a nanosecond clock and
+  are not renamed, so one does not replace another, and a hook run's cleanup
+  removes only the file it wrote. Between runs of this release no record is
+  lost in silence, with one exception. A writer that passes the pending
+  lock's wait (a sweep stopped while listing) creates its pending file
+  without the lock, then stops for more than a minute before writing it,
+  while a sweep that read the stale file empty stops before removing it, and
+  the writer finishes its write in between: the sweep removes the written
+  file. On the local path, which writes a pending file only when the spool
+  is held too and the local service is down, that record is lost. On the hub
+  path the hub's copy is lost when neither the hub nor its spool took
+  another copy: for a configured hub, which goes on with the record in
+  memory, when the run is killed before the hub or the spool took it, or
+  when the hub fails and the append to its spool then fails too (held past
+  its wait, or a write error); for a quarantined hub, or a named hub with no
+  configuration on the machine, which queues the record without asking the
+  hub, whenever its queueing ended in the removed pending file. The local
+  copy stays. Otherwise a stall past the one-minute age rule may deliver a
+  record twice (the hub keeps one event per idempotency key), and a record
+  is named lost in the run's line only where nothing could be written. On a
+  filesystem that refuses the locks (some network mounts), records are
+  appended without them, nothing is delivered from the queue there, and the
+  run says so once in its line; `aimem spool-flush` says what it left for a
+  later run on stderr, its output unchanged. During an upgrade a run of this
+  release and one of an older release can still meet: this release returns
+  the older release's claims to the spool and checks its own appends and
+  rewrites against them, at worst delivering a record twice. An older
+  client's sweep, which takes no lock, may remove a pending file of this
+  release while it is still empty; the writer sees its file gone after
+  writing and writes it once more. Three losses remain in that window, each
+  through a step of the older release that takes no lock, and each ends when
+  the last run of the old binary has ended. On Linux and macOS, where a file
+  another process has open can be moved or removed: an older run stalled
+  between opening the spool and writing to it loses its record when a flush
+  moves the file aside, and an older run stalled for more than a minute
+  between creating its pending file and writing to it loses its record when
+  the sweep removes the empty file. On every platform: an older client's
+  sweep that read a pending file of this release while it was still empty
+  (its writer stalled for more than a minute) and stalls before removing it,
+  removes it after the writer wrote it and was killed before asking the hub,
+  and that record is lost.
+
 
 ### Fixed
 
 - **A hub that asks the client to come back later no longer loses the
   checkpoint.** A 408 or 429, which the events route never answers itself
-  and which therefore comes from a proxy in front of the hub, was counted
-  as a record the hub refused as invalid, and the checkpoint was dropped
-  from the hub's queue: it stayed only in the local journal. Both now keep
-  the record queued and end the run's delivery to that hub, as a 5xx does;
-  the next run delivers it. The run's line names the status and the
-  Retry-After value when one was sent, rendered from what it parses to
+  and which therefore comes from a proxy in front of the hub, was counted as
+  a record the hub refused as invalid, and the checkpoint was dropped from
+  the hub's queue: it stayed only in the local journal. Both now keep the
+  record queued and end the run's delivery to that hub, as a 5xx does; the
+  record stays queued for a later run. The run's line names the status and
+  the Retry-After value when one was sent, rendered from what it parses to
   (seconds, an HTTP date, or "unreadable"), never as the proxy wrote it.
   Retry-After is neither waited for nor kept between runs: a hook has
   seconds, and checkpoints already come at the user's pace. Every other 4xx
   but 401 and 403 still drops the record from the hub path.
-- **A Codex turn journaled from the hook payload alone is named in the
-  run's line.** When `submit-codex` could not read the session's rollout
-  (a reason other than running out of its time share), the event was built
-  from the payload alone and only stderr said so; `aimem logs` showed
-  nothing, and a thin event stays thin, since the store keeps the first
-  record of an idempotency key. The run's line in `adapter.log` now names
-  the read's error with the event, the session and the turn, and no content
-  of the turn.
+- **A Codex turn journaled from the hook payload alone after a rollout read
+  error is named in the run's line.** When `submit-codex` could not read the
+  session's rollout (a reason other than running out of its time share), the
+  event was built from the payload alone and only stderr said so; `aimem
+  logs` showed nothing, and a thin event stays thin, since the store keeps
+  the first record of an idempotency key. The run's line in `adapter.log`
+  now names the read's error with the event, the session and the turn, and
+  no content of the turn.
 - **The run's line reads right outside a hook.** It began "the hook for
   the ... event" also for an import; it now begins "the run for the ...
   event".
