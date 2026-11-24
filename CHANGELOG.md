@@ -32,6 +32,21 @@ currently 26); a binary refuses a database newer than it understands.
   the replay of a committed write. No new write is made for such a record:
   every write reads the record first.
 
+### Fixed
+
+- **A hub that asks the client to come back later no longer loses the
+  checkpoint.** A 408 or 429, which the events route never answers itself
+  and which therefore comes from a proxy in front of the hub, was counted
+  as a record the hub refused as invalid, and the checkpoint was dropped
+  from the hub's queue: it stayed only in the local journal. Both now keep
+  the record queued and end the run's delivery to that hub, as a 5xx does;
+  the next run delivers it. The run's line names the status and the
+  Retry-After value when one was sent, rendered from what it parses to
+  (seconds, an HTTP date, or "unreadable"), never as the proxy wrote it.
+  Retry-After is neither waited for nor kept between runs: a hook has
+  seconds, and checkpoints already come at the user's pace. Every other 4xx
+  but 401 and 403 still drops the record from the hub path.
+
 ## [0.12.1] — 2026-11-24
 
 A fix for lost turns, for workstations. In a long Codex or Claude Code
