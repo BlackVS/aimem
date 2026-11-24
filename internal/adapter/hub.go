@@ -16,6 +16,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -443,9 +444,51 @@ func (c *Client) hubPost(hub *HubConfig, body []byte) error {
 	if resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden {
 		return fmt.Errorf("hub rejected token (HTTP %d)", resp.StatusCode)
 	}
+	if resp.StatusCode == http.StatusRequestTimeout || resp.StatusCode == http.StatusTooManyRequests {
+		// Come back later, never "the record is invalid": the events
+		// route answers neither, so a proxy in front of the hub did. The
+		// record stays queued and the run stops asking this hub, as for a
+		// 5xx. Retry-After is named, not waited for: a hook has seconds,
+		// and the next checkpoint comes at the user's pace.
+		return &hubLaterError{status: resp.StatusCode, retryAfter: retryAfterText(resp.Header.Get("Retry-After"))}
+	}
 	// Other 4xx: record is invalid; retrying forever is pointless — drop
 	// from the hub path (it stays in the local journal regardless).
 	return nil
+}
+
+// hubLaterError is a hub's (or its proxy's) answer to come back later.
+type hubLaterError struct {
+	status     int
+	retryAfter string // as retryAfterText renders it; empty when none was sent
+}
+
+func (e *hubLaterError) Error() string {
+	if e.retryAfter == "" {
+		return fmt.Sprintf("hub HTTP %d", e.status)
+	}
+	return fmt.Sprintf("hub HTTP %d, Retry-After %s", e.status, e.retryAfter)
+}
+
+// retryAfterText renders a Retry-After value for the run's line from what
+// it parses to, never from the text a proxy sent: a number of seconds, an
+// HTTP date in its canonical form, or "unreadable".
+func retryAfterText(v string) string {
+	v = strings.TrimSpace(v)
+	switch {
+	case v == "":
+		return ""
+	case len(v) <= 10 && strings.Trim(v, "0123456789") == "":
+		n, err := strconv.Atoi(v)
+		if err != nil {
+			return "unreadable"
+		}
+		return fmt.Sprintf("%d s", n)
+	}
+	if t, err := http.ParseTime(v); err == nil {
+		return t.UTC().Format(http.TimeFormat)
+	}
+	return "unreadable"
 }
 
 // hubTry posts one record unless the run is out of time or the hub
@@ -475,7 +518,11 @@ func (c *Client) hubDown(hub *HubConfig, spool string, err error) {
 		c.deferred("the hub delivery (the hub failed earlier in this run)")
 	default:
 		c.deferred(fmt.Sprintf("the hub delivery (%v)", err))
-		c.note("aimem: hub unreachable, checkpoint queued for hub (%v)", err)
+		if later := (*hubLaterError)(nil); errors.As(err, &later) {
+			c.note("aimem: the hub asked to come back later, checkpoint queued for hub (%v)", err)
+		} else {
+			c.note("aimem: hub unreachable, checkpoint queued for hub (%v)", err)
+		}
 		// A spool that keeps growing means the hub has been down — or
 		// the token rejected — for a long time; the per-checkpoint
 		// line above is easy to tune out, a size is not.
