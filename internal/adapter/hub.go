@@ -554,7 +554,9 @@ func writePending(spool string, body []byte) (string, error) {
 	if err := os.MkdirAll(filepath.Dir(spool), 0o700); err != nil {
 		return "", err
 	}
-	f, err := os.CreateTemp(filepath.Dir(spool), filepath.Base(spool)+".pending-*")
+	// Written under a name no sweep takes for a pending file, then renamed
+	// to one: a sweep never sees a pending file without its record.
+	f, err := os.CreateTemp(filepath.Dir(spool), pendingTempPrefix(spool)+"*")
 	if err != nil {
 		return "", err
 	}
@@ -562,11 +564,47 @@ func writePending(spool string, body []byte) (string, error) {
 	if cerr := f.Close(); err == nil {
 		err = cerr
 	}
+	name := filepath.Join(filepath.Dir(spool), filepath.Base(spool)+".pending-"+strings.TrimPrefix(filepath.Base(f.Name()), pendingTempPrefix(spool)))
+	if beforePendingPublish != nil {
+		beforePendingPublish(f.Name())
+	}
+	if err == nil {
+		err = os.Rename(f.Name(), name)
+	}
 	if err != nil {
 		os.Remove(f.Name())
 		return "", err
 	}
-	return f.Name(), nil
+	return name, nil
+}
+
+// pendingTempPrefix names a pending file before its record is complete.
+// It begins with a dot, so it does not begin with the spool's name, which
+// every sweep (and the older clients' sweeps) matches.
+func pendingTempPrefix(spool string) string { return "." + filepath.Base(spool) + ".pending-tmp-" }
+
+// beforePendingPublish runs between a pending file's write and its rename;
+// a test looks at the directory in that window.
+var beforePendingPublish func(tmp string)
+
+// pendingTemps lists the temporary names of pending files. The pending
+// sweep treats one older than pendingStale as a pending file of a run that
+// died before its rename: it moves the record into the spool and removes
+// the name. A run still writing one that long finds its rename failing and
+// keeps the record by its other means (at worst it goes twice); Windows
+// refuses the removal of a file still open.
+func pendingTemps(spool string) []string {
+	entries, err := os.ReadDir(filepath.Dir(spool))
+	if err != nil {
+		return nil
+	}
+	var out []string
+	for _, e := range entries {
+		if !e.IsDir() && strings.HasPrefix(e.Name(), pendingTempPrefix(spool)) {
+			out = append(out, filepath.Join(filepath.Dir(spool), e.Name()))
+		}
+	}
+	return out
 }
 
 func removePending(path string) {
@@ -578,15 +616,26 @@ func removePending(path string) {
 // sweepPending moves the pending files of runs that died into the spool,
 // while the run has time for its hub request: a run without it does not
 // list the directory, and one that runs out midway stops at the next
-// file; the files it does not reach wait for a later run. A file is
-// removed only after its record is in the spool. A record whose run had
-// already delivered it, or appended it, before dying is delivered twice;
-// the hub keeps one event per idempotency key.
+// file; the files it does not reach wait for a later run. It runs as the
+// one run holding the spool's flush lock, tried once: a run that finds it
+// held leaves the pending files to the run holding it, so no two runs
+// move one file. A file is removed only after its record is in the spool.
+// A record whose run had already delivered it, or appended it, before
+// dying is delivered twice; the hub keeps one event per idempotency key.
+// An empty stale file is removed: no run of this release makes one
+// visible (writePending), and an older client's is a record it never
+// wrote.
 func (c *Client) sweepPending(spool string) {
 	if c.left() < hubRequestMin {
 		return // nothing looked at, nothing to name
 	}
-	for _, p := range listSiblings(spool, ".pending-") {
+	fl, err := lockSpool(spool, "flush", 0)
+	if err != nil {
+		c.noteNoLocks(err) // busy: another run sweeps
+		return
+	}
+	defer fl.release()
+	for _, p := range append(listSiblings(spool, ".pending-"), pendingTemps(spool)...) {
 		if c.left() < hubRequestMin {
 			c.deferred("the pending files of interrupted runs, if any (out of time)")
 			return
@@ -600,7 +649,7 @@ func (c *Client) sweepPending(spool string) {
 			continue
 		}
 		if line := bytes.TrimSpace(data); len(line) > 0 {
-			if err := appendLines(spool, line); errors.Is(err, errQueueBusy) {
+			if err := appendRecords(spool, line, appendLockWait, nil); errors.Is(err, errQueueBusy) {
 				return // another run holds the queue: the rest waits for a later run
 			} else if err != nil {
 				continue
@@ -635,7 +684,7 @@ func spoolSiblings(spool, infix string) []string {
 // appendLines appends records (newline-separated, a final newline optional)
 // to the spool in one write, under its append lock.
 func appendLines(path string, lines []byte) error {
-	return appendRecords(path, lines, appendLockWait)
+	return appendRecords(path, lines, appendLockWait, nil)
 }
 
 const (
@@ -688,7 +737,7 @@ func (c *Client) flushHubSpool(hub *HubConfig, spool string) {
 	if delivered > 0 {
 		c.note("aimem: delivered %d queued checkpoint(s) to hub", delivered)
 	}
-	if err != nil && !errors.Is(err, errQueueBusy) { // busy: another run delivers it
+	if err != nil && !errors.Is(err, errQueueBusy) && !c.noteNoLocks(err) { // busy: another run delivers it
 		c.deferred(fmt.Sprintf("the hub backlog (%v)", err))
 	}
 	if stop != nil && delivered > 0 {
@@ -713,7 +762,7 @@ var errFlushLimit = errors.New("flush limit reached")
 // spoolTo appends one record to the named spool, waiting at most
 // appendLockWait for another run's hold on it (errQueueBusy past that).
 func (c *Client) spoolTo(path string, line []byte) error {
-	return appendRecords(path, line, appendLockWait)
+	return appendRecords(path, line, appendLockWait, func(err error) { c.noteNoLocks(err) })
 }
 
 // queue appends one record to spool; when another run holds the spool past

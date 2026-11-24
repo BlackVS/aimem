@@ -33,6 +33,29 @@ var appendLockWait = 200 * time.Millisecond
 // errQueueBusy is a lock held by another run.
 var errQueueBusy = errors.New("another run holds the queue")
 
+// errMovedTwice is an append that found the spool moved away under it on
+// its retry too: the record is in no file that stays, and the caller
+// keeps its own copy. It counts as a busy queue.
+var errMovedTwice = fmt.Errorf("%w: an older client moved the spool away during the append, twice", errQueueBusy)
+
+// tryLock is filelock.TryLock; a test replaces it to refuse locks.
+var tryLock = filelock.TryLock
+
+// noLocksLine names, once in a run's line, a filesystem that refuses the
+// queue's lock.
+const noLocksLine = "the queued records (this filesystem refuses the queue's lock: they are appended without it, and nothing is delivered from the queue here)"
+
+// noteNoLocks puts noLocksLine in the run's line when err is a refused
+// lock, and reports whether it was.
+func (c *Client) noteNoLocks(err error) bool {
+	var nl *noLocksError
+	if !errors.As(err, &nl) {
+		return false
+	}
+	c.deferred(noLocksLine)
+	return true
+}
+
 // noLocksError is a filesystem that refuses advisory locks.
 type noLocksError struct{ err error }
 
@@ -68,7 +91,7 @@ func lockSpool(spool, kind string, wait time.Duration) (*spoolLock, error) {
 	}
 	until := time.Now().Add(wait)
 	for {
-		ok, err := filelock.TryLock(f)
+		ok, err := tryLock(f)
 		switch {
 		case err != nil:
 			f.Close()
@@ -85,15 +108,20 @@ func lockSpool(spool, kind string, wait time.Duration) (*spoolLock, error) {
 
 // appendRecords appends records (separated by newlines, a final newline
 // optional) to spool as whole lines, waiting at most wait for the append
-// lock. On a filesystem without locks it appends unlocked: no flush can
-// run there to race it.
-func appendRecords(spool string, recs []byte, wait time.Duration) error {
+// lock. On a filesystem without locks it appends unlocked, as no flush
+// can run there to race it, and reports that through unlocked when it is
+// not nil.
+func appendRecords(spool string, recs []byte, wait time.Duration, unlocked func(error)) error {
 	recs = bytes.TrimRight(recs, "\n")
 	if len(bytes.TrimSpace(recs)) == 0 {
 		return nil
 	}
 	l, err := lockSpool(spool, "append", wait)
-	if nl := (*noLocksError)(nil); err != nil && !errors.As(err, &nl) {
+	if nl := (*noLocksError)(nil); errors.As(err, &nl) {
+		if unlocked != nil {
+			unlocked(err)
+		}
+	} else if err != nil {
 		return err
 	}
 	defer l.release()
@@ -128,8 +156,11 @@ func appendHeld(spool string, recs []byte) error {
 		if cerr := f.Close(); err == nil {
 			err = cerr
 		}
-		if err != nil || !moved || try > 0 {
+		if err != nil || !moved {
 			return err
+		}
+		if try > 0 {
+			return errMovedTwice
 		}
 		// Serves a client older than this release: its flush renames the
 		// spool to a claim without the lock, and this write may have

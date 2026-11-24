@@ -52,11 +52,17 @@ currently 26); a binary refuses a database newer than it understands.
   During an upgrade a run of this release and one of an older release can
   still meet: this release returns the older release's claims to the spool
   and checks its own appends and rewrites against them, at worst delivering
-  a record twice (the hub keeps one event per idempotency key). One loss
-  remains in that window, on Linux and macOS: an older run stalled between
-  opening the spool and writing to it while a flush moves the file aside
-  loses that record (Windows refuses the move while the file is open). It
-  ends with the last session of the old binary.
+  a record twice (the hub keeps one event per idempotency key). Two losses
+  remain in that window, both on Linux and macOS only, as Windows refuses
+  to move or remove a file another process has open: an older run stalled
+  between opening the spool and writing to it while a flush moves the file
+  aside loses that record, and so does an older run stalled for more than a
+  minute between creating its pending file and writing to it, whose empty
+  file the sweep removes. Both end with the last session of the old binary.
+  A pending file of this release is written under another name first, so
+  it is never seen empty. On a filesystem that refuses the locks (some
+  network mounts), records are appended without them, nothing is delivered
+  from the queue there, and the run says so in its line.
 
 ### Fixed
 

@@ -273,7 +273,7 @@ func (c *Client) sweepOrphanedClaims(spool string, reserve time.Duration) {
 		if err != nil {
 			continue
 		}
-		if err := appendRecords(spool, data, appendLockWait); errors.Is(err, errQueueBusy) {
+		if err := appendRecords(spool, data, appendLockWait, nil); errors.Is(err, errQueueBusy) {
 			return // another run holds the queue: the rest waits for a later run
 		} else if err != nil {
 			continue
@@ -331,8 +331,8 @@ func (c *Client) ReplaySpool() (replayed, requeued int, err error) {
 	if failed != nil {
 		c.deferred(fmt.Sprintf("the local spool replay (%v; %d record(s) kept)", failed, requeued))
 	}
-	if errors.Is(err, errQueueBusy) {
-		err = nil // another run is replaying it
+	if errors.Is(err, errQueueBusy) || c.noteNoLocks(err) {
+		err = nil // another run is replaying it, or nothing is replayed here
 	}
 	return replayed, requeued, err
 }
