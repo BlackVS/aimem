@@ -13,7 +13,7 @@ currently 26); a binary refuses a database newer than it understands.
 
 ## [Unreleased]
 
-## [0.12.1] — 2026-11-23
+## [0.12.1] — 2026-11-24
 
 A fix for lost turns, for workstations. In a long Codex or Claude Code
 session, the Stop hook could run past the client's 10 s hook timeout and be
