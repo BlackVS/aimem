@@ -32,6 +32,32 @@ currently 26); a binary refuses a database newer than it understands.
   the replay of a committed write. No new write is made for such a record:
   every write reads the record first.
 
+### Data integrity
+
+- **Two aimem runs that use one spool at once no longer lose records.** A
+  flush renamed the spool to a claim of its own, delivered it and wrote the
+  rest back; a record another run appended in that window could land in the
+  claim after it was read and go with the claim's removal. Two hook runs, or
+  a hook run and `aimem spool-flush`, could meet this way; on Windows, which
+  refused the rename while another run had the spool open, the run's line
+  reported that as a failure instead. Each spool,
+  the per-hub ones and the local service's, is now guarded by two lock files
+  beside it that the operating system releases when a run exits, so a killed
+  run never holds up delivery: one run delivers at a time, and it removes
+  only what it delivered, under the lock appends take. A run that finds the
+  spool being delivered leaves it alone without a word, and a run that
+  cannot take the append lock within 200 ms keeps its record in a pending
+  file of its own, which a later run moves in, so a hook still ends inside
+  its budget. A record whose write was cut mid-line stays a line of its own.
+  During an upgrade a run of this release and one of an older release can
+  still meet: this release returns the older release's claims to the spool
+  and checks its own appends and rewrites against them, at worst delivering
+  a record twice (the hub keeps one event per idempotency key). One loss
+  remains in that window, on Linux and macOS: an older run stalled between
+  opening the spool and writing to it while a flush moves the file aside
+  loses that record (Windows refuses the move while the file is open). It
+  ends with the last session of the old binary.
+
 ### Fixed
 
 - **A hub that asks the client to come back later no longer loses the

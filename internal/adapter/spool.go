@@ -9,6 +9,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net"
 	"net/http"
@@ -244,33 +245,21 @@ type rejectError struct{ msg string }
 
 func (e *rejectError) Error() string { return e.msg }
 
-// spool appends one already-redacted record atomically (single O_APPEND write).
-func (c *Client) spool(line []byte) error {
-	if err := os.MkdirAll(filepath.Dir(c.spoolPath()), 0o700); err != nil {
-		return err
-	}
-	f, err := os.OpenFile(c.spoolPath(), os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600)
-	if err != nil {
-		return err
-	}
-	defer f.Close()
-	_, err = f.Write(append(line, '\n'))
-	return err
-}
+// spool queues one already-redacted record for the local service.
+func (c *Client) spool(line []byte) error { return c.queue(c.spoolPath(), line) }
 
 // claimSweep is (*Client).sweepOrphanedClaims; a test replaces it.
 var claimSweep = (*Client).sweepOrphanedClaims
 
-// sweepOrphanedClaims returns crash-orphaned replay claims to the spool,
-// while the run has more than reserve left; the claims it does not reach
-// wait for a later run.
-// A replay claims the spool by renaming it and removes the claim when
-// done — but a hard kill mid-replay leaves the claim file holding
-// records that nothing would ever re-scan: a silent drop. Events are
-// idempotent end to end (idempotency_key), so the rare sweep of a claim
-// whose owner is still alive only causes a double-post the service
-// deduplicates. A claim we cannot read (Windows keeps it locked while
-// its live owner reads it) is skipped and swept next time.
+// sweepOrphanedClaims returns every .replay-* file beside the spool to it,
+// while the run has more than reserve left; the files it does not reach
+// wait for a later run. A flush calls it holding the spool's flush lock,
+// so no compaction of this release is using one: each is the move of a
+// compaction whose run was killed (compactSpool), or serves a client
+// older than this release, whose flush claims the spool by renaming it to
+// a .replay-<pid> file. A claim an older run is still delivering from is
+// returned too, and its records go twice; the hub keeps one event per
+// idempotency key. A file that cannot be read now is left for a later run.
 func (c *Client) sweepOrphanedClaims(spool string, reserve time.Duration) {
 	if c.left() <= reserve {
 		return // nothing looked at, nothing to name
@@ -284,93 +273,68 @@ func (c *Client) sweepOrphanedClaims(spool string, reserve time.Duration) {
 		if err != nil {
 			continue
 		}
-		if len(bytes.TrimSpace(data)) > 0 {
-			f, err := os.OpenFile(spool, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600)
-			if err != nil {
-				continue
-			}
-			err = writeLines(f, data)
-			f.Close()
-			if err != nil {
-				continue
-			}
+		if err := appendRecords(spool, data, appendLockWait); errors.Is(err, errQueueBusy) {
+			return // another run holds the queue: the rest waits for a later run
+		} else if err != nil {
+			continue
 		}
 		os.Remove(cl)
 	}
 }
 
-// ReplaySpool drains the spool into the service. The file is claimed by
-// atomic rename first so concurrent adapters never double-replay; records
-// that still fail transport, and the untouched rest when the run runs
-// out of time, go back to the spool, in order; requeued counts the
-// records kept back, not the untouched rest. Invalid
-// records are dropped with a warning (they would never succeed). A run
-// already out of time does not claim the spool. If the write fails, the
-// claim is left in place and sweepOrphanedClaims returns it to the spool.
+// ReplaySpool drains the spool into the service, as the one run holding
+// its flush lock (drainSpool); a run that finds another replaying leaves
+// it alone. Records that still fail transport are kept and go back in
+// front of the rest, in order; requeued counts them, not the untouched
+// rest when the run runs out of time. Invalid records are dropped with a
+// warning (they would never succeed). A run already out of time does not
+// read the spool.
 func (c *Client) ReplaySpool() (replayed, requeued int, err error) {
-	if c.left() <= 0 {
-		if fi, err := os.Stat(c.spoolPath()); err == nil && fi.Size() > 0 {
+	spool := c.spoolPath()
+	noTime := func() bool {
+		if c.left() > 0 {
+			return false
+		}
+		if fi, err := os.Stat(spool); err == nil && fi.Size() > 0 {
 			c.deferred("the local spool replay (out of time)")
 		}
+		return true
+	}
+	if noTime() {
 		return 0, 0, nil
 	}
-	claimSweep(c, c.spoolPath(), 0)
-	if c.left() <= 0 {
-		c.deferred("the local spool replay (out of time)")
-		return 0, 0, nil
-	}
-	claim := c.spoolPath() + fmt.Sprintf(".replay-%d", os.Getpid())
-	if err := os.Rename(c.spoolPath(), claim); err != nil {
-		if os.IsNotExist(err) {
-			return 0, 0, nil
-		}
-		return 0, 0, err
-	}
-	data, err := os.ReadFile(claim)
-	if err != nil {
-		return 0, 0, err // the claim stays for sweepOrphanedClaims
-	}
-	var kept bytes.Buffer
+	c.sweepPending(spool)
 	var failed error // the first post the service failed, not the run's end
-	rest := data
-	for len(rest) > 0 {
-		line, after, _ := bytes.Cut(rest, []byte{'\n'})
-		if len(bytes.TrimSpace(line)) == 0 {
-			rest = after
-			continue
-		}
+	_, err = c.drainSpool(spool, 0, noTime, func(line []byte) (bool, error) {
 		if c.left() <= 0 {
-			// Out of time: the rest goes back as it is, neither walked
-			// nor counted.
+			// Out of time: the rest stays as it is, neither walked nor
+			// counted.
 			c.deferred("the local spool replay (out of time)")
-			break
+			return false, errShare
 		}
-		rest = after
 		if err := c.post(line); err != nil {
 			if _, invalid := err.(*rejectError); invalid {
 				c.note("aimem: dropping invalid spooled record: %v", err)
-				continue
+				return false, nil
 			}
 			if c.outOfTime(err) {
 				c.deferred("the local spool replay (out of time)")
 			} else if failed == nil {
 				failed = err
 			}
-			kept.Write(line)
-			kept.WriteByte('\n') // each record whole, so the block goes back as it is
 			requeued++
-			continue
+			return true, nil
 		}
 		replayed++
-	}
+		return false, nil
+	})
 	if failed != nil {
 		c.deferred(fmt.Sprintf("the local spool replay (%v; %d record(s) kept)", failed, requeued))
 	}
-	if err := writeBack(c.spoolPath(), kept.Bytes(), rest); err != nil {
-		return replayed, requeued, err // the claim stays for sweepOrphanedClaims
+	if errors.Is(err, errQueueBusy) {
+		err = nil // another run is replaying it
 	}
-	os.Remove(claim)
-	return replayed, requeued, nil
+	return replayed, requeued, err
 }
 
 // noteDeferred leaves the one adapter.log line of a hook run that left

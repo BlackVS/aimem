@@ -13,7 +13,6 @@ import (
 	"os/exec"
 	"path/filepath"
 	"reflect"
-	"runtime"
 	"slices"
 	"strings"
 	"sync"
@@ -675,10 +674,10 @@ func TestALocalReplayThatExpiresMidwayKeepsEverythingInOrder(t *testing.T) {
 	c := NewClient(root) // no local service here: every post fails at once
 	var want bytes.Buffer
 	for i := range 20000 {
-		c.spool(rec(fmt.Sprint(i)))
 		want.Write(rec(fmt.Sprint(i)))
 		want.WriteByte('\n')
 	}
+	appendLines(c.spoolPath(), want.Bytes()) // one append: the cut, not the appends, is under test
 	c.WithDeadline(time.Now().Add(20 * time.Millisecond))
 	_, kept, err := c.ReplaySpool()
 	if err != nil || kept > 20000 { // the records kept back; the untouched rest is not counted
@@ -1193,51 +1192,20 @@ func TestNoClaimAfterASweepThatUsedTheTime(t *testing.T) {
 	}
 }
 
-// A block written back goes as whole lines without a copy of the block:
-// only an unterminated last record is copied.
-func TestAWriteBackCopiesAtMostOneRecord(t *testing.T) {
-	block := bytes.Repeat([]byte(`{"k":"0123456789"}`+"\n"), 1<<19) // 9.5 MiB
-	for _, b := range [][]byte{block, append(block[:len(block):len(block)], `{"k":"open"}`...)} {
-		spool := filepath.Join(t.TempDir(), "hub.jsonl")
-		var before, after runtime.MemStats
-		runtime.GC()
-		runtime.ReadMemStats(&before)
-		if err := writeBack(spool, nil, b); err != nil {
-			t.Fatal(err)
-		}
-		runtime.ReadMemStats(&after)
-		if grown := after.TotalAlloc - before.TotalAlloc; grown > 1<<20 {
-			t.Fatalf("the write-back of %d bytes allocated %d", len(b), grown)
-		}
-		got, _ := os.ReadFile(spool)
-		if !bytes.HasPrefix(got, block) || !bytes.HasSuffix(got, []byte{'\n'}) || len(got) != len(b)+boolInt(!bytes.HasSuffix(b, []byte{'\n'})) {
-			t.Fatalf("the spool holds %d bytes for a block of %d", len(got), len(b))
-		}
-	}
-}
-
-func boolInt(b bool) int {
-	if b {
-		return 1
-	}
-	return 0
-}
-
-// A flush stopped at its limit whose write-back fails still names the
-// limit, and where its records stay, in the run's line.
-func TestAFlushLimitWithAFailedWriteBackIsNamed(t *testing.T) {
-	var root string
-	var posts atomic.Int32
-	hub, _ := keysHub(t, func() int {
-		if posts.Add(1) == 2 { // the first backlog record: the claim is taken
-			os.MkdirAll(filepath.Join(root, "spool", "hub.jsonl"), 0o700)
-		}
-		return 200
-	})
+// A flush stopped at its limit whose rewrite of the spool fails still
+// names the limit, and that the delivered records stay queued, in the
+// run's line; the spool is left as it was, so nothing is lost.
+func TestAFlushLimitWithAFailedRewriteIsNamed(t *testing.T) {
+	defer func(f func(string, string) error) { renameSpool = f }(renameSpool)
+	renameSpool = func(string, string) error { return errors.New("no rewrite here") }
+	hub, _ := keysHub(t, nil)
 	root, p := hubRoot(t, hub.URL)
 	spool := filepath.Join(root, "spool", "hub.jsonl")
+	var want bytes.Buffer
 	for i := range hubFlushLimit + 1 {
 		appendLines(spool, rec(fmt.Sprint(i)))
+		want.Write(rec(fmt.Sprint(i)))
+		want.WriteByte('\n')
 	}
 	NewClient(root).WithDeadline(time.Now().Add(5 * time.Second)).Submit(p)
 	notes, _ := os.ReadFile(filepath.Join(root, "adapter.log"))
@@ -1247,13 +1215,13 @@ func TestAFlushLimitWithAFailedWriteBackIsNamed(t *testing.T) {
 			line = l
 		}
 	}
-	for _, want := range []string{"the hub backlog past the flush limit", "its records stay in hub.jsonl.replay-"} {
+	for _, want := range []string{"the hub backlog past the flush limit", "the queue could not be rewritten, its delivered records stay queued: no rewrite here"} {
 		if !bytes.Contains(line, []byte(want)) {
 			t.Fatalf("the run's line lacks %q:\n%s", want, notes)
 		}
 	}
-	if cl := spoolSiblings(spool, ".replay-"); len(cl) != 1 {
-		t.Fatalf("claims left: %v", cl)
+	if b, _ := os.ReadFile(spool); string(b) != want.String() {
+		t.Fatalf("the spool after a failed rewrite: %d bytes, want the backlog as it was (%d)", len(b), want.Len())
 	}
 }
 
