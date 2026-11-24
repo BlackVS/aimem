@@ -36,12 +36,18 @@ Includes PRs #416, #417, #418 and #419.
   can be upgraded in either order.
 - **Running sessions need no restart.** Each hook runs `aimem` afresh, by
   name, so a session that was open during the upgrade runs its next hook
-  with the new binary. A run of the old binary meets the new one on a spool
-  only if it was already under way when the installer swapped the binary.
-  The 10 s timeout the installers register for each hook ends such a run,
-  unless the machine sleeps or the process is stopped in between. The three
-  losses that Data integrity names for an older release's steps can happen
-  only in that window, and it closes when the last such run ends.
+  with the new binary. No long-lived aimem process writes to a spool or
+  delivers from one: the local service and the MCP servers never touch one,
+  and the dashboard only reads it. A run of the old binary meets the new one
+  on a spool only if it was already under way when the installer swapped the
+  binary. That is a hook run, which the 10 s timeout the installers register
+  ends unless the machine sleeps or the process is stopped in between, or a
+  command such as `aimem sync`, `aimem import-events` or `aimem
+  spool-flush`, which ends with its own work. On Windows a sync started by
+  the `aimem-sync` task before the upgrade can go on after it, since
+  stopping the task does not stop its process. The three losses that Data
+  integrity names for an older release's steps can happen only in that
+  window, and it closes when the last such run ends.
 - **Three lock files per spool** appear in the state root's `spool/`
   directory, beside each spool (`pending.jsonl`, `hub.jsonl`,
   `hub-<name>.jsonl`): `.<spool>.append-lock`, `.<spool>.flush-lock` and
