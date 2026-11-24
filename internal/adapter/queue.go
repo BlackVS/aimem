@@ -14,12 +14,16 @@ import (
 )
 
 // A spool is a queue of records, one per line, that any number of aimem
-// runs may use at once: hook runs, `aimem spool-flush`, the import. Two
+// runs may use at once: hook runs, `aimem spool-flush`, the import. Three
 // locks, each on a file of its own beside the spool, keep them apart:
 //
 //   - the append lock is held for one append, and by a flush for its
 //     snapshot and for removing what it delivered;
-//   - the flush lock is held by the one run delivering the spool.
+//   - the flush lock is held by the one run delivering the spool, and by
+//     the one run moving pending files into it;
+//   - the pending lock is held shared by each run writing a pending file,
+//     from before its creation to after its close, and exclusive by the
+//     pending sweep while it lists the files: a listed file is whole.
 //
 // Appenders only ever add at the end. A flush reads a snapshot, delivers
 // it unlocked, then rewrites the spool without the part it walked. The
@@ -38,8 +42,12 @@ var errQueueBusy = errors.New("another run holds the queue")
 // keeps its own copy. It counts as a busy queue.
 var errMovedTwice = fmt.Errorf("%w: an older client moved the spool away during the append, twice", errQueueBusy)
 
-// tryLock is filelock.TryLock; a test replaces it to refuse locks.
-var tryLock = filelock.TryLock
+// tryLock and tryLockShared are filelock's; a test replaces them to
+// refuse locks.
+var (
+	tryLock       = filelock.TryLock
+	tryLockShared = filelock.TryLockShared
+)
 
 // noLocksLine names, once in a run's line, a filesystem that refuses the
 // queue's lock.
@@ -52,7 +60,9 @@ func (c *Client) noteNoLocks(err error) bool {
 	if !errors.As(err, &nl) {
 		return false
 	}
-	c.deferred(noLocksLine)
+	// Once per client, not per event: an import submits many events on
+	// one client, and each logs its own line.
+	c.noLocksOnce.Do(func() { c.deferred(noLocksLine) })
 	return true
 }
 
@@ -84,6 +94,16 @@ func (l *spoolLock) release() {
 // errQueueBusy when another run holds it, a *noLocksError when the
 // filesystem refuses the lock.
 func lockSpool(spool, kind string, wait time.Duration) (*spoolLock, error) {
+	return lockSpoolWith(tryLock, spool, kind, wait)
+}
+
+// lockSpoolShared is lockSpool for a lock held shared: any number of runs
+// hold it at once, none while one holds it exclusive (lockSpool).
+func lockSpoolShared(spool, kind string, wait time.Duration) (*spoolLock, error) {
+	return lockSpoolWith(tryLockShared, spool, kind, wait)
+}
+
+func lockSpoolWith(try func(*os.File) (bool, error), spool, kind string, wait time.Duration) (*spoolLock, error) {
 	path := spoolLockPath(spool, kind)
 	f, err := openCreating(path, os.O_RDONLY|os.O_CREATE)
 	if err != nil {
@@ -91,7 +111,7 @@ func lockSpool(spool, kind string, wait time.Duration) (*spoolLock, error) {
 	}
 	until := time.Now().Add(wait)
 	for {
-		ok, err := tryLock(f)
+		ok, err := try(f)
 		switch {
 		case err != nil:
 			f.Close()

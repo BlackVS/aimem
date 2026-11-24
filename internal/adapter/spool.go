@@ -15,6 +15,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -98,6 +99,8 @@ type Client struct {
 	http *http.Client
 	// pushOff notes, once per run, a hub that has no checkpoint token.
 	pushOff sync.Once
+	// noLocksOnce puts noLocksLine in the run's line once per client.
+	noLocksOnce sync.Once
 	// deadline ends a hook run (WithDeadline); zero outside a hook.
 	deadline time.Time
 	// deferredList names what this run left for a later one.
@@ -336,6 +339,11 @@ func (c *Client) ReplaySpool() (replayed, requeued int, err error) {
 	}
 	return replayed, requeued, err
 }
+
+// LeftForLater names what this client's runs left for a later one since
+// its last event's line was written: the line `aimem spool-flush`, which
+// writes no event line, prints.
+func (c *Client) LeftForLater() []string { return slices.Clone(c.deferredList) }
 
 // noteDeferred leaves the one adapter.log line of a hook run that left
 // work for a later run: which event, what it left and why. No content of

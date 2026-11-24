@@ -41,7 +41,7 @@ currently 26); a binary refuses a database newer than it understands.
   a hook run and `aimem spool-flush`, could meet this way; on Windows, which
   refused the rename while another run had the spool open, the run's line
   reported that as a failure instead. Each spool,
-  the per-hub ones and the local service's, is now guarded by two lock files
+  the per-hub ones and the local service's, is now guarded by lock files
   beside it that the operating system releases when a run exits, so a killed
   run never holds up delivery: one run delivers at a time, and it removes
   only what it delivered, under the lock appends take. A run that finds the
@@ -59,10 +59,20 @@ currently 26); a binary refuses a database newer than it understands.
   aside loses that record, and so does an older run stalled for more than a
   minute between creating its pending file and writing to it, whose empty
   file the sweep removes. Both end with the last session of the old binary.
-  A pending file of this release is written under another name first, so
-  it is never seen empty. On a filesystem that refuses the locks (some
-  network mounts), records are appended without them, nothing is delivered
-  from the queue there, and the run says so in its line.
+  A run of this release holds a third lock, shared, from before it creates
+  its pending file until it has written and closed it, and the run that
+  moves pending files in lists them holding that lock exclusive, so it
+  never takes a file whose writer has not finished, however long that
+  writer stalls; pending files are created under names of their own and
+  never renamed, so one never replaces another. An older client's sweep,
+  which takes no lock, may still remove a writer's file while it is empty;
+  the writer sees its file gone after writing and writes it once more. A
+  writer that stalls for more than a minute after closing its file, before
+  the hub answers, may find its record moved in and queue it once more
+  (delivered twice at worst). On a filesystem that refuses the locks (some network mounts),
+  records are appended without them, nothing is delivered from the queue
+  there, and the run says so once in its line; `aimem spool-flush` says
+  what it left for a later run on stderr, its output unchanged.
 
 ### Fixed
 
