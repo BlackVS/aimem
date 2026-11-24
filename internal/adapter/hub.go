@@ -381,8 +381,8 @@ func (c *Client) pushHub(hubName string, body []byte) {
 	}
 	spool := c.hubSpoolPathFor(name)
 	// Durable before the hub is asked, in a file no other run writes: a run
-	// killed at any later step leaves the record here, and a later run
-	// moves it into the spool.
+	// killed at a later step leaves the record here, and a later run moves
+	// it into the spool (but for the residual stated at sweepPending).
 	pend, perr := pendingWrite(spool, body)
 	queued := false
 	if perr != nil {
@@ -665,9 +665,10 @@ func removePending(p *pendingFile) {
 // keeps one event per idempotency key. An empty stale file is removed: a
 // writer of this release leaves one when it died before its write, or
 // while it is stopped there after writing past the lock's wait (if it
-// then writes after this sweep's read, that record is lost: the stated
-// residual of this release), and an older client's is a record it never
-// wrote.
+// then writes after this sweep's read, the written file is removed: the
+// stated residual of this release, a loss on the local path and, if the
+// run then also fails to hand the record on, on the hub path), and an
+// older client's is a record it never wrote.
 func (c *Client) sweepPending(spool string) {
 	if c.left() < hubRequestMin {
 		return // nothing looked at, nothing to name

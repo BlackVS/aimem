@@ -59,13 +59,17 @@ currently 26); a binary refuses a database newer than it understands.
   Pending files are created under names that carry the process id and a
   nanosecond clock and are not renamed, so one does not replace another,
   and a hook run's cleanup removes only the file it wrote. Between runs of
-  this release no record is lost in silence, with one exception: with the
-  local service down, two runs stopped while holding the queue's locks, so
-  that a writer passes both lock waits and creates its pending file
-  without the lock; that writer stopped for more than a minute between
-  creating the file and writing it; and a sweep that read the stale file
-  empty stopped before removing it while the writer finished its write in
-  between: the sweep then removes the written file. Otherwise a stall past
+  this release no record is lost in silence, with one exception. A writer
+  that passes the pending lock's wait (a sweep stopped while listing)
+  creates its pending file without the lock, then stops for more than a
+  minute before writing it, while a sweep that read the stale file empty
+  stops before removing it, and the writer finishes its write in between:
+  the sweep removes the written file. On the local path, which writes a
+  pending file only when the spool is held too and the local service is
+  down, that record is lost. On the hub path the run goes on with the
+  record in memory, and the hub's copy is lost only if the run is then
+  killed before the hub or the spool took it, or if the hub fails and the
+  spool is held at that moment; the local copy stays. Otherwise a stall past
   the one-minute age rule may deliver a record twice (the hub keeps one
   event per idempotency key), and a record is named lost in the run's line
   only where nothing could be written. On a filesystem that refuses
