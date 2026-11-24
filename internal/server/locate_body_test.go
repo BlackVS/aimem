@@ -215,7 +215,11 @@ func TestFeatureConfirmReplayOfARecordThatDoesNotDecode(t *testing.T) {
 	if w := g.confirm(t, g.alice, other, "fc-2", body); w.Code != http.StatusInternalServerError {
 		t.Fatalf("a new confirmation of the damaged task: %d %s", w.Code, w.Body)
 	}
-	if w := taskReq(t, g.h, "GET", "/v1/tasks/"+other, g.alice, "", ""); strings.Contains(w.Body.String(), work) {
-		t.Fatalf("the refused confirmation wrote: %s", w.Body)
+	w := taskReq(t, g.h, "GET", "/v1/tasks/"+other, g.alice, "", "")
+	if w.Code != http.StatusOK {
+		t.Fatalf("read the other feature back: %d %s", w.Code, w.Body)
+	}
+	if back := decodeTask(t, w); back.Revision != 1 || len(back.Dependencies) != 0 {
+		t.Fatalf("the refused confirmation wrote: revision %d, dependencies %v", back.Revision, back.Dependencies)
 	}
 }
