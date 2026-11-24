@@ -590,8 +590,10 @@ var beforePendingPublish func(tmp string)
 // pendingTemps lists the temporary names of pending files. The pending
 // sweep treats one older than pendingStale as a pending file of a run that
 // died before its rename: it moves the record into the spool and removes
-// the name. A run still writing one that long finds its rename failing and
-// keeps the record by its other means (at worst it goes twice); Windows
+// the name. A run stalled that long before its rename finds the rename
+// failing and returns the error, which its caller handles as any failed
+// write: pushHub appends the record to the spool itself (at worst it goes
+// twice), and a local append names it lost in the run's line. Windows
 // refuses the removal of a file still open.
 func pendingTemps(spool string) []string {
 	entries, err := os.ReadDir(filepath.Dir(spool))
