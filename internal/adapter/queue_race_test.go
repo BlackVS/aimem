@@ -202,8 +202,7 @@ func TestASweepNeverTakesAPendingFileItsWriterHolds(t *testing.T) {
 
 // A writer hung while holding the pending lock holds off pending sweeps
 // only: they leave every pending file, quietly and at once, while appends
-// and the flush go on. A writer that cannot take the lock within the wait
-// is busy, and the hub path keeps its record in the spool.
+// and the flush go on.
 func TestAHungPendingWriterHoldsOffOnlyTheSweep(t *testing.T) {
 	defer func(d time.Duration) { pendingStale = d }(pendingStale)
 	pendingStale = 0
@@ -260,17 +259,7 @@ func TestAHungPendingWriterHoldsOffOnlyTheSweep(t *testing.T) {
 		t.Fatalf("the flush did not deliver the appended record: %q", delivered)
 	}
 
-	// An exclusive holder (a sweep) past the writer's wait: busy, and no
-	// file is created.
 	hung.release()
-	sweeper, err := lockSpool(spool, "pending", 0)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := writePending(spool, rec("late")); !errors.Is(err, errQueueBusy) {
-		t.Fatalf("writePending beside a sweep's lock: %v, want busy", err)
-	}
-	sweeper.release()
 	left := spoolSiblings(spool, ".pending-")
 	want := []string{stale, beside}
 	slices.Sort(left)
@@ -431,5 +420,124 @@ func TestARunOnALocklessFilesystemSaysSoOnce(t *testing.T) {
 	}
 	if b, _ := os.ReadFile(filepath.Join(root, "spool", "hub.jsonl")); bytes.Count(b, []byte{'\n'}) != 1 {
 		t.Fatalf("the hub spool holds %q, want the submit's record", b)
+	}
+}
+
+// writePending is writePendingFile for tests that need only the path.
+func writePending(spool string, body []byte) (string, error) {
+	p, err := writePendingFile(spool, body)
+	if p == nil {
+		return "", err
+	}
+	return p.path, err
+}
+
+// A local submit whose spool and pending lock are both held past their
+// waits (two runs stopped while holding them) still keeps its record, in
+// a pending file written without the lock, which the sweep's age rule
+// keeps off while fresh and moves in once stale.
+func TestASubmitBesideTwoHeldLocksKeepsItsRecord(t *testing.T) {
+	defer func(d time.Duration) { pendingStale = d }(pendingStale)
+	root := t.TempDir()
+	c := NewClient(root).WithDeadline(time.Now().Add(5 * time.Second))
+	spool := c.spoolPath()
+	appender, err := lockSpool(spool, "append", 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sweeper, err := lockSpool(spool, "pending", 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	p := &Payload{ProjectID: "proj-b"}
+	p.Event.Client, p.Event.SessionID, p.Event.TurnID, p.Event.Kind = "codex", "s1", "t1", "turn"
+	p.Event.IdempotencyKey = "codex:s1:t1"
+	if _, err := c.SubmitLocal(p); err != nil {
+		t.Fatalf("SubmitLocal beside two held locks: %v", err)
+	}
+	for _, w := range c.deferredList {
+		if strings.Contains(w, "LOST") {
+			t.Fatalf("the run names a loss: %q", c.deferredList)
+		}
+	}
+	pend := spoolSiblings(spool, ".pending-")
+	if len(pend) != 1 {
+		t.Fatalf("pending files %v, want one", pend)
+	}
+	if b, _ := os.ReadFile(pend[0]); !bytes.Contains(b, []byte(`"codex:s1:t1"`)) {
+		t.Fatalf("the pending file holds %q", b)
+	}
+	sweeper.release()
+	appender.release()
+	pendingStale = time.Hour
+	NewClient(root).WithDeadline(time.Now().Add(5 * time.Second)).sweepPending(spool)
+	if q := queued(t, spool); len(q) != 0 {
+		t.Fatalf("a fresh pending file was swept: %q", q)
+	}
+	pendingStale = 0
+	NewClient(root).WithDeadline(time.Now().Add(5 * time.Second)).sweepPending(spool)
+	if b, _ := os.ReadFile(spool); bytes.Count(b, []byte(`"codex:s1:t1"`)) != 1 {
+		t.Fatalf("the spool holds %q, want the record once", b)
+	}
+}
+
+// A run removes only the pending file it wrote: after a sweep moved its
+// record in, another run's file at the same name stays. Names carry the
+// writer's pid and a nanosecond clock, so two writes never share one.
+func TestARunRemovesOnlyItsOwnPendingFile(t *testing.T) {
+	spool := filepath.Join(t.TempDir(), "spool", "hub.jsonl")
+	a, err := writePendingFile(spool, rec("a"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	b, err := writePendingFile(spool, rec("b"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if a.path == b.path || !strings.Contains(filepath.Base(a.path), fmt.Sprintf(".pending-%d-", os.Getpid())) {
+		t.Fatalf("pending names %s and %s", a.path, b.path)
+	}
+	// A sweep moved A in and removed it; B's run got A's former name.
+	if err := os.Remove(a.path); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(a.path, append(rec("other"), '\n'), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	removePending(a)
+	if got, err := os.ReadFile(a.path); err != nil || !bytes.Contains(got, rec("other")) {
+		t.Fatalf("A's run removed the file at its former name: %q, %v", got, err)
+	}
+	removePending(b)
+	if _, err := os.Stat(b.path); !os.IsNotExist(err) {
+		t.Fatalf("a run's own pending file is still there: %v", err)
+	}
+	removePending(nil)
+}
+
+// A writer takes the pending lock beside another writer holding it: it
+// holds it shared, not past the wait without it.
+func TestAPendingWriterHoldsTheLockBesideAnother(t *testing.T) {
+	defer func() { duringPendingWrite = nil }()
+	spool := filepath.Join(t.TempDir(), "spool", "hub.jsonl")
+	other, err := lockSpoolShared(spool, "pending", 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	held := false
+	duringPendingWrite = func(_ string, written bool) {
+		if !written {
+			return
+		}
+		other.release()
+		x, err := lockSpool(spool, "pending", 0)
+		held = errors.Is(err, errQueueBusy)
+		x.release()
+	}
+	if _, err := writePending(spool, rec("mine")); err != nil {
+		t.Fatal(err)
+	}
+	if !held {
+		t.Fatal("the writer did not hold the pending lock beside another writer")
 	}
 }

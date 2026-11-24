@@ -402,7 +402,7 @@ func (c *Client) pushHub(hubName string, body []byte) {
 	// The record goes from memory. A hub that does not answer costs this
 	// one request and one append below, whatever the backlog's size.
 	if err := c.hubTry(hub, body); err != nil {
-		if pend != "" {
+		if pend != nil {
 			switch aerr := c.spoolTo(spool, body); {
 			case aerr == nil:
 				removePending(pend)
@@ -410,7 +410,7 @@ func (c *Client) pushHub(hubName string, body []byte) {
 				// Another run holds the queue: the record stays in its
 				// pending file, which a later run moves in.
 			default:
-				c.note("aimem: hub spool %s cannot be written (%v); the checkpoint stays in %s for a later run", filepath.Base(spool), aerr, filepath.Base(pend))
+				c.note("aimem: hub spool %s cannot be written (%v); the checkpoint stays in %s for a later run", filepath.Base(spool), aerr, filepath.Base(pend.path))
 			}
 		} else if !queued {
 			c.deferred("the checkpoint for the hub, LOST: nothing could be written and the hub did not take it")
@@ -545,36 +545,43 @@ func (c *Client) hubDown(hub *HubConfig, spool string, err error) {
 // keeps as one event (idempotency key).
 var pendingStale = time.Minute
 
-// pendingWrite is writePending; a test replaces it to fail.
-var pendingWrite = writePending
+// pendingWrite is writePendingFile; a test replaces it to fail.
+var pendingWrite = writePendingFile
 
-// writePending keeps one record in a file of its own beside spool, named
-// so that no two runs share one (CreateTemp creates it exclusively). It
-// holds the spool's pending lock shared from before the file's creation
-// to after its close, waiting at most appendLockWait for it: the pending
-// sweep, which lists the files under the same lock exclusive, never lists
-// a file its writer has not finished. A held lock past the wait is
-// errQueueBusy, and the caller keeps the record by its other means; on a
-// filesystem that refuses the lock the file is written without it, as no
-// sweep runs there. It returns the file's path.
-func writePending(spool string, body []byte) (string, error) {
+// pendingFile is a pending file this run wrote: its path, and what it
+// was when written, so that the run removes only its own file.
+type pendingFile struct {
+	path string
+	fi   os.FileInfo
+}
+
+// writePendingFile keeps one record in a file of its own beside spool,
+// created exclusively under a name that carries the process id and a
+// nanosecond clock, so no name recurs while its writer lives. It holds
+// the spool's pending lock shared from before the file's creation to
+// after its close, waiting at most appendLockWait: the pending sweep,
+// which lists the files under the same lock exclusive, does not list a
+// file its writer has not finished. Past the wait, or on a filesystem
+// that refuses the lock, the file is written without it, and the sweep's
+// age rule (pendingStale) keeps it off a file that fresh.
+func writePendingFile(spool string, body []byte) (*pendingFile, error) {
 	l, err := lockSpoolShared(spool, "pending", appendLockWait)
-	if nl := (*noLocksError)(nil); errors.As(err, &nl) {
+	if nl := (*noLocksError)(nil); errors.Is(err, errQueueBusy) || errors.As(err, &nl) {
 		l = nil
 	} else if err != nil {
-		return "", err
+		return nil, err
 	}
 	defer l.release()
 	// An older client's sweep takes no lock: it may remove the file while
 	// it is still empty, after a stall of over pendingStale here. A file
 	// whose name no longer names it is written once more, fresh.
 	for try := 0; ; try++ {
-		name, kept, err := writePendingOnce(spool, body)
-		if err != nil || kept {
-			return name, err
+		p, err := writePendingOnce(spool, body)
+		if err != nil || p != nil {
+			return p, err
 		}
 		if try > 0 {
-			return "", errPendingTaken
+			return nil, errPendingTaken
 		}
 	}
 }
@@ -583,12 +590,13 @@ func writePending(spool string, body []byte) (string, error) {
 // record was in it.
 var errPendingTaken = errors.New("another run removed the pending file before its record was written")
 
-// writePendingOnce writes one pending file, and reports whether its name
-// still names it after the close.
-func writePendingOnce(spool string, body []byte) (string, bool, error) {
-	f, err := os.CreateTemp(filepath.Dir(spool), filepath.Base(spool)+".pending-*")
+// writePendingOnce writes one pending file. It returns nil without an
+// error when the file's name no longer names it after the close.
+func writePendingOnce(spool string, body []byte) (*pendingFile, error) {
+	prefix := fmt.Sprintf("%s.pending-%d-%d-", filepath.Base(spool), os.Getpid(), time.Now().UnixNano())
+	f, err := os.CreateTemp(filepath.Dir(spool), prefix+"*")
 	if err != nil {
-		return "", false, err
+		return nil, err
 	}
 	if duringPendingWrite != nil {
 		duringPendingWrite(f.Name(), false)
@@ -606,10 +614,24 @@ func writePendingOnce(spool string, body []byte) (string, bool, error) {
 	}
 	if err != nil {
 		os.Remove(f.Name())
-		return "", false, err
+		return nil, err
 	}
+	// The name is this writer's alone (pid and clock), so the same file
+	// under it means no run removed it; what it is now, after the close,
+	// is what removePending compares against later.
 	cur, err := os.Stat(f.Name())
-	return f.Name(), err == nil && os.SameFile(cur, fi), nil
+	if err != nil || !os.SameFile(cur, fi) {
+		return nil, nil
+	}
+	return &pendingFile{f.Name(), cur}, nil
+}
+
+// isMine reports whether p's name still names the file this run wrote.
+// The modification time and size are compared too: a filesystem may give
+// a file created at the freed name the removed file's inode at once.
+func (p *pendingFile) isMine() bool {
+	cur, err := os.Stat(p.path)
+	return err == nil && os.SameFile(cur, p.fi) && cur.ModTime().Equal(p.fi.ModTime()) && cur.Size() == p.fi.Size()
 }
 
 // duringPendingWrite runs under the shared lock after a pending file's
@@ -617,9 +639,12 @@ func writePendingOnce(spool string, body []byte) (string, bool, error) {
 // those windows.
 var duringPendingWrite func(path string, written bool)
 
-func removePending(path string) {
-	if path != "" {
-		os.Remove(path)
+// removePending removes the pending file this run wrote, and only that
+// one: a sweep may have moved it in and another run may have created a
+// file under the freed name since.
+func removePending(p *pendingFile) {
+	if p != nil && p.isMine() {
+		os.Remove(p.path)
 	}
 }
 
@@ -630,8 +655,9 @@ func removePending(path string) {
 // one run holding the spool's flush lock, tried once: a run that finds it
 // held leaves the pending files to the run holding it, so no two runs
 // move one file. It lists the files holding the pending lock exclusive,
-// tried once, so every file it lists is whole (writePending); a run that
-// finds a writer holding it leaves the files to a later run. A file is
+// tried once, so every file it lists is whole (writePendingFile), but
+// for one written past the lock's wait, which the age rule keeps it off;
+// a run that finds a writer holding it leaves the files to a later run. A file is
 // moved only once older than pendingStale, which keeps the sweep off a
 // live run's file between its write and the hub's answer, and removed
 // only after its record is in the spool. A record whose run had already

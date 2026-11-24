@@ -745,8 +745,8 @@ func TestAFlushCutMidwayKeepsTheRestInOrder(t *testing.T) {
 // asked: appended to the spool, then posted. With nothing writable it is
 // posted anyway, as its only chance, and the run says it was not kept.
 func TestAFailedPendingWriteStillKeepsTheRecordFirst(t *testing.T) {
-	defer func(f func(string, []byte) (string, error)) { pendingWrite = f }(pendingWrite)
-	pendingWrite = func(string, []byte) (string, error) { return "", errors.New("no pending file") }
+	defer func(f func(string, []byte) (*pendingFile, error)) { pendingWrite = f }(pendingWrite)
+	pendingWrite = func(string, []byte) (*pendingFile, error) { return nil, errors.New("no pending file") }
 
 	// The spool writable, the hub up: posted from memory, and the flush
 	// that follows delivers the spooled copy once more.
@@ -1032,8 +1032,8 @@ func TestOneClientsLinesDoNotCarryEarlierSubmissions(t *testing.T) {
 // When nothing can be written and the hub does not take the checkpoint,
 // the run says it is lost, and never that it is queued.
 func TestALostCheckpointIsNamedLost(t *testing.T) {
-	defer func(f func(string, []byte) (string, error)) { pendingWrite = f }(pendingWrite)
-	pendingWrite = func(string, []byte) (string, error) { return "", errors.New("no pending file") }
+	defer func(f func(string, []byte) (*pendingFile, error)) { pendingWrite = f }(pendingWrite)
+	pendingWrite = func(string, []byte) (*pendingFile, error) { return nil, errors.New("no pending file") }
 	down := httptest.NewServer(http.NotFoundHandler())
 	url := down.URL
 	down.Close()

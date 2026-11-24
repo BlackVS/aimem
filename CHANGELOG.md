@@ -49,30 +49,41 @@ currently 26); a binary refuses a database newer than it understands.
   cannot take the append lock within 200 ms keeps its record in a pending
   file of its own, which a later run moves in, so a hook still ends inside
   its budget. A record whose write was cut mid-line stays a line of its own.
-  During an upgrade a run of this release and one of an older release can
-  still meet: this release returns the older release's claims to the spool
-  and checks its own appends and rewrites against them, at worst delivering
-  a record twice (the hub keeps one event per idempotency key). Two losses
-  remain in that window, both on Linux and macOS only, as Windows refuses
-  to move or remove a file another process has open: an older run stalled
-  between opening the spool and writing to it while a flush moves the file
-  aside loses that record, and so does an older run stalled for more than a
-  minute between creating its pending file and writing to it, whose empty
-  file the sweep removes. Both end with the last session of the old binary.
   A run of this release holds a third lock, shared, from before it creates
   its pending file until it has written and closed it, and the run that
   moves pending files in lists them holding that lock exclusive, so it
   never takes a file whose writer has not finished, however long that
-  writer stalls; pending files are created under names of their own and
-  never renamed, so one never replaces another. An older client's sweep,
-  which takes no lock, may still remove a writer's file while it is empty;
-  the writer sees its file gone after writing and writes it once more. A
-  writer that stalls for more than a minute after closing its file, before
-  the hub answers, may find its record moved in and queue it once more
-  (delivered twice at worst). On a filesystem that refuses the locks (some network mounts),
-  records are appended without them, nothing is delivered from the queue
-  there, and the run says so once in its line; `aimem spool-flush` says
-  what it left for a later run on stderr, its output unchanged.
+  writer stalls. A writer that cannot take the lock within 200 ms (two
+  other runs stopped while holding the queue's locks) writes its file
+  without it, and the sweep's one-minute age rule keeps it off that file.
+  Pending files are created under names that carry the process id and a
+  nanosecond clock, never renamed, and a run removes only the file it
+  wrote, so one run's file never replaces or removes another's. Between
+  runs of this release no record is lost silently at any stall: a stall
+  past the one-minute age rule may deliver a record twice (the hub keeps
+  one event per idempotency key), and a record is named lost in the run's
+  line only where nothing could be written. On a filesystem that refuses
+  the locks (some network mounts), records are appended without them,
+  nothing is delivered from the queue there, and the run says so once in
+  its line; `aimem spool-flush` says what it left for a later run on
+  stderr, its output unchanged.
+  During an upgrade a run of this release and one of an older release can
+  still meet: this release returns the older release's claims to the spool
+  and checks its own appends and rewrites against them, at worst delivering
+  a record twice. An older client's sweep, which takes no lock, may remove
+  a pending file of this release while it is still empty; the writer sees
+  its file gone after writing and writes it once more. Three losses remain
+  in that window, each through a step of the older release that takes no
+  lock, and each ends with the last session of the old binary. On Linux
+  and macOS, where a file another process has open can be moved or
+  removed: an older run stalled between opening the spool and writing to
+  it loses its record when a flush moves the file aside, and an older run
+  stalled for more than a minute between creating its pending file and
+  writing to it loses its record when the sweep removes the empty file. On
+  every platform: an older client's sweep that read a pending file of this
+  release while it was still empty (its writer stalled for more than a
+  minute) and stalls before removing it, removes it after the writer wrote
+  it and was killed before asking the hub, and that record is lost.
 
 ### Fixed
 
