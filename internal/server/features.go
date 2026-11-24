@@ -264,10 +264,10 @@ func readyToClose(t store.Task, finished func(id string) bool) bool {
 // a record of the goal's project from its snapshot, which the caller may
 // read since it reads the listing; a record of another project once per id
 // per listing, and only when the caller may read that project. Locating a
-// task reads it inside the server before the grant check, as on every route
-// that takes a task id; the state and kind used here come from one read made
-// after the grant. A record that is gone, unreadable or now a feature
-// withholds the mark exactly as an unfinished task does.
+// task asks only which project holds its id; the state and kind used here
+// come from the one read of the record, made after the grant. A record that
+// is gone, unreadable or now a feature withholds the mark exactly as an
+// unfinished task does.
 func (s *Server) confirmedFinished(r *http.Request, local map[string]store.Confirmed) func(id string) bool {
 	seen := map[string]bool{}
 	return func(id string) bool {

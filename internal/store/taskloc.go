@@ -1,6 +1,7 @@
 package store
 
 import (
+	"database/sql"
 	"errors"
 	"fmt"
 	"strings"
@@ -95,13 +96,19 @@ func (h *taskHints) noteMiss(id string) {
 // cannot be opened is skipped with its error retained: the task is
 // reported not found only when every project was readable, and only such
 // a conclusive miss is remembered.
+//
+// It asks only whether a project holds the id (taskExists) and never reads
+// the record: every caller checks its authority on the located project
+// before it reads the task, so a record the caller may not read is never
+// decoded for it, and a record that does not decode is located like any
+// other.
 func (r *Registry) LocateTask(id string) (string, *DB, error) {
 	if !taskIDRE.MatchString(id) {
 		return "", nil, ErrTaskNotFound
 	}
 	if p, ok := r.hints.get(id); ok {
 		if db, err := r.OpenExisting(p); err == nil {
-			if _, err := db.GetTask(id); err == nil {
+			if ok, err := db.taskExists(id); err == nil && ok {
 				return p, db, nil
 			}
 		}
@@ -154,14 +161,28 @@ func (r *Registry) scanForTask(id string) (string, *DB, error) {
 			unreadable = fmt.Errorf("project %q could not be opened: %w", p, err)
 			continue
 		}
-		if _, err := db.GetTask(id); err == nil {
-			return p, db, nil
-		} else if !errors.Is(err, ErrTaskNotFound) {
+		if ok, err := db.taskExists(id); err != nil {
 			unreadable = fmt.Errorf("project %q could not be read: %w", p, err)
+		} else if ok {
+			return p, db, nil
 		}
 	}
 	if unreadable != nil {
 		return "", nil, fmt.Errorf("task lookup incomplete: %w", unreadable)
 	}
 	return "", nil, ErrTaskNotFound
+}
+
+// taskExists reports whether this project holds a task with id, by its id
+// alone: the record's body is not read.
+func (d *DB) taskExists(id string) (bool, error) {
+	var one int
+	switch err := d.sql.QueryRow(`SELECT 1 FROM tasks WHERE id=?`, id).Scan(&one); {
+	case err == nil:
+		return true, nil
+	case errors.Is(err, sql.ErrNoRows):
+		return false, nil
+	default:
+		return false, err
+	}
 }
