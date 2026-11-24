@@ -9,6 +9,7 @@ package server
 import (
 	"database/sql"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"path/filepath"
 	"strings"
@@ -119,5 +120,102 @@ func TestReadScopeReadsOfARecordThatDoesNotDecode(t *testing.T) {
 	}
 	if r := g.get(t, holdOf(task.ID)); r.status == http.StatusOK || !strings.Contains(string(r.body), "request_in_progress") {
 		t.Fatalf("hold status of a damaged record: %d %s", r.status, r.body)
+	}
+}
+
+// The routes that read a record other than the body answer for a damaged
+// record to a caller with a grant (task comment 693): a comment, a
+// reservation receipt by key, and the replay of a committed claim.
+func TestGrantedNonBodyReadsOfARecordThatDoesNotDecode(t *testing.T) {
+	f := newTaskFixture(t)
+	id := walkTask(t, f)
+	w := taskReq(t, f.h, "POST", "/v1/tasks/"+id+"/comments", f.alice, "nb-c", `{"body":"before the damage"}`)
+	var comment struct{ ID string }
+	if json.Unmarshal(w.Body.Bytes(), &comment); comment.ID == "" {
+		t.Fatalf("comment: %d %s", w.Code, w.Body)
+	}
+	claim := `{"expected_revision":1,"holder":{"mode":"standalone","work_ref":"x"}}`
+	claimPath := "/v1/projects/alpha/tasks/" + id + "/reservation/claim"
+	if c, b := walkCall(f, "POST", claimPath, f.alice, "nb-claim", claim, id); c != http.StatusOK {
+		t.Fatalf("claim: %d %s", c, b)
+	}
+	breakBody(t, f.reg, id)
+
+	if c, b := walkCall(f, "GET", "/v1/tasks/"+id+"/comments/"+comment.ID, f.alice, "", "", id); c != http.StatusOK || !strings.Contains(b, "before the damage") {
+		t.Errorf("the comment: %d %s", c, b)
+	}
+	if c, b := walkCall(f, "GET", "/v1/projects/alpha/tasks/"+id+"/reservation/receipts/claim/nb-claim", f.alice, "", "", id); c != http.StatusOK || !strings.Contains(b, `"reservation"`) {
+		t.Errorf("the receipt by key: %d %s", c, b)
+	}
+	if c, b := walkCall(f, "POST", claimPath, f.alice, "nb-claim", claim, id); c != http.StatusOK || !strings.Contains(b, `"replayed":true`) {
+		t.Errorf("the claim's replay: %d %s", c, b)
+	}
+	// A new transition reads the body and fails; nothing is written.
+	if c, b := walkCall(f, "POST", claimPath, f.alice, "nb-claim-2", claim, id); c != http.StatusServiceUnavailable || !strings.Contains(b, `"code":"context_unavailable"`) {
+		t.Errorf("a new claim: %d %s", c, b)
+	}
+}
+
+// A new write on a damaged record reads the body in its transaction first,
+// fails, and writes nothing: the comment count stays as it was.
+func TestNewCommentOnARecordThatDoesNotDecodeWritesNothing(t *testing.T) {
+	f := newTaskFixture(t)
+	id := walkTask(t, f)
+	if w := taskReq(t, f.h, "POST", "/v1/tasks/"+id+"/comments", f.alice, "nw-1", `{"body":"one"}`); w.Code != 201 {
+		t.Fatalf("comment: %d %s", w.Code, w.Body)
+	}
+	breakBody(t, f.reg, id)
+	if c, b := walkCall(f, "POST", "/v1/tasks/"+id+"/comments", f.alice, "nw-2", `{"body":"two"}`, id); c != http.StatusInternalServerError || !strings.Contains(b, "task storage failure") {
+		t.Fatalf("a new comment: %d %s", c, b)
+	}
+	if n := commentRows(t, f.reg, id); n != 1 {
+		t.Fatalf("the refused write left %d comments, want 1", n)
+	}
+	// The comment list reads the task too, and answers the read's failure.
+	if c, b := walkCall(f, "GET", "/v1/tasks/"+id+"/comments", f.alice, "", "", id); c != http.StatusInternalServerError {
+		t.Fatalf("the comment list: %d %s", c, b)
+	}
+}
+
+// commentRows counts a task's stored comments through a second connection.
+func commentRows(t *testing.T, reg *store.Registry, taskID string) int {
+	t.Helper()
+	project, _, err := reg.LocateTask(taskID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	db, err := sql.Open("sqlite", filepath.Join(reg.Root(), "projects", project, "journal.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	var n int
+	if err := db.QueryRow(`SELECT COUNT(*) FROM task_comments WHERE task_id=?`, taskID).Scan(&n); err != nil {
+		t.Fatal(err)
+	}
+	return n
+}
+
+// A feature's confirmation of a task replays from its receipt once the
+// confirmed task's record no longer decodes; a new confirmation reads the
+// task, fails, and writes nothing.
+func TestFeatureConfirmReplayOfARecordThatDoesNotDecode(t *testing.T) {
+	g := newFeatureRig(t)
+	work := g.task(t, "the work", "READY")
+	f1 := g.feature(t, "a feature", 1)
+	body := fmt.Sprintf(`{"task":%q,"expected_revision":1}`, work)
+	if w := g.confirm(t, g.alice, f1, "fc-1", body); w.Code != 200 {
+		t.Fatalf("confirm: %d %s", w.Code, w.Body)
+	}
+	breakBody(t, g.reg, work)
+	if w := g.confirm(t, g.alice, f1, "fc-1", body); w.Code != 200 || !strings.Contains(w.Body.String(), work) {
+		t.Fatalf("the confirmation's replay: %d %s", w.Code, w.Body)
+	}
+	other := g.feature(t, "another feature", 2)
+	if w := g.confirm(t, g.alice, other, "fc-2", body); w.Code != http.StatusInternalServerError {
+		t.Fatalf("a new confirmation of the damaged task: %d %s", w.Code, w.Body)
+	}
+	if w := taskReq(t, g.h, "GET", "/v1/tasks/"+other, g.alice, "", ""); strings.Contains(w.Body.String(), work) {
+		t.Fatalf("the refused confirmation wrote: %s", w.Body)
 	}
 }
