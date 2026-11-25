@@ -1730,7 +1730,7 @@ func syncOne(dest, hubName, def string) error {
 	fmt.Fprintf(os.Stderr, "aimem: pushing local events to %s\n", dest)
 	// The remote command is single-quoted so $HOME expands on the remote
 	// side, not in the local pipeline shell.
-	push := exec.Command("bash", "-c",
+	push := pipeline(
 		fmt.Sprintf(`"%s" export-events --since %q%s | ssh %s %q '%s import-events'`,
 			selfPath(), uuidv7.ShiftBack(pushCur, overlap), filter, sshOpts, dest, remoteBin))
 	push.Stdout, push.Stderr = os.Stdout, os.Stderr
@@ -1741,7 +1741,7 @@ func syncOne(dest, hubName, def string) error {
 		writeCursor(dest, "push", m)
 	}
 	fmt.Fprintf(os.Stderr, "aimem: pulling remote events from %s\n", dest)
-	pull := exec.Command("bash", "-c",
+	pull := pipeline(
 		fmt.Sprintf(`ssh %s %q '%s export-events --since "%s"' | "%s" import-events`,
 			sshOpts, dest, remoteBin, uuidv7.ShiftBack(pullCur, overlap), selfPath()))
 	pull.Stdout, pull.Stderr = os.Stdout, os.Stderr
@@ -1756,13 +1756,13 @@ func syncOne(dest, hubName, def string) error {
 	// Curated memories sync the same way; the import side merges staleness
 	// (expiry/supersession wins) so forgotten facts never resurrect.
 	fmt.Fprintf(os.Stderr, "aimem: syncing memories with %s\n", dest)
-	memPush := exec.Command("bash", "-c",
+	memPush := pipeline(
 		fmt.Sprintf(`"%s" export-memories%s | ssh %s %q '%s import-memories'`, selfPath(), filter, sshOpts, dest, remoteBin))
 	memPush.Stdout, memPush.Stderr = os.Stdout, os.Stderr
 	if err := memPush.Run(); err != nil {
 		return fmt.Errorf("memory push failed: %w", err)
 	}
-	memPull := exec.Command("bash", "-c",
+	memPull := pipeline(
 		fmt.Sprintf(`ssh %s %q '%s export-memories' | "%s" import-memories`, sshOpts, dest, remoteBin, selfPath()))
 	memPull.Stdout, memPull.Stderr = os.Stdout, os.Stderr
 	if err := memPull.Run(); err != nil {
@@ -1771,13 +1771,13 @@ func syncOne(dest, hubName, def string) error {
 	// Group config (charter/policy/chapters) rides along so routing rules
 	// converge everywhere. Best-effort: an old peer binary without these
 	// subcommands must not fail the whole sync.
-	cfgPush := exec.Command("bash", "-c",
+	cfgPush := pipeline(
 		fmt.Sprintf(`"%s" export-group-config%s | ssh %s %q '%s import-group-config'`, selfPath(), filter, sshOpts, dest, remoteBin))
 	cfgPush.Stdout, cfgPush.Stderr = os.Stdout, os.Stderr
 	if err := cfgPush.Run(); err != nil {
 		fmt.Fprintln(os.Stderr, "aimem: group config push skipped:", err)
 	}
-	cfgPull := exec.Command("bash", "-c",
+	cfgPull := pipeline(
 		fmt.Sprintf(`ssh %s %q '%s export-group-config' | "%s" import-group-config`, sshOpts, dest, remoteBin, selfPath()))
 	cfgPull.Stdout, cfgPull.Stderr = os.Stdout, os.Stderr
 	if err := cfgPull.Run(); err != nil {
@@ -1812,6 +1812,18 @@ func postSyncEmbed() {
 			fmt.Fprintln(os.Stderr, "aimem: post-sync embed:", err)
 		}
 	}
+}
+
+// pipeline runs script, an ssh sync leg of the form `<left> | <right>`,
+// under bash with pipefail, so the leg fails when either side does. Without
+// it the leg's status was the right side's alone: a local export that ended
+// early gave the remote import a clean end of input, the push "succeeded",
+// and its cursor moved past events never sent; a peer's export that ended
+// early, or a dropped connection, did the same to the pull. pipefail is an
+// option of the local bash only: nothing on the wire changes, and an older
+// peer reports a failed export through ssh's status as it always has.
+func pipeline(script string) *exec.Cmd {
+	return exec.Command("bash", "-c", "set -o pipefail; "+script)
 }
 
 func cursorPath(dest, dir string) string {
@@ -1858,7 +1870,15 @@ func localMaxEventID() (string, error) {
 	return max, nil
 }
 
+// selfPathOverride, when set, is the binary the ssh sync's legs run
+// locally in place of this one: the tests' stand-in, since the test binary
+// does not answer export-events.
+var selfPathOverride string
+
 func selfPath() string {
+	if selfPathOverride != "" {
+		return selfPathOverride
+	}
 	if p, err := os.Executable(); err == nil {
 		return p
 	}
