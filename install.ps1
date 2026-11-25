@@ -71,10 +71,10 @@ function Select-ServeProcess($exe, $processes) {
 # installation that run a sync or one of its legs: the binary at $exe or a
 # parked copy, with a first argument in $SyncVerbs. The ssh sync runs its
 # legs as `bash -c "... | aimem <verb>"` pipelines, which on Windows outlive
-# the `aimem sync` that started them, so the legs are matched too. Each
-# verb is resumable when ended: a leg's cursor is written only after it
-# succeeds, and memories and group config are pulled whole. Every selected
-# process gets a Kind:
+# the `aimem sync` that started them, so the legs are matched too. They
+# are resumable when ended in Stop-AimemSync's order, the sync before its
+# legs: no cursor is written once the sync is gone, and memories and group
+# config are pulled whole. Every selected process gets a Kind:
 #   stop    the installer's user owns it: the upgrade may end it;
 #   unknown its owner cannot be read: never ended, and the upgrade does not
 #           swap while it runs.
