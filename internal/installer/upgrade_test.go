@@ -48,7 +48,7 @@ func TestMain(m *testing.M) {
 }
 
 // binary builds, once per test run, an aimem stamped with version, or the
-// broken stand-in when version is "broken".
+// stand-in of that name when version is "broken" or "stuck".
 func binary(t *testing.T, version string) string {
 	t.Helper()
 	if _, err := exec.LookPath("go"); err != nil {
@@ -62,8 +62,8 @@ func binary(t *testing.T, version string) string {
 	once, _ := binOnce.LoadOrStore(version, new(sync.Once))
 	once.(*sync.Once).Do(func() {
 		args := []string{"build", "-o", out}
-		if version == "broken" {
-			args = append(args, "./testdata/broken")
+		if version == "broken" || version == "stuck" {
+			args = append(args, "./testdata/"+version)
 		} else {
 			args = append(args, "-ldflags", "-X main.version="+version, "aimem/cmd/aimem")
 		}

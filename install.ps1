@@ -34,6 +34,29 @@ $CodexSubmitCmd = 'aimem submit-codex'
 
 function Say($m) { Write-Host "==> $m" }
 
+# BEGIN Get-ComparablePath
+# Get-ComparablePath gives the form both sides of a path match are compared
+# in: GetFullPath, which on Windows PowerShell also turns an existing 8.3
+# short name into its long form. A process keeps the form of the path it
+# was started with, so a short `RUNNER~1\...` process path and a long
+# installation path name one file and must compare equal.
+function Get-ComparablePath($path) {
+  if (-not $path) { return $path }
+  try { [IO.Path]::GetFullPath($path) } catch { $path }
+}
+# Test-InstallationPath tells whether $path, in Get-ComparablePath's form,
+# is this installation's binary $full or a parked copy of it: a file in the
+# same directory whose name starts with the binary's name and `.old-`. Only
+# a sibling counts, so an aimem.exe under a directory that happens to be
+# named `aimem.exe.old-...` is another installation's.
+function Test-InstallationPath($full, $path) {
+  if (-not $path) { return $false }
+  if ([string]::Equals($path, $full, [StringComparison]::OrdinalIgnoreCase)) { return $true }
+  [string]::Equals([IO.Path]::GetDirectoryName($path), [IO.Path]::GetDirectoryName($full), [StringComparison]::OrdinalIgnoreCase) -and
+    [IO.Path]::GetFileName($path).StartsWith([IO.Path]::GetFileName($full) + '.old-', [StringComparison]::OrdinalIgnoreCase)
+}
+# END Get-ComparablePath
+
 # BEGIN Select-ServeProcess
 # Select-ServeProcess picks, from Win32_Process objects, the `aimem serve`
 # processes of THIS installation: the binary at $exe or one of its parked
@@ -43,15 +66,198 @@ function Say($m) { Write-Host "==> $m" }
 # directory, is left running (docs/DEVELOPMENT.md, "Processes and state in
 # tests"). A process whose path cannot be read is not ours to stop.
 function Select-ServeProcess($exe, $processes) {
-  $full = [IO.Path]::GetFullPath($exe)
+  $full = Get-ComparablePath $exe
   @($processes | Where-Object {
-    $path = $_.ExecutablePath
-    $path -and ($_.CommandLine -match '\sserve(\s|$)') -and (
-      [string]::Equals($path, $full, [StringComparison]::OrdinalIgnoreCase) -or
-      $path.StartsWith($full + '.old-', [StringComparison]::OrdinalIgnoreCase))
+    $path = Get-ComparablePath $_.ExecutablePath
+    $path -and ($_.CommandLine -match '\sserve(\s|$)') -and (Test-InstallationPath $full $path)
   })
 }
 # END Select-ServeProcess
+
+# BEGIN Select-SyncProcess
+# Select-SyncProcess sorts, from Win32_Process objects that carry an
+# OwnerSid (null when it cannot be read), the processes of THIS
+# installation that run a sync or one of its legs: the binary at $exe or a
+# parked copy, with a first argument in $SyncVerbs. The ssh sync runs its
+# legs as `bash -c "... | aimem <verb>"` pipelines, which on Windows outlive
+# the `aimem sync` that started them, so the legs are matched too. They
+# are resumable when ended in Stop-AimemSync's order, the sync before its
+# legs: no cursor is written once the sync is gone, and memories and group
+# config are pulled whole. Every selected process gets a Kind:
+#   stop    the installer's user owns it: the upgrade may end it;
+#   unknown its owner cannot be read: never ended, and the upgrade does not
+#           swap while it runs.
+# A process of another owner, another installation, another command, or
+# whose path cannot be read is not selected (Select-ServeProcess's rule:
+# never by name).
+$SyncVerbs = @('sync', 'export-events', 'import-events', 'export-memories',
+  'import-memories', 'export-group-config', 'import-group-config')
+# Get-AimemVerb reads a process's first argument: after its own path when
+# the command line starts with it (quoted or not, so a path with a space
+# is not split), else after the first quoted or unquoted word. A quoted
+# argument is read without its enclosing quotes, as Windows hands it to
+# the program: `"sync"` runs sync.
+function Get-AimemVerb($commandLine, $path) {
+  if (-not $commandLine) { return '' }
+  $rest = $null
+  if ($path) {
+    foreach ($head in @(('"' + $path + '"'), $path)) {
+      if ($commandLine.StartsWith($head, [StringComparison]::OrdinalIgnoreCase)) {
+        $rest = $commandLine.Substring($head.Length)
+        break
+      }
+    }
+  }
+  if ($null -eq $rest) {
+    if ($commandLine -notmatch '^\s*(?:"[^"]*"|\S+)(.*)$') { return '' }
+    $rest = $Matches[1]
+  }
+  if ($rest -match '^\s+"([^"]*)"(?:\s|$)') { return $Matches[1] }
+  if ($rest -match '^\s+(\S+)') { return $Matches[1] }
+  ''
+}
+function Select-SyncProcess($exe, $sid, $processes) {
+  $full = Get-ComparablePath $exe
+  @($processes | Where-Object {
+    $path = Get-ComparablePath $_.ExecutablePath
+    $path -and ($SyncVerbs -ccontains (Get-AimemVerb $_.CommandLine $path)) -and
+      (Test-InstallationPath $full $path) -and (-not $_.OwnerSid -or $_.OwnerSid -eq $sid)
+  } | ForEach-Object {
+    $kind = if ($_.OwnerSid) { 'stop' } else { 'unknown' }
+    $_ | Add-Member -NotePropertyName Kind -NotePropertyValue $kind -Force -PassThru
+  })
+}
+# END Select-SyncProcess
+
+# BEGIN Stop-AimemSync
+# Stop-AimemSync ends this installation's sync processes before the binary
+# is swapped (the caller has already disabled and stopped the sync task, so
+# no new one starts). It waits up to $seconds for them to end by
+# themselves, then ends each one still running through a handle it opened
+# and checked: the same executable and the same creation time as the
+# process it selected, read again while the handle is held, so a reused
+# process id is never ended. A process whose owner cannot be read is never
+# ended: the function throws instead, and the upgrade does not swap.
+#
+# Every `aimem sync` is ended, and seen gone, before any of its legs. The
+# ssh push leg is `aimem export-events | ssh ... import-events`, whose
+# status is ssh's: a local export ended under a living sync gives the
+# remote import a clean end, the push "succeeds", and the sync writes its
+# push cursor past events it never sent. With the sync gone first, no
+# cursor is written, and the next sync sends the window again. A sync that
+# cannot be ended leaves every leg running, and the function throws.
+#
+# One leg can still cross the swap: a sync ended in the few milliseconds
+# between its start of a `bash -c` pipeline and that bash's start of its
+# aimem leaves a leg that starts after the last listing. bash and ssh are
+# not followed. That leg runs as the old binary, as every leg did before
+# this stop existed, with no sync left to write a cursor, so the next sync
+# sends or pulls its window again and nothing is lost.
+$script:SyncUnreadable = @{}
+function Get-SyncCandidates($exe) {
+  @(Get-CimInstance Win32_Process -Filter "Name LIKE 'aimem.exe%'" | ForEach-Object {
+    $owner = $null
+    try {
+      $r = Invoke-CimMethod -InputObject $_ -MethodName GetOwnerSid -ErrorAction Stop
+      if ($r.ReturnValue -eq 0) { $owner = $r.Sid }
+    } catch {}
+    if (-not $_.ExecutablePath -and -not $script:SyncUnreadable[$_.ProcessId]) {
+      $script:SyncUnreadable[$_.ProcessId] = $true
+      Say "left aimem PID $($_.ProcessId) alone: cannot read its path"
+    }
+    $_ | Add-Member -NotePropertyName OwnerSid -NotePropertyValue $owner -Force -PassThru
+  })
+}
+function Stop-SyncByHandle($p) {
+  $h = $null
+  try {
+    $h = [Diagnostics.Process]::GetProcessById([int]$p.ProcessId)
+    $null = $h.Handle
+    $now = Get-CimInstance Win32_Process -Filter "ProcessId = $([int]$p.ProcessId)"
+    if (-not $now -or $now.CreationDate -ne $p.CreationDate -or
+        -not [string]::Equals($now.ExecutablePath, $p.ExecutablePath, [StringComparison]::OrdinalIgnoreCase)) {
+      Say "left aimem PID $($p.ProcessId) alone: it is no longer the process selected"
+      return
+    }
+    $h.Kill()
+    $h.WaitForExit(10000) | Out-Null
+  } catch {
+    Say "could not end aimem PID $($p.ProcessId): $($_.Exception.Message)"
+  } finally { if ($h) { $h.Dispose() } }
+}
+# Test-ProcessAlive tells whether the process listed as $p still runs: the
+# same id with the same creation time.
+function Test-ProcessAlive($p) {
+  $now = Get-CimInstance Win32_Process -Filter "ProcessId = $([int]$p.ProcessId)"
+  [bool]($now -and $now.CreationDate -eq $p.CreationDate)
+}
+function Stop-SyncList($list, $seconds) {
+  foreach ($p in $list) {
+    $verb = Get-AimemVerb $p.CommandLine $p.ExecutablePath
+    Say "ending aimem $verb (PID $($p.ProcessId)), still running after ${seconds}s; the next sync resumes where its cursors stand"
+    if ($verb -eq 'import-events') { Say "  if you ran that import by hand, run it again: records already imported are skipped" }
+    Stop-SyncByHandle $p
+  }
+}
+# Assert-OwnersKnown throws for the first process in $list whose owner
+# cannot be read: it is never ended, and the upgrade does not swap.
+function Assert-OwnersKnown($list) {
+  $u = @($list | Where-Object Kind -eq 'unknown') | Select-Object -First 1
+  if ($u) {
+    throw "aimem PID $($u.ProcessId) runs $($u.ExecutablePath) $(Get-AimemVerb $u.CommandLine $u.ExecutablePath) and its owner cannot be read; end it, or wait for it to end, and run the upgrade again"
+  }
+}
+function Stop-AimemSync($exe, $seconds) {
+  $sid = [Security.Principal.WindowsIdentity]::GetCurrent().User.Value
+  $deadline = (Get-Date).AddSeconds($seconds)
+  $said = $false
+  while ($true) {
+    $found = Select-SyncProcess $exe $sid (Get-SyncCandidates $exe)
+    if (-not $found) { return }
+    if ((Get-Date) -ge $deadline) { break }
+    if (-not $said) {
+      Say "waiting up to ${seconds}s for this installation's aimem sync to end: $(($found | ForEach-Object { "PID $($_.ProcessId) $(Get-AimemVerb $_.CommandLine $_.ExecutablePath)" }) -join ', ')"
+      $said = $true
+    }
+    Start-Sleep -Milliseconds 500
+  }
+  # An owner read fails also for a process that ended after it was listed:
+  # only a process that still runs counts.
+  $found = @($found | Where-Object { Test-ProcessAlive $_ })
+  if (-not $found) { return }
+  Assert-OwnersKnown $found
+  $isSync = { (Get-AimemVerb $_.CommandLine $_.ExecutablePath) -ceq 'sync' }
+  Stop-SyncList @($found | Where-Object $isSync) $seconds
+  $left = @(Select-SyncProcess $exe $sid (Get-SyncCandidates $exe) | Where-Object { Test-ProcessAlive $_ })
+  if (@($left | Where-Object $isSync)) {
+    throw "could not end aimem sync (PID $(@($left | Where-Object $isSync)[0].ProcessId)), so no sync leg was ended; end it and run the upgrade again"
+  }
+  # With every sync gone no new leg starts, so the legs are listed again:
+  # one a sync started after the first listing is ended too.
+  Assert-OwnersKnown $left
+  Stop-SyncList $left $seconds
+  $left = @(Select-SyncProcess $exe $sid (Get-SyncCandidates $exe) | Where-Object { Test-ProcessAlive $_ })
+  if ($left) {
+    throw "could not end aimem PID $($left[0].ProcessId) ($(Get-AimemVerb $left[0].CommandLine $left[0].ExecutablePath)); end it and run the upgrade again"
+  }
+}
+# Invoke-AimemStop runs the sync stop and then the serve stop, the serve
+# stop whether or not the sync stop threw. A serve stop that throws throws
+# as it is. A sync stop's error is thrown after both, marked in its
+# exception's Data as AimemSyncRefusal: the rollback goes on past that
+# refusal alone, with serve stopped, and ends on any other error before a
+# file is moved.
+function Invoke-AimemStop([scriptblock]$stopSync, [scriptblock]$stopServe) {
+  $err = $null
+  try { & $stopSync } catch { $err = $_ }
+  & $stopServe
+  if ($err) {
+    $e = New-Object Exception -ArgumentList $err.Exception.Message, $err.Exception
+    $e.Data['AimemSyncRefusal'] = $true
+    throw $e
+  }
+}
+# END Stop-AimemSync
 
 # BEGIN Invoke-Upgrade
 # Invoke-Upgrade replaces the installed binary $exe with $new without
@@ -60,7 +266,9 @@ function Select-ServeProcess($exe, $processes) {
 # not come up healthy at its own version is undone: the previous binary
 # and the state copy both go back. The caller defines Stop-AimemService
 # and Start-AimemService (this installation's service and its sync task,
-# nothing else) and Say.
+# nothing else) and Say. A Stop-AimemService that throws before the swap
+# leaves the binary and the state root as they were, and the service is
+# started again.
 function Invoke-Quiet($exe, [string[]]$argv) {
   # PS 5.1 under EAP=Stop turns a native command's stderr into a
   # terminating error; these probes expect failures, so relax it locally.
@@ -152,7 +360,10 @@ function Invoke-Upgrade($exe, $new) {
   $root = Get-StateRoot $exe (Get-AimemHealth $exe)
   $ts = (Get-Date).ToUniversalTime().ToString("yyyyMMdd'T'HHmmss'Z'")
   Say "upgrading aimem $oldV -> $newV (state root $root)"
-  Stop-AimemService
+  try { Stop-AimemService } catch {
+    Start-AimemService
+    throw "the service could not be stopped for the upgrade; the binary and the state root are unchanged: $($_.Exception.Message)"
+  }
   $backup = $null
   if (Test-Path $root) {
     $backup = "$root.backup-$ts"
@@ -182,7 +393,10 @@ function Invoke-Upgrade($exe, $new) {
     return
   }
   Write-Warning "aimem $newV did not answer health at its version within ${wait}s; rolling back"
-  Stop-AimemService
+  try { Stop-AimemService } catch {
+    if (-not $_.Exception.Data['AimemSyncRefusal']) { throw }
+    Write-Warning "rolling back while the sync stop could not finish: $($_.Exception.Message)"
+  }
   Move-Item $exe "$exe.failed-$ts" -Force
   Move-Item $park $exe
   if ($backup) {
@@ -217,14 +431,18 @@ function Stop-AimemService {
     $sync | Disable-ScheduledTask | Out-Null
   }
   Stop-ScheduledTask 'aimem-sync' -ErrorAction SilentlyContinue
-  # Stopping the TASK kills the conhost wrapper but ORPHANS its aimem
-  # child, which keeps serving through the socket. Stop this
-  # installation's serve processes by executable path, never by name.
-  Stop-ScheduledTask 'aimem-serve' -ErrorAction SilentlyContinue
-  $candidates = Get-CimInstance Win32_Process -Filter "Name LIKE 'aimem.exe%'"
-  Select-ServeProcess $Exe $candidates | ForEach-Object {
-    Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue
-    Wait-Process -Id $_.ProcessId -Timeout 10 -ErrorAction SilentlyContinue
+  # As for serve below, stopping the sync task ends its conhost wrapper,
+  # not the aimem sync under it, nor the legs that sync started.
+  Invoke-AimemStop { Stop-AimemSync $Exe 30 } {
+    # Stopping the TASK kills the conhost wrapper but ORPHANS its aimem
+    # child, which keeps serving through the socket. Stop this
+    # installation's serve processes by executable path, never by name.
+    Stop-ScheduledTask 'aimem-serve' -ErrorAction SilentlyContinue
+    $candidates = Get-CimInstance Win32_Process -Filter "Name LIKE 'aimem.exe%'"
+    Select-ServeProcess $Exe $candidates | ForEach-Object {
+      Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue
+      Wait-Process -Id $_.ProcessId -Timeout 10 -ErrorAction SilentlyContinue
+    }
   }
 }
 function Start-AimemService {
