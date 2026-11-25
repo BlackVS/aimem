@@ -13,6 +13,33 @@ currently 26); a binary refuses a database newer than it understands.
 
 ## [Unreleased]
 
+### Data integrity
+
+- **The ssh sync no longer moves a cursor past events a cut stream never
+  carried.** Each leg of `aimem sync` over ssh is a `bash -c "<left> |
+  <right>"` pipeline, and its status was the right side's alone. When the
+  local `export-events` ended early (an error after part of its stream, or
+  ended from outside), the peer's import read a clean end, the push
+  "succeeded", and the push cursor moved to the newest local event: events
+  the stream had not carried, older than the hour of overlap, were never
+  pushed by a later sync. A peer's export that ended early, or a dropped
+  connection, did the same to the pull cursor. The legs now run with bash's
+  `pipefail`, so a leg fails when either side does, the sync says "push
+  failed" or "pull failed", and the cursor stays where it was. Nothing on
+  the wire changes, and a peer of any release is unaffected: its export has
+  always reported a failure through its exit status. The memory and
+  group-configuration legs run the same way: a failed memory export now
+  fails the sync as a failed memory import already did, and a failed
+  group-configuration export is reported as skipped. One change you may see:
+  a pull from a peer whose `aimem` is missing or fails now reports "pull
+  failed", where it used to succeed with nothing pulled and move its cursor.
+  On a Windows machine where WSL is installed, `bash` is WSL's launcher,
+  which cannot run this binary's Windows path: wherever WSL's own ssh
+  reached the peer, the push sent nothing and moved its cursor. It now fails
+  and keeps the cursor. The ssh sync still cannot run there, and a machine
+  where the cursor has already moved needs the recovery its own follow-up
+  will document.
+
 ### Fixed
 
 - **A Windows upgrade ends this installation's running sync before it swaps
