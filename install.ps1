@@ -44,6 +44,17 @@ function Get-ComparablePath($path) {
   if (-not $path) { return $path }
   try { [IO.Path]::GetFullPath($path) } catch { $path }
 }
+# Test-InstallationPath tells whether $path, in Get-ComparablePath's form,
+# is this installation's binary $full or a parked copy of it: a file in the
+# same directory whose name starts with the binary's name and `.old-`. Only
+# a sibling counts, so an aimem.exe under a directory that happens to be
+# named `aimem.exe.old-...` is another installation's.
+function Test-InstallationPath($full, $path) {
+  if (-not $path) { return $false }
+  if ([string]::Equals($path, $full, [StringComparison]::OrdinalIgnoreCase)) { return $true }
+  [string]::Equals([IO.Path]::GetDirectoryName($path), [IO.Path]::GetDirectoryName($full), [StringComparison]::OrdinalIgnoreCase) -and
+    [IO.Path]::GetFileName($path).StartsWith([IO.Path]::GetFileName($full) + '.old-', [StringComparison]::OrdinalIgnoreCase)
+}
 # END Get-ComparablePath
 
 # BEGIN Select-ServeProcess
@@ -58,9 +69,7 @@ function Select-ServeProcess($exe, $processes) {
   $full = Get-ComparablePath $exe
   @($processes | Where-Object {
     $path = Get-ComparablePath $_.ExecutablePath
-    $path -and ($_.CommandLine -match '\sserve(\s|$)') -and (
-      [string]::Equals($path, $full, [StringComparison]::OrdinalIgnoreCase) -or
-      $path.StartsWith($full + '.old-', [StringComparison]::OrdinalIgnoreCase))
+    $path -and ($_.CommandLine -match '\sserve(\s|$)') -and (Test-InstallationPath $full $path)
   })
 }
 # END Select-ServeProcess
@@ -85,7 +94,9 @@ $SyncVerbs = @('sync', 'export-events', 'import-events', 'export-memories',
   'import-memories', 'export-group-config', 'import-group-config')
 # Get-AimemVerb reads a process's first argument: after its own path when
 # the command line starts with it (quoted or not, so a path with a space
-# is not split), else after the first quoted or unquoted word.
+# is not split), else after the first quoted or unquoted word. A quoted
+# argument is read without its enclosing quotes, as Windows hands it to
+# the program: `"sync"` runs sync.
 function Get-AimemVerb($commandLine, $path) {
   if (-not $commandLine) { return '' }
   $rest = $null
@@ -101,6 +112,7 @@ function Get-AimemVerb($commandLine, $path) {
     if ($commandLine -notmatch '^\s*(?:"[^"]*"|\S+)(.*)$') { return '' }
     $rest = $Matches[1]
   }
+  if ($rest -match '^\s+"([^"]*)"(?:\s|$)') { return $Matches[1] }
   if ($rest -match '^\s+(\S+)') { return $Matches[1] }
   ''
 }
@@ -108,10 +120,8 @@ function Select-SyncProcess($exe, $sid, $processes) {
   $full = Get-ComparablePath $exe
   @($processes | Where-Object {
     $path = Get-ComparablePath $_.ExecutablePath
-    $path -and ($SyncVerbs -ccontains (Get-AimemVerb $_.CommandLine $path)) -and (
-      [string]::Equals($path, $full, [StringComparison]::OrdinalIgnoreCase) -or
-      $path.StartsWith($full + '.old-', [StringComparison]::OrdinalIgnoreCase)) -and (
-      -not $_.OwnerSid -or $_.OwnerSid -eq $sid)
+    $path -and ($SyncVerbs -ccontains (Get-AimemVerb $_.CommandLine $path)) -and
+      (Test-InstallationPath $full $path) -and (-not $_.OwnerSid -or $_.OwnerSid -eq $sid)
   } | ForEach-Object {
     $kind = if ($_.OwnerSid) { 'stop' } else { 'unknown' }
     $_ | Add-Member -NotePropertyName Kind -NotePropertyValue $kind -Force -PassThru
@@ -136,6 +146,13 @@ function Select-SyncProcess($exe, $sid, $processes) {
 # push cursor past events it never sent. With the sync gone first, no
 # cursor is written, and the next sync sends the window again. A sync that
 # cannot be ended leaves every leg running, and the function throws.
+#
+# One leg can still cross the swap: a sync ended in the few milliseconds
+# between its start of a `bash -c` pipeline and that bash's start of its
+# aimem leaves a leg that starts after the last listing. bash and ssh are
+# not followed. That leg runs as the old binary, as every leg did before
+# this stop existed, with no sync left to write a cursor, so the next sync
+# sends or pulls its window again and nothing is lost.
 $script:SyncUnreadable = @{}
 function Get-SyncCandidates($exe) {
   @(Get-CimInstance Win32_Process -Filter "Name LIKE 'aimem.exe%'" | ForEach-Object {
@@ -225,14 +242,20 @@ function Stop-AimemSync($exe, $seconds) {
   }
 }
 # Invoke-AimemStop runs the sync stop and then the serve stop, the serve
-# stop whether or not the sync stop threw, and throws the sync stop's error
-# after both: a rollback that goes on after a refused sync stop must not
-# put the binary and the state back under a serve that still runs.
+# stop whether or not the sync stop threw. A serve stop that throws throws
+# as it is. A sync stop's error is thrown after both, marked in its
+# exception's Data as AimemSyncRefusal: the rollback goes on past that
+# refusal alone, with serve stopped, and ends on any other error before a
+# file is moved.
 function Invoke-AimemStop([scriptblock]$stopSync, [scriptblock]$stopServe) {
   $err = $null
   try { & $stopSync } catch { $err = $_ }
   & $stopServe
-  if ($err) { throw $err }
+  if ($err) {
+    $e = New-Object Exception -ArgumentList $err.Exception.Message, $err.Exception
+    $e.Data['AimemSyncRefusal'] = $true
+    throw $e
+  }
 }
 # END Stop-AimemSync
 
@@ -370,7 +393,10 @@ function Invoke-Upgrade($exe, $new) {
     return
   }
   Write-Warning "aimem $newV did not answer health at its version within ${wait}s; rolling back"
-  try { Stop-AimemService } catch { Write-Warning "rolling back while the stop could not finish: $($_.Exception.Message)" }
+  try { Stop-AimemService } catch {
+    if (-not $_.Exception.Data['AimemSyncRefusal']) { throw }
+    Write-Warning "rolling back while the sync stop could not finish: $($_.Exception.Message)"
+  }
   Move-Item $exe "$exe.failed-$ts" -Force
   Move-Item $park $exe
   if ($backup) {

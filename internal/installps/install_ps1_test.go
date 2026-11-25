@@ -66,7 +66,9 @@ $procs = @(
   [pscustomobject]@{ ProcessId = 5; ExecutablePath = $null; CommandLine = 'aimem.exe serve' },
   [pscustomobject]@{ ProcessId = 6; ExecutablePath = $exe.ToUpper(); CommandLine = '"' + $exe + '" serve' },
   [pscustomobject]@{ ProcessId = 7; ExecutablePath = $exe + 'x'; CommandLine = '"' + $exe + 'x" serve' },
-  [pscustomobject]@{ ProcessId = 8; ExecutablePath = $exe; CommandLine = '"' + $exe + '" observe' }
+  [pscustomobject]@{ ProcessId = 8; ExecutablePath = $exe; CommandLine = '"' + $exe + '" observe' },
+  [pscustomobject]@{ ProcessId = 9; ExecutablePath = $exe + '.old-backup\bin\aimem.exe'; CommandLine = '"' + $exe + '.old-backup\bin\aimem.exe" serve' },
+  [pscustomobject]@{ ProcessId = 10; ExecutablePath = $exe + '.old-manual'; CommandLine = '"' + $exe + '.old-manual" serve' }
 )
 ConvertTo-Json -Compress @(Select-ServeProcess $exe $procs | ForEach-Object { $_.ProcessId })
 `
@@ -85,8 +87,8 @@ ConvertTo-Json -Compress @(Select-ServeProcess $exe $procs | ForEach-Object { $_
 		t.Fatalf("output %q: %v", out, err)
 	}
 	slices.Sort(ids)
-	if want := []int{1, 2, 6}; !slices.Equal(ids, want) {
-		t.Fatalf("selected %v, want %v: this binary and its parked copy (any case), never another installation, another command or an unreadable path", ids, want)
+	if want := []int{1, 2, 6, 10}; !slices.Equal(ids, want) {
+		t.Fatalf("selected %v, want %v: this binary and its parked copies beside it (any case, any suffix after .old-), never another installation (one under a directory named like a parked copy included), another command or an unreadable path", ids, want)
 	}
 }
 
@@ -136,6 +138,10 @@ $procs = @(
   (P 33 'C:\Tools\aimem.exe' 'sync'),
   (P 34 ($exe + 'x') 'sync'),
   (P 35 $exe 'SYNC'),
+  (P 38 ($exe + '.old-backup\bin\aimem.exe') 'sync --all-hubs'),
+  (P 12 ($exe + '.old-manual') 'sync --all-hubs'),
+  (P 13 $exe '"sync" --all-hubs'),
+  (P 14 $exe '"export-events" --since 01a2'),
   ([pscustomobject]@{ ProcessId = 36; ExecutablePath = 'C:\Program Files\Git\usr\bin\bash.exe'; CommandLine = 'bash -c "ssh hub aimem export-events | ' + $exe + ' import-events"'; OwnerSid = $me }),
   ([pscustomobject]@{ ProcessId = 37; ExecutablePath = 'C:\Windows\System32\OpenSSH\ssh.exe'; CommandLine = 'ssh hub "aimem export-events --since 01a2"'; OwnerSid = $me })
 )
@@ -163,9 +169,9 @@ ConvertTo-Json -Compress $out
 		t.Fatalf("output %q: %v", out, err)
 	}
 	want := map[string]string{"1": "stop", "2": "stop", "3": "stop", "4": "stop", "5": "stop", "6": "stop", "7": "stop",
-		"8": "stop", "9": "stop", "10": "unknown", "11": "stop", "40": "stop"}
+		"8": "stop", "9": "stop", "10": "unknown", "11": "stop", "12": "stop", "13": "stop", "14": "stop", "40": "stop"}
 	if !maps.Equal(got, want) {
-		t.Fatalf("selected %v,\nwant %v: this installation's binary or parked copy, one of the seven sync verbs first, the installer's user (an unreadable owner as unknown); never another installation, owner, command, an unreadable path, a later argument, a name alone, or bash and ssh", got, want)
+		t.Fatalf("selected %v,\nwant %v: this installation's binary or parked copy, one of the seven sync verbs first, the installer's user (an unreadable owner as unknown); never another installation, owner, command, an unreadable path, a later argument, a name alone, bash and ssh, or an aimem.exe under a directory named like a parked copy; a quoted verb counts as the verb", got, want)
 	}
 }
 
@@ -235,6 +241,18 @@ function Stop-SyncByHandle($p) {
 `)
 	if strings.Contains(out, "THROWN:") || !strings.Contains(out, "ENDED: 1,2,4\n") {
 		t.Fatalf("want the late leg ended as well (ENDED: 1,2,4):\n%s", out)
+	}
+}
+
+// A sync started by hand with its verb quoted is still a sync: it is ended
+// before the unquoted leg it started.
+func TestSyncStopEndsAQuotedSyncBeforeItsLegs(t *testing.T) {
+	out := runSyncStop(t, `
+function Test-ProcessAlive($p) { $true }
+$global:procs = @((P 2 'export-events --since 01a2'), (P 1 '"sync"'))
+`)
+	if strings.Contains(out, "THROWN:") || !strings.Contains(out, "ENDED: 1,2\n") {
+		t.Fatalf("want the quoted sync ended first, then its leg (ENDED: 1,2):\n%s", out)
 	}
 }
 

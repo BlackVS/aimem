@@ -32,6 +32,13 @@ func runPowerShellUpgrade(t *testing.T, s *sandbox, newBinary, wait string, stuc
 // sync part throw, as the sync stop does when it cannot identify or end a
 // process of this installation.
 func runPowerShellUpgradeRefusing(t *testing.T, s *sandbox, newBinary, wait string, refuse int, stuck ...string) string {
+	return runPowerShellUpgradeWith(t, s, newBinary, wait, refuse, nil, stuck...)
+}
+
+// runPowerShellUpgradeWith is runPowerShellUpgradeRefusing with extraEnv
+// added to the harness's environment (SERVE_FAILS=n makes stop n's serve
+// part throw).
+func runPowerShellUpgradeWith(t *testing.T, s *sandbox, newBinary, wait string, refuse int, extraEnv []string, stuck ...string) string {
 	t.Helper()
 	if runtime.GOOS != "windows" {
 		t.Skip("install.ps1 runs on Windows only; the Windows test job runs this")
@@ -90,7 +97,8 @@ function Stop-StandInServe {
 }
 # The installer's shape: the sync stop, then the serve stop whatever the
 # sync stop did. STOP_REFUSES names the stop (1 before the swap, 2 in the
-# rollback) whose sync part throws.
+# rollback) whose sync part throws; SERVE_FAILS names the stop whose serve
+# part throws, as a failed process listing would.
 function Stop-AimemService {
   $global:stops++
   $n = $global:stops
@@ -98,6 +106,7 @@ function Stop-AimemService {
     if ($env:STOP_REFUSES -eq "$n") { throw 'a stand-in refusal' }
     Stop-AimemSync $Exe 2
   } {
+    if ($env:SERVE_FAILS -eq "$n") { throw 'a stand-in serve stop failure' }
     Stop-StandInServe
     if ($env:STOP_REFUSES) { Write-Host "SERVE STOPPED $n" }
   }
@@ -161,6 +170,7 @@ try {
 	if refuse > 0 {
 		cmd.Env = append(cmd.Env, "STOP_REFUSES="+strconv.Itoa(refuse))
 	}
+	cmd.Env = append(cmd.Env, extraEnv...)
 	out, err := cmd.CombinedOutput()
 	if ee, ok := err.(*exec.ExitError); ok && ee.ExitCode() == 99 {
 		t.Fatalf("setup failed:\n%s", out)
@@ -290,7 +300,7 @@ func TestPowerShellRollbackStopsServeWhenTheSyncStopRefuses(t *testing.T) {
 	}
 	s := newSandbox(t, binary(t, "v0.0.1"), false)
 	out := runPowerShellUpgradeRefusing(t, s, binary(t, "broken"), "15", 2)
-	if !strings.Contains(out, "rolling back while the stop could not finish: a stand-in refusal") {
+	if !strings.Contains(out, "rolling back while the sync stop could not finish: a stand-in refusal") {
 		t.Errorf("want the rollback to report the refused stop:\n%s", out)
 	}
 	i, j := strings.Index(out, "SERVE STOPPED 2"), strings.Index(out, "STARTED 3")
@@ -298,4 +308,28 @@ func TestPowerShellRollbackStopsServeWhenTheSyncStopRefuses(t *testing.T) {
 		t.Errorf("want the serve stopped in the rollback, before the old release starts again:\n%s", out)
 	}
 	checkRolledBack(t, s, out)
+}
+
+// In the rollback, a serve stop that throws ends the rollback before a file
+// is moved, as before the sync stop existed: only the sync stop's refusal is
+// gone past, since then serve has been stopped. The failed release's binary
+// and the state it wrote stay where they are, and nothing is restored.
+func TestPowerShellRollbackEndsWhenTheServeStopFails(t *testing.T) {
+	if runtime.GOOS != "windows" {
+		t.Skip("install.ps1 runs on Windows only; the Windows test job runs this")
+	}
+	s := newSandbox(t, binary(t, "v0.0.1"), false)
+	out := runPowerShellUpgradeWith(t, s, binary(t, "broken"), "15", 0, []string{"SERVE_FAILS=2"})
+	if !strings.Contains(out, "THROWN: a stand-in serve stop failure") {
+		t.Errorf("want the serve stop's failure to end the rollback:\n%s", out)
+	}
+	if strings.Contains(out, "rolling back while") || strings.Contains(out, "ROLLED BACK") {
+		t.Errorf("want no rollback past a failed serve stop:\n%s", out)
+	}
+	if m, _ := filepath.Glob(s.bin + ".failed-*"); len(m) != 0 {
+		t.Errorf("want the failed binary left in place, found %v", m)
+	}
+	if len(s.siblings(t, ".failed-")) != 0 || !exists(filepath.Join(s.state, "migrated-by-broken")) {
+		t.Error("want the state root left as the failed release wrote it, with nothing restored")
+	}
 }

@@ -27,10 +27,15 @@ currently 26); a binary refuses a database newer than it understands.
   would let the sync write its cursor past events it never sent. Ended in
   that order, no cursor moves, and the next sync sends and pulls the same
   window again. A sync it cannot end leaves every leg running, and the
-  upgrade stops before the swap. If it ends an `aimem import-events` you ran
-  by hand, run it again: the records it already imported are skipped. The
-  upgrade matches a process only by this installation's binary or a parked
-  copy of it, its first argument and the user who runs the installer. It
+  upgrade stops before the swap. One leg can still cross the swap: a sync
+  ended in the few milliseconds between starting a `bash -c` pipeline and
+  that pipeline starting its aimem leaves a leg that starts after the last
+  check. It runs as the old binary, as every leg did before, with no sync
+  left to write a cursor, so the next sync sends or pulls its window again
+  and nothing is lost. If it ends an `aimem import-events` you ran by hand,
+  run it again: the records it already imported are skipped. The upgrade
+  matches a process only by this installation's binary or a parked copy of
+  it beside it, its first argument and the user who runs the installer. It
   leaves another user's or another installation's aimem, `aimem mcp`, the
   hooks and `aimem upgrade` alone, and never ends a process it cannot
   identify: one of this installation's whose owner cannot be read stops the
