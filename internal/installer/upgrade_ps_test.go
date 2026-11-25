@@ -5,6 +5,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
 	"testing"
 )
@@ -23,13 +24,14 @@ import (
 // another installation; and "mcp", this installation's MCP server. Every
 // start of the service prints which of them are still alive.
 func runPowerShellUpgrade(t *testing.T, s *sandbox, newBinary, wait string, stuck ...string) string {
-	return runPowerShellUpgradeRefusing(t, s, newBinary, wait, false, stuck...)
+	return runPowerShellUpgradeRefusing(t, s, newBinary, wait, 0, stuck...)
 }
 
-// runPowerShellUpgradeRefusing is runPowerShellUpgrade whose first service
-// stop throws when refuse is set, as the sync stop does when it cannot
-// identify a process of this installation.
-func runPowerShellUpgradeRefusing(t *testing.T, s *sandbox, newBinary, wait string, refuse bool, stuck ...string) string {
+// runPowerShellUpgradeRefusing is runPowerShellUpgrade whose service stop
+// number refuse (1 before the swap, 2 in the rollback; 0 for none) has its
+// sync part throw, as the sync stop does when it cannot identify or end a
+// process of this installation.
+func runPowerShellUpgradeRefusing(t *testing.T, s *sandbox, newBinary, wait string, refuse int, stuck ...string) string {
 	t.Helper()
 	if runtime.GOOS != "windows" {
 		t.Skip("install.ps1 runs on Windows only; the Windows test job runs this")
@@ -46,7 +48,8 @@ func runPowerShellUpgradeRefusing(t *testing.T, s *sandbox, newBinary, wait stri
 	}
 	script := `$ErrorActionPreference = 'Stop'
 function Say($m) { Write-Host "==> $m" }
-` + extract(t, "install.ps1", "Invoke-Upgrade") + extract(t, "install.ps1", "Select-SyncProcess") +
+` + extract(t, "install.ps1", "Invoke-Upgrade") + extract(t, "install.ps1", "Get-ComparablePath") +
+		extract(t, "install.ps1", "Select-SyncProcess") +
 		extract(t, "install.ps1", "Stop-AimemSync") + `
 $Exe = Join-Path $env:SANDBOX 'bin\aimem.exe'
 $global:svc = $null
@@ -75,10 +78,7 @@ function Stop-Stuck {
 # another process by that PID ("Access is denied"), and the stop could
 # have ended an unrelated one.
 $global:stops = 0
-function Stop-AimemService {
-  $global:stops++
-  if ($env:STOP_REFUSES -eq '1' -and $global:stops -eq 1) { throw 'a stand-in refusal' }
-  Stop-AimemSync $Exe 2
+function Stop-StandInServe {
   $p = $global:svc
   if (-not $p) { return }
   $global:svc = $null
@@ -88,9 +88,23 @@ function Stop-AimemService {
   [IO.File]::WriteAllText("$($p.Log).err", $p.Err.Result)
   $p.Dispose()
 }
+# The installer's shape: the sync stop, then the serve stop whatever the
+# sync stop did. STOP_REFUSES names the stop (1 before the swap, 2 in the
+# rollback) whose sync part throws.
+function Stop-AimemService {
+  $global:stops++
+  $n = $global:stops
+  Invoke-AimemStop {
+    if ($env:STOP_REFUSES -eq "$n") { throw 'a stand-in refusal' }
+    Stop-AimemSync $Exe 2
+  } {
+    Stop-StandInServe
+    if ($env:STOP_REFUSES) { Write-Host "SERVE STOPPED $n" }
+  }
+}
 function Start-AimemService {
   $global:starts++
-  if ($env:STOP_REFUSES -eq '1') { Write-Host "STARTED $($global:starts)" }
+  if ($env:STOP_REFUSES) { Write-Host "STARTED $($global:starts)" }
   # Starting a running service is a no-op, as Start-ScheduledTask is for a
   # running task; a second stand-in would orphan the first one's handle.
   if ($global:svc -and -not $global:svc.HasExited) { return }
@@ -144,8 +158,8 @@ try {
 	if len(stuck) > 0 {
 		cmd.Env = append(cmd.Env, "STUCK="+stuck[0])
 	}
-	if refuse {
-		cmd.Env = append(cmd.Env, "STOP_REFUSES=1")
+	if refuse > 0 {
+		cmd.Env = append(cmd.Env, "STOP_REFUSES="+strconv.Itoa(refuse))
 	}
 	out, err := cmd.CombinedOutput()
 	if ee, ok := err.(*exec.ExitError); ok && ee.ExitCode() == 99 {
@@ -240,17 +254,20 @@ func TestPowerShellUpgradeEndsThisInstallationsSyncBeforeTheSwap(t *testing.T) {
 }
 
 // A stop that throws before the swap (the sync stop cannot identify one of
-// this installation's processes, or cannot end it) leaves everything as it
-// was: the old binary stays, no state copy is made, and the service is
-// started again.
+// this installation's processes, or cannot end it) leaves the binary and
+// the state root as they were: the old binary stays, no state copy is
+// made, the serve stop still runs, and the service is started again.
 func TestPowerShellUpgradeThatCannotStopChangesNothing(t *testing.T) {
 	if runtime.GOOS != "windows" {
 		t.Skip("install.ps1 runs on Windows only; the Windows test job runs this")
 	}
 	s := newSandbox(t, binary(t, "v0.0.1"), false)
-	out := runPowerShellUpgradeRefusing(t, s, binary(t, "v0.0.2"), "20", true)
-	if !strings.Contains(out, "THROWN: the service could not be stopped for the upgrade; nothing was changed: a stand-in refusal") {
-		t.Errorf("want the refusal reported as nothing changed:\n%s", out)
+	out := runPowerShellUpgradeRefusing(t, s, binary(t, "v0.0.2"), "20", 1)
+	if !strings.Contains(out, "THROWN: the service could not be stopped for the upgrade; the binary and the state root are unchanged: a stand-in refusal") {
+		t.Errorf("want the refusal reported with the binary and state unchanged:\n%s", out)
+	}
+	if !strings.Contains(out, "SERVE STOPPED 1") {
+		t.Errorf("want the serve stop run although the sync stop threw:\n%s", out)
 	}
 	if got := s.version(t); got != "aimem v0.0.1" {
 		t.Errorf("installed binary reports %q; want the old aimem v0.0.1 kept\n%s", got, out)
@@ -261,4 +278,24 @@ func TestPowerShellUpgradeThatCannotStopChangesNothing(t *testing.T) {
 	if !strings.Contains(out, "STARTED 2") {
 		t.Errorf("want the service started again after the refusal:\n%s", out)
 	}
+}
+
+// In the rollback, a sync stop that throws (a sync the installer cannot end
+// or identify started while the sync task was enabled again for the health
+// wait) is reported, and the serve stop still runs before the binary and
+// the state root are put back.
+func TestPowerShellRollbackStopsServeWhenTheSyncStopRefuses(t *testing.T) {
+	if runtime.GOOS != "windows" {
+		t.Skip("install.ps1 runs on Windows only; the Windows test job runs this")
+	}
+	s := newSandbox(t, binary(t, "v0.0.1"), false)
+	out := runPowerShellUpgradeRefusing(t, s, binary(t, "broken"), "15", 2)
+	if !strings.Contains(out, "rolling back while the stop could not finish: a stand-in refusal") {
+		t.Errorf("want the rollback to report the refused stop:\n%s", out)
+	}
+	i, j := strings.Index(out, "SERVE STOPPED 2"), strings.Index(out, "STARTED 3")
+	if i < 0 || j < i {
+		t.Errorf("want the serve stopped in the rollback, before the old release starts again:\n%s", out)
+	}
+	checkRolledBack(t, s, out)
 }

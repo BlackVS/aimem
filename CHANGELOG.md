@@ -22,16 +22,20 @@ currently 26); a binary refuses a database newer than it understands.
   `import-memories`, `export-group-config` and `import-group-config`, ran on
   as the old binary beside the new one: the window v0.12.2's upgrade notes
   name. The upgrade now waits up to 30 s for them and then ends the ones
-  still running, and says which. Each can be ended safely, since a leg
-  writes its cursor only after it succeeds and the next sync starts from
-  there. If it ends an `aimem import-events` you ran by hand, run it again:
-  the records it already imported are skipped. The upgrade matches a
-  process only by this installation's binary or a parked copy of it, its
-  first argument and the user who runs the installer. It leaves another
-  user's or another installation's aimem, `aimem mcp`, the hooks and `aimem
-  upgrade` alone, and never ends a process it cannot identify: one of this
-  installation's whose owner cannot be read stops the upgrade before the
-  swap, with the old binary kept and a line naming the process.
+  still running, and says which. It ends every sync, and sees it gone,
+  before any leg that sync started: a push leg ended under a living sync
+  would let the sync write its cursor past events it never sent. Ended in
+  that order, no cursor moves, and the next sync sends and pulls the same
+  window again. A sync it cannot end leaves every leg running, and the
+  upgrade stops before the swap. If it ends an `aimem import-events` you ran
+  by hand, run it again: the records it already imported are skipped. The
+  upgrade matches a process only by this installation's binary or a parked
+  copy of it, its first argument and the user who runs the installer. It
+  leaves another user's or another installation's aimem, `aimem mcp`, the
+  hooks and `aimem upgrade` alone, and never ends a process it cannot
+  identify: one of this installation's whose owner cannot be read stops the
+  upgrade before the swap, with the old binary kept and a line naming the
+  process.
 
 ## [0.12.2] — 2026-11-24
 
